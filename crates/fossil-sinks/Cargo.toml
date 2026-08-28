@@ -19,18 +19,15 @@ workspace = true
 # policy check, so it names policy vocabulary, and `fossil-policy` names nothing
 # — it is a serde/serde_json/thiserror leaf and knows nothing about GraphAr.
 fossil-policy = { path = "../fossil-policy" }
-# The GraphAr "writer" is DuckDB COPY —
-# fossil-sinks is a plan + manifest generator, NOT an I/O library, so it never byte-writes
-# Parquet from Rust. It therefore depends on `arrow-schema` ONLY (DataType -> data_type
-# string names; pulls no mio/arrow-ipc/arrow-csv) and `serde_yaml_ng` (manifest emission).
-# This keeps fossil-sinks WASM-clean — it joins the WASM gate as the 7th gated crate.
+# fossil-sinks is a plan + manifest generator, NOT an I/O library: it declares the tiling
+# and never byte-writes Parquet, so emission is all `serde_yaml_ng` opens.
 serde = { workspace = true }
 serde_yaml_ng = { workspace = true }
 # `arrow-schema` sub-crate ONLY — NOT the `arrow` umbrella crate, whose default features
-# pull `arrow-ipc`/`arrow-csv`, and with them `mio`, which wasm32 cannot build. `arrow_schema::DataType`
-# is the single authority for GraphAr `data_type` string spellings — never hand-rolled;
-# we deliberately depend on it ALONE rather than fossil-hir's `Primitive` so the manifest layer
-# stays decoupled from the type system and the WASM dep surface is minimal.
+# pull `arrow-ipc`/`arrow-csv`, and with them `mio`, which wasm32 cannot build.
+# `arrow_schema::DataType` is the single authority for GraphAr `data_type` spellings, and it
+# is depended on ALONE rather than fossil-hir's `Primitive` so the manifest layer stays
+# decoupled from the type system.
 arrow-schema = { workspace = true }
 
 [dev-dependencies]

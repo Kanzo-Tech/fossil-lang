@@ -4,11 +4,9 @@
 //! serialize to the `GraphAr` vertex-info / edge-info / graph-info field names — `version:
 //! gar/v1`, `type`, `chunk_size`, `prefix`, `property_groups`, and edge
 //! `src_type`/`dst_type`/`adj_lists` — because a borrowed word is one fewer word a reader has to
-//! learn, and because the hand-templated spelling this superseded (`graphar_version: 1.0.0`,
-//! `vertex_types:`, `data_type: string`) was neither `GraphAr`'s nor anyone else's. **A fossil
-//! corpus is not a valid `GraphAr` corpus, and this module used to end that sentence the other
-//! way.** That is a description and not a policy: divergence 1 below is a `data_type` spelling
-//! the reference C++ throws on, and it is on the first property of the first vertex type.
+//! learn. **A fossil corpus is not a valid `GraphAr` corpus.** That is a description and not a
+//! policy: divergence 1 below is a `data_type` spelling the reference C++ throws on, and it is
+//! on the first property of the first vertex type.
 //!
 //! Eight divergences, each read out of `docs/specification/format.md` in
 //! `apache/incubator-graphar` and out of `cpp/src/graphar/` — not out of a summary of either.
@@ -20,11 +18,10 @@
 //!    `int64`, `float`, `double`, `string`, `date`, `timestamp` and five `list<…>` forms, and
 //!    `throw`s `"Unsupported data type"` on anything else. `fossil-df` declares `dense_id` as
 //!    `uint32`, and `cluster_id` the same — so the reference reader throws on the first property
-//!    of the first vertex type it opens. **It is not the primary key, and this said it was**:
-//!    `is_primary` marks `subject`, whose `string` that function does accept, and the two
-//!    sentences that had it the other way round were written when `fossil-df` marked the address.
-//!    Nothing about this divergence turns on the flag — the throw is on the spelling, and a
-//!    reader reaches it whether the property is a key or not. The specification's own type
+//!    of the first vertex type it opens. `is_primary` marks `subject`, whose `string` that
+//!    function does accept, and nothing about this divergence turns on the flag: the throw is on
+//!    the spelling, and a reader reaches it whether the property is a key or not.
+//!    The specification's own type
 //!    list has no unsigned integer in it either. `time` and `binary` go out the same door: `time`
 //!    is in the specification's list and has no arm in the C++, and `binary` is in neither — see
 //!    [`data_type_name`], whose fallback it is.
@@ -37,7 +34,7 @@
 //!    `<IdType>`, with `IdType = int64_t` in `fwd.h`. The count therefore goes out as **eight raw
 //!    bytes in the writing machine's byte order**, in a file the specification never names, with
 //!    no declared width and no declared endianness. That is a reference implementation normative
-//!    by accident, which is the thing `/docs/characteristics/corpus-contract` exists to refuse.
+//!    by accident, which is the thing `/docs/design/corpus` exists to refuse.
 //!    Ours is a declared decimal integer in the YAML, with a published vector table in
 //!    `apps/corpus/guards/vectors.json` and a guard that reads the rows back off the disk.
 //! 3. **`chunk_size` must be a power of two here.** A tile's address is [`tile_of`], a shift, and
@@ -76,14 +73,11 @@
 //!
 //! **Fossil byte-writes Parquet from Rust, and no engine is left on the path.** `fossil-df`'s
 //! `files.rs` is the single Arrow→Parquet encoder, shared by the native sink and the browser
-//! executor; the `DuckDB` `COPY` `GraphAr` writer was retired when both the `run` and `catalog`
-//! paths moved to `fossil-df`. The layout post-pass in `fossil-layout/src/layout.rs`, which
-//! re-tiles into the manifest-declared `prefix`, went the same way in `1e11a91` — it reads and
-//! writes Parquet through `arrow-rs` and holds no connection, and this paragraph named a
-//! `materialize.rs` that commit deleted. This module declares the tiling; it does not emit bytes,
-//! and `enrich_layout` is the only thing that does — **what the emitter writes is what the
-//! manifest says**, asserted on the artefact by `fossil-cli/tests/conformance.rs` rather than
-//! agreed by convention. That gap stood open for a long time; it does not get to reopen.
+//! executor, and the layout post-pass in `fossil-layout/src/layout.rs` re-tiles into the
+//! manifest-declared `prefix` through `arrow-rs`, holding no connection. This module declares the
+//! tiling; it does not emit bytes, and `enrich_layout` is the only thing that does — **what the
+//! emitter writes is what the manifest says**, asserted on the artefact by
+//! `fossil-cli/tests/conformance.rs` rather than agreed by convention.
 
 use arrow_schema::DataType;
 use serde::{Deserialize, Serialize};
@@ -413,16 +407,6 @@ pub struct VertexInfo {
 /// the default `chunk_size`, the payload is **1,221** addressable objects and a
 /// single-file index would be one of ~60 MB beside them. A reader that already
 /// knows how to seek a tile needs nothing new to seek this.
-///
-/// **Both of those numbers were wrong when this paragraph was written**, and the
-/// way they were wrong is worth keeping. It said *"a hundred and twenty-two"*
-/// where `5,000,000 / 4,096` is 1,221 — a factor of ten, transcribed and never
-/// divided. And it said *"one ~40 MB object"*, which is `subject` at 8.016
-/// compressed bytes per row and nothing else: that is the size of the **scan**
-/// this index exists to avoid, not of the index, which carries `subject` **and**
-/// `dense_id` and is half again as large. A figure borrowed from the cost you are
-/// arguing against is the easiest one to get wrong, because it is sitting right
-/// there in the sentence above it.
 ///
 /// # What a reader does with it
 ///
@@ -788,19 +772,13 @@ impl GraphInfo {
 /// hand-rolled. Unhandled arrow types fall back to `binary`, which is **fossil's
 /// fallback and not a `GraphAr` spelling**: `binary` is in neither the
 /// specification's type list nor `types.cc`, and `TypeNameToDataType` throws
-/// `"Unsupported data type"` on it. This sentence used to call it "the `GraphAr`
-/// catch-all for opaque columns", attributing to `GraphAr` a spelling `GraphAr`
-/// rejects. `time` is the same shape of problem from the other side — it is in
-/// the specification's list and has no arm in the C++ — and both are named in
-/// this module's header beside the `uint32` that is the real one.
+/// `"Unsupported data type"` on it. `time` is the same shape of problem from the
+/// other side — it is in the specification's list and has no arm in the C++ —
+/// and both are named in this module's header beside the `uint32` that is the
+/// real one.
 ///
-/// **This said the declared types "must match what `DuckDB` COPY actually
-/// writes", and both halves of that were wrong.** `DuckDB` COPY is not the
-/// writer any more for a payload — the module header above says so: `fossil-df`'s
-/// `files.rs` encodes Arrow→Parquet, and COPY survives only in the layout
-/// post-pass. And "must match" was a `must` nothing enforces.
-///
-/// **Half of that gap is closed, and the half that is closed is the half the
+/// **Nothing enforces that the declared type matches the column the writer
+/// emits.** Half of that gap is closed, and the half that is closed is the half the
 /// addressing rests on.** `apps/corpus/guards/guards.mjs`'s
 /// `addressing-is-unsigned` opens the payload and requires `dense_id`,
 /// `src_dense` and `dst_dense` to hold an unsigned integer, because those are
