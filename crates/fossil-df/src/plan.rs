@@ -203,9 +203,7 @@ fn join(
     let equalities = join_equalities(on, left_side, right_side)?;
     for (side, df, spec) in [("left", &left, left_side), ("right", &right, right_side)] {
         for (source, column) in condition_refs(on) {
-            if source == spec.name().as_str()
-                && !df.schema().has_column_with_unqualified_name(column)
-            {
+            if spec.addresses(source) && !df.schema().has_column_with_unqualified_name(column) {
                 return Err(DataFusionError::Plan(format!(
                     "the join condition names `{source}.{column}`, and the {side} side has {:?}",
                     df.schema().field_names()
@@ -247,9 +245,14 @@ fn alias_of(df: DataFrame, side: &JoinSide) -> datafusion::error::Result<DataFra
 /// - a conjunct that is not `==` between two column references — a join is an
 ///   equijoin here, and a theta join or a constant comparison would silently
 ///   become a nested loop over the product of two corpora;
-/// - a reference qualified by a relation that is neither input — this check was
-///   already written and never once fired, because an empty source can never be
-///   unequal to both names;
+/// - a reference qualified by a relation that addresses neither input — this
+///   check was already written and never once fired, because an empty source can
+///   never be unequal to both names. It then fired on programs it should have
+///   admitted: a side answers to a SET of names ([`JoinSide::relations`]), and
+///   while it answered to one, `Both := L.join(R, …)` followed by
+///   `Both.join(T, on = R.k == T.k)` was refused for naming `R`. The refusal
+///   named `Both` as the alternative, and `Both` qualifies no column at all —
+///   `Op::Join` is the composite operator that does NOT re-qualify;
 /// - a reference naming a column its own side does not have ([`join`]).
 ///
 /// Which side is written first does not matter: the equality is a filter over
@@ -285,18 +288,32 @@ fn join_equalities(
             )));
         };
         for (side, source) in [("left", ls), ("right", rs)] {
-            if !source.is_empty() && source != left.name() && source != right.name() {
+            if !source.is_empty() && !left.addresses(source) && !right.addresses(source) {
                 return Err(DataFusionError::Plan(format!(
                     "the {side} side of the join condition qualifies a column with `{source}`, \
-                     which is neither input (`{}`, `{}`)",
-                    left.name(),
-                    right.name()
+                     which addresses neither input ({})",
+                    addressable(left, right)
                 )));
             }
         }
         out.push(render(conjunct));
     }
     Ok(out)
+}
+
+/// Every name the two sides answer to, rendered for a refusal — `` `L`, `R`, `T` ``.
+///
+/// A side is a SET of names (see [`JoinSide::relations`]), so this cannot be the
+/// two-name pair it was: after `Both := L.join(R, …)` the left side of a second
+/// join addresses `L` and `R`, and naming it `Both` told the author to write the
+/// one qualifier that would not resolve.
+fn addressable(left: &JoinSide, right: &JoinSide) -> String {
+    left.names()
+        .iter()
+        .chain(right.names())
+        .map(|n| format!("`{n}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Split a condition on `and` — one element for a single key, N for a compound
@@ -577,7 +594,17 @@ mod tests {
     fn side(input: usize, relation: &str) -> JoinSide {
         JoinSide {
             input,
-            relation: SmolStr::from(relation),
+            relations: vec![SmolStr::from(relation)],
+            alias: None,
+        }
+    }
+
+    /// A side that answers to SEVERAL names — what a previous join leaves
+    /// behind, and the shape the one-name field could not hold.
+    fn sides(input: usize, relations: &[&str]) -> JoinSide {
+        JoinSide {
+            input,
+            relations: relations.iter().copied().map(SmolStr::from).collect(),
             alias: None,
         }
     }
@@ -780,6 +807,39 @@ mod tests {
         assert!(
             message.contains("`Invoice`") && message.contains("`LineRow`, `OrderRow`"),
             "the refusal names the stranger and both inputs: {message}"
+        );
+    }
+
+    /// **A binding of a previous join keys the next one.** `Both := L.join(R,
+    /// …)` leaves a side that answers to `L` AND `R`, and
+    /// `Both.join(T, on = R.k == T.k)` names `R` — which `fossil check` admits
+    /// (`fossil_hir::check_tests`: *a binding of the left side may key a second
+    /// join*) and which this refused, because the side carried one name and the
+    /// lowering had filled it with the pipeline's.
+    ///
+    /// The refusal was not a narrower rule but an inverted one: it demanded
+    /// `Both`, and `Both` qualifies no column of the relation —
+    /// [`Op::Join`](fossil_mir::Op::Join) is the composite operator that does
+    /// not re-qualify. So the name it accepted could not resolve and the name it
+    /// refused was the only one that could. Both halves are asserted here.
+    #[test]
+    fn a_side_is_addressed_by_every_binding_a_previous_join_left() {
+        let db = db();
+        let chained = eq(&db, col("R", "k"), col("T", "k"));
+        let left = sides(0, &["L", "R"]);
+
+        join_equalities(&chained, &left, &side(1, "T"))
+            .expect("`R` is a binding of the left side, and keys the second join");
+
+        // And the pipeline's own name, which the old refusal named as the
+        // alternative, addresses nothing.
+        let by_pipeline = eq(&db, col("Both", "k"), col("T", "k"));
+        let err = join_equalities(&by_pipeline, &left, &side(1, "T"))
+            .expect_err("`Both` qualifies no column: a join re-qualifies neither side");
+        let message = err.to_string();
+        assert!(
+            message.contains("`Both`") && message.contains("`L`, `R`, `T`"),
+            "the refusal names the stranger and every name the two sides answer to: {message}"
         );
     }
 

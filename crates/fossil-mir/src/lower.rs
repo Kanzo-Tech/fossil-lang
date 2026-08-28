@@ -526,17 +526,42 @@ pub fn apply_output_shape<'db>(ops: &[Op<'db>], schema: &GraphSchema) -> Vec<Op<
 ///
 /// # The naming rule, which the backend has to agree with
 ///
-/// **Every named binding is a relation known by its name.** `Op::Source` is
-/// known by its binding; a pipeline's result is known by the binding it defines.
-/// In between, a `Filter` or a `Project` does not rename — the rows are the same
-/// rows — so a predicate over `users |> where(.edad >= 18)` qualifies its columns
-/// with `users`, while one written after a `join` qualifies them with the
-/// pipeline's own name, because the join built a relation neither side was.
+/// **A relation is addressed by the qualifiers its columns actually carry, and
+/// there may be more than one.** `Op::Source` is qualified by its binding; a
+/// `Filter`, a `Project` or a `Distinct` does not rename, so the rows keep the
+/// qualifiers they had. A `join` keeps BOTH sides addressable — which is what
+/// lets a body write `Purchase.amount` beside `User.email` — so it is the one
+/// verb that makes this a set rather than a name. A `union` and a `group_by` are
+/// the two that introduce the pipeline's own name, because each re-qualifies
+/// what it produces (`Op::Union` wholly, `Op::GroupBy` its aggregates).
+///
+/// This field was a single `SmolStr` set to the pipeline's name after a join and
+/// again at the end of every chain, and that name qualified nothing: see
+/// [`crate::op::JoinSide`] for the two programs it made unplannable.
 struct Chain {
     /// Index into the op list of the chain's last op — what an emit op reads.
     last: usize,
-    /// The name the rendered SQL knows this relation by.
-    relation: SmolStr,
+    /// Every name the rendered SQL knows this relation's columns by, in the
+    /// order they became addressable.
+    relations: Vec<SmolStr>,
+}
+
+impl Chain {
+    /// The name an unqualified reference falls back to. Every `ColumnRef` the
+    /// surface can write is qualified (`lower_property_value` copies the
+    /// binding the author wrote), so this reaches nothing that renders a
+    /// qualifier today; it is the base binding, which is what the single
+    /// `relation` field held before the first join.
+    fn primary(&self) -> SmolStr {
+        self.relations.first().cloned().unwrap_or_default()
+    }
+
+    /// Make `name` addressable, without repeating one that already is.
+    fn add(&mut self, name: &SmolStr) {
+        if !self.relations.contains(name) {
+            self.relations.push(name.clone());
+        }
+    }
 }
 
 /// A pipeline deriving from a pipeline deriving from … The cycle is already a
@@ -586,7 +611,7 @@ fn lower_source_chain<'db>(
         });
         return Ok(Chain {
             last: ops.len() - 1,
-            relation: binding.clone(),
+            relations: vec![binding.clone()],
         });
     };
 
@@ -602,7 +627,7 @@ fn lower_source_chain<'db>(
     for op in &pipe.ops {
         match op {
             HirSourceOp::Where(pred) => {
-                let pred = lower_property_value(db, pred, &chain.relation, None);
+                let pred = lower_property_value(db, pred, &chain.primary(), None);
                 ops.push(Op::Filter {
                     input: chain.last,
                     pred,
@@ -630,30 +655,37 @@ fn lower_source_chain<'db>(
                 // references are qualified (`Purchase.user_id`,
                 // `User.id`), so each one already carries the relation it
                 // belongs to and the scope only supplies the default.
-                let on = lower_property_value(db, on, &chain.relation, None);
+                let on = lower_property_value(db, on, &chain.primary(), None);
                 // `Node.join(Node as Other, …)` — the self-join alias is the
                 // second name for the same source, and it travels as an alias
                 // rather than as the right side's name because the backend has
                 // to know the difference: an alias is a RE-qualification of that
                 // relation, and no alias means the relation keeps the
                 // qualification its own columns are already addressed by.
+                let right_side = crate::op::JoinSide {
+                    input: right_chain.last,
+                    relations: right_chain.relations.clone(),
+                    alias: alias.clone(),
+                };
                 ops.push(Op::Join {
                     left: crate::op::JoinSide {
                         input: chain.last,
-                        relation: chain.relation.clone(),
+                        relations: chain.relations.clone(),
                         alias: None,
                     },
-                    right: crate::op::JoinSide {
-                        input: right_chain.last,
-                        relation: right_chain.relation.clone(),
-                        alias: alias.clone(),
-                    },
+                    right: right_side.clone(),
                     on,
                     kind: crate::op::JoinKind::Inner,
                 });
-                // A join builds a relation neither side was; from here on the
-                // pipeline's own name is what qualifies its columns.
-                chain.relation = pipe.name.clone();
+                // A join builds a relation neither side was, and it leaves BOTH
+                // sides addressable — nothing is re-qualified and nothing is
+                // dropped, so the qualifiers of the result are the two sides'
+                // together. This assigned the pipeline's own name, which
+                // qualified no column of either side and is what made a second
+                // join over this one unplannable.
+                for name in right_side.names() {
+                    chain.add(name);
+                }
             }
             HirSourceOp::Distinct => ops.push(Op::Distinct { input: chain.last }),
             // The keys keep the relation each was written against; the
@@ -690,6 +722,13 @@ fn lower_source_chain<'db>(
                     aggs,
                     relation: pipe.name.clone(),
                 });
+                // The keys keep the qualifier each was written with and the
+                // aggregates are aliased under the pipeline's name, so both are
+                // addressable after it — `Totals.total` beside `Order.customer`.
+                chain
+                    .relations
+                    .retain(|r| keys.iter().any(|k| k.binding == *r));
+                chain.add(&pipe.name);
             }
             // Like a join, a union builds a relation neither side was — and
             // unlike a join it does not keep the two sides addressable, because
@@ -702,14 +741,26 @@ fn lower_source_chain<'db>(
                     right: right_chain.last,
                     relation: pipe.name.clone(),
                 });
-                chain.relation = pipe.name.clone();
+                // A union DOES collapse to one name: `DataFusion` hands the
+                // result back with no qualifier at all, so `Op::Union`
+                // re-qualifies the whole thing and neither side survives.
+                chain.relations = vec![pipe.name.clone()];
             }
         }
         chain.last = ops.len() - 1;
     }
-    // And the finished pipeline is the relation its binding names, which is what
-    // the mapping's `from` and every property's column reference use.
-    chain.relation = pipe.name.clone();
+    // And the finished pipeline is addressed by whatever its verbs left
+    // addressable — NOT by its own binding.
+    //
+    // This assigned `pipe.name` unconditionally, and that was the second half of
+    // the same mistake: `Adults := User.where(…)` produces rows still qualified
+    // `User` (an `Op::Filter` renames nothing), so a chain ending here answered
+    // to a name no column carried. It is why
+    // `Purchase.join(Adults, on = Purchase.user_id == User.id)` refused `User`
+    // as "neither input (`Purchase`, `Adults`)" — while `/docs/design/algebra`
+    // and `JoinSide`'s own doc comment both describe that program as working.
+    // Only `union` and `group_by` put the pipeline's name on a column, and each
+    // now says so in its own arm.
     Ok(chain)
 }
 
@@ -1497,8 +1548,8 @@ Venta : Person from Sales
         assert_eq!(*kind, crate::op::JoinKind::Inner);
         // Each side's index travels WITH the name its columns are addressed by,
         // and neither side was written `as` anything.
-        assert_eq!(left.name().as_str(), "Orders");
-        assert_eq!(right.name().as_str(), "People");
+        assert_eq!(left.names(), ["Orders"]);
+        assert_eq!(right.names(), ["People"]);
         assert_eq!((&left.alias, &right.alias), (&None, &None));
         let Expr::BinOp {
             op: fossil_hir::BinOp::Eq,
@@ -1521,6 +1572,73 @@ Venta : Person from Sales
              names — which here happen to agree, got {rhs:?}"
         );
         assert!(matches!(&ops[3], Op::EmitVertex { input, .. } if *input == 2));
+    }
+
+    /// **A join over a join is addressed by both its sides' bindings, and a
+    /// pipeline by the ones its verbs left.** The two halves of one mistake:
+    /// this carried ONE name, assigned `pipe.name` after a join and again at the
+    /// end of every chain, and that name qualifies no column — `Op::Join` is the
+    /// composite operator that re-qualifies neither side, and `Op::Filter`
+    /// renames nothing.
+    ///
+    /// So `fossil check` admitted two programs the engine then refused, each
+    /// naming the one qualifier that could not resolve as the alternative:
+    /// `Both.join(Region, on = User.region_id == Region.id)` wanted `Both`, and
+    /// `Purchase.join(Adults, on = … == User.id)` wanted `Adults`.
+    /// `apps/docs/programs/chained-join` is both of them, executed.
+    #[test]
+    fn a_side_carries_every_binding_its_pipeline_left_addressable() {
+        let src = "\
+Purchase := io.csv(\"o.csv\")
+User := io.csv(\"u.csv\")
+Region := io.csv(\"r.csv\")
+Adults := User.where(User.age >= 18)
+Both := Purchase.join(Adults, on = Purchase.user_id == User.id)
+Tri := Both.join(Region, on = User.region_id == Region.id)
+
+Orders : Person from Tri
+    @subject = \"https://example.org/order/{Purchase.id}\"
+    name = Region.label
+";
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+        let mapping = *dm.mappings(&db).first().expect("one mapping");
+        let mir = lower_to_mir_pg(&db, mapping);
+        let ops = mir.ops(&db);
+
+        let joins: Vec<_> = ops
+            .iter()
+            .filter_map(|o| match o {
+                Op::Join { left, right, .. } => Some((left, right)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(joins.len(), 2, "two joins, got {ops:?}");
+
+        // A filter renames nothing, so `Adults` is still addressed as `User` —
+        // the case `JoinSide`'s own doc comment has described as working since
+        // it was written, and which the end-of-chain assignment broke.
+        let (left, right) = joins[0];
+        assert_eq!(left.names(), ["Purchase"]);
+        assert_eq!(
+            right.names(),
+            ["User"],
+            "`Adults := User.where(…)` is addressed by `User`, not by its own name"
+        );
+
+        // And the second join's left side answers to BOTH — which is what makes
+        // `User.region_id` a column of it.
+        let (left, right) = joins[1];
+        assert_eq!(
+            left.names(),
+            ["Purchase", "User"],
+            "a join leaves both sides addressable"
+        );
+        assert!(left.addresses("User") && !left.addresses("Both"));
+        assert_eq!(right.names(), ["Region"]);
     }
 
     /// `Node.join(Node as Other, …)` — the alias reaches the MIR as an alias,
@@ -1555,9 +1673,13 @@ Cat : Person from Pairs
         else {
             unreachable!()
         };
-        assert_eq!(left.name().as_str(), "Node");
+        assert_eq!(left.names(), ["Node"]);
         assert_eq!(left.alias, None);
-        assert_eq!(right.relation.as_str(), "Node", "both sides read `Node`");
+        assert_eq!(right.relations, ["Node"], "both sides read `Node`");
+        // The alias REPLACES the relations it re-qualifies, so the right side
+        // answers to `Other` alone — which is the whole apparatus for telling
+        // the two halves of a self-join apart.
+        assert_eq!(right.names(), ["Other"]);
         assert_eq!(
             right.alias.as_deref(),
             Some("Other"),
