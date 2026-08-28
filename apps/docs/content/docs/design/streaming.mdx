@@ -184,26 +184,47 @@ rather than overruled: with the contraction's maps gone the peak is 5.08 GiB, an
 
 Four terms, three of them proportional and one a floor:
 
-| fixture | adjacency rows | the pass | `estimated_peak_bytes` |
-| --- | --- | --- | --- |
-| 2,000,000 · degree 14 | 27,974,508 | 0.62 GiB | 0.90 GiB |
-| 4,000,000 · degree 6 | 23,978,362 | 1.14 GiB | 1.38 GiB |
-| 4,000,000 · degree 14 | 55,949,862 | 1.38 GiB | 1.80 GiB |
-| 4,000,000 · degree 28 | 111,899,830 | 1.69 GiB | 2.53 GiB |
-| 10,000,000 · degree 14 | 139,874,560 | 3.80 GiB | 4.47 GiB |
+| fixture | adjacency rows | the pass | `read CSR + CSC` | `estimated_peak_bytes` | clears by |
+| --- | --- | --- | --- | --- | --- |
+| 2,000,000 · degree 14 | 27,974,508 | 0.60 GiB | +0.16 GiB | 0.74 GiB | +24% |
+| 4,000,000 · degree 6 | 23,978,362 | 1.07 GiB | +0.15 GiB | 1.25 GiB | +16% |
+| 4,000,000 · degree 14 | 55,949,862 | 1.23 GiB | +0.31 GiB | 1.49 GiB | +21% |
+| 4,000,000 · degree 28 | 111,899,830 | 1.17 GiB | +0.52 GiB | 1.90 GiB | +63% |
+| 10,000,000 · degree 14 | 139,874,560 | 2.71 GiB | +0.78 GiB | 3.69 GiB | +36% |
 
 **The three middle rows are a debt paid.** Every calibration point behind the old constant shared
 mean degree fourteen, where V and E are proportional and a per-row term and a per-vertex term fit
-the same line — so attributing Louvain's cost to adjacency rows was mechanically defensible and
-unverified. These three hold the vertex file byte-identical and move only the edges. The measured
-slope is **6.7 bytes per adjacency row**; a per-vertex attribution predicts a flat line. It is rows.
+the same line — so attributing the cost to adjacency rows was mechanically defensible and
+unverified. These three hold the vertex file byte-identical and move only the edges, and a
+per-vertex attribution predicts a flat line across them. `read CSR + CSC` moves **+0.15 → +0.31 →
++0.52 GiB** across them, a slope of **4.5 bytes per adjacency row**. It is rows.
 
-The constant is 14 rather than 6.7 because it has to bound a *peak* rather than fit a slope, and the
-phase that now sets the peak is the last one — `remap adjacencies + write edge tiles`, which holds a
-whole orientation as Arrow at once and measures 13.2 / 14.5 / 15.0 B/row at two, four and ten
-million and 14.2 at four million and degree twenty-eight. The ten-million row above is the **larger**
-of two runs of one build (5.08 and 4.97 GiB), because a bound fitted to the luckier of two runs is a
-bound that fails on the unluckier.
+**`ADJACENCY_ROW_BYTES` is 8 now, and the phase it is fitted on has moved for the third time.** It
+was 48 when Louvain's contraction built a hash table per community; it was 14 when the remap held a
+whole orientation as Arrow at 13–15 B/row. With the remap holding one `Vec<u64>` per orientation —
+four bytes for each row counted in the table above, and not live at the same time as the CSR — the
+phase that holds the most per adjacency row is `read CSR + CSC`, which is arithmetic rather than a
+guess: one `u32` of `targets` per row plus an offset per vertex, held by Louvain for the whole of
+its 127 s at ten million. Measured, that is 5.0 to 6.7 B/row across the five. Eight is the larger of
+the two terms, rounded up.
+
+<Callout type="warn" title="The pass's total has stopped being fittable, and the fixture is why">
+The constant is fitted on a **phase delta** and no longer on the pass's total, because that
+regression has started lying in the direction that matters. At four million vertices the pass
+measures 1.07 / 1.23 / **1.17** GiB at degree 6 / 14 / 28: it goes *down* at the densest point, and
+a slope through the three is 1.2 B/row — below what `read CSR + CSC` is measured to hold in the same
+runs.
+
+The confound is the fixture, not the pass. `examples/enrich_memory` builds the corpus in the process
+that then measures the pass, so the baseline already contains the generator's retained heap — 0.36,
+0.72 and 1.01 GiB at those three degrees — and the pass reuses those pages instead of asking the OS
+for more. **`peak − start` is biased low, and increasingly so with degree.** A delta taken from
+inside the pass is not.
+
+Which is why the constant was *not* lowered to what the regression suggests. What would let the
+total be fitted again is a measurement whose process did not build the fixture: a second binary
+handed a corpus already on disk. That is the next thing this calibration is owed.
+</Callout>
 
 There is also a floor now, `LAYOUT_BASE_BYTES`, 16 MiB. Three proportional terms make a small enough
 corpus cost nothing, and the reader's batches and the writer's row-group buffers are the size they

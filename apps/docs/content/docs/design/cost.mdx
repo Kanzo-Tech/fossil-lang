@@ -119,9 +119,10 @@ The whole build, `/usr/bin/time -l` over the generator plus `fossil run`, unboun
 For 1.5 GB of corpus. There is no spill path in the pass, so exceeding the machine is a failed run
 rather than a slow one, which is the opposite of what [streaming](/docs/design/streaming) promises.
 
-**The line got shallower, and that row above predates it.** The layout pass on its own was 7.22 GiB
-at ten million — 0.72 per million — and is **3.80**, or 0.38 per million (0.31 at two million, 0.35
-at four), after the Louvain contraction stopped building one hash table per community. The
+**The line got shallower twice, and that row above predates both.** The layout pass on its own was
+7.22 GiB at ten million — 0.72 per million — then 3.80 after the Louvain contraction stopped
+building one hash table per community, and is **2.71** after the adjacency remap stopped holding an
+orientation as Arrow: 0.27 per million. The
 `/usr/bin/time -l` table is the *whole* build, generator and executor included, and it has not been
 re-run against the smaller pass; what changed underneath it is a layout half that now asks for less
 than half of what it asked for. **Re-measuring the whole build is outstanding.**
@@ -147,8 +148,20 @@ reached in the last phase, after all of Louvain's has been handed back. A stream
 0.78 off a number that is already 1.17 below the one that binds. **It is worth zero on the peak**,
 and a Parquet scan per sweep to get it.
 
-That is the honest end of this thread: the ceiling is now the adjacency remap, which holds a whole
-orientation as Arrow at once, and it is the term to attack next.
+That was the honest end of that thread, and the ceiling it named — the adjacency remap, holding a
+whole orientation as Arrow at once — **is gone**. Sampled inside the phase rather than at its
+boundary, the +1.95 GiB it billed at ten million was 40% one call: `lexsort_to_indices` over two
+`u32` columns routes through arrow's `RowConverter`, which encodes each row into ten comparable
+bytes plus an eight-byte offset for a row that is eight bytes wide. A pair of `u32` ordered
+lexicographically is a `u64` ordered by value, so the whole orientation is one `Vec<u64>` sorted in
+place: **+0.46 GiB, 11.7 s → 6.5, output bit-identical.**
+
+What that leaves is a peak the level-zero argument now reaches. At ten million the pass's high-water
+is `community_hierarchy`'s in the unluckier of two runs — 3.94 GiB against the remap's 3.48 in the
+same run — where before the remap set it at 4.98. **The measurement that closed the streaming
+level-zero question was «Louvain's high-water is 1.17 GiB below the pass's»**, and it is not any
+more; re-measuring it is the next thing this thread is owed, and it is measurable before anything is
+written.
 
 <Callout type="warn" title="One row of the streaming page does not reproduce">
 That page bills `community_hierarchy` at **+0.08 GiB** at ten million after the CSR landed, and

@@ -480,40 +480,53 @@ const VERTEX_ARRAY_BYTES: u64 = 128;
 /// Bytes per adjacency row, counting each orientation's rows separately.
 ///
 /// **The one constant here that is measured rather than derived, and it is the
-/// one that decides the answer.** It is the phase that now sets the pass's
-/// high-water mark: `remap adjacencies + write edge tiles`, the one step holding
-/// a whole orientation as Arrow at once — `concat_batches` over two `u32`
-/// columns, `lexsort_to_indices`, and the `take` that applies it. Its own delta,
-/// measured, is **13.2 B/row at two million, 14.5 at four and 15.0 at ten**, and
-/// 14.2 at four million and mean degree twenty-eight. Four of the fourteen are
-/// the CSR `targets` entry the row becomes, which Louvain holds while the remap
-/// does not; nothing here is a sum of two things that are live together, and
-/// that is why it can be smaller than the arithmetic below suggests.
+/// one that decides the answer.** It bounds whichever phase holds the most per
+/// adjacency row, and that phase has now moved twice. It was
+/// `community_hierarchy` at 48, when one line of [`Weighted::contract`] built a
+/// hash table per community. It was `remap adjacencies + write edge tiles` at
+/// 14, the one step holding a whole orientation as Arrow — `concat_batches`,
+/// `lexsort_to_indices` and a `take` — measuring 13.2 / 14.5 / 15.0 B/row at
+/// two, four and ten million.
 ///
-/// # It was 48, and thirty-eight of those were a residue nothing explained
+/// It is **`read CSR + CSC`** now, and that step is arithmetic rather than a
+/// guess: one `u32` of `targets` per row plus one offset per vertex, and Louvain
+/// holds it for the whole of its 127 s at ten million. Measured across the five
+/// calibration fixtures it is **5.0 to 6.7 bytes per adjacency row**:
 ///
-/// It is explained now, and the explanation is that it was never Louvain's
-/// *sweeps*. `local_moving`'s resident set is flat to three decimal places
-/// across all thirty-two of them, at two million and at ten. The residue was one
-/// line of [`Weighted::contract`] — `vec![HashMap::new(); k]`, one hash table per
-/// community, `k` = 3,757,900 at ten million — measured **+3.41 GiB of the
-/// +3.82 GiB** `community_hierarchy` billed. Those maps are gone, the process
-/// peak went **8.54 GiB → 5.08** and the pass 7.22 → 3.80, and this constant
-/// went with it.
+/// | fixture | adjacency rows | `read CSR + CSC` | B/row |
+/// | --- | --- | --- | --- |
+/// | 2,000,000 · degree 14 | 27,974,508 | +0.16 GiB | 6.1 |
+/// | 4,000,000 · degree 6 | 23,978,362 | +0.15 GiB | 6.7 |
+/// | 4,000,000 · degree 14 | 55,949,862 | +0.31 GiB | 6.0 |
+/// | 4,000,000 · degree 28 | 111,899,830 | +0.52 GiB | 5.0 |
+/// | 10,000,000 · degree 14 | 139,874,560 | +0.78 GiB | 6.0 |
 ///
-/// # The attribution to rows is verified now, and it was not
+/// The remap's own term is now 4 B/row — one `Vec<u64>` per orientation, which
+/// is eight bytes for each of an orientation's rows and therefore four for each
+/// of the rows counted here — and it is not live at the same time as the CSR.
+/// Eight is the larger of the two, rounded up: the constant has to bound a peak,
+/// and the peak holds one of them.
 ///
-/// Every calibration point behind the old 48 shared one mean degree, fourteen,
-/// where V and E are proportional and "per row" and "per vertex" fit the same
-/// line. So hold V at four million and move the degree — 6, 14, 28, which is
-/// 23,978,362 / 55,949,862 / 111,899,830 adjacency rows over an identical vertex
-/// file — and the pass costs **1.14 / 1.38 / 1.69 GiB**. A per-vertex term
-/// predicts a flat line; the measured slope is **6.7 bytes per adjacency row**
-/// with every vertex term held fixed. The attribution is to rows.
+/// # Why it is not fitted on the pass's total any more
+///
+/// Because that regression has stopped being trustworthy in the direction that
+/// matters. Holding V at four million and moving the degree, the pass measures
+/// 1.07 / 1.23 / **1.17** GiB at degree 6 / 14 / 28 — it goes *down* at the
+/// densest point, and a slope through those three is 1.2 B/row, below what
+/// `read CSR + CSC` is measured to hold. The confound is in the fixture rather
+/// than in the pass: `examples/enrich_memory` builds the corpus in the same
+/// process, so the baseline the pass is measured from already contains the
+/// generator's retained heap — 0.36, 0.72 and 1.01 GiB at those three degrees —
+/// and the pass reuses those pages instead of asking for more. **`peak − start`
+/// is biased low, and increasingly so with degree.** A per-phase delta taken
+/// from inside the pass is not, which is why the constant is fitted on one.
+///
+/// What would let it be fitted on the total again is a measurement whose process
+/// did not build the fixture — a second binary handed a corpus already on disk.
 ///
 /// (`examples/enrich_memory <N> <degree>`, 2026-08-28, Mac16,8 — 14 cores,
 /// 48 GiB, macOS 26.2 / Darwin 25.2.0.)
-const ADJACENCY_ROW_BYTES: u64 = 14;
+const ADJACENCY_ROW_BYTES: u64 = 8;
 
 /// What the pass holds whatever the corpus is.
 ///
@@ -567,15 +580,15 @@ const VERTEX_PAYLOAD_PERMILLE: u64 = 1_300;
 /// budget raises it and tries again; one that is a little too small accepts a
 /// run and lets it exceed the number they were promised, which is the defect
 /// this whole mechanism exists to remove. So it is fitted to the **largest** of
-/// two runs of one build at every point, and it clears all five by 18% to 50%:
+/// two runs of one build at every point, and it clears all five by 16% to 63%:
 ///
-/// | fixture | adjacency rows | the pass | this returns |
-/// | --- | --- | --- | --- |
-/// | 2,000,000 · degree 14 | 27,974,508 | 0.62 GiB | 0.90 GiB |
-/// | 4,000,000 · degree 6 | 23,978,362 | 1.14 GiB | 1.38 GiB |
-/// | 4,000,000 · degree 14 | 55,949,862 | 1.38 GiB | 1.80 GiB |
-/// | 4,000,000 · degree 28 | 111,899,830 | 1.69 GiB | 2.53 GiB |
-/// | 10,000,000 · degree 14 | 139,874,560 | 3.80 GiB | 4.47 GiB |
+/// | fixture | adjacency rows | the pass | this returns | clears by |
+/// | --- | --- | --- | --- | --- |
+/// | 2,000,000 · degree 14 | 27,974,508 | 0.60 GiB | 0.74 GiB | +24% |
+/// | 4,000,000 · degree 6 | 23,978,362 | 1.07 GiB | 1.25 GiB | +16% |
+/// | 4,000,000 · degree 14 | 55,949,862 | 1.23 GiB | 1.49 GiB | +21% |
+/// | 4,000,000 · degree 28 | 111,899,830 | 1.17 GiB | 1.90 GiB | +63% |
+/// | 10,000,000 · degree 14 | 139,874,560 | 2.71 GiB | 3.69 GiB | +36% |
 ///
 /// (`FOSSIL_MEM_PROBE=1 … --example enrich_memory -- <N> <degree>`, 2026-08-28,
 /// Mac16,8 — 14 cores, 48 GiB, macOS 26.2 / Darwin 25.2.0.)
@@ -587,9 +600,14 @@ const VERTEX_PAYLOAD_PERMILLE: u64 = 1_300;
 /// [`ADJACENCY_ROW_BYTES`] is now fitted on.
 ///
 /// **Nor is it a guess about which phase dominates.** That is measured, and it
-/// moved: it used to be Louvain by more than every other phase together, and
-/// since [`Weighted::contract`] stopped building one hash table per community it
-/// is `remap adjacencies + write edge tiles`, the last phase of the pass.
+/// has moved twice — Louvain by more than every other phase together, then
+/// `remap adjacencies + write edge tiles` once [`Weighted::contract`] stopped
+/// building one hash table per community, and now **no one phase**: the peak is
+/// `community_hierarchy`'s at ten million, `write identity index`'s at four
+/// million and degree twenty-eight, and `remap adjacencies` in one of two
+/// ten-million runs of one build. That is what a sum of terms is for. The
+/// per-row term is fitted on the phase that holds the most per adjacency row,
+/// which is `read CSR + CSC` — see [`ADJACENCY_ROW_BYTES`].
 #[must_use]
 pub const fn estimated_peak_bytes(
     vertex_count: u64,
