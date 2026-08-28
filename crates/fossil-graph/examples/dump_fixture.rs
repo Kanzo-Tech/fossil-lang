@@ -2,7 +2,7 @@
 //!
 //! Mirrors the in-crate test `fixture()` (one `Person` vertex with `dense_id`/
 //! `age`/`name`, one `Person_knows_Person` edge), but reconstructed with the
-//! public `fossil_sinks::manifest` API so the `@fossil-lang/graph` binding's
+//! public `fossil_sinks::manifest` API so the `@fossil-lang/corpus` binding's
 //! WASM smoke test reads a manifest whose SERIALISATION is the writer's — no
 //! hand-written YAML that could drift from the structs.
 //!

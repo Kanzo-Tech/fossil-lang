@@ -3,10 +3,10 @@
  *
  * `reader.mjs` is the second implementation of the ADDRESSING — which URL a tile has. This is the
  * second implementation of the ANSWERS: what is inside, what is in a rectangle, what one vertex is,
- * and what is within N hops. `openCorpus` in `@fossil-lang/graph` is the first, published and typed;
+ * and what is within N hops. `openCorpus` in `@fossil-lang/corpus` is the first, published and typed;
  * this is plain Node over the `duckdb` binary, and it shares no line of answer logic with it.
  *
- * # Why a second one at all, when `packages/graph/tests/corpus.test.ts` already cross-checks
+ * # Why a second one at all, when `packages/corpus/tests/corpus.test.ts` already cross-checks
  *
  * That file runs the published API against this corpus and compares every answer to SQL it writes
  * itself, which is strictly better than a constant — but it is **one implementation checked against

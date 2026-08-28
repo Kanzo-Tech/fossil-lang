@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Graph query surface over GraphAr+DuckDB. Verb-level operations (schema, discovery, aggregate, GraphRAG, viewport, sql) with JSON Schema contracts. Transport-agnostic — bindings live in fossil-mcp, fossil-cli, @fossil-lang/graph."
+description = "Graph query surface over GraphAr+DuckDB. Verb-level operations (schema, discovery, aggregate, GraphRAG, viewport, sql) with JSON Schema contracts. Transport-agnostic — bindings live in fossil-mcp, fossil-cli, @fossil-lang/corpus."
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -17,7 +17,7 @@ workspace = true
 # Verb contracts: each operation's params/result derives serde + JsonSchema
 # The same schema is emitted by every transport binding so the
 # wire contract stays single-source — no hand-written JSON Schema files, no
-# divergence between fossil-mcp and @fossil-lang/graph.
+# divergence between fossil-mcp and @fossil-lang/corpus.
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
@@ -40,5 +40,5 @@ serde_yaml_ng = { workspace = true }
 [dev-dependencies]
 # Snapshot the generated JSON Schemas so a hand-edit to a Params/Result struct
 # triggers a visible diff against the canonical wire contract. The bindings
-# (fossil-mcp, @fossil-lang/graph) consume the same snapshots.
+# (fossil-mcp, @fossil-lang/corpus) consume the same snapshots.
 insta = { workspace = true }

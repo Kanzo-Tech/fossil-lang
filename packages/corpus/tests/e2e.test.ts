@@ -82,7 +82,7 @@ beforeAll(async () => {
   graph = createGraphClient({ query, manifestFiles });
 });
 
-describe('@fossil-lang/graph verbs e2e against DuckDB-WASM', () => {
+describe('@fossil-lang/corpus verbs e2e against DuckDB-WASM', () => {
   it('schema: real count(*) from the loaded table', async () => {
     const { vertices } = await graph.schema();
     expect(vertices).toHaveLength(1);

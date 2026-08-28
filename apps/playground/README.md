@@ -44,7 +44,7 @@ Measured in Chrome on the built bundle, raw bytes over the wire:
 | `fossil_graph_wasm_bg.wasm` (verbs) | 549 kB | 217 kB | — | never, so far |
 | app JS + CSS | 438 kB | 122 kB | — | on load |
 
-The graph WASM is emitted as an asset because `@fossil-lang/graph`'s barrel resolves it,
+The graph WASM is emitted as an asset because `@fossil-lang/corpus`'s barrel resolves it,
 and it is never fetched: `openCorpus` reaches the tiles through the host's `query`
 callback, and only the typed verb surface instantiates the module. If the app grows a verb
 call, that row stops being free.

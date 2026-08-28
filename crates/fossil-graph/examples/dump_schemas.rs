@@ -1,6 +1,6 @@
 //! Emit one combined JSON Schema document for the whole verb surface to stdout.
 //!
-//! This is the codegen source for the TS binding (`@fossil-lang/graph`): its
+//! This is the codegen source for the TS binding (`@fossil-lang/corpus`): its
 //! `scripts/gen-types.sh` pipes this output through `json-schema-to-typescript`
 //! to produce `src/generated.ts`. The same schemas are snapshot-tested in
 //! `tests/schemas.rs` (the canonical wire contract) — this example

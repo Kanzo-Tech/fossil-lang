@@ -17,7 +17,7 @@
  * | --- | --- |
  * | `./reader.mjs` | plain Node, written from the conventions and from nothing else |
  * | `./wasm-reader.mjs` | `fossil_graph::address` compiled to wasm32, through `fossil-graph-wasm` |
- * | `packages/graph/src/address.ts` | the published module, run by `packages/graph/tests/conformance.test.ts` |
+ * | `packages/corpus/src/address.ts` | the published module, run by `packages/corpus/tests/conformance.test.ts` |
  *
  * It was two, and both were JavaScript. A mistake they share — a shift taken as signed, a count
  * that went through a `Number` — was invisible to a diff of the two, which is the same shape of
@@ -27,7 +27,7 @@
  * runs the same table natively in `crates/fossil-graph/tests/conformance.rs`; what runs here is the
  * wasm32 build of it, which is a different claim — `usize` is 64 bits there and 32 here.
  *
- * The wasm leg needs `packages/graph/pkg/`, which is the one thing under `apps/corpus/` that is not
+ * The wasm leg needs `packages/corpus/pkg/`, which is the one thing under `apps/corpus/` that is not
  * `node` plus a `duckdb` binary. It is therefore **required by default and refused explicitly**:
  * `--without-wasm` is the opt-out, and `.github/workflows/corpus.yml` — which installs `node` and
  * `duckdb` and nothing else — is where it is passed and where the reason is written down. A leg
@@ -68,7 +68,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * A run that quietly does less than it says is the shape of a suite that has stopped being
  * evidence, so a checkout that cannot do something has to say which and CI has to say why.
  *
- * - `--without-wasm` — no Rust toolchain, so no `packages/graph/pkg/` and no third reader.
+ * - `--without-wasm` — no Rust toolchain, so no `packages/corpus/pkg/` and no third reader.
  *   `.github/workflows/corpus.yml` passes it: its install list is `node` and a `duckdb` binary,
  *   deliberately, because `guards/` is meant to be copied by somebody who has neither.
  * - `--addressing-only` — no `duckdb` binary, so the `answers` block cannot open a byte.
@@ -255,7 +255,7 @@ let legs = 1;
 if (WITHOUT_WASM) {
   reader = "wasm";
   note(
-    "not run: --without-wasm. The wasm leg needs `packages/graph/pkg/`, which needs a Rust " +
+    "not run: --without-wasm. The wasm leg needs `packages/corpus/pkg/`, which needs a Rust " +
       "toolchain; this invocation declared it has none.",
   );
   reader = "reader.mjs";
@@ -376,7 +376,7 @@ if (failures.length > 0) {
   process.exit(1);
 }
 // What this file ran, and what it did not. The third reader of the table is
-// `packages/graph/src/address.ts`, executed by `packages/graph/tests/conformance.test.ts` — a pnpm
+// `packages/corpus/src/address.ts`, executed by `packages/corpus/tests/conformance.test.ts` — a pnpm
 // test in another package, so an address moved here turns it red and this file will not tell you.
 // Saying so is the point: a line reading "conformance cases reproduce" over one implementation is
 // the sentence `GraphAr`'s fourth reader was green under.
@@ -384,6 +384,6 @@ console.log(
   `\n${table.cases.length}/${table.cases.length} conformance cases reproduce for ${legs} of the ` +
     `2 readers this file runs` +
     (legs > 1
-      ? "; the third is packages/graph/tests/conformance.test.ts"
+      ? "; the third is packages/corpus/tests/conformance.test.ts"
       : " — one side is not a diff, and the other two run elsewhere"),
 );

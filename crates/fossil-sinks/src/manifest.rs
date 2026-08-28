@@ -92,7 +92,7 @@ use serde::{Deserialize, Serialize};
 pub const GRAPHAR_VERSION: &str = "gar/v1";
 
 /// The payload file of a row-group container: one per set, its row groups the
-/// tiles. `@fossil-lang/graph` spells the same constant.
+/// tiles. `@fossil-lang/corpus` spells the same constant.
 pub const TILES_FILE: &str = "tiles.parquet";
 
 /// Which container carries a corpus's tiles — one file per tile with the address
@@ -248,7 +248,7 @@ pub struct KAnonymity {
     /// grammar is a flat mapping of scalars, one sequence of paths and one
     /// sequence of small mappings; a nested sequence under a nested mapping is
     /// outside what `apps/corpus/guards/manifest.mjs` and
-    /// `packages/graph/src/manifest.ts` read, and both of them **skip** what
+    /// `packages/corpus/src/manifest.ts` read, and both of them **skip** what
     /// they cannot see rather than failing on it. A quasi-identifier set that
     /// silently scans as absent is the worst available outcome, so the shape is
     /// chosen to be one those scanners already read.
@@ -537,7 +537,7 @@ pub struct GraphInfo {
     /// The privacy bound this corpus declares. See [`Privacy`]: it is here,
     /// once, beside [`Self::container`], because the bound is a property of the
     /// **whole release** and not of a column — and because
-    /// `packages/graph/src/corpus.ts` deliberately does not read
+    /// `packages/corpus/src/corpus.ts` deliberately does not read
     /// `property_groups`, taking the payload vocabulary from the bytes with one
     /// `DESCRIBE` per type. A field the reference reader never opens is not a
     /// policy.
@@ -1148,7 +1148,7 @@ version: gar/v1
 
     /// The manifest is read by four things and only one of them is `serde`.
     ///
-    /// `apps/corpus/guards/manifest.mjs` and `packages/graph/src/manifest.ts` are
+    /// `apps/corpus/guards/manifest.mjs` and `packages/corpus/src/manifest.ts` are
     /// line scanners over «a flat mapping of scalars, one sequence of paths and
     /// one sequence of small mappings», and what they do with a shape outside
     /// that grammar is **skip it silently**. So the emitted `privacy:` block has

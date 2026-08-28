@@ -35,7 +35,7 @@
  * hands back the tiled tree**, so this file stages bytes and opens them, and there is no
  * stand-in left to document.
  */
-import { openCorpus, type Corpus } from '@fossil-lang/graph';
+import { openCorpus, type Corpus } from '@fossil-lang/corpus';
 import type { GraphArFile } from '@fossil-lang/executor';
 
 import { query, register } from './duckdb.js';

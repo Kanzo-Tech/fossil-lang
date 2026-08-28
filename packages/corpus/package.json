@@ -1,12 +1,13 @@
 {
-  "name": "@fossil-lang/graph",
+  "name": "@fossil-lang/corpus",
   "version": "0.0.0-development",
-  "description": "In-process TS binding for the fossil-graph verb surface. Runs verb→SQL in WASM (fossil-graph-wasm) and delegates execution to a host-provided DuckDB-WASM query callback (e.g. keasy's Mosaic coordinator). The larger-than-RAM query layer for whatever draws the graph; fossil ships no viewer. Also publishes the corpus addressing — resolveCorpus turns a GraphAr manifest into tile URLs, synchronously and without WASM.",
+  "description": "Open a fossil corpus and read it. `openCorpus` is the door: it runs the fossil-graph verb surface as verb→SQL in WASM (fossil-graph-wasm) and delegates execution to a host-provided DuckDB-WASM query callback (e.g. keasy's Mosaic coordinator) — the larger-than-RAM query layer for whatever draws the graph; fossil ships no viewer. The `./address` subpath publishes the addressing alone: resolveCorpus turns a GraphAr manifest into tile URLs, synchronously and without WASM.",
+  "//name": "This was `@fossil-lang/graph` and it does not draw one. Its door is `openCorpus`, every type it exports is `Corpus*`, and the package that DOES put vertices on a GPU — `@kanzo-tech/graph` — sits beside it in `apps/playground/package.json`, where two entries called `graph` meant nothing about an import told you which. The Rust crates behind it are deliberately NOT renamed: `fossil-graph` is a verb surface over a property graph, which is what it says it is, and a cargo name is not in the import space this collision happened in. See /docs/design/corpus.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/kanzo-tech/fossil.git",
-    "directory": "packages/graph"
+    "directory": "packages/corpus"
   },
   "publishConfig": {
     "access": "public"

@@ -125,11 +125,11 @@ pub async fn dispatch_graph(
 // engine appears anywhere below, which is why a host swapping the one behind
 // `query` changes nothing here.
 //
-// It is exposed here rather than only in `@fossil-lang/graph` because this is the
+// It is exposed here rather than only in `@fossil-lang/corpus` because this is the
 // leg that makes the conformance diff three-sided.
 // `apps/corpus/conformance/expected.json` is executed by plain Node
 // (`conformance/verify.mjs`), by the published TypeScript
-// (`packages/graph/tests/conformance.test.ts`) and by [`fossil_graph::address`] —
+// (`packages/corpus/tests/conformance.test.ts`) and by [`fossil_graph::address`] —
 // natively in `crates/fossil-graph/tests/conformance.rs` and, through this
 // binding, as the wasm32 build that actually ships. The native run and the wasm
 // run are not the same claim: `usize` is 64 bits there and 32 here, and 2^53 is
@@ -139,7 +139,7 @@ use fossil_graph::address::{Direction, ResolvedCorpus, resolve};
 
 /// A corpus resolved to addresses — synchronous, and it opens no byte.
 ///
-/// The counterpart of `resolveCorpus` in `@fossil-lang/graph/address`, and the
+/// The counterpart of `resolveCorpus` in `@fossil-lang/corpus/address`, and the
 /// same arithmetic the native reader runs. A host holds one of these for as long
 /// as it holds the manifest.
 #[wasm_bindgen]

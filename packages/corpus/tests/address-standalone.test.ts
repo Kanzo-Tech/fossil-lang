@@ -31,7 +31,7 @@ import { GRAPH_INFO_PATH } from '../src/address.js';
  *   1. compile `src/address.ts` and whatever it pulls in — nothing but `manifest.ts` — into a
  *      package directory built from scratch, holding the real `package.json` and **no `pkg/`**;
  *   2. link that directory into a consumer's `node_modules` and import
- *      `@fossil-lang/graph/address` from a child Node process.
+ *      `@fossil-lang/corpus/address` from a child Node process.
  *
  * If the closure ever reaches the verb half, `tsc` emits `client.js` beside it, its
  * `import '../pkg/fossil_graph_wasm.js'` resolves to nothing, and the child dies with
@@ -55,7 +55,7 @@ afterAll(() => rmSync(work, { recursive: true, force: true }));
  * lands in `dist/` — this step is the measurement, not a copy of a list.
  */
 function standalone(name: string, entry: string, probe: readonly string[]): string {
-  const linked = join(work, name, 'graph');
+  const linked = join(work, name, 'corpus');
   mkdirSync(join(linked, 'dist'), { recursive: true });
 
   execFileSync(
@@ -84,7 +84,7 @@ function standalone(name: string, entry: string, probe: readonly string[]): stri
 
   const consumer = join(work, name, 'consumer');
   mkdirSync(join(consumer, 'node_modules', '@fossil-lang'), { recursive: true });
-  symlinkSync(linked, join(consumer, 'node_modules', '@fossil-lang', 'graph'), 'dir');
+  symlinkSync(linked, join(consumer, 'node_modules', '@fossil-lang', 'corpus'), 'dir');
   // No `node_modules` beyond the link, so an import of anything the closure did not bring with it
   // dies with ERR_MODULE_NOT_FOUND naming the package — which is what "zero runtime dependencies"
   // means when it is a measurement rather than a line in `package.json`.
@@ -94,7 +94,7 @@ function standalone(name: string, entry: string, probe: readonly string[]): stri
   return execFileSync(process.execPath, ['probe.mjs'], { cwd: consumer, encoding: 'utf8' });
 }
 
-describe('@fossil-lang/graph/address — reachable without the WASM toolchain', () => {
+describe('@fossil-lang/corpus/address — reachable without the WASM toolchain', () => {
   it('publishes the subpath the addressing half is reached by', () => {
     expect(manifest.exports['./address']).toEqual({
       types: './dist/address.d.ts',
@@ -104,7 +104,7 @@ describe('@fossil-lang/graph/address — reachable without the WASM toolchain', 
 
   it('imports from a package directory that has no pkg/ in it', () => {
     const stdout = standalone('address', 'src/address.ts', [
-      "import { CorpusManifestError, GRAPH_INFO_PATH, resolveCorpus, shiftFor, tileOf, TILE_SHIFT } from '@fossil-lang/graph/address';",
+      "import { CorpusManifestError, GRAPH_INFO_PATH, resolveCorpus, shiftFor, tileOf, TILE_SHIFT } from '@fossil-lang/corpus/address';",
       'process.stdout.write(JSON.stringify({',
       '  tile: String(tileOf(4096n)),',
       '  shift: String(TILE_SHIFT),',

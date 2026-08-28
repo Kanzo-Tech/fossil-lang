@@ -173,10 +173,15 @@ crates/
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
-  graph/                   two halves over one manifest. The verbs are the root barrel and NEED
+  corpus/                  two halves over one manifest. The verbs are the root barrel and NEED
                            the gitignored `pkg/`; the addressing (`resolveCorpus` — no WASM) is
-                           `@fossil-lang/graph/address`, and it has a subpath because a barrel
+                           `@fossil-lang/corpus/address`, and it has a subpath because a barrel
                            import is not one. `tests/address-standalone.test.ts` proves it.
+                           It was `@fossil-lang/graph` and it is not a graph: its door is
+                           `openCorpus` and the thing that DOES draw one, `@kanzo-tech/graph`,
+                           sits beside it in the playground's `package.json`. The Rust crates
+                           keep their names — `fossil-graph` IS a verb surface over a property
+                           graph, and a crate name is not in npm's import space
   executor/                datafusion-wasm query executor
   types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme — zero runtime)
   resolvers/               default + mock + public-HTTP ConnectionResolver impls

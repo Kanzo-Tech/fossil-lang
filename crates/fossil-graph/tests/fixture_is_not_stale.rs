@@ -1,8 +1,8 @@
 //! **The manifest fixture three TypeScript tests read is a generated file that
 //! nothing regenerates.**
 //!
-//! `examples/dump_fixture.rs` writes `packages/graph/tests/fixtures/manifest.json`,
-//! and `packages/graph/tests/{address,client,e2e}.test.ts` read it. Between
+//! `examples/dump_fixture.rs` writes `packages/corpus/tests/fixtures/manifest.json`,
+//! and `packages/corpus/tests/{address,client,e2e}.test.ts` read it. Between
 //! those two facts there is no script, no CI step and no test: `git log` on that
 //! file shows **one** commit, the one that introduced the binding, and the
 //! generator has been decorative ever since.
@@ -41,7 +41,7 @@ use fossil_sinks::manifest::{DEFAULT_CHUNK_SIZE, VertexInfo};
 /// The fixture, as the `{ rel_path: yaml }` map the generator emits.
 fn fixture() -> serde_json::Map<String, serde_json::Value> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../packages/graph/tests/fixtures/manifest.json");
+        .join("../../packages/corpus/tests/fixtures/manifest.json");
     let text =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     serde_json::from_str::<serde_json::Value>(&text)

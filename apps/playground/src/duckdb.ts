@@ -1,7 +1,7 @@
 /**
  * The engine the host brings.
  *
- * `@fossil-lang/graph` asks a host for exactly one capability — `query(sql) => rows` — and
+ * `@fossil-lang/corpus` asks a host for exactly one capability — `query(sql) => rows` — and
  * takes no engine dependency itself. This is that capability, wired to DuckDB-WASM. It is
  * used for two unrelated jobs and it is the same connection for both:
  *
@@ -26,7 +26,7 @@
 import * as duckdb from '@duckdb/duckdb-wasm';
 import ehWasm from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url';
 import ehWorker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url';
-import type { QueryFn, QueryRow } from '@fossil-lang/graph';
+import type { QueryFn, QueryRow } from '@fossil-lang/corpus';
 
 import type { BundleCost } from './check.js';
 
@@ -113,7 +113,7 @@ export async function registerUrl(path: string, url: string): Promise<void> {
 }
 
 /**
- * The one capability, as `@fossil-lang/graph` spells it.
+ * The one capability, as `@fossil-lang/corpus` spells it.
  *
  * Arrow in, plain row objects out — the binding's contract is `Record<string, unknown>`
  * and it coerces widths at its own boundary, precisely because hosts disagree about

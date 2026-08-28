@@ -18,14 +18,14 @@
  * fossil's writer emits `container: rowgroups` — ONE `tiles.parquet` per payload set, where row
  * group *k* IS tile *k* — so every URL that reader composes against this corpus is a 404. It also
  * re-derives the addressing from a hand-written line scan over six manifest keys, which is exactly
- * the arithmetic `@fossil-lang/graph/address` publishes so that nobody has to; its own comment
+ * the arithmetic `@fossil-lang/corpus/address` publishes so that nobody has to; its own comment
  * records what that cost the last time — a copied `chunk_size` «went stale and read a fraction of
  * a corpus in silence for as long as it did».
  *
  * So the split is: **kanzo owns the contract and the renderer, fossil owns the addressing.** This
  * file is the twenty lines where they meet, and it imports `resolveCorpus` rather than restating
  * any of it. Should `openCorpus` learn `rowgroups` — better, should it address through
- * `@fossil-lang/graph/address` — this file becomes a call to it and the argument reverses.
+ * `@fossil-lang/corpus/address` — this file becomes a call to it and the argument reverses.
  *
  * ## Why no Mosaic
  *
@@ -45,7 +45,7 @@
  * holds. There is deliberately no request between the camera moving and a URL being computable —
  * the moment there is one, this is the `viewport` verb again.
  */
-import type { CorpusAddressing } from '@fossil-lang/graph/address';
+import type { CorpusAddressing } from '@fossil-lang/corpus/address';
 import {
   BOUNDED_DEFAULTS,
   denseOf,
@@ -458,7 +458,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
  * `@kanzo-tech/mosaic`'s `fillColumn` writes an Arrow column straight into a typed buffer with no
  * intermediate, and is the better route where an Arrow table is in hand. It is not, here: the
  * host's one capability is `sql => Record<string, unknown>[]`, which is the contract
- * `@fossil-lang/graph` asks of a host and the one this app implements. At `limit` marks the loop
+ * `@fossil-lang/corpus` asks of a host and the one this app implements. At `limit` marks the loop
  * is twenty thousand iterations of four field reads.
  */
 function assemble(

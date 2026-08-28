@@ -330,7 +330,7 @@ playground does not call it, for a reason that is a 404 rather than a preference
 `chunk{k}.parquet` and `by_source/tile{k}.parquet`, which is `container: files`, and fossil's writer
 emits `container: rowgroups`. It also re-derives the addressing from a line scan over six manifest
 keys, which is the arithmetic
-[`@fossil-lang/graph` exists to publish](/docs/format/conventions/addressing#the-address-is-published-not-described)
+[`@fossil-lang/corpus` exists to publish](/docs/format/conventions/addressing#the-address-is-published-not-described)
 so that nobody has to. What reverses this is that reader learning `rowgroups` — better, addressing
 through the published module — at which point the source here becomes a call to it.
 
@@ -360,9 +360,9 @@ Two things that adoption does **not** buy, and one it must not cost:
   `pnpm --filter @fossil-lang/playground... build`, which is also the only build that type-checks:
   three workspace dependencies shell out to cargo, and without the recursive form a stale `dist/`
   is what fails.
-- **No engine in `@fossil-lang/graph`.** The renderer needs bytes; the *host* reads them. The
+- **No engine in `@fossil-lang/corpus`.** The renderer needs bytes; the *host* reads them. The
   addressing subpath stays synchronous, `fetch`-free and WASM-free, which
-  `packages/graph/tests/address-standalone.test.ts` holds by importing it from a package directory
+  `packages/corpus/tests/address-standalone.test.ts` holds by importing it from a package directory
   with no `pkg/` in it.
 
 ### A palette has a capacity, and a corpus does not know it
@@ -450,14 +450,14 @@ That obligation has been discharged once, and the shape of it is what to copy. T
 [row-group container](/docs/format/conventions/addressing#two-containers-one-address) is a change of
 format; both readers were moved to it and diffed **while the writer still emitted only the old one**,
 which is the only window in which two containers of one corpus exist at the same time to be compared.
-`apps/corpus/conformance/containers.mjs` and `packages/graph/tests/containers.test.ts` are that diff:
+`apps/corpus/conformance/containers.mjs` and `packages/corpus/tests/containers.test.ts` are that diff:
 the same graph written both ways, every answer required to match. After the writer moves there is
 one container and nothing left to compare against.
 
 What runs lives in `apps/corpus/conformance/` — `verify.mjs` (the table, against each reader in
 turn), `containers.mjs` (the same graph in both containers) and `provenance.mjs` (the corpus from its
 recipe) — plus `crates/fossil-graph/tests/conformance.rs` and
-`packages/graph/tests/conformance.test.ts`. The conventions they check are documented for reader
+`packages/corpus/tests/conformance.test.ts`. The conventions they check are documented for reader
 implementors on the corpus site rather than here.
 
 The wasm leg is the one part of that directory needing more than `node` and a `duckdb` binary, and it

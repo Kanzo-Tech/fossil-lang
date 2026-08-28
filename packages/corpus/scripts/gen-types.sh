@@ -8,7 +8,7 @@
 #   cargo run --example dump_schemas   →   one combined JSON Schema doc
 #   json2ts                            →   src/generated.ts
 #
-# Run via `pnpm --filter @fossil-lang/graph gen:types` (wired in package.json).
+# Run via `pnpm --filter @fossil-lang/corpus gen:types` (wired in package.json).
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ echo "[gen-types] json2ts → $OUT"
 # --additionalProperties false: structs use `deny_unknown_fields`; mirror that.
 # The root `FossilGraphSchemas` interface is a harmless codegen by-product; the
 # per-verb Params/Result interfaces are what the client consumes.
-pnpm --filter @fossil-lang/graph exec json2ts \
+pnpm --filter @fossil-lang/corpus exec json2ts \
   --input "$TMP" \
   --output "$OUT" \
   --additionalProperties false \
@@ -35,7 +35,7 @@ pnpm --filter @fossil-lang/graph exec json2ts \
 /**
  * GENERATED — do not edit by hand.
  * Source: crates/fossil-graph JSON Schemas (schemars). Regenerate with
- *   pnpm --filter @fossil-lang/graph gen:types
+ *   pnpm --filter @fossil-lang/corpus gen:types
  */"
 
 echo "[gen-types] done."

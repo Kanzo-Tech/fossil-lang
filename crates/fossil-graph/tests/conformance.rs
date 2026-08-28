@@ -9,7 +9,7 @@
 //! | --- | --- | --- |
 //! | [`fossil_graph::address`] | this file, and `verify.mjs`'s wasm leg | the Rust one, and the one that reaches a browser through `fossil-graph-wasm` |
 //! | `apps/corpus/conformance/reader.mjs` | `apps/corpus/conformance/verify.mjs` | plain Node, written from the conventions and from nothing else |
-//! | `packages/graph/src/address.ts` | `packages/graph/tests/conformance.test.ts` | the published module |
+//! | `packages/corpus/src/address.ts` | `packages/corpus/tests/conformance.test.ts` | the published module |
 //!
 //! Two of them were here before this one, and the gap the third closes is named
 //! at the top of `crates/fossil-cli/tests/conformance.rs`: that file is one

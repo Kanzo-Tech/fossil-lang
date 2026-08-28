@@ -44,7 +44,7 @@ node_modules/
 **/.turbo/
 # wasm-bindgen output is committed-elsewhere or built-on-demand, never tracked
 packages/wasm/pkg/
-packages/graph/pkg/
+packages/corpus/pkg/
 packages/executor/pkg/
 # The playground's large demo corpus: ~56 MB of Parquet written by
 # `apps/playground/scripts/bench-corpus.mjs` from `apps/corpus/guards/fixture.mjs`. A build
@@ -61,8 +61,8 @@ apps/playground/public/bench/
 *.tsbuildinfo
 
 # DuckDB-WASM's spill directory. Under `NODE_RUNTIME` it defaults to `./.tmp` in
-# the PROCESS's cwd, not to the OS temp dir — a `@fossil-lang/graph` test run
-# left 29 GB there on 2026-08-25 before anyone noticed. `packages/graph`'s own
+# the PROCESS's cwd, not to the OS temp dir — a `@fossil-lang/corpus` test run
+# left 29 GB there on 2026-08-25 before anyone noticed. `packages/corpus`'s own
 # suite now points `temp_directory` at a scratch dir it cleans up, but the
 # default is the trap: any future test that boots DuckDB-WASM and touches the
 # filesystem writes here, and a run that dies mid-way leaves the spill behind.

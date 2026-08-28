@@ -42,7 +42,7 @@ import { registerHooks } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resolveCorpus } from '@fossil-lang/graph/address';
+import { resolveCorpus } from '@fossil-lang/corpus/address';
 import { BOUNDED_DEFAULTS, denseOf, typeOf, vertexId } from '@kanzo-tech/graph';
 
 import { query as duckQuery } from '../../corpus/guards/duck.mjs';

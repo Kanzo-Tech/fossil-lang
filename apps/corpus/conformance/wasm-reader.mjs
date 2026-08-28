@@ -2,7 +2,7 @@
  * The third reader, adapted to the shape the other two are executed in.
  *
  * `reader.mjs` is plain Node written from the conventions. `resolveCorpus` in
- * `@fossil-lang/graph/address` is the published TypeScript. Both are JavaScript, and a mistake they
+ * `@fossil-lang/corpus/address` is the published TypeScript. Both are JavaScript, and a mistake they
  * share — a shift taken as signed, a count that went through a `Number` — is invisible to a diff of
  * the two. This one is `fossil_graph::address`, compiled to wasm32 and reached through
  * `fossil-graph-wasm`'s `Corpus`: a different language, a different integer width, and the build
@@ -13,7 +13,7 @@
  * Everything else under `apps/corpus/` runs in a checkout where nothing has been installed, which
  * is the position the third party this format is for is in — `guards/README.md` says take this
  * directory, it is meant to be copied, and `guards/` keeps that claim intact. This file does not:
- * it imports `packages/graph/pkg/`, which `pnpm --filter @fossil-lang/graph build:wasm` writes and
+ * it imports `packages/corpus/pkg/`, which `pnpm --filter @fossil-lang/corpus build:wasm` writes and
  * which needs a Rust toolchain and `wasm-bindgen-cli`.
  *
  * So the leg is **required by default and refused explicitly**, never skipped quietly. `verify.mjs`
@@ -37,14 +37,14 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** Where `packages/graph/scripts/build-wasm.sh` writes its output. */
-export const PKG_DIR = join(HERE, "..", "..", "..", "packages", "graph", "pkg");
+/** Where `packages/corpus/scripts/build-wasm.sh` writes its output. */
+export const PKG_DIR = join(HERE, "..", "..", "..", "packages", "corpus", "pkg");
 
 const SHIM = join(PKG_DIR, "fossil_graph_wasm.js");
 const BINARY = join(PKG_DIR, "fossil_graph_wasm_bg.wasm");
 
 /** How to get the leg back, printed wherever it is missing. */
-export const BUILD_COMMAND = "pnpm --filter @fossil-lang/graph run build:wasm";
+export const BUILD_COMMAND = "pnpm --filter @fossil-lang/corpus run build:wasm";
 
 /**
  * Every manifest under a case root, keyed the way a host that fetched them would key them.

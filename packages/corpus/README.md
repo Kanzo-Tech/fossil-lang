@@ -1,4 +1,4 @@
-# @fossil-lang/graph
+# @fossil-lang/corpus
 
 The query layer for whatever draws the graph. **Fossil ships no viewer.**
 
@@ -6,12 +6,12 @@ The query layer for whatever draws the graph. **Fossil ships no viewer.**
 manifest with no rule for choosing between them; two of them took the same two
 arguments and answered overlapping questions in two languages.
 
-- **`@fossil-lang/graph`** — `openCorpus(url, { query, wasmUrl })`. Discovery,
+- **`@fossil-lang/corpus`** — `openCorpus(url, { query, wasmUrl })`. Discovery,
   the camera (`extent`, `window`, `node`, `neighbours`) and the six verbs
   (`read`, `expand`, `path`, `aggregate`, `schema`, `executeSql`) on one object.
   **Start here.** No tiles, no `dense_id`, no Morton, no `by_source`, no
   prefixes, no footers.
-- **the addressing** (`@fossil-lang/graph/address`) — `resolveCorpus`, which
+- **the addressing** (`@fossil-lang/corpus/address`) — `resolveCorpus`, which
   turns the manifest into the tile URLs a camera reads. Synchronous, no WASM, no
   `fetch`, no promise. It is what the door is built **on**, and it stays
   published for a drawing path that wants the URLs and does its own fetching.
@@ -32,7 +32,7 @@ directory with no `pkg/` and no `node_modules`, and imports the subpath from a
 child Node process.
 
 ```
-@fossil-lang/graph (this package)
+@fossil-lang/corpus (this package)
   ├─ pkg/            fossil-graph-wasm, wasm-bindgen --target web (built, gitignored)
   ├─ src/generated.ts   verb Params/Result types — codegen'd from schemars JSON Schema
   ├─ src/load.ts        initFossilGraphWasm({ wasmUrl })
@@ -46,8 +46,8 @@ child Node process.
 ## Usage
 
 ```ts
-import { openCorpus } from '@fossil-lang/graph';
-import wasmUrl from '@fossil-lang/graph/pkg/fossil_graph_wasm_bg.wasm?url'; // Vite
+import { openCorpus } from '@fossil-lang/corpus';
+import wasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url'; // Vite
 
 const corpus = await openCorpus('https://data.example/graph', {
   // Adapt the host's DuckDB-WASM to row objects. In keasy this wraps the Mosaic
@@ -151,7 +151,7 @@ manifest fields. `resolveCorpus` is that arithmetic, published once instead of
 copied into every reader:
 
 ```ts
-import { resolveCorpus } from '@fossil-lang/graph/address';
+import { resolveCorpus } from '@fossil-lang/corpus/address';
 
 const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
 
@@ -192,7 +192,7 @@ npm at all, which is the position a third-party reader is in.
 ## Build
 
 ```sh
-pnpm --filter @fossil-lang/graph build   # build:wasm → gen:types → tsc
+pnpm --filter @fossil-lang/corpus build   # build:wasm → gen:types → tsc
 ```
 
 `build:wasm` needs `wasm-bindgen` 0.2.120 (`cargo install --version 0.2.120

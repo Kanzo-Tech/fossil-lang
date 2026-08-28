@@ -23,7 +23,7 @@
  *
  * `openCorpus` in `./corpus.ts` is the layer that does all three, by taking an engine from the host
  * rather than growing one. It sits **on** this module and does not absorb it: the subpath
- * `@fossil-lang/graph/address` stays importable with no dependencies and no `query`.
+ * `@fossil-lang/corpus/address` stays importable with no dependencies and no `query`.
  *
  * @see {@link resolveCorpus}
  */

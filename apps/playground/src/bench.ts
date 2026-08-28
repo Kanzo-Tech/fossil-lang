@@ -7,9 +7,9 @@
  *
  * ## The import is the claim
  *
- * `@fossil-lang/graph/address`, not `@fossil-lang/graph`. The barrel needs the WASM verb
+ * `@fossil-lang/corpus/address`, not `@fossil-lang/corpus`. The barrel needs the WASM verb
  * surface and static-imports `pkg/`; the addressing subpath imports nothing but a YAML reader.
- * That separation is enforced by `packages/graph/tests/address-standalone.test.ts`, which
+ * That separation is enforced by `packages/corpus/tests/address-standalone.test.ts`, which
  * builds the package with no `pkg/` at all and runs `resolveCorpus` from a consumer with an
  * otherwise empty `node_modules`. So "computing the URLs needs no engine" is not a claim this
  * app makes about itself — it is a property of the module it imports, tested next door.
@@ -18,7 +18,7 @@
  * YAML files it reads; once they are in hand, every tile URL in a million-vertex corpus is
  * available without another request.
  */
-import { resolveCorpus, type CorpusAddressing } from '@fossil-lang/graph/address';
+import { resolveCorpus, type CorpusAddressing } from '@fossil-lang/corpus/address';
 
 /** What `scripts/bench-corpus.mjs` recorded about the corpus it wrote. */
 export interface BenchStamp {

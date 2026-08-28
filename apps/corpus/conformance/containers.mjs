@@ -21,7 +21,7 @@
  * open to answer the same window — and that is printed rather than asserted, because the ratio is a
  * property of the corpus and not of the format.
  *
- * The published module's half of this is `packages/graph/tests/containers.test.ts`, which asks the
+ * The published module's half of this is `packages/corpus/tests/containers.test.ts`, which asks the
  * same question of `openCorpus`. Neither shares a line with the other.
  */
 

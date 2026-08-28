@@ -84,7 +84,7 @@ than a correction. `crates/fossil-cli/tests/cloud_source.rs` pins both halves an
 different decision from this one rather than the same one taken twice.
 
 That row is about the corpus **read** path, where `fossil-graph` builds verb SQL and a host executes
-it — `@fossil-lang/graph` through a host-provided DuckDB-WASM callback, `fossil-mcp` through a
+it — `@fossil-lang/corpus` through a host-provided DuckDB-WASM callback, `fossil-mcp` through a
 connection. Rewriting it as DataFusion plan construction costs roughly nine hundred lines, adds
 several megabytes to the read path, and loses the range-request file system that makes reading a
 corpus over plain HTTP work at all. Still rejected.
