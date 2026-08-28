@@ -1,6 +1,6 @@
 ---
 title: Identity
-description: dense_id is an address and the subject IRI is a name. A gapless 0..V−1 is what makes a tile a range, and 64 bits is what makes a boundary safe.
+description: dense_id is an address and the subject IRI is a name. A gapless 0..V−1 is what makes a tile a range, uint32 is what the column holds, and 64 bits is what the arithmetic does and what makes a boundary safe.
 ---
 
 A corpus carries two numbers that are easy to confuse and must not be. **`dense_id` is where a
@@ -23,6 +23,13 @@ with no gaps and no repeats. Four other conventions are built on it:
   tile costs — **43% of the payload** — derivable only because the ids are gapless.
 - **Each vertex type has its own space.** Two types both number from zero, so an id is meaningless
   without its type, which is why an edge manifest names `src_type` and `dst_type`.
+
+**An identity is therefore the pair `(type, dense_id)`, and the manifest names the type three
+times**: the vertex info's `type`, the edge info's `src_type` and `dst_type`, and the `prefix` a
+type's tiles live under. Nothing defaults. A corpus carrying one vertex type still names it, and a
+reader that supplies a type of its own when the corpus omits one is inventing the half of an address
+that says which space the other half is in — which is how a second relation comes to embark the same
+identities as the first with nothing to report it.
 
 Guard: `dense-ids` — and every guard named here is specified in full, with what it cannot prove, on
 [the guard index](/docs/format#the-guards).
@@ -122,10 +129,37 @@ reader's side — `apps/corpus/conformance/expected.json` runs each id twice, ag
 it is and against a copy of the tree with the `index:` block stripped, and requires the same vertex
 both ways.
 
+## Thirty-two bits in the column, sixty-four in the arithmetic
+
+A vertex payload carries `dense_id` as **`uint32`** — the spelling its manifest declares under
+`property_groups`, and the width of the column on disk — so **one vertex type holds at most
+4,294,967,295 vertices**. An adjacency's `src_dense` and `dst_dense` are the same width, and an edge
+manifest declares no properties at all: those two columns are the relation rather than a payload of
+it, and their names and widths come from the convention.
+
+**The arithmetic is wider than the column, and deliberately.** `tile_of` takes and returns an
+unsigned **64-bit** integer, and the [published
+vectors](/docs/format/conventions/addressing#the-published-vectors) carry 2³¹, 2³² − 1 and 2⁵³ —
+three values no `uint32` column can hold. A reader is therefore checked past the ceiling its corpora
+reach, which is what makes the two widths independent: a corpus written with a wider column is
+addressed by the same arithmetic, against the same vectors, by a reader that changes nothing.
+
+Unsigned is the half a reader gets wrong in silence. A string `dense_id` opens, describes and
+addresses until something shifts it; a **signed** one shifts arithmetically rather than logically
+and hands back a tile that is real and is not the one asked for. Guard:
+`addressing-is-unsigned` — and what it does not check is the *width*, because `uint32` and `uint64`
+both address correctly and a column cannot say which ceiling its writer was working to. That is why
+the width is stated here.
+
+Why the column is the narrower of the two is [argued with the measurement that decides
+it](/docs/design/corpus#the-width-of-an-address-and-what-actually-runs-out-first).
+
 ## Sixty-four bits, and `number` is not one of them
 
-A `dense_id` is an unsigned integer that may carry more than 53 bits. **At a language boundary it is
-a `BigInt`, and a `Number` is wrong.** The operator is worse than the width: `>>` means three
+The boundary is specified against the 64-bit arithmetic and not against the width of the column, so
+it does not move when the column does: an id, a count and a tile number are unsigned integers that
+may carry more than 53 bits. **At a language boundary each of them is a `BigInt`, and a `Number` is
+wrong.** The operator is worse than the width: `>>` means three
 different things across the layers that have to agree.
 
 | | what `>>` does |

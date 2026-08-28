@@ -109,6 +109,78 @@ reader that is not ours and already speaks it** — because a specification nobo
 interoperability.
 </Callout>
 
+## The width of an address, and what actually runs out first
+
+The first divergence in that table is a width, and a width is the most expensive kind of decision
+here: it is a commitment made once, in files that cannot be withdrawn. `dense_id` is declared
+`uint32`, which puts a hard ceiling of **4,294,967,295 vertices in one type**, and the question the
+number invites is whether that ceiling is close.
+
+**It is not close, and what is close is something else.** The layout pass assigns the numbering, and
+it is measured: on a 14-core machine with 48 GiB it peaks at **2.09 GiB at two million vertices and
+8.82 GiB at ten**, and the whole write at ten million is **404.4 s**. Linear over that range, 2³²
+vertices of one type is on the order of **3.7 TiB resident and two days of wall clock** — so the
+pass exhausts a machine roughly **430× before the column exhausts its range**. The width is not what
+stops a corpus. Nothing in this repository has produced a corpus within two orders of magnitude of
+the ceiling, and the thing that would have to change first is not the manifest.
+
+It is also 32-bit *by construction* rather than by choice of spelling. `weakly_connected_components`,
+`community_hierarchy` and the Morton ranks in `crates/fossil-layout/src/layout.rs` are `u32`
+throughout — the sentinel there is documented as safe precisely because "the count is a `u32` and
+the last one is `u32::MAX - 1` at worst". Widening the column without widening the pass would
+declare a range nothing in the writer can number. And the ecosystem is at the same place, which is
+its own evidence: no maintained community-detection crate exceeds 32-bit indices, which is one of
+the three reasons [adopting one is
+rejected](/docs/design/discarded#streaming-memory-and-scale).
+
+The cost of the other choice is on the column that can least afford it. `dense_id` is **4.000 of the
+9.23 compressed bytes per row** a drawing tile costs — 43% of the payload, the largest single column
+in it — so `uint64` spends the format's cheapest artefact on range nothing can reach.
+
+<Callout title="What makes it cheap to be wrong about">
+**The arithmetic every reader implements is already 64-bit.** `tile_of` takes and returns a `u64`,
+and the published vectors carry 2³¹, **2³² − 1** and 2⁵³ — values above what the column holds — so
+every port is checked *past* the storage ceiling before a corpus ever approaches it.
+
+That inverts the usual cost. A format change here lands only after every reader has been moved to it
+and diffed, which is the discipline the row-group container paid in full. A widening of `dense_id`
+pays none of it: no reader changes, no vector changes, no address changes — one manifest spelling
+does. So the decision that was expensive to make is cheap to revise, and the thing that bought that
+was publishing the arithmetic wider than the storage.
+</Callout>
+
+### The gapless `0..V−1`, and the price of keeping it
+
+The other half of the same commitment is [gaplessness](/docs/format/conventions/identity), and it is
+the convention a writer is most tempted to trade. The temptation is concrete: the writer assigns ids
+after a `collect()` that holds every batch, and handing each partition a **preassigned range**
+removes it — at the price of holes wherever a partition does not fill its range.
+
+Both exits were priced before any code was written, and neither is taken.
+
+- **How many holes.** The split is a hash's, not the data's: the plan repartitions on `subject` into
+  fourteen partitions, and at ten million they come out within **0.526%** of each other. A quantum
+  sized to the largest and rounded to the tile leaves **35,200 holes, 0.35% of V** — but that
+  quantum is known only *after* the run. The one a writer can pick beforehand is source rows over
+  partitions, and the dedup collapses 8.1 rows into one: **71,027,072 holes, 710% of V**.
+- **What compacting them costs.** Over the ten-million corpus, **9.6 s and 3.72 GiB**, against a
+  whole write of 404.4 s and 20.72 GiB — 2.4% of the wall clock standing alone, and less than that
+  folded into the renumbering that already runs on every write. Verified rather than asserted:
+  compacting a numbering with holes injected produces output byte-identical to compacting the
+  gapless one.
+- **And the premise did not survive the measurement.** The `collect()` is not where the peak comes
+  from. Level by level at ten million, the sort is **13.72 GiB** and the aggregate beneath it
+  **13.85**, so deleting the collect leaves ≈13.9 GiB — and that term is the dedup, which no range
+  scheme touches. What escapes the pool is the `Vec` the collect builds, and that is 1.64 GiB, not
+  fourteen.
+
+`crates/fossil-df/examples/dense_id_ranges.rs` and `crates/fossil-layout/examples/compaction_pass.rs`
+are the two harnesses. They are instruments and not tests: neither runs in CI, and neither writes
+inside the corpus it reads.
+
+**So the convention stays, and the reason it stays is the third bullet rather than the first two.**
+The exit was being bought to solve a problem the measurement puts somewhere else entirely.
+
 ## Why write-once/read-many is not an implementation detail
 
 [Identity is unique per type](/docs/design/identity) because a fossil program is compiled in one
