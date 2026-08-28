@@ -211,6 +211,37 @@ are: a ten-thousand-vertex corpus holds 6.21 MB against 4.00 MB of linear terms.
 guard that samples the bound was admitting a sixty-thousand-vertex run on 22.8 MB and watching it
 hold 30.1.
 
+### The ceiling is the remap, and the remap is the sort
+
+The last phase sets the peak, and *which line of it* was a guess until it was sampled from the
+inside. `Probe::sample` is that instrument — a reading taken within a phase, against the previous
+reading, that does not move the phase's own baseline, so instrumenting a phase cannot quietly
+rewrite the number the phase had been reporting. The phase still bills **+1.95 GiB** at ten million;
+here is where it goes (`examples/enrich_memory 10000000 14`, degree 14, 69,937,280 rows per
+orientation, Mac16,8 — 14 cores, 48 GiB, macOS 26.2 / Darwin 25.2.0, 2026-08-28):
+
+| step, `by_source` | delta | of the phase |
+| --- | --- | --- |
+| `read` — every batch of the orientation | +0.39 GiB | 20% |
+| `concat` — `concat_batches` into one | +0.26 GiB | 13% |
+| `remap endpoints` — two `Vec<u32>` through the mapping | +0.52 GiB | 27% |
+| **`lexsort`** — `lexsort_to_indices` over the two columns | **+0.78 GiB** | **40%** |
+| `take` — the permutation applied | +0.00 GiB | — |
+| `write tiles` | +0.00 GiB | — |
+| the whole second orientation, `by_target` | +0.00 GiB | — |
+
+**`concat_batches` was the suspect and it is not the answer.** It is thirteen percent. The dominant
+term is the *sort*, and the reason is a detail of the kernel rather than of the data: `arrow`'s
+`lexsort_to_indices` over more than one column routes through a `RowConverter`, which encodes every
+row into a comparable byte string first — for two non-null `u32`s that is ten bytes per row plus an
+eight-byte offset, against the eight bytes the row actually is. Sorting a pair of `u32`s costs more
+than twice holding it.
+
+**And the second orientation is free**, which is the other half of the reading: every step of
+`by_target` bills +0.00 GiB. Nothing about it is cheaper — it does the identical work on the identical
+number of rows. It lands in the pages the first orientation's transients left behind. A phase-boundary
+delta over the loop would have reported one number for two orientations and attributed it to neither.
+
 <Callout type="warn" title="What is still not measured">
 The peak is **no longer monotone**, and one page's arithmetic assumed it was. The ten-million run now
 prints `flatten + order + place  −2.93G` — the level-zero quotient graph being dropped, in pages the

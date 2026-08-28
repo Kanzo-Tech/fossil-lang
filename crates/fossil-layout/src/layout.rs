@@ -1079,9 +1079,18 @@ pub fn enrich_layout_with(
         let src_map = &maps[index_of(&adjacency.src_type, aurl)?];
         let dst_map = &maps[index_of(&adjacency.dst_type, aurl)?];
 
+        // Sampled step by step, not at the phase boundary. This loop is the pass's
+        // high-water mark and it is five allocations of the whole orientation deep;
+        // a single delta across the `for` cannot say which of them is the peak, and
+        // the last time that distinction was skipped the wrong phase was blamed for
+        // two sessions. See `Probe::sample`.
+        let step = short_name(aurl);
+
         let (schema, batches) = read_parquet(io, aurl)?;
+        probe.sample(&format!("{step}: read"));
         let combined = concat_batches(&schema, &batches).map_err(arrow_err(aurl))?;
         drop(batches);
+        probe.sample(&format!("{step}: concat"));
         let before = combined.num_rows();
 
         // The two joins, as the two array lookups they always were. An endpoint
@@ -1109,6 +1118,7 @@ pub fn enrich_layout_with(
         }
         drop(src);
         drop(dst);
+        probe.sample(&format!("{step}: remap endpoints"));
         if dropped > 0 {
             return Err(LayoutError::DanglingEndpoint {
                 target: aurl.to_string(),
@@ -1140,6 +1150,7 @@ pub fn enrich_layout_with(
             None,
         )
         .map_err(arrow_err(aurl))?;
+        probe.sample(&format!("{step}: lexsort"));
 
         let remapped = replace_columns(
             &combined,
@@ -1150,6 +1161,7 @@ pub fn enrich_layout_with(
         let sorted = take_record_batch(&remapped, &order).map_err(arrow_err(aurl))?;
         drop(remapped);
         drop(order);
+        probe.sample(&format!("{step}: take"));
 
         // The remapped relation is NOT written back over its input. It used to
         // be, and the corpus then shipped `by_source.parquet` beside
@@ -1205,6 +1217,8 @@ pub fn enrich_layout_with(
             start = end;
         }
         writer.finish().map_err(write_err(&payload))?;
+        drop(sorted);
+        probe.sample(&format!("{step}: write tiles"));
     }
     probe.mark("remap adjacencies + write edge tiles");
     probe.finish();
@@ -1500,6 +1514,19 @@ const fn shift_for(rows: u64) -> Option<u32> {
         return None;
     }
     Some(rows.trailing_zeros())
+}
+
+/// The last path component of an adjacency URL, without its extension —
+/// `…/by_source.parquet` → `by_source`.
+///
+/// Only ever a label in a memory report, which is why it is total rather than
+/// fallible: a URL with no separator and no dot is its own short name. Two
+/// orientations of one edge type are two iterations of the same loop, and a
+/// report that labelled both of them `remap` would be a report that could not be
+/// read.
+fn short_name(url: &str) -> &str {
+    let tail = url.rsplit(['/', '\\']).next().unwrap_or(url);
+    tail.rsplit_once('.').map_or(tail, |(stem, _)| stem)
 }
 
 /// Where one adjacency's tiles go, from where the adjacency itself is:
