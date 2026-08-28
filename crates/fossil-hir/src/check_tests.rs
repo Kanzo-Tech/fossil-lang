@@ -1859,13 +1859,15 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
     // And the chained join that IS one still passes, or the rule above would be
     // "a join may not follow a join".
     //
-    // **This one the engine cannot plan yet, and the checker is right anyway.**
-    // `fossil run` answers «the left side of the join condition qualifies a
-    // column with `Right`, which is neither input (`Both`, `Third`)»: a
-    // `fossil_mir::JoinSide` carries the ONE name its relation answers to, which
-    // after a join is the pipeline's, while the scope here carries every binding
-    // a body may address. Refusing it here to match would write that seam into
-    // the language — see `/docs/design/algebra`, "What this does not settle".
+    // **The engine plans this one now, and the checker was right to admit it.**
+    // `fossil run` used to answer «the left side of the join condition qualifies
+    // a column with `Right`, which is neither input (`Both`, `Third`)», because
+    // `fossil_mir::JoinSide` carried ONE name and the lowering filled it with
+    // the pipeline's. That name qualified no column of either side — `Op::Join`
+    // re-qualifies neither — so the refusal demanded the one spelling that could
+    // not resolve. The side is a SET of names now
+    // (`fossil_mir::JoinSide::relations`), the seam is closed, and
+    // `apps/docs/programs/chained-join` is the program that executes it.
     let chained = diagnostics(&format!(
         "{SOURCES}Both := Left.join(Right, on = Left.k == Right.k)\n\
          Out := Both.join(Third, on = Right.k == Third.k)\n"

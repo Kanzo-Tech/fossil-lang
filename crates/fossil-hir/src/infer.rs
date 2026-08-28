@@ -761,10 +761,15 @@ enum ConditionSide {
 /// MIR reaching it need not have come through this checker.
 ///
 /// What the checker can say that the engine cannot is WHICH SIDE, in the
-/// author's own names. A `JoinSide` carries one relation name — the pipeline's
-/// after a previous join — while the scope here carries every binding a body
-/// may address, which is what makes «and `Third` goes unmentioned» sayable at
-/// all.
+/// author's own names, and WHERE — a span over the text the author wrote. The
+/// engine sees a `JoinSide` and a `DataFrame`; by then the program is a plan.
+///
+/// It also used to see less. A `JoinSide` carried one relation name, filled with
+/// the pipeline's after a previous join, so it could not tell `Third` from a
+/// binding of its own left side; the name is a SET now
+/// (`fossil_mir::JoinSide::relations`) and the two layers admit the same
+/// conditions. They still answer in different currencies, which is why both
+/// copies stay: a MIR reaching the engine need not have come through here.
 ///
 /// # What is refused that a relational algebra would allow
 ///

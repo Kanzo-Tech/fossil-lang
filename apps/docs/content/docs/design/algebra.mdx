@@ -139,9 +139,35 @@ the author's own names, and [the sixth
 diagnostic](/docs/book/diagnostics#6-a-join-that-names-one-side-twice) is the program that produces
 it.
 
-What the checker can say and the engine cannot is **which side goes unmentioned**. A `JoinSide`
-carries one relation name; the scope here carries every binding a body may address, which is what
-makes `` `User` is never named `` a sentence rather than a guess.
+What the checker can say and the engine cannot is **where** — a span over the author's own text.
+By the time a `JoinSide` reaches the engine the program is a plan, which is what makes
+`` `User` is never named `` a sentence at a source location rather than a `DataFusionError` at
+`fossil run`.
+
+#### A side is a set of names, because a join composes
+
+**A join's result is addressed by both its sides' bindings**, and that is what lets the body write
+`Purchase.amount` beside `User.email`. It is also what lets a join key the next one:
+
+<Program src="chained-join/chained-join.fossil" region="chain" title="chained-join.fossil" />
+
+`User` qualifies a column of `Both` because `Both` is a join and **a join re-qualifies neither
+side** — the one composite operator that does not. `Op::Union` re-qualifies wholly (DataFusion
+returns its schema with no qualifier at all, so there is nothing to keep) and `Op::GroupBy` does it
+to the aggregates; only those two put a pipeline's own name on a column.
+
+So `JoinSide` carries `relations`, a set, and it carried a name until 2026-08-28. The lowering filled
+that name with the pipeline's after a join, and the pipeline's name qualified nothing: the engine
+refused `User` as *«neither input (`Both`, `Region`)»* while `Both` addressed no column of either
+side. The rule was not a narrower one than the checker's but an **inverted** one — it named as the
+alternative the single spelling that could not resolve, and refused the only spelling that could.
+Two programs `fossil check` accepted could not be planned, and the second had been described here
+as working since this page was written: `Purchase.join(Adults, …)`, where `Adults := User.where(…)`
+is addressed as `User` because a filter renames nothing.
+
+Both are the program above, and it is in the conformance set. What would have written the seam into
+the language instead — refusing the chained join in the checker — is in
+[`design/discarded`](/docs/design/discarded) with what would bring it back, which is nothing.
 
 ### A union answers to the pipeline, and to neither side
 
@@ -216,12 +242,9 @@ after it](/docs/design/shapes).
 - **How a pipeline's type is reported in the editor.** A source binding today has a schema from a
   descriptor; a pipeline has a schema derived from one, and hover has to say something useful about
   the derived one.
-- **A join whose left side is itself a join.** `Both := L.join(R, …)` followed by
-  `Tri := Both.join(T, on = R.k == T.k)` passes `fossil check` — it is a join by the rule above,
-  `R` being a binding of the left side — and then fails to plan: *«the left side of the join
-  condition qualifies a column with `R`, which is neither input (`Both`, `T`)»*. The two layers
-  disagree about what a side IS. `fossil_mir::JoinSide` carries the one name the relation answers
-  to, which after a join is the pipeline's; the checker's scope carries every binding, because that
-  is what a mapping body may write. The seam is the `JoinSide`, and the fix is a set of names rather
-  than a name — which is a change to what the engine reads, so it arrives with the engine and not
-  before.
+- **Which side a bare column belongs to, when two bindings of one relation carry the same name.**
+  Nothing in the surface spells a bare column, so this is not reachable by writing a program today;
+  `fossil_df::plan::column` builds an unqualified reference for one anyway, and DataFusion's rule
+  for it — resolve against whichever relation has the name, and error naming both candidates if two
+  do — is inherited rather than chosen. The day a verb produces a column with no binding to
+  qualify it, that inheritance becomes a decision.

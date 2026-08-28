@@ -98,7 +98,7 @@ fn on_key<'db>(db: &'db dyn fossil_base::Db, left: &str, right: &str, key: &str)
 fn side(input: usize, relation: &str) -> JoinSide {
     JoinSide {
         input,
-        relation: SmolStr::from(relation),
+        relations: vec![SmolStr::from(relation)],
         alias: None,
     }
 }
@@ -609,7 +609,7 @@ async fn a_self_join_keeps_both_sides_apart_by_their_alias() {
             left: side(0, "users"),
             right: JoinSide {
                 input: 1,
-                relation: SmolStr::new_static("users"),
+                relations: vec![SmolStr::new_static("users")],
                 alias: Some(SmolStr::new_static("again")),
             },
             on: eq(&db, col("users", "id"), col("again", "id")),

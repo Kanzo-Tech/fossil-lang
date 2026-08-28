@@ -213,7 +213,7 @@ pub struct ProjectedColumn {
     pub column: SmolStr,
 }
 
-/// One side of an [`Op::Join`] — the relation it reads and the name that
+/// One side of an [`Op::Join`] — the relation it reads and the names that
 /// relation's columns are addressed by.
 ///
 /// It was four flat fields, `left`/`right` beside `left_name`/`right_name`, and
@@ -221,33 +221,70 @@ pub struct ProjectedColumn {
 /// [`ProjectedColumn`] is a struct: nobody recovers the pairing from a call
 /// site.
 ///
+/// # Why `relations` is a set and was a name
+///
+/// **A side is addressed by every qualifier its columns actually carry, and a
+/// join produces two.** This field was one `SmolStr`, and the lowering filled it
+/// with the pipeline's own name after a join — a name that qualifies NOTHING in
+/// the relation, because [`Op::Join`] is the one composite operator that does
+/// not re-qualify. [`Op::Union`] does (its schema comes back from `DataFusion`
+/// with no qualifier at all, so there is nothing to keep) and [`Op::GroupBy`]
+/// does it to the aggregates; a join keeps both sides' qualifiers side by side,
+/// which is the whole of why the body may write `Purchase.amount` and
+/// `User.email` after one.
+///
+/// The one name was therefore not a narrower truth but a false one, and it made
+/// two programs that pass `fossil check` fail to plan:
+///
+/// - `Both := L.join(R, …)` then `Tri := Both.join(T, on = R.k == T.k)` — the
+///   engine refused `R` as "neither input (`Both`, `T`)" while `Both` qualified
+///   no column of either;
+/// - `Purchase.join(Adults, on = Purchase.user_id == User.id)`, which the
+///   paragraph below has described as working since it was written.
+///
+/// The invariant this field states is checkable against the backend by
+/// induction over `fossil_df::plan::build`: a `Source` is qualified by its
+/// binding, `Filter`/`Distinct` preserve, `Project` keeps the qualifier each
+/// column was written with, `Union` collapses to the one name it carries,
+/// `GroupBy` keeps its keys' and adds its own for the aggregates, and `Join`
+/// unions the two sides'.
+///
 /// `alias` is `Node.join(Node as Other, …)` — the second name for the same
 /// source, and the only thing that can tell the two sides of a self-join apart.
-/// It REPLACES `relation` rather than sitting beside it (mirroring
+/// It REPLACES `relations` rather than sitting beside them (mirroring
 /// `fossil_hir::infer::RowScope::rename_to`, where the alias collapses the right
-/// scope to one row), so the backend re-qualifies that side's relation under it.
-/// A side with no alias keeps the qualification it already carries — which is
-/// why this is `Option` and not just a name: `Purchase.join(Adults, …)` reads a
-/// pipeline called `Adults` whose columns are addressed as `User.…`, and
-/// re-qualifying it under `Adults` would rename exactly the columns the body
-/// refers to.
+/// scope to one row), so the backend re-qualifies that side under it and the
+/// side is addressed by the alias ALONE. A side with no alias keeps the
+/// qualification it already carries — which is why this is `Option` and not just
+/// a name: `Purchase.join(Adults, …)` reads a pipeline called `Adults` whose
+/// columns are addressed as `User.…`, and re-qualifying it under `Adults` would
+/// rename exactly the columns the body refers to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct JoinSide {
     /// Index into the op list of the operator producing this side's relation.
     pub input: usize,
-    /// The name this side's relation already carries — a source binding, or the
-    /// name of the pipeline that built it.
-    pub relation: SmolStr,
+    /// Every name this side's columns are already qualified by — one source
+    /// binding, or the bindings a pipeline's own joins left addressable.
+    pub relations: Vec<SmolStr>,
     /// The `X as Y` of a self-join, when one was written.
     pub alias: Option<SmolStr>,
 }
 
 impl JoinSide {
-    /// The name the body addresses this side's columns by — the alias when
-    /// there is one, the relation otherwise.
+    /// The names the body may address this side's columns by — the alias alone
+    /// when there is one, every relation it carries otherwise.
     #[must_use]
-    pub fn name(&self) -> &SmolStr {
-        self.alias.as_ref().unwrap_or(&self.relation)
+    pub fn names(&self) -> &[SmolStr] {
+        match &self.alias {
+            Some(alias) => std::slice::from_ref(alias),
+            None => &self.relations,
+        }
+    }
+
+    /// Whether `name` qualifies a column of this side.
+    #[must_use]
+    pub fn addresses(&self, name: &str) -> bool {
+        self.names().iter().any(|n| n == name)
     }
 }
 
