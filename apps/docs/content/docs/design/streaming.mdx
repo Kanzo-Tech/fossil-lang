@@ -176,8 +176,8 @@ measurement of 1.78× and +0.38 GiB almost exactly.
 
 That trade was refused once, on the grounds that it spent the one quantity `--memory-gib` bounds to
 buy wall clock that was not the objective. It is here now because the objection has been removed
-rather than overruled: with the contraction's maps gone the peak is 5.08 GiB, and 90 MB against
-3.4 GiB recovered is not a trade any more.
+rather than overruled: with the contraction's maps gone the peak was 5.08 GiB, and 90 MB against
+3.4 GiB recovered is not a trade any more. It is 3.94 with the remap's copies gone too.
 </Callout>
 
 ### What the budget is calibrated on now
@@ -305,29 +305,31 @@ run beside it peaks in the hierarchy at 3.94 and the remap never reaches it. **N
 the peak any more**, which is what a sum of terms is for.
 </Callout>
 
-<Callout type="warn" title="What is still not measured">
-The peak is **no longer monotone**, and one page's arithmetic assumed it was. The ten-million run now
-prints `flatten + order + place  −2.93G` — the level-zero quotient graph being dropped, in pages the
-allocator hands back. `estimated_peak_bytes` still *sums* its terms, which is now a bound on the
-maximum rather than a reading of it, and it is the direction the calibration wants.
+<Callout type="warn" title="The level-zero pass was worth nothing, and it is worth something again">
+The peak is **no longer monotone**, and one page's arithmetic assumed it was. The ten-million run
+prints `flatten + order + place  −3.35G` — the level-zero quotient graph being dropped, in pages the
+allocator hands back. `estimated_peak_bytes` still *sums* its terms, which is a bound on the maximum
+rather than a reading of it, and it is the direction the calibration wants.
 
-`community_hierarchy` still bills +1.92 GiB at ten million, and the level-zero graph is still fully
-resident — `read CSR + CSC` is +0.78 GiB and Louvain holds it for all 136 s. **A level-zero pass that
-streamed the CSR from disk instead of holding it was the named next step, and it is now worth
-nothing**, which is a result rather than a deferral.
+**A level-zero pass that streamed the CSR from disk instead of holding it was closed here as worth
+nothing, on a measurement, and the measurement has expired.** What closed it was that Louvain's
+high-water sat 1.17 GiB below the pass's — 3.55 GiB while it ran against a 4.72 peak reached in the
+last phase, after every byte of Louvain's had been given back. The last phase was the adjacency
+remap, and it has stopped holding an orientation as Arrow.
 
-Sampled through the hierarchy, the pass's high-water while Louvain runs is **3.55 GiB**, and the
-pass's peak is **4.72**, reached in the last phase after every byte of Louvain's has been given back.
-Taking the CSR's 0.78 out of the Louvain period lowers a number that is already **1.17 GiB below**
-the one the budget is fitted to. It changes `estimated_peak_bytes` by zero, it changes what
-`--memory-gib` admits by zero, and it costs a Parquet scan per sweep for it.
+At phase granularity now, at ten million: `community_hierarchy` closes at **3.94 GiB and that is the
+pass's peak**, and the remap closes at 3.48 and never reaches it. **Louvain's high-water is the
+pass's high-water**, which is the exact condition this callout named for the argument coming back.
 
-It comes back the day Louvain's high-water is the pass's high-water, and **one of the two things
-that would do it has happened**: the remap stopped holding an orientation as Arrow, and the last
-phase now bills +0.46 GiB where it billed +1.95. The other is a corpus whose level-zero contraction
-survives at a much higher ratio than the 79% measured here. Louvain's high-water and the pass's are
-now 3.11 GiB and 3.61 in the same run — half a gigabyte apart, where they were 3.93 and 4.98 — so
-this is worth re-measuring rather than re-deciding, and it is measurable before anything is written.
+What it would take off is `read CSR + CSC`'s **+0.78 GiB**, held for all 127 s of Louvain, and it no
+longer changes `estimated_peak_bytes` by zero either: `ADJACENCY_ROW_BYTES` is fitted on that CSR at
+8 B/row, and the next-largest per-row term is the remap's four. **It would roughly halve the term the
+budget charges per adjacency row**, which is what `--memory-gib` admits. What it costs is a Parquet
+scan per sweep, and that is the number nobody has: thirty-two sweeps against a CSR that is currently
+free to read.
+
+The other route is unchanged and still open — a corpus whose level-zero contraction survives at a
+much higher ratio than the 79% measured here. Both are measurable before anything is written.
 </Callout>
 
 ### One number, two stages: it is **per stage**, and that is a decision

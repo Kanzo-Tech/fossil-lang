@@ -23,7 +23,7 @@ always correct; only the slope was wrong.
 | R3 | A window's cost follows its answer | O(rows) | met |
 | R4 | An answer names every gap in it | exact | met |
 | W1 | The write path's peak is independent of the corpus | O(1) in N | **not met** |
-| W2 | The declared budget encloses the whole write path | — | **not met** |
+| W2 | The declared budget encloses the whole write path | — | **not met**, and decided: the number is per stage |
 | W3 | Every stage declares what it holds | — | partial |
 
 The reading half is nearly a system; the writing half is a budget around one stage of four.
@@ -103,8 +103,10 @@ corpus whose `by_target` is not tiled, every window reports `dst: not-declared` 
 it: `enrich_layout` took the run's `memory_bytes` and discarded it, so three stages sat outside the
 pool and a declared 4 GiB run peaked at 8.39 GiB. The number reaches the layout pass now, and is
 honoured there by **refusing** rather than spilling — `estimated_peak_bytes` over the staged Parquet
-footers, checked before the first column chunk is decoded. That closes the *declaration*; it does not
-close the shape below, and the two should not be confused. **The peak still grows with N, and a
+footers, checked before the first column chunk is decoded. That closes the *declaration* for that stage — and the flag
+bounds each stage rather than their sum, which is decided rather than outstanding and argued on
+[streaming](/docs/design/streaming). It does not close the shape below, and the two should not be
+confused. **The peak still grows with N, and a
 refusal is what happens when it grows past what was declared.**
 
 The whole build, `/usr/bin/time -l` over the generator plus `fossil run`, unbounded, 2026-08-25:
@@ -141,11 +143,12 @@ would hold 40 MB against 0.41 GiB per million. Two corrections, both measured:
   k]`, one hash table per community and `k` in the millions, measured at +3.41 GiB of the +3.82 the
   step billed. That is gone and the step is 0.19 GiB per million.
 
-What is left of the level-zero argument is a measurement that closes it. The graph *is* still fully
+What was left of the level-zero argument was a measurement that closed it — and the measurement has
+since expired; the two paragraphs below are its record and its reversal. The graph *is* still fully
 resident while Louvain runs — `read CSR + CSC` is +0.78 GiB at ten million and Louvain holds it for
 all 136 s — but the pass's high-water **while Louvain runs** is 3.55 GiB and the pass's peak is 4.72,
 reached in the last phase, after all of Louvain's has been handed back. A streaming level zero takes
-0.78 off a number that is already 1.17 below the one that binds. **It is worth zero on the peak**,
+0.78 off a number that is already 1.17 below the one that binds. **It was worth zero on the peak**,
 and a Parquet scan per sweep to get it.
 
 That was the honest end of that thread, and the ceiling it named — the adjacency remap, holding a

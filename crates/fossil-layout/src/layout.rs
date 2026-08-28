@@ -2806,7 +2806,8 @@ impl Weighted {
 /// That trade was refused once and the refusal was correct at the time: it spent
 /// the one quantity `--memory-gib` bounds to buy wall clock that was not the
 /// objective. What removed the objection was [`Weighted::contract`], after which
-/// the peak is 5.08 GiB and 90 MB is not a trade.
+/// the peak was 5.08 GiB and 90 MB was not a trade; the adjacency remap has
+/// taken it to **3.94** since, and 90 MB is less of one still.
 ///
 /// (`examples/enrich_memory 10000000 14`, 2026-08-28, Mac16,8 — 14 cores,
 /// 48 GiB, macOS 26.2 / Darwin 25.2.0.)
