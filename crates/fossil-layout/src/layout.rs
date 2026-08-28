@@ -192,10 +192,11 @@ use std::sync::Arc;
 use arrow::array::{
     Array, ArrayRef, Float32Array, RecordBatch, RecordBatchReader, StringArray, UInt32Array,
 };
-use arrow::compute::{
-    SortColumn, cast, concat_batches, interleave_record_batch, lexsort_to_indices,
-    take_record_batch,
-};
+// `concat_batches`, `lexsort_to_indices`, `SortColumn` and `take_record_batch`
+// stood here and are gone with the adjacency remap's five copies of an
+// orientation: the relation is a `Vec<u64>` now and `sort_unstable` orders it.
+// See `read_adjacency`.
+use arrow::compute::{cast, interleave_record_batch};
 use arrow::datatypes::{DataType, SchemaRef};
 use arrow::error::ArrowError;
 use fossil_df::files::TileWriter;
@@ -384,6 +385,21 @@ pub enum LayoutError {
         #[source]
         source: std::io::Error,
     },
+    /// An adjacency Parquet is not the two `u32` columns an adjacency is.
+    ///
+    /// The remap reads each orientation as one packed `u64` per row and never
+    /// materialises it as a `RecordBatch`, which is what took the phase from
+    /// +1.95 GiB to +0.55 at ten million — and a packed pair has nowhere to put
+    /// a third column. The writer emits exactly `src_dense` and `dst_dense`
+    /// (`fossil_df`'s `write_to_dir`) and the format says so, so this is a file
+    /// that came from somewhere else; refusing it is the honest answer, where
+    /// the alternative is dropping columns nobody declared and writing the
+    /// result as if it were the same relation.
+    #[error(
+        "adjacency `{target}` is `{columns}`; the remap reads an adjacency as two `u32` columns, \
+         `src_dense` and `dst_dense`"
+    )]
+    AdjacencyShape { target: String, columns: String },
     /// An adjacency the manifest declares `ordered: true` is not.
     ///
     /// Worth an error for the same reason as [`Self::DanglingEndpoint`]: the
@@ -1080,88 +1096,32 @@ pub fn enrich_layout_with(
         let dst_map = &maps[index_of(&adjacency.dst_type, aurl)?];
 
         // Sampled step by step, not at the phase boundary. This loop is the pass's
-        // high-water mark and it is five allocations of the whole orientation deep;
-        // a single delta across the `for` cannot say which of them is the peak, and
-        // the last time that distinction was skipped the wrong phase was blamed for
-        // two sessions. See `Probe::sample`.
+        // high-water mark, and a single delta across the `for` cannot say which
+        // line of it is the peak — the last time that distinction was skipped the
+        // wrong phase was blamed for two sessions. See `Probe::sample`.
         let step = short_name(aurl);
 
-        let (schema, batches) = read_parquet(io, aurl)?;
-        probe.sample(&format!("{step}: read"));
-        let combined = concat_batches(&schema, &batches).map_err(arrow_err(aurl))?;
-        drop(batches);
-        probe.sample(&format!("{step}: concat"));
-        let before = combined.num_rows();
+        // **One `Vec<u64>`, and that is the whole orientation.** This used to be
+        // five allocations of it — the reader's batches, `concat_batches` into
+        // one, two remapped `Vec<u32>`, `lexsort_to_indices`'s permutation, and
+        // the `take` that applied it — and sampled from the inside at ten million
+        // it billed +0.39 / +0.26 / +0.52 / +0.78 / +0.00 GiB. The suspect was
+        // `concat_batches` and it was 13%; the SORT was 40%, because arrow's
+        // `lexsort_to_indices` over more than one column routes through a
+        // `RowConverter` and encodes every row into a comparable byte string
+        // first — ten bytes plus an eight-byte offset for a pair that is eight
+        // bytes wide.
+        //
+        // A pair of `u32` ordered lexicographically IS a `u64` ordered by value,
+        // so there is nothing to encode: pack the key endpoint into the high half
+        // and the other into the low, and `sort_unstable` is the same order for
+        // no bytes at all. Ties are pairs equal in both columns, which is the
+        // whole row, so an unstable sort is not an unstable result.
+        let (schema, mut keys) = read_adjacency(io, aurl, src_map, dst_map, adjacency.ordered_by)?;
+        probe.sample(&format!("{step}: read + remap"));
 
-        // The two joins, as the two array lookups they always were. An endpoint
-        // out of its type's range is a dangling one: the statement this replaces
-        // joined inner and therefore *deleted* the row, and the drop was found
-        // afterwards by counting. Found here before anything is written, which
-        // means the file it would have corrupted is still the file it was.
-        let src = u32_column(&combined, aurl, "src_dense")?;
-        let dst = u32_column(&combined, aurl, "dst_dense")?;
-        let mut new_src = Vec::with_capacity(before);
-        let mut new_dst = Vec::with_capacity(before);
-        let mut dropped = 0u64;
-        for (&s, &d) in src.values().iter().zip(dst.values()) {
-            if let (Some(&s), Some(&d)) = (src_map.get(s as usize), dst_map.get(d as usize)) {
-                new_src.push(s);
-                new_dst.push(d);
-            } else {
-                // Pushed anyway, so the two arrays stay the length the batch is
-                // and the count below is the only thing that decides. The values
-                // are never written: `dropped > 0` returns before the encode.
-                dropped += 1;
-                new_src.push(0);
-                new_dst.push(0);
-            }
-        }
-        drop(src);
-        drop(dst);
-        probe.sample(&format!("{step}: remap endpoints"));
-        if dropped > 0 {
-            return Err(LayoutError::DanglingEndpoint {
-                target: aurl.to_string(),
-                before: before as u64,
-                dropped,
-            });
-        }
-
-        // The one genuine sort left in the pass. Ties are pairs that are equal in
-        // both columns, and an adjacency carries nothing else, so an unstable
-        // sort is not an unstable *result* — the rows it may swap are identical.
-        let src_array: ArrayRef = Arc::new(UInt32Array::from(new_src));
-        let dst_array: ArrayRef = Arc::new(UInt32Array::from(new_dst));
-        let (first, second) = match adjacency.ordered_by {
-            Endpoint::Src => (&src_array, &dst_array),
-            Endpoint::Dst => (&dst_array, &src_array),
-        };
-        let order = lexsort_to_indices(
-            &[
-                SortColumn {
-                    values: Arc::clone(first),
-                    options: None,
-                },
-                SortColumn {
-                    values: Arc::clone(second),
-                    options: None,
-                },
-            ],
-            None,
-        )
-        .map_err(arrow_err(aurl))?;
-        probe.sample(&format!("{step}: lexsort"));
-
-        let remapped = replace_columns(
-            &combined,
-            aurl,
-            &[("src_dense", src_array), ("dst_dense", dst_array)],
-        )?;
-        drop(combined);
-        let sorted = take_record_batch(&remapped, &order).map_err(arrow_err(aurl))?;
-        drop(remapped);
-        drop(order);
-        probe.sample(&format!("{step}: take"));
+        keys.sort_unstable();
+        probe.sample(&format!("{step}: sort"));
 
         // The remapped relation is NOT written back over its input. It used to
         // be, and the corpus then shipped `by_source.parquet` beside
@@ -1176,9 +1136,9 @@ pub fn enrich_layout_with(
         // The tile space is that endpoint's type's, and the two are different
         // spaces on a cross-type edge: `by_target` of `Author authored Paper` is
         // cut on `Paper`'s ranges, not on `Author`'s.
-        let (key, endpoint_type) = match adjacency.ordered_by {
-            Endpoint::Src => ("src_dense", &adjacency.src_type),
-            Endpoint::Dst => ("dst_dense", &adjacency.dst_type),
+        let endpoint_type = match adjacency.ordered_by {
+            Endpoint::Src => &adjacency.src_type,
+            Endpoint::Dst => &adjacency.dst_type,
         };
         let endpoint = &targets[index_of(endpoint_type, aurl)?];
         let tile_shift = shift_for(endpoint.chunk_size).ok_or_else(|| LayoutError::TileSize {
@@ -1200,24 +1160,24 @@ pub fn enrich_layout_with(
         // on the key column, and the runs below are written in ascending order,
         // so the boxes ascend and do not overlap — which is the property
         // `apps/corpus`'s `tile-of` asks an adjacency for.
-        let keys = u32_column(&sorted, aurl, key)?;
-        let addresses = keys.values();
+        //
+        // A run is unpacked into two `u32` arrays as it is written, so the only
+        // Arrow this loop holds is one tile — tens of thousands of rows against
+        // the seventy million the relation is.
         let payload = format!("{prefix}{TILES_FILE}");
-        let mut writer = open_tiles(io, &payload, sorted.schema())?;
+        let mut writer = open_tiles(io, &payload, Arc::clone(&schema))?;
         let mut start = 0usize;
-        while start < addresses.len() {
-            let tile = u64::from(addresses[start]) >> tile_shift;
+        while start < keys.len() {
+            let tile = (keys[start] >> 32) >> tile_shift;
             let mut end = start + 1;
-            while end < addresses.len() && u64::from(addresses[end]) >> tile_shift == tile {
+            while end < keys.len() && (keys[end] >> 32) >> tile_shift == tile {
                 end += 1;
             }
-            writer
-                .tile(&sorted.slice(start, end - start))
-                .map_err(write_err(&payload))?;
+            let batch = unpack(&schema, aurl, &keys[start..end], adjacency.ordered_by)?;
+            writer.tile(&batch).map_err(write_err(&payload))?;
             start = end;
         }
         writer.finish().map_err(write_err(&payload))?;
-        drop(sorted);
         probe.sample(&format!("{step}: write tiles"));
     }
     probe.mark("remap adjacencies + write edge tiles");
@@ -1514,6 +1474,153 @@ const fn shift_for(rows: u64) -> Option<u32> {
         return None;
     }
     Some(rows.trailing_zeros())
+}
+
+/// The two column indices of an adjacency Parquet, `(src_dense, dst_dense)`, or
+/// [`LayoutError::AdjacencyShape`] if it is not the two `u32` columns an
+/// adjacency is.
+///
+/// Checked once per file, from the schema, before a page is decoded. The
+/// strictness is the point rather than an omission: the remap holds a row as a
+/// packed `u64` and has nowhere to put a third column, so a file with one is a
+/// file this pass would silently narrow. It came from somewhere other than the
+/// writer, and saying so is better than writing a different relation under the
+/// same name.
+fn adjacency_columns(schema: &SchemaRef, url: &str) -> Result<(usize, usize), LayoutError> {
+    let shaped = schema.fields().len() == 2
+        && schema
+            .fields()
+            .iter()
+            .all(|f| f.data_type() == &DataType::UInt32);
+    let src = schema.index_of("src_dense").ok();
+    let dst = schema.index_of("dst_dense").ok();
+    match (shaped, src, dst) {
+        (true, Some(src), Some(dst)) => Ok((src, dst)),
+        _ => Err(LayoutError::AdjacencyShape {
+            target: url.to_string(),
+            columns: schema
+                .fields()
+                .iter()
+                .map(|f| format!("{}: {}", f.name(), f.data_type()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        }),
+    }
+}
+
+/// One orientation, read and remapped and packed, in a single streaming pass.
+///
+/// Returns the file's own [`SchemaRef`] — the one the tiles are written back
+/// under, so the output carries the field names, nullability and schema metadata
+/// the input had and the bytes do not move — and one `u64` per row: the endpoint
+/// the relation is **ordered by** in the high half, the other in the low.
+///
+/// # Why the pair is packed rather than kept as two arrays
+///
+/// Because the sort is then free. A pair of `u32` compared lexicographically is
+/// the packed `u64` compared by value, so ordering the relation is
+/// `sort_unstable` over a slice that is already the size of the data — against
+/// `lexsort_to_indices`, which for more than one column encodes every row
+/// through a `RowConverter` into ten bytes plus an eight-byte offset and then
+/// holds a permutation to apply. That sort was **40% of the phase that sets the
+/// pass's peak**, measured from inside it.
+///
+/// # And the reader's batches are never collected
+///
+/// The `Vec` is reserved exactly, from the footer's row count, and each batch is
+/// consumed into it and dropped. The phase used to hold the batches, the
+/// `concat_batches` of them, and two remapped `Vec<u32>` beside each other; this
+/// holds the batch it is decoding.
+///
+/// # Errors
+///
+/// [`LayoutError::AdjacencyShape`] if the file is not two `u32` columns,
+/// [`LayoutError::DanglingEndpoint`] if any row names a dense id outside its
+/// type's mapping — counted over the whole file and reported before anything is
+/// written, so the file it would have corrupted is still the file it was.
+fn read_adjacency(
+    io: &dyn LayoutIo,
+    url: &str,
+    src_map: &[u32],
+    dst_map: &[u32],
+    ordered_by: Endpoint,
+) -> Result<(SchemaRef, Vec<u64>), LayoutError> {
+    let builder = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?).map_err(read_err(url))?;
+    let rows = builder.metadata().file_metadata().num_rows().max(0) as usize;
+    let reader = builder
+        .with_batch_size(SCAN_BATCH_ROWS)
+        .build()
+        .map_err(read_err(url))?;
+    let schema = reader.schema();
+    adjacency_columns(&schema, url)?;
+
+    let mut keys = Vec::with_capacity(rows);
+    let mut before = 0u64;
+    let mut dropped = 0u64;
+    for batch in reader {
+        let batch = batch.map_err(arrow_err(url))?;
+        before += batch.num_rows() as u64;
+        let src = u32_column(&batch, url, "src_dense")?;
+        let dst = u32_column(&batch, url, "dst_dense")?;
+        for (&s, &d) in src.values().iter().zip(dst.values()) {
+            let (Some(&s), Some(&d)) = (src_map.get(s as usize), dst_map.get(d as usize)) else {
+                // Counted rather than returned on, so the message names how many
+                // of how many: a single dangling endpoint and a mapping that is
+                // wholesale wrong are the same error with very different numbers
+                // in it, and the count is what tells them apart.
+                dropped += 1;
+                continue;
+            };
+            let (high, low) = match ordered_by {
+                Endpoint::Src => (s, d),
+                Endpoint::Dst => (d, s),
+            };
+            keys.push((u64::from(high) << 32) | u64::from(low));
+        }
+    }
+    if dropped > 0 {
+        return Err(LayoutError::DanglingEndpoint {
+            target: url.to_string(),
+            before,
+            dropped,
+        });
+    }
+    Ok((schema, keys))
+}
+
+/// One tile's worth of packed rows, back as the `RecordBatch` the writer takes.
+///
+/// The inverse of the packing in [`read_adjacency`], and the only Arrow the
+/// remap holds: a run of the sorted slice, tens of thousands of rows against the
+/// seventy million the relation is at ten million vertices.
+///
+/// The columns go back in the schema's own order, which is why the indices are
+/// looked up rather than assumed — `by_target` is ordered by `dst_dense` and the
+/// file still declares `src_dense` first.
+///
+/// # Errors
+///
+/// [`LayoutError::AdjacencyShape`] as [`read_adjacency`], and
+/// [`LayoutError::Arrow`] if the batch does not match the schema it is built
+/// against.
+fn unpack(
+    schema: &SchemaRef,
+    url: &str,
+    keys: &[u64],
+    ordered_by: Endpoint,
+) -> Result<RecordBatch, LayoutError> {
+    let (src_index, dst_index) = adjacency_columns(schema, url)?;
+    let high: Vec<u32> = keys.iter().map(|k| (k >> 32) as u32).collect();
+    let low: Vec<u32> = keys.iter().map(|k| *k as u32).collect();
+    let (src, dst) = match ordered_by {
+        Endpoint::Src => (high, low),
+        Endpoint::Dst => (low, high),
+    };
+    let empty: ArrayRef = Arc::new(UInt32Array::from(Vec::<u32>::new()));
+    let mut columns: Vec<ArrayRef> = vec![Arc::clone(&empty), empty];
+    columns[src_index] = Arc::new(UInt32Array::from(src));
+    columns[dst_index] = Arc::new(UInt32Array::from(dst));
+    RecordBatch::try_new(Arc::clone(schema), columns).map_err(arrow_err(url))
 }
 
 /// The last path component of an adjacency URL, without its extension —
@@ -2029,6 +2136,107 @@ mod tests {
         let codes = morton_codes(&[(0.0, 0.0), (1.0, 1.0), (100.0, 100.0)]);
         assert_eq!(codes.len(), 3);
         assert!(codes[0] < codes[2] && codes[1] < codes[2]);
+    }
+
+    /// **The packing IS the ordering**, which is the whole claim the remap rests
+    /// on: sorting one `u64` per row has to be the same relation `lexsort` over
+    /// two `u32` columns produced, or the corpus moves. Asserted against a sort
+    /// of the pairs themselves rather than against a recorded answer.
+    #[test]
+    fn a_packed_pair_sorts_lexicographically() {
+        let pairs: Vec<(u32, u32)> = vec![
+            (1, 7),
+            (0, u32::MAX),
+            (u32::MAX, 0),
+            (1, 0),
+            (0, 0),
+            (2, 3),
+            (1, 7),
+        ];
+        let mut packed: Vec<u64> = pairs
+            .iter()
+            .map(|&(a, b)| (u64::from(a) << 32) | u64::from(b))
+            .collect();
+        packed.sort_unstable();
+        let mut expected = pairs;
+        expected.sort_unstable();
+        let unpacked: Vec<(u32, u32)> = packed
+            .iter()
+            .map(|&k| ((k >> 32) as u32, k as u32))
+            .collect();
+        assert_eq!(unpacked, expected);
+    }
+
+    /// The shape check, and the reason it is strict: the remap holds a row as a
+    /// packed `u64` and has nowhere to put a third column, so a file with one is
+    /// refused rather than silently narrowed. The error names what it found,
+    /// because "this is not an adjacency" is unactionable without it.
+    #[test]
+    fn an_adjacency_is_two_u32_columns_and_says_so_when_it_is_not() {
+        let two: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("src_dense", DataType::UInt32, false),
+            arrow::datatypes::Field::new("dst_dense", DataType::UInt32, false),
+        ]));
+        assert_eq!(adjacency_columns(&two, "u").unwrap(), (0, 1));
+
+        // Ordered by the other endpoint, and the file still declares `src_dense`
+        // first — which is why the indices are looked up and not assumed.
+        let swapped: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("dst_dense", DataType::UInt32, false),
+            arrow::datatypes::Field::new("src_dense", DataType::UInt32, false),
+        ]));
+        assert_eq!(adjacency_columns(&swapped, "u").unwrap(), (1, 0));
+
+        let three: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("src_dense", DataType::UInt32, false),
+            arrow::datatypes::Field::new("dst_dense", DataType::UInt32, false),
+            arrow::datatypes::Field::new("weight", DataType::Float32, false),
+        ]));
+        let message = adjacency_columns(&three, "u").unwrap_err().to_string();
+        assert!(
+            message.contains("weight: Float32"),
+            "the error has to name what it found: {message}"
+        );
+
+        let wide: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("src_dense", DataType::UInt64, false),
+            arrow::datatypes::Field::new("dst_dense", DataType::UInt64, false),
+        ]));
+        assert!(adjacency_columns(&wide, "u").is_err());
+    }
+
+    /// A tile goes back out under the file's own schema and in its own column
+    /// order, both endpoints where the file put them. `by_target` is the case
+    /// that would go unnoticed: it is ordered by `dst_dense`, so the packed high
+    /// half is the SECOND column of the file.
+    #[test]
+    fn unpacking_puts_each_endpoint_back_in_its_own_column() {
+        let schema: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("src_dense", DataType::UInt32, false),
+            arrow::datatypes::Field::new("dst_dense", DataType::UInt32, false),
+        ]));
+        // key 5, other 9.
+        let keys = [(5u64 << 32) | 9u64];
+
+        let by_source = unpack(&schema, "u", &keys, Endpoint::Src).unwrap();
+        assert_eq!(
+            u32_column(&by_source, "u", "src_dense").unwrap().value(0),
+            5
+        );
+        assert_eq!(
+            u32_column(&by_source, "u", "dst_dense").unwrap().value(0),
+            9
+        );
+
+        let by_target = unpack(&schema, "u", &keys, Endpoint::Dst).unwrap();
+        assert_eq!(
+            u32_column(&by_target, "u", "src_dense").unwrap().value(0),
+            9
+        );
+        assert_eq!(
+            u32_column(&by_target, "u", "dst_dense").unwrap().value(0),
+            5
+        );
     }
 
     #[test]

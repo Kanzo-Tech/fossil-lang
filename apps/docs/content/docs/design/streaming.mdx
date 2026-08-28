@@ -216,8 +216,8 @@ hold 30.1.
 The last phase sets the peak, and *which line of it* was a guess until it was sampled from the
 inside. `Probe::sample` is that instrument — a reading taken within a phase, against the previous
 reading, that does not move the phase's own baseline, so instrumenting a phase cannot quietly
-rewrite the number the phase had been reporting. The phase still bills **+1.95 GiB** at ten million;
-here is where it goes (`examples/enrich_memory 10000000 14`, degree 14, 69,937,280 rows per
+rewrite the number the phase had been reporting. The phase billed **+1.95 GiB** at ten million;
+here is where it went (`examples/enrich_memory 10000000 14`, degree 14, 69,937,280 rows per
 orientation, Mac16,8 — 14 cores, 48 GiB, macOS 26.2 / Darwin 25.2.0, 2026-08-28):
 
 | step, `by_source` | delta | of the phase |
@@ -242,6 +242,48 @@ than twice holding it.
 number of rows. It lands in the pages the first orientation's transients left behind. A phase-boundary
 delta over the loop would have reported one number for two orientations and attributed it to neither.
 
+**A pair of `u32` ordered lexicographically is a `u64` ordered by value**, so there is nothing to
+encode: pack the key endpoint into the high half and the other into the low, and `sort_unstable` is
+the same order for no bytes at all. That collapses the whole loop — the batches, the `concat`, the
+two remapped arrays, the permutation and the `take` are one `Vec<u64>` reserved exactly from the
+footer's row count, and the only Arrow the remap holds is the tile it is writing:
+
+| ten million, degree 14 | before | after |
+| --- | --- | --- |
+| `remap adjacencies + write edge tiles` | +1.95 GiB · 11.8 s | **+0.46 GiB · 6.5 s** |
+| the whole pass | 3.75 GiB | **2.71 GiB** |
+| process peak | 4.98 GiB | **3.94 GiB** |
+| the phase that sets the peak | the remap | `community_hierarchy` |
+
+Two runs of each build, and each column is the **larger**, because a number fitted to the luckier of
+two runs is a number that fails on the unluckier. The remap's own row is the one to read: +1.95 GiB
+in both before-runs and +0.46 in both after-runs, 11.7 / 11.8 s against 5.6 / 6.5. **The totals move
+less than the phase does**, and the wall clock does not move at all — 130.4 and 130.7 s before,
+129.4 and 140.2 after — because `community_hierarchy` is 113 to 127 s of every one of those four
+runs and its own spread swamps everything this change touched.
+
+**The output is bit-identical**, and that is checked rather than argued: the ordering is the same
+ordering, ties are pairs equal in both columns and therefore the whole row, and a 300,000-vertex
+corpus written by the two binaries is equal over all seven files and 136 MB.
+
+<Callout title="Three of four runs agree to 0.01 GiB, and the fourth says what the resolution depends on">
+Both before-runs report `community_hierarchy` at +1.92 and +1.93 GiB and a 4.98 GiB peak, to the
+digit. One of the two after-runs reports +1.93; the other reports **+1.02**, on code that is byte for
+byte the same and a fixture that is byte for byte the same.
+
+What separates the outlier is not the pass. It is the line above every phase: that run enters
+`enrich_layout` at **1.31 GiB** resident where the other three enter at 1.23. A delta is what the
+phase asked the OS for, not what it used, so a phase that starts with more freed pages in hand asks
+for less and bills less — and the whole difference is downstream of a `start` that differs by 0.08.
+
+That is the reading, and it is narrower than "identical runs vary by 0.9 GiB": **runs that enter the
+pass at the same resident set agree to 0.01 GiB, and runs that do not are not comparable phase by
+phase.** The totals are what to compare across builds; the sub-phase deltas are for attribution
+*within* one run. The outlier also moves the peak — it peaks in the remap at 3.61 GiB, where the
+run beside it peaks in the hierarchy at 3.94 and the remap never reaches it. **No single phase sets
+the peak any more**, which is what a sum of terms is for.
+</Callout>
+
 <Callout type="warn" title="What is still not measured">
 The peak is **no longer monotone**, and one page's arithmetic assumed it was. The ten-million run now
 prints `flatten + order + place  −2.93G` — the level-zero quotient graph being dropped, in pages the
@@ -259,9 +301,12 @@ Taking the CSR's 0.78 out of the Louvain period lowers a number that is already 
 the one the budget is fitted to. It changes `estimated_peak_bytes` by zero, it changes what
 `--memory-gib` admits by zero, and it costs a Parquet scan per sweep for it.
 
-It comes back the day Louvain's high-water is the pass's high-water — a corpus whose level-zero
-contraction survives at a much higher ratio than the 79% measured here, or a remap that stops holding
-an orientation as Arrow. Both are measurable before anything is written.
+It comes back the day Louvain's high-water is the pass's high-water, and **one of the two things
+that would do it has happened**: the remap stopped holding an orientation as Arrow, and the last
+phase now bills +0.46 GiB where it billed +1.95. The other is a corpus whose level-zero contraction
+survives at a much higher ratio than the 79% measured here. Louvain's high-water and the pass's are
+now 3.11 GiB and 3.61 in the same run — half a gigabyte apart, where they were 3.93 and 4.98 — so
+this is worth re-measuring rather than re-deciding, and it is measurable before anything is written.
 </Callout>
 
 <Callout type="warn" title="The composition is not closed, and this is the honest edge of the claim">
