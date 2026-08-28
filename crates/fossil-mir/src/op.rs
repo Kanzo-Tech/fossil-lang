@@ -330,10 +330,9 @@ pub struct VProp<'db> {
     pub single_valued: bool,
 }
 
-// `AggFn` lived here, with a `Count` nothing could construct. It is
-// `fossil_hir::stdlib::AggFn` now: which calls are aggregates is the
-// CATALOGUE's answer, and a copy of the answer on this side of the lowering
-// would be a second table to keep in step with four rows of `math/`.
+// Which calls are aggregates is the CATALOGUE's answer —
+// `fossil_hir::stdlib::AggFn`. A copy on this side of the lowering would be a
+// second table to keep in step with four rows of `math/`.
 
 /// Source formats.
 ///
@@ -369,10 +368,6 @@ pub enum SinkRef {
 }
 
 /// Typed MIR expression.
-///
-/// It replaced an untyped `ExprLowered`. `LitString` / `ColRef` / `Concat` are
-/// the rendering-compatible subset — the SQL for `examples/hello.fossil` is
-/// byte-identical across the change.
 ///
 /// The `ty: Ty<'db>` carriage on `Call` / `BinOp` is intentional — it makes
 /// the "erase types ≡ untyped property" check testable.

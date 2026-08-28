@@ -206,17 +206,10 @@ pub fn lower_to_mir_pg<'db>(
         );
     };
 
-    // `subject_skeletons` was read here, and it is gone. An edge used to be
-    // GUESSED: the skeleton of a property's IRI template — every per-row hole
-    // replaced by a `\u{1}` marker — was compared against the skeleton of every
-    // mapping's subject in the file, and a match made it a foreign key. That
-    // comparison existed only because the identity rule was repeated per
-    // mapping. There is now exactly ONE identity per type — every mapping that
-    // produces `T` declares the same `@subject`, and disagreeing is an error —
-    // so the guess becomes a lookup, and the lookup already exists downstream:
-    // `apply_output_shape` classifies a predicate as an edge when the SHAPE
-    // says its range is a shape. Naming a shape document is MANDATORY, so that
-    // path is always available — which is what made deleting this one safe.
+    // Nothing here GUESSES an edge from template shapes: the lookup already
+    // exists downstream, where `apply_output_shape` classifies a predicate as an
+    // edge when the SHAPE says its range is a shape. Naming a shape document is
+    // MANDATORY, so that path is always available.
 
     // Classify each non-`iri` property: FieldRef/StringLit → vertex prop;
     // IRI-template that resolves to another subject → edge; dangling template /
@@ -309,12 +302,10 @@ pub fn lower_to_mir_pg<'db>(
             }),
             // A comparison is a Bool column; a literal is its own type. An
             // arithmetic expression is NEITHER — `net = Row.gross -
-            // Row.discount` over two `xsd:float` columns is a float column, and
-            // this arm used to answer `Bool` for every `BinOp` there was. It was
-            // right while `+` did not lower and became wrong the moment it did:
-            // the property would have been written, with a value DuckDB computes
-            // as a double and a declared type of boolean, which is the silent
-            // half of a wrong answer.
+            // Row.discount` over two `xsd:float` columns is a float column. An
+            // arm answering `Bool` for every `BinOp` writes the property with a
+            // value DuckDB computes as a double and a declared type of boolean,
+            // which is the silent half of a wrong answer.
             HirExpr::BinOp { .. } | HirExpr::UnaryOp { .. } => props.push(VProp {
                 name: pred_local,
                 value: lower_property_value(db, &prop.value, &m.source_binding, None),
@@ -947,15 +938,11 @@ fn lower_iri_property<'db>(
 /// and no new classification rule. What it needed was a per-row IRI value the
 /// language could actually produce, which is the hole it fills.
 ///
-/// # This is what replaced `subject_skeletons`
+/// # Why a lookup and not a guess
 ///
-/// An edge used to be GUESSED: the skeleton of a property's template — every
-/// per-row hole replaced by a `\u{1}` marker — was compared against the skeleton
-/// of every mapping's subject in the file, and a match made it a foreign key.
-/// The comparison existed only because the identity rule was repeated per
-/// mapping. There is now one identity per TYPE — every mapping producing `T`
-/// declares the same `@subject`, and two that disagree are a compile error —
-/// so the guess becomes this lookup.
+/// There is one identity per TYPE — every mapping producing `T` declares the
+/// same `@subject`, and two that disagree are a compile error — so an edge is
+/// found by looking the target up, never by comparing IRI-template skeletons.
 ///
 /// # Fan-out
 ///
@@ -1320,14 +1307,10 @@ fn call_result_ty<'db>(db: &'db dyn fossil_base::Db, func: &SmolStr) -> Ty<'db> 
 
 /// Lower an interpolated string to the concat-chain of its parts.
 ///
-/// This replaced `lower_iri_template` + `lower_placeholder`, which took the
-/// template's raw text and scanned it for `${`, hand-parsing each hole at
-/// MIR-lowering time. Two things were wrong with that beyond the duplication.
-/// Its default arm echoed an unrecognised hole back as literal text, so
-/// anything that was not `.field` or `prefix:` reached the output unexamined —
-/// a mini format language nobody type-checked. And the prefix table had to be
-/// carried into MIR so a lowering could resolve `${ex:}`, which is a HIR
-/// concern that MIR now no longer sees.
+/// The parts arrive parsed. Nothing here re-scans a template's raw text for
+/// `${`: a hand-parsed hole reaches the output unexamined — a mini format
+/// language nobody type-checked — and resolving one is a HIR concern MIR does
+/// not see.
 ///
 /// `assert_line` is `Some(N)` in the subject position, where a hole that is
 /// NULL at runtime would produce a malformed IRI. v0.1 cannot discharge
