@@ -62,15 +62,20 @@
 //!
 //! **Beside the pass it would be folded into**, `enrich_layout` over a
 //! ten-million fixture at mean degree 14, same machine, same probe
-//! (`examples/enrich_memory 10000000 14`): **289.0 s, peak 8.47 GiB**, of which
-//! `community_hierarchy` alone is 265.6 s and +3.96 G. Its renumbering half —
-//! ranks, vertex read, gather, adjacency remap — is 20.5 s. So a compaction
-//! standing alone is **3.3% of the pass that already runs on every write**, and
-//! folded in it is a different value assigned in a loop that already runs. The
-//! adjacency remap there costs 16.1 s against 7.6 s here on the same number of
-//! rows, and the difference is the sort: Morton is not monotone and a
-//! compaction is, so `lexsort_to_indices` there is a real sort and here it is
-//! one pass over an array that is already in order.
+//! (`examples/enrich_memory 10000000 14`, 2026-08-28): **159.1 s, peak 5.08
+//! GiB**, of which `community_hierarchy` alone is 136.1 s and +1.92 G. Its
+//! renumbering half — ranks, vertex read, gather, adjacency remap — is 22.4 s.
+//! So a compaction standing alone is **6.1% of the pass that already runs on
+//! every write**, and folded in it is a different value assigned in a loop that
+//! already runs. The adjacency remap there costs 16.6 s against 7.6 s here on
+//! the same number of rows, and the difference is the sort: Morton is not
+//! monotone and a compaction is, so `lexsort_to_indices` there is a real sort
+//! and here it is one pass over an array that is already in order.
+//!
+//! That comparison read **289.0 s, peak 8.47 GiB** and 3.3% until the Louvain
+//! contraction stopped building one hash table per community; the pass it is
+//! measured against got smaller, not the compaction. The compaction's own
+//! figures above are unchanged and were not re-run.
 //!
 //! **Verified rather than asserted.** Compacting a numbering with holes injected
 //! into it produces output **byte-identical** to compacting the gapless one, at
