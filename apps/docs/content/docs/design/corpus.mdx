@@ -38,9 +38,54 @@ call that decides it. So a corpus fossil wrote registers no wildcard at all, and
 reachable only through a corpus another writer produced — which the conformance corpus is, because it
 is written through DuckDB and DuckDB clamps a row group under its 2,048-row vector.
 
+### `chunk_size` is what was written, never what was asked for
+
+DuckDB's `ROW_GROUP_SIZE` is a **request**. It writes row groups in whole 2,048-row vectors and
+rounds a smaller one up without saying so, and a generator that takes `chunk_size` from the number it
+passed in publishes a manifest describing a corpus it did not write. `--chunk-size 1024` produced
+exactly that: a corpus declaring 1,024 over row groups of 2,048, against which this repository's own
+`tile-of` guard finds **14,643 violations**.
+
+The fixture now **refuses** when the two disagree. Writing the size it observed was the tempting fix
+and is the same lie pointed the other way — the manifest would agree with the bytes while silently
+disowning what the caller asked for, and a `chunk_size` that quietly means something else is what
+produced a flat sweep curve for somebody measuring from outside. Refusing is the only outcome that
+reaches the person who can act on it.
+
+**This is DuckDB's floor and not the format's**, which is why fossil's own writer is unaffected:
+`TileWriter` goes through arrow-rs with both automatic limits set to `None`, so the cut is the
+explicit one the caller made. A 64-row tile round-trips as `[64, 64, 64, 64, 44]`. The conformance
+corpus therefore declares `container: files` at a `chunk_size` of 64 — the field exists to say which
+— while fossil emits `rowgroups`.
+
 It is not closed, and the reason is that closing it is a format change rather than a binding change:
 it needs a per-orientation tile census in the edge manifest, a field with its own argument about what
 a reader may derive. Until a `files` corpus is served, the cost is one nobody is paying.
+
+### The reader prunes the identity index, because the engine declines to
+
+The [identity index](/docs/format/conventions/identity) is built so that footers name the one tile a
+key can be in. Nothing makes an engine use them. **DuckDB prunes no disjunction over a `VARCHAR`
+column**, so a batched lookup — `key IN (a, b)` — opened all 245 index tiles of a million-vertex
+corpus and read **44.1 MB**, where the single `key = a` opened one and read **3.98 MB**. The index
+was doing its job and the query was reading past it.
+
+So the pruning moves to the reader, out of the same statistics the engine declined to use: one
+`parquet_metadata` sweep over the index tiles, cached per type exactly as the payload's `x`/`y` boxes
+are, and the batch stays **one** query over only the files its keys can be in. Under the `rowgroups`
+container a row group has no URL and there is nothing to address, so the batched read over the whole
+index is what there is, and the cache records that with `null` rather than pretending it pruned.
+
+<Callout type="warn" title="Two hazards in the comparison, and neither is visible in a passing test">
+**The comparison is on bytes, not on strings.** Parquet orders a string column by unsigned UTF-8
+bytes and JavaScript compares UTF-16 code units. The two disagree above `U+E000`, and an IRI reaching
+there would be pruned out of the very tile holding it and reported **absent** — a wrong answer, not a
+slow one.
+
+**A truncated statistic must widen the range, never narrow it.** A writer may shorten a long min/max:
+parquet-rs increments a truncated max, but a writer that did not would store a prefix, so a key
+extending the stored max is **kept** rather than excluded.
+</Callout>
 
 ## The artifact is the API
 
@@ -273,6 +318,24 @@ and a verb can no longer be declared without being wired.**
 A new verb enters only if it serves a case the single path demonstrably cannot, and that
 demonstration is a measurement. Not an argument.
 </Callout>
+
+### The reader keeps an addressing pair beside the verbs, and that is a correction
+
+The reader package offers `node` and `neighbours` alongside `read` and `expand`, and they read as
+duplicates of them. They were to be deleted on exactly that reading, and the deletion was wrong.
+
+**A verb names a relation and lets the engine choose bytes; these compute which files to open.** It
+is the same line that keeps `extent` and `window`, and the one the crate doc draws when it says
+pruning is the tiles' job and not a verb's. The two are not interchangeable in either direction:
+`expand` is a recursive CTE over the whole edge relation — the query `neighbours` exists because of,
+and which **did not return in 45 seconds at a million vertices**. It answers in IRIs where a canvas
+needs placements, it walks the source-ordered relation only where a neighbourhood is undirected, and
+it reports no `complete`, `gaps` or `frontier`, so an answer whose outermost ring is missing its own
+edges looks whole in a count.
+
+Deleting them would also have left the identity index unreadable through the package, because **no
+verb sees it** — the index is addressing by construction, and a surface with only verbs on it has no
+way to ask.
 
 ### `read`'s `where` is SQL, and carries `execute_sql`'s authority
 

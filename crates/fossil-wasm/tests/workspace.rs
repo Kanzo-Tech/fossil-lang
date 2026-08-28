@@ -2,19 +2,16 @@
 //!
 //! The full node-driven end-to-end exercise lives in `test-wasm-workspace.js`
 //! (loaded by `wasm-bindgen --target nodejs` + node ≥18); that script is
-//! manual + CI-job-driven, not per-PR `cargo test` (the same split as
-//! `test-wasm.js`).
+//! manual + CI-job-driven, not per-PR `cargo test`.
 //!
 //! This file is the cargo-test mirror that catches API regressions on every
 //! PR without needing the wasm-bindgen + node toolchain installed. Each test
 //! exercises the lifecycle through the pure-Rust `*_native` / `*_rows` /
 //! `*_result` helpers — the `#[wasm_bindgen]` wrappers (`open_file`,
-//! `update_file`, `close_file`, `check`, `diagnostics_for`, `compile_file`)
+//! `update_file`, `close_file`, `check`, `diagnostics_for`)
 //! merely translate to/from `JsError` + `JsValue` via wasm-bindgen, which
 //! panics on native targets ("cannot call wasm-bindgen
 //! imported functions on non-wasm targets" — wasm-bindgen 0.2 lib.rs:101).
-//! The split mirrors the `classification()` ↔ `stdlib_classification()` pair,
-//! which is the same wrapper/native division.
 
 use fossil_wasm::{FossilPlayground, WorkspaceError};
 
@@ -34,7 +31,7 @@ fn hello_fossil_source() -> String {
     })
 }
 
-/// The full lifecycle: open → update → check → compile → close, plus the
+/// The full lifecycle: open → update → check → close, plus the
 /// close-of-unknown-handle error path.
 #[test]
 fn workspace_lifecycle_smoke() {

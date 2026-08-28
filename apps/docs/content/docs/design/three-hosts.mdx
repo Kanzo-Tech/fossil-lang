@@ -87,6 +87,30 @@ cursor — so hover, completion and definition are also plain method calls on th
 implementation still, two projections of it, and a guard that sweeps every cursor of a program
 comparing what the two wires say rather than comparing either against a written-down answer.
 
+The same measurement settles what a row may carry across that wire, and it is the companion rule:
+
+> **A name crosses the boundary, never a number.** An enum's discriminant is an ordering the
+> compiler is free to change; a consumer that wrote one down is broken by a reorder *silently*,
+> because every kind remaps at once and nothing fails.
+
+This is not a precaution. `TokenRow.kind` was a bare `fossil_syntax::lexer::Token as u32`, and the
+consumer that kept the matching table — `packages/codemirror-fossil/src/tags.ts`, since deleted —
+was **wrong in nine places** by the time it went: `KwPrefix`, `KwIn`, `KwUse`, `KwAs`, `KwIri`,
+`Template`, `AbsIri`, `EnvVar` and `Pipe` are variants the lexer no longer has, `True`, `False` and
+`Null` are ones it gained, and every discriminant from 3 up pointed at the wrong token. The file
+carried a comment saying it must be updated in lockstep with any reorder. Nothing could hold that,
+and nothing noticed for as long as it did not.
+
+So the legend ships instead of the warning. `tokenKinds()` returns every variant name indexed by the
+discriminant a row carries, and a host keys on `"Comment"` rather than on `2`; `semanticLegend()`
+already did this for LSP semantic tokens, and completion kinds followed — LSP spells
+`CompletionItemKind` as an integer, and `kind_name` puts the table in Rust where
+`every_lsp_kind_has_a_name` can check it is total. Each of those tables is an **exhaustive** match,
+so adding or renaming a variant fails this build rather than someone else's product, which is the
+whole difference between a guard and a comment. A kind past the end of a legend is a newer compiler
+than the host and reads as plain text, so appending stays backwards-compatible and reordering stops
+being an event at all.
+
 Where an implementation genuinely cannot be shared,
 `packages/introspect/tests/rust-parity.test.ts` is the shape of the guard: it derives its tables from
 the Rust rather than restating any value, so a rewritten crate fails it instead of quietly matching

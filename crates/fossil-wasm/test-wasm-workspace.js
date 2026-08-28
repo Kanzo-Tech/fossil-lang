@@ -1,7 +1,7 @@
 // WASM Workspace lifecycle smoke.
 //
-// Companion to test-wasm.js — verifies the ty_wasm-shaped lifecycle
-// (open_file / update_file / close_file / check / compile_file /
+// Verifies the ty_wasm-shaped lifecycle
+// (open_file / update_file / close_file / check /
 // diagnostics_for) round-trips through wasm-bindgen + serde-wasm-bindgen
 // correctly in a node process. The native cargo-test mirror is
 // `crates/fossil-wasm/tests/workspace.rs` (catches API regressions on every
@@ -18,10 +18,10 @@
 // Run:
 //   node crates/fossil-wasm/test-wasm-workspace.js
 //
-// NOTE: this is the same `--target nodejs` bindgen target as `test-wasm.js`
-// (CommonJS-friendly, `require('fs')`-based .wasm loading) — distinct from the
-// `--target web` artefact the browser packages consume. Both come from the same
-// .wasm binary; only the generated JS shim differs.
+// NOTE: this is the `--target nodejs` bindgen target (CommonJS-friendly,
+// `require('fs')`-based .wasm loading) — distinct from the `--target web`
+// artefact the browser packages consume. Both come from the same .wasm binary;
+// only the generated JS shim differs.
 
 'use strict';
 
@@ -67,14 +67,6 @@ function main() {
         assert.ok(typeof d.severity === 'number', 'row.severity is a number');
         assert.ok(typeof d.message === 'string', 'row.message is a string');
     }
-
-    // ----- compile_file -----
-    const out = pg.compile_file(h1);
-    assert.ok(out && typeof out.sql === 'string', 'compile_file returns { sql, ... }');
-    assert.ok(out.sql.includes('COPY'), 'compile_file SQL contains COPY');
-    assert.ok(out.sql.includes('output.parquet'), 'compile_file SQL contains output.parquet');
-    assert.ok(typeof out.manifest_yaml === 'string', 'compile_file returns { manifest_yaml }');
-    assert.ok(out.manifest_yaml.includes('graphar_version'), 'manifest_yaml contains graphar_version');
 
     // ----- multi-file isolation + diagnostics_for (B3) -----
     const h2 = pg.open_file('b.fossil', source);

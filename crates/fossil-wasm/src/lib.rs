@@ -2,18 +2,18 @@
 //!
 //! ## The surface
 //!
-//! A single `compile(source: &str)` came first; the surface is now the full
-//! `ty_wasm`-shaped `Workspace` lifecycle the playground and the WASM LSP
-//! Worker consume, because an editor edits files and re-checks them, and a
-//! one-shot compile has nowhere to put the file identity that requires:
+//! The surface is the `ty_wasm`-shaped `Workspace` lifecycle the playground and
+//! the WASM LSP Worker consume, because an editor edits files and re-checks
+//! them, and a one-shot compile has nowhere to put the file identity that
+//! requires:
 //!
 //! | Method                          | Returns                              | Use site            |
 //! |---------------------------------|--------------------------------------|---------------------|
-//! | [`FossilPlayground::open_file`] | [`FileHandle`]                       | `textDocument/didOpen`     |
-//! | [`FossilPlayground::update_file`]| `()`                                 | `textDocument/didChange`   |
-//! | [`FossilPlayground::close_file`]| `()`                                 | `textDocument/didClose`    |
-//! | [`FossilPlayground::check`]     | `Array<{ uri, range, severity, message }>` | LSP `publishDiagnostics` (workspace-wide) |
-//! | [`FossilPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | per-file `publishDiagnostics` (the worker's drain) |
+//! | [`WasmPlayground::open_file`]   | [`FileHandle`]                       | `textDocument/didOpen`     |
+//! | [`WasmPlayground::update_file`] | `()`                                 | `textDocument/didChange`   |
+//! | [`WasmPlayground::close_file`]  | `()`                                 | `textDocument/didClose`    |
+//! | [`WasmPlayground::check`]       | `Array<{ uri, range, severity, message }>` | LSP `publishDiagnostics` (workspace-wide) |
+//! | [`WasmPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | per-file `publishDiagnostics` (the worker's drain) |
 //! | [`WasmPlayground::hover`]       | `{ markdown, range } \| null`        | `textDocument/hover`       |
 //! | [`WasmPlayground::completions`] | `Array<{ label, kind, detail }>`     | `textDocument/completion`  |
 //! | [`WasmPlayground::goto_definition`] | `Array<{ uri, range }>`          | `textDocument/definition`  |
@@ -24,10 +24,6 @@
 //! what type is under a cursor. That module's header is the whole argument,
 //! including why all three take a SHARED borrow and what a caller owes in
 //! return.
-//!
-//! The single-shot `compile(&str)` is RETAINED beside it: a playground with one
-//! buffer and no LSP client should not have to open and close a file to
-//! type-check it, and the node smoke test calls exactly that entry point.
 //!
 //! ## Architecture
 //!
@@ -495,8 +491,8 @@ impl WasmPlayground {
 
 // ----- Pure-Rust core (test-reachable; no wasm-bindgen serialization) -----
 //
-// The `#[wasm_bindgen]` methods above (`check`, `diagnostics_for`,
-// `compile_file`) call `serde_wasm_bindgen::to_value` and construct
+// The `#[wasm_bindgen]` methods above (`check`, `diagnostics_for`)
+// call `serde_wasm_bindgen::to_value` and construct
 // `JsError`s, both of which call wasm-bindgen extern intrinsics that panic
 // on native targets ("cannot call wasm-bindgen imported functions on
 // non-wasm targets" — wasm-bindgen 0.2 lib.rs:101). Splitting the
@@ -504,8 +500,7 @@ impl WasmPlayground {
 // `cargo test -p fossil-wasm --test workspace` exercise the full lifecycle
 // natively (the wasm-bindgen attribute layer is a transparent pass-through
 // over these helpers — a passing native test guarantees the wire-side
-// methods compile + dispatch correctly). Mirrors the `classification()` ↔
-// `stdlib_classification()` split that established the convention.
+// methods compile + dispatch correctly).
 
 /// Pure-Rust error returned by the `*_native` / `*_rows` / `*_result`
 /// helpers.
@@ -518,10 +513,6 @@ impl WasmPlayground {
 pub enum WorkspaceError {
     /// The handle was never opened, or was already closed.
     UnknownHandle,
-    /// The file parsed to zero mappings — `compile_file` has nothing to
-    /// compile. The `check` path is fine with this case (it returns an
-    /// empty diagnostic stream).
-    NoMappingInFile,
     /// The `register_inferred_descriptor` JSON payload did not deserialise
     /// into an [`fossil_descriptors_input::InferredDescriptor`]. Carries the
     /// underlying `serde_json` error message.
@@ -532,7 +523,6 @@ impl std::fmt::Display for WorkspaceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownHandle => f.write_str("unknown file handle"),
-            Self::NoMappingInFile => f.write_str("no mapping found in file"),
             Self::MalformedDescriptor(msg) => {
                 write!(f, "malformed InferredDescriptor JSON: {msg}")
             }
@@ -707,7 +697,7 @@ impl FossilPlayground {
 
     // ----- Inferred-descriptor registration -----
 
-    /// Pure-Rust mirror of [`Self::register_inferred_descriptor`] (the
+    /// Pure-Rust mirror of [`WasmPlayground::register_inferred_descriptor`] (the
     /// `#[wasm_bindgen]` wrapper).
     ///
     /// Cargo-tests call THIS function — the wasm-bindgen wrapper panics on
@@ -811,7 +801,7 @@ pub fn refs_native(program: &str) -> Vec<fossil_lineage::SourceRefInfo> {
     fossil_lineage::source_refs(&db, file)
 }
 
-/// One diagnostic row in the [`FossilPlayground::check`] return array.
+/// One diagnostic row in the [`WasmPlayground::check`] return array.
 ///
 /// The playground's own shape, and **not the LSP wire's** — the LSP Worker
 /// publishes `lsp_types::Diagnostic` (`lsp_worker::publish_diagnostics`), which
