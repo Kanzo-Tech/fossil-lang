@@ -1,14 +1,16 @@
 /**
  * The loop, in one screen.
  *
- * Left: the program, in a textarea, re-checked on every keystroke. Right: what happened —
- * diagnostics, then the files the run wrote, then the rows read back out of them.
+ * Left: the program, in `@kanzo-tech/ui`'s `CodeEditor` with fossil's language layer
+ * inside it — highlighting, squiggles, hover, completion and go-to-definition, all five
+ * answered by the compiler in this tab. Right: what happened — diagnostics, then the files
+ * the run wrote, then the rows read back out of them.
  *
- * A textarea and a table is the whole of the first cut on purpose. The owner's bar is that
- * it genuinely runs: `examples/hello.fossil` must produce the same five subjects here that
- * `fossil run` produces natively. A CodeMirror editor with `fossil-ide`'s hover and
- * completion behind it is the obvious next thing and it is strictly the second thing —
- * `@fossil-lang/wasm` already exposes `tokenize` and `semanticLegend` for it.
+ * The bar has not moved: `examples/hello.fossil` must produce the same five subjects here
+ * that `fossil run` produces natively. What changed is that the editor is now an editor.
+ * This file wires it and owns none of it — the extensions are
+ * `@fossil-lang/codemirror-fossil`'s and the answers are `crates/fossil-ide`'s, reached
+ * through `check.ts`.
  */
 import { CodeEditor } from '@kanzo-tech/ui/editor';
 import { fossil } from '@fossil-lang/codemirror-fossil';
@@ -40,6 +42,7 @@ export default function App() {
   const [files, setFiles] = useState<{ path: string; bytes: number }[]>([]);
   const [table, setTable] = useState<Table | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [definition, setDefinition] = useState<string | null>(null);
   const booted = useRef(false);
 
   const say = useCallback((line: string) => setLog((prior) => [...prior, line]), []);
@@ -84,6 +87,9 @@ export default function App() {
   // be here, as a `setTimeout` plus a `busy` flag in `check.ts`, guarding a wasm
   // re-entrancy defect that poisoned the workspace permanently — see `check.ts` for
   // where that went.
+  //
+  // Four sources at four rates, one workspace, and every one of them takes the text:
+  // `check.ts`'s `sync` is what makes that safe to say and cheap to do.
   const extensions = useMemo(
     () =>
       fossil({
@@ -93,6 +99,19 @@ export default function App() {
         check: checker.checkText,
         // The panel below renders the same rows the squiggles do, from one check.
         onDiagnostics: (rows) => setDiagnostics([...rows]),
+        hover: checker.hoverAt,
+        complete: checker.completeAt,
+        definition: checker.definitionAt,
+        // One pane, so a definition in `hello.shex` cannot be a jump — and two of the
+        // four positions goto-def recognises resolve into exactly that file. Reporting
+        // where it is beats moving the cursor to the same coordinates in the wrong
+        // buffer, which is what a host that ignored `uri` would do.
+        onNavigate: (target) =>
+          setDefinition(
+            target === null
+              ? 'no definition at the cursor'
+              : `${target.uri}:${target.range.start.line + 1}:${target.range.start.character + 1}`,
+          ),
       }),
     [],
   );
@@ -171,7 +190,11 @@ export default function App() {
             <button onClick={onRun} disabled={!runnable}>
               {phase === 'running' ? 'running…' : 'Run'}
             </button>
+            <span className="note">
+              hover for a type · ctrl-space to complete · alt-. or ⌘-click for the definition
+            </span>
           </div>
+          {definition && <p className="log">definition → {definition}</p>}
         </section>
 
         <section>

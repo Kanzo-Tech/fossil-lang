@@ -31,14 +31,17 @@ import {
   tokenize,
   tokenKinds,
   type CheckRow,
+  type CompletionRow,
+  type DefinitionRow,
   type FileHandle,
+  type HoverRow,
   type InferredDescriptorJson,
 } from '@fossil-lang/wasm';
 import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
 
 import { PROGRAM_PATH, SHEX, SHEX_PATH } from './example.js';
 
-export type { CheckRow };
+export type { CheckRow, CompletionRow, DefinitionRow, HoverRow };
 
 /** The lexer and its legend, re-exported so `App` hands the editor one module.
  *  `tokenKinds()` is what makes `TokenRow.kind` readable — see the legend note in
@@ -57,6 +60,8 @@ export interface BundleCost {
 let playground: FossilPlayground | null = null;
 let programHandle: FileHandle | null = null;
 let cost: BundleCost | null = null;
+/** The text last pushed into the workspace. See {@link sync}. */
+let pushed: string | null = null;
 
 /** The measured cost of the checker bundle, or `null` before {@link load}. */
 export function checkerCost(): BundleCost | null {
@@ -84,6 +89,37 @@ export async function load(program: string): Promise<void> {
   // query that missed it re-executes). Doing it first just means the first check is right.
   playground.openFile(SHEX_PATH, SHEX);
   programHandle = playground.openFile(PROGRAM_PATH, program);
+  pushed = program;
+}
+
+/**
+ * Push the buffer into the workspace, unless it is already there.
+ *
+ * **Four callers at four rates share one workspace, and this is what makes that
+ * safe to read as well as safe to call.** The linter runs on a 120 ms debounce;
+ * hover fires when the pointer rests; completion fires on nearly every
+ * keystroke; goto-def fires on a key. All four answer about the text of the last
+ * `updateFile`, so all four push first — otherwise the three fast ones would be
+ * answering about text one keystroke old, and a hover range one character off is
+ * the sort of wrong that reads as an editor bug.
+ *
+ * The string comparison is what makes that cheap. `updateFile` is the one method
+ * that takes the workspace's EXCLUSIVE borrow and the one that bumps the Salsa
+ * revision, so calling it per mouse-move would invalidate the memoised check the
+ * squiggles came from for no reason at all. In the common case — the pointer
+ * moving over text nobody has touched since the last check — this compares two
+ * strings and returns.
+ *
+ * A second workspace for the position queries was the alternative, and it is
+ * worse: double the interning and double the memory, to answer from a different
+ * revision than the diagnostics on screen. The re-entrancy that made sharing look
+ * dangerous is fixed at the root — the three position methods take a SHARED
+ * borrow on the Rust side because none of them mutates.
+ */
+function sync(text: string): void {
+  if (!playground || programHandle === null || text === pushed) return;
+  playground.updateFile(programHandle, text);
+  pushed = text;
 }
 
 /** Push a host-introspected input schema at the compiler. See `descriptor.ts`. */
@@ -116,8 +152,38 @@ export function registerDescriptor(descriptor: InferredDescriptorJson): void {
  */
 export function checkText(program: string): CheckRow[] {
   if (!playground || programHandle === null) return [];
-  playground.updateFile(programHandle, program);
+  sync(program);
   return playground.check();
+}
+
+/**
+ * The type under the cursor, and the type the shape demands of it.
+ *
+ * The three functions below are the whole of the LSP surface the tab was
+ * missing: `fossil-ide` has had hover, completion and goto-def all along and
+ * `lsp_worker.rs` dispatches them, but only over `postMessage` from a Worker —
+ * which needs an LSP client on the other end. `crates/fossil-wasm`'s `ide`
+ * module puts the same three answers on the main thread as method calls, and
+ * these three lines are what that buys.
+ */
+export function hoverAt(text: string, line: number, character: number): HoverRow | null {
+  if (!playground || programHandle === null) return null;
+  sync(text);
+  return playground.hover(programHandle, line, character);
+}
+
+/** The candidates at the cursor, narrowed by the receiver's type. */
+export function completeAt(text: string, line: number, character: number): CompletionRow[] {
+  if (!playground || programHandle === null) return [];
+  sync(text);
+  return playground.completions(programHandle, line, character);
+}
+
+/** Where the name under the cursor is defined — often in `hello.shex`. */
+export function definitionAt(text: string, line: number, character: number): DefinitionRow[] {
+  if (!playground || programHandle === null) return [];
+  sync(text);
+  return playground.gotoDefinition(programHandle, line, character);
 }
 
 /** Check without editing — used once after the descriptor lands. */

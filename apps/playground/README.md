@@ -74,20 +74,39 @@ live-reconfigured `Compartment` and externalises every `@codemirror/*` as an
 optional peer; the language layer asks whichever `HighlightStyle` is installed for
 its classes, so fossil arrives in kanzo's palette without either side arranging it.
 
-`@kanzo-tech/ui` is a **published dependency at an exact version**, `0.0.1-alpha`.
-It was a `pnpm pack` tarball committed at `vendor/kanzo-tech/` for as long as the
-package had never been published, because the three routes that stand in for
-publishing all die on a fresh clone — a workspace spanning both repositories,
-`pnpm link`, and a `file:`/git URL at `kanzo-ui/packages/ui`, the last of which
-cannot work at all while `@kanzo-tech/ui` names `@kanzo-tech/theme` at
-`workspace:*`. The published manifest names it at `0.0.1-alpha`, so the argument
-is spent and the directory is gone. The pin is exact rather than a caret because a
-prerelease is not a contract yet.
+Hover, completion and go-to-definition are in it too, and they are the same three
+answers `fossil-lsp` gives a native editor. What stood between them and this tab
+was a transport: `crates/fossil-wasm`'s `lsp_worker.rs` dispatches all three, but
+over `postMessage`, which needs an LSP client on the other end. `crates/fossil-wasm`'s
+`ide` module puts them on the main thread as ordinary method calls instead — the
+same `fossil-ide` free functions, one call each — and
+`crates/fossil-wasm/tests/main_thread_parity.rs` sweeps every cursor in
+`hello.fossil` comparing the two wires so they cannot drift.
 
-What the editor does NOT have is hover, completion and goto-definition. All three
-exist in `crates/fossil-ide` and `crates/fossil-wasm`'s `lsp_worker.rs` dispatches
-them, but over `postMessage` from a Worker — an LSP client is the work, and it is
-its own piece.
+Hover is bidirectional: `User.name` reports `String` from the CSV descriptor AND
+`String` as the ShEx shape's constraint, which is the pair that makes hovering
+worth anything here. Completion is narrowed by the receiver — after `User.name.`
+the list is `concat contains ends_with length lower replace slice …`, spelled bare.
+Go-to-definition is `F12`, `Alt-.` or ⌘-click, and it usually leaves the file:
+`Person` in the mapping header resolves into `hello.shex`, so the app reports the
+target rather than moving a cursor it has no second pane for.
+
+`@kanzo-tech/ui` is a **published dependency at an exact version**, `0.1.0`. It was
+a `pnpm pack` tarball committed at `vendor/kanzo-tech/` for as long as the package
+had never been published, because the three routes that stand in for publishing all
+die on a fresh clone — a workspace spanning both repositories, `pnpm link`, and a
+`file:`/git URL at `kanzo-ui/packages/ui`, the last of which cannot work at all
+while `@kanzo-tech/ui` names `@kanzo-tech/theme` at `workspace:*`. The pin is exact
+rather than a caret because one exact pin is what a consumer of a young library owes
+it.
+
+One thing that bump did not fix, and `src/styles.css` carries the two lines that
+did: `CodeEditor`'s CodeMirror theme paints tooltips with `var(--popover)` and no
+fallback, and kanzo defines that token only in its **dark** palettes. This page
+selects no palette, so the declaration was invalid at computed-value time and every
+tooltip — hover, autocomplete, lint — had a transparent background and rendered as
+unreadable text over the code. Measured, not reasoned about: `getComputedStyle` on
+`.cm-tooltip` returned `rgba(0, 0, 0, 0)`.
 
 ## The defect that used to be here
 
@@ -119,6 +138,6 @@ Not a graph viewer. `@kanzo-tech/graph` is deliberately NOT adopted: it
 hard-requires `@cosmos.gl/graph`, three `@uwdata/*`, and
 `@duckdb/duckdb-wasm@^1.33.1-dev57.0` — a pre-release pin that does not match the
 `1.32.0` this app already loads. That is a separate decision needing its own
-argument. (`@kanzo-tech/ui` names the same duckdb pin, but as an OPTIONAL peer used
-only by its `/analytics` subpath, which nothing here imports; `pnpm install` warns
-about it and the warning is correct and inert.)
+argument. (`@kanzo-tech/ui` named the same duckdb pin as an OPTIONAL peer through
+`0.0.1-alpha`, so `pnpm install` printed a correct and inert warning about it;
+`0.1.0` does not name it at all and the warning is gone.)

@@ -47,16 +47,16 @@ Four things narrow the list further than you might expect, and each is deliberat
   an input, and an input is not drained — without that rule the parser blames a perfectly good
   `ShExJ` file for every complaint it has.
 
-## Two hosts, one set of answers
+## Two hosts, three wires, one set of answers
 
 `fossil-lsp` is native — it is a stdio transport and it refuses to compile for `wasm32`. What
-compiles to WebAssembly is everything under it. Neither host implements a feature: both call the same
-`fossil-ide` free functions, over a different wire.
+compiles to WebAssembly is everything under it. No transport implements a feature: they all call the
+same `fossil-ide` free functions.
 
 ```mermaid
 sequenceDiagram
   participant E as your editor
-  participant S as fossil-lsp over stdio<br/>— or the wasm worker over postMessage
+  participant S as fossil-lsp over stdio<br/>— or the wasm worker over postMessage<br/>— or the wasm workspace, called directly
   participant C as the compiler<br/>fossil-ide, fossil-hir, fossil-mir
   E->>S: didOpen / didChange
   S->>S: introspect the sources the program binds
@@ -64,10 +64,18 @@ sequenceDiagram
   C-->>S: diagnostics, spans in both files
   S-->>E: publishDiagnostics
   E->>S: completion / hover / definition / codeAction
-  S->>C: the same free function either host calls
+  S->>C: the same free function every transport calls
   C-->>S: the answer
   S-->>E: the response
 ```
+
+The third is the browser's short path and it exists because the second needs a client. A page that
+already calls the checker in-process should not have to stand up an LSP client, an id table and a
+second copy of every buffer to ask what type is under a cursor — so hover, completion and definition
+are also plain methods on the wasm workspace, and the playground calls them. Two rules fall out of
+that and both are enforced rather than asserted: those three methods take a *shared* borrow, because
+none of them mutates and an editor asks at three different rates; and every one of them owes the
+caller's current text, because they answer about the last edit that was pushed.
 
 Checking a program needs a parser, a shape document and the columns of a file. None of those needs a
 machine somewhere else, so all of it is available in a page with nothing on the other end of it.

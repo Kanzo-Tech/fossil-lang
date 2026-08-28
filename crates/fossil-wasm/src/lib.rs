@@ -14,6 +14,16 @@
 //! | [`FossilPlayground::close_file`]| `()`                                 | `textDocument/didClose`    |
 //! | [`FossilPlayground::check`]     | `Array<{ uri, range, severity, message }>` | LSP `publishDiagnostics` (workspace-wide) |
 //! | [`FossilPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | per-file `publishDiagnostics` (the worker's drain) |
+//! | [`WasmPlayground::hover`]       | `{ markdown, range } \| null`        | `textDocument/hover`       |
+//! | [`WasmPlayground::completions`] | `Array<{ label, kind, detail }>`     | `textDocument/completion`  |
+//! | [`WasmPlayground::goto_definition`] | `Array<{ uri, range }>`          | `textDocument/definition`  |
+//!
+//! The last three are the [`ide`] module: the same `fossil-ide` answers the
+//! Worker dispatches, as ordinary method calls, because a tab that already
+//! calls `check()` in-process should not have to stand up an LSP client to ask
+//! what type is under a cursor. That module's header is the whole argument,
+//! including why all three take a SHARED borrow and what a caller owes in
+//! return.
 //!
 //! The single-shot `compile(&str)` is RETAINED beside it: a playground with one
 //! buffer and no LSP client should not have to open and close a file to
@@ -40,11 +50,13 @@
 //! build for `wasm32` before this shim could exist at all, which is why the
 //! `compile_error!` tripwires live on the native-only crates rather than here.
 
+pub mod ide;
 pub(crate) mod lsp_worker;
 pub mod tokenize;
 mod wasm_system;
 mod workspace;
 
+pub use crate::ide::{CompletionRow, DefinitionRow, HoverRow};
 pub use crate::lsp_worker::start_lsp_worker;
 pub use crate::tokenize::{TokenRow, token_kinds_native, tokenize_native};
 // The #[wasm_bindgen] `tokenize` and `semantic_legend` functions are exposed
@@ -365,6 +377,95 @@ impl WasmPlayground {
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
     }
 
+    // ----- The main-thread IDE surface (see the `ide` module) -----
+    //
+    // All three take `&FileHandle` — wasm-bindgen CONSUMES an exported struct
+    // passed by value, so a by-value handle is good for exactly one call and
+    // the second throws "null pointer passed to rust" (the note on
+    // `FileHandle` has the whole defect). Hover fires on mouse-move, so this
+    // is the surface where that bug would be found again in one second rather
+    // than in one keystroke.
+    //
+    // And all three take a SHARED borrow, because none of them mutates. That
+    // is what lets an editor ask at three different rates against one
+    // workspace without the coalescing `update_file` needs.
+
+    /// What is under the cursor: `{ markdown, range }`, or `null` when the
+    /// cursor is on whitespace, on an expression the checker inferred no type
+    /// for, or outside any mapping.
+    ///
+    /// `line` / `character` are LSP — zero-based, and `character` in UTF-16
+    /// code units, which is what a JS host counts in anyway. The `range` comes
+    /// back in the same units.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error if the workspace is busy, or if the result fails to
+    /// serialize to `JsValue`. An unknown handle is `null`, not an error —
+    /// see [`FossilPlayground::hover_row`].
+    pub fn hover(
+        &self,
+        handle: &FileHandle,
+        line: u32,
+        character: u32,
+    ) -> Result<JsValue, JsError> {
+        let pg = self.inner.try_borrow().map_err(|_| busy_error("hover"))?;
+        serde_wasm_bindgen::to_value(&pg.hover_row(*handle, line, character)).map_err(JsError::from)
+    }
+
+    /// The completion candidates at a position: `{ label, kind, detail }` rows,
+    /// already narrowed by the receiver — `str.` offers string members and no
+    /// reader, a property key position offers the target shape's predicates and
+    /// no catalogue row.
+    ///
+    /// `kind` is the LSP `CompletionItemKind` **by name** (`"function"`,
+    /// `"field"`). See [`ide::CompletionRow`] for why a number does not cross
+    /// this boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error if the workspace is busy, or if the result fails to
+    /// serialize to `JsValue`. An unknown handle is an empty array.
+    pub fn completions(
+        &self,
+        handle: &FileHandle,
+        line: u32,
+        character: u32,
+    ) -> Result<JsValue, JsError> {
+        let pg = self
+            .inner
+            .try_borrow()
+            .map_err(|_| busy_error("completions"))?;
+        serde_wasm_bindgen::to_value(&pg.completion_rows(*handle, line, character))
+            .map_err(JsError::from)
+    }
+
+    /// Where the name under the cursor is defined: `{ uri, range }` rows, empty
+    /// when nothing there has a definition.
+    ///
+    /// `uri` is the key the host opened the buffer under, verbatim — and two of
+    /// the four positions goto-def recognises resolve into the shape document,
+    /// so a host with one pane has to read it before moving a cursor.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error if the workspace is busy, or if the result fails to
+    /// serialize to `JsValue`.
+    #[wasm_bindgen(js_name = gotoDefinition)]
+    pub fn goto_definition(
+        &self,
+        handle: &FileHandle,
+        line: u32,
+        character: u32,
+    ) -> Result<JsValue, JsError> {
+        let pg = self
+            .inner
+            .try_borrow()
+            .map_err(|_| busy_error("gotoDefinition"))?;
+        serde_wasm_bindgen::to_value(&pg.definition_rows(*handle, line, character))
+            .map_err(JsError::from)
+    }
+
     // ----- Register a host-introspected descriptor -----
 
     /// Register an [`fossil_descriptors_input::InferredDescriptor`] for a
@@ -570,6 +671,16 @@ impl FossilPlayground {
     /// goto-def, etc.) that consume Salsa inputs directly.
     pub(crate) fn lookup_file_by_uri(&self, uri: &str) -> Option<SourceFile> {
         let handle = self.files.lookup_uri(uri)?;
+        self.files.get(handle)
+    }
+
+    /// Handle → `SourceFile` lookup, for the main-thread surface in [`ide`].
+    ///
+    /// The Worker routes by URI because LSP does; a direct caller already holds
+    /// the handle `open_file` gave it, and making it re-derive a URI to get
+    /// back to the file it just opened would be the sort of round trip
+    /// [`CheckRow::uri`]'s note exists to avoid.
+    pub(crate) fn file_by_handle(&self, handle: FileHandle) -> Option<SourceFile> {
         self.files.get(handle)
     }
 

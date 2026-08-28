@@ -1,15 +1,38 @@
 /*
  * MEANT TO BE DELETED, NOT EXTENDED.
  *
- * `@kanzo-tech/ui` is the intended design system and it is not on npm, so consuming it
- * means vendoring tarballs across two repositories — `apps/docs/CLAUDE.md` defers that as
- * needing its own argued page. Until that argument is made and won, this file is the
- * smallest thing that makes the loop legible: three colours, one font stack, no
- * components, no tokens, no variants, nothing worth keeping.
+ * `@kanzo-tech/ui` is the design system and it IS consumed now — published, pinned exact,
+ * imported before this file so these rules win. This one existed because it was not on
+ * npm and that sentence is no longer true; what is left is the smallest thing that makes
+ * the loop legible: three colours, one font stack, no components, no variants.
  *
- * If you find yourself adding a second button style here, that is the signal to go make
- * the dependency argument instead.
+ * If you find yourself adding a second button style here, that is the signal to go take
+ * the component from the library instead.
  */
+
+/*
+ * The one exception, and it is a compatibility shim rather than a style.
+ *
+ * `CodeEditor`'s CodeMirror theme paints tooltips with `var(--popover)` and NO fallback,
+ * and kanzo defines that token only in its dark palettes (`:root.dark:not([data-theme])`
+ * and the eight `[data-theme=…-dark]` blocks). This page selects no palette, so the
+ * declaration was invalid at computed-value time, the background fell back to
+ * `transparent`, and EVERY CodeMirror tooltip — hover, autocomplete, lint — rendered as
+ * unreadable text floating over the code. Measured in Chrome, not reasoned about:
+ * `getComputedStyle(document.querySelector('.cm-tooltip')).backgroundColor` was
+ * `rgba(0, 0, 0, 0)`.
+ *
+ * Kanzo's own utilities all write `var(--popover, var(--card))`; the editor theme is the
+ * one place that forgot the fallback. The value here is this file's own surface pair
+ * rather than `--card`, and deliberately: `--card` IS defined, at kanzo's LIGHT value,
+ * which would hang a white tooltip in front of a dark editor. `--panel` and `--fg` follow
+ * the `prefers-color-scheme` switch below, so the tooltip is the same colour decision as
+ * everything else on the page. Delete both lines when the token is unconditional upstream.
+ */
+:root {
+  --popover: var(--panel);
+  --popover-foreground: var(--fg);
+}
 
 :root {
   --bg: #ffffff;

@@ -7,7 +7,9 @@
  * - {@link tokenize} — calls the Rust lexer, returns TokenRow[].
  * - {@link tokenKinds} — the legend for TokenRow.kind: variant names by index.
  * - {@link semanticLegend} — returns the LSP SemanticTokensLegend.
- * - {@link FossilPlayground} — Workspace API class for the LSP.
+ * - {@link FossilPlayground} — Workspace API class: open / update / close,
+ *   `check`, and the three position queries (`hover`, `completions`,
+ *   `gotoDefinition`) an editor draws its IDE surface from.
  *
  * Consumer pattern (wasm-bindgen --target web):
  *
@@ -65,12 +67,59 @@ export interface ProviderInfo {
  */
 export interface CheckRow {
   uri: string;
-  range: {
-    start: { line: number; character: number };
-    end: { line: number; character: number };
-  };
+  range: LspRange;
   severity: number;
   message: string;
+}
+
+/** An LSP range: zero-based lines, `character` in UTF-16 code units — the units
+ *  a JavaScript string is indexed in, so no byte arithmetic converts it. (The
+ *  lexer's {@link TokenRow} offsets are the other thing: those ARE bytes.) */
+export interface LspRange {
+  start: { line: number; character: number };
+  end: { line: number; character: number };
+}
+
+/** What {@link FossilPlayground.hover} found: the rendered Markdown — a
+ *  ` ```fossil ` fence, the type of what you wrote and where it came from, and
+ *  a second block with the type the target shape demands of that predicate when
+ *  the shape resolves — and the range it applies to. */
+export interface HoverRow {
+  markdown: string;
+  range: LspRange;
+}
+
+/** One candidate from {@link FossilPlayground.completions}.
+ *
+ *  `kind` is the LSP `CompletionItemKind` **by name**, lowercased —
+ *  `"function"`, `"field"`, `"enum_member"` — and `""` when the item carries
+ *  none. Rust owns that table (`fossil_wasm::ide::kind_name`, total over the
+ *  twenty-five the spec defines) because a table in TypeScript is one nothing
+ *  can check: the deleted predecessor of `@fossil-lang/codemirror-fossil`
+ *  hard-copied the lexer's discriminants and was wrong in nine places by the
+ *  time it went.
+ *
+ *  `detail` is the signature, the shape property's IRI, or the source field's
+ *  inferred type — whatever the compiler wrote beside the label; `""` when it
+ *  wrote none. Neither field is optional, on purpose: an absent optional is the
+ *  one shape `serde_json` and `serde_wasm_bindgen` are measured to disagree
+ *  about. */
+export interface CompletionRow {
+  label: string;
+  kind: string;
+  detail: string;
+}
+
+/** One place {@link FossilPlayground.gotoDefinition} found a definition.
+ *
+ *  `uri` is the key the buffer was opened under, VERBATIM — matching
+ *  {@link CheckRow.uri}, and not a `file://` URI. Two of the four positions
+ *  goto-def recognises resolve into the shape document, so a target in another
+ *  file is the ordinary case and a host with one editor pane has to read this
+ *  before it moves a cursor. */
+export interface DefinitionRow {
+  uri: string;
+  range: LspRange;
 }
 
 // `StdlibClass` and `FossilPlayground.classification()` lived here — one row per
