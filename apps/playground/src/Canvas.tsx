@@ -22,6 +22,7 @@
  * geometry: if a placement is wrong it is wrong upstream, and it is fixed by recompiling.
  */
 import { GraphCanvas, type BoundedSource } from '@kanzo-tech/graph';
+import { categoricalCapacity } from '@kanzo-tech/ui';
 import { useCallback, useMemo, useState } from 'react';
 
 import type { Bench } from './bench.js';
@@ -54,6 +55,16 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
   const onCost = useCallback((next: SliceCost) => setCost(next), []);
   const onFailure = useCallback((message: string) => setFailure(message), []);
 
+  /**
+   * How many colours the palette has, asked of the document rather than assumed.
+   *
+   * `--chart-capacity` is a `:root` token of `@kanzo-tech/ui`'s stylesheet and its themes disagree
+   * about it, so the number that decides which ordinals get a colour is not a constant this app
+   * may write down. Read off `documentElement` and not off the canvas: the source is built before
+   * the element exists, and nothing here scopes an override.
+   */
+  const slots = useMemo(() => categoricalCapacity(document.documentElement), []);
+
   const source: BoundedSource = useMemo(
     () =>
       corpusSource({
@@ -62,8 +73,9 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
         register: duck.registerUrl,
         query: duck.query,
         onCost,
+        slots,
       }),
-    [bench, boxes, onCost],
+    [bench, boxes, onCost, slots],
   );
 
   return (
@@ -72,10 +84,14 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
       <p className="str-note">
         Drag to pan, scroll to zoom. Every camera move asks the source for the tiles the new
         rectangle touches and for nothing else — the same footer boxes the ledger above is reading,
-        with a camera on them instead of a slider. Colour is <code>cluster_id</code>, which the
-        layout pass wrote; position is <code>x</code>/<code>y</code>, which it wrote at the same
-        time. The simulation is off on purpose: a force would move the points out from under the
-        coordinates the next query is expressed in.
+        with a camera on them instead of a slider. Position is <code>x</code>/<code>y</code> and
+        colour is <code>cluster_id</code>, both written by the layout pass. The colour is{' '}
+        <em>folded</em>: this corpus has 128 communities and the palette has {slots} slots, so two
+        communities can share one — which is what a categorical palette is. Unfolded they do not
+        share a colour, they share <em>the</em> colour: everything past the last slot resolves to
+        the muted token, and 937,496 of the million vertices came back one grey. The simulation is
+        off on purpose: a force would move the points out from under the coordinates the next query
+        is expressed in.
       </p>
 
       <div className="can-surface">

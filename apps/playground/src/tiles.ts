@@ -121,6 +121,14 @@ export interface CorpusSourceOptions {
   query(sql: string): Promise<QueryRow[]>;
   /** Told what each answer cost, so the panel can print it beside the picture. */
   onCost?(cost: SliceCost): void;
+  /**
+   * How many slots the categorical palette has — `categoricalCapacity` of the host element.
+   *
+   * Asked for rather than assumed, because it is a fact about the THEME and this file cannot read
+   * a stylesheet: `@kanzo-tech/ui` publishes it as `--chart-capacity`, and its own themes disagree
+   * (7 in some, 8 in others). Passed as a number so nothing here imports a design system.
+   */
+  slots?: number;
 }
 
 /** `bigint` from one host and `number` from another — the graph package's contract says so. */
@@ -206,7 +214,7 @@ function tilesFor(
  * corpus in one corner of it.
  */
 export function corpusSource(options: CorpusSourceOptions): BoundedSource {
-  const { addressing, boxes, onCost, query, register, vertexType } = options;
+  const { addressing, boxes, onCost, query, register, slots = 8, vertexType } = options;
 
   const type = addressing.vertexType(vertexType);
   const { chunkSize } = type;
@@ -426,7 +434,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
       const points = await query(pointsSql);
       const links = linksSql ? await query(linksSql) : [];
 
-      const slice = assemble(points, links, typeIndex);
+      const slice = assemble(points, links, typeIndex, slots);
       onCost?.({
         tiles: chosen.length,
         ofTiles: boxes.length,
@@ -453,7 +461,12 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
  * `@fossil-lang/graph` asks of a host and the one this app implements. At `limit` marks the loop
  * is twenty thousand iterations of four field reads.
  */
-function assemble(points: readonly QueryRow[], links: readonly QueryRow[], typeIndex: number): Slice {
+function assemble(
+  points: readonly QueryRow[],
+  links: readonly QueryRow[],
+  typeIndex: number,
+  slots: number,
+): Slice {
   const rows = points.length;
   const positions = new Float32Array(rows * 2);
   const vertices = new BigUint64Array(rows);
@@ -466,11 +479,17 @@ function assemble(points: readonly QueryRow[], links: readonly QueryRow[], typeI
     positions[i * 2] = num(row.x);
     positions[i * 2 + 1] = num(row.y);
     vertices[i] = vertexId(typeIndex, num(row.dense_id)) as bigint;
-    // `& 0xffff` and not a rank: an ordinal has to mean the same colour after a pan, and a rank
-    // over the sample is renumbered by every camera move. A corpus with more than 65,536
-    // communities would wrap, which is the one thing this cap gets wrong and is worth saying —
-    // `Uint16Array` is the contract's type and the layout pass's `CLUSTER_BUDGET` is far below it.
-    categories[i] = num(row.cat) & 0xffff;
+    // Folded into the palette's slots, and NOT ranked: an ordinal has to mean the same colour
+    // after a pan, and a rank over the sample is renumbered by every camera move. A remainder is
+    // a function of the community alone, so it survives one.
+    //
+    // **The fold is what makes the picture show communities at all.** `categoricalColor` answers
+    // `var(--muted-foreground)` for any ordinal at or past the palette's capacity, and this corpus
+    // carries 128 communities against a capacity of 8 — so 937,496 of a million vertices came back
+    // one grey, which is what a pixel read of the canvas measured before this line existed. Two
+    // communities sharing a slot is what eight slots MEANS; a million points sharing one is a
+    // scale that has silently given up.
+    categories[i] = ((num(row.cat) % slots) + slots) % slots;
     // `mark` is TRUE down the sample and FALSE down the anchors, and the query orders by `local`,
     // so this is a prefix length rather than a count.
     if (row.mark === true || row.mark === 1) marks = i + 1;
