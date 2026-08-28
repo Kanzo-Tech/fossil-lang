@@ -549,7 +549,7 @@ describe('the verbs, through the same door', () => {
     // bare `subject` that `node` reports as the identity rather than as a field. The
     // divergence the pair pins is which columns each side can see, not how many: it read one
     // against five before the fixture grew the two, and it is three against seven now.
-    expect(rows[0]).toEqual({ subject: id, birth_year: 1955, postcode: 'PC5' });
+    expect(rows[0]).toEqual({ subject: id, birth_year: 1955, postcode: 'PC0' });
     const placed = await corpus.node(id);
     expect(placed!.id).toBe(id);
     expect(Object.keys(placed!.fields)).toEqual(['birth_year', 'postcode', 'cluster_id']);

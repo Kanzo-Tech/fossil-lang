@@ -4,7 +4,7 @@ container: files
 privacy:
   bound: k-anonymity
   k: 5
-  reached: 1
+  reached: 7
   absent_quasi_identifier: value
   population: 300
   suppressed: 0

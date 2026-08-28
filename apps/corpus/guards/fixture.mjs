@@ -98,13 +98,43 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
   // never been asked a question.
   //
   // They are functions of the PRE-layout index rather than of `dense_id`, so the
-  // equivalence classes are a property of the data and not of the tiling: 40
-  // birth years by 25 postcodes is 1,000 combinations, each holding
-  // `count / 1000` records, and the smallest class is the same number however
-  // the corpus is cut. That is what makes `declared-privacy` and
+  // equivalence classes are a property of the data and not of the tiling, and
+  // the smallest class is the same number however the corpus is cut. That is
+  // what makes `declared-privacy` and
   // `the_class_is_the_release_and_not_the_tile` the same assertion in two
   // languages.
-  const quasi = (index) => [1950 + (index % 40), `PC${index % 25}`];
+  //
+  // # The grain is chosen, because a fixed one declares a bound small corpora cannot hold
+  //
+  // This read `1950 + index % 40` and `PC${index % 25}` unconditionally, with a
+  // comment claiming 1,000 combinations of `count / 1000` records each. **Both
+  // halves were wrong.** `index % 40` and `index % 25` do not range over 40×25
+  // pairs: they repeat every `lcm(40, 25)`, and `gcd` is 5, so there are **200**
+  // classes and never were a thousand. And at the conformance corpus's 300
+  // records, 200 classes hold one or two records apiece — so the manifest
+  // declared `k: 5` over files that reach `k: 1`, and `declared-privacy` said so.
+  //
+  // The grain now falls with the corpus. `PAIRS` is ordered coarsest-first and
+  // the first entry whose class count the corpus can fill `K` deep wins, so the
+  // 70,000-record default still lands on `(40, 25)` and writes the same bytes it
+  // always did, while 300 records land on `(8, 5)` — 40 classes of seven or
+  // eight. A fixture that emits a corpus violating the convention it exists to
+  // demonstrate is worse than no fixture.
+  const K = 5;
+  const PAIRS = [
+    [40, 25],
+    [8, 5],
+    [4, 5],
+    [2, 5],
+    [1, 1],
+  ];
+  const lcm = (a, b) => {
+    const gcd = (x, y) => (y === 0 ? x : gcd(y, x % y));
+    return (a / gcd(a, b)) * b;
+  };
+  const [years, postcodes] =
+    PAIRS.find(([y, pc]) => lcm(y, pc) * K <= count) ?? PAIRS[PAIRS.length - 1];
+  const quasi = (index) => [1950 + (index % years), `PC${index % postcodes}`];
   const rows = ordered.map((p, dense) => {
     const [birthYear, postcode] = quasi(p.index);
     return `${dense},https://example.org/person/${p.index},${birthYear},${postcode},${p.x},${p.y},${p.cluster}`;
@@ -245,7 +275,7 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       // nested sequence here would be SKIPPED rather than refused.
       "privacy:",
       "  bound: k-anonymity",
-      "  k: 5",
+      `  k: ${K}`,
       `  reached: ${reached}`,
       "  absent_quasi_identifier: value",
       `  population: ${count}`,
