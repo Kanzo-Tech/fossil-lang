@@ -165,6 +165,35 @@ const MUTATIONS = [
     layout: "rowgroups",
     mutate: (dir) => rewrite(join(dir, VERTICES), "SELECT * EXCLUDE (y) FROM m ORDER BY dense_id"),
   },
+  // Two breaks, because the two ways an address stops being an address are not
+  // ones a reader would confuse. A string fails to shift at all and is loud
+  // wherever anything touches it; a SIGNED integer shifts perfectly, addresses a
+  // real tile, and every other guard here stays green — `dense-ids` reads
+  // min/max/count and a BIGINT satisfies all three. The second is the one this
+  // guard exists for.
+  {
+    guard: "addressing-is-unsigned",
+    what: "`dense_id` is stored as a string, so nothing can shift it",
+    layout: "rowgroups",
+    // The rows keep their order and every other column: the subquery sorts on the
+    // original numeric column, so the tiling and the Morton order survive and the
+    // only thing that changed is the type under the name.
+    mutate: (dir) =>
+      rewrite(
+        join(dir, VERTICES),
+        "SELECT * REPLACE (dense_id::VARCHAR AS dense_id) FROM (SELECT * FROM m ORDER BY dense_id)",
+      ),
+  },
+  {
+    guard: "addressing-is-unsigned",
+    what: "`dense_id` is signed, so `>>` sign-extends — and it is the break nothing else here sees",
+    layout: "rowgroups",
+    mutate: (dir) =>
+      rewrite(
+        join(dir, VERTICES),
+        "SELECT * REPLACE (dense_id::BIGINT AS dense_id) FROM (SELECT * FROM m ORDER BY dense_id)",
+      ),
+  },
   {
     guard: "declared-tiling",
     what: "the manifest declares a tile of 5,000 rows, which no shift addresses",
@@ -266,7 +295,11 @@ const MUTATIONS = [
     mutate: (dir) =>
       rewrite(
         join(dir, VERTICES),
-        `SELECT row_number() OVER (ORDER BY hash(dense_id::BIGINT * 2654435761)) - 1 AS dense_id,
+        // The cast back to UINTEGER is not cosmetic: `row_number()` is a BIGINT, and
+        // without it this break is also a signed `dense_id` and fires
+        // `addressing-is-unsigned` as well. The control has to change the ORDER and
+        // nothing else, or the collateral list stops naming what was broken.
+        `SELECT (row_number() OVER (ORDER BY hash(dense_id::BIGINT * 2654435761)) - 1)::UINTEGER AS dense_id,
                 subject, x, y, cluster_id FROM m ORDER BY 1`,
       ),
   },

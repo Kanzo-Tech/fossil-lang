@@ -86,11 +86,21 @@ export function fileList(files) {
   return `[${files.map((f) => `'${lit(f.path)}'`).join(", ")}]`;
 }
 
-/** The column names of a payload set. */
+/**
+ * The columns of a payload set: the names, and the type under each name.
+ *
+ * One `DESCRIBE` answers both, and the second half is not decoration. Every convention here is
+ * addressed by NAME — `dense_id`, `src_dense`, `x` — and a name says nothing about what a shift
+ * will do to the value under it. `plain-parquet` proves the names are present and says in its own
+ * `cannotProve` that it cannot reach the types; `addressing-is-unsigned` is where they are reached.
+ */
 function columnsOf(files) {
-  if (files.length === 0) return new Set();
+  if (files.length === 0) return { names: new Set(), types: new Map() };
   const rows = query(`DESCRIBE SELECT * FROM read_parquet(${fileList(files)})`);
-  return new Set(rows.map((r) => String(r.column_name)));
+  return {
+    names: new Set(rows.map((r) => String(r.column_name))),
+    types: new Map(rows.map((r) => [String(r.column_name), String(r.column_type)])),
+  };
 }
 
 /**
@@ -137,6 +147,7 @@ export function inspect(root) {
     const prefix = vertexPrefix(info);
     const files = payload(join(root, prefix));
     const chunkSize = BigInt(info.chunk_size ?? 0);
+    const columns = columnsOf(files);
     return {
       name: String(info.type ?? ""),
       rel: info.rel,
@@ -147,7 +158,9 @@ export function inspect(root) {
       shift: shiftFor(chunkSize),
       files,
       layout: layoutOf(files),
-      columns: columnsOf(files),
+      columns: columns.names,
+      /** The type under each of those names, which is what a shift depends on and a name cannot say. */
+      columnTypes: columns.types,
       count: files.length === 0 ? 0 : Number(scalar(`SELECT count(*) FROM read_parquet(${fileList(files)})`)),
       /** The staged single file the layout pass consumes. A reader that globs picks it up. */
       staged: join(root, `${prefix}.parquet`),
@@ -170,6 +183,9 @@ export function inspect(root) {
           chunkSize: BigInt(declared.chunk_size ?? 0),
           files: tiles,
           layout: layoutOf(tiles),
+          // The index carries `dense_id` too — it is the half of the pair that gets shifted, so it
+          // is addressing and answers to the same rule as the payload's.
+          columnTypes: columnsOf(tiles).types,
         };
       })(),
     };
@@ -220,7 +236,9 @@ export function inspect(root) {
 
   for (const edge of edges) {
     for (const side of [edge.bySource, edge.byTarget]) {
-      side.columns = columnsOf([...side.relation, ...side.tiles]);
+      const columns = columnsOf([...side.relation, ...side.tiles]);
+      side.columns = columns.names;
+      side.columnTypes = columns.types;
     }
   }
 
