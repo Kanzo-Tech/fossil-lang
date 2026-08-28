@@ -21,6 +21,8 @@
 import { linter, type Diagnostic } from '@codemirror/lint';
 import type { EditorState, Extension } from '@codemirror/state';
 
+import { rangeOf, type Position } from './positions.js';
+
 /** LSP `DiagnosticSeverity`, as `fossil-wasm` emits it on `CheckRow.severity`. */
 const SEVERITY: Readonly<Record<number, Diagnostic['severity']>> = {
   1: 'error',
@@ -28,12 +30,6 @@ const SEVERITY: Readonly<Record<number, Diagnostic['severity']>> = {
   3: 'info',
   4: 'hint',
 };
-
-/** One LSP position, UTF-16 — the units CodeMirror already counts in. */
-interface Position {
-  line: number;
-  character: number;
-}
 
 /** The `CheckRow` shape, restated structurally so this module imports no runtime.
  *  `@fossil-lang/wasm` is the definition; anything with these fields works. */
@@ -45,21 +41,10 @@ export interface CheckRowLike {
   related?: { uri: string; range: { start: Position; end: Position }; message: string }[];
 }
 
-/**
- * Turn one LSP position into a CodeMirror offset, clamped into the document.
- *
- * Clamping is not defensiveness for its own sake: a diagnostic is computed from
- * the text as it was when `check()` ran, and by the time the linter renders it the
- * user may have deleted the line it points at. CodeMirror throws on an
- * out-of-range decoration, and an editor that crashes because you pressed
- * backspace is worse than a squiggle in the wrong place for one frame.
- */
-function offsetOf(state: EditorState, pos: Position): number {
-  const doc = state.doc;
-  const lineNumber = Math.min(Math.max(pos.line + 1, 1), doc.lines);
-  const line = doc.line(lineNumber);
-  return Math.min(line.from + Math.max(pos.character, 0), line.to);
-}
+// The clamping this module used to do itself is `positions.ts`'s now, because
+// hover and goto-def need exactly the same arithmetic and exactly the same
+// clamp: a position is computed against the text as it was when the request went
+// out, and the user may have deleted that line before the answer lands.
 
 /**
  * Project `CheckRow`s onto CodeMirror `Diagnostic`s against a given document.
@@ -77,11 +62,7 @@ export function toDiagnostics(
   const out: Diagnostic[] = [];
   for (const row of rows) {
     if (row.uri !== uri) continue;
-    const from = offsetOf(state, row.range.start);
-    let to = offsetOf(state, row.range.end);
-    // A zero-width range renders as nothing at all. Widen it by one character
-    // where there is one, so an error at end-of-line is still visible.
-    if (to <= from) to = Math.min(from + 1, state.doc.length);
+    const { from, to } = rangeOf(state, row.range);
     const related = (row.related ?? [])
       .map((r) => `\n  → ${r.uri}:${r.range.start.line + 1}: ${r.message}`)
       .join('');
