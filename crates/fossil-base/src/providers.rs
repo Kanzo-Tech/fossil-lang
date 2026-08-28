@@ -51,13 +51,10 @@
 //!
 //! # It is data, and it is now only data
 //!
-//! This module used to open by claiming *«nothing here decides anything about a
-//! program»* while carrying `decline_capability` and `decline_extension` — two
-//! functions that composed English Fossil compiler errors, asserted verbatim by
-//! this module's own tests. The claim and the file disagreed, and the file was
-//! wrong. Both moved to `fossil_hir::refusals`, next to the checker that raises
-//! them. What is left is the catalogue: a name, the extensions it accepts, the
-//! capabilities it declares, and two predicates over those.
+//! Nothing here decides anything about a program. The catalogue is a name, the
+//! extensions it accepts, the capabilities it declares, and two predicates over
+//! those; composing a Fossil compiler error out of it is `fossil_hir::refusals`,
+//! next to the checker that raises it.
 //!
 //! That is not left to a comment: `tests/substrate_has_no_prose.rs` reads this
 //! file **and the module beside it** and fails on a string literal outside `mod tests`
@@ -263,16 +260,11 @@ pub fn claimed(table: &[&'static Provider], uri: &str) -> bool {
     table.iter().any(|p| p.accepts(uri))
 }
 
-// `type_reader_claiming(table, uri)` lived here — the one position with no name
-// to dispatch on, `{ A, B } := io.rdf("g.ttl", schema = "x.shex")`, where a
-// named argument carried a path and no constructor. It was the last
-// extension-based selection in the tree and its own doc said it would go the day
-// `schema = …` named a provider.
-//
-// It has. `schema = io.shex("x.shex")` is a provider call like every other
-// position that names a document, so there is ONE rule and no corner:
-// **where there is a document, there is a row that names it.** A bare string is
-// a diagnostic (`fossil_hir::lower::check_provider`), not a fallback.
+// Nothing selects a row by extension. `schema = io.shex("x.shex")` is a
+// provider call like every other position that names a document, so there is ONE
+// rule and no corner: **where there is a document, there is a row that names
+// it.** A bare string is a diagnostic (`fossil_hir::lower::check_provider`), not
+// a fallback.
 //
 // The alternative considered was killing `schema =` outright and taking every
 // document from a `type { … }` binding. It is not the same document: `schema =`
@@ -382,10 +374,9 @@ mod tests {
     /// rule this replaces they would have been one row.
     #[test]
     fn a_row_is_identified_by_its_address_not_by_its_decode() {
-        // `assert_eq!` on the two `Option<fn>` is what this said, and it is not a
-        // comparison the compiler will stand behind: two `fn` pointers can differ
-        // across codegen units and two distinct functions can be merged to one
-        // address. `std::ptr::fn_addr_eq` is the spelling that admits that.
+        // Never `assert_eq!` on the two `Option<fn>`: two `fn` pointers can
+        // differ across codegen units and two distinct functions can be merged
+        // to one address. `std::ptr::fn_addr_eq` is the spelling that admits it.
         assert!(
             std::ptr::fn_addr_eq(
                 SHEX.reads_types.expect("shex reads types"),

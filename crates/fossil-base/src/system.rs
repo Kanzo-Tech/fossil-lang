@@ -34,9 +34,8 @@ pub trait System: Send + Sync + std::fmt::Debug {
     /// This is the whole descriptor surface: one accessor handing out a
     /// reference to a plain table, in place of the read/write method pair that
     /// three `System` impls each re-implemented over a private
-    /// `Mutex<HashMap>`. The registration side no longer has a default that
-    /// panics, because there is no longer a default to write — a host either has
-    /// a table or answers `None`. **A host capability is ambient in the context
+    /// `Mutex<HashMap>`. There is no default to write, so a host either has a
+    /// table or answers `None`. **A host capability is ambient in the context
     /// and never part of a query key**, which is what lets this be an accessor
     /// at all.
     ///
@@ -57,21 +56,19 @@ pub trait System: Send + Sync + std::fmt::Debug {
         None
     }
 
-    /// **What this host declares it recognises.** It is no longer what anything
-    /// reads: `FossilDb::new` copies it into [`crate::providers::Registry`], a
-    /// Salsa input, and every query goes through
-    /// [`crate::providers::installed`].
+    /// **What this host declares it recognises**, and nothing reads it directly:
+    /// `FossilDb::new` copies it into [`crate::providers::Registry`], a Salsa
+    /// input, and every query goes through [`crate::providers::installed`].
     ///
     /// The rows stay `&'static` because a row's identity is its address, and a
     /// `Vec<&'static Provider>` inside an input is exactly that. A table read
     /// from a file at run time cannot be `&'static`, which is why the read path
     /// moved to the input and this method stayed a declaration.
     ///
-    /// **This method is a seam that should close.** Twelve of the thirteen
-    /// implementations return the identical
-    /// `fossil_descriptors_output::PROVIDERS`, so "the host chooses what is
-    /// installed" is a choice nobody makes. When the catalogue is loaded from a
-    /// file there is one loader, and these thirteen go with it.
+    /// **This method is a seam that should close.** All but two implementations
+    /// return the identical `fossil_descriptors_output::PROVIDERS`, so "the host
+    /// chooses what is installed" is a choice nobody makes. When the catalogue
+    /// is loaded from a file there is one loader, and they all go with it.
     ///
     /// The default is [`DATA`] — the four rows that read data — and it is a real
     /// answer, not a stub: a host that decodes no shape document still has to
@@ -145,9 +142,8 @@ mod inferred_tests {
         assert!(s.descriptors().expect("table").get("nope.csv").is_none());
     }
 
-    /// The default `System` has no table. It used to have one that panicked
-    /// the moment anyone wrote to it; the answer is now a value the caller can
-    /// branch on.
+    /// The default `System` has no table, and says so with a value the caller
+    /// can branch on rather than a panic.
     #[test]
     fn a_system_without_a_table_says_so_instead_of_panicking() {
         #[derive(Debug)]
