@@ -38,6 +38,26 @@ call that decides it. So a corpus fossil wrote registers no wildcard at all, and
 reachable only through a corpus another writer produced — which the conformance corpus is, because it
 is written through DuckDB and DuckDB clamps a row group under its 2,048-row vector.
 
+### `chunk_size` is what was written, never what was asked for
+
+DuckDB's `ROW_GROUP_SIZE` is a **request**. It writes row groups in whole 2,048-row vectors and
+rounds a smaller one up without saying so, and a generator that takes `chunk_size` from the number it
+passed in publishes a manifest describing a corpus it did not write. `--chunk-size 1024` produced
+exactly that: a corpus declaring 1,024 over row groups of 2,048, against which this repository's own
+`tile-of` guard finds **14,643 violations**.
+
+The fixture now **refuses** when the two disagree. Writing the size it observed was the tempting fix
+and is the same lie pointed the other way — the manifest would agree with the bytes while silently
+disowning what the caller asked for, and a `chunk_size` that quietly means something else is what
+produced a flat sweep curve for somebody measuring from outside. Refusing is the only outcome that
+reaches the person who can act on it.
+
+**This is DuckDB's floor and not the format's**, which is why fossil's own writer is unaffected:
+`TileWriter` goes through arrow-rs with both automatic limits set to `None`, so the cut is the
+explicit one the caller made. A 64-row tile round-trips as `[64, 64, 64, 64, 44]`. The conformance
+corpus therefore declares `container: files` at a `chunk_size` of 64 — the field exists to say which
+— while fossil emits `rowgroups`.
+
 It is not closed, and the reason is that closing it is a format change rather than a binding change:
 it needs a per-orientation tile census in the edge manifest, a field with its own argument about what
 a reader may derive. Until a `files` corpus is served, the cost is one nobody is paying.
