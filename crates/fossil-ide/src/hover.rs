@@ -32,8 +32,8 @@
 //! renders the closure binding as a fenced `fossil` code block ABOVE the field
 //! type, plus a `*synthesised closure parameter binding*` tagline, so the
 //! synthesis is NEVER hidden from the user. All type rendering goes through
-//! [`render_ty_kind`], so `TyKind::Unknown(InferenceId)` — internal inference
-//! state — normalises to `?` and never reaches a surface diagnostic or a hover.
+//! [`render_ty_kind`], never `{:?}`, so no `TyKind` reaches a hover under its
+//! Rust spelling.
 //!
 //! Nothing in the compiler builds that variant any more. The synthesis went away
 //! when the row got a name: a reference reaches its row through the binding that
