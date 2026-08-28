@@ -1,6 +1,17 @@
 name: graph
 prefix: ''
 container: files
+privacy:
+  bound: k-anonymity
+  k: 5
+  reached: 1
+  absent_quasi_identifier: value
+  population: 300
+  suppressed: 0
+  suppression_budget_ppm: 0
+  quasi_identifiers: Person.birth_year Person.postcode
+  policy: https://example.org/policies/fixture-v1
+  profile: https://fossil-lang.org/ns/privacy/v1
 vertices:
 - vertex/Person.vertex.yml
 edges:

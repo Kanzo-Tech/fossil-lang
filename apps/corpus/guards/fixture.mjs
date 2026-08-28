@@ -24,7 +24,7 @@
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { execute, lit } from "./duck.mjs";
+import { execute, lit, scalar } from "./duck.mjs";
 import { TILE_ROWS, mortonOf } from "./arithmetic.mjs";
 
 const GOLDEN_ANGLE = 2.3999632;
@@ -277,10 +277,17 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       "  - name: subject",
       "    data_type: string",
       "    is_primary: true",
+      // `is_primary` is not optional, and leaving it off produced a manifest fossil's own
+      // reader refuses: `fossil_sinks::manifest::Property` has no default for it, so
+      // `openCorpus` failed on this file with «missing field `is_primary`» while every
+      // JavaScript reader sailed past. That is the asymmetry the third reader was added
+      // to catch, catching something.
       "  - name: birth_year",
       "    data_type: int32",
+      "    is_primary: false",
       "  - name: postcode",
       "    data_type: string",
+      "    is_primary: false",
       "index:",
       "  prefix: index/",
       "  ordered_by: subject",
@@ -316,6 +323,38 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       "",
     ].join("\n"),
   );
+
+  // `ROW_GROUP_SIZE` is a REQUEST, and `rowgroups` is the container that believes it.
+  //
+  // DuckDB writes row groups in whole vectors and its vector is 2,048 rows, so anything
+  // below that is rounded UP and the writer says nothing. Every line above wrote
+  // `chunk_size: ${tileRows}` into three manifests from the number that was ASKED FOR,
+  // never from the number on disk — so `--chunk-size 1024` produced a corpus whose
+  // manifest declared 1024 and whose row groups held 2,048, and the repo's own `tile-of`
+  // guard found 14,643 violations in it. A fixture that can emit a corpus violating the
+  // conventions it exists to demonstrate is worse than no fixture.
+  //
+  // It refuses rather than correcting the manifest to match the bytes. Silently writing a
+  // chunk size nobody asked for is the same lie pointed the other way: the caller of a
+  // `chunk_size` sweep would get a flat curve and no reason for it, which is precisely how
+  // this was found — from the outside, by someone measuring.
+  //
+  // `files` is unaffected: there the tile is a whole file, so no row-group size addresses it.
+  if (layout === "rowgroups" && count > 0) {
+    const target = lit(join(vertexPrefix, "tiles.parquet"));
+    const onDisk = Number(
+      scalar(`SELECT max(row_group_num_rows) FROM parquet_metadata('${target}');`),
+    );
+    if (onDisk !== tileRows && tiles > 1) {
+      throw new Error(
+        `chunk_size ${tileRows} was requested and DuckDB wrote row groups of ${onDisk}. ` +
+          `Row groups come out in whole 2,048-row vectors, so a smaller chunk_size cannot ` +
+          `be honoured — and the manifest would declare a tile no reader could address. ` +
+          `Ask for ${onDisk} or larger, or write this corpus as \`layout: "files"\`, where ` +
+          `a tile is a file and no row-group size is involved.`,
+      );
+    }
+  }
 
   return { dir, count, edges: pairs.length, tiles, layout, chunkSize: tileRows, reached };
 }

@@ -366,15 +366,15 @@
       "case": "corpus",
       "vertex_count": 300,
       "types": {
-        "about": "What is inside, from the manifest and one DESCRIBE. `identity` is the column an id is read from and it is `subject`, not `dense_id`: the address does not survive a re-layout, and the guards' `identity-is-the-subject` holds the same line.",
+        "about": "What is inside, from the manifest and one DESCRIBE. `identity` is the column an id is read from and it is `subject`, not `dense_id`: the address does not survive a re-layout, and the guards' `identity-is-the-subject` holds the same line. `birth_year` and `postcode` are the quasi-identifiers the declared bound is measured over, and they are ordinary payload to a reader — which is the point: nothing about reading this corpus changes because it carries a privacy declaration.",
         "vertices": [
           {
             "type": "Person",
             "chunk_size": 64,
-            "fields": ["dense_id", "subject", "x", "y", "cluster_id"],
+            "fields": ["dense_id", "subject", "birth_year", "postcode", "x", "y", "cluster_id"],
             "identity": "subject",
             "geometry": true,
-            "payload": ["cluster_id"]
+            "payload": ["birth_year", "postcode", "cluster_id"]
           }
         ],
         "edges": [

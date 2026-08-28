@@ -131,11 +131,15 @@ describe('openCorpus — what is inside', () => {
     expect(person.count).toBe(VERTEX_COUNT);
     expect(person.identity).toBe('subject');
     expect(person.geometry).toBe(true);
-    // Five on disk against ONE in `property_groups` — the manifest's promise is not the artefact,
-    // which is why the vocabulary is a DESCRIBE and not a read of the manifest.
+    // Seven on disk against THREE in `property_groups` — the manifest's promise is not the
+    // artefact, which is why the vocabulary is a DESCRIBE and not a read of the manifest. The
+    // gap is what matters and not its width: it was five against one before the fixture grew
+    // the two quasi-identifiers the declared privacy bound is measured over.
     expect(person.fields.map((f) => f.name)).toEqual([
       'dense_id',
       'subject',
+      'birth_year',
+      'postcode',
       'x',
       'y',
       'cluster_id',
@@ -143,16 +147,18 @@ describe('openCorpus — what is inside', () => {
     expect(person.fields.map((f) => f.type)).toEqual([
       'UINTEGER',
       'VARCHAR',
+      'INTEGER',
+      'VARCHAR',
       'FLOAT',
       'FLOAT',
       'UINTEGER',
     ]);
   });
 
-  it('carries one property that the manifest declares, against five columns on disk', () => {
+  it('carries three properties that the manifest declares, against seven columns on disk', () => {
     const declared = readFileSync(join(CORPUS, 'vertex/Person.vertex.yml'), 'utf8');
-    expect(declared.match(/^ {2}- name: /gm)).toHaveLength(1);
-    expect(corpus.types.vertices[0]!.fields.length).toBe(5);
+    expect(declared.match(/^ {2}- name: /gm)).toHaveLength(3);
+    expect(corpus.types.vertices[0]!.fields.length).toBe(7);
   });
 
   it('reads the edge type, both orientations, one count for the pair', () => {
@@ -300,7 +306,7 @@ describe('node — the identity, and what it refuses to be', () => {
     expect(vertex!.denseId).toBe(137n);
     expect(vertex!.type).toBe('Person');
     // The payload minus the four the answer reads by name.
-    expect(Object.keys(vertex!.fields)).toEqual(['cluster_id']);
+    expect(Object.keys(vertex!.fields)).toEqual(['birth_year', 'postcode', 'cluster_id']);
   });
 
   it('refuses a dense id, because an address is not a name', async () => {
@@ -513,8 +519,8 @@ describe('the verbs, through the same door', () => {
    * registers the temp views that join the two.
    *
    * **These do not assert what the corpus API asserts elsewhere, on purpose.** A verb reads the
-   * MANIFEST's vocabulary and this corpus declares one property against five columns on disk, so
-   * `read` answers with `subject` alone and `schema` reports no fields at all. That divergence is
+   * MANIFEST's vocabulary and this corpus declares three properties against seven columns on
+   * disk, so `read` answers with `subject` alone and `schema` reports no fields at all. That divergence is
    * the reason `openCorpus` describes the bytes instead, and pinning it here is what stops the two
    * halves being confused for one.
    */
@@ -529,7 +535,7 @@ describe('the verbs, through the same door', () => {
     expect(edges).toHaveLength(1);
     expect(edges[0]!.table_name).toBe('Person_knows_Person');
     expect(edges[0]!.count).toBe(Number(EDGE_COUNT));
-    // Five columns on disk, one declared, and `subject` is a writer column: no field survives.
+    // Seven columns on disk, three declared, and `subject` is a writer column: no field survives.
     expect(fields).toHaveLength(0);
   }, 30_000);
 
@@ -537,12 +543,16 @@ describe('the verbs, through the same door', () => {
     const id = await seedOf(7);
     const { rows } = await corpus.read({ vertex_type: 'Person', where: `subject = ${lit(id)}` });
     expect(rows).toHaveLength(1);
-    // The manifest's vocabulary, which is `subject` and nothing else. `node` on the same identity
-    // answers with five columns and a position, because it reads the bytes.
-    expect(rows[0]).toEqual({ subject: id });
+    // The manifest's vocabulary, which is now `subject` and the two quasi-identifiers the
+    // declared privacy bound is measured over. `node` on the same identity answers from the
+    // BYTES instead, so it has `x`, `y` and `cluster_id` that this does not — and this has a
+    // bare `subject` that `node` reports as the identity rather than as a field. The
+    // divergence the pair pins is which columns each side can see, not how many: it read one
+    // against five before the fixture grew the two, and it is three against seven now.
+    expect(rows[0]).toEqual({ subject: id, birth_year: 1955, postcode: 'PC5' });
     const placed = await corpus.node(id);
     expect(placed!.id).toBe(id);
-    expect(Object.keys(placed!.fields)).toEqual(['cluster_id']);
+    expect(Object.keys(placed!.fields)).toEqual(['birth_year', 'postcode', 'cluster_id']);
   }, 30_000);
 
   it('expands over the whole relation, in identities, where neighbours walks tiles', async () => {
