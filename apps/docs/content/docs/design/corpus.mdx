@@ -288,6 +288,24 @@ A new verb enters only if it serves a case the single path demonstrably cannot, 
 demonstration is a measurement. Not an argument.
 </Callout>
 
+### The reader keeps an addressing pair beside the verbs, and that is a correction
+
+The reader package offers `node` and `neighbours` alongside `read` and `expand`, and they read as
+duplicates of them. They were to be deleted on exactly that reading, and the deletion was wrong.
+
+**A verb names a relation and lets the engine choose bytes; these compute which files to open.** It
+is the same line that keeps `extent` and `window`, and the one the crate doc draws when it says
+pruning is the tiles' job and not a verb's. The two are not interchangeable in either direction:
+`expand` is a recursive CTE over the whole edge relation — the query `neighbours` exists because of,
+and which **did not return in 45 seconds at a million vertices**. It answers in IRIs where a canvas
+needs placements, it walks the source-ordered relation only where a neighbourhood is undirected, and
+it reports no `complete`, `gaps` or `frontier`, so an answer whose outermost ring is missing its own
+edges looks whole in a count.
+
+Deleting them would also have left the identity index unreadable through the package, because **no
+verb sees it** — the index is addressing by construction, and a surface with only verbs on it has no
+way to ask.
+
 ### `read`'s `where` is SQL, and carries `execute_sql`'s authority
 
 `read { vertex_type, where?, order_by?, descending, limit }` takes `where` as a **raw SQL fragment**,
