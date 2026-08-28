@@ -18,6 +18,10 @@ export type FieldRole = "identifier" | "dimension" | "measure";
  * All graph operations dispatchable on the surface.
  *
  * The `tag = "verb"` serde representation makes the wire form `{ "verb": "schema", "params": { … } }` — identical for MCP tool calls, HTTP POST bodies, and CLI subcommand args.
+ *
+ * # It serialises, and it does not deserialise
+ *
+ * There is no `Deserialize` impl, and its absence is load-bearing rather than an oversight: two variants carry [`RawSql`], and [`Operation::from_wire`] is the one door from wire JSON because that door takes the permission those two fields share. [`raw_sql`] is the argument.
  */
 export type Operation =
   | {
@@ -210,7 +214,7 @@ export interface SchemaParams {
 /**
  * Rows of one vertex type, filtered, ordered and capped.
  *
- * **`where` is SQL and is trusted exactly as far as `execute_sql` is.** A binding that gates the escape hatch behind a permission MUST gate this field with it: the two carry the same authority over the same engine.
+ * **`where` is SQL and is trusted exactly as far as `execute_sql` is**, which is why its type is [`RawSql`] and why this struct is not `Deserialize`: the permission that opens the escape hatch is the same token that fills this field, and [`Operation::from_wire`](super::Operation::from_wire) is the one place either can be built from wire JSON. [`raw_sql`](super::raw_sql) carries the argument.
  */
 export interface ReadParams {
   descending?: boolean;
