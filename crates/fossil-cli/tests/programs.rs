@@ -234,7 +234,7 @@ use miette::{GraphicalReportHandler, GraphicalTheme, LabeledSpan, NamedSource, S
 /// and `grammar.bnf`'s header states these numbers: a program added or deleted
 /// without that header changing is a divergence between the language's spec and
 /// its only control.
-const EXPECTED_TOTAL: usize = 27;
+const EXPECTED_TOTAL: usize = 28;
 const EXPECTED_FAILING: usize = 6;
 
 /// One program of the set.
