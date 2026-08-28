@@ -1,0 +1,50 @@
+/*
+ * The canvas panel's own styles. Same disposition as `streaming.css`: it reuses `styles.css`'s
+ * custom properties, defines no palette, and reuses `.str-*` for the ledger and the notes rather
+ * than restating them — the two panels are one argument in two halves and a second set of rules
+ * for the same boxes would be two of them.
+ *
+ * `.can-surface` has an explicit height and that is not decoration. `GraphCanvas` renders
+ * `size-full` — 100% of its parent in both axes — and cosmos.gl sizes its WebGL drawing buffer
+ * from the element's own box. A parent whose height is content-derived is therefore zero tall, the
+ * canvas is zero tall, and the renderer draws a million vertices into no pixels and reports
+ * nothing wrong. Somebody has to name a height; the host is the only one who can.
+ */
+
+.can {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.can-surface {
+  /*
+   * The five tokens the renderer resolves, mapped onto this app's own three colours.
+   *
+   * `@kanzo-tech/graph` reads `--background`, `--foreground`, `--muted-foreground`, `--border` and
+   * `--primary` off the element the canvas sits in — `resolveToken(host, …)`, resolved against the
+   * host rather than against `<html>` precisely so a scoped override wins. `@kanzo-tech/ui`'s
+   * prebuilt stylesheet defines them, but only inside `[data-theme=…]` and `.dark`, and this app
+   * sets neither: it follows `prefers-color-scheme` on a palette of its own. So the canvas came up
+   * WHITE on a dark page — resolved, not unresolved, which is why nothing reported a problem.
+   *
+   * Mapping here rather than adopting a `data-theme` is deliberate: picking one of kanzo's themes
+   * for the whole document is the editor half's decision, and it would repaint the editor. Five
+   * declarations scoped to one element repaint the canvas.
+   */
+  --background: var(--panel);
+  --foreground: var(--fg);
+  --muted-foreground: var(--muted);
+  --border: var(--line);
+  --primary: var(--ok);
+
+  height: 26rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  overflow: hidden;
+  /* The canvas takes pointer gestures — a drag here is a pan, not a text selection. */
+  touch-action: none;
+}
+

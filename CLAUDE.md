@@ -217,8 +217,15 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
                            and Morton through `fossil-layout` over a `MemoryFs` — so the corpus
                            the tab writes is byte-identical to the one `fossil run` writes. Its
                            editor is `@kanzo-tech/ui`'s `CodeEditor` with
-                           `packages/codemirror-fossil` inside it, and it does NOT adopt
-                           `@kanzo-tech/graph`
+                           `packages/codemirror-fossil` inside it, and its canvas IS
+                           `@kanzo-tech/graph` — this line said it was not, and the tree
+                           won. What the app does NOT take is `@kanzo-tech/mosaic`: that
+                           subpath is an OPTIONAL peer, and taking it pulls
+                           `@uwdata/mosaic-core`, which hard-depends on a SECOND
+                           DuckDB-WASM. `src/tiles.ts` implements `BoundedSource` over the
+                           app's own connection instead; `pnpm --filter
+                           @fossil-lang/playground... build` emitting one `duckdb-*.wasm`
+                           asset is the condition that keeps it true
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
