@@ -173,6 +173,36 @@ than unbounded. Closing it means the layout being told what the executor left re
 number nothing currently carries across the seam.
 </Callout>
 
+## The pass takes a filesystem it does not own
+
+The layout pass is arithmetic over Arrow — Louvain, a Morton renumbering, a gather, one sort — and
+only eight functions of it were ever about files. Every one of those was `std::fs`, which is the
+single reason a crate declaring `[package.metadata.fossil] wasm = true` could not actually run in a
+browser: it compiled for `wasm32` and then had nothing to open. `LayoutIo` is the narrowest seam that
+fixes it — **open a URL for reading, create one for writing, ensure a prefix exists** — with
+`LocalFs` behind it natively and `MemoryFs` for a tab.
+
+**Handing the pass bytes instead of a filesystem was the obvious alternative, and it makes the native
+path worse to buy the browser path nothing.** A `Vec<(String, Vec<u8>)>` in and one back forces every
+input file resident before the pass starts and every output file resident until it ends, on a host
+that has a filesystem and needs neither. The vertex read is already the memory peak of the whole
+write path, so that is the half a byte-slice interface would double down on:
+
+| measured 2026-08-22, one million vertices and ten million edges | no budget | `--memory-gib 2` |
+| --- | --- | --- |
+| `execute_graph` peak | 7.42 G | 2.21 G |
+| layout entry → peak | 7.93 → 9.25 G | 2.80 → **4.80 G** |
+| what the layout adds | +1.32 G | +2.00 G |
+
+And it is the **vertex read and the gather, not the edge sort**: `read vertices` is +0.95 G and
+`gather + replace` +0.51 G under the cap, while `remap adjacencies + write edge tiles` is +0.17 G in
+1.9 s. So `LocalFs` streams through `File` exactly as the code did before the module existed, and the
+browser pays the resident cost because in a browser there is nothing else to pay.
+
+Below the trait the dispatch inverts: `LayoutIo` is a `&dyn` the pass takes once, while `Source` and
+`Sink` are enums, because `parquet` puts the reader and the writer in hot loops and that is where the
+indirection would be paid per call rather than per run.
+
 ## Three seams, named on the same reasoning
 
 DataFusion already streams — it hands `RecordBatch`es out lazily and its operators reserve, spill and
