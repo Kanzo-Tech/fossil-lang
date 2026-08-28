@@ -106,6 +106,54 @@ The interesting part is the gate. It is set at **400 ms, not at 100**, and delib
 A gate that catches the failure it was built for and says what it cannot catch is worth more than one
 whose threshold implies a precision the runner does not have.
 
+### Four callers at four rates, and one workspace between them
+
+Incrementality only pays if the callers stop invalidating each other. Four of them read the same
+workspace at four different rates — the linter on a 120 ms debounce, hover when the pointer rests,
+completion on nearly every keystroke, goto-definition on a key — and every one of them answers about
+the text of the last update, so every one of them pushes its text first.
+
+What makes that cheap is a string compare before the push. `updateFile` is the one method taking the
+exclusive borrow and the one bumping the Salsa revision, so calling it per mouse-move would
+invalidate the memoised check the squiggles came from, for text that had not changed. The compare is
+the difference between sharing a workspace and thrashing one.
+
+**A second workspace for the position queries was the alternative, and it is worse in the way that
+matters.** It doubles the interning and the memory, which is merely a cost; what condemns it is that
+hover and completion would then answer from a different revision than the diagnostics on screen —
+the exact class of defect a separate workspace was meant to avoid, wearing a different hat. The
+re-entrancy that made sharing look dangerous is a fixed defect rather than a standing hazard, so
+scheduling around it would be paying forever for a bug that is gone.
+
+### The editor layer owns only the half it can check
+
+The same three answers reach a CodeMirror buffer as extensions rather than as a component, and the
+line that divides the two sides is what keeps them from drifting.
+
+**Completion does not re-rank or re-filter.** `validFor` is deliberately unset: the compiler decided
+which rows apply at this cursor, and a client-side prefix filter over its answer is a second opinion
+from the side that knows less. What does live here is the CodeMirror half of the kind mapping —
+LSP's `field` and `property` are both CodeMirror's `property` — because that is a CodeMirror fact.
+Rust owns which kinds exist and what they are called; each side owns the half it can check, which is
+the [same rule](/docs/design/three-hosts) that ships a legend instead of a discriminant.
+
+**Every source takes the text as well as the position**, and the repetition is the design. The
+checker is debounced while hover fires on mouse-move and completion on nearly every keystroke, so
+most sources run between two checks. A source taking only a position would let a host query text it
+had not pushed and get a range one keystroke wrong.
+
+**Goto-definition reports its target instead of moving the cursor.** Two of the four positions
+`fossil_ide::goto_definition` recognises resolve into the shape document — the common case in a
+mapping language rather than the exception — so the navigation callback is required rather than
+defaulted. A version that always moved the caret would put it at the shape document's coordinates
+inside the program: somewhere plausible, and wrong.
+
+Two smaller ones with the same shape. `autocompletion()` is registered through `languageData` rather
+than as configuration, because the host editor already installs it and a language layer that
+configured it again would be reaching past the editor to set the editor's options. And `Alt-.` is
+bound beside `F12` because F12 is the browser's first — Chrome opens DevTools before the page sees
+it.
+
 ## Interruption, and what a test of it must prove
 
 An editor generates work faster than a compiler can finish it, so the compiler has to be
