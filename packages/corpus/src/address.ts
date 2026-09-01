@@ -191,6 +191,19 @@ export interface VertexAddress {
    * opposite of {@link VertexAddress.count}, whose absence makes a question unanswerable.
    */
   readonly index: IndexAddress | null;
+  /**
+   * Where this type's **tile-code anchor** is, or `null` when the manifest declares none.
+   *
+   * The one input {@link mortonTilesFor} needs and cannot derive — see {@link TileCodes}. It is a
+   * URL and not a value, because this module does not fetch: the host reads it once, the way it
+   * already reads the manifest, and hands the parsed document back through {@link parseTileCodes}.
+   *
+   * `null` is a legal corpus, on {@link VertexAddress.index}'s argument and not
+   * {@link VertexAddress.count}'s: a reader that has a Parquet reader answers the same window
+   * question out of the footers, more slowly and more loosely. What it is not is answerable by a
+   * reader that has none, and that is the reader this exists for.
+   */
+  readonly codesUrl: string | null;
 }
 
 /**
@@ -469,6 +482,7 @@ function vertexAddress(
     tiles,
     container,
     index: indexAddress(prefix, path, yaml, count, container),
+    codesUrl: codesUrlFor(prefix, path, yaml),
     tileOf: (denseId) => tileOf(denseId, shift),
     tileUrl,
     files: () => {
@@ -541,6 +555,25 @@ function indexAddress(
       return distinct(urls);
     },
   };
+}
+
+/**
+ * The `codes:` block of a vertex manifest, resolved to a URL, or `null` when there is none.
+ *
+ * One required key, and it is required for {@link indexAddress}'s reason: a block that declares the
+ * anchor exists without saying where it is reads exactly like a corpus that declares none, and the
+ * difference between those two is what a reader would act on.
+ */
+function codesUrlFor(vertexPrefix: string, path: string, yaml: ScannedManifest): string | null {
+  const declared = mapping(yaml, path, 'codes');
+  if (declared === null) return null;
+  const relative = declared['path'];
+  if (relative === undefined || relative === '') {
+    throw new CorpusManifestError(
+      `${path} declares codes and no path, so the anchor it names cannot be fetched`,
+    );
+  }
+  return join(vertexPrefix, relative);
 }
 
 function edgeAddress(
@@ -863,6 +896,131 @@ export function gridBoxOf(box: Box, extent: Box): GridBox | null {
 export interface TileCodes {
   readonly lo: ArrayLike<number>;
   readonly hi: ArrayLike<number>;
+  /**
+   * The box the codes were quantised against, when the anchor carries one.
+   *
+   * The **other** half of what a rectangle needs, and the half that was quietly assumed: a code is
+   * `quantize(x, xlo, xhi)` interleaved with `quantize(y, ylo, yhi)`, so a rectangle in the
+   * corpus's own coordinates is a rectangle on the grid only once this is known. It is derivable —
+   * it is the min and max of the `x` and `y` columns — but deriving it means opening every tile's
+   * footer, which is the reader the arithmetic path exists without. So the writer publishes it
+   * beside the codes, in the same document, and {@link mortonTilesFor} takes it from there when the
+   * caller does not pass one.
+   */
+  readonly extent?: Box;
+}
+
+/**
+ * The **tile-code anchor** as the writer publishes it: `vertex/<Type>/codes.json`, named by the
+ * `codes:` block of the type's manifest and addressed by {@link VertexAddress.codesUrl}.
+ *
+ * It is JSON and not a packed array of `u32` for the reason the rest of this module is arithmetic:
+ * a reader should need nothing it does not already have. Packed is 1,960 B at a million vertices
+ * against about 5.4 kB here, and both are two orders of magnitude under the 226 kB of Parquet
+ * footer that answers the same question — what the extra 3.4 kB buys is that there is no
+ * endianness, no width and no offset table to get wrong, in any language.
+ */
+export interface TileCodesDocument extends TileCodes {
+  /** Bits per axis on the grid the writer quantised onto. Must be {@link MORTON_BITS}. */
+  readonly mortonBits: number;
+  /** Rows per tile the anchor was cut at — the type's own `chunk_size`. */
+  readonly chunkSize: number;
+  /** How many tiles it names. `lo.length`, `hi.length`, and the manifest's own count agree. */
+  readonly tiles: number;
+  readonly lo: readonly number[];
+  readonly hi: readonly number[];
+  readonly extent: Box;
+}
+
+/** A number that is a `u32`, which every code and every tile count in the anchor is. */
+function u32(value: unknown, where: string, what: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+    throw new CorpusManifestError(`${where}: ${what} is ${String(value)}, which is not a u32`);
+  }
+  return value;
+}
+
+/**
+ * Parse a tile-code anchor. **Synchronous, and it validates rather than trusts.**
+ *
+ * The host fetches {@link VertexAddress.codesUrl} the way it already fetches the manifest and hands
+ * the text here; this module still opens nothing. What comes back satisfies {@link TileCodes}, so
+ * it goes straight into {@link mortonTilesFor} and {@link CorpusAddressing.tilesForBox}.
+ *
+ * Four things are checked, and each one is a wrong picture rather than an exception if it is not:
+ *
+ * - **`morton_bits` is this module's.** A corpus quantised onto a different grid is addressed by
+ *   different arithmetic, and every function here would answer confidently and wrongly.
+ * - **`lo` and `hi` are the same length**, and it is `tiles`. A pair per tile is the whole shape.
+ * - **`lo[k] <= hi[k]`**, and **both arrays are non-decreasing**. {@link tilesForGrid} answers with
+ *   two binary searches, and a binary search over an unsorted array does not fail, it misses.
+ * - **The extent is four finite numbers.** A `null` — which is what a non-finite `f32` becomes in
+ *   JSON — would quantise every code to zero.
+ */
+export function parseTileCodes(text: string, where = 'the tile-code anchor'): TileCodesDocument {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text) as unknown;
+  } catch (cause) {
+    throw new CorpusManifestError(`${where} is not JSON: ${String(cause)}`);
+  }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new CorpusManifestError(`${where} is not an object`);
+  }
+  const doc = raw as Record<string, unknown>;
+
+  const mortonBits = u32(doc['morton_bits'], where, 'morton_bits');
+  if (mortonBits !== MORTON_BITS) {
+    throw new CorpusManifestError(
+      `${where} declares ${mortonBits} bits per axis and this reader addresses ${MORTON_BITS}; ` +
+        `a different grid is different arithmetic, not a smaller one`,
+    );
+  }
+  const chunkSize = u32(doc['chunk_size'], where, 'chunk_size');
+  const tiles = u32(doc['tiles'], where, 'tiles');
+
+  const codes = (key: 'lo' | 'hi'): number[] => {
+    const value = doc[key];
+    if (!Array.isArray(value)) {
+      throw new CorpusManifestError(`${where}: ${key} is not an array`);
+    }
+    if (value.length !== tiles) {
+      throw new CorpusManifestError(
+        `${where} declares ${tiles} tile(s) and ${value.length} ${key} code(s)`,
+      );
+    }
+    return value.map((v, k) => u32(v, where, `${key}[${k}]`));
+  };
+  const lo = codes('lo');
+  const hi = codes('hi');
+  for (let k = 0; k < tiles; k += 1) {
+    if (lo[k]! > hi[k]!) {
+      throw new CorpusManifestError(`${where}: tile ${k} spans ${lo[k]}..${hi[k]}, backwards`);
+    }
+    if (k > 0 && (lo[k - 1]! > lo[k]! || hi[k - 1]! > hi[k]!)) {
+      throw new CorpusManifestError(
+        `${where}: tile ${k} does not follow tile ${k - 1} in code order, so no binary search ` +
+          `over these arrays finds it`,
+      );
+    }
+  }
+
+  const box = doc['extent'];
+  if (box === null || typeof box !== 'object' || Array.isArray(box)) {
+    throw new CorpusManifestError(`${where} publishes no extent, so no rectangle reaches the grid`);
+  }
+  const side = (key: keyof Box): number => {
+    const value = (box as Record<string, unknown>)[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new CorpusManifestError(
+        `${where}: extent.${key} is ${String(value)}, which is not a finite coordinate`,
+      );
+    }
+    return value;
+  };
+  const extent: Box = { xlo: side('xlo'), xhi: side('xhi'), ylo: side('ylo'), yhi: side('yhi') };
+
+  return { mortonBits, chunkSize, tiles, lo, hi, extent };
 }
 
 /** Smallest tile whose codes can reach `code`, or `codes.lo.length` when none can. */
@@ -944,14 +1102,28 @@ export function tilesForGrid(grid: GridBox, codes: TileCodes): number[] {
 export interface BoxQuery {
   /** The rectangle, in the corpus's own coordinates. */
   box: Box;
-  /** The extent the type's positions were quantised against — its own bounding box. */
-  extent: Box;
+  /**
+   * The extent the type's positions were quantised against — its own bounding box.
+   *
+   * **Optional since the anchor publishes it.** It was required and had to be, because the only
+   * way to obtain it was to scan every tile's `x`/`y`; a {@link TileCodesDocument} carries it, so
+   * the ordinary call passes `codes` alone. An explicit one still wins, which is what
+   * `address-morton.test.ts` builds its own renumberings with.
+   */
+  extent?: Box;
   /** Which codes each tile holds. See {@link TileCodes} for why this is not derivable. */
   codes: TileCodes;
 }
 
 /** The tiles a rectangle in corpus coordinates touches. Synchronous, and it reads no byte. */
 export function mortonTilesFor({ box, extent, codes }: BoxQuery): number[] {
-  const grid = gridBoxOf(box, extent);
+  const against = extent ?? codes.extent;
+  if (against === undefined) {
+    throw new CorpusManifestError(
+      `a rectangle reaches the Morton grid through the extent its codes were quantised against, ` +
+        `and neither the call nor the anchor carries one`,
+    );
+  }
+  const grid = gridBoxOf(box, against);
   return grid === null ? [] : tilesForGrid(grid, codes);
 }
