@@ -251,9 +251,158 @@ over it. **It closed at six on 2026-08-05**, and the six are the variants of `Op
 
 The algebra answers questions and **does not draw**, because drawing is addressing: the camera works
 out which level and which tiles it needs and asks for bytes, with no bbox in flight and no database
-on that path. Level-of-detail is not a filter but a different relation — a level-3 tile holds
-super-nodes that do not exist at level 0. A `where` selects rows from a table; zoom changes the
-table. Once that is settled, every verb whose job was to make a picture stops having one.
+on that path. Level-of-detail is not a filter but a **decimation**: level *k* is the vertices whose
+`dense_id` is a multiple of 2^*k*, which over a Morton-ordered `dense_id` is one vertex per quadtree
+cell of that depth. A `where` selects rows from a table; zoom changes which rows exist at all. Once
+that is settled, every verb whose job was to make a picture stops having one.
+
+<Callout type="warn" title="This paragraph claimed super-nodes, and there are none">
+It read *"a level-3 tile holds super-nodes that do not exist at level 0"*. Nothing writes one.
+Louvain builds a hierarchy in the layout pass — four levels at ten million, 3,757,900 / 8,832 /
+2,081 / 1,487 — and the pass **collapses it to a `cluster_id` column** and discards the levels
+above zero. `cluster_id` is a colour, not a level, and no directory under `vertex/<Type>/` is a
+level either.
+
+Aggregation is also the wrong primitive here, and the reason is the one below: **a synthetic
+centroid cannot nest.** Replace a super-node with its children and every point on screen moves.
+A decimation is real vertices at real positions, and level *k+1* is a strict subset of level *k*,
+so zooming in only ever ADDS. Louvain's levels could not serve as a pyramid anyway — 8,832 to
+2,081 to 1,487 is not a decimation, it is a hierarchy that stops decimating after one step.
+</Callout>
+
+### The stride has to be a power of two, and this is what it costs when it is not
+
+The reader draws a bounded sample of what the window holds. It picks the sample by striding on
+`dense_id`, which is right — the ids ascend along the Morton curve, so every *s*-th id is spatially
+stratified where a prefix would be one corner. But `s` is `ceil(matched / limit)`, **an arbitrary
+integer**, and arbitrary integers do not nest: the multiples of 34 and the multiples of 21 share
+only the multiples of 714.
+
+So zoom does not refine the picture, it **replaces** it. Measured over a million-vertex corpus at a
+12,000-point cap, counting only the vertices that are still inside the window after the camera
+moves — every point lost below is lost to *resampling*, not to leaving the frame:
+
+| zoom step | still drawn, `s` arbitrary | still drawn, `s` a power of two |
+| --- | --- | --- |
+| 60% → 40% | **5.9%** | **100%** |
+| 40% → 25% | 4.8% | 100% |
+| 25% → 15% | 7.7% | 100% |
+| 15% → 10% | 11.1% | 100% |
+| 10% → 6% | 20.0% | 100% |
+
+Quantising `s` up to the next power of two costs at most one extra halving of the sample and buys
+the nesting outright: a vertex drawn at one zoom is drawn at every closer zoom, at the same
+position, and nothing is thrown away that did not leave the frame. **That is the whole difference
+between a picture that refines and a picture that flashes**, and it is one expression.
+
+<Callout title="Writing the levels is an optimisation of this, not a second design">
+Level *k* selected by `dense_id % 2^k` needs no bytes on disk: it is a predicate. What a written
+`vertex/<Type>/l{k}/` buys is that a coarse camera reads a small file instead of striding a large
+one — which is where the byte cost of a zoomed-out view lives. Both paths select **the same rows by
+the same predicate**, so a corpus without the levels still draws the same picture and only reads
+more. That is the property that lets the pyramid be added later without becoming a second contract.
+</Callout>
+
+### The addressing and the reader do not meet, and Morton is why they could
+
+`@fossil-lang/corpus/address` stated its own seam: *"**No boxes.** Which tiles a rectangle touches
+comes from the per-tile `x`/`y` statistics in the Parquet footers... the address is the half that
+cannot be re-derived from the corpus itself. So the host reads its own footers and hands the tile
+numbers back here."* `tilesFor` took `tiles: number[]` — the caller had to already know.
+
+**That last clause is false, and the layout pass is what made it false.** `dense_id` is renumbered
+into Morton order, so a vertex's address and its position are the same number read two ways. A
+rectangle is therefore a set of Morton ranges, a Morton range is a `dense_id` range, and a
+`dense_id` range is a run of tiles — no footer, no reader and no engine. The sentence was true
+before the renumbering and nobody revisited it after. `mortonTilesFor` is that decomposition:
+descend the Z-order quadtree, stop where the answer stops changing, and `tilesForBox` is it fed
+into the tile-number door beside it.
+
+What this changes is not an optimisation, it is which package can answer:
+
+- **A camera with no engine can address itself.** The browser used to need a Parquet reader to ask
+  "which tiles"; the coarse levels of a pyramid have no reason to. The subpath's promise — no
+  fetch, no WASM, no promise — stopped one step short of the question a camera actually asks.
+- **`openCorpus` stops being the only door to a picture.** It keeps the engine for what needs one.
+
+#### What it costs, measured against the footer path over the same windows
+
+The over-read was left unwritten here on purpose — *"it is not written down until it is measured"* —
+so it was measured, over the million-vertex corpus `apps/playground/scripts/bench-corpus.mjs`
+writes, at nine windows. The denominator is not a model: DuckDB is asked which tiles actually hold
+a vertex inside the rectangle, and a path answering with fewer has not read less, it has drawn a
+wrong picture.
+
+| window | need | geometric | arithmetic | uniform, no anchor |
+| --- | --- | --- | --- | --- |
+| 2%, centred | 4 | 7 · 1.75× | **4 · 1.00×** | 4, **4 missed** |
+| 2%, lower-left | 4 | 8 · 2.00× | **4 · 1.00×** | 4, **4 missed** |
+| 2%, upper-right | 4 | 7 · 1.75× | **4 · 1.00×** | 3, **4 missed** |
+| 10%, centred | 15 | 17 · 1.13× | **15 · 1.00×** | 8, **12 missed** |
+| 10%, lower-left | 7 | 10 · 1.43× | **7 · 1.00×** | 8, **7 missed** |
+| 10%, upper-right | 12 | 18 · 1.50× | **12 · 1.00×** | 9, **11 missed** |
+| 30%, centred | 90 | 96 · 1.07× | **90 · 1.00×** | 42, **52 missed** |
+| 30%, lower-left | 40 | 41 · 1.02× | **40 · 1.00×** | 46, **9 missed** |
+| 30%, upper-right | 50 | 53 · 1.06× | **50 · 1.00×** | 40, **26 missed** |
+
+**The arithmetic does not over-cover here — it under-cuts the footers.** Mean over-read 1.00×
+against 1.41×, and on the 10% window the page already records, **15 tiles in 4 range requests and
+1,294 kB against 17 tiles in 6 requests and 1,466 kB** — 2.26% of the corpus rather than 2.56%.
+The reason is not cleverness, it is that a code range is a *tighter* description of a tile than its
+`x`/`y` box: the box is the rectangular hull of an arc that snakes, and the arc is where the
+vertices are. The predicted over-cover is real and it is smaller than the hull's.
+
+<Callout type="warn" title="The seam moved and did not vanish: a rank is not a code">
+*"Arithmetic on the manifest's `chunk_size` alone"* is the half of the claim that does not survive.
+`dense_id` is a vertex's **rank** by Morton code, not its code, and where a code falls in a ranking
+is a function of how the positions are distributed — which `chunk_size` does not carry. The third
+column above is that assumption taken seriously: tile *k* holding the *k*th equal slice of the code
+space **misses 129 of the 226 tiles** that hold a matching vertex. It is not a conservative guess,
+it is a wrong picture.
+
+So the decomposition needs one anchor, and it is small: the first and last code of each tile, two
+`u32`, **1,960 B for a million vertices** against the 226 kB of Parquet footer the geometric path
+reads over the same corpus — and readable by anything that can read a number. `TileCodes` is that
+input, and the writer already holds it: `morton` and `order` are both in hand in the layout pass, so
+publishing it is a manifest field and not a second computation. **Nothing publishes it yet**, which
+is the outstanding half of this section rather than a limitation of the arithmetic.
+
+The two still compose, but not in the direction this callout used to guess. Arithmetic addresses
+*and* prunes tighter; what the footer is still needed for is **byte offsets under `container:
+rowgroups`**, where a run of tiles is a byte interval only a footer can name. Under `container:
+files` a URL is the answer and there is no footer on the path at all.
+
+`packages/corpus/tests/address-cost.test.ts` is the measurement, `address-morton.test.ts` the
+soundness — every tile holding a point inside the rectangle is in the answer, over a sweep of
+rectangles against a renumbering it did not build.
+</Callout>
+
+### Zarr, against the condition this repo wrote down for reopening a format
+
+Conforming to an existing interchange specification is [discarded](/docs/design/discarded), and the
+reversal condition recorded there is exact: **a second reader that is not ours, that already speaks
+it.** GraphAr failed that in practice — its own reader cannot open a fossil corpus, because
+`TypeNameToDataType` throws on `dense_id`'s `uint32`.
+
+Zarr meets the condition on the half above and fails it on the half below, and the split is clean:
+
+- **Its addressing model is this one.** A metadata document plus chunks addressed by a key computed
+  from the index, no server, store-agnostic. That is `resolveCorpus`, spelled differently — and its
+  `multiscales` convention is the level pyramid described above, already standardised.
+- **Its data model is not.** Zarr is dense N-dimensional arrays. A tile here is a typed table with a
+  subject IRI and, load-bearing, **footer statistics**: a chunk of Zarr carries none, so adopting
+  the container means building an explicit spatial index to replace what Parquet gives for free.
+
+So the honest reading is that Zarr is worth borrowing at the manifest and the key arithmetic, where
+this format already agrees with it and would gain a vocabulary readers know, and is not worth
+adopting as the container while the footer is the index. **Neither half is decided here** — this
+section exists so the next person argues against the right thing.
+
+The measurement above moves the bottom half rather than the top. A tile's Morton range prunes a
+rectangle *better* than its `x`/`y` box does, so "the footer is the index" is now only true of byte
+offsets: the spatial index a Zarr container would have to grow is 8 B per chunk and the writer
+already holds it. What that does **not** settle is the reversal condition, which is a reader and not
+a size — and no Zarr reader opens a corpus of typed tables with a subject IRI in them.
 
 ### The npm package is named for the corpus; the crates are named for the surface
 
