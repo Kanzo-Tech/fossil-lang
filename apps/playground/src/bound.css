@@ -1,0 +1,156 @@
+/**
+ * The privacy panel.
+ *
+ * Its own stylesheet for the same reason `lineage.css` and `streaming.css` are: the panel is
+ * self-contained and drops into a section without the shell knowing anything about it. Every
+ * colour is a token off `@kanzo-tech/ui`'s palette — nothing here picks a hex.
+ */
+
+.pri {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pri h2 {
+  margin: 0;
+  font: 11px var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.pri h3 {
+  margin: 0 0 0.35rem;
+  font: 11px var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.pri-note {
+  margin: 0;
+  font: 11px/1.6 var(--mono);
+  color: var(--muted);
+}
+
+.pri-bad {
+  margin: 0;
+  font: 11px/1.6 var(--mono);
+  color: var(--error);
+}
+
+/* The two columns are the whole point: a claim and a recomputation, side by side and legible
+   as a pair. They stack under a narrow viewport rather than scrolling, because a declaration
+   above its own re-derivation still reads correctly. */
+.pri-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.pri-cols dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 11px var(--mono);
+}
+
+.pri-cols dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pri-head {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.15rem;
+}
+
+.pri-cols dt {
+  color: var(--muted);
+}
+
+.pri-cols dd {
+  margin: 0;
+  text-align: right;
+  word-break: break-word;
+}
+
+.pri-cols dd.ok {
+  color: var(--ok);
+}
+
+.pri-cols dd.bad {
+  color: var(--error);
+}
+
+.pri-empty dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.pri-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.pri-sql {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 11px/1.5 var(--mono);
+  color: var(--muted);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.pri-verdict {
+  margin: 0;
+  font: 11px/1.6 var(--mono);
+}
+
+.pri-verdict.ok {
+  color: var(--ok);
+}
+
+.pri-verdict.bad {
+  color: var(--error);
+}
+
+/* The caveats are not small print. They are the half that stops the tick above from being read
+   as more than it is, so they get the same type size as everything else. */
+.pri-caveats ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.pri-caveats li {
+  font: 11px/1.6 var(--mono);
+  color: var(--muted);
+}
+
+.pri-caveats strong {
+  color: var(--fg);
+}
+
+.pri-inline {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}

@@ -22,6 +22,7 @@ import * as duck from './duckdb.js';
 import { CSV_BYTES, CSV_PATH, PROGRAM, PROGRAM_PATH } from './example.js';
 import { describeCsv } from './descriptor.js';
 import Lineage from './Lineage.js';
+import { Undeclared } from './Privacy.js';
 import * as runner from './run.js';
 import Streaming from './Streaming.js';
 
@@ -236,6 +237,12 @@ export default function App() {
                   </li>
                 ))}
               </ul>
+              {/*
+                What this corpus says about itself, which is nothing — stated here rather than
+                left for a reader to discover in the YAML, and stated beside the artifact it is
+                about rather than beside the bench corpus that does declare a bound.
+              */}
+              <Undeclared />
             </>
           )}
 

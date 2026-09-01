@@ -25,6 +25,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { openBench, type Bench } from './bench.js';
 import Canvas from './Canvas.js';
 import * as duck from './duckdb.js';
+import Privacy from './Privacy.js';
 import {
   FOOTER_SQL,
   extentOf,
@@ -360,6 +361,15 @@ export default function Streaming({ ready }: StreamingProps) {
         explicit step that costs an engine.
       */}
       <Canvas bench={bench} boxes={boxes} />
+
+      {/*
+        The bound this corpus declares, and the same numbers recomputed from the bytes above.
+        It belongs on this panel and not beside the run output because it needs two things this
+        panel already has and the five-row demo has neither: a corpus written WITH a policy, and
+        a payload registered with DuckDB. `ready` is the footer read, which is also what
+        registered `PAYLOAD` — so the button cannot be pressed before there is a file to scan.
+      */}
+      <Privacy bench={bench} payload={PAYLOAD} ready={boxes !== null} />
     </div>
   );
 }

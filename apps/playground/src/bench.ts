@@ -56,6 +56,14 @@ export interface Bench {
    */
   base: string;
   addressing: CorpusAddressing;
+  /**
+   * `graph.graph.yml` as it was served, verbatim.
+   *
+   * Kept because addressing throws it away and one reader wants it whole: the `privacy:` block
+   * is a claim about these bytes, and the panel that re-derives it shows the declaration beside
+   * the recomputation. Costs nothing — the text is already in hand and already counted below.
+   */
+  indexText: string;
   /** The manifests, and what they weighed — the only bytes addressing costs. */
   manifestBytes: number;
   manifestCount: number;
@@ -140,6 +148,7 @@ export async function openBench(): Promise<Bench | null> {
     stamp,
     base,
     addressing,
+    indexText,
     manifestBytes,
     manifestCount: Object.keys(manifestFiles).length,
     fetchMs,
