@@ -35,7 +35,7 @@ they go out at once.
 
 A reader over HTTP cannot list a directory, so nothing is discovered by listing: `graph.graph.yml`
 is the one name known in advance and it names every per-type manifest. A vertex manifest carries a
-`type`, a `vertex_count`, a `prefix`, a `chunk_size` and optionally an `index:` block; an edge
+`type`, a `vertex_count`, a `prefix`, a `chunk_size` and optionally an `index:` and a `codes:` block; an edge
 manifest carries `src_type`, `edge_type`, `dst_type`, an `edge_count`, a `prefix`, and the
 `src_chunk_size` and `dst_chunk_size` that tie each orientation's tiles to its own endpoint type's.
 They are small and flat, so `apps/corpus/guards/manifest.mjs` reads them with a line scan and no
@@ -59,9 +59,22 @@ tail breaks nothing, and its borders are published as vectors —
 
 ## Which tiles intersect the window
 
-Arithmetic gives the tiles that *exist*; the footer gives the ones that *intersect*. The row-group
-statistics on `x` and `y` are bounding boxes, and selecting on them is the whole of viewport
-culling.
+Arithmetic gives the tiles that *exist*. Which ones *intersect* has two routes and they answer the
+same question at very different prices.
+
+**The anchor, when the manifest declares one.** A `codes:` block names a small JSON document —
+`vertex/Person/codes.json` — carrying the Morton code each tile begins and ends on, and the box the
+positions were quantised against. Quantise the window's corners onto that box, decompose the
+rectangle into Z-order ranges, and binary-search `lo`/`hi` for the tiles each range meets. That is
+5,498 B and `JSON.parse` at a million vertices, against 226 kB and a Parquet reader — and it prunes
+*tighter*, because a tile's code range describes an arc where its `x`/`y` box describes the arc's
+rectangular hull. It is the only route open to a reader that cannot decode Parquet at all.
+[Addressing](/docs/format/conventions/addressing#the-codes-are-the-anchor) has the document and its
+guard.
+
+**The footers, always.** The row-group statistics on `x` and `y` are bounding boxes, and selecting on
+them is the whole of viewport culling. This is the route for a corpus that publishes no anchor, and
+under `container: rowgroups` it is what turns the chosen tiles into byte ranges either way.
 
 ```sql
 SELECT file_name, row_group_id, path_in_schema,

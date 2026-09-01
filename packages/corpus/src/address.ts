@@ -25,10 +25,13 @@
  * that decomposition, and it is arithmetic: no fetch, no reader, no engine, and no promise.
  *
  * What it needs instead is **one number per tile end** — {@link TileCodes} — because a rank is not
- * a code and no amount of `chunk_size` recovers the one from the other. That is 1,960 B on a
- * million-vertex corpus, against 1.15 MB of footer at five million, and it buys a *tighter* answer
- * rather than a looser one: 1.00× over-read against the geometric path's 1.13× on the same window.
- * The seam moved; it did not vanish, and it is now the smaller half.
+ * a code and no amount of `chunk_size` recovers the one from the other. The corpus publishes it:
+ * `vertex/<Type>/codes.json`, named by the manifest and addressed by {@link VertexAddress.codesUrl},
+ * parsed by {@link parseTileCodes}. That is 5,498 B on a million-vertex corpus — 1,960 B is what the
+ * same 245 pairs pack to, and the difference buys a document with no endianness, no width and no
+ * offset table to get wrong — against 1.15 MB of footer at five million. And it buys a *tighter*
+ * answer rather than a looser one: 1.00× over-read against the geometric path's 1.13× on the same
+ * window. The seam moved; it did not vanish, and it is now the smaller half.
  *
  * `openCorpus` in `./corpus.ts` is the layer that does all three, by taking an engine from the host
  * rather than growing one. It sits **on** this module and does not absorb it: the subpath
