@@ -201,3 +201,153 @@ export function agrees(bound: DeclaredBound, found: Recomputed): Agreement {
  */
 export const margin = (bound: DeclaredBound, found: Recomputed): number =>
   bound.k === 0 ? 0 : found.reached / bound.k;
+
+/* -------------------------------------------------------------------------------------------
+ * The ladder — what `reached` costs, which is the number the manifest cannot publish
+ * ---------------------------------------------------------------------------------------- */
+
+/**
+ * One rung of a declared generalisation ladder.
+ *
+ * A rung is a whole release: every quasi-identifier rendered at one declared hierarchy level,
+ * for every row. That is **global** recoding, and it is the case in which a level is a
+ * comparable thing at all — `ColumnLevels::Levels` in `crates/fossil-kanon/src/report.rs` says
+ * why, and `ColumnLevels::Spans` is the case where it is not.
+ */
+export interface Rung {
+  /**
+   * What a manifest written at this rung would carry in `generalization:`, in the grammar
+   * `fossil_sinks::manifest` documents: `none`, or a space-separated
+   * `<Type>.<column>@<coarsest>-<finest>/<declared>` per generalised column. Coarsest equals
+   * finest here because a rung is one level for the whole column.
+   */
+  token: string;
+  /** What each quasi-identifier still says at this rung, in English. */
+  says: string[];
+  /**
+   * The whole release in one phrase, for prose.
+   *
+   * Separate from `says` because a sentence and a table column want different English: a cell
+   * reading `1 nothing` beside a count is fine, and «publishes 1 nothing, 1 nothing» is not a
+   * sentence.
+   */
+  release: string;
+  /** The SQL rendering each quasi-identifier at this rung, in the ladder's column order. */
+  exprs: string[];
+}
+
+/** A ladder over one corpus's quasi-identifiers, finest rung first. */
+export interface Ladder {
+  columns: string[];
+  rungs: Rung[];
+}
+
+/**
+ * The ladder for the bench corpus, and **where it comes from is the point**.
+ *
+ * It is not in the corpus. `generalization:` is checkable by a recipient who holds the
+ * hierarchy, and the hierarchy lives in the policy document that `policy:` NAMES rather than
+ * locates — a corpus carrying its own policy would be a corpus that can be handed on with the
+ * policy rewritten. So this constant is the playground standing in for that document, and the
+ * panel says so rather than letting it look derived.
+ *
+ * The shapes are the two `crates/fossil-kanon/hierarchies/` ships: a numeric column published
+ * as its enclosing declared bucket, and a prefix column cut on characters. Prefix values keep
+ * their `*` at every generalised level, including the finest, because `PC1*` and a postcode
+ * that is literally `PC1` are different facts — `Prefix::value_at` makes the same choice for
+ * the same reason.
+ */
+export const BENCH_LADDER: Ladder = {
+  columns: ['birth_year', 'postcode'],
+  rungs: [
+    {
+      token: 'none',
+      says: ['the year', 'the postcode'],
+      release: 'the year and the postcode, as the program produced them',
+      exprs: ['"birth_year"::VARCHAR', '"postcode"'],
+    },
+    {
+      token: 'Person.postcode@2-2/3',
+      says: ['the year', 'the postcode, 3 characters'],
+      release: 'the year, and 3 characters of the postcode',
+      exprs: ['"birth_year"::VARCHAR', `substr("postcode", 1, 3) || '*'`],
+    },
+    {
+      token: 'Person.birth_year@bucket Person.postcode@2-2/3',
+      says: ['the decade', 'the postcode, 3 characters'],
+      release: 'the decade, and 3 characters of the postcode',
+      exprs: [`((("birth_year" / 10)::INTEGER) * 10)::VARCHAR || 's'`, `substr("postcode", 1, 3) || '*'`],
+    },
+    {
+      token: 'Person.birth_year@bucket Person.postcode@1-1/3',
+      says: ['the decade', 'the postcode, 2 characters'],
+      release: 'the decade, and a postcode column that is PC* for every row',
+      exprs: [`((("birth_year" / 10)::INTEGER) * 10)::VARCHAR || 's'`, `substr("postcode", 1, 2) || '*'`],
+    },
+    {
+      token: 'Person.birth_year@0-0/2 Person.postcode@0-0/3',
+      says: ['nothing', 'nothing'],
+      release: 'two columns of * — nothing at all',
+      exprs: [`'*'`, `'*'`],
+    },
+  ],
+};
+
+/** A rung, climbed: the release it would have produced, measured. */
+export interface Climbed extends Rung {
+  reached: number;
+  classes: number;
+  /** Distinct published values left in each column — what the release still says, as a count. */
+  distinct: number[];
+}
+
+/**
+ * Climb the ladder over the real bytes, and report what each rung would have released.
+ *
+ * This is the half a badge cannot have. Every rung satisfies k-anonymity, every rung writes a
+ * `privacy:` block, and `reached` is weakly monotone up the ladder — generalising can only
+ * merge classes. Weakly is the interesting word: over the bench corpus the first THREE rungs
+ * all reach 5,000, publishing 40×25, 40×10 and 5×10 distinct values. Three manifests, the same
+ * `reached` over the same population, three releases that are not the same release, and no
+ * recomputation from the Parquet can tell them apart. That is the argument for the
+ * `generalization` field stated as a measurement rather than as a worry.
+ *
+ * The top rung is the reductio: one class holding everybody, which satisfies **any** k the
+ * population is large enough for, and publishes two columns of `*`.
+ *
+ * Sequential rather than parallel on purpose: five scans of the same million rows through one
+ * DuckDB connection, so the elapsed time reported is a time a reader could have measured.
+ */
+export async function climb(name: string, ladder: Ladder): Promise<Climbed[]> {
+  const out: Climbed[] = [];
+  for (const rung of ladder.rungs) {
+    const projected = rung.exprs.map((e, i) => `${e} AS q${i}`).join(', ');
+    const tuple = rung.exprs.map((_, i) => `q${i}`).join(', ');
+    const rows = await duck.query(`WITH g AS (
+  SELECT ${projected} FROM "${name}"
+), c AS (
+  SELECT count(*) AS n FROM g GROUP BY ${tuple}
+)
+SELECT (SELECT count(*) FROM c) AS classes, (SELECT min(n) FROM c) AS reached,
+       ${rung.exprs.map((_, i) => `(SELECT count(DISTINCT q${i}) FROM g) AS d${i}`).join(', ')}`);
+    const row = rows[0] ?? {};
+    out.push({
+      ...rung,
+      classes: Number(row.classes ?? 0),
+      reached: Number(row.reached ?? 0),
+      distinct: rung.exprs.map((_, i) => Number(row[`d${i}`] ?? 0)),
+    });
+  }
+  return out;
+}
+
+/**
+ * The rung a writer asked for `k` would have stopped at — the lowest one that clears it.
+ *
+ * `null` when no rung does, which for a ladder whose top is one class means only that `k`
+ * exceeds the population. **That is the honest shape of a refusal and it is not this ladder's
+ * to give**: a refusal comes from a hierarchy running out before `k` does, and a ladder ending
+ * in `*` never runs out. Which is the whole argument — see the panel.
+ */
+export const stopsAt = (climbed: Climbed[], k: number): Climbed | null =>
+  climbed.find((rung) => rung.reached >= k) ?? null;

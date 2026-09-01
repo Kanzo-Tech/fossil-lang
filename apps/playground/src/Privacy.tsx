@@ -24,6 +24,23 @@
  * margin and the generalisation are given the same weight as the tick, and the three things the
  * bound is silent about are stated rather than implied.
  *
+ * ## And the half that is neither a claim nor a check: the ladder
+ *
+ * A recipient checking a producer is only half the demonstration, because it can only ever end
+ * in agreement here — the writer that produced this corpus is the one whose guard runs in CI.
+ * The other half checks the FIELD rather than the corpus: the panel climbs a declared
+ * generalisation ladder over the same bytes and reports what each rung would have released.
+ * Measured, in the tab: the first three rungs all reach 5,000, publishing 40×25, 40×10 and
+ * 5×10 distinct quasi-identifier values. **Three manifests carrying the same `reached` over the
+ * same population, describing releases that are not the same release** — and recomputing k from
+ * the Parquet returns 5,000 for all three. The top rung publishes two columns of `*`, satisfies
+ * any k a million records can hold, and says nothing at all.
+ *
+ * That is why this panel is not a badge, and it is also why a bound cannot be REFUSED for being
+ * too demanding: the top of every hierarchy is `*`, so a writer asked for more generalises until
+ * it clears. A refusal comes from a hierarchy running out first, which is the writer's business
+ * and native-only — see `Undeclared`.
+ *
  * The honest bottom of the panel is the corpus THIS TAB writes, which declares
  * `bound: undeclared` — see `Undeclared` below.
  */
@@ -32,10 +49,14 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Bench } from './bench.js';
 import {
   agrees,
+  BENCH_LADDER,
+  climb,
   margin,
   readDeclaration,
   recompute,
+  stopsAt,
   type Agreement,
+  type Climbed,
   type Declaration,
   type Recomputed,
 } from './bound.js';
@@ -56,6 +77,11 @@ export default function Privacy({ bench, payload, ready }: PrivacyProps) {
   const [verdict, setVerdict] = useState<Agreement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [climbed, setClimbed] = useState<Climbed[] | null>(null);
+  const [climbing, setClimbing] = useState(false);
+  // What a second producer, handed the same table, might have been asked for. A text field
+  // rather than a slider: the interesting values are orders of magnitude apart.
+  const [asked, setAsked] = useState(250_000);
 
   const declaration: Declaration = readDeclaration(bench.indexText);
 
@@ -74,11 +100,24 @@ export default function Privacy({ bench, payload, ready }: PrivacyProps) {
     }
   }, [declaration, payload]);
 
+  const onClimb = useCallback(async () => {
+    setClimbing(true);
+    setError(null);
+    try {
+      setClimbed(await climb(payload, BENCH_LADDER));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setClimbing(false);
+    }
+  }, [payload]);
+
   // The declaration changes only when the corpus does, so a stale recomputation would be a lie
   // with a tick beside it rather than merely out of date.
   useEffect(() => {
     setFound(null);
     setVerdict(null);
+    setClimbed(null);
   }, [bench.indexText]);
 
   if (declaration.state === 'absent') {
@@ -226,7 +265,8 @@ export default function Privacy({ bench, payload, ready }: PrivacyProps) {
               something a verifier can measure, so the writer does not refuse it; what it does is
               refuse to let the flattening be invisible, by reporting the level each column
               reached. A coarsest and a finest that are equal, short of the declared count, is a
-              column every row of which publishes one value.
+              column every row of which publishes one value. <strong>The ladder below is that,
+              climbed over these bytes</strong> — it is the half of this panel a badge cannot have.
             </li>
             <li>
               <strong>The quasi-identifier set may simply be wrong.</strong>{' '}
@@ -244,6 +284,130 @@ export default function Privacy({ bench, payload, ready }: PrivacyProps) {
               discloses the diagnosis of all 5,000.
             </li>
           </ul>
+        </div>
+      )}
+
+      {/*
+        The flattening, measured. Everything above this line is a recipient checking a producer;
+        this is the recipient checking the FIELD — what a `reached` is worth without the level
+        beside it. Every rung is a valid k-anonymous release over these exact bytes.
+      */}
+      {found && (
+        <div className="pri-ladder">
+          <h3>the same bytes, generalised — every rung is a valid release</h3>
+          <p className="pri-note">
+            The bound cannot be refused for being too demanding: the top of every hierarchy is{' '}
+            <code>*</code>, so a writer asked for more <em>generalises</em> until it clears, and
+            one class holding everybody satisfies any <em>k</em> the population can hold. Below is
+            that climb over the million rows this page is reading — the same table, five releases,
+            each one honest, each one writing a <code>privacy:</code> block. The hierarchy is not
+            in the corpus: <code>policy:</code> <strong>names</strong> a document it does not
+            carry, so the ladder is supplied here, by the reader, which is exactly the position a
+            recipient checking <code>generalization</code> is in.
+          </p>
+
+          <div className="pri-actions">
+            <button onClick={onClimb} disabled={climbing}>
+              {climbing ? 'climbing…' : 'Climb it'}
+            </button>
+            <label className="pri-k">
+              a second producer asks for k =
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={asked}
+                onChange={(e) => setAsked(Math.max(1, Number(e.target.value) || 1))}
+              />
+            </label>
+          </div>
+
+          {climbed && (
+            <>
+              <table className="pri-rungs">
+                <thead>
+                  <tr>
+                    <th>generalization:</th>
+                    <th>classes</th>
+                    <th>reached</th>
+                    <th>{BENCH_LADDER.columns[0]}</th>
+                    <th>{BENCH_LADDER.columns[1]}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {climbed.map((rung) => {
+                    const stop = stopsAt(climbed, asked);
+                    return (
+                      <tr key={rung.token} className={stop?.token === rung.token ? 'stop' : ''}>
+                        <td><code>{rung.token}</code></td>
+                        <td>{n(rung.classes)}</td>
+                        <td className={rung.reached >= asked ? 'ok' : ''}>{n(rung.reached)}</td>
+                        {rung.distinct.map((d, i) => (
+                          <td key={i}>
+                            {n(d)} <span className="pri-dim">{rung.says[i]}</span>
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {/*
+                The headline, and it is derived rather than written down: if two rungs share a
+                `reached`, they are two manifests carrying the SAME number over the SAME
+                population, describing releases that are not the same release. That is the
+                sentence `generalization` exists to make false, said with measurements.
+              */}
+              {(() => {
+                const tally = new Map<number, Climbed[]>();
+                for (const rung of climbed) tally.set(rung.reached, [...(tally.get(rung.reached) ?? []), rung]);
+                const twins = [...tally.values()].filter((g) => g.length > 1).sort((a, b) => b.length - a.length)[0];
+                if (!twins) return null;
+                const [first, last] = [twins[0]!, twins[twins.length - 1]!];
+                return (
+                  <p className="pri-twins">
+                    {twins.length} of these {climbed.length} rungs declare{' '}
+                    <strong>reached: {n(first.reached)}</strong> over the same {n(found.population)}{' '}
+                    records. The first publishes <strong>{first.release}</strong>; the last
+                    publishes <strong>{last.release}</strong> — {first.distinct.map(n).join(' × ')}{' '}
+                    distinct values against {last.distinct.map(n).join(' × ')}.
+                    Recomputing <em>k</em> from the Parquet gives {n(first.reached)} for every one
+                    of them, so the number cannot tell them apart —{' '}
+                    <code>generalization</code> is the only field that can, and it is why a
+                    manifest carries a fact its reader cannot check alone.
+                  </p>
+                );
+              })()}
+
+              <p className="pri-note">
+                {(() => {
+                  const stop = stopsAt(climbed, asked);
+                  const top = climbed[climbed.length - 1]!;
+                  if (!stop) {
+                    return (
+                      <>
+                        No rung clears <code>k = {n(asked)}</code>, and the only thing that means
+                        is that {n(asked)} exceeds the {n(top.reached)} records there are. A ladder
+                        ending in <code>*</code> never runs out; a refusal comes from a hierarchy
+                        that does.
+                      </>
+                    );
+                  }
+                  return (
+                    <>
+                      A writer asked for <code>k = {n(asked)}</code> stops at{' '}
+                      <code>{stop.token}</code> and seals a corpus declaring{' '}
+                      <strong>reached: {n(stop.reached)}</strong>, satisfied, verifiable — and it
+                      publishes <strong>{stop.release}</strong>.{' '}
+                      That manifest and the one at the top of this panel differ in{' '}
+                      <strong>one field</strong>, and it is not <code>reached</code>.
+                    </>
+                  );
+                })()}
+              </p>
+            </>
+          )}
         </div>
       )}
     </div>

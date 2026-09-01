@@ -154,3 +154,87 @@
   border: 1px solid var(--line);
   border-radius: 4px;
 }
+
+/* The ladder. A table because it is one: five releases over one set of bytes, and the reader's
+   eye has to run DOWN the `reached` column to see it climb while the two columns beside it
+   empty out. Anything laid out as cards would hide exactly that. */
+.pri-ladder {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pri-rungs {
+  border-collapse: collapse;
+  font: 11px/1.5 var(--mono);
+  width: 100%;
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.pri-rungs th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--line);
+  padding: 0.25rem 0.6rem 0.25rem 0;
+}
+
+.pri-rungs td {
+  padding: 0.25rem 0.6rem 0.25rem 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg);
+}
+
+.pri-rungs td.ok {
+  color: var(--ok);
+}
+
+/* The rung the writer would have stopped at. A left rule rather than a filled row: the row is
+   not a verdict, it is one of five equally valid releases, and shading it like a result would
+   say the opposite of what the paragraph under it says. */
+.pri-rungs tr.stop td {
+  color: var(--fg);
+}
+
+.pri-rungs tr.stop td:first-child {
+  box-shadow: inset 2px 0 0 var(--ok);
+  padding-left: 0.5rem;
+}
+
+.pri-dim {
+  color: var(--muted);
+}
+
+.pri-k {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: 11px var(--mono);
+  color: var(--muted);
+}
+
+.pri-k input {
+  width: 8rem;
+  padding: 0.3rem 0.4rem;
+  font: 11px var(--mono);
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+/* The ladder's headline. Not `.pri-verdict.bad` — it was, and red read as «something failed»
+   when nothing did: every rung is a correct release, and that is the uncomfortable part. A rule
+   in the foreground colour says «read this» without saying «this is an error». */
+.pri-twins {
+  margin: 0;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--fg);
+  font: 11px/1.6 var(--mono);
+  color: var(--fg);
+}
