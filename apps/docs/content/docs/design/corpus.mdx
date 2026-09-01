@@ -251,9 +251,109 @@ over it. **It closed at six on 2026-08-05**, and the six are the variants of `Op
 
 The algebra answers questions and **does not draw**, because drawing is addressing: the camera works
 out which level and which tiles it needs and asks for bytes, with no bbox in flight and no database
-on that path. Level-of-detail is not a filter but a different relation — a level-3 tile holds
-super-nodes that do not exist at level 0. A `where` selects rows from a table; zoom changes the
-table. Once that is settled, every verb whose job was to make a picture stops having one.
+on that path. Level-of-detail is not a filter but a **decimation**: level *k* is the vertices whose
+`dense_id` is a multiple of 2^*k*, which over a Morton-ordered `dense_id` is one vertex per quadtree
+cell of that depth. A `where` selects rows from a table; zoom changes which rows exist at all. Once
+that is settled, every verb whose job was to make a picture stops having one.
+
+<Callout type="warn" title="This paragraph claimed super-nodes, and there are none">
+It read *"a level-3 tile holds super-nodes that do not exist at level 0"*. Nothing writes one.
+Louvain builds a hierarchy in the layout pass — four levels at ten million, 3,757,900 / 8,832 /
+2,081 / 1,487 — and the pass **collapses it to a `cluster_id` column** and discards the levels
+above zero. `cluster_id` is a colour, not a level, and no directory under `vertex/<Type>/` is a
+level either.
+
+Aggregation is also the wrong primitive here, and the reason is the one below: **a synthetic
+centroid cannot nest.** Replace a super-node with its children and every point on screen moves.
+A decimation is real vertices at real positions, and level *k+1* is a strict subset of level *k*,
+so zooming in only ever ADDS. Louvain's levels could not serve as a pyramid anyway — 8,832 to
+2,081 to 1,487 is not a decimation, it is a hierarchy that stops decimating after one step.
+</Callout>
+
+### The stride has to be a power of two, and this is what it costs when it is not
+
+The reader draws a bounded sample of what the window holds. It picks the sample by striding on
+`dense_id`, which is right — the ids ascend along the Morton curve, so every *s*-th id is spatially
+stratified where a prefix would be one corner. But `s` is `ceil(matched / limit)`, **an arbitrary
+integer**, and arbitrary integers do not nest: the multiples of 34 and the multiples of 21 share
+only the multiples of 714.
+
+So zoom does not refine the picture, it **replaces** it. Measured over a million-vertex corpus at a
+12,000-point cap, counting only the vertices that are still inside the window after the camera
+moves — every point lost below is lost to *resampling*, not to leaving the frame:
+
+| zoom step | still drawn, `s` arbitrary | still drawn, `s` a power of two |
+| --- | --- | --- |
+| 60% → 40% | **5.9%** | **100%** |
+| 40% → 25% | 4.8% | 100% |
+| 25% → 15% | 7.7% | 100% |
+| 15% → 10% | 11.1% | 100% |
+| 10% → 6% | 20.0% | 100% |
+
+Quantising `s` up to the next power of two costs at most one extra halving of the sample and buys
+the nesting outright: a vertex drawn at one zoom is drawn at every closer zoom, at the same
+position, and nothing is thrown away that did not leave the frame. **That is the whole difference
+between a picture that refines and a picture that flashes**, and it is one expression.
+
+<Callout title="Writing the levels is an optimisation of this, not a second design">
+Level *k* selected by `dense_id % 2^k` needs no bytes on disk: it is a predicate. What a written
+`vertex/<Type>/l{k}/` buys is that a coarse camera reads a small file instead of striding a large
+one — which is where the byte cost of a zoomed-out view lives. Both paths select **the same rows by
+the same predicate**, so a corpus without the levels still draws the same picture and only reads
+more. That is the property that lets the pyramid be added later without becoming a second contract.
+</Callout>
+
+### The addressing and the reader do not meet, and Morton is why they could
+
+`@fossil-lang/corpus/address` states its own seam: *"**No boxes.** Which tiles a rectangle touches
+comes from the per-tile `x`/`y` statistics in the Parquet footers... the address is the half that
+cannot be re-derived from the corpus itself. So the host reads its own footers and hands the tile
+numbers back here."* `tilesFor` takes `tiles: number[]` — the caller must already know.
+
+**That last clause is false, and the layout pass is what made it false.** `dense_id` is renumbered
+into Morton order, so a vertex's address and its position are the same number read two ways. A
+rectangle is therefore a set of Morton ranges, a Morton range is a `dense_id` range, and a
+`dense_id` range is a run of tiles — arithmetic, on the manifest's `chunk_size` alone, with no
+footer, no reader and no engine. The sentence was true before the renumbering and nobody revisited
+it after.
+
+What this changes is not an optimisation, it is which package can answer:
+
+- **A camera with no engine can address itself.** Today the browser must hold a Parquet reader to
+  ask "which tiles"; the coarse levels of a pyramid have no reason to. The subpath's promise — no
+  fetch, no WASM, no promise — currently stops one step short of the question a camera actually
+  asks.
+- **`openCorpus` stops being the only door to a picture.** It keeps the engine for what needs one.
+
+<Callout type="warn" title="Arithmetic over-covers, and the footers are what prune it exactly">
+A Morton decomposition of a box returns a **superset**: the curve enters and leaves the rectangle,
+so some addressed tiles hold nothing inside it. The footer statistics prune that exactly, which is
+what they are for and why they do not go away. The two compose — arithmetic to address, footers to
+refine where a reader exists — and the cost of the arithmetic-only path is measurable against the
+1.13× over-read the footer path already records. **It is not written down until it is measured.**
+</Callout>
+
+### Zarr, against the condition this repo wrote down for reopening a format
+
+Conforming to an existing interchange specification is [discarded](/docs/design/discarded), and the
+reversal condition recorded there is exact: **a second reader that is not ours, that already speaks
+it.** GraphAr failed that in practice — its own reader cannot open a fossil corpus, because
+`TypeNameToDataType` throws on `dense_id`'s `uint32`.
+
+Zarr meets the condition on the half above and fails it on the half below, and the split is clean:
+
+- **Its addressing model is this one.** A metadata document plus chunks addressed by a key computed
+  from the index, no server, store-agnostic. That is `resolveCorpus`, spelled differently — and its
+  `multiscales` convention is the level pyramid described above, already standardised.
+- **Its data model is not.** Zarr is dense N-dimensional arrays. A tile here is a typed table with a
+  subject IRI and, load-bearing, **footer statistics**: a chunk of Zarr carries none, so adopting
+  the container means building an explicit spatial index to replace what Parquet gives for free.
+
+So the honest reading is that Zarr is worth borrowing at the manifest and the key arithmetic, where
+this format already agrees with it and would gain a vocabulary readers know, and is not worth
+adopting as the container while the footer is the index. **Neither half is decided here** — this
+section exists so the next person argues against the right thing, and the measurement that would
+decide the top half is the one the callout above asks for.
 
 ### The npm package is named for the corpus; the crates are named for the surface
 
