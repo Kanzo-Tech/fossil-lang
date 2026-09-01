@@ -203,7 +203,7 @@ use fossil_df::files::TileWriter;
 use fossil_mem_probe::Probe;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
-use fossil_sinks::manifest::TILES_FILE;
+use fossil_sinks::manifest::{TILE_CODES_FILE, TILES_FILE};
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -933,7 +933,16 @@ pub fn enrich_layout_with(
         // query prunes on would describe somewhere else.
         origin_x = place_after(&mut positions, origin_x);
 
-        let morton = morton_codes(&positions);
+        // The extent is taken out here rather than left inside `morton_codes`
+        // because it is PUBLISHED now: it is half of what turns a rectangle in
+        // the corpus's own coordinates into a code range, and a reader that
+        // re-derives it from the written `x`/`y` gets it by reading every tile
+        // back. Computed once, used for the codes and written beside them.
+        let extent = extent_of(&positions);
+        let morton = match extent {
+            Some(extent) => morton_codes_within(&positions, extent),
+            None => Vec::new(),
+        };
         let (new_ids, order) = morton_ranks(&morton);
         probe.mark("morton codes + ranks");
 
@@ -957,6 +966,11 @@ pub fn enrich_layout_with(
         let mut xs = Vec::with_capacity(rows);
         let mut ys = Vec::with_capacity(rows);
         let mut cluster_ids = Vec::with_capacity(rows);
+        // The code of each row IN THE ORDER IT IS WRITTEN, which is the only
+        // order the anchor can be cut on: `order` is the ranking over every
+        // `dense_id`, and a `dense_id` no row carries is skipped just below, so
+        // the k-th tile is the k-th slice of THIS list and not of `morton`.
+        let mut row_codes = Vec::with_capacity(rows);
         for (new_id, &old) in order.iter().enumerate() {
             let row = row_of_dense[old as usize];
             if row == NO_ROW {
@@ -968,6 +982,7 @@ pub fn enrich_layout_with(
             xs.push(x);
             ys.push(y);
             cluster_ids.push(clusters[old as usize]);
+            row_codes.push(morton[old as usize]);
         }
         drop(row_of_dense);
 
@@ -1052,6 +1067,30 @@ pub fn enrich_layout_with(
         }
         writer.finish().map_err(write_err(&payload))?;
         probe.mark("gather + write vertex tiles");
+
+        // The anchor, cut on the same loop bound the tiles were: `lo[k]` is the
+        // code of tile `k`'s first row and `hi[k]` the code of its last. Both
+        // are non-decreasing in `k` because `row_codes` is — the rows are in
+        // rank order and rank order IS code order — which is what lets a reader
+        // binary-search them.
+        //
+        // Written for a type with no rows too: a `tiles: 0` anchor says «this
+        // type has no tiles», where a missing file says «this corpus was written
+        // before the anchor existed». Those are not the same thing to be told,
+        // and the manifest declares the path either way.
+        if let Some(extent) = extent {
+            let mut code_lo = Vec::with_capacity(tiles as usize);
+            let mut code_hi = Vec::with_capacity(tiles as usize);
+            for k in 0..tiles {
+                let lo = (k << shift) as usize;
+                let len = (rows - lo).min(target.chunk_size as usize);
+                code_lo.push(row_codes[lo]);
+                code_hi.push(row_codes[lo + len - 1]);
+            }
+            let anchor = format!("{}{TILE_CODES_FILE}", target.chunk_prefix);
+            write_tile_codes(io, &anchor, extent, target.chunk_size, &code_lo, &code_hi)?;
+            probe.mark("write tile codes");
+        }
 
         // The identity index: the SAME rows a second time, ordered by `subject`
         // instead of by position, carrying only the identity and the address it
@@ -1467,6 +1506,106 @@ fn replace_columns(
     RecordBatch::try_new(schema, columns).map_err(arrow_err(url))
 }
 
+/// Write one vertex type's **tile-code anchor** — the document
+/// `fossil_sinks::manifest::VertexCodes` declares and `@fossil-lang/corpus`'s
+/// `parseTileCodes` reads.
+///
+/// # What is in it
+///
+/// `lo[k]` is the Morton code of the first row of tile `k` and `hi[k]` the code
+/// of its last. The rows within a tile are in code order and the tiles are in
+/// rank order, so both arrays are non-decreasing and two binary searches over
+/// them turn a code range into a run of tiles. `extent` is what the codes were
+/// quantised against, so a rectangle in the corpus's own coordinates can be
+/// turned into a code range in the first place.
+///
+/// # Why this pass writes it and nothing else can
+///
+/// `morton` and `order` are both in hand here — the codes are what the ranking
+/// was made from — so this is a projection of two values the pass already holds
+/// and not a second computation over the corpus. Anything else would have to
+/// re-derive the codes from the written `x`/`y`, which means reading every tile
+/// back and quantising again, and getting a *different* answer wherever the two
+/// quantisations disagree by a unit.
+///
+/// # Hand-written JSON, deliberately
+///
+/// The document is a flat object with three scalars, four floats and two integer
+/// arrays, and writing it by hand keeps `serde_json` out of a crate whose
+/// dependency list argues for every line in it. Every number here is exact:
+/// `u32` and `u64` print exactly, and Rust's `f32` `Display` emits the shortest
+/// decimal that round-trips **to `f32`** — which is what a reader recovers with
+/// `Math.fround(parseFloat(s))`. A non-finite coordinate cannot reach here (the
+/// positions come from `cluster_layout`, which is arithmetic on integers), and
+/// if one ever did it would be `null` in JSON rather than the unparseable `inf`
+/// Rust prints, so it is refused instead.
+fn write_tile_codes(
+    io: &dyn LayoutIo,
+    url: &str,
+    extent: Extent,
+    chunk_size: u64,
+    lo: &[u32],
+    hi: &[u32],
+) -> Result<(), LayoutError> {
+    use std::fmt::Write as _;
+    use std::io::Write as _;
+
+    let finite = [extent.xlo, extent.ylo, extent.xhi, extent.yhi]
+        .iter()
+        .all(|v| v.is_finite());
+    if !finite {
+        return Err(LayoutError::Io {
+            target: url.to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "the layout produced a non-finite extent, which has no Morton grid",
+            ),
+        });
+    }
+
+    // `write!` into a `String` is infallible, so the `Result` is discarded once
+    // rather than threaded through: `fmt::Error` is only reachable from a
+    // `Display` impl that fails, and every value written here is a primitive.
+    let mut out = String::with_capacity(24 * (lo.len() + hi.len()) + 256);
+    out.push_str("{\n");
+    // Declared rather than assumed: a reader that hard-codes 16 bits per axis is
+    // right today and has no way to notice the day it stops being.
+    let _ = writeln!(out, "  \"morton_bits\": {MORTON_BITS},");
+    let _ = writeln!(out, "  \"chunk_size\": {chunk_size},");
+    let _ = writeln!(out, "  \"tiles\": {},", lo.len());
+    let _ = writeln!(
+        out,
+        "  \"extent\": {{ \"xlo\": {}, \"ylo\": {}, \"xhi\": {}, \"yhi\": {} }},",
+        extent.xlo, extent.ylo, extent.xhi, extent.yhi
+    );
+    let array = |name: &str, values: &[u32], tail: &str, out: &mut String| {
+        let _ = write!(out, "  \"{name}\": [");
+        for (i, v) in values.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let _ = write!(out, "{v}");
+        }
+        out.push(']');
+        out.push_str(tail);
+    };
+    array("lo", lo, ",\n", &mut out);
+    array("hi", hi, "\n", &mut out);
+    out.push_str("}\n");
+
+    let mut sink = io.create(url)?;
+    sink.write_all(out.as_bytes())
+        .map_err(|source| LayoutError::Io {
+            target: url.to_string(),
+            source,
+        })?;
+    sink.flush().map_err(|source| LayoutError::Io {
+        target: url.to_string(),
+        source,
+    })?;
+    Ok(())
+}
+
 /// Open the row-group container one payload set goes into, at `url`.
 ///
 /// Through [`TileWriter`] and not through a writer of its own, because one row
@@ -1801,6 +1940,16 @@ fn place_after(positions: &mut [(f32, f32)], origin_x: f32) -> f32 {
     origin_x + width + TYPE_GUTTER
 }
 
+/// Bits per axis on the grid positions are quantised onto, so a code is a `u32`.
+///
+/// Published in the code anchor rather than left implicit in [`morton2`]'s `u16`
+/// argument, because a reader that hard-codes it is right today and has no way
+/// to notice the day it stops being. The three implementations that agree on it
+/// — this one, `apps/corpus/guards/arithmetic.mjs` and
+/// `@fossil-lang/corpus`'s `MORTON_BITS` — agree against
+/// `apps/corpus/guards/vectors.json` and not against each other.
+pub const MORTON_BITS: u32 = 16;
+
 /// Interleave the low 16 bits of `x` and `y` into a 32-bit Morton (Z-order)
 /// code (`x` in even bits, `y` in odd). Spatially-near points get
 /// near-sequential codes, so sorting vertices by it groups nearby ones into the
@@ -1843,25 +1992,81 @@ fn quantize(v: f32, lo: f32, hi: f32) -> u16 {
     (t * f32::from(u16::MAX)).round() as u16
 }
 
+/// The bounding box a vertex type's positions were quantised against — **the
+/// other half of the anchor**, and the half a reader cannot guess either.
+///
+/// A Morton code is `quantize(x, xlo, xhi)` interleaved with
+/// `quantize(y, ylo, yhi)`, so a rectangle in the corpus's own coordinates is a
+/// rectangle on the code grid only once this is known. It is derivable from the
+/// corpus — it is the min and max of the `x` and `y` columns — but deriving it
+/// means reading every tile's footer, which is the dependency the arithmetic
+/// address exists to remove. Four numbers published beside the codes settle it.
+///
+/// **`f32`, and that is load-bearing.** The quantisation is binary32 at every
+/// step (see [`quantize`]); a reader that widens these to binary64 before
+/// dividing gets a different grid cell for values near a boundary, and that is a
+/// different code, a different rank and a different tile.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Extent {
+    pub xlo: f32,
+    pub ylo: f32,
+    pub xhi: f32,
+    pub yhi: f32,
+}
+
+/// The bounding box of a position list. `None` for an empty one, which has no
+/// box rather than a degenerate one at the origin.
+#[must_use]
+fn extent_of(positions: &[(f32, f32)]) -> Option<Extent> {
+    if positions.is_empty() {
+        return None;
+    }
+    let (mut xlo, mut ylo, mut xhi, mut yhi) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for &(x, y) in positions {
+        xlo = xlo.min(x);
+        ylo = ylo.min(y);
+        xhi = xhi.max(x);
+        yhi = yhi.max(y);
+    }
+    Some(Extent { xlo, ylo, xhi, yhi })
+}
+
+/// Morton codes for a position list, quantised against a **given** box.
+///
+/// Split from [`morton_codes`] because the box is now published rather than
+/// discarded: it was computed inside the map and thrown away, and a reader that
+/// wants to turn a rectangle into a code range needs the same four numbers the
+/// writer used. Computing it twice from the same slice would be equal by luck
+/// rather than by construction.
+#[must_use]
+fn morton_codes_within(positions: &[(f32, f32)], extent: Extent) -> Vec<u32> {
+    positions
+        .iter()
+        .map(|&(x, y)| {
+            morton2(
+                quantize(x, extent.xlo, extent.xhi),
+                quantize(y, extent.ylo, extent.yhi),
+            )
+        })
+        .collect()
+}
+
 /// Morton codes for a position list — quantises each coordinate to `u16` over
 /// the list's bounding box (a degenerate axis maps to 0). Index-aligned with
 /// `positions`.
+///
+/// **The pass does not call this**, and that is the point of the split above it:
+/// it takes the box out of [`extent_of`] and passes the *same value* to
+/// [`morton_codes_within`] and to the anchor it writes, so the codes and the box
+/// published beside them cannot be two computations that happen to agree. What
+/// is left here is the composition the tests are written against.
+#[cfg(test)]
 #[must_use]
 fn morton_codes(positions: &[(f32, f32)]) -> Vec<u32> {
-    if positions.is_empty() {
-        return Vec::new();
+    match extent_of(positions) {
+        None => Vec::new(),
+        Some(extent) => morton_codes_within(positions, extent),
     }
-    let (mut min_x, mut min_y, mut max_x, mut max_y) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-    for &(x, y) in positions {
-        min_x = min_x.min(x);
-        min_y = min_y.min(y);
-        max_x = max_x.max(x);
-        max_y = max_y.max(y);
-    }
-    positions
-        .iter()
-        .map(|&(x, y)| morton2(quantize(x, min_x, max_x), quantize(y, min_y, max_y)))
-        .collect()
 }
 
 #[cfg(test)]

@@ -180,11 +180,71 @@ byte curve is flat from 1,024 to 8,192, so the emitter is not tuned inside that 
 Pareto-dominated on both curves at once, because a 122,880-row edge tile crosses several row groups
 and costs 9.4 requests.
 
+## The codes are the anchor
+
+Arithmetic says **which tiles exist**. Which tiles **intersect the window** is a second question, and
+`chunk_size` does not answer it: `dense_id` is a vertex's *rank* by Morton code and not its code, and
+where a code falls in a ranking is a function of how the positions are distributed. Assuming the
+ranks are uniform in the code space is not a conservative guess — over nine windows of a
+million-vertex corpus it misses **129 of the 226** tiles that hold a matching vertex, which is a
+wrong picture rather than a slow one.
+
+So a vertex type publishes the codes its tiles begin and end on, in a document beside them:
+
+```yaml
+# vertex/Person/codes.json              the anchor — two u32 per tile, and the box they were cut on
+codes:
+  path: codes.json
+```
+
+```json
+{
+  "morton_bits": 16,
+  "chunk_size": 4096,
+  "tiles": 245,
+  "extent": { "xlo": -49.435, "ylo": -46.09, "xhi": 342.257, "yhi": 337.975 },
+  "lo": [22025280, 925545790, "…"],
+  "hi": [908871311, 1803986609, "…"]
+}
+```
+
+`lo[k]` is the Morton code of tile *k*'s first row and `hi[k]` the code of its last. Both arrays are
+non-decreasing, because the rows are in rank order and rank order **is** code order — which is what
+makes two binary searches over them a decomposition rather than a scan. `extent` is the box the
+positions were [quantised against](#the-arithmetic), the half a reader cannot derive
+without opening every tile; `morton_bits` is the grid, declared rather than left to be inferred by a
+reader that has no way to notice the day it changes.
+
+**A path on the manifest and not the numbers in it.** There are two per tile, so inlining them would
+make a manifest grow with the corpus — and a manifest is read in full by everything that touches
+one, including a reader that wants a row count. The `codes:` block has the shape
+[`index:`](/docs/format/conventions/identity#searching-for-one-is-a-second-table-not-a-second-column)
+has: the manifest names where, and the file is what a reader fetches when it has a rectangle.
+
+**JSON and not a packed array.** The 245 pairs of a million-vertex corpus pack to 1,960 B and print
+to 5,498 B, and both are two orders of magnitude under the 226 kB of Parquet footer that answers the
+same question over the same corpus. What the difference buys is a document with no endianness, no
+width and no offset table to agree on — legible to anything that can read a number, which is the
+criterion the rest of this page is written to.
+
+It is **optional**, on the same argument `index:` is: a corpus without it leaves the window question
+answerable and slower, out of the footer boxes below, and a corpus whose payload carries no `x`/`y`
+has no codes to anchor. What it does not leave answerable is the window question *for a reader that
+has no Parquet reader*, which is the reader the anchor exists for — a camera addressing a rectangle
+with `JSON.parse` and arithmetic, no engine and no fetch beyond the bytes it already holds.
+
+Guard: `code-anchor`, and it is not "the document parses". Every `lo[k]`/`hi[k]` is recomputed from
+the corpus's own first and last row of tile *k*, quantised in binary32 against the extent the anchor
+publishes, and that extent is checked against the corpus's actual bounding box. A plausible anchor
+computed from something else draws a plausible picture of the wrong vertices, and no count notices.
+
 ## The footer is the index
 
-Arithmetic says **which tiles exist**. It does not say **which tiles intersect the window**: the
-`dense_id` range of a rectangle needs the Morton range, and the Morton range is what the row-group
-boxes say. They live in the footer, and one request buys all of them.
+A code range prunes a rectangle *tighter* than an `x`/`y` box does — the box is the rectangular hull
+of an arc that snakes, and the arc is where the vertices are — so what the footer is needed for is
+**byte offsets**: under `container: rowgroups` a run of tiles is a byte interval only a footer can
+name, and a corpus that publishes no anchor answers the window question here instead. The boxes live
+in the footer, and one request buys all of them.
 
 ```
 tiles.parquet                                 5,000,000 rows

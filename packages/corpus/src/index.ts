@@ -53,6 +53,7 @@ export type { QueryFn, QueryRow } from './query.js';
 // already using the verbs and want both halves from one specifier.
 export {
   resolveCorpus,
+  parseTileCodes,
   shiftFor,
   tailRows,
   tileOf,
@@ -73,6 +74,8 @@ export type {
   CorpusAddressing,
   VertexAddress,
   AddressedTiles,
+  TileCodes,
+  TileCodesDocument,
 } from './address.js';
 
 // The door. It had a subpath of its own — `@fossil-lang/corpus/corpus` — whose one justification

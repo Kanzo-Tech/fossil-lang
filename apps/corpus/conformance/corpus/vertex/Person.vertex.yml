@@ -18,4 +18,6 @@ index:
   prefix: index/
   ordered_by: subject
   chunk_size: 64
+codes:
+  path: codes.json
 version: gar/v1

@@ -38,7 +38,7 @@
 
 use std::path::Path;
 
-use fossil_sinks::manifest::{TILES_FILE, VertexInfo};
+use fossil_sinks::manifest::{TILE_CODES_FILE, TILES_FILE, VertexInfo};
 
 const PROGRAM: &str = "\
 type { Person } := io.shex(\"person.shex\")
@@ -70,6 +70,28 @@ const USERS: &str = "id,name\n1,Alice\n2,Bob\n3,Cleo\n";
 /// footer.
 fn payload(info: &VertexInfo) -> String {
     format!("{}{TILES_FILE}", info.prefix)
+}
+
+/// The `codes:` block's `path`, by line scan, or `None` when the document
+/// declares none.
+///
+/// A scan and not a deserialise, for the reason the whole file exists: reading
+/// it back through `VertexInfo` would prove the struct round-trips, not that the
+/// artefact tells a stranger where the anchor is. The shape it reads is the two
+/// lines the writer emits — `codes:` then an indented `path:` — which is also
+/// the shape `apps/corpus/guards/manifest.mjs` scans for.
+fn codes_path(yaml: &str) -> Option<String> {
+    let mut lines = yaml.lines().skip_while(|l| l.trim_end() != "codes:");
+    lines.next()?;
+    for line in lines {
+        if !line.starts_with(' ') {
+            return None;
+        }
+        if let Some(value) = line.trim().strip_prefix("path:") {
+            return Some(value.trim().to_string());
+        }
+    }
+    None
 }
 
 /// How many tiles a payload set holds, read off its footer — one row group per
@@ -125,6 +147,19 @@ fn every_path_the_manifest_names_exists_on_disk() {
     named.extend(report.graph.vertices.clone());
     named.extend(report.graph.edges.clone());
     named.extend(report.vertices.iter().map(payload));
+    // And the tile-code anchor, read out of the vertex document rather than off
+    // the report, because the report is the compile's view and the anchor is the
+    // LAYOUT pass's: the manifest declares a path it has no numbers for and the
+    // pass fills it afterwards. Exactly the shape the header of this file
+    // describes — two sides agreeing about a string, and only one of them
+    // writing bytes. If the pass stopped writing it, every reader that trusts
+    // `codes:` gets a 404 and nothing else here would notice.
+    for (info, doc) in report.vertices.iter().zip(&report.graph.vertices) {
+        let yaml = std::fs::read_to_string(dest.join(doc)).expect("read the vertex document");
+        let declared = codes_path(&yaml)
+            .unwrap_or_else(|| panic!("`{doc}` declares no `codes:` path; got:\n{yaml}"));
+        named.push(format!("{}{declared}", info.prefix));
+    }
     assert!(named.len() > 1, "the manifest named nothing to fetch");
     for rel in named {
         assert!(
@@ -189,8 +224,12 @@ fn the_vertices_are_the_tile_prefix_and_the_staged_parquet_is_gone() {
     emitted.sort();
     assert_eq!(
         emitted,
-        vec!["index".to_string(), TILES_FILE.to_string()],
-        "the prefix holds the payload and the index, and nothing else"
+        vec![
+            TILE_CODES_FILE.to_string(),
+            "index".to_string(),
+            TILES_FILE.to_string()
+        ],
+        "the prefix holds the payload, the index and the code anchor, and nothing else"
     );
 
     // And the tiles are in the footer, which is where the count moved: a

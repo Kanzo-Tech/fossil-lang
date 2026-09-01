@@ -89,6 +89,11 @@ pub const GRAPHAR_VERSION: &str = "gar/v1";
 /// tiles. `@fossil-lang/corpus` spells the same constant.
 pub const TILES_FILE: &str = "tiles.parquet";
 
+/// The **tile-code anchor** of one vertex type, under its own
+/// [`VertexInfo::prefix`]. See [`VertexCodes`] for what is in it and why it is
+/// beside the tiles rather than inside the manifest.
+pub const TILE_CODES_FILE: &str = "codes.json";
+
 /// Which container carries a corpus's tiles — one file per tile with the address
 /// in the name, or one file per set with the address as the row-group ordinal.
 ///
@@ -386,6 +391,17 @@ pub struct VertexInfo {
     /// them stays readable. That is the other half of the same argument.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<VertexIndex>,
+    /// **Where the Morton code of each tile's first and last row is published**
+    /// — the one input the arithmetic address cannot derive. See [`VertexCodes`].
+    ///
+    /// `Option` for [`Self::index`]'s reason and not [`Self::vertex_count`]'s:
+    /// its absence leaves the window question answerable and slower, because a
+    /// reader with a Parquet reader in hand gets the same tiles out of the
+    /// footers. What it does not leave answerable is the window question *for a
+    /// reader that has no Parquet reader*, which is the reader this field
+    /// exists for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codes: Option<VertexCodes>,
     /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
     pub version: String,
 }
@@ -432,6 +448,64 @@ pub struct VertexIndex {
     /// Reusing the payload's number would read as an alignment that does not
     /// exist.
     pub chunk_size: u64,
+}
+
+/// Where a vertex type's **tile-code anchor** lives: the first and last Morton
+/// code of every tile, plus the extent those codes were quantised against.
+///
+/// # What it is for
+///
+/// `dense_id` is renumbered into Morton order, so a vertex's address and its
+/// position are the same number read two ways and a rectangle is a set of code
+/// ranges. What that does **not** give is where a code range falls in the
+/// *ranking*: `dense_id` is a vertex's RANK by code, not its code, and the rank
+/// of a code is a function of how the positions are distributed.
+/// [`VertexInfo::chunk_size`] alone cannot say it, and assuming the ranks are
+/// uniform in the code space is not a conservative guess — measured over nine
+/// windows of a million-vertex corpus it MISSES 129 of the 226 tiles that hold
+/// a matching vertex.
+///
+/// So it is data, and it is small: two `u32` per tile, 245 tiles at a million
+/// vertices, against the 226 kB of Parquet footer a geometric answer to the same
+/// question reads.
+///
+/// # Why a file beside the tiles and not a field of this manifest
+///
+/// Three reasons, and the first one is not size.
+///
+/// - **The manifest is the plan and this is an outcome.** Every field of
+///   [`VertexInfo`] is known before a byte is written; the codes are known only
+///   after the layout pass has placed the vertices, and the placeholder `x`/`y`
+///   the writer emits do not have them. Putting a value here would mean a second
+///   manifest write after the pass. Declaring a *path* is the same shape
+///   [`VertexInfo::index`] already has: the manifest names where, the pass fills
+///   it, and `apps/corpus` is what goes red if the pass does not.
+/// - **It scales with the corpus and the manifest does not.** `graph.graph.yml`
+///   and its siblings are read in full by everything that touches a corpus —
+///   `fossil check`, the conformance readers, the guards, a reader that only
+///   wants a row count. Inlining `2 · ceil(V / chunk_size)` numbers turns a
+///   constant-size document into one that grows with V, charged to every reader
+///   including the ones that never draw.
+/// - **A reader must not need a reader.** The point of the arithmetic address is
+///   that a camera answers "which tiles" with no Parquet reader, no engine and
+///   no fetch beyond the bytes it already holds. Publishing the anchor as a
+///   Parquet column, or as a column of the payload it is supposed to select,
+///   puts back the dependency the arithmetic exists to remove.
+///
+/// # Why JSON and not a packed `u32` array
+///
+/// Packed little-endian `u32` is 1,960 B at a million vertices where the JSON is
+/// about 5.4 kB — 2.8×, and both are two orders of magnitude under the footer
+/// they replace. What the JSON buys for that is that it needs **no convention**:
+/// no endianness, no width, no offset table, and no code at the reading end
+/// beyond the `JSON.parse` every language already has. The criterion this format
+/// is written to is legibility by anything that can read a number, and a packed
+/// array is legible only to a reader that has been told how.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VertexCodes {
+    /// Path to the anchor document, relative to the vertex type's own
+    /// [`VertexInfo::prefix`] — [`TILE_CODES_FILE`] as the writer spells it.
+    pub path: String,
 }
 
 /// `GraphAr` edge-info manifest (one per `(src_type, edge_type, dst_type)` triple).
@@ -688,6 +762,9 @@ impl VertexInfo {
             // second pass over the rows in a different order, which the caller
             // that HAS those rows decides to pay. `with_index` is how it says so.
             index: None,
+            // Nor a code anchor: it is an outcome of the layout pass and the
+            // caller that runs one declares it. See [`VertexCodes`].
+            codes: None,
             version: GRAPHAR_VERSION.to_string(),
         }
     }
@@ -696,6 +773,13 @@ impl VertexInfo {
     #[must_use]
     pub fn with_index(mut self, index: VertexIndex) -> Self {
         self.index = Some(index);
+        self
+    }
+
+    /// Declare where this type's tile-code anchor is written. See [`VertexCodes`].
+    #[must_use]
+    pub fn with_codes(mut self, codes: VertexCodes) -> Self {
+        self.codes = Some(codes);
         self
     }
 

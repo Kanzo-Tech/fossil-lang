@@ -361,11 +361,42 @@ space **misses 129 of the 226 tiles** that hold a matching vertex. It is not a c
 it is a wrong picture.
 
 So the decomposition needs one anchor, and it is small: the first and last code of each tile, two
-`u32`, **1,960 B for a million vertices** against the 226 kB of Parquet footer the geometric path
-reads over the same corpus — and readable by anything that can read a number. `TileCodes` is that
-input, and the writer already holds it: `morton` and `order` are both in hand in the layout pass, so
-publishing it is a manifest field and not a second computation. **Nothing publishes it yet**, which
-is the outstanding half of this section rather than a limitation of the arithmetic.
+`u32`, against the 226 kB of Parquet footer the geometric path reads over the same corpus — and
+readable by anything that can read a number. **It is published.** The layout pass writes
+`vertex/<Type>/codes.json` and the vertex manifest names it in a `codes:` block; the numbers above
+are measured against that file, read as a stranger reads it — `JSON.parse`, its own extent, and no
+Parquet reader anywhere on the path.
+
+Three things about it were decided rather than assumed, and each one is written where it is spelled.
+
+- **A path on the manifest, not the numbers in it.** Every other field of a vertex manifest is known
+  before a byte is written; the codes are known only after the layout pass has placed the vertices.
+  Inlining `2 · ceil(V / chunk_size)` numbers would also turn a constant-size document into one that
+  grows with V, charged to everything that reads a manifest in full — including a reader that wants
+  a row count. `codes:` has the shape `index:` already has: the manifest names where, the pass fills
+  it, and `apps/corpus` is what goes red if the pass does not.
+- **A file beside the tiles, not a column inside them.** The point of the arithmetic is that a
+  camera answers *which tiles* with no Parquet reader; publishing the anchor as Parquet puts back
+  exactly the dependency it exists to remove.
+- **JSON, not a packed `u32` array.** Packed is **1,960 B** at a million vertices where the JSON is
+  **5,498 B** — 2.8×, and both two orders of magnitude under the footer they replace. What the
+  difference buys is that there is no endianness, no width and no offset table to get wrong, in any
+  language. The criterion this format is written to is legibility by anything that can read a
+  number, and a packed array is legible only to a reader that has been told how.
+
+The writer holds it rather than computing it: `morton` and `order` are the same values in the same
+hand — the codes are what the ranking was made from — so publishing is a projection and not a second
+pass. Anything downstream would have to re-derive the codes from the written `x`/`y`, which means
+reading every tile back *and* getting a different answer wherever the two quantisations disagree by
+a unit.
+
+Two implementations write it and a guard holds them together. `code-anchor` recomputes every
+`lo[k]`/`hi[k]` from the corpus's own first and last row of tile *k*, quantised in binary32 against
+the extent the anchor publishes, and checks that extent against the corpus's actual bounding box —
+because a writer that published a *plausible* anchor computed from something else would draw a
+plausible picture of the wrong vertices, and no count would notice. `self-test.mjs` breaks it two
+ways, one code and one extent, and both fire in isolation: the rows are untouched, so every other
+guard stays green.
 
 The two still compose, but not in the direction this callout used to guess. Arithmetic addresses
 *and* prunes tighter; what the footer is still needed for is **byte offsets under `container:
@@ -401,7 +432,8 @@ section exists so the next person argues against the right thing.
 The measurement above moves the bottom half rather than the top. A tile's Morton range prunes a
 rectangle *better* than its `x`/`y` box does, so "the footer is the index" is now only true of byte
 offsets: the spatial index a Zarr container would have to grow is 8 B per chunk and the writer
-already holds it. What that does **not** settle is the reversal condition, which is a reader and not
+already publishes it, in a document beside the chunks rather than inside them — which is the shape a
+Zarr store would want anyway. What that does **not** settle is the reversal condition, which is a reader and not
 a size — and no Zarr reader opens a corpus of typed tables with a subject IRI in them.
 
 ### The npm package is named for the corpus; the crates are named for the surface

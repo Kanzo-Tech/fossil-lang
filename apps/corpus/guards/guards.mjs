@@ -20,7 +20,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import { query, scalar } from "./duck.mjs";
 import { fileList, rowGroups } from "./inspect.mjs";
-import { TILE_ROWS, morton2, quantize, shiftFor, tailRows, tileOf, tileUrl, tilesOf } from "./arithmetic.mjs";
+import {
+  TILE_ROWS,
+  morton2,
+  mortonOf,
+  quantize,
+  shiftFor,
+  tailRows,
+  tileOf,
+  tileUrl,
+  tilesOf,
+} from "./arithmetic.mjs";
 
 /**
  * The published borders, read on first use.
@@ -769,6 +779,163 @@ export const GUARDS = [
               `so selecting tiles by box selects nearly all of them`,
           );
         }
+      }
+      return result(failures, notes);
+    },
+  },
+
+  {
+    id: "code-anchor",
+    title: "The published tile codes are the codes of the rows they name",
+    proves:
+      "That `vertex/<Type>/codes.json` — the document the manifest's `codes:` block names — is a " +
+      "projection of the corpus and not a plausible number beside it. Every `lo[k]`/`hi[k]` is " +
+      "recomputed here from the corpus's OWN first and last row of tile `k`, quantised against the " +
+      "extent the anchor publishes, in binary32; the extent is checked against the corpus's actual " +
+      "bounding box; and the pairs are checked to be non-decreasing, which is what makes a binary " +
+      "search over them valid. Without the anchor `dense_id` is a rank whose code is unknowable, " +
+      "and a rectangle can only be turned into tiles by opening a Parquet footer — so this is the " +
+      "one file that decides whether a reader with no Parquet reader gets the right picture or a " +
+      "confident wrong one.",
+    cannotProve:
+      "That a corpus SHOULD carry one. An absent `codes:` block is a legal corpus read here as a " +
+      "note and not a failure: the same question is answerable out of the footers, more slowly and " +
+      "more loosely, and every corpus written before the field existed reads that way. Nor that " +
+      "the anchor is any use — a corpus whose positions mean nothing has an exact anchor over " +
+      "meaningless codes, which `spatial-tiles` is the guard for.",
+    run(corpus) {
+      const failures = [];
+      const notes = [];
+      for (const type of corpus.types) {
+        if (type.codes === null) {
+          if (type.files.length > 0 && type.columns.has("x")) {
+            notes.push(`${type.name}: no anchor declared, so a rectangle needs a Parquet reader`);
+          }
+          continue;
+        }
+        if (type.codes.error !== null) {
+          failures.push(`${type.name}: the manifest ${type.codes.error}`);
+          continue;
+        }
+        const doc = type.codes.doc;
+        if (type.files.length === 0 || !type.columns.has("x") || !type.columns.has("y")) {
+          failures.push(`${type.name}: an anchor over a payload with no positions in it`);
+          continue;
+        }
+        if (type.shift === null) {
+          failures.push(`${type.name}: no shift addresses its tiles, so the anchor cuts nowhere`);
+          continue;
+        }
+        // The grid, declared rather than assumed. A corpus quantised onto a
+        // different number of bits per axis is addressed by DIFFERENT
+        // arithmetic, so every check below would agree with itself and with
+        // nothing else.
+        if (doc.morton_bits !== 16) {
+          failures.push(
+            `${type.name}: the anchor declares ${doc.morton_bits} bits per axis and the ` +
+              `conventions quantise to 16, which is a different code for the same position`,
+          );
+          continue;
+        }
+        if (String(doc.chunk_size) !== String(type.chunkSize)) {
+          failures.push(
+            `${type.name}: the anchor is cut at ${doc.chunk_size} rows and the manifest tiles at ` +
+              `${type.chunkSize}, so its k-th pair is not tile k`,
+          );
+          continue;
+        }
+        const { lo, hi } = doc;
+        if (!Array.isArray(lo) || !Array.isArray(hi) || lo.length !== hi.length) {
+          failures.push(`${type.name}: the anchor is not one lo/hi pair per tile`);
+          continue;
+        }
+        if (lo.length !== Number(doc.tiles)) {
+          failures.push(
+            `${type.name}: the anchor declares ${doc.tiles} tile(s) and carries ${lo.length} pair(s)`,
+          );
+          continue;
+        }
+        const expected = tilesOf(BigInt(type.count), type.chunkSize);
+        if (expected !== null && BigInt(lo.length) !== expected) {
+          failures.push(
+            `${type.name}: ${lo.length} anchored tile(s) against the ${expected} the ${type.count} ` +
+              `row(s) on disk occupy`,
+          );
+          continue;
+        }
+
+        // The extent, against the corpus's own. It is the half a reader cannot
+        // guess, and a wrong one is not a rounding error: every code shifts, so
+        // the rectangle a camera asks for lands on different tiles.
+        const measured = query(
+          `SELECT min(x)::FLOAT AS xlo, max(x)::FLOAT AS xhi,
+                  min(y)::FLOAT AS ylo, max(y)::FLOAT AS yhi
+             FROM read_parquet(${fileList(type.files)})`,
+        )[0];
+        const f = Math.fround;
+        let skewed = false;
+        for (const side of ["xlo", "xhi", "ylo", "yhi"]) {
+          const published = f(Number(doc.extent?.[side]));
+          if (!Number.isFinite(published) || published !== f(Number(measured[side]))) {
+            skewed = true;
+            failures.push(
+              `${type.name}: the anchor publishes extent.${side} = ${doc.extent?.[side]} and the ` +
+                `corpus's own is ${measured[side]}`,
+            );
+          }
+        }
+        // Every code below is quantised against the published box, so a box that
+        // is already wrong would report every tile wrong as well. One failure
+        // per break, and the one that names the cause.
+        if (skewed) continue;
+        const extent = {
+          minX: Number(doc.extent.xlo),
+          maxX: Number(doc.extent.xhi),
+          minY: Number(doc.extent.ylo),
+          maxY: Number(doc.extent.yhi),
+        };
+
+        // The codes themselves. The first and last row of each tile by
+        // `dense_id`, which IS the first and last by code — the order is the
+        // ranking — read back out of the corpus and quantised here.
+        const ends = query(
+          `WITH src AS (SELECT dense_id, x, y FROM read_parquet(${fileList(type.files)})),
+                t AS (SELECT (dense_id >> ${type.shift}) AS tile, dense_id, x, y FROM src),
+                b AS (SELECT tile, min(dense_id) AS a, max(dense_id) AS z FROM t GROUP BY tile)
+           SELECT b.tile AS tile, lo.x AS lox, lo.y AS loy, hi.x AS hix, hi.y AS hiy
+             FROM b JOIN t AS lo ON lo.dense_id = b.a JOIN t AS hi ON hi.dense_id = b.z
+            ORDER BY b.tile`,
+        );
+        let wrong = 0;
+        for (const row of ends) {
+          const k = Number(row.tile);
+          if (k >= lo.length) {
+            failures.push(`${type.name}: tile ${k} is on disk and the anchor names ${lo.length}`);
+            break;
+          }
+          if (mortonOf(Number(row.lox), Number(row.loy), extent) !== Number(lo[k])) wrong += 1;
+          if (mortonOf(Number(row.hix), Number(row.hiy), extent) !== Number(hi[k])) wrong += 1;
+        }
+        failures.push(
+          ...violations(wrong, `${type.name}: an anchored code is not the code of the row it names`),
+        );
+
+        // Non-decreasing, both arrays. `tilesForGrid` answers with two binary
+        // searches, and a binary search over an unsorted array does not fail —
+        // it misses, and a missed tile is a hole in a picture nothing counts.
+        let disordered = 0;
+        for (let k = 0; k < lo.length; k += 1) {
+          if (Number(lo[k]) > Number(hi[k])) disordered += 1;
+          if (k > 0 && (Number(lo[k - 1]) > Number(lo[k]) || Number(hi[k - 1]) > Number(hi[k]))) {
+            disordered += 1;
+          }
+        }
+        failures.push(
+          ...violations(disordered, `${type.name}: the anchor is not in code order end to end`),
+        );
+        notes.push(
+          `${type.name}: ${lo.length} anchored tile(s), codes recomputed from the rows they name`,
+        );
       }
       return result(failures, notes);
     },

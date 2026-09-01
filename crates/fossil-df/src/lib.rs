@@ -86,7 +86,7 @@ use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
     AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Privacy,
-    Property, PropertyGroup, VertexIndex, VertexInfo, data_type_name,
+    Property, PropertyGroup, TILE_CODES_FILE, VertexCodes, VertexIndex, VertexInfo, data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -1937,6 +1937,14 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
         prefix: "index/".to_string(),
         ordered_by: "subject".to_string(),
         chunk_size: DEFAULT_CHUNK_SIZE,
+    });
+    // And where the tile-code anchor will be, for the same reason and in the
+    // same place: the manifest is the plan, and this pass writes placeholder
+    // `x`/`y` it has no codes for. Only the layout pass knows the numbers, and
+    // it writes them under this path — `apps/corpus`'s guards are what go red if
+    // it does not.
+    info = info.with_codes(VertexCodes {
+        path: TILE_CODES_FILE.to_string(),
     });
     info
 }

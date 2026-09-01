@@ -248,9 +248,11 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
         "six vertices at a chunk_size of 2 is three row groups of two",
     );
 
-    // ONE file in the prefix, and it is the payload. Two containers at once is
-    // one too many — a reader that globs finds both — which is the convention
-    // `apps/corpus`'s `declared-tiling` fires on.
+    // ONE Parquet in the prefix, and it is the payload. Two containers at once
+    // is one too many — a reader that globs finds both — which is the convention
+    // `apps/corpus`'s `declared-tiling` fires on. The anchor beside it is not a
+    // second container: it is JSON, no glob for `*.parquet` reaches it, and it
+    // is listed here so that a third file cannot appear unremarked.
     let mut emitted: Vec<String> = fs::read_dir(&chunks)
         .expect("read the tile prefix")
         .filter_map(Result::ok)
@@ -259,9 +261,56 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     emitted.sort();
     assert_eq!(
         emitted,
-        vec!["index".to_string(), "tiles.parquet".to_string()],
-        "the tile prefix holds the payload and the index, and nothing else",
+        vec![
+            "codes.json".to_string(),
+            "index".to_string(),
+            "tiles.parquet".to_string(),
+        ],
+        "the tile prefix holds the payload, the index and the code anchor, and nothing else",
     );
+
+    // The anchor, read as a stranger reads it: JSON, no Parquet reader in the
+    // path, one `lo`/`hi` pair per row group. `hi[k] <= lo[k+1]` is what makes
+    // the two binary searches in `@fossil-lang/corpus`'s `tilesForGrid` valid,
+    // and it holds because the rows are in rank order and rank order IS code
+    // order — asserted rather than trusted, because a pass that cut the anchor
+    // on `morton` instead of on the written rows would break exactly this.
+    let anchor: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(chunks.join("codes.json")).expect("read the code anchor"),
+    )
+    .expect("the anchor is JSON");
+    assert_eq!(
+        anchor["morton_bits"], 16,
+        "the grid is declared, not implied"
+    );
+    assert_eq!(
+        anchor["chunk_size"], 2,
+        "the anchor is cut at the tile size"
+    );
+    assert_eq!(anchor["tiles"], 3, "three tiles, three pairs");
+    let nums = |key: &str| -> Vec<u64> {
+        anchor[key]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|v| v.as_u64().expect("a code"))
+            .collect()
+    };
+    let (lo, hi) = (nums("lo"), nums("hi"));
+    assert_eq!(lo.len(), 3);
+    assert_eq!(hi.len(), 3);
+    for k in 0..3 {
+        assert!(lo[k] <= hi[k], "tile {k} spans backwards");
+        if k + 1 < 3 {
+            assert!(hi[k] <= lo[k + 1], "tile {k} overlaps the one after it");
+        }
+    }
+    for key in ["xlo", "ylo", "xhi", "yhi"] {
+        assert!(
+            anchor["extent"][key].is_number(),
+            "the extent publishes {key}",
+        );
+    }
 
     // And the index the pass writes beside it, addressed the same way: tiled at
     // the same size over the SORTED order, so three row groups again.

@@ -38,13 +38,21 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { type Box, type TileCodes, gridBoxOf, mortonOf, tilesForGrid } from '../src/address.js';
+import {
+  type Box,
+  type TileCodes,
+  type TileCodesDocument,
+  gridBoxOf,
+  mortonOf,
+  parseTileCodes,
+  tilesForGrid,
+} from '../src/address.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
 // conventions ask for, and it must not import a type of ours to be one.
@@ -126,10 +134,15 @@ describe.skipIf(!hasDuckdb)('the arithmetic against the footers, same windows', 
   // ---- the arithmetic path's input ----
   //
   // Two rows per tile, not two hundred: `dense_id` is the rank BY code, so the rows inside a tile
-  // are in code order too and its first and last rows ARE its range. A writer holds both already —
-  // `morton` and `order` are in hand in `crates/fossil-layout/src/layout.rs` — so this query stands
-  // in for a manifest field that does not exist yet, and its size is what that field would cost.
-  const codes: TileCodes = { lo: new Uint32Array(tiles), hi: new Uint32Array(tiles) };
+  // are in code order too and its first and last rows ARE its range.
+  //
+  // **This used to be the measurement's anchor and it is now its control.** It stood in for "a
+  // manifest field that does not exist yet"; the field exists — `codes:` on the vertex manifest,
+  // `vertex/<Type>/codes.json` on disk — and the corpus publishes one. So the numbers below are
+  // measured against the PUBLISHED anchor and this derivation is what proves the published one is
+  // the corpus's own: same codes, same extent, tile for tile. A measurement that reconstructs its
+  // own input is measuring a function, not a format.
+  const derived: TileCodes = { lo: new Uint32Array(tiles), hi: new Uint32Array(tiles) };
   const ends = query(`
     SELECT dense_id, CAST(x AS DOUBLE) AS x, CAST(y AS DOUBLE) AS y
     FROM read_parquet('${lit(payload)}')
@@ -143,14 +156,25 @@ describe.skipIf(!hasDuckdb)('the arithmetic against the footers, same windows', 
     const tile = dense >>> SHIFT;
     const code = mortonOf(Math.fround(num(row.x)), Math.fround(num(row.y)), extent);
     if (dense % CHUNK === 0) {
-      (codes.lo as Uint32Array)[tile] = code;
+      (derived.lo as Uint32Array)[tile] = code;
       seenLo.add(tile);
     }
     if (dense % CHUNK === CHUNK - 1 || dense === count - 1) {
-      (codes.hi as Uint32Array)[tile] = code;
+      (derived.hi as Uint32Array)[tile] = code;
       seenHi.add(tile);
     }
   }
+
+  // ---- the published anchor: what the writer put on disk ----
+  //
+  // Read the way a stranger reads it — `JSON.parse` and nothing else, no Parquet reader in the
+  // path — and it carries its own extent, so the arithmetic column below takes NOTHING from the
+  // footer query above. That is the whole claim being measured: no footer, no reader, no engine.
+  const anchorPath = join(root, 'vertex/Person/codes.json');
+  const published: TileCodesDocument | null = existsSync(anchorPath)
+    ? parseTileCodes(readFileSync(anchorPath, 'utf8'), anchorPath)
+    : null;
+  const codes: TileCodes = published ?? derived;
 
   /** No anchor at all: tile `k` assumed to hold the `k`th equal slice of the code space. */
   const uniform: TileCodes = { lo: new Uint32Array(tiles), hi: new Uint32Array(tiles) };
@@ -215,7 +239,7 @@ describe.skipIf(!hasDuckdb)('the arithmetic against the footers, same windows', 
       const geometric = boxes
         .filter((b) => b.xlo <= box.xhi && b.xhi >= box.xlo && b.ylo <= box.yhi && b.yhi >= box.ylo)
         .map((b) => b.tile);
-      const grid = gridBoxOf(box, extent);
+      const grid = gridBoxOf(box, codes.extent ?? extent);
       const arithmetic = grid === null ? [] : tilesForGrid(grid, codes);
       const naive = grid === null ? [] : tilesForGrid(grid, uniform);
 
@@ -252,6 +276,33 @@ describe.skipIf(!hasDuckdb)('the arithmetic against the footers, same windows', 
     expect(rows.length).toBeGreaterThan(0);
   });
 
+  it('reads the anchor the corpus publishes, and it is the corpus\'s own', () => {
+    // Not "an anchor parses". The published `lo`/`hi` must be the codes of the first and last row
+    // of every tile, recomputed here from the rows themselves through a different route — a
+    // DuckDB read of the two ends plus `mortonOf` — and the extent must be the one the footers
+    // describe. A writer that published a plausible anchor computed from something else would
+    // give a plausible picture of the wrong vertices, and no count would notice.
+    expect(published).not.toBeNull();
+    const anchor = published!;
+    expect(anchor.mortonBits).toBe(16);
+    expect(anchor.chunkSize).toBe(CHUNK);
+    expect(anchor.tiles).toBe(tiles);
+    expect(anchor.lo).toEqual([...(derived.lo as Uint32Array)]);
+    expect(anchor.hi).toEqual([...(derived.hi as Uint32Array)]);
+    for (const side of ['xlo', 'xhi', 'ylo', 'yhi'] as const) {
+      expect(Math.fround(anchor.extent[side])).toBe(Math.fround(extent[side]));
+    }
+  });
+
+  it('costs two u32 per tile, against a footer that costs a reader', () => {
+    // The size the design page quotes, checked against the file rather than argued: the anchor is
+    // JSON, so it is bigger than the 8 B per tile a packed array would be, and it is still two
+    // orders of magnitude under the footer it replaces.
+    const anchorBytes = statSync(anchorPath).size;
+    const footerBytes = statSync(payload).size - boxes.reduce((a, b) => a + b.bytes, 0);
+    expect(anchorBytes).toBeLessThan(footerBytes / 10);
+  });
+
   it('misses nothing: every tile holding a matching vertex is addressed', () => {
     // The one that has to hold. A decomposition that comes back smaller has not saved bytes, it has
     // dropped vertices that are inside the window — and a picture is wrong in a way no count sees.
@@ -273,7 +324,8 @@ describe.skipIf(!hasDuckdb)('the arithmetic against the footers, same windows', 
     const footerBytes = bytes - boxes.reduce((a, b) => a + b.bytes, 0);
     const lines = [
       `corpus   ${count} vertices · ${tiles} tiles · payload ${(bytes / 1024 / 1024).toFixed(1)} MB`,
-      `inputs   footer ${(footerBytes / 1024).toFixed(0)} kB + a Parquet reader · codes ${tiles * 8} B + nothing`,
+      `inputs   footer ${(footerBytes / 1024).toFixed(0)} kB + a Parquet reader · ` +
+        `anchor ${statSync(anchorPath).size} B published (${tiles * 8} B packed) + nothing`,
       '',
       'window            need |  geometric              |  arithmetic             | uniform, no anchor',
       '                       |  tiles     × req     kB |  tiles     × req     kB |  tiles     × missed',
