@@ -305,32 +305,76 @@ more. That is the property that lets the pyramid be added later without becoming
 
 ### The addressing and the reader do not meet, and Morton is why they could
 
-`@fossil-lang/corpus/address` states its own seam: *"**No boxes.** Which tiles a rectangle touches
+`@fossil-lang/corpus/address` stated its own seam: *"**No boxes.** Which tiles a rectangle touches
 comes from the per-tile `x`/`y` statistics in the Parquet footers... the address is the half that
 cannot be re-derived from the corpus itself. So the host reads its own footers and hands the tile
-numbers back here."* `tilesFor` takes `tiles: number[]` — the caller must already know.
+numbers back here."* `tilesFor` took `tiles: number[]` — the caller had to already know.
 
 **That last clause is false, and the layout pass is what made it false.** `dense_id` is renumbered
 into Morton order, so a vertex's address and its position are the same number read two ways. A
 rectangle is therefore a set of Morton ranges, a Morton range is a `dense_id` range, and a
-`dense_id` range is a run of tiles — arithmetic, on the manifest's `chunk_size` alone, with no
-footer, no reader and no engine. The sentence was true before the renumbering and nobody revisited
-it after.
+`dense_id` range is a run of tiles — no footer, no reader and no engine. The sentence was true
+before the renumbering and nobody revisited it after. `mortonTilesFor` is that decomposition:
+descend the Z-order quadtree, stop where the answer stops changing, and `tilesForBox` is it fed
+into the tile-number door beside it.
 
 What this changes is not an optimisation, it is which package can answer:
 
-- **A camera with no engine can address itself.** Today the browser must hold a Parquet reader to
-  ask "which tiles"; the coarse levels of a pyramid have no reason to. The subpath's promise — no
-  fetch, no WASM, no promise — currently stops one step short of the question a camera actually
-  asks.
+- **A camera with no engine can address itself.** The browser used to need a Parquet reader to ask
+  "which tiles"; the coarse levels of a pyramid have no reason to. The subpath's promise — no
+  fetch, no WASM, no promise — stopped one step short of the question a camera actually asks.
 - **`openCorpus` stops being the only door to a picture.** It keeps the engine for what needs one.
 
-<Callout type="warn" title="Arithmetic over-covers, and the footers are what prune it exactly">
-A Morton decomposition of a box returns a **superset**: the curve enters and leaves the rectangle,
-so some addressed tiles hold nothing inside it. The footer statistics prune that exactly, which is
-what they are for and why they do not go away. The two compose — arithmetic to address, footers to
-refine where a reader exists — and the cost of the arithmetic-only path is measurable against the
-1.13× over-read the footer path already records. **It is not written down until it is measured.**
+#### What it costs, measured against the footer path over the same windows
+
+The over-read was left unwritten here on purpose — *"it is not written down until it is measured"* —
+so it was measured, over the million-vertex corpus `apps/playground/scripts/bench-corpus.mjs`
+writes, at nine windows. The denominator is not a model: DuckDB is asked which tiles actually hold
+a vertex inside the rectangle, and a path answering with fewer has not read less, it has drawn a
+wrong picture.
+
+| window | need | geometric | arithmetic | uniform, no anchor |
+| --- | --- | --- | --- | --- |
+| 2%, centred | 4 | 7 · 1.75× | **4 · 1.00×** | 4, **4 missed** |
+| 2%, lower-left | 4 | 8 · 2.00× | **4 · 1.00×** | 4, **4 missed** |
+| 2%, upper-right | 4 | 7 · 1.75× | **4 · 1.00×** | 3, **4 missed** |
+| 10%, centred | 15 | 17 · 1.13× | **15 · 1.00×** | 8, **12 missed** |
+| 10%, lower-left | 7 | 10 · 1.43× | **7 · 1.00×** | 8, **7 missed** |
+| 10%, upper-right | 12 | 18 · 1.50× | **12 · 1.00×** | 9, **11 missed** |
+| 30%, centred | 90 | 96 · 1.07× | **90 · 1.00×** | 42, **52 missed** |
+| 30%, lower-left | 40 | 41 · 1.02× | **40 · 1.00×** | 46, **9 missed** |
+| 30%, upper-right | 50 | 53 · 1.06× | **50 · 1.00×** | 40, **26 missed** |
+
+**The arithmetic does not over-cover here — it under-cuts the footers.** Mean over-read 1.00×
+against 1.41×, and on the 10% window the page already records, **15 tiles in 4 range requests and
+1,294 kB against 17 tiles in 6 requests and 1,466 kB** — 2.26% of the corpus rather than 2.56%.
+The reason is not cleverness, it is that a code range is a *tighter* description of a tile than its
+`x`/`y` box: the box is the rectangular hull of an arc that snakes, and the arc is where the
+vertices are. The predicted over-cover is real and it is smaller than the hull's.
+
+<Callout type="warn" title="The seam moved and did not vanish: a rank is not a code">
+*"Arithmetic on the manifest's `chunk_size` alone"* is the half of the claim that does not survive.
+`dense_id` is a vertex's **rank** by Morton code, not its code, and where a code falls in a ranking
+is a function of how the positions are distributed — which `chunk_size` does not carry. The third
+column above is that assumption taken seriously: tile *k* holding the *k*th equal slice of the code
+space **misses 129 of the 226 tiles** that hold a matching vertex. It is not a conservative guess,
+it is a wrong picture.
+
+So the decomposition needs one anchor, and it is small: the first and last code of each tile, two
+`u32`, **1,960 B for a million vertices** against the 226 kB of Parquet footer the geometric path
+reads over the same corpus — and readable by anything that can read a number. `TileCodes` is that
+input, and the writer already holds it: `morton` and `order` are both in hand in the layout pass, so
+publishing it is a manifest field and not a second computation. **Nothing publishes it yet**, which
+is the outstanding half of this section rather than a limitation of the arithmetic.
+
+The two still compose, but not in the direction this callout used to guess. Arithmetic addresses
+*and* prunes tighter; what the footer is still needed for is **byte offsets under `container:
+rowgroups`**, where a run of tiles is a byte interval only a footer can name. Under `container:
+files` a URL is the answer and there is no footer on the path at all.
+
+`packages/corpus/tests/address-cost.test.ts` is the measurement, `address-morton.test.ts` the
+soundness — every tile holding a point inside the rectangle is in the answer, over a sweep of
+rectangles against a renumbering it did not build.
 </Callout>
 
 ### Zarr, against the condition this repo wrote down for reopening a format
@@ -352,8 +396,13 @@ Zarr meets the condition on the half above and fails it on the half below, and t
 So the honest reading is that Zarr is worth borrowing at the manifest and the key arithmetic, where
 this format already agrees with it and would gain a vocabulary readers know, and is not worth
 adopting as the container while the footer is the index. **Neither half is decided here** — this
-section exists so the next person argues against the right thing, and the measurement that would
-decide the top half is the one the callout above asks for.
+section exists so the next person argues against the right thing.
+
+The measurement above moves the bottom half rather than the top. A tile's Morton range prunes a
+rectangle *better* than its `x`/`y` box does, so "the footer is the index" is now only true of byte
+offsets: the spatial index a Zarr container would have to grow is 8 B per chunk and the writer
+already holds it. What that does **not** settle is the reversal condition, which is a reader and not
+a size — and no Zarr reader opens a corpus of typed tables with a subject IRI in them.
 
 ### The npm package is named for the corpus; the crates are named for the surface
 

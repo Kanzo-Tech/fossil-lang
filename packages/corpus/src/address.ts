@@ -15,11 +15,20 @@
  * **What it does not do**, and each absence is the seam this package is on the far side of:
  *
  * - **No bytes.** Nothing here fetches, decodes or reads Parquet. `tileUrl` hands back a string.
- * - **No boxes.** Which tiles a rectangle touches comes from the per-tile `x`/`y` statistics in the
- *   Parquet footers, and reading a footer needs a Parquet reader. The host has one; this package
- *   would have to grow one, and the address is the half that cannot be re-derived from the corpus
- *   itself. So the host reads its own footers and hands the tile numbers back here.
  * - **No cache, no debounce, no sampling.** Those are the reader's, and they stay there.
+ *
+ * **Boxes used to be on that list, and the layout pass is what took them off.** It read: *which
+ * tiles a rectangle touches comes from the per-tile `x`/`y` statistics in the Parquet footers … the
+ * address is the half that cannot be re-derived from the corpus itself.* That was true when it was
+ * written and the renumbering falsified it — `dense_id` is a vertex's rank by Morton code, so a
+ * rectangle is a set of code ranges and a code range is a run of tiles. {@link mortonTilesFor} is
+ * that decomposition, and it is arithmetic: no fetch, no reader, no engine, and no promise.
+ *
+ * What it needs instead is **one number per tile end** — {@link TileCodes} — because a rank is not
+ * a code and no amount of `chunk_size` recovers the one from the other. That is 1,960 B on a
+ * million-vertex corpus, against 1.15 MB of footer at five million, and it buys a *tighter* answer
+ * rather than a looser one: 1.00× over-read against the geometric path's 1.13× on the same window.
+ * The seam moved; it did not vanish, and it is now the smaller half.
  *
  * `openCorpus` in `./corpus.ts` is the layer that does all three, by taking an engine from the host
  * rather than growing one. It sits **on** this module and does not absorb it: the subpath
@@ -372,6 +381,17 @@ export interface CorpusAddressing {
     tiles: Iterable<number | bigint>;
     directions?: readonly Direction[];
   }): AddressedTiles;
+  /**
+   * The URLs a *rectangle* addresses — {@link mortonTilesFor} composed with {@link tilesFor}.
+   *
+   * This is the method the module header says the subpath stopped one step short of. A camera has
+   * a rectangle, not a set of tile numbers, and until this existed the caller had to hold a Parquet
+   * reader to get from one to the other. It still holds {@link TileCodes}, which is data — but data
+   * three orders of magnitude smaller than a footer and readable by anything that can read a number.
+   */
+  tilesForBox(
+    params: BoxQuery & { type?: string; directions?: readonly Direction[] },
+  ): AddressedTiles;
 }
 
 const COLUMN: Record<Direction, 'src_dense' | 'dst_dense'> = {
@@ -662,6 +682,51 @@ export function resolveCorpus(options: ResolveCorpusOptions): CorpusAddressing {
   const incident = (type: string): readonly EdgeAddress[] =>
     edges.filter((e) => e.srcType === type || e.dstType === type);
 
+  const tilesFor: CorpusAddressing['tilesFor'] = ({ type, tiles, directions = ['src'] }) => {
+    const vertex = vertexType(type);
+    const wanted = new Set(directions);
+    const numbers = [...tiles].map(Number);
+    const edgeTiles: EdgeTiles[] = [];
+    const gaps: Gap[] = [];
+
+    for (const edge of incident(vertex.type)) {
+      // Only the orientations whose *own* `dense_id` space is this window's. On a cross-type edge
+      // `by_target` tile k addresses tile k of the destination type, which is a different set of
+      // vertices — reading it for a window over the source type would answer a question nobody
+      // asked and call it the neighbourhood.
+      const applicable: Direction[] = [];
+      if (edge.srcType === vertex.type) applicable.push('src');
+      if (edge.dstType === vertex.type) applicable.push('dst');
+
+      for (const direction of applicable) {
+        const adjacency = edge.adjacency(direction);
+        if (adjacency === null) {
+          gaps.push({ edgeType: edge.edgeType, direction, reason: 'not-declared' });
+          continue;
+        }
+        if (!wanted.has(direction)) {
+          gaps.push({ edgeType: edge.edgeType, direction, reason: 'not-requested' });
+          continue;
+        }
+        edgeTiles.push({
+          edgeType: edge.edgeType,
+          direction,
+          urls: distinct(numbers.map((k) => adjacency.tileUrl(k))),
+        });
+      }
+    }
+
+    return {
+      type: vertex.type,
+      tiles: numbers,
+      vertexUrls: distinct(numbers.map((k) => vertex.tileUrl(k))),
+      edges: edgeTiles,
+      edgeUrls: distinct(edgeTiles.flatMap((e) => e.urls)),
+      complete: gaps.length === 0,
+      gaps,
+    };
+  };
+
   return {
     base,
     container,
@@ -669,50 +734,224 @@ export function resolveCorpus(options: ResolveCorpusOptions): CorpusAddressing {
     edges,
     vertexType,
     incident,
-
-    tilesFor({ type, tiles, directions = ['src'] }) {
-      const vertex = vertexType(type);
-      const wanted = new Set(directions);
-      const numbers = [...tiles].map(Number);
-      const edgeTiles: EdgeTiles[] = [];
-      const gaps: Gap[] = [];
-
-      for (const edge of incident(vertex.type)) {
-        // Only the orientations whose *own* `dense_id` space is this window's. On a cross-type edge
-        // `by_target` tile k addresses tile k of the destination type, which is a different set of
-        // vertices — reading it for a window over the source type would answer a question nobody
-        // asked and call it the neighbourhood.
-        const applicable: Direction[] = [];
-        if (edge.srcType === vertex.type) applicable.push('src');
-        if (edge.dstType === vertex.type) applicable.push('dst');
-
-        for (const direction of applicable) {
-          const adjacency = edge.adjacency(direction);
-          if (adjacency === null) {
-            gaps.push({ edgeType: edge.edgeType, direction, reason: 'not-declared' });
-            continue;
-          }
-          if (!wanted.has(direction)) {
-            gaps.push({ edgeType: edge.edgeType, direction, reason: 'not-requested' });
-            continue;
-          }
-          edgeTiles.push({
-            edgeType: edge.edgeType,
-            direction,
-            urls: distinct(numbers.map((k) => adjacency.tileUrl(k))),
-          });
-        }
-      }
-
-      return {
-        type: vertex.type,
-        tiles: numbers,
-        vertexUrls: distinct(numbers.map((k) => vertex.tileUrl(k))),
-        edges: edgeTiles,
-        edgeUrls: distinct(edgeTiles.flatMap((e) => e.urls)),
-        complete: gaps.length === 0,
-        gaps,
-      };
-    },
+    tilesFor,
+    tilesForBox: ({ box, extent, codes, type, directions }) =>
+      tilesFor({ type, tiles: mortonTilesFor({ box, extent, codes }), directions }),
   };
+}
+
+// ---------------------------------------------------------------------------
+// The Z-order half: which tiles a rectangle touches, without a reader
+// ---------------------------------------------------------------------------
+
+/**
+ * Bits per axis on the grid the layout pass quantises positions onto, so a code is a `u32`.
+ *
+ * The writer is `morton_codes` in `crates/fossil-layout/src/layout.rs` and the published second
+ * implementation is `apps/corpus/guards/arithmetic.mjs`; this is the third, and the three agree
+ * against `apps/corpus/guards/vectors.json` rather than against each other.
+ */
+export const MORTON_BITS = 16;
+
+/** Cells per axis — `1 << MORTON_BITS`. */
+export const MORTON_SIDE = 1 << MORTON_BITS;
+
+/** A rectangle in the corpus's own coordinates: the camera's question, and the layout's extent. */
+export interface Box {
+  xlo: number;
+  xhi: number;
+  ylo: number;
+  yhi: number;
+}
+
+/** The same rectangle on the Morton grid — `0..65535` per axis, both ends inclusive. */
+export interface GridBox {
+  xlo: number;
+  xhi: number;
+  ylo: number;
+  yhi: number;
+}
+
+/**
+ * Quantise one coordinate onto `0..65535` over the extent it was ranked within.
+ *
+ * **Every step is binary32**, hence the `Math.fround` on each one. The writer's positions, extent
+ * and intermediate ratio are all `f32`; JavaScript's arithmetic is binary64, so a literal
+ * transcription of the formula is a *different function* — `quantize(147, 0, 167)` is 57687 in
+ * binary32 and 57686 in binary64, and one unit here is a different code, a different rank, a
+ * different `dense_id` and a different tile. `vectors.json` carries that case.
+ */
+export function quantize(v: number, lo: number, hi: number): number {
+  if (!(hi > lo)) return 0;
+  const f = Math.fround;
+  const t = Math.min(Math.max(f(f(f(v) - f(lo)) / f(f(hi) - f(lo))), 0), 1);
+  return Math.round(f(t * 65535));
+}
+
+/** Spread the low 16 bits of `n` into the even bit positions of a `u32`. */
+function spread(n: number): number {
+  let v = n & 0xffff;
+  v = (v | (v << 8)) & 0x00ff00ff;
+  v = (v | (v << 4)) & 0x0f0f0f0f;
+  v = (v | (v << 2)) & 0x33333333;
+  v = (v | (v << 1)) & 0x55555555;
+  return v >>> 0;
+}
+
+/**
+ * Interleave two quantised coordinates into a 32-bit Z-order code — `x` in the even bits.
+ *
+ * `spread(y) << 1` reaches bit 31, so the result is a negative `Number` unless coerced back to
+ * unsigned. That coercion is not a detail: without it the top half of the plane sorts before the
+ * bottom half, and the corpus satisfies every count-based check while addressing nothing.
+ */
+export function morton2(x: number, y: number): number {
+  return (spread(x) | (spread(y) << 1)) >>> 0;
+}
+
+/** The Morton code of a position within an extent — quantise, then interleave. */
+export function mortonOf(x: number, y: number, extent: Box): number {
+  return morton2(quantize(x, extent.xlo, extent.xhi), quantize(y, extent.ylo, extent.yhi));
+}
+
+/** Split a code back into the two grid coordinates {@link morton2} interleaved. */
+export function mortonDecode(code: number): { x: number; y: number } {
+  let x = 0;
+  let y = 0;
+  for (let bit = 0; bit < MORTON_BITS; bit += 1) {
+    x |= ((code >>> (2 * bit)) & 1) << bit;
+    y |= ((code >>> (2 * bit + 1)) & 1) << bit;
+  }
+  return { x, y };
+}
+
+/**
+ * A rectangle onto the grid — every vertex inside `box` is in a cell inside the answer.
+ *
+ * `quantize` is monotone non-decreasing, so `v >= box.xlo` implies `quantize(v) >= quantize(xlo)`
+ * and the containment is exact rather than padded. `null` when the rectangle and the extent are
+ * disjoint, which is a real answer and not an empty one: `quantize` CLAMPS, so a box entirely left
+ * of the extent would otherwise come back as the column of cells at `x = 0`.
+ */
+export function gridBoxOf(box: Box, extent: Box): GridBox | null {
+  if (box.xhi < box.xlo || box.yhi < box.ylo) return null;
+  if (box.xhi < extent.xlo || box.xlo > extent.xhi) return null;
+  if (box.yhi < extent.ylo || box.ylo > extent.yhi) return null;
+  return {
+    xlo: quantize(box.xlo, extent.xlo, extent.xhi),
+    xhi: quantize(box.xhi, extent.xlo, extent.xhi),
+    ylo: quantize(box.ylo, extent.ylo, extent.yhi),
+    yhi: quantize(box.yhi, extent.ylo, extent.yhi),
+  };
+}
+
+/**
+ * Which Morton codes each tile holds — **the one thing the arithmetic does not derive.**
+ *
+ * `dense_id` is renumbered into Morton order, so a vertex's address and its position are the same
+ * number read two ways and a rectangle is a set of code ranges. What that does NOT give is where
+ * one range falls in the *ranking*: `dense_id` is a vertex's RANK by code, not its code, and the
+ * rank of a code is a function of how the positions are distributed. `chunk_size` alone cannot say
+ * it, and assuming the ranks are uniform in the code space is not a conservative guess — measured
+ * over nine windows of the million-vertex fixture it MISSES 129 of the 226 tiles that hold a
+ * matching vertex. So this is data, and it is two `u32` per tile: 1,960 B at a million vertices,
+ * against the 1.15 MB of Parquet footer the geometric path reads at five million.
+ *
+ * `lo[k]` is the lowest code in tile `k` and `hi[k]` the highest — the codes of its first and last
+ * rows, because the rows within a tile are in code order too. Both are non-decreasing in `k`.
+ */
+export interface TileCodes {
+  readonly lo: ArrayLike<number>;
+  readonly hi: ArrayLike<number>;
+}
+
+/** Smallest tile whose codes can reach `code`, or `codes.lo.length` when none can. */
+function firstTile(codes: TileCodes, code: number): number {
+  let a = 0;
+  let b = codes.hi.length - 1;
+  let found = codes.hi.length;
+  while (a <= b) {
+    const mid = (a + b) >> 1;
+    if (codes.hi[mid]! >= code) {
+      found = mid;
+      b = mid - 1;
+    } else a = mid + 1;
+  }
+  return found;
+}
+
+/** Largest tile whose codes can reach down to `code`, or `-1` when none can. */
+function lastTile(codes: TileCodes, code: number): number {
+  let a = 0;
+  let b = codes.lo.length - 1;
+  let found = -1;
+  while (a <= b) {
+    const mid = (a + b) >> 1;
+    if (codes.lo[mid]! <= code) {
+      found = mid;
+      a = mid + 1;
+    } else b = mid - 1;
+  }
+  return found;
+}
+
+/**
+ * The tiles a grid rectangle touches: descend the quadtree, stop where the answer stops changing.
+ *
+ * A node of the Z-order tree is a code range `[base, base + 4^level)` AND a square of cells, which
+ * is what makes the descent possible at all — one test on the square says whether the node is
+ * outside the rectangle, inside it, or on its edge, and two binary searches over {@link TileCodes}
+ * say which tiles the range falls in. The recursion stops on any of three answers rather than on
+ * depth: outside (nothing), inside (every tile the range touches), or **the range is within one
+ * tile** — refining a node that cannot split the answer costs work and buys nothing.
+ *
+ * The result **over-covers**, because the curve enters and leaves the rectangle: a tile whose code
+ * range straddles the boundary is named whole. Measured against the tiles that actually hold a
+ * matching vertex, over nine windows of the million-vertex fixture, that over-read is **1.00×** —
+ * the geometric path over the same windows is 1.41×, and 1.13× on the 10% one the design page
+ * records. A code range is a tighter description of a tile than its `x`/`y` box: the box is the
+ * hull of an arc that snakes, and the arc is what the vertices are on.
+ */
+export function tilesForGrid(grid: GridBox, codes: TileCodes): number[] {
+  const tiles = codes.lo.length;
+  if (tiles === 0 || codes.hi.length !== tiles) return [];
+  const selected = new Set<number>();
+  const stack: Array<[number, number]> = [[0, MORTON_BITS]];
+  while (stack.length > 0) {
+    const [base, level] = stack.pop()!;
+    const side = 2 ** level;
+    const { x, y } = mortonDecode(base);
+    const x1 = x + side - 1;
+    const y1 = y + side - 1;
+    if (x1 < grid.xlo || x > grid.xhi || y1 < grid.ylo || y > grid.yhi) continue;
+    const span = 4 ** level;
+    const first = firstTile(codes, base);
+    const last = lastTile(codes, base + span - 1);
+    // A gap in the ranking: no tile holds a code in this range, so no vertex does either.
+    if (first > last) continue;
+    const inside = x >= grid.xlo && x1 <= grid.xhi && y >= grid.ylo && y1 <= grid.yhi;
+    if (inside || first === last || level === 0) {
+      for (let k = first; k <= last; k += 1) selected.add(k);
+      continue;
+    }
+    const quarter = span / 4;
+    for (let i = 0; i < 4; i += 1) stack.push([base + i * quarter, level - 1]);
+  }
+  return [...selected].sort((a, b) => a - b);
+}
+
+/** What {@link mortonTilesFor} and {@link CorpusAddressing.tilesForBox} take. */
+export interface BoxQuery {
+  /** The rectangle, in the corpus's own coordinates. */
+  box: Box;
+  /** The extent the type's positions were quantised against — its own bounding box. */
+  extent: Box;
+  /** Which codes each tile holds. See {@link TileCodes} for why this is not derivable. */
+  codes: TileCodes;
+}
+
+/** The tiles a rectangle in corpus coordinates touches. Synchronous, and it reads no byte. */
+export function mortonTilesFor({ box, extent, codes }: BoxQuery): number[] {
+  const grid = gridBoxOf(box, extent);
+  return grid === null ? [] : tilesForGrid(grid, codes);
 }
