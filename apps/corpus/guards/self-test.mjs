@@ -103,6 +103,19 @@ function rewrite(path, select) {
   );
 }
 
+/**
+ * Rewrite the tile-code anchor at `dir`, leaving every row of the corpus alone.
+ *
+ * The mutation the rest of this file cannot express: every other break goes
+ * through a `SELECT` over the payload, and the anchor is not in the payload. It
+ * is a document beside it, which is exactly why it can be wrong without anything
+ * else noticing.
+ */
+function reanchor(dir, edit) {
+  const path = join(dir, VERTEX_DIR, "codes.json");
+  writeFileSync(path, `${JSON.stringify(edit(JSON.parse(readFileSync(path, "utf8"))), null, 2)}\n`);
+}
+
 /** Which guards fail on the corpus at `dir`. */
 function failing(dir) {
   return runAll(inspect(dir))
@@ -302,6 +315,31 @@ const MUTATIONS = [
         `SELECT (row_number() OVER (ORDER BY hash(dense_id::BIGINT * 2654435761)) - 1)::UINTEGER AS dense_id,
                 subject, x, y, cluster_id FROM m ORDER BY 1`,
       ),
+  },
+  // Two breaks, because the anchor has two halves and a reader would not confuse
+  // them. A wrong CODE puts one tile in the wrong place; a wrong EXTENT moves
+  // every one of them, and neither is visible to any other guard here — the rows
+  // are untouched, so the corpus counts, tiles, orders and prunes exactly as it
+  // did. That is the whole reason this file is published rather than derived.
+  {
+    guard: "code-anchor",
+    what: "one published code is one greater than the row it names",
+    layout: "rowgroups",
+    mutate: (dir) =>
+      reanchor(dir, (doc) => {
+        doc.hi[1] += 1;
+        return doc;
+      }),
+  },
+  {
+    guard: "code-anchor",
+    what: "the published extent is widened, so every code is quantised onto a different grid",
+    layout: "rowgroups",
+    mutate: (dir) =>
+      reanchor(dir, (doc) => {
+        doc.extent.xhi += 10;
+        return doc;
+      }),
   },
   {
     guard: "csr-and-csc",

@@ -72,7 +72,11 @@ function renumber(points) {
   coded.forEach((p, dense) => {
     denseOf[p.index] = dense;
   });
-  return { ordered: coded, denseOf };
+  // The extent comes back out because it is PUBLISHED now — half of the tile-code
+  // anchor, and the half a reader cannot guess. It was computed here and thrown
+  // away, which is exactly what fossil's own layout pass did until the anchor
+  // existed.
+  return { ordered: coded, denseOf, extent };
 }
 
 /**
@@ -90,7 +94,7 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
   mkdirSync(join(dir, "edge", "Person_knows_Person", "by_target"), { recursive: true });
 
   const points = positions(count, clusters);
-  const { ordered, denseOf } = renumber(points);
+  const { ordered, denseOf, extent } = renumber(points);
 
   // Two quasi-identifiers, because a corpus with none cannot exercise the
   // convention that a corpus declares what its bytes guarantee — and a guard
@@ -322,10 +326,50 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       "  prefix: index/",
       "  ordered_by: subject",
       `  chunk_size: ${tileRows}`,
+      // Where the tile-code anchor is. A path and not the numbers themselves:
+      // there are two per tile, so inlining them would make this document grow
+      // with the corpus, and everything that touches a corpus reads it in full.
+      "codes:",
+      "  path: codes.json",
       "version: gar/v1",
       "",
     ].join("\n"),
   );
+  // The tile-code anchor: `lo[k]` is the Morton code of tile `k`'s first row and
+  // `hi[k]` the code of its last. Both come off `ordered`, which IS the ranking —
+  // so this is a projection of what the renumbering already produced and not a
+  // second pass over the corpus, which is the same thing that makes it cheap on
+  // fossil's side.
+  //
+  // **This is the second implementation of the anchor**, in the sense the rest of
+  // this file is: written from the published convention, checked against a corpus
+  // fossil wrote by the `code-anchor` guard rather than against fossil's source.
+  {
+    const anchorTiles = Math.ceil(count / tileRows);
+    const lo = [];
+    const hi = [];
+    for (let k = 0; k < anchorTiles; k += 1) {
+      const first = k * tileRows;
+      const last = Math.min(first + tileRows, count) - 1;
+      lo.push(ordered[first].morton);
+      hi.push(ordered[last].morton);
+    }
+    writeFileSync(
+      join(dir, "vertex", "Person", "codes.json"),
+      [
+        "{",
+        `  "morton_bits": 16,`,
+        `  "chunk_size": ${tileRows},`,
+        `  "tiles": ${anchorTiles},`,
+        `  "extent": { "xlo": ${extent.minX}, "ylo": ${extent.minY}, "xhi": ${extent.maxX}, "yhi": ${extent.maxY} },`,
+        `  "lo": [${lo.join(",")}],`,
+        `  "hi": [${hi.join(",")}]`,
+        "}",
+        "",
+      ].join("\n"),
+    );
+  }
+
   writeFileSync(
     join(edgeDir, "Person_knows_Person.edge.yml"),
     [

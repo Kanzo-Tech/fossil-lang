@@ -22,7 +22,7 @@
  * `declared-tiling` compares the two. This module reports both and reconciles neither.
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { lit, query, scalar } from "./duck.mjs";
 import { load, rel, vertexPrefix, edgePrefix } from "./manifest.mjs";
@@ -187,6 +187,32 @@ export function inspect(root) {
           // is addressing and answers to the same rule as the payload's.
           columnTypes: columnsOf(tiles).types,
         };
+      })(),
+      /**
+       * The tile-code anchor, when the manifest declares one, or `null`.
+       *
+       * `null` is a legal corpus for the reason `index` is: a reader that has a
+       * Parquet reader answers "which tiles does this rectangle touch" out of
+       * the footers, more slowly and more loosely. What it is not is answerable
+       * by a reader that has none, which is the reader the anchor exists for.
+       *
+       * A declared anchor that is not on disk, or not JSON, is a different
+       * finding and comes back as an `error` string rather than as `null` —
+       * `code-anchor` is what reports it. An inspector that collapsed the two
+       * would be reporting a broken corpus as an old one.
+       */
+      codes: (() => {
+        const declared = info.codes;
+        if (declared === undefined || declared === null) return null;
+        const relative = String(declared.path ?? "");
+        if (relative === "") return { path: null, error: "declares codes and no path", doc: null };
+        const path = join(root, prefix, relative);
+        if (!existsSync(path)) return { path, error: "the anchor it names is not on disk", doc: null };
+        try {
+          return { path, error: null, doc: JSON.parse(readFileSync(path, "utf8")) };
+        } catch (cause) {
+          return { path, error: `is not JSON (${cause.message})`, doc: null };
+        }
       })(),
     };
   });

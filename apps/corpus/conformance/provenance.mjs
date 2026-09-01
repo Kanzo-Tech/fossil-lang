@@ -65,6 +65,12 @@ function tree(root) {
   return {
     manifests: all.filter((p) => p.endsWith(".yml")),
     payloads: all.filter((p) => p.endsWith(".parquet")),
+    // The tile-code anchor is neither, and it was invisible here until it
+    // existed: a corpus carries `vertex/<Type>/codes.json`, a reader with no
+    // Parquet reader addresses a rectangle with it, and a `.yml`/`.parquet`
+    // filter walks straight past. Compared as text, like the manifests, because
+    // it is one — a document a stranger reads with `JSON.parse`.
+    documents: all.filter((p) => p.endsWith(".json")),
   };
 }
 
@@ -99,7 +105,7 @@ try {
     );
   }
 
-  const setOf = (t) => JSON.stringify([...t.manifests, ...t.payloads]);
+  const setOf = (t) => JSON.stringify([...t.manifests, ...t.documents, ...t.payloads]);
   if (setOf(committed) !== setOf(regenerated)) {
     fail(
       `the file set differs.\n    committed:   ${setOf(committed)}\n    regenerated: ${setOf(regenerated)}`,
@@ -116,6 +122,20 @@ try {
         `${path} is not what the recipe writes. Either the corpus was made with different ` +
           `parameters than RECIPE records, or the generator has changed under it.`,
       );
+    }
+  }
+
+  // The anchor, byte for byte. It is a projection of the renumbering, so a
+  // regeneration that produces different codes has produced a different corpus —
+  // and one that produces the same codes against different rows is the failure
+  // this catches that nothing else can: the payloads compare as rows, and a
+  // wrong anchor over right rows draws the wrong picture out of the right file.
+  for (const path of committed.documents) {
+    if (!regenerated.documents.includes(path)) continue;
+    const a = readFileSync(join(CORPUS, path), "utf8");
+    const b = readFileSync(join(written.dir, path), "utf8");
+    if (a !== b) {
+      fail(`${path} is not what the recipe writes — the anchor does not reproduce`);
     }
   }
 
