@@ -12,8 +12,9 @@
  *      `resolveCorpus` names all 245 tiles synchronously. The panel prints the count and the
  *      microseconds it took, and lists the URLs a given window resolves to — before fetching.
  *   2. **The footer, bought once.** Which tiles a rectangle touches comes from the Parquet
- *      footer. It is read once per corpus and its cost is shown alongside the payload's, so
- *      the one thing that grows with N is visible as the one thing that grows with N.
+ *      footer *on this panel*. It is read once per corpus and its cost is shown alongside the
+ *      payload's, so the one thing that grows with N is visible as the one thing that grows
+ *      with N. It is no longer the only way to answer that question — see below.
  *   3. **The bytes.** One `Range` request per run of adjacent tiles, weighed in this thread,
  *      against the size of the whole corpus.
  *
@@ -208,8 +209,8 @@ export default function Streaming({ ready }: StreamingProps) {
         {error && <p className="str-bad">{error}</p>}
         <p className="str-note">
           Which tiles a <em>rectangle</em> touches is the one question the arithmetic above cannot
-          answer: it comes from the per-tile <code>x</code>/<code>y</code> statistics in the Parquet
-          footer, and reading a footer needs a Parquet reader.{' '}
+          answer <em>on this panel</em>: it comes from the per-tile <code>x</code>/<code>y</code>{' '}
+          statistics in the Parquet footer, and reading a footer needs a Parquet reader.{' '}
           <code>@fossil-lang/corpus</code> deliberately carries none — the host has one. This is the
           only step on this panel that costs an engine, and it happens once per corpus.
         </p>
@@ -324,13 +325,33 @@ export default function Streaming({ ready }: StreamingProps) {
         </>
       )}
 
-      <h2>the footer — bought once</h2>
+      <h2>the footer — bought once, and no longer the only way</h2>
       <p className="str-note">
-        Which tiles a rectangle touches is not arithmetic: it comes from the per-tile{' '}
-        <code>x</code>/<code>y</code> statistics in the Parquet footer, read once per corpus in{' '}
+        This panel gets the tiles a rectangle touches from the per-tile <code>x</code>/
+        <code>y</code> statistics in the Parquet footer, read once per corpus in{' '}
         <strong>{footerMs.toFixed(0)} ms</strong> and reused by every window above.{' '}
         <code>@fossil-lang/corpus</code> carries no Parquet reader on purpose — the host has one,
         and here it is DuckDB. It is the one structure a reader holds that grows with N.
+      </p>
+      {/*
+        The panel said «which tiles a rectangle touches is NOT arithmetic», and the tree stopped
+        agreeing: `mortonTilesFor` in `@fossil-lang/corpus/address` answers it by descending the
+        Z-order tree over two u32 per tile. This panel does not use it yet, and saying what it
+        would have cost is cheaper and more honest than either implying the footer is required or
+        quietly reporting the other path's numbers off a path that did not produce them. The
+        three figures are measured over THIS corpus, both ways, at the three windows the slider
+        reaches — not copied from the design page.
+      */}
+      <p className="str-note">
+        It is no longer the only way. <code>mortonTilesFor</code> answers the same question by
+        arithmetic, from two <code>u32</code> per tile rather than a footer — and it prunes
+        tighter, because a footer's bounding box over-covers what the curve actually visits. Over
+        this corpus: at the 10% window the footer path opens <strong>17 tiles in 6 requests,
+        1,466 kB</strong> and the arithmetic opens the <strong>15 that hold a matching vertex, in
+        4 requests, 1,294 kB</strong> — 1.13× over-read against 1.00×. At 2% it is 7/5/602 kB
+        against 4/4/344 kB; at 30%, 96/21/8,283 kB against 90/17/7,772 kB. The tile codes it
+        needs are data the manifest does not carry yet, which is the work outstanding — not a
+        property of the arithmetic.
       </p>
 
       <h2>the URLs, before the requests</h2>
