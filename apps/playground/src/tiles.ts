@@ -59,6 +59,7 @@ import {
 } from '@kanzo-tech/graph';
 
 import type { QueryRow } from './duckdb.js';
+import { strideSql } from './stride.js';
 import { extentOf, runsOf, selectTiles, type Rect, type Run, type TileBox } from './stream.js';
 
 /** What one answer cost, in the terms the panel beside the canvas is already reporting. */
@@ -340,8 +341,14 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
        * `0..m-1` rather than a run of it, so the moment `LIMIT` binds the link indices address the
        * wrong rows and the anchors collide with unused ones. Ordering the sample is not the fix —
        * the numbering has to be over the rows that come back, which is what `kept` is for.
+       *
+       * **The stride is quantised UP to a power of two**, which is what makes a zoom refine the
+       * picture instead of replacing it, and the reasoning with its measurements is in
+       * `src/stride.ts` beside the expression. What matters here is that the pin stays exempt
+       * through it: `pins` is OR-ed with the modulo below, because an odd pin satisfies no
+       * stride above 1 whether or not that stride is a power of two.
        */
-      const stride = `greatest(1, CAST(ceil(matched / ${limit}.0) AS BIGINT))`;
+      const stride = strideSql(limit);
 
       /**
        * `held` is every row of the tiles this window opened; `vis` is the sample that gets drawn.
