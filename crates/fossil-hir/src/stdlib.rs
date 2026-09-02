@@ -661,31 +661,14 @@ pub enum AggFn {
 
 /// Operators of the algebra: the relation verbs plus the `io/` sources.
 ///
-/// They were said to "mirror the multi-input MIR ops", and this crate cannot
-/// see one: there is no `fossil-mir` dependency in its `Cargo.toml`, the
-/// direction of the graph forbids adding one, and the names are not a mirror in
-/// any case — `Where` lowers to a `FilterOp`, `Map` to `ExtendOp`s plus a
-/// `ProjectOp`, and `Take`/`Drop`/`Sort`/`Flatten`/`Count` have no `fossil-mir`
-/// `Op` of their own at all. What a variant means is written beside it, and
-/// **no reader destructures this enum**: every consumer of [`LoweringKind`]
-/// matches `Expr` and takes `Op(_)` as a wildcard, so the variant says only
-/// *this name is an operator of the algebra, not a scalar template*.
+/// A variant says *this name is an operator of the algebra, not a scalar
+/// template*; what it lowers to is written beside it. The names are NOT a
+/// mirror of `fossil-mir`'s `Op` — this crate has no `fossil-mir` dependency,
+/// the direction of the graph forbids adding one, and `Take`/`Drop`/`Sort`/
+/// `Flatten`/`Count` have no `Op` of their own in any case.
 ///
-/// They were documented as
-/// "surface-unreachable in v0.1", and that stopped being true with the
-/// receiver: a [`Receiver::Relation`] row is reached by writing
-/// `User.where(User.age >= 18)`, which `grammar.bnf, PostfixExpr` spells and the
-/// conformance programs use.
-///
-/// The gap that is now VISIBLE rather than hidden: every variant below but
-/// [`Self::Source`] is a relation operator, and
-/// `crate::lower::lower_source_stage` implements six of them (`where`,
-/// `select`, `join`, `distinct`, `union`, `group_by`). Before the receiver,
-/// nothing could enumerate the members of a relation and so nothing could count
-/// the difference.
-///
-/// No count is written for this enum, in this paragraph or anywhere else: three
-/// were, they disagreed, and the variants are right below.
+/// `crate::lower::lower_source_stage` matches this enum exhaustively, so a new
+/// variant is a compile error there and no count is written down anywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanOp {
     /// `seq.where` → `FilterOp` (`WHERE`).
