@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { scan } from '../src/manifest.js';
 import {
   CorpusManifestError,
   resolveCorpus,
@@ -280,5 +281,88 @@ describe('resolveCorpus', () => {
     const corpus = resolveCorpus({ manifestFiles });
     expect(corpus).not.toBeInstanceOf(Promise);
     expect(corpus.tilesFor({ tiles: [7] }).vertexUrls).toEqual(['vertex/Person/chunk7.parquet']);
+  });
+});
+
+/**
+ * The `levels:` block — **the first thing a manifest says that is a sequence inside a mapping.**
+ *
+ * The shape below is not invented here: `fossil-sinks`' own
+ * `the_levels_block_is_emitted_in_the_shape_the_line_scanners_read` asserts the emitter produces
+ * exactly these bytes, because this is a line scanner and the nested items sit at their key's own
+ * indentation rather than one deeper.
+ *
+ * **What is being defended is a silent failure and not a parse error.** Before the scanner could
+ * see a nested sequence, `levels:`'s own `levels:` read as an empty scalar — so a corpus WITH a
+ * pyramid resolved to a corpus without one, no throw, no diagnostic, and a camera that opens a
+ * million rows to draw fifteen thousand. That is the same failure `index:` had, from the same
+ * cause, which is why the assertion below is on the numbers surviving rather than on a URL.
+ */
+describe('levels — the written pyramid', () => {
+  /** A million vertices at 4,096 to a tile is the plan `VertexLevels::planned` writes: 6, 7, 8. */
+  const withLevels = (extra = 'levels:\n  prefix: l\n  levels:\n  - 6\n  - 7\n  - 8\n  chunk_size: 4096\n') => {
+    const yaml = manifestFiles['vertex/Person.vertex.yml']!;
+    const mutated = `${yaml.replace(/^vertex_count: \d+$/m, 'vertex_count: 1000000')}${extra}`;
+    // The mutation has to have happened, for the reason the chunk_size test states at length.
+    expect(mutated).toContain('vertex_count: 1000000');
+    return { ...manifestFiles, 'vertex/Person.vertex.yml': mutated };
+  };
+
+  it('sees the level list, which is the whole of what it cannot derive', () => {
+    const [person] = resolveCorpus({ manifestFiles: withLevels() }).types;
+    expect(person!.levels?.levels).toEqual([6, 7, 8]);
+    expect(person!.levels?.chunkSize).toBe(4096);
+    expect(person!.levels?.has(6)).toBe(true);
+    expect(person!.levels?.has(5)).toBe(false);
+  });
+
+  it('leaves a sequence of MAPPINGS exactly where it was', () => {
+    // `properties:` is a nested sequence too, and it is a sequence of mappings. The scanner grew a
+    // rule for scalars only, and this is the assertion that keeps it from growing one for these:
+    // nothing reads a column list off the manifest — `openCorpus` reads the bytes — so collecting
+    // them would be a scanner inventing a shape rather than reading one.
+    const groups = scan('vertex/Person.vertex.yml', manifestFiles['vertex/Person.vertex.yml']!)[
+      'property_groups'
+    ] as Array<Record<string, string>>;
+    expect(groups[0]!['file_type']).toBe('parquet');
+    expect(groups[0]!['properties']).toBe('');
+  });
+
+  it('addresses a level tile by the same shift, with k more bits falling off', () => {
+    const levels = resolveCorpus({ manifestFiles: withLevels() }).types[0]!.levels!;
+    // Level 6 keeps one id in 64, so a tile of 4,096 of its rows spans 262,144 payload ids.
+    expect(levels.tileOf(6, 0n)).toBe(0n);
+    expect(levels.tileOf(6, 262_143n)).toBe(0n);
+    expect(levels.tileOf(6, 262_144n)).toBe(1n);
+    expect(levels.prefix(6)).toBe('vertex/Person/l6/');
+    expect(levels.tileUrl(6, 1)).toBe('vertex/Person/l6/chunk1.parquet');
+    // `ceil(1,000,000 / 64)` rows, which is four tiles of 4,096 — the pyramid's cost in tiles,
+    // and the number the manifest's own `planned` was written against.
+    expect(levels.rows(6)).toBe(15_625n);
+    expect(levels.tiles(6)).toBe(4n);
+    expect(levels.files(6)).toEqual([
+      'vertex/Person/l6/chunk0.parquet',
+      'vertex/Person/l6/chunk1.parquet',
+      'vertex/Person/l6/chunk2.parquet',
+      'vertex/Person/l6/chunk3.parquet',
+    ]);
+  });
+
+  it('refuses to address a level nobody wrote, and says what answers it instead', () => {
+    const levels = resolveCorpus({ manifestFiles: withLevels() }).types[0]!.levels!;
+    expect(() => levels.files(5)).toThrow('writes levels 6, 7, 8 and not 5');
+    expect(() => levels.files(5)).toThrow('the predicate over the payload');
+  });
+
+  it('refuses a block that declares a pyramid without its numbers', () => {
+    // A prefix with no list is not a corpus without a pyramid: it is one whose policy the reader
+    // cannot read, and the two must not resolve to the same thing — `index:` made that mistake.
+    const files = withLevels('levels:\n  prefix: l\n  chunk_size: 4096\n');
+    expect(() => resolveCorpus({ manifestFiles: files })).toThrow('no level list');
+    expect(() => resolveCorpus({ manifestFiles: files })).toThrow('not arithmetic a reader can redo');
+  });
+
+  it('is null when the manifest declares none, which is a corpus and not a gap', () => {
+    expect(resolveCorpus({ manifestFiles }).types[0]!.levels).toBeNull();
   });
 });

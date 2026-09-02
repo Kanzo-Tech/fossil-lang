@@ -1210,4 +1210,32 @@ version: gar/v1
         let back: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("round trip");
         assert_eq!(back, with);
     }
+
+    /// **The bytes two hand-written line scanners have to read**, pinned here
+    /// rather than assumed there.
+    ///
+    /// `packages/corpus/src/manifest.ts` and `apps/corpus/guards/manifest.mjs`
+    /// are line scanners and not YAML parsers, deliberately and for reasons each
+    /// states. `levels:` is the first thing this manifest emits that is a
+    /// SEQUENCE INSIDE A MAPPING, which is one level deeper than the grammar
+    /// either of them had, and the shape they were grown to read is the one
+    /// below: the nested key's items at the key's OWN indentation, two spaces,
+    /// not four.
+    ///
+    /// The failure this exists to prevent is silent in the exact way that module
+    /// header warns about — a scanner that cannot see `levels:`'s list reads the
+    /// key as an empty scalar, which is indistinguishable from a corpus that
+    /// declares no pyramid. So the emitter is what is asserted, and a serde
+    /// version that re-indents sequences turns this red instead of turning two
+    /// readers blind.
+    #[test]
+    fn the_levels_block_is_emitted_in_the_shape_the_line_scanners_read() {
+        let info = VertexInfo::new("Person", 1_000_000, DEFAULT_CHUNK_SIZE, "vertex/Person/", vec![])
+            .with_levels(VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).unwrap());
+        let yaml = info.to_yaml().expect("serialise");
+        assert!(
+            yaml.contains("levels:\n  prefix: l\n  levels:\n  - 6\n  - 7\n  - 8\n  chunk_size: 4096\n"),
+            "{yaml}"
+        );
+    }
 }

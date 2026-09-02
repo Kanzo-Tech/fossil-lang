@@ -32,8 +32,11 @@ export const GRAPH_INFO_PATH = 'graph.graph.yml';
  */
 export type ScannedManifest = Record<
   string,
-  string | string[] | Array<Record<string, string>> | Record<string, string>
+  string | string[] | Array<Record<string, string>> | Record<string, string | string[]>
 >;
+
+/** A nested mapping's values: scalars, and the one sequence of scalars a mapping carries. */
+export type ScannedMapping = Record<string, string | string[]>;
 
 /** Raised by everything in this module. Carries the file it was reading. */
 export class CorpusManifestError extends Error {
@@ -65,8 +68,18 @@ export function scan(path: string, text: string): ScannedManifest {
   const out: ScannedManifest = {};
   let sequence: string[] | Array<Record<string, string>> | null = null;
   let item: Record<string, string> | null = null;
+  /** The nested MAPPING being continued — `index:`, `codes:`, `levels:`. Never a sequence element. */
+  let map: ScannedMapping | null = null;
   /** A key whose value was empty and whose shape the next child line decides. */
   let pending: string | null = null;
+  /**
+   * The last key ON {@link item} whose value was empty — the one a `- ` line under it would be an
+   * element of. `levels:` inside `levels:` is the case: a mapping carrying a sequence, which is one
+   * level deeper than anything this grammar had, and the level list is the whole of what the
+   * pyramid declares that a reader cannot derive.
+   */
+  let nested: string | null = null;
+
 
   const lines = text.split('\n');
   for (const [index, raw] of lines.entries()) {
@@ -82,18 +95,41 @@ export function scan(path: string, text: string): ScannedManifest {
 
     // A continuation of the mapping currently being built inside a sequence.
     const continuation = /^ {2}(\w+):\s*(.*)$/.exec(line);
+    if (continuation && map) {
+      map[continuation[1]!] = unquote(continuation[2]!);
+      nested = continuation[2] === '' ? continuation[1]! : null;
+      continue;
+    }
     if (continuation && item) {
       item[continuation[1]!] = unquote(continuation[2]!);
+      continue;
+    }
+    // An element of a sequence nested in a mapping, and ONLY when it is a scalar. serde writes such
+    // items at their key's own indentation, so this is the same two spaces a continuation has.
+    //
+    // **A `- k: v` item is left exactly where it was**, which is skipped and the key still `''`.
+    // That is not timidity: `properties:` inside a `property_groups` element is a sequence of
+    // MAPPINGS, this reads no column list off it (`openCorpus` reads the bytes instead, and says
+    // why), and turning those items into mangled scalars would be a scanner inventing a shape
+    // rather than growing one.
+    const element2 = /^ {2}- (.*)$/.exec(line);
+    if (element2 && map && nested !== null && !/^\w+:/.test(element2[1]!)) {
+      const held = map[nested];
+      const held2 = Array.isArray(held) ? held : [];
+      held2.push(unquote(element2[1]!));
+      map[nested] = held2;
       continue;
     }
     // The first child of a key with an empty value, and it is `k: v` rather than `- `: the key is
     // a MAP. Decided here rather than at the key, because `property_groups:` and `index:` are
     // written identically until this line arrives.
     if (continuation && pending !== null) {
-      const map: Record<string, string> = { [continuation[1]!]: unquote(continuation[2]!) };
-      out[pending] = map;
+      const built: ScannedMapping = { [continuation[1]!]: unquote(continuation[2]!) };
+      out[pending] = built;
       sequence = null;
-      item = map;
+      item = null;
+      map = built;
+      nested = continuation[2] === '' ? continuation[1]! : null;
       pending = null;
       continue;
     }
@@ -109,6 +145,8 @@ export function scan(path: string, text: string): ScannedManifest {
       pending = null;
     }
     if (element && sequence) {
+      map = null;
+      nested = null;
       const pair = /^(\w+):\s*(.*)$/.exec(element[1]!);
       if (pair) {
         item = { [pair[1]!]: unquote(pair[2]!) };
@@ -127,6 +165,8 @@ export function scan(path: string, text: string): ScannedManifest {
       );
     }
     item = null;
+    map = null;
+    nested = null;
     if (entry[2] === '') {
       // Shape unknown until the first child line. A key with an empty value and no children stays
       // a sequence, which is what `property_groups: []` has always been.
@@ -218,7 +258,7 @@ export function mapping(
   manifest: ScannedManifest,
   path: string,
   key: string,
-): Record<string, string> | null {
+): ScannedMapping | null {
   const value = manifest[key];
   if (value === undefined) return null;
   if (Array.isArray(value)) {
@@ -229,4 +269,29 @@ export function mapping(
     throw new CorpusManifestError(`${path} writes ${key} as a scalar, and it is a mapping here`);
   }
   return value;
+}
+
+/**
+ * A scalar inside a nested mapping, or `undefined` — the accessor that keeps a caller from having
+ * to narrow {@link ScannedMapping}'s union at every read.
+ *
+ * A key whose value is a SEQUENCE reads as absent rather than throwing, because the two callers
+ * that ask this are asking *did the writer say this*, and a list where a scalar belongs is a
+ * manifest neither of them can act on.
+ */
+export function scalar(map: ScannedMapping, key: string): string | undefined {
+  const value = map[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * A sequence of scalars inside a nested mapping — `levels:`'s own `levels:`, and nothing else yet.
+ *
+ * Empty covers absent, a scalar, and an empty list, on {@link mapping}'s argument: all three are
+ * *the writer declared no levels*, and a pyramid that is declared without its numbers is one a
+ * reader cannot address. The caller that cares says so with its own error.
+ */
+export function list(map: ScannedMapping, key: string): string[] {
+  const value = map[key];
+  return Array.isArray(value) ? value : [];
 }

@@ -39,11 +39,13 @@ import {
   mapping,
   GRAPH_INFO_PATH,
   join,
+  list as listOf,
   mappings,
   optionalCount,
   paths,
   required,
   requiredNumber,
+  scalar as scalarOf,
   scan,
   type ScannedManifest,
 } from './manifest.js';
@@ -201,6 +203,14 @@ export interface VertexAddress {
    * reader that has none, and that is the reader this exists for.
    */
   readonly codesUrl: string | null;
+  /**
+   * The **written levels** of this type, or `null` when the manifest declares none.
+   *
+   * `null` is a legal corpus and the most legal of the three optional blocks: a level is a
+   * predicate, so every level is answerable with or without this, and what it changes is which
+   * bytes answer it. See {@link LevelAddress}.
+   */
+  readonly levels: LevelAddress | null;
 }
 
 /**
@@ -480,6 +490,7 @@ function vertexAddress(
     container,
     index: indexAddress(prefix, path, yaml, count, container),
     codesUrl: codesUrlFor(prefix, path, yaml),
+    levels: levelAddress(prefix, path, yaml, count, container),
     tileOf: (denseId) => tileOf(denseId, shift),
     tileUrl,
     files: () => {
@@ -516,7 +527,7 @@ function indexAddress(
   if (declared === null) return null;
 
   const need = (key: string): string => {
-    const value = declared[key];
+    const value = scalarOf(declared, key);
     if (value === undefined || value === '') {
       throw new CorpusManifestError(
         `${path} declares an index and no ${key}, so its tiles address nothing`,
@@ -555,6 +566,148 @@ function indexAddress(
 }
 
 /**
+ * Where a vertex type's **written levels** are, and which ones exist.
+ *
+ * **Level `k` is `dense_id % 2^k == 0`, whatever this says.** A level is a predicate over the
+ * payload, and a written `l{k}/` is a cache of it — so a corpus declaring none draws the identical
+ * picture and only reads more, and that is what keeps the pyramid from being a second contract.
+ * What this block changes is a byte count, and `ViewCost.read` in `./corpus.ts` is where the
+ * difference is reported.
+ *
+ * **The numbers are declared and not derived**, unlike everything else here, and the manifest side
+ * argues why: a level list is at most three integers whatever the corpus is, and *which* levels a
+ * writer spent bytes on is a policy — a reader re-deriving it from `vertex_count` and `chunk_size`
+ * would reimplement the writer's plan and 404 the day the plan moved.
+ *
+ * **A level needs no second anchor.** Level `k`'s row `i` is the payload row with
+ * `dense_id == i · 2^k`, so tile `j` of a level covers the `dense_id` range
+ * `[j · chunkSize · 2^k, (j+1) · chunkSize · 2^k)` — a contiguous run of payload tiles, which the
+ * published `codes:` anchor already bounds in Morton space.
+ */
+export interface LevelAddress {
+  /** The levels written, finest first, as the manifest declares them. */
+  readonly levels: readonly number[];
+  /**
+   * Rows per tile within a level set. Declared rather than inherited from
+   * {@link VertexAddress.chunkSize}, because turning a level tile back into a `dense_id` range
+   * multiplies by it and a number that has to be assumed is one a writer can change in silence.
+   */
+  readonly chunkSize: number;
+  /** Which container carries the level tiles. The corpus's, never a second answer. */
+  readonly container: Container;
+  /**
+   * Whether level `k` is written.
+   *
+   * `false` is not a refusal and not an absence of the level: the level exists at every `k` — it is
+   * a predicate — and this says only whether reading it costs the level's bytes or the type's.
+   */
+  has(level: number): boolean;
+  /** Where level `k`'s tiles are, resolved against the corpus base, with a trailing separator. */
+  prefix(level: number): string;
+  /** The tile of level `k` holding `denseId`: a shift by `log2(chunkSize) + k`, never a division. */
+  tileOf(level: number, denseId: bigint): bigint;
+  /** The file tile `j` of level `k` is in, spelled by the corpus's container. */
+  tileUrl(level: number, tile: number | bigint): string;
+  /** How many rows level `k` holds — `ceil(count / 2^k)` — or `null` when the manifest has no count. */
+  rows(level: number): bigint | null;
+  /** How many tiles level `k` has, or `null` when the manifest declares no count. */
+  tiles(level: number): bigint | null;
+  /**
+   * Every file of level `k`, in order and distinct.
+   *
+   * Throws on {@link VertexAddress.files}' argument when the count is absent, and on a level that
+   * is not written — the second one because the URL would name a prefix nobody wrote, which is the
+   * one failure a reader cannot tell from an empty level.
+   */
+  files(level: number): readonly string[];
+}
+
+/**
+ * The `levels:` block of a vertex manifest, resolved, or `null` when there is none.
+ *
+ * Every field is required once the block is present, on {@link indexAddress}'s argument: a block
+ * naming a prefix without its level list reads exactly like a corpus that declares no pyramid, and
+ * the difference between those two is a reader opening `l6/` or striding a million rows.
+ */
+function levelAddress(
+  vertexPrefix: string,
+  path: string,
+  yaml: ScannedManifest,
+  count: bigint | null,
+  container: Container,
+): LevelAddress | null {
+  const declared = mapping(yaml, path, 'levels');
+  if (declared === null) return null;
+
+  const stem = scalarOf(declared, 'prefix');
+  if (stem === undefined || stem === '') {
+    throw new CorpusManifestError(
+      `${path} declares levels and no prefix, so the tiles they name cannot be composed`,
+    );
+  }
+  const declaredLevels = listOf(declared, 'levels');
+  if (declaredLevels.length === 0) {
+    throw new CorpusManifestError(
+      `${path} declares levels and no level list, so which of them is written is not derivable — ` +
+        `and it is a policy, not arithmetic a reader can redo`,
+    );
+  }
+  const levels = declaredLevels.map((raw) => {
+    const level = Number(raw);
+    if (!Number.isInteger(level) || level < 0) {
+      throw new CorpusManifestError(`${path} declares level ${raw}, which is not a level`);
+    }
+    return level;
+  });
+  const chunkSize = Number(scalarOf(declared, 'chunk_size'));
+  const shift = shiftFor(chunkSize);
+  if (shift === null) {
+    throw new CorpusManifestError(
+      `${path} declares a level tile of ${scalarOf(declared, 'chunk_size') ?? 'nothing'} rows, ` +
+        `which no shift addresses`,
+    );
+  }
+  const written = new Set(levels);
+  const prefix = (level: number): string => prefixOf(join(vertexPrefix, `${stem}${level}`));
+  const rows = (level: number): bigint | null =>
+    count === null ? null : (count + (1n << BigInt(level)) - 1n) / (1n << BigInt(level));
+  const tiles = (level: number): bigint | null => {
+    const at = rows(level);
+    return at === null ? null : tilesOf(at, BigInt(chunkSize));
+  };
+  return {
+    levels,
+    chunkSize,
+    container,
+    has: (level) => written.has(level),
+    prefix,
+    // The whole of a level's addressing: `k` more bits of `dense_id` fall off, because level `k`
+    // holds one row in `2^k` and a tile of it therefore spans `2^k` times the ids.
+    tileOf: (level, denseId) => tileOf(denseId, shift + BigInt(Math.max(0, Math.trunc(level)))),
+    tileUrl: (level, tile) => tileUrlFor(prefix(level), 'chunk', container)(tile),
+    rows,
+    tiles,
+    files: (level) => {
+      if (!written.has(level)) {
+        throw new CorpusManifestError(
+          `${path} writes levels ${levels.join(', ')} and not ${level}, so its files are not ` +
+            `addressable — the predicate over the payload is what answers that level`,
+        );
+      }
+      const count_ = tiles(level);
+      if (count_ === null) {
+        throw new CorpusManifestError(
+          `${path} declares no vertex_count, so how many tiles level ${level} has is not derivable`,
+        );
+      }
+      const urls: string[] = [];
+      for (let k = 0n; k < count_; k += 1n) urls.push(tileUrlFor(prefix(level), 'chunk', container)(k));
+      return distinct(urls);
+    },
+  };
+}
+
+/**
  * The `codes:` block of a vertex manifest, resolved to a URL, or `null` when there is none.
  *
  * One required key, and it is required for {@link indexAddress}'s reason: a block that declares the
@@ -564,7 +717,7 @@ function indexAddress(
 function codesUrlFor(vertexPrefix: string, path: string, yaml: ScannedManifest): string | null {
   const declared = mapping(yaml, path, 'codes');
   if (declared === null) return null;
-  const relative = declared['path'];
+  const relative = scalarOf(declared, 'path');
   if (relative === undefined || relative === '') {
     throw new CorpusManifestError(
       `${path} declares codes and no path, so the anchor it names cannot be fetched`,
