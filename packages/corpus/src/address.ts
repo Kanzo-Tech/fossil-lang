@@ -17,21 +17,15 @@
  * - **No bytes.** Nothing here fetches, decodes or reads Parquet. `tileUrl` hands back a string.
  * - **No cache, no debounce, no sampling.** Those are the reader's, and they stay there.
  *
- * **Boxes used to be on that list, and the layout pass is what took them off.** It read: *which
- * tiles a rectangle touches comes from the per-tile `x`/`y` statistics in the Parquet footers … the
- * address is the half that cannot be re-derived from the corpus itself.* That was true when it was
- * written and the renumbering falsified it — `dense_id` is a vertex's rank by Morton code, so a
- * rectangle is a set of code ranges and a code range is a run of tiles. {@link mortonTilesFor} is
- * that decomposition, and it is arithmetic: no fetch, no reader, no engine, and no promise.
- *
- * What it needs instead is **one number per tile end** — {@link TileCodes} — because a rank is not
- * a code and no amount of `chunk_size` recovers the one from the other. The corpus publishes it:
- * `vertex/<Type>/codes.json`, named by the manifest and addressed by {@link VertexAddress.codesUrl},
- * parsed by {@link parseTileCodes}. That is 5,498 B on a million-vertex corpus — 1,960 B is what the
- * same 245 pairs pack to, and the difference buys a document with no endianness, no width and no
- * offset table to get wrong — against 1.15 MB of footer at five million. And it buys a *tighter*
- * answer rather than a looser one: 1.00× over-read against the geometric path's 1.13× on the same
- * window. The seam moved; it did not vanish, and it is now the smaller half.
+ * **Boxes used to be on that list, and the layout pass is what took them off.** `dense_id` is a
+ * vertex's rank by Morton code, so a rectangle is a set of code ranges and a code range is a run of
+ * tiles: {@link mortonTilesFor} is that decomposition, and it is arithmetic — no fetch, no reader,
+ * no engine, no promise. What it needs instead is **one number per tile end**
+ * ({@link TileCodes}), because a rank is not a code and no amount of `chunk_size` recovers the one
+ * from the other; the corpus publishes it as `vertex/<Type>/codes.json`, addressed by
+ * {@link VertexAddress.codesUrl} and parsed by {@link parseTileCodes}. `/docs/design/corpus` has
+ * why a JSON document and not a packed one, and what the anchor path over-reads against the footer
+ * path over the same windows. The seam moved; it did not vanish, and it is now the smaller half.
  *
  * `openCorpus` in `./corpus.ts` is the layer that does all three, by taking an engine from the host
  * rather than growing one. It sits **on** this module and does not absorb it: the subpath

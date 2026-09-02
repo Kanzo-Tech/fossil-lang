@@ -1531,11 +1531,9 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       /**
        * Which tiles, and by which artefact.
        *
-       * The anchor is preferred and it is not a preference: a code range is a tighter description
-       * of a tile than its `x`/`y` box — the box is the rectangular hull of an arc that snakes, and
-       * the arc is where the vertices are — measured at 1.00× over-read against the geometric
-       * path's 1.41× over nine windows. The footer path is the fallback for a corpus that publishes
-       * no `codes:`, and it stays correct, only looser.
+       * The anchor is preferred because a code range describes a tile more tightly than its `x`/`y`
+       * box does; `/docs/design/corpus` measures the two over the same nine windows. The footer
+       * path is the fallback for a corpus publishing no `codes:`, and it stays correct, only looser.
        */
       const all = await tileBoxes(address.type);
       const boxed = BigInt(all.length) === address.tiles;
