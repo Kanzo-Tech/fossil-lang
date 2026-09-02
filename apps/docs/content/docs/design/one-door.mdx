@@ -130,11 +130,13 @@ two arguments.
 `{ query, manifestFiles }` and returned the verbs; `openCorpus` took `(url, { query })` and returned
 discovery plus the camera. Two entry points over one manifest with no rule for choosing between
 them is how one question came to have two answers, in two languages, over two SQL generators. It was
-folded in for exactly this reason, and `packages/corpus/src/index.ts` still carries the note where
-the export used to be. Adding `view` as a third would have re-run the argument that removal settled.
+folded in for exactly this reason, and the note survives at the seam: the verbs section of
+`packages/corpus/src/corpus.ts` records that it *is the transport now, and this is the door*.
+Adding `view` as a third would have re-run the argument that removal settled.
 
 There was also a `./corpus` subpath, whose one justification was that its closure reached no WASM.
-The door reaches the verbs now, so the justification went and the subpath went with it. The
+The door reaches the verbs now, so the justification went and the subpath went with it, and
+`packages/corpus/src/index.ts` carries *that* note above the export. The
 objection it answered was never large: `openCorpus` runs a `DESCRIBE` per vertex type before it
 returns, so a caller holding one is already in *I have an engine* territory.
 
