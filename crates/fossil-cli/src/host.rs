@@ -1,5 +1,5 @@
-//! **The five verbs the `fossil` binary is a shell over**, and the host work
-//! under them.
+//! **The verbs the `fossil` binary is a shell over** — `check`, `run`,
+//! `providers`, `refs`, one `pub fn` each — and the host work under them.
 //!
 //! This was `fossil-engine`, a library crate with exactly one consumer — this
 //! one. `fossil-lsp` and `fossil-wasm` are the other two hosts and each keeps
