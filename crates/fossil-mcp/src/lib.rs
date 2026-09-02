@@ -6,7 +6,7 @@
 //! [`fossil_graph::dispatch`] the operation via [`ConnectionExecutor`].
 //!
 //! The MCP transport (`main.rs`, `rmcp`) is a thin shell over [`dispatch_json`]:
-//! the host spawns this binary against one [`Dataset`], the six typed tools of
+//! the host spawns this binary against one [`Dataset`], the typed tools of
 //! [`tools`] turn a tool call into an [`fossil_graph::Operation`], and the
 //! caller gets the verb's JSON result. The dataset — including its secret —
 //! comes from the file `--dataset` names, never from argv or the environment,

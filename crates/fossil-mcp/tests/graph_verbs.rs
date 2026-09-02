@@ -119,7 +119,7 @@ fn connection() -> Connection {
     conn
 }
 
-/// Drive the async dispatch to completion synchronously. The native runtime
+/// Drive the async dispatch to completion synchronously. [`ConnectionExecutor`]
 /// never suspends, so a noop-waker poll returns on the first poll.
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
     use std::task::{Context as TaskContext, Poll};
