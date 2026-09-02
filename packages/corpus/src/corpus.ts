@@ -1705,39 +1705,10 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     /**
      * One vertex by identity.
      *
-     * **`id` is the subject IRI, and this is the decision the handover left without an owner.**
-     *
-     * The alternative was the `dense_id`, and it is the cheap one: a shift names the tile, one
-     * request answers, and the whole lookup is `O(1)`. It is refused because *the spatial order is
-     * the id space* — redoing the layout ranks every vertex by the Morton code of its new position
-     * and lets that rank be its id, so a `dense_id` held anywhere outside the corpus names a
-     * different vertex after the next write. A bookmark, a selection, a link from another system
-     * and a row in somebody else's database all key on something, and an address is not something
-     * to key on.
-     *
-     * The tree used to contradict itself about this and no longer does. `apps/corpus/guards`'s
-     * `identity-is-the-subject` says *"`dense_id` is an address and cannot also be an identity"*
-     * and the conformance corpus marks `subject` `is_primary`; `crates/fossil-df/src/lib.rs` —
-     * `vertex_info`, the one writer — marked `dense_id` instead, on every corpus `fossil run`
-     * produced. One field, two answers, and what that resolved to in practice was that nothing
-     * read it. It marks `subject` now.
-     *
-     * **The flag is still not consulted, and the reason is no longer the disagreement.** It is not
-     * reachable: `./manifest.ts` is a line scanner, `properties` is nested one level deeper than
-     * anything it addresses, and `scan` on the conformance corpus's own `Person.vertex.yml`
-     * returns `property_groups: [{ file_type: 'parquet', properties: '' }]` — the flag is not a
-     * value this reader has, it is a value this reader cannot see. Getting at it means a third
-     * shape in `ScannedManifest` (a sequence of mappings inside a mapping inside a sequence),
-     * which is exactly the nesting that module refuses by name, plus the same growth in
-     * `apps/corpus/guards/manifest.mjs`, which is a deliberate copy for a third party who has
-     * neither this repository nor npm.
-     *
-     * Second reason, independent of the first: {@link openCorpus} already refuses to take the
-     * payload vocabulary off the manifest, and says why — the conformance corpus declares **one**
-     * property against **five** columns on disk. A flag on a property list that does not enumerate
-     * the payload would name the identity of some corpora and be silent about others, while
-     * `DESCRIBE` sees every one. The column name is the stable thing, so the column name is what
-     * this keys on.
+     * **`id` is the subject IRI, never the `dense_id`** — a re-layout renumbers every vertex, so
+     * an address held outside the corpus names a different one after the next write. That decision,
+     * the alternative it refuses, what would reverse it, and why `is_primary` is not consulted are
+     * on `/docs/design/corpus` under *A reader is handed the subject IRI*.
      *
      * **What it costs, measured rather than asserted.** Where the type declares an `index:` this is
      * a seek: two reads, no scan of either table, and see {@link Corpus.types} — `indexed` says

@@ -62,6 +62,31 @@ It is not closed, and the reason is that closing it is a format change rather th
 it needs a per-orientation tile census in the edge manifest, a field with its own argument about what
 a reader may derive. Until a `files` corpus is served, the cost is one nobody is paying.
 
+### A reader is handed the subject IRI, because an address is not something to key on
+
+`openCorpus`'s `node(id)` takes the subject IRI. The alternative was the `dense_id`, and it is the
+cheap one: a shift names the tile, one request answers, the whole lookup is `O(1)`. It is refused
+because **the spatial order is the id space** — redoing the layout ranks every vertex by the Morton
+code of its new position and lets that rank be its id, so a `dense_id` held anywhere outside the
+corpus names a *different vertex* after the next write. A bookmark, a selection, a link from another
+system and a row in somebody else's database all key on something, and an address is not something
+to key on. `node` refuses a `BigInt` with a `TypeError` that says so.
+
+What would reverse it is a corpus whose ids survive a re-layout — a stable id column written beside
+the address. Nothing writes one, and adding one is a format change and not a reader change.
+
+**The `is_primary` flag is not what this keys on, and no longer because anything disagrees.** The
+guard `identity-is-the-subject` and the writer now both mark `subject`. The flag is simply not
+*reachable*: `packages/corpus/src/manifest.ts` is a line scanner and `properties` is nested one
+level deeper than anything it addresses, so getting at it means a third shape in `ScannedManifest`
+— a sequence of mappings inside a mapping inside a sequence — which is the nesting that module
+refuses by name, plus the same growth in `apps/corpus/guards/manifest.mjs`, a deliberate copy for a
+third party who has neither this repository nor npm. And independently: the reader already refuses
+to take the payload vocabulary off the manifest at all, because `property_groups` enumerates three
+properties where `DESCRIBE` sees seven columns. A flag on a list that does not enumerate the
+payload would name the identity of some corpora and be silent about others. The **column name** is
+the stable thing, so the column name is what it keys on.
+
 ### The reader prunes the identity index, because the engine declines to
 
 The [identity index](/docs/format/conventions/identity) is built so that footers name the one tile a
