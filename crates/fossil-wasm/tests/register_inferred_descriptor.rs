@@ -1,8 +1,8 @@
-//! Cargo-test mirror of `FossilPlayground::register_inferred_descriptor` (13-03).
+//! Cargo-test mirror of `FossilPlayground::register_inferred_descriptor`.
 //!
 //! Exercises the pure-Rust path via `register_inferred_descriptor_native`. The
 //! `#[wasm_bindgen]`-attributed `register_inferred_descriptor` wrapper panics on
-//! the native cargo-test target (wasm-bindgen 0.2 lib.rs:101 — "cannot call
+//! the native cargo-test target (wasm-bindgen 0.2 — "cannot call
 //! wasm-bindgen imported functions on non-wasm targets"); the full
 //! wasm-bindgen integration is exercised browser-side by the vitest suite at
 //! `packages/wasm/tests/registerInferredDescriptor.test.ts`.

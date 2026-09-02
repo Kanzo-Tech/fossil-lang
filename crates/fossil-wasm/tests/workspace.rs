@@ -11,7 +11,7 @@
 //! `update_file`, `close_file`, `check`, `diagnostics_for`)
 //! merely translate to/from `JsError` + `JsValue` via wasm-bindgen, which
 //! panics on native targets ("cannot call wasm-bindgen
-//! imported functions on non-wasm targets" — wasm-bindgen 0.2 lib.rs:101).
+//! imported functions on non-wasm targets" — wasm-bindgen 0.2).
 
 use fossil_wasm::{FossilPlayground, WorkspaceError};
 
@@ -74,7 +74,7 @@ fn workspace_lifecycle_smoke() {
 
 /// Two open files, close one, the other still produces a diagnostic stream.
 /// Exercises `OpenFiles::iter` (the workspace-wide drain `check()` uses) +
-/// `diagnostics_for_rows(handle)` (the B3 per-file drain).
+/// `diagnostics_for_rows(handle)` (the per-file drain).
 #[test]
 fn workspace_multi_file_isolation() {
     let mut pg = FossilPlayground::new();
@@ -83,15 +83,14 @@ fn workspace_multi_file_isolation() {
     let h1 = pg.open_file_native("a.fossil".to_string(), source.clone());
     let h2 = pg.open_file_native("b.fossil".to_string(), source);
 
-    // diagnostics_for_rows(h1) — per-file accessor (the LSP Worker's
-    // drain entry point). Returns Some(_) for an open handle.
+    // diagnostics_for_rows(h1) — per-file accessor. Some(_) for an open handle.
     let per_file_a = pg.diagnostics_for_rows(h1);
     assert!(per_file_a.is_some(), "diagnostics_for_rows h1 returns Some");
     let per_file_b = pg.diagnostics_for_rows(h2);
     assert!(per_file_b.is_some(), "diagnostics_for_rows h2 returns Some");
 
     // Every per-file row's `uri` matches the file it was drained from
-    // (proves the B3 per-file scoping).
+    // (proves the per-file scoping).
     for row in per_file_a.unwrap() {
         assert_eq!(row.uri, "a.fossil", "per-file row keyed to its file URI");
     }

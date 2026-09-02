@@ -13,7 +13,7 @@
 //!
 //! So these are ordinary method calls, and the surface stays the shape the rest
 //! of this crate has: `(handle, line, character)` in, a serialisable row out.
-//! The Worker keeps every one of its sixteen routes; nothing here replaces it.
+//! The Worker keeps every one of its routes; nothing here replaces it.
 //! What is shared is what `/docs/design/three-hosts` says is shared — the
 //! ANSWER, as a `fossil-ide` free function — and
 //! `crates/fossil-wasm/tests/main_thread_parity.rs` is the test that crosses
@@ -107,7 +107,7 @@ pub struct CompletionRow {
 /// anything else; this surface has no wire to satisfy.
 ///
 /// A target in ANOTHER file is the ordinary case rather than the exception —
-/// two of the four positions goto-def recognises resolve into the shape
+/// two of the three positions goto-def recognises resolve into the shape
 /// document — so a host with one editor pane still has to read `uri` before it
 /// moves a cursor.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]

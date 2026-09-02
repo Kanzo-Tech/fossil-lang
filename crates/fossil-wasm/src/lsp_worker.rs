@@ -38,7 +38,7 @@
 //! in-flight analysis observes the new revision at its next cooperative
 //! checkpoint.
 //!
-//! ## Per-file diagnostics drain (B3 fix — mandatory)
+//! ## Per-file diagnostics drain
 //!
 //! [`publish_diagnostics`] takes `(&FossilPlayground, &str)` and returns
 //! `Option<serde_json::Value>` — drains for the SINGLE file named by `uri`
@@ -203,7 +203,7 @@ fn post<T: serde::Serialize>(g: &DedicatedWorkerGlobalScope, v: &T) -> Result<()
 
 /// Route one decoded LSP message to the right handler. Returns the response
 /// (None for notifications) plus any `publishDiagnostics` notifications the
-/// caller must post out-of-band. Per-file drain (B3 fix).
+/// caller must post out-of-band. Per-file drain.
 ///
 /// Test-reachable from native via `__dispatch_for_test` in the crate root.
 pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOutput {
@@ -262,8 +262,8 @@ pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOu
     }
 }
 
-/// Handle the four LSP notifications (`initialized`, `exit`, didOpen,
-/// didChange, didClose). Returns `Some(diagnostics)` when `method` was a
+/// Handle the LSP notifications (`initialized`, `exit`, didOpen, didChange,
+/// didClose). Returns `Some(diagnostics)` when `method` was a
 /// notification — the per-file `publishDiagnostics` notifications the
 /// caller must post (empty for `initialized` / `exit`). Returns `None`
 /// when `method` is not a notification — caller falls through to request
@@ -352,7 +352,7 @@ fn server_capabilities() -> serde_json::Value {
     serde_json::to_value(&caps).unwrap_or(serde_json::Value::Null)
 }
 
-// ---------- Per-file diagnostics drain (B3 fix) ----------
+// ---------- Per-file diagnostics drain ----------
 
 /// Drain diagnostics for the SINGLE file identified by `uri` (per-file drain —
 /// NOT all open files). Returns the constructed
@@ -552,7 +552,7 @@ fn handle_code_action(
     Ok(serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null))
 }
 
-// ---------- Custom fossil/* methods (B2) ----------
+// ---------- Custom fossil/* methods ----------
 
 // Uniform handler signature for the dispatch routing table — `check_all`
 // cannot fail today, but the `Result` keeps the handler-shape symmetry with
@@ -628,7 +628,7 @@ mod tests {
 
     /// `fossil/registerInferredDescriptor` dispatch registers the catalog on
     /// the worker's own `FossilPlayground` — the instance that drives editor
-    /// completion (layer 2 of decision (b)).
+    /// completion.
     #[test]
     fn register_inferred_descriptor_dispatch_registers_on_worker_pg() {
         let pg = FossilPlayground::new();
