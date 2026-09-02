@@ -207,7 +207,7 @@ specification, where self-explaining file names are more interoperable than a sp
 has read.
 
 Nor was conformance given up in principle and kept in practice. Every vertex manifest fossil writes
-declares `dense_id` as `uint32` (`crates/fossil-df/src/lib.rs, vertex_info`, `vertex_info`), and the
+declares `dense_id` as `uint32` (`crates/fossil-df/src/lib.rs, vertex_info`), and the
 built-in list GraphAr's `types.cc` parses has no unsigned type at all — so its own C++ reader would
 refuse the first property of the first vertex type.
 
