@@ -260,8 +260,9 @@ that is settled, every verb whose job was to make a picture stops having one.
 It read *"a level-3 tile holds super-nodes that do not exist at level 0"*. Nothing writes one.
 Louvain builds a hierarchy in the layout pass — four levels at ten million, 3,757,900 / 8,832 /
 2,081 / 1,487 — and the pass **collapses it to a `cluster_id` column** and discards the levels
-above zero. `cluster_id` is a colour, not a level, and no directory under `vertex/<Type>/` is a
-level either.
+above zero. `cluster_id` is a colour and not a level. The directories that *are* levels are
+`vertex/<Type>/l{k}/`, and what is in them is the decimation below rather than anything Louvain
+built: real vertices at real positions, one per quadtree cell of depth *k*.
 
 Aggregation is also the wrong primitive here, and the reason is the one below: **a synthetic
 centroid cannot nest.** Replace a super-node with its children and every point on screen moves.
@@ -295,12 +296,60 @@ the nesting outright: a vertex drawn at one zoom is drawn at every closer zoom, 
 position, and nothing is thrown away that did not leave the frame. **That is the whole difference
 between a picture that refines and a picture that flashes**, and it is one expression.
 
-<Callout title="Writing the levels is an optimisation of this, not a second design">
+<Callout title="The levels are written, and they optimise the predicate rather than replace it">
 Level *k* selected by `dense_id % 2^k` needs no bytes on disk: it is a predicate. What a written
 `vertex/<Type>/l{k}/` buys is that a coarse camera reads a small file instead of striding a large
-one — which is where the byte cost of a zoomed-out view lives. Both paths select **the same rows by
-the same predicate**, so a corpus without the levels still draws the same picture and only reads
-more. That is the property that lets the pyramid be added later without becoming a second contract.
+one — which is where the byte cost of a zoomed-out view lives, and the view that pays it is the
+default one: over the million-vertex bench corpus, **245 of 245 tiles and 20,901 kB to draw 15,625
+points**, 98.4% of it read and thrown away.
+
+**Both paths select the same rows by the same predicate**, so a corpus without the levels draws the
+identical picture and only reads more. That is the property that keeps the pyramid from being a
+second contract, and it is held as a test rather than as a sentence:
+`crates/fossil-layout/tests/levels.rs` diffs each written level against the predicate evaluated over
+the payload, `EXCEPT ALL` in both directions, every column and not only the id, with the row count as
+a separate statement because a duplicate and an omission net to zero. Shifting the writer's predicate
+by one level fails exactly that test and leaves the others green.
+
+Three things about the pyramid are decided, and each is spelled where it lives —
+`crates/fossil-sinks/src/manifest.rs, VertexLevels` and
+`crates/fossil-layout/src/layout.rs, write_levels`.
+
+- **Three levels, and the coarsest is the one that fits a single tile.** Coarser buys nothing: one
+  tile is already one range request. Each level is one 2× zoom step, and the finest holds about
+  4·`chunk_size` rows — the order of a camera's point budget — so a view wanting more points is a
+  view zoomed in far enough that striding the payload reads only its own window's tiles. The cost is
+  therefore `2³−1` tiles' worth of rows **whatever V is**: measured over 300,000 vertices at the real
+  4,096-row tile, 74 tiles and 18,122 kB of payload against **589 / 298 / 153 kB** of levels — 1,040
+  kB, 5.7% of the type, and falling as the corpus grows.
+- **The floor is expressed in tiles, and set high on purpose.** Under 64 tiles a type gets no
+  pyramid. The asymmetry is the argument: a corpus below the floor draws the same picture off the
+  predicate and only reads more, where a floor set too low charges every small corpus bytes for a
+  view it already serves in a handful of requests. `fossil run examples/hello.fossil` is three orders
+  of magnitude under it and writes nothing.
+- **The manifest declares the numbers**, which departs from `codes:` deliberately. A code anchor is
+  two `u32` per tile and grows with the corpus; a level list is at most three integers at any V. And
+  which levels a writer spent bytes on is a **policy**, not a derivation — a reader recomputing it
+  from `vertex_count` would be reimplementing the writer and would 404 the day the policy moved. One
+  function chooses them, and both the pass that writes the files and the caller that declares them
+  call it.
+
+Addressing a level needs nothing new. Level *k*'s row *i* is the payload row with `dense_id = i·2^k`,
+so a level tile is a contiguous run of payload tiles and the published code anchor already bounds it
+in Morton space.
+</Callout>
+
+<Callout type="warn" title="The edges get no pyramid, and not for the reason that rejects a centroid">
+A level's **induced** edge set — both endpoints in it — nests exactly as its vertices do, so it is
+not refused for a centroid's reason. It is refused because it is empty. A level keeps 1/2^*k* of the
+vertices and an edge needs two of them, so it keeps on the order of 1/2^2*k* of the edges: measured
+over a fixture of **27,976 edges** at mean degree 14, the three written levels induce **1, 0 and 0**.
+
+So a coarse camera draws points and no links, which is not a new state for it to be in — `links` is
+already 0 in a window whose edges leave the frame. The alternative is what this page refuses twice
+over: an edge between two survivors standing in for a path through vertices nobody drew is synthetic,
+and replacing it with the real path as the camera zooms moves every line on screen. Links come from
+the payload's own `by_source` tiles, over the window, at the zoom where there are links to draw.
 </Callout>
 
 ### The addressing and the reader do not meet, and Morton is why they could
