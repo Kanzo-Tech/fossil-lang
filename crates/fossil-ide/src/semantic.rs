@@ -24,9 +24,9 @@
 //! [`semantic_tokens`] is a whole-file CST walk — it re-runs **once** per edit
 //! (no per-mapping Salsa key, so `MAX_PER_MAPPING_FAN_OUT` is untouched). It is a
 //! pure function over [`fossil_syntax::parse`] + the line index, with no native
-//! dependency, so `fossil-ide` stays inside the 9-crate WASM gate. We emit
-//! full-document tokens (not delta/range) per Research's v0.1 recommendation:
-//! < 5ms on 200 lines is well within the perf budget; delta is a v2 optimization.
+//! dependency, so `fossil-ide` stays inside the WASM gate. We emit
+//! full-document tokens rather than delta or range ones: delta is an
+//! optimisation, and the whole-file walk is not the cost on a program's scale.
 
 use fossil_base::SourceFile;
 use fossil_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
@@ -105,8 +105,7 @@ struct AbsToken {
 /// `(deltaLine, deltaStartChar, length, tokenType, tokenModifiers)`.
 ///
 /// Walks the [`fossil_syntax::parse`] CST in source order, classifies each
-/// *leaf* token via [`classify`] (using its parent node for the IDENT /
-/// prefixed-name disambiguation), and converts byte offsets to UTF-16
+/// *leaf* token via [`classify`], and converts byte offsets to UTF-16
 /// `(line, char, length)` through the FILE-keyed [`LineIndex`]. Tokens with no
 /// semantic category (whitespace, structural punctuation, parse-error trivia)
 /// are skipped. The result is exactly what
@@ -136,8 +135,8 @@ pub fn semantic_tokens(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<u32> {
 
 /// Classify a leaf [`SyntaxToken`] into a legend token-type index, or `None`
 /// if it carries no color (whitespace, structural punctuation, indent/dedent,
-/// errors). Uses the token's parent node kind to disambiguate an `IDENT`
-/// (a mapping subject vs a shape type vs a stdlib call).
+/// errors). An `IDENT` is disambiguated by its local tree shape — see
+/// [`ident_type`] for the three it can take.
 fn classify(tok: &SyntaxToken) -> Option<u32> {
     use SyntaxKind as K;
     match tok.kind() {

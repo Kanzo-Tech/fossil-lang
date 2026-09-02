@@ -326,8 +326,9 @@ fn wanted_iri(db: &dyn fossil_base::Db, entry: &TypeEntry, wanted: &Wanted<'_>) 
             // `short_names` IS the rule — the last segment of
             // the predicate IRI, with `@rename` substituted first — so this
             // resolves a key exactly the way the checker resolves it, including
-            // the renamed ones. Reimplementing `local_name` here would be the
-            // seventh copy of it in this tree, and two of the six disagree.
+            // the renamed ones. Splitting the IRI here instead would be a second
+            // implementation of `fossil_graph_schema::local_name`, which exists
+            // because three copies of that split had already disagreed.
             let shape = resolve_target_shape(db, *mapping).ok().flatten()?;
             let (table, _collisions) = shape.short_names(&entry.renames);
             table

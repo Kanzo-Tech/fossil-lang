@@ -25,15 +25,10 @@ use smol_str::SmolStr;
 
 /// The classification of a [`SymbolEntry`].
 ///
-/// Mirrors the LSP `SymbolKind` axes the outline maps onto:
-/// `Mapping → Class/Struct`, `Shape → Interface`. Kept
-/// as a Fossil-native enum so the index itself owes nothing to `lsp-types` —
-/// [`crate::outline`] is where the translation lives.
+/// Kept as a Fossil-native enum so the index itself owes nothing to
+/// `lsp-types` — [`crate::outline`] holds the translation and its table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SymbolKind {
-    // A `Prefix` variant mapped to the LSP `Namespace` kind and indexed
-    // `prefix xx: <iri>`. The declaration is gone, and with it the only symbol
-    // this crate ever indexed that was not a mapping or a shape.
     /// A mapping header name (`Users` in `Users : Person from Adults`).
     Mapping,
     /// The shape name a mapping header targets (`Person`).
@@ -83,14 +78,10 @@ impl SymbolIndex {
     pub fn from_root(root: &SyntaxNode) -> Self {
         let mut entries = Vec::new();
         for item in root.children() {
-            // A `:=` binding. This arm did not exist: the walk tested only for
-            // `MAPPING`, so `User := io.csv("users.csv")` was in no index and
-            // goto-def on `User` — at the binding, in the `from`, or inside
-            // another binding's right-hand side — answered with zero targets,
-            // four positions measured. `TYPE_DEF` is still not indexed and
-            // deliberately: a shape name is defined in the `.shex`, and
-            // `goto_def` answers for it there (or falls back to the `type` line
-            // itself) before the workspace index is ever consulted.
+            // A `:=` binding. `TYPE_DEF` is deliberately NOT indexed: a shape
+            // name is defined in the `.shex`, and `goto_def` answers for it
+            // there (or falls back to the `type` line itself) before the
+            // workspace index is ever consulted.
             if item.kind() == SyntaxKind::SOURCE_DEF
                 && let Some(name) = SourceDef::cast(item.clone()).and_then(|s| s.name())
             {
