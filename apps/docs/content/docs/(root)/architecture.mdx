@@ -205,7 +205,7 @@ about itself is now a module of the one host that used it.
 
 | the name | what it actually is |
 | --- | --- |
-| `fossil-ide` | not an IDE: the set of LSP functions, and it exists only because `fossil-lsp` does not compile to wasm32. It also returns `lsp_types` structs directly (`crates/fossil-ide/src/completion.rs:63`), which is the invariant rust-analyzer defends hardest and the one Gleam broke |
+| `fossil-ide` | not an IDE: the set of LSP functions, and it exists only because `fossil-lsp` does not compile to wasm32. It also returns `lsp_types` structs directly (`crates/fossil-ide/src/completion.rs:58`), which is the invariant rust-analyzer defends hardest and the one Gleam broke |
 | `fossil-sinks` | writes nothing: the manifest model, borrowing GraphAr's YAML field names without conforming to GraphAr ([where borrowing stops](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops)); half its dependents are readers |
 
 <Callout title="Deliberately absent">

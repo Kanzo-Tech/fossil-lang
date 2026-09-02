@@ -17,7 +17,7 @@ user declares no functions.
 
 ## The forms
 
-`HirExpr` has thirteen variants (`crates/fossil-hir/src/lower.rs:304`) — the ten below cover twelve
+`HirExpr` has thirteen variants (`crates/fossil-hir/src/lower.rs:334`) — the ten below cover twelve
 between them, plus the bare-name column reference the surface is retiring. Each is spelled by a
 program in `apps/docs/programs/`, compiled by the production path and not transcribed here.
 
@@ -93,8 +93,8 @@ particular expression being unlowerable — its own fixture lowers fine today
 a promise the language does not keep — `|>`, the leading dot, the triple term, `&` shape
 intersection and the rest. No list here: `grammar.bnf` carries each as a tombstone, the never-built
 forms sit under `grammar.bnf, § NOT IN MVP`, six answer by name with a message saying what to write
-instead (`crates/fossil-syntax/src/parser/diag.rs:106`), and
-`crates/fossil-syntax/tests/parse_corpus.rs:477` fails if any fenced `fossil` block on this site
+instead (`crates/fossil-syntax/src/parser/diag.rs:101`), and
+`crates/fossil-syntax/tests/parse_corpus.rs:475` fails if any fenced `fossil` block on this site
 spells one.
 
 ## What this does not settle

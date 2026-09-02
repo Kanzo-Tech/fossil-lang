@@ -43,8 +43,8 @@ and as completion after a dot: one property seen from three sides, not three pro
 A row is enough only if it declares **everything** the verb takes, including whether an argument is
 written with its name. A join's condition is `on = …`; with the name missing from the signature the
 binder would fill `on` from the second positional slot and `join(User, a == b)` would start
-compiling. Five kinds fill a position and two of them name rather than evaluate
-(`crates/fossil-hir/src/stdlib.rs:311`):
+compiling. Six kinds fill a position and two of them name rather than evaluate
+(`crates/fossil-hir/src/stdlib.rs:450`):
 
 | kind | what fills it | verbs |
 | --- | --- | --- |
@@ -53,6 +53,7 @@ compiling. Five kinds fill a position and two of them name rather than evaluate
 | `Predicate` | a condition over the receiver's rows | `where`, a join's `on` |
 | `Column` | a qualified column reference — a NAME, not a value | `select`, `sort`, `group_by` |
 | `Binding` | the name of a source binding | `join`, with `X as Y`; `union`, without |
+| `Aggregate` | a call over a group — a NAME and its argument, not a value | `group_by`'s second position |
 
 ## The alternative grows as *n · m*
 
