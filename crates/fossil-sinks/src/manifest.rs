@@ -31,6 +31,11 @@ pub const TILES_FILE: &str = "tiles.parquet";
 /// beside the tiles rather than inside the manifest.
 pub const TILE_CODES_FILE: &str = "codes.json";
 
+/// The filename stem of a **level set**, under a vertex type's own
+/// [`VertexInfo::prefix`]: level `k` lives under `<prefix>l{k}/`, and inside it
+/// the container rules apply unchanged. See [`VertexLevels`].
+pub const LEVEL_PREFIX_STEM: &str = "l";
+
 /// Which container carries a corpus's tiles — one file per tile with the address
 /// in the name, or one file per set with the address as the row-group ordinal.
 ///
@@ -239,6 +244,16 @@ pub struct VertexInfo {
     /// is the one that has no Parquet reader.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codes: Option<VertexCodes>,
+    /// **Which decimated levels of this type are written, and where** — the
+    /// pyramid a zoomed-out camera reads instead of striding the whole type.
+    /// See [`VertexLevels`].
+    ///
+    /// `Option` for [`Self::codes`]' reason, and more strongly: a level is an
+    /// optimisation of a predicate, so a corpus without one draws **the same
+    /// picture** off `dense_id % 2^k == 0` over the payload and only reads
+    /// more. That is what keeps this from being a second contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels: Option<VertexLevels>,
     /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
     pub version: String,
 }
@@ -289,6 +304,133 @@ pub struct VertexCodes {
     /// Path to the anchor document, relative to the vertex type's own
     /// [`VertexInfo::prefix`] — [`TILE_CODES_FILE`] as the writer spells it.
     pub path: String,
+}
+
+/// Where a vertex type's **level sets** live, and which levels exist.
+///
+/// **Level `k` is the vertices whose `dense_id` is a multiple of `2^k`.** Over
+/// a Morton-ordered `dense_id` that is one vertex per quadtree cell of depth
+/// `k`, and level `k+1` is a strict subset of level `k` — the nesting is by
+/// construction rather than by a writer's care, which is why zooming in only
+/// ever ADDS. A level is not an aggregation: nothing here is a synthetic
+/// centroid, every row is a real vertex at the position the payload gives it,
+/// and `cluster_id` is a colour rather than a level of anything.
+///
+/// # What is declared, and what is not
+///
+/// The **numbers**, unlike [`VertexCodes`]. That is a deliberate departure from
+/// the precedent and the reason is that the two quantities differ in kind: the
+/// code anchor is two `u32` per tile and therefore grows with the corpus, so
+/// inlining it would charge every reader of a manifest for the size of the
+/// graph. A level list is at most [`LEVEL_WINDOW`] integers **whatever the
+/// corpus is** — the pyramid's cost is bounded by tiles and not by `V`. And it
+/// is not derivable: which levels a writer chose to spend bytes on is a policy,
+/// and a reader that re-derived it from `vertex_count` and `chunk_size` would
+/// be reimplementing [`VertexLevels::planned`] and would 404 the day the policy
+/// moved.
+///
+/// # Addressing a level needs nothing new
+///
+/// Level `k`'s row `i` is the payload row with `dense_id == i · 2^k`, so tile
+/// `j` of a level set covers the `dense_id` range
+/// `[j · chunk_size · 2^k, (j+1) · chunk_size · 2^k)` — a contiguous run of
+/// payload tiles, which the published [`VertexCodes`] anchor already bounds in
+/// Morton space. So a camera turns a rectangle into level tiles with the anchor
+/// it already read, and no second document is written per level.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VertexLevels {
+    /// Filename stem of a level set's prefix, relative to the vertex type's own
+    /// [`VertexInfo::prefix`] — [`LEVEL_PREFIX_STEM`] as the writer spells it.
+    /// Level `k`'s prefix is `<stem>{k}/`, and inside it the corpus's
+    /// [`Container`] decides the filenames exactly as it does for the payload.
+    /// A stem plus the number is the shape `chunk{k}.parquet` and
+    /// `tile{k}.parquet` already have, so a level set introduces no naming
+    /// convention of its own.
+    pub prefix: String,
+    /// The levels written, finest first. Level `k` holds
+    /// `ceil(vertex_count / 2^k)` rows.
+    pub levels: Vec<u32>,
+    /// Rows per tile within a level set. Declared rather than inherited from
+    /// [`VertexInfo::chunk_size`] because a reader turning a level tile back
+    /// into a `dense_id` range multiplies by it, and a number that has to be
+    /// assumed is one a writer can change in silence.
+    pub chunk_size: u64,
+}
+
+/// How many levels a pyramid carries: **three**, and the number is where the
+/// pyramid meets the window rather than a taste.
+///
+/// Each level is one 2× zoom step, and the coarsest is [`VertexLevels::planned`]'s
+/// one-tile level, so three of them cover a 4× zoom range from there. Below the
+/// finest, the camera strides the payload — which nests, because the stride is
+/// quantised to a power of two — and reads only the tiles its window touches, so
+/// the pyramid does not need to reach level 0. The crossover is the arithmetic:
+/// the finest level holds about `4 · chunk_size` rows, which is the order of a
+/// camera's point budget, so a view wanting more points than it holds is a view
+/// zoomed in far enough that the window is a fraction of the corpus.
+pub const LEVEL_WINDOW: u32 = 3;
+
+/// The floor, in tiles: below this a type gets no pyramid.
+///
+/// The pyramid's cost is `2^LEVEL_WINDOW - 1` tiles' worth of rows **whatever
+/// `V` is**, so expressing the floor in tiles is expressing it as a fraction of
+/// the corpus: at 64 tiles the pyramid is under 11% of the type and at 245 it is
+/// 2.7%, falling as the corpus grows. It is set conservatively on purpose, and
+/// the asymmetry is the argument — **a floor set too high costs a corpus
+/// nothing but a slower zoom-out, because the predicate over the payload draws
+/// the identical picture; a floor set too low charges every small corpus bytes
+/// for a view it can already serve in a handful of range requests.**
+pub const LEVEL_FLOOR_TILES: u64 = 64;
+
+impl VertexLevels {
+    /// The pyramid a type of `vertex_count` rows at `chunk_size` rows per tile
+    /// gets, or `None` where it gets none.
+    ///
+    /// **One function, two callers**: the layout pass writes exactly these
+    /// levels and the manifest declares exactly these levels, so the two cannot
+    /// drift into a manifest naming a file nobody wrote. A second copy of this
+    /// rule anywhere is the bug it exists to prevent.
+    ///
+    /// The coarsest level is the finest `k` whose level fits in **one tile** —
+    /// coarser than that buys nothing, because one tile is already one range
+    /// request and the whole level is the minimum read. From there
+    /// [`LEVEL_WINDOW`] levels run finer, and [`LEVEL_FLOOR_TILES`] is the size
+    /// below which none are written at all.
+    ///
+    /// # Panics
+    /// Never: `chunk_size` of zero returns `None` before it is divided by.
+    #[must_use]
+    pub fn planned(vertex_count: u64, chunk_size: u64) -> Option<Self> {
+        if chunk_size == 0 || vertex_count <= chunk_size.saturating_mul(LEVEL_FLOOR_TILES) {
+            return None;
+        }
+        // The coarsest: the smallest `k` with `ceil(V / 2^k) <= chunk_size`.
+        // Computed by shifting rather than by a logarithm, because the answer
+        // has to be the same integer in every language that re-implements it.
+        let mut coarsest = 1u32;
+        while vertex_count.div_ceil(1u64 << coarsest) > chunk_size {
+            coarsest += 1;
+        }
+        let finest = coarsest.saturating_sub(LEVEL_WINDOW - 1).max(1);
+        Some(Self {
+            prefix: LEVEL_PREFIX_STEM.to_string(),
+            levels: (finest..=coarsest).collect(),
+            chunk_size,
+        })
+    }
+
+    /// The prefix level `k`'s tiles live under, relative to the vertex type's
+    /// own [`VertexInfo::prefix`] — `<stem>{k}/`.
+    #[must_use]
+    pub fn level_prefix(&self, level: u32) -> String {
+        format!("{}{level}/", self.prefix)
+    }
+
+    /// How many rows level `k` of a type of `vertex_count` rows holds.
+    #[must_use]
+    pub const fn rows_at(vertex_count: u64, level: u32) -> u64 {
+        vertex_count.div_ceil(1u64 << level)
+    }
 }
 
 /// `GraphAr` edge-info manifest (one per `(src_type, edge_type, dst_type)` triple).
@@ -503,6 +645,9 @@ impl VertexInfo {
             // Nor a code anchor: it is an outcome of the layout pass and the
             // caller that runs one declares it. See [`VertexCodes`].
             codes: None,
+            // Nor a pyramid: the levels are files the layout pass writes, and
+            // a type without them draws the same picture off the predicate.
+            levels: None,
             version: GRAPHAR_VERSION.to_string(),
         }
     }
@@ -518,6 +663,14 @@ impl VertexInfo {
     #[must_use]
     pub fn with_codes(mut self, codes: VertexCodes) -> Self {
         self.codes = Some(codes);
+        self
+    }
+
+    /// Declare which decimated levels of this type are written, and where. See
+    /// [`VertexLevels`].
+    #[must_use]
+    pub fn with_levels(mut self, levels: VertexLevels) -> Self {
+        self.levels = Some(levels);
         self
     }
 
@@ -967,5 +1120,94 @@ version: gar/v1
             ..bound
         };
         assert!(over.suppressed * 1_000_000 > over.population * over.suppression_budget_ppm);
+    }
+
+    /// The corpus the encargo is about: a million vertices at 4,096 rows a tile
+    /// is 245 tiles, and the levels that come out of it are the three the
+    /// default view needs. 15,625 is exactly what that view draws.
+    #[test]
+    fn planned_levels_over_a_million_vertices() {
+        let plan = VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).expect("above the floor");
+        assert_eq!(plan.levels, vec![6, 7, 8]);
+        let rows: Vec<u64> = plan
+            .levels
+            .iter()
+            .map(|&k| VertexLevels::rows_at(1_000_000, k))
+            .collect();
+        assert_eq!(rows, vec![15_625, 7_813, 3_907]);
+        // The coarsest fits one tile and the one above it does not, which is
+        // the whole definition of where the pyramid stops.
+        assert!(rows[2] <= DEFAULT_CHUNK_SIZE);
+        assert!(VertexLevels::rows_at(1_000_000, 7) > DEFAULT_CHUNK_SIZE);
+        // And the pyramid costs 2.7% of the type it is a pyramid of.
+        assert_eq!(rows.iter().sum::<u64>(), 27_345);
+    }
+
+    /// The cost is bounded by TILES and not by `V`, which is the property the
+    /// floor is expressed in tiles because of: ten times the corpus, the same
+    /// seven tiles' worth of pyramid, a tenth of the fraction.
+    #[test]
+    fn the_pyramid_costs_a_constant_number_of_tiles() {
+        for &v in &[300_000u64, 1_000_000, 5_000_000, 10_000_000] {
+            let plan = VertexLevels::planned(v, DEFAULT_CHUNK_SIZE).expect("above the floor");
+            assert_eq!(plan.levels.len(), LEVEL_WINDOW as usize);
+            let rows: u64 = plan
+                .levels
+                .iter()
+                .map(|&k| VertexLevels::rows_at(v, k))
+                .sum();
+            let cap = DEFAULT_CHUNK_SIZE * u64::from((1u32 << LEVEL_WINDOW) - 1);
+            assert!(rows <= cap, "{v}: {rows} rows against a {cap}-row ceiling");
+        }
+    }
+
+    /// Below the floor there is no pyramid, and the boundary is exact rather
+    /// than approximately where it was meant to be.
+    #[test]
+    fn the_floor_is_where_it_says_it_is() {
+        let floor = DEFAULT_CHUNK_SIZE * LEVEL_FLOOR_TILES;
+        assert!(VertexLevels::planned(floor, DEFAULT_CHUNK_SIZE).is_none());
+        assert!(VertexLevels::planned(floor + 1, DEFAULT_CHUNK_SIZE).is_some());
+        // The walking skeleton's five `Person` vertices are three orders under
+        // it, and a corpus that gets no pyramid is not a corpus that lost one.
+        assert!(VertexLevels::planned(5, DEFAULT_CHUNK_SIZE).is_none());
+        assert!(VertexLevels::planned(1_000_000, 0).is_none());
+    }
+
+    /// `k+1` is a strict subset of `k`, which is what makes zooming in ADD
+    /// rather than replace. Asserted over the predicate itself, because the
+    /// predicate is the definition and the files are the optimisation.
+    #[test]
+    fn levels_nest_by_construction() {
+        for k in 0..12u32 {
+            let coarse: Vec<u64> = (0..4_096u64).filter(|d| d % (1 << (k + 1)) == 0).collect();
+            let fine: Vec<u64> = (0..4_096u64).filter(|d| d % (1 << k) == 0).collect();
+            assert!(coarse.iter().all(|d| fine.contains(d)), "level {k}");
+            assert!(coarse.len() < fine.len() || fine.len() <= 1);
+        }
+    }
+
+    /// A level set's prefix is a stem plus the number, the shape
+    /// `chunk{k}.parquet` already has.
+    #[test]
+    fn a_level_prefix_is_the_stem_and_the_number() {
+        let plan = VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).expect("above the floor");
+        assert_eq!(plan.level_prefix(6), "l6/");
+        assert_eq!(plan.prefix, LEVEL_PREFIX_STEM);
+    }
+
+    /// The manifest is silent about levels unless a type has them, so every
+    /// corpus written before the field existed serialises byte for byte as it
+    /// did — which is what keeps the conformance corpus out of this.
+    #[test]
+    fn a_type_without_levels_serialises_no_key() {
+        let info = VertexInfo::new("Person", 5, DEFAULT_CHUNK_SIZE, "vertex/Person/", vec![]);
+        let yaml = info.to_yaml().expect("serialise");
+        assert!(!yaml.contains("levels"), "{yaml}");
+        let with = info.with_levels(VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).unwrap());
+        let yaml = with.to_yaml().expect("serialise");
+        assert!(yaml.contains("levels:"), "{yaml}");
+        let back: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("round trip");
+        assert_eq!(back, with);
     }
 }
