@@ -1,5 +1,5 @@
 //! Native Arrow→Parquet sink — write a [`GraphArData`] to a destination
-//! directory in the W0b GraphAr layout (design §A1/§A2):
+//! directory in the W0b GraphAr layout:
 //!
 //! ```text
 //! <dest>/graph.graph.yml
@@ -29,19 +29,18 @@ pub enum SinkError {
 
 impl GraphArData {
     /// Write the whole graph under `dest` (a local directory): one Parquet per
-    /// vertex type, the CSR/CSC Parquet pair per edge type, and the three
-    /// manifest YAMLs. Creates intermediate directories as needed.
+    /// vertex type, the CSR/CSC Parquet pair per edge type, and the manifest
+    /// YAMLs. Creates intermediate directories as needed.
     ///
-    /// Encodes via the shared [`Self::to_files`] (the same bytes the browser
-    /// host PUTs), then drops each file to disk — the only native-specific step.
+    /// Encodes via the shared [`Self::try_for_each_file`] (the same bytes the
+    /// browser host PUTs), then drops each file to disk — the only
+    /// native-specific step.
     ///
     /// # Errors
     /// Filesystem or Parquet-encode failures, or manifest serialization.
     pub fn write_to_dir(&self, dest: &Path) -> Result<(), SinkError> {
         // One file at a time: encoded, written, dropped. `to_files` would hold
         // every Parquet buffer at once for a list nothing on this path reads.
-        // Measured at ten million, it is worth 0.02 GB of peak — noise. The
-        // reason it stays is that the list has no reader here, not the number.
         let mut probe = fossil_mem_probe::Probe::new("write_to_dir");
         let mut count = 0usize;
         self.try_for_each_file::<SinkError>(|file| {

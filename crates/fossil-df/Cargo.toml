@@ -24,8 +24,8 @@ fossil-base = { path = "../fossil-base" }
 fossil-locator = { path = "../fossil-locator" }
 fossil-hir = { path = "../fossil-hir" }
 # `FOSSIL_MEM_PROBE` — peak RSS and elapsed seconds per phase of a write. A
-# dependency-free leaf, shared with `fossil-layout`'s DuckDB layout pass;
-# neither half of the write path may depend on the other.
+# dependency-free leaf, shared with `fossil-layout`'s layout pass; neither half
+# of the write path may depend on the other.
 fossil-mem-probe = { path = "../fossil-mem-probe" }
 fossil-mir = { path = "../fossil-mir" }
 # The policy document a corpus is verified against, and the vocabulary the
@@ -45,8 +45,7 @@ fossil-policy = { path = "../fossil-policy" }
 # the native one does.
 fossil-kanon = { path = "../fossil-kanon" }
 # Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name). WASM-clean
-# (arrow-schema / serde only) — the backend reuses them instead of re-deriving
-# the GraphAr layout.
+# — the backend reuses them instead of re-deriving the GraphAr layout.
 fossil-sinks = { path = "../fossil-sinks" }
 # The canonical graph-schema contract — the metadata fossil-df produces and the
 # manifest materializes from (the universal substrate's single source).
@@ -121,7 +120,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 # The stdlib UDFs no engine ships. Pure Rust, no C, wasm-clean — the logic is
 # the function's, not the database's, which is why it can live in the compiler
-# ring at all (`fossil-layout`'s DuckDB trampolines wrap the same crates).
+# ring at all.
 slug = { workspace = true }
 unicode-normalization = { workspace = true }
 

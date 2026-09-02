@@ -1,4 +1,4 @@
-//! DataFusion backend for the property-graph MIR (paso 3 — vertex phase).
+//! DataFusion backend for the property-graph MIR.
 //!
 //! Consumes a [`fossil_mir::lower_to_mir_pg`] graph and materialises the
 //! GraphAr VERTEX layout on DataFusion: read the source, project
@@ -6,19 +6,15 @@
 //! dedup single-valued shapes, sort by `subject` for a deterministic dense id,
 //! `collect()`, and prepend `dense_id` (`0..N-1`, sort order). The result is
 //! registered in the [`SessionContext`] so the edge phase can resolve endpoint
-//! IRIs against it in memory (the C4 hard barrier: vertices before edges).
+//! IRIs against it in memory (the hard barrier: vertices before edges).
 //!
-//! Column shape (writer-W0b contract, see design §A1):
+//! Column shape (writer-W0b contract):
 //! `dense_id(u32), subject(varchar IRI), <props…>, x(f32=0), y(f32=0), cluster_id(u32=0)`.
 //!
 //! The crate compiles to `wasm32-unknown-unknown` (the whole executor runs in
-//! the browser, design §D). `zstd-sys` is an unavoidable C dep (datafusion 54
-//! hardcodes `arrow-ipc/zstd`), so the wasm build needs a wasm-capable clang —
-//! see the `datafusion` entry in `Cargo.toml`.
-//!
-//! Still TODO (next increments): the `Call`/`BinOp` UDFs (`ScalarUDF`),
-//! multi-valued (`single_valued = false`) cardinality, and the wasm-bindgen
-//! wrapper + parquet-wasm write glue (the JS-facing packaging, design §E).
+//! the browser). `zstd-sys` is an unavoidable C dep (datafusion 54 hardcodes
+//! `arrow-ipc/zstd`), so the wasm build needs a wasm-capable clang — see the
+//! `datafusion` entry in `Cargo.toml`.
 
 pub mod files;
 /// Deriving the generalisation a declared bound needs, over the same batches
@@ -26,7 +22,7 @@ pub mod files;
 /// repairs nothing.
 pub mod generalize;
 /// The relational operators executed: the walk from an emit op back to the
-/// sources it reads (`Filter` / `Project` / `Join`).
+/// sources it reads. Its own module doc lists which operators run here.
 pub mod plan;
 /// Write-time verification of a declared privacy bound: the check that runs
 /// after the corpus is a value and before any of it is a file.
@@ -37,7 +33,7 @@ pub mod rdf;
 /// else.
 pub mod report;
 /// The catalog rendered for this engine: which `DataFusion` function each
-/// stdlib entry becomes, and the UDFs no engine ships.
+/// stdlib entry becomes, and which rows this engine cannot render.
 pub mod stdlib;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -93,10 +89,10 @@ use fossil_sinks::manifest::{
 /// single source of all type/predicate/cardinality metadata) plus the relation
 /// data — vertex tables and edge tables (CSR + CSC) as in-memory `RecordBatch`es.
 ///
-/// This is the universal substrate made concrete: **relations + a graph-schema**
-/// (`fossil-universal-substrate-architecture.md`). The GraphAr view (the
-/// manifest + Parquet) is materialized *from* this; the data carriers hold no
-/// metadata of their own — it all lives in [`schema`](Self::schema).
+/// This is the universal substrate made concrete: **relations + a
+/// graph-schema**. The GraphAr view (the manifest + Parquet) is materialized
+/// *from* this; the data carriers hold no metadata of their own — it all lives
+/// in [`schema`](Self::schema).
 #[derive(Debug)]
 pub struct GraphArData {
     pub schema: GraphSchema,
@@ -139,16 +135,14 @@ pub struct EdgeTable {
     pub dropped: u64,
 }
 
-/// One emitted GraphAr manifest YAML + its dataset-relative path. Keasy serves
-/// these verbatim from `GET /discover/manifest` (`manifest_files: Record<path,
-/// yaml>`), fed opaquely into `createGraphClient` (design §A2).
+/// One emitted GraphAr manifest YAML + its dataset-relative path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManifestFile {
     pub rel_path: String,
     pub yaml: String,
 }
 
-/// Execute a whole program's mappings into the GraphAr graph (design §C4).
+/// Execute a whole program's mappings into the GraphAr graph.
 ///
 /// Two phases with a hard barrier between them: **(1)** materialise *every*
 /// vertex (assigning dense ids, registering each as a [`MemTable`]); **(2)**
@@ -158,8 +152,8 @@ pub struct ManifestFile {
 ///
 /// The caller owns the [`SessionContext`] so it can configure the source layer
 /// before execution — the browser host registers an `ObjectStore` per signed
-/// source URL and tunes schema inference (design §C2/§E2) — and so the
-/// registered vertex tables outlive the call for inspection.
+/// source URL and tunes schema inference — and so the registered vertex tables
+/// outlive the call for inspection.
 ///
 /// # Errors
 /// Propagates DataFusion read/plan/execute errors.
@@ -184,9 +178,9 @@ pub async fn execute_graph<'db>(
 
     // Phase 1 (barrier): prepare every mapping's vertex projection, then merge
     // the mappings that emit the SAME type (UNION) before assigning dense ids —
-    // a vertex type may be fed by several sources (design §B4). Each type is
-    // registered exactly once, so two mappings of one type can't clobber each
-    // other's `MemTable`.
+    // a vertex type may be fed by several sources. Each type is registered
+    // exactly once, so two mappings of one type can't clobber each other's
+    // `MemTable`.
     let mut groups: Vec<(String, Vec<PreparedVertex>)> = Vec::new();
     for &mapping in &mappings {
         let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
@@ -247,7 +241,7 @@ pub struct VertexTable {
 /// A mapping's vertex projection before the dense-id barrier — the W0b columns
 /// (`subject` + props + `x`/`y`/`cluster_id`) as an un-collected [`DataFrame`],
 /// plus the [`NodeType`] schema it contributes. Several of these with the same
-/// node `label` are UNIONed before dense ids are assigned (design §B4).
+/// node `label` are UNIONed before dense ids are assigned.
 struct PreparedVertex {
     node: NodeType,
     dedup: bool,
@@ -391,8 +385,8 @@ async fn prepare_vertex_ops<'db>(
 
 /// Finalise one vertex type from the mappings that emit it: UNION their
 /// projections, dedup by `subject` when the shape is single-valued, sort by
-/// `subject` for a deterministic dense id (design §A1), `collect()`, prepend
-/// `dense_id`, and register the table once under its type name.
+/// `subject` for a deterministic dense id, `collect()`, prepend `dense_id`, and
+/// register the table once under its type name.
 ///
 /// Returns the materialised [`VertexTable`] plus the [`NodeType`] it contributes
 /// to the graph-schema — the group's first member carries the canonical schema
@@ -459,7 +453,7 @@ fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
 
 /// The vertex projection exprs: `id AS subject`, each prop, and the
 /// `x`/`y`/`cluster_id` layout placeholders the discovery viewer expects
-/// (`RESERVED_VERTEX_COLUMNS`, design §A2). Layout/cluster are filled by W3;
+/// (`RESERVED_VERTEX_COLUMNS`). Layout/cluster are filled by the layout pass;
 /// here they are deterministic zeros.
 fn vertex_projection(subject: DfExpr, props: &[VProp<'_>]) -> Vec<DfExpr> {
     let mut exprs = vec![subject.alias("subject")];
@@ -700,10 +694,10 @@ async fn execute_edge(
 /// joined mapping is as much a source as the first, and a host that fetches
 /// only the first would run the program against half its inputs.
 ///
-/// The raw `@conn` alias is resolved through `connections`
-/// (`resolve_source_uri`) before use. The `binding` is the table name a
-/// `Provider` source is registered under (the host pre-registers it;
-/// [`read_source`] scans it); object-store formats ignore it.
+/// The raw `@conn` alias is resolved through `connections` before use, by
+/// `SourceAnchor::locator`. The `binding` is the table name a `Provider` source
+/// is registered under (the host pre-registers it; [`read_source`] scans it);
+/// object-store formats ignore it.
 fn sources_of<'db>(
     ops: &[Op<'db>],
     anchor: SourceAnchor<'_>,
@@ -722,7 +716,7 @@ fn sources_of<'db>(
 }
 
 /// Read a source into a [`DataFrame`], dispatching on its [`SourceFormat`] — the
-/// two halves of the host input seam (design §C2):
+/// two halves of the host input seam:
 ///
 /// - **Object-store formats** (`io.csv`/`io.json`/`io.parquet`) stream through
 ///   the [`SessionContext`]'s registered `ObjectStore` (the local filesystem by
@@ -844,9 +838,9 @@ async fn fetch_bytes(ctx: &SessionContext, uri: &str) -> datafusion::error::Resu
 /// `sample_size = -1`). DataFusion samples only the first ~1000 rows by default,
 /// which mis-types a column whose early values look numeric but later turn
 /// stringy (or vice-versa) — read every record so the inferred Arrow types (and
-/// thus the manifest's `data_type`s) match the writer (design unknown
-/// #4). Trade-off: inference reads the file once before execution reads it
-/// again; acceptable for parity, revisit if it bites large remote sources.
+/// thus the manifest's `data_type`s) match the writer. Trade-off: inference
+/// reads the file once before execution reads it again; acceptable for parity,
+/// revisit if it bites large remote sources.
 fn csv_options<'a>() -> CsvReadOptions<'a> {
     CsvReadOptions::new().schema_infer_max_records(usize::MAX)
 }
@@ -1032,8 +1026,7 @@ pub fn register_rdf(
 /// (`node.label`): for an RDF shape the source binding *is* the shape local name
 /// (`{ KB } := io.rdf …` + `KB : KB from KB`), so an un-namespaced source
 /// table `KB` would collide with the vertex table `KB` (DataFusion folds
-/// identifiers to lowercase, so even case wouldn't save it). Mirrors the legacy
-/// `fossil_codegen::provider_relation` indirection.
+/// identifiers to lowercase, so even case wouldn't save it).
 fn provider_table_name(binding: &str) -> String {
     format!("__rdf_src_{binding}")
 }
@@ -1104,8 +1097,8 @@ fn bounded_context(memory_bytes: Option<u64>) -> datafusion::error::Result<Sessi
 /// (e.g. the layout enrichment).
 ///
 /// `connections` is the name→base-URL ref-map: `@conn/path` source aliases
-/// resolve through it (`resolve_source_uri`) for BOTH object-store reads
-/// (csv/json/parquet → the resolved URL feeds `read_csv`) and provider (RDF)
+/// resolve through it for BOTH object-store reads (csv/json/parquet → the
+/// resolved URL feeds `read_csv`) and provider (RDF)
 /// bindings. `read_uri` is the host's byte seam for RDF only: given a (resolved)
 /// source URI, return its text — the host owns credentials + transport (fs /
 /// cloud). Object-store formats are NOT read through it; they stream via the
@@ -1300,13 +1293,13 @@ const fn df_operator(op: fossil_hir::BinOp) -> Operator {
     }
 }
 
-/// Render a catalogued call. The name is fossil's (`clean.slug`); what it
+/// Render a catalogued call. The name is fossil's (`str.slug`); what it
 /// becomes on this engine comes from the catalog entry, via [`crate::stdlib`].
 ///
 /// A call that reaches here has type-checked, so the name IS catalogued. What
 /// it can still hit is a function this engine has no implementation for — an
-/// aggregate in a scalar position, a UDF not yet ported — and that is an error
-/// carried in the plan, not a panic and not a dropped column.
+/// aggregate in a scalar position — and that is an error carried in the plan,
+/// not a panic and not a dropped column.
 fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
     use fossil_hir::stdlib::LoweringKind;
 
@@ -1353,10 +1346,8 @@ fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
 /// two vocabularies are reconciled, and it is applied here per function name
 /// rather than to a single builtin.
 ///
-/// What cannot be reconciled stays a NAMED gap, exactly as before: `error()` has
-/// no `DataFusion` equivalent, so the four validators do not render on this
-/// engine and say so. An `Err` becomes an `unsupported_call`, never a dropped
-/// column.
+/// What cannot be reconciled stays a NAMED gap — see [`crate::stdlib`]. An
+/// `Err` becomes an `unsupported_call`, never a dropped column.
 ///
 /// # Errors
 ///
@@ -1693,12 +1684,12 @@ fn unsupported_call(func: &str, why: &str) -> DfExpr {
         .alias(format!("__fossil_unsupported__{func}__{why}"))
 }
 
-// ── Phase 3: the manifest (design §C4 phase 3) ──────────────────────────────
+// ── The manifest ───────────────────────────────────────────────────────────
 //
 // One description of the dataset, in the shape the fossil-graph reader
 // round-trips (`prefix = vertex/<Type>/`). Type-name casing is preserved
-// throughout. There used to be a second one — a `RunStatus` the CLI printed —
-// and seven of its nine fields were this spelled again; see `report.rs`.
+// throughout. There used to be a second one — a `RunStatus` the CLI printed;
+// see `report.rs`.
 
 /// The `<src>_<label>_<dst>` adjacency directory name (writer convention).
 fn edge_dir(src: &str, label: &str, dst: &str) -> String {
@@ -1731,7 +1722,7 @@ impl GraphArData {
             / (1024.0 * 1024.0 * 1024.0)
     }
 
-    /// The corpus's own description (design §C4 phase 3) — the GraphAr
+    /// The corpus's own description — the GraphAr
     /// *materializer*: the `graph.graph.yml` index, one [`VertexInfo`] per node
     /// type and one [`EdgeInfo`] per edge type, in the order the index names
     /// them. Reuses the WASM-clean `fossil_sinks::manifest` structs.
@@ -1816,7 +1807,7 @@ impl GraphArData {
         })
     }
 
-    /// [`Self::manifest`] as the three YAML documents and the paths they go to:
+    /// [`Self::manifest`] as YAML documents and the paths they go to:
     /// the top-level `graph.graph.yml` index, one `vertex/<Type>.vertex.yml` per
     /// node type, and one `edge/<dir>/<dir>.edge.yml` per edge type.
     ///
@@ -1848,10 +1839,6 @@ impl GraphArData {
 /// The `VertexInfo` manifest for one node type: `dense_id`, `subject`, the
 /// schema's props, then `x`/`y`/`cluster_id`, each with the **real** per-prop
 /// `data_type` the schema carries.
-///
-/// It said it mirrored «the writer's `build_vertex_manifest`». That name occurs
-/// exactly once in the tree — in the sentence that claimed it — and `lib.rs:557`
-/// already says there is no second writer left to mirror.
 ///
 /// `rows` is the one argument that is not a function of the schema, and it is
 /// the whole of what the manifest could not say before: how far the corpus goes.

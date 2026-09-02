@@ -1,8 +1,8 @@
 //! Native gate for the browser executor core: a CSV program staged through the
 //! in-memory object-store seam runs end-to-end on `DataFusion` and yields the
-//! W0b `GraphAr` files + a `RunReport`. The wasm node smoke (B2) re-runs this exact
-//! flow through the `#[wasm_bindgen]` wrapper to prove `execute_graph().collect()`
-//! works under wasm-bindgen-futures.
+//! `GraphAr` files + a `RunReport`. `packages/executor/tests/execute.test.ts`
+//! drives the same core through the `#[wasm_bindgen]` wrapper under Node, which
+//! is where wasm-bindgen-futures is proved.
 
 //! **One of these used to pass for the wrong reason, and the shape IRI is what
 //! says it no longer does.**
@@ -22,12 +22,11 @@
 //! and nothing here asserted it, which is why it went green. Two things broke
 //! silently downstream: keasy's DCAT and every edge, because
 //! `apply_output_shape` classifies on `p.rdf_uri` and `None` matches no
-//! predicate. The `shex` ARGUMENT cannot
-//! supply either: a bare property key means the last segment of a predicate IRI
-//! a shape declares, so the IRI comes from `TypeckOutput.predicates`, which
-//! comes from the REGISTERED document — and once the header stopped carrying its
-//! own CURIE, so did the vertex LABEL, which is how this finally became loud
-//! (`vertex/.parquet`).
+//! predicate. The `shex` ARGUMENT cannot supply either: a bare property key
+//! means the last segment of a predicate IRI a shape declares, so the IRI comes
+//! from `TypeckOutput.predicates`, which comes from the REGISTERED document —
+//! and once the header stopped carrying its own CURIE, so did the vertex LABEL,
+//! which is how this finally became loud (`vertex/.parquet`).
 //!
 //! `build_program` now registers the one text it holds under the name the
 //! program writes. The assertion on `VertexInfo::iri` below is the guard: it is
@@ -81,16 +80,10 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
     .await
     .expect("executor runs the CSV program");
 
-    // The TILED vertex payload + the three manifest YAMLs are produced as bytes.
-    //
-    // This asserted `vertex/Person.parquet` — the staged single file — and that
-    // is the tree this executor used to hand back while the manifest beside it
-    // declared `prefix: vertex/Person/` and the `rowgroups` container. The two
-    // disagreed, and nothing here said so. The layout pass runs in memory after
-    // `execute_graph` now, so what comes out is the tree `fossil run` writes:
-    // the tiles under the declared prefix, the identity index beside them, and
-    // the staged file GONE — left in, it is a second, stale copy of every vertex
-    // and `apps/corpus`'s `exactly-once` fails a corpus for it.
+    // The TILED tree, which is the one `fossil run` writes: the tiles under the
+    // declared prefix, the identity index beside them, and the staged
+    // single-file payload GONE — left in, it is a second, stale copy of every
+    // vertex and `apps/corpus`'s `exactly-once` fails a corpus for it.
     let paths: Vec<&str> = out.files.iter().map(|f| f.rel_path.as_str()).collect();
     assert!(
         paths.contains(&"vertex/Person/tiles.parquet"),
@@ -107,7 +100,6 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
     assert!(paths.contains(&"graph.graph.yml"));
     assert!(paths.contains(&"vertex/Person.vertex.yml"));
 
-    // The tiles are non-empty (the encoder wrote a real file).
     let person = out
         .files
         .iter()
@@ -115,7 +107,7 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
         .unwrap();
     assert!(!person.bytes.is_empty());
 
-    // The report carries the vertex + its row count (3 users → 3 vertices).
+    // 3 users → 3 vertices.
     assert_eq!(out.report.dest, "s3://jobs/run-1");
     assert_eq!(out.report.vertices.len(), 1);
     let v = &out.report.vertices[0];
@@ -191,9 +183,8 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].0, "https://data.example.com/users.csv");
     // The wire `format` round-trips: what `sources()` emits is a catalogue row
-    // name, and `source_row` reads it back. Nothing asserted this before — the
-    // second element of the pair was never looked at, so the string could have
-    // been anything and both halves of the host contract would still have passed.
+    // name and `source_row` reads it back, which is the half of the host
+    // contract nothing else looks at.
     assert_eq!(listed[0].1, "csv");
     assert_eq!(
         source_row(&listed[0].1)

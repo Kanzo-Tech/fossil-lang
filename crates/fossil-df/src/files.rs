@@ -5,7 +5,7 @@
 //! Universal-substrate decision: ONE parquet encoder in Rust (parquet-rs,
 //! native + wasm), no parquet-wasm JS. [`GraphArData::to_files`] turns the
 //! materialised graph into the W0b GraphAr tree as `(rel_path, bytes)` pairs —
-//! one Parquet per vertex type, the CSR/CSC Parquet pair per edge, and the three
+//! one Parquet per vertex type, the CSR/CSC Parquet pair per edge, and the
 //! manifest YAMLs. The native sink writes each pair to disk; the wasm host hands
 //! them to JS for signed `PUT`. Pure in-memory (`Vec<u8>` writer), so the encoder
 //! itself never touches the filesystem and compiles to `wasm32`.
@@ -43,9 +43,9 @@ pub enum EncodeError {
 
 impl GraphArData {
     /// The whole GraphAr dataset as in-memory `(rel_path, bytes)` files: every
-    /// vertex Parquet, every edge CSR/CSC Parquet pair, and the three manifest
-    /// YAMLs ([`Self::manifests`]). A zero-row vertex/edge encodes nothing (no
-    /// schema to declare) and is skipped, exactly as the fs sink does.
+    /// vertex Parquet, every edge CSR/CSC Parquet pair, and the manifest YAMLs
+    /// ([`Self::manifests`]). A zero-row vertex/edge encodes nothing (no schema
+    /// to declare) and is skipped, exactly as the fs sink does.
     ///
     /// This is the single encoder both hosts share: the native [`crate::sink`]
     /// writes each file to a directory, the wasm host returns them to JS.
@@ -69,12 +69,8 @@ impl GraphArData {
     /// native sink never needed: it writes each file and forgets it. The browser
     /// host does, because it hands JS a list.
     ///
-    /// **This is a shape, not a measured win.** At ten million vertices the whole
-    /// output is 713 MB across six files, and swapping the list for this changed
-    /// peak RSS by 0.02 GB — inside the run-to-run noise. The +0.58 GiB the probe
-    /// bills to the encode phase is the encoder's own working memory, which this
-    /// does not touch. It is here because holding N files to write them one at a
-    /// time is indefensible per file, not because it paid at this size.
+    /// **This is a shape, not a measured win** — the measurement that refuted the
+    /// saving, and why the shape stayed anyway, is `/docs/design/streaming`.
     ///
     /// # Errors
     /// Whatever `emit` returns, or an encode failure converted through `E`.

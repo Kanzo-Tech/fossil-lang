@@ -3,10 +3,10 @@
 //! subject of a shape: subjects are selected by `rdf:type == shape_iri`, and the
 //! columns are the shape's predicates. The result is a [`RecordBatch`] the host
 //! registers as a table, so the executor scans RDF exactly like a CSV — **RDF
-//! stays at the I/O border, the core never sees it** (design §C2; this is the
+//! stays at the I/O border, the core never sees it**. This is the
 //! DataFusion-native, WASM-clean pivot, and there is no other — no
-//! `fossil-provider-rdf` crate has ever existed, which
-//! `fossil-base/src/providers.rs:127` already says outright).
+//! `SourceProvider` trait and no `fossil-provider-rdf` crate, which
+//! `fossil-base`'s `RowReader::Materialised` also says outright.
 //!
 //! A column is scalar or multi-valued: a ShEx `*`/`+` cardinality pivots into an
 //! Arrow `List<Utf8>` of every object, a single-valued one into a `Utf8` cell.
@@ -135,11 +135,6 @@ pub fn rdf_to_batch(
 
     RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).map_err(Into::into)
 }
-
-// `subject_value` — "the bare IRI (or blank-node label) of a triple subject,
-// `as_str` and NOT the `Display` form that wraps IRIs in `<>`" — lived here as a
-// byte-identical twin of `fossil_descriptors_output::subject_value`, which this
-// crate already depends on. It is that call now, imported above.
 
 /// The lexical value of an RDF object term: a literal's lexical form, or a
 /// node's IRI. Blank nodes render as their `_:id` label.

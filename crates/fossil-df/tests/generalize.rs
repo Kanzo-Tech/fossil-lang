@@ -28,15 +28,15 @@ use fossil_sinks::manifest::{KAnonymity, Privacy};
 /// Rows enough for classes worth counting.
 const PEOPLE: usize = 60;
 
-/// The two shipped hierarchies this file uses, pasted from
-/// `crates/fossil-kanon/hierarchies/`.
+/// The two hierarchy documents this file declares — the `numeric` and `prefix`
+/// shapes `crates/fossil-kanon/hierarchies/` ships, with buckets and lengths
+/// that fit this corpus rather than the shipped values.
 ///
-/// **Verbatim, and that is the assertion.** The claim `fossil-kanon` makes about
-/// that directory is that it is an interface rather than an illustration of one,
-/// and the claim `fossil:generalization` makes is that a policy author pastes
-/// one of those files into a policy and it works. Two crates that do not depend
-/// on each other meet here and nowhere else, which is the meeting
-/// `fossil_policy::profile`'s hierarchy-kind test points at.
+/// **The shape is the assertion.** The claim `fossil:generalization` makes is
+/// that a policy author writes one of these documents into a policy and it
+/// works. Two crates that do not depend on each other meet here and nowhere
+/// else, which is the meeting `fossil_policy::profile`'s hierarchy-kind test
+/// points at.
 const AGE_HIERARCHY: &str = r#"{"kind": "numeric", "buckets": [1950, 1955, 1960],
                                 "presentation": "enclosing_bucket"}"#;
 const POSTCODE_HIERARCHY: &str = r#"{"kind": "prefix", "lengths": [1, 2, 3]}"#;

@@ -1,6 +1,6 @@
 //! Two mappings emitting the SAME vertex type from two sources must MERGE into
 //! one table (UNION + dedup by subject), not register twice and clobber each
-//! other (design §B4). Regression guard for the multi-mapping same-type path.
+//! other. Regression guard for the multi-mapping same-type path.
 
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]

@@ -147,9 +147,9 @@ struct Corpus {
 }
 
 /// Golden angle, cluster spacing and packing radius — copied from
-/// `fossil_layout::layout`, which owns `DuckDB` and so cannot be depended on
-/// from here. If those constants move, this example measures a corpus the
-/// writer no longer produces.
+/// `fossil_layout::layout`, which depends on this crate and so cannot be
+/// depended on from here. If those constants move, this example measures a
+/// corpus the writer no longer produces.
 const GOLDEN_ANGLE: f32 = 2.399_963_2;
 const CLUSTER_SPACING: f32 = 100.0;
 const INTRA_CLUSTER_RADIUS: f32 = 12.0;

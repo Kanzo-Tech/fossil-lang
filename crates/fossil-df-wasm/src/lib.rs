@@ -7,9 +7,9 @@
 //! returns the output files (Parquet + manifest YAML, as bytes) plus the
 //! [`RunReport`] — the same manifest, as JSON, so the host does not have to
 //! parse back out of the bytes it is about to upload. JS then signed-`PUT`s the
-//! files and `PATCH`es the job. No mapping runtime on the server (design §E2).
+//! files and `PATCH`es the job. No mapping runtime on the server.
 //!
-//! ## Source seam (design §C2)
+//! ## Source seam
 //! The executor reads sources through the [`SessionContext`]'s object stores.
 //! Here the host stages each fetched source's bytes in an
 //! [`object_store::memory::InMemory`] store keyed by the source URI's
@@ -39,8 +39,6 @@ use datafusion::execution::context::SessionContext;
 use datafusion::prelude::SessionConfig;
 use fossil_base::{FossilDb, FsError, Provider, RowReader, SourceFile, System};
 use fossil_descriptors_output::OutputDescriptorKind;
-// The `ShEx` AST, named from its own crate: `fossil-descriptors-output` stopped
-// re-exporting it, so a consumer that wants it says so in its `Cargo.toml`.
 use fossil_df::RunReport;
 use fossil_df::SourceFormat;
 use fossil_df::files::GraphArFile;
@@ -54,18 +52,10 @@ use wasm_bindgen::prelude::*;
 /// One source the host fetched: its program URI (`io.csv("…")`), the catalogue
 /// ROW it was written with, and the raw bytes.
 ///
-/// # `format` is a row, and it used to be a fourth enum
+/// # `format` is a catalogue row and not an enum of its own
 ///
-/// It was `SourceKind { Csv, Json, Parquet, Rdf }` with a hand-written
-/// `parse` — the names of the rows that read data, spelled out a fourth time
-/// after `catalogue.bnf`, `providers::DATA` and `fossil_mir::SourceFormat`, and
-/// re-parsed from the wire by a `match` that `fossil_base::provider` already is.
-///
-/// **And its four variants drew exactly one distinction.** Every use was
-/// `== SourceKind::Rdf`, twice; `Csv`, `Json` and `Parquet` were never told
-/// apart from each other anywhere in this crate. The question actually being
-/// asked was never "is this RDF" — it was *does this go through the object store
-/// or through the provider seam*, which is [`RowReader::Native`] against
+/// The one question this crate asks of it is *does this go through the object
+/// store or through the provider seam* — [`RowReader::Native`] against
 /// [`RowReader::Materialised`], a property the row already carries. Asking the
 /// row means a second materialised provider works here the day it is a line in
 /// `catalogue.bnf`, instead of being silently staged as bytes for a reader that
@@ -83,10 +73,7 @@ pub struct SourceInput {
 /// fetching bytes for `io.shex` would be a program that got past the checker,
 /// and the wire has no business naming a row that decodes types.
 ///
-/// Public because a caller building a [`SourceInput`] needs one, which is
-/// exactly what `SourceKind` was for. It is not new surface — it is the same
-/// surface, doing the lookup `fossil_base::provider` already is instead of a
-/// `match` over four string literals.
+/// Public because a caller building a [`SourceInput`] needs one.
 ///
 /// # Errors
 ///
@@ -110,10 +97,10 @@ const fn is_materialised(row: &Provider) -> bool {
 /// The executor result: the `GraphAr` output files (the bytes the host
 /// signed-PUTs) and the [`RunReport`] keasy turns into DCAT.
 ///
-/// The report duplicates nothing in `files`: the three manifest YAMLs are in
-/// there as bytes, and this is the same values already parsed. A host that only
-/// wants to upload can ignore it; a host that wants to know what it uploaded
-/// would otherwise have to YAML-parse its own payload.
+/// The report duplicates nothing in `files`: the manifest YAMLs are in there as
+/// bytes, and this is the same values already parsed. A host that only wants to
+/// upload can ignore it; one that wants to know what it uploaded would otherwise
+/// have to YAML-parse its own payload.
 #[derive(Debug)]
 pub struct ExecOutput {
     pub files: Vec<GraphArFile>,
@@ -216,34 +203,20 @@ pub async fn execute_core(
 /// the only way to be sure of that is for the browser to run the pass rather
 /// than to approximate it.
 ///
-/// # Why this is not optional, and what it was before
+/// It is not optional. `fossil-df` writes `x`, `y` and `cluster_id` as zeroed
+/// placeholders and declares in the manifest the tree this pass delivers, so a
+/// browser that skips it publishes a corpus satisfying the manifest's *shape*
+/// and violating the property that shape exists to express — `dense_id`
+/// ascending with the Morton code of the vertex's position
+/// (`/docs/format/conventions/addressing`) — and every count-based check
+/// passes.
 ///
-/// `fossil-df` writes `x = 0`, `y = 0`, `cluster_id = 0` as placeholders and
-/// declares in the manifest the tree the layout pass delivers — `vertex/Person/`
-/// and an `index/`, the `rowgroups` container. Until this function existed the
-/// browser wrote the *staged* tree against that manifest and `apps/playground`
-/// papered over the difference with a `DuckDB` `COPY … ROW_GROUP_SIZE`. That
-/// produced row groups of the right size and nothing else: no communities, no
-/// Morton order, coordinates still at the writer's zeros.
-///
-/// The corpus format's whole addressing argument is that `dense_id` ascends
-/// with the Morton code of the vertex's position — the id space *is* the spatial
-/// order, which is what makes a rectangle break into O(√n) contiguous runs
-/// (`/docs/format/conventions/addressing`). A corpus with zeroed coordinates
-/// satisfies the manifest's *shape* and violates the property the shape exists
-/// to express, and it does so silently: every count-based check passes.
-///
-/// # What it costs
-///
-/// One resident copy of every file, twice over at the crossing point — the
-/// staged Parquet the executor produced and the tiles the pass emits are both
-/// in the map until [`MemoryFs::remove`] takes the staged ones away. Natively
-/// the pass streams through `File` and holds one row group; there is no
-/// filesystem here to stream to, so this is what a browser pays. The pass is
-/// also the memory-hungry half of the write path — the vertex read and the
-/// gather, not the edge sort (`/docs/design/streaming`) — and on `wasm32` the
-/// address space is 4 GiB, so a corpus that fits natively can fail here. That
-/// ceiling is a property of the target and is stated rather than worked around.
+/// What it costs: one resident copy of every file, twice over at the crossing
+/// point, because there is no filesystem here to stream to as the native pass
+/// does. The pass is the memory-hungry half of the write path
+/// (`/docs/design/streaming`) and `wasm32`'s address space is 4 GiB, so a
+/// corpus that fits natively can fail here. That ceiling is a property of the
+/// target, stated rather than worked around.
 fn enrich_layout_in_memory(
     graph: &fossil_df::GraphArData,
     files: Vec<GraphArFile>,
@@ -342,9 +315,6 @@ fn enrich_layout_in_memory(
 /// plan its fetches before [`execute_core`]. The second element is the catalogue
 /// row's name, which is what the program wrote after `io.` and what the host
 /// hands back on `SourceInput.format`.
-///
-/// It was `&'static str`, which is what forced `format_kind`'s `Provider` arm
-/// to be a literal instead of the name the format carries.
 ///
 /// # Errors
 /// `ShEx` parse failures.
@@ -454,15 +424,13 @@ fn build_descriptor(
 }
 
 /// The host fetch-strategy string for a source format — **the catalogue row's
-/// name**, which is what a program wrote after `io.` and what [`row_named`]
+/// name**, which is what a program wrote after `io.` and what [`source_row`]
 /// reads back off the wire.
 ///
-/// The `Provider` arm returned the literal `"rdf"` and that was a latent defect,
-/// not a shorthand: `SourceFormat::Provider { name }` carries the name precisely
-/// because more than one row can be materialised, so an `io.avro` source would
-/// have gone out over the wire labelled `rdf` and come back as the RDF row. It
-/// is unreachable today because `rdf` is the only materialised row there is,
-/// which is exactly the kind of "correct by coincidence" a second row deletes.
+/// The `Provider` arm carries the name rather than the literal `"rdf"` because
+/// more than one row can be materialised: labelling an `io.avro` source `rdf`
+/// would send it back as the RDF row. That `rdf` is the only materialised row
+/// today is what would make the literal correct by coincidence.
 fn format_kind(f: &SourceFormat) -> &str {
     match f {
         SourceFormat::Csv => "csv",
@@ -511,10 +479,9 @@ async fn register_object_store_sources(
 /// where the bytes come from is the whole difference, and it gives this side one
 /// failure the native side cannot have — a binding the host did not provide.
 ///
-/// **"Exactly the counterpart" is a reading, not a result.** `tests/` here holds
-/// one end-to-end case and it is CSV; no test drives an RDF source through both
-/// halves and compares. The two can drift in the browser's favour or against it
-/// and only a program would notice.
+/// **"Exactly the counterpart" is a reading, not a result.** Nothing here
+/// drives an RDF source through both halves and compares — `tests/` is CSV — so
+/// the two can drift and only a program would notice.
 fn register_rdf_sources(
     ctx: &SessionContext,
     db: &dyn fossil_base::Db,
