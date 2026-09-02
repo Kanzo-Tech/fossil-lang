@@ -436,7 +436,8 @@ impl Catalogue {
 /// The same three-way question `fossil_hir::stdlib::receiver_of` answers,
 /// reduced to the one bit this crate needs: whether the reference page prints a
 /// row's dotted name or its member. It is a second statement of that rule and
-/// says so; `crates/xtask/tests/receiver_agrees.rs` derives the comparison from
+/// says so; `the_receiver_rule_agrees_with_fossil_hir` in
+/// `crates/xtask/tests/catalogue_generated.rs` derives the comparison from
 /// `fossil_hir` itself rather than repeating the answer here.
 #[must_use]
 pub fn is_namespace_head(head: &str) -> bool {

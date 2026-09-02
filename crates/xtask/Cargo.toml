@@ -23,9 +23,9 @@ serde_json = { workspace = true }
 # Cargo does not build dev-dependencies for a plain `run -p xtask`, so the
 # binary now links none of it. The tests still do, which is what keeps the
 # round-trip PROVEN rather than assumed: `tests/catalogue_generated.rs` holds
-# the emitted table against the `FunctionRegistry` it becomes, and
-# `tests/receiver_agrees.rs` derives the receiver rule from `fossil_hir`
-# instead of leaving `is_namespace_head` to restate it.
+# the emitted table against the `FunctionRegistry` it becomes, and derives the
+# receiver rule from `fossil_hir` instead of leaving `is_namespace_head` to
+# restate it.
 fossil-hir = { path = "../fossil-hir" }
 # `tests/engine_reach.rs` reads `deny.toml` — the file that IS the engine-ring
 # policy — rather than a second copy of its list, so it needs a TOML parser.
