@@ -185,13 +185,10 @@ fn freshness_token(resolved: &str) -> String {
 /// of the program is a buffer that may never have been saved, so it calls
 /// [`pre_introspect_and_register`] with the text it already holds.
 ///
-/// Register an
-/// [`InferredDescriptor`] on the host's descriptor cache BEFORE typecheck,
-/// keyed by the URI the program writes rather than by the resolved locator —
-/// the written URI is the only string the host and the checker both see.
-///
-/// Introspect the program at `path` into `system`'s descriptor cache — read the
-/// file, anchor it, and describe every source it binds.
+/// Reads the file at `path`, anchors it, and registers an
+/// [`InferredDescriptor`] for every source it binds on `system`'s cache BEFORE
+/// typecheck — keyed by the URI the program writes rather than by the resolved
+/// locator, which is the only string the host and the checker both see.
 ///
 /// **This is the unit of work a host actually has**, and the reason it is here
 /// rather than repeated at each call site: `pre_introspect_and_register` takes
@@ -419,7 +416,7 @@ mod tests {
             .collect()
     }
 
-    /// The four `@conn` cases this file used to assert against its own resolver
+    /// The `@conn` cases this file used to assert against its own resolver
     /// live beside the rule itself, in `fossil_locator` — there is one
     /// implementation, so there is one place to test it. What is left here is
     /// the host's own half: the projection the anchor is built from, which is

@@ -26,9 +26,9 @@
 //! `run` path resolves its destination through `local_dest_dir`, which refuses
 //! every URL carrying a scheme before any credential is consulted. A field a
 //! host can fill in and be ignored is worse than an absent one — it reads as
-//! support for a cloud destination that does not exist. `tests/cloud_dest.rs`
-//! is the refusal, asserted rather than described, so this paragraph cannot
-//! outlive it.
+//! support for a cloud destination that does not exist.
+//! `fossil-cli/tests/cloud_dest.rs` is the refusal, asserted rather than
+//! described, so this paragraph cannot outlive it.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -173,7 +173,7 @@ mod tests {
     /// could sit in the payload for as long as it did without anything
     /// noticing. Asserted rather than assumed: a host still sending one gets a
     /// run, not a parse failure, and the refusal it deserves comes from
-    /// `tests/cloud_dest.rs` instead.
+    /// `fossil-cli/tests/cloud_dest.rs` instead.
     #[test]
     fn a_section_nothing_reads_is_silently_ignored() {
         let creds = RunCreds::from_json(r#"{ "dest": { "secret": { "type": "s3" } } }"#)
