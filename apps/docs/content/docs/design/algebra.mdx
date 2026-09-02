@@ -117,9 +117,9 @@ share a name — the MIR lowering carries the binding, so a column reference say
 <Program src="shop/shop.fossil" region="join" title="shop.fossil" />
 
 Three shapes follow and each has an executed test: differently-named keys plan as an ordinary
-equi-join (`crates/fossil-df/tests/pipeline.rs:272`), a compound key is a conjunction of equalities
-joined by `and` (`crates/fossil-df/tests/pipeline.rs:307`), and a self-join tells its two halves
-apart by the alias `X as Y` (`crates/fossil-df/tests/pipeline.rs:603`).
+equi-join (`crates/fossil-df/tests/pipeline.rs, a_join_whose_two_keys_are_named_differently_plans`), a compound key is a conjunction of equalities
+joined by `and` (`crates/fossil-df/tests/pipeline.rs, a_compound_key_joins_on_both_columns`), and a self-join tells its two halves
+apart by the alias `X as Y` (`crates/fossil-df/tests/pipeline.rs, a_self_join_keeps_both_sides_apart_by_their_alias`).
 
 #### And the checker is where it is exacted
 
@@ -198,7 +198,7 @@ while every conformance artefact is compared byte for byte. The parameter is gon
 Its effect is **not** visible in either conformance artefact, and it cannot be made so: `EmitVertex`
 dedups by subject unconditionally, so four sightings of two species mint two vertices with or
 without the verb. The rows are asserted where rows exist —
-`crates/fossil-df/tests/pipeline.rs:690` unions three names onto three and counts six, then five.
+`crates/fossil-df/tests/pipeline.rs, distinct_over_a_union_drops_the_shared_row` unions three names onto three and counts six, then five.
 
 ## The plan is DataFusion's
 
@@ -236,7 +236,7 @@ after it](/docs/design/shapes).
   `seq.aggregate` was a seventh and is deleted: `group_by` took the aggregations into itself,
   because a grouping with nothing aggregated has the rows of `select(…).distinct()`.
 - **The three join flavours that are not `Inner`.** They stay defined and unreachable
-  (`crates/fossil-df/tests/pipeline.rs:481` pins the refusal). An outer join manufactures NULL, and
+  (`crates/fossil-df/tests/pipeline.rs, an_outer_join_is_refused_by_name` pins the refusal). An outer join manufactures NULL, and
   [the shape](/docs/design/shapes) has no way to declare a nullable property yet, so the one that
   arrives will arrive with that story and not before.
 - **How a pipeline's type is reported in the editor.** A source binding today has a schema from a

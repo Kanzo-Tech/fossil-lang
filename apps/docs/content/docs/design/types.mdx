@@ -28,12 +28,12 @@ graph LR
 fields are the columns of the file, with the types the file has, and every expression in the body is
 synthesised from it. That row type comes from the file itself: one
 `DESCRIBE SELECT * FROM read_csv_auto(…)` per binding, run by the native host before the compiler
-exists (`crates/fossil-introspect/src/lib.rs:320`) and cached per source. The programs are small and
+exists (`crates/fossil-introspect/src/lib.rs, pre_introspect_and_register`) and cached per source. The programs are small and
 the sources are large, so it is the only step of a compile that costs real time.
 
 **Backward, from the shape.** `Users : Person from Adults` names the type the body must produce.
 `Person` is a constraint table — a predicate, a kind of value and a count, per property — read out
-of the document the program names (`crates/fossil-hir/src/shapes.rs:529`). Which schema language
+of the document the program names (`crates/fossil-hir/src/shapes.rs, resolve_target_shape`). Which schema language
 that document is written in is settled, and it is neither: a ShEx decoder and a SHACL decoder lower
 into one format-neutral vocabulary and the checker reads that and nothing else, argued on
 [the shapes page](/docs/design/shapes).
@@ -53,7 +53,7 @@ expected; working backward only, it does not know what arrived.
 
 The provider generated `User` from the file, so the compiler knows its columns exactly. A name that
 is not among them is a typo with a location, refused by `resolve_predicate`
-(`crates/fossil-hir/src/check.rs:473`).
+(`crates/fossil-hir/src/check.rs, resolve_predicate`).
 
 <Program src="errors/unknown-field/expected/diagnostic.txt" title="fossil check program.fossil" />
 
@@ -63,7 +63,7 @@ program — a property of [the dot meaning member-of](/docs/design/the-dot), not
 ### A value whose type the shape will not accept
 
 The shape declares what kind of value a predicate carries; the source declares what kind a column
-holds. `compatible` (`crates/fossil-hir/src/check.rs:907`) checks them where they meet, before the
+holds. `compatible` (`crates/fossil-hir/src/check.rs, compatible`) checks them where they meet, before the
 graph exists. That is the `wrong-type` diagnostic above, and the fix is in the message — a parsing
 function from the standard library — because the checker knows both types and can say which
 conversion closes the gap.
@@ -72,7 +72,7 @@ conversion closes the gap.
 
 A constraint table carries counts, not just kinds, so a property the shape requires and the body
 never writes is knowable from the program alone — `check_required_properties`
-(`crates/fossil-hir/src/check.rs:598`):
+(`crates/fossil-hir/src/check.rs, check_required_properties`):
 
 <Program src="errors/missing-property/expected/diagnostic.txt" title="fossil check program.fossil" />
 
@@ -111,7 +111,7 @@ covariance of `Optional` and of `Seq`, and `Integer <: Float`, all in
 
 - **The upper bound of a cardinality.** `check_required_properties` observes a required property
   that is absent, and the property loop says in its own comment why it does not read
-  `constraint.occurs` (`crates/fossil-hir/src/check.rs:450`). Nothing in the language constructs a
+  `constraint.occurs` (`crates/fossil-hir/src/check.rs, check_property`). Nothing in the language constructs a
   multi-valued expression, so a `maxCount 1` property has nothing to reject yet; an expression that
   yields more than one value is what makes the gap reachable, and reachable is when it gets a rule.
 - **What types a `join` condition.** The `on` predicate is checked for the existence of every column

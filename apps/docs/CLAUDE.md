@@ -57,16 +57,32 @@ and nothing more. And `unmeasured: true`, the honest alternative the schema offe
 So prefer `<Program src= region= />`, which reads the file at build time — an absent region stops
 the build, and the code on the page *is* the code on disk. Same for `<GuardIndex />` and
 `<VectorTable of= />`, which render `apps/corpus/guards/{guards.mjs,vectors.json}` rather than
-transcribing them. Where none of those fit, a bare `file:line` is allowed and is your responsibility
-to verify by opening it.
+transcribing them.
+
+**A line number is not a citation.** This paragraph used to end "a bare `file:line` is allowed and is
+your responsibility to verify by opening it", and that policy was measured: of **35 citations, 13
+said something other than what the page claimed** — 37%, one of them a blank line, one naming a test
+the same sentence had already named correctly in prose. Nobody re-reads a paragraph to check a
+number, and the guard could only prove the line was in range. So the spelling is the one
+`grammar.bnf` already uses:
+
+    `crates/fossil-hir/src/lower.rs, HirExpr`
+
+The anchor is an item the file DEFINES — `fn`, `struct`, `enum`, `trait`, `type`, `mod`, `const`,
+`static`, `macro_rules!` — and `content.test.ts` checks it. A `use` that merely names the item does
+not count, because four of the thirteen cited the import for a claim about the function underneath.
+Where the claim is «this is pinned in that file» and no single item carries it, write the path with
+no line and no anchor; nothing checks that, and `design/discarded` records why and what would change
+it. `path:12` in any form fails the build.
 
 ## What the guards hold, and what they cannot
 
 `build` runs `test` first, and that is load-bearing. `content.test.ts` fails the build on: a
 direction without a summary, an `arguedIn` that does not resolve or that names its own page, a
-`/docs/…` link to a page that is not there, a `#fragment` naming no heading in the target, a
-`file:line` whose line is out of range, and a `grammar.bnf` citation that names no production. It
-also carries the one architectural claim a manifest can settle.
+`/docs/…` link to a page that is not there, a `#fragment` naming no heading in the target, a source
+citation naming an item its file does not define, a citation written as `path:12` at all, and a
+`grammar.bnf` citation that names no production. It also carries the one architectural claim a
+manifest can settle.
 
 Each of those has a vacuity check beside it, because a glob that stops matching is how a guard
 stops guarding without anyone noticing.

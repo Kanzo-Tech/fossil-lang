@@ -99,8 +99,8 @@ projection directly.
 
 The attractive cut is three numbered rings by where the code runs. It is not the cut, and
 [three hosts](/docs/design/three-hosts) is where the three reference compilers say why. What survives
-is not a ring: two crates with a `cfg` and a written reason — `crates/fossil-lsp/src/lib.rs:98`,
-because `lsp-server` uses crossbeam and stdio, and `crates/fossil-resolver/src/lib.rs:48`, because
+is not a ring: two crates with a `cfg` and a written reason — `crates/fossil-lsp/src/lib.rs`,
+because `lsp-server` uses crossbeam and stdio, and `crates/fossil-resolver/src/lib.rs`, because
 credential material is deliberately kept off the wasm boundary.
 
 ## A list is not a check
@@ -153,7 +153,7 @@ does not.
 ### What would move the remaining edge
 
 `fossil-base → fossil-descriptors-input` exists for **one trait method**, `System::descriptors`,
-which hands out a `&DescriptorCache` (`crates/fossil-base/src/system.rs:23`). Four crates, and the
+which hands out a `&DescriptorCache` (`crates/fossil-base/src/system.rs, descriptors`). Four crates, and the
 arrows nearly meet:
 
 ```mermaid
@@ -205,7 +205,7 @@ about itself is now a module of the one host that used it.
 
 | the name | what it actually is |
 | --- | --- |
-| `fossil-ide` | not an IDE: the set of LSP functions, and it exists only because `fossil-lsp` does not compile to wasm32. It also returns `lsp_types` structs directly (`crates/fossil-ide/src/completion.rs:63`), which is the invariant rust-analyzer defends hardest and the one Gleam broke |
+| `fossil-ide` | not an IDE: the set of LSP functions, and it exists only because `fossil-lsp` does not compile to wasm32. It also returns `lsp_types` structs directly (`crates/fossil-ide/src/completion.rs, completions`), which is the invariant rust-analyzer defends hardest and the one Gleam broke |
 | `fossil-sinks` | writes nothing: the manifest model, borrowing GraphAr's YAML field names without conforming to GraphAr ([where borrowing stops](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops)); half its dependents are readers |
 
 <Callout title="Deliberately absent">
@@ -224,7 +224,7 @@ would be a list that forbids acting on it.
 ## The second core has one dependency left
 
 **`fossil-graph` has exactly one fossil dependency, `fossil-sinks`, and uses it on one production
-line** — `crates/fossil-graph/src/manifest.rs:16`; everything else is a `#[cfg(test)]` module. It
+line** — `crates/fossil-graph/src/manifest.rs`; everything else is a `#[cfg(test)]` module. It
 does not know the language (grepping its `src` for
 `fossil_hir|fossil_syntax|fossil_mir|fossil_base|fossil_descriptors|fossil_lineage` returns zero) and
 it does not touch the disk. It declares two ports instead: `ManifestSource::fetch` and

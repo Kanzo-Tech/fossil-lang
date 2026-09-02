@@ -42,7 +42,7 @@ An edge is a pair of dense ids and a dense id is a row number in a vertex table,
 resolves both endpoints with an inner join and the third review never becomes an edge. That is
 intended and it stays; what it no longer is, is silent. The run counts the drops per edge type — a
 summary line naming the edge and the number, and a `dropped` entry in `--output-json` present even as
-`0` (`crates/fossil-df/src/report.rs:100`, `crates/fossil-df/tests/dangling_edges.rs:90`).
+`0` (`crates/fossil-df/src/report.rs, EdgeDrops`, `crates/fossil-df/tests/dangling_edges.rs, a_dangling_endpoint_is_counted_rather_than_swallowed`).
 </Callout>
 
 The usual way to arrive here by accident is a filter upstream: a mapping reads from `Adults` while

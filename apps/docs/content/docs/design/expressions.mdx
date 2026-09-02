@@ -17,7 +17,7 @@ user declares no functions.
 
 ## The forms
 
-`HirExpr` has thirteen variants (`crates/fossil-hir/src/lower.rs:304`) — the ten below cover twelve
+`HirExpr` has thirteen variants (`crates/fossil-hir/src/lower.rs, HirExpr`) — the ten below cover twelve
 between them, plus the bare-name column reference the surface is retiring. Each is spelled by a
 program in `apps/docs/programs/`, compiled by the production path and not transcribed here.
 
@@ -62,13 +62,13 @@ equivalence is demonstrated rather than asserted.
 
 The catalogue is 41 rows: twelve relation verbs, four source constructors, and **25 functions an
 expression may call**. Twenty-one of the 25 render on the DataFusion backend; the four that do not
-are pinned in `crates/fossil-df/src/stdlib.rs:103` with the cause beside them, and it is one cause
+are pinned in `crates/fossil-df/src/stdlib.rs, UNREACHABLE_ON_DATAFUSION` with the cause beside them, and it is one cause
 and not four — `math.sum`, `avg`, `min` and `max` are aggregates, and an aggregate in a scalar
 position is [a pipeline with a group-by](/docs/design/algebra) rather than a call this backend
 declines to render. **That list is measured, not guessed:** the test beside it plans each catalogued
 row's real template through the renderer and compares what fails against the list, so a function
 becoming reachable — or stopping — is a diff there and not a surprise in someone's program. A call
-*running* is a separate claim, and a narrower one (`crates/fossil-df/tests/expressions.rs:42`
+*running* is a separate claim, and a narrower one (`crates/fossil-df/tests/expressions.rs, a_call_produces_its_column`
 asserts the values, not the plan).
 
 ## The drop is loud
@@ -78,10 +78,10 @@ handful of node kinds and dropped the rest, the checker raised nothing because t
 expression, and the compiler declared success over a corpus with a property missing. The fallback
 arm is a diagnostic now — it quotes the source text, points at it, names the node kind the parser
 built — and every `*_EXPR` kind has an arm, so what still arrives there is the parser's own `ERROR`
-node. `an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop`
-(`crates/fossil-hir/src/lower.rs:3207`) pins the guarantee, which is the drop being **loud**, not any
-particular expression being unlowerable — its own fixture lowers fine today
-(`crates/fossil-hir/src/lower.rs:3253`).
+node.
+`crates/fossil-hir/src/lower.rs, an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop`
+pins the guarantee, which is the drop being **loud**, not any particular expression being
+unlowerable — its own fixture lowers fine today.
 
 ## What leaves
 
@@ -89,8 +89,8 @@ particular expression being unlowerable — its own fixture lowers fine today
 a promise the language does not keep — `|>`, the leading dot, the triple term, `&` shape
 intersection and the rest. No list here: `grammar.bnf` carries each as a tombstone, the never-built
 forms sit under `grammar.bnf, § NOT IN MVP`, six answer by name with a message saying what to write
-instead (`crates/fossil-syntax/src/parser/diag.rs:106`), and
-`crates/fossil-syntax/tests/parse_corpus.rs:477` fails if any fenced `fossil` block on this site
+instead (`crates/fossil-syntax/src/parser/diag.rs, retired`), and
+`crates/fossil-syntax/tests/parse_corpus.rs, no_fenced_fossil_block_spells_a_retired_form` fails if any fenced `fossil` block on this site
 spells one.
 
 ## What this does not settle

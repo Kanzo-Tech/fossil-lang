@@ -55,7 +55,7 @@ file: not a guess, not a cached schema somebody wrote down in a config.
 
 The reading is the host's job, and every host does it: `fossil-cli` introspects before each `check` and
 each `run`, the browser playground reads the file with DuckDB-WASM, and `fossil-lsp` goes and looks at
-any source it can `stat` (`crates/fossil-lsp/src/lib.rs:183`). The gap left is a source that is not on
+any source it can `stat` (`crates/fossil-lsp/src/lib.rs, introspect`). The gap left is a source that is not on
 disk — a CSV on `s3://`, or behind an `https://` — which the editor declines to fetch on its message
 loop, so there `fossil check` reports things your editor does not, and
 [in your editor](/docs/book/editor) measures it.

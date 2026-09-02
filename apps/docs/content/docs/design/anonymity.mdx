@@ -158,8 +158,8 @@ this algorithm are the ones nobody writes down: the median with k duplicates beh
 that is one value repeated, the k larger than the table, the table that is entirely nulls. Both
 counterexamples it has found so far are checked in as seeds.
 
-`tests/traps.rs` asserts the *shape* of the output rather than its safety, because a table
-generalised entirely to `*` satisfies every k and would pass the invariant. `tests/hierarchies.rs`
+`crates/fossil-kanon/tests/traps.rs` asserts the *shape* of the output rather than its safety, because a table
+generalised entirely to `*` satisfies every k and would pass the invariant. `crates/fossil-kanon/tests/hierarchies.rs`
 reads the three shipped hierarchies from disk and generalises with them: hierarchies are declared
 data — dates, string prefixes, numeric buckets — as they are in Amnesia, and a hierarchy that parses
 into a value nobody generalises with is a fixture rather than data.

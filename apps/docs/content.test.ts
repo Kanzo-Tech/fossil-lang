@@ -341,55 +341,130 @@ describe("the group diagram is the manifests", () => {
 });
 
 /**
- * The frontmatter registers govern one citation per page. The prose carries dozens.
+ * A source citation names an ITEM, never a line. Same rule as `grammar.bnf` below, same reason.
  *
- * A page that says a thing is true at `crates/fossil-hir/src/lower.rs:60` is making the same kind of
- * promise as a `backedBy:`, and it rots the same way — except there are a hundred of them and nobody
- * re-reads a paragraph to check a line number. Every `` `path/to/file.ext:12` `` span in an MDX file
- * has to name a line that exists.
+ * **What was here: `` `path/to/file.ext:12` `` had to name a line that exists.** It caught three
+ * real errors the day it was written — a range past the end of a file, a mistyped path — and then it
+ * was measured over the whole tree, which is the part that decided this. Of **35 citations, 13 did
+ * not say what the page claimed**: 37%, with CI green on every one of them, because the assertion
+ * was `last <= lines` and nothing else.
  *
- * This caught three real errors the day it was written, two of them in pages written the same hour:
- * a range whose end ran past the file, and a mistyped path.
+ * The thirteen were not typos. They are what a line number does on its own:
  *
- * What it does NOT prove — and the gap is the interesting one: **it checks that the line exists, not
- * that it says what the page claims.** A citation that drifts one line still passes. That failure
- * mode is not hypothetical either; three enum variants were cited at real lines in the right file,
- * permuted. Catching that needs the citation to carry what it asserts, which is a heavier convention
- * than this one and has not earned itself yet.
+ *   - `fossil-df/src/stdlib.rs:78` was a **blank line**, cited as where a list of "thirteen"
+ *     functions is pinned. The list is at :103 and holds four. The page contradicted itself six
+ *     sections apart and the guard could not see either half.
+ *   - `fossil-hir/src/lower.rs:3207` was cited for a test the prose NAMES in the sentence before it.
+ *     The name is at :3347; :3207 is a different test's fixture. The citation and the name in the
+ *     prose disagreed, in the same sentence, and only the unreadable half was checked.
+ *   - Four cited the `use` at the top of a file for a claim about the function underneath —
+ *     `system.rs:23` for `System::descriptors` at :55, `completion.rs:63` for `completions` at :80.
+ *   - Three had simply slid: `lower.rs:304` for `HirExpr` at :334, `stdlib.rs:311` for `SigTy` at
+ *     :451, `df/lib.rs:1792` for `vertex_info` at :1858.
+ *
+ * A line number is an offset into a file that is edited by definition. It is invalidated by an
+ * insertion anywhere above it and the failure is SILENT: the citation still resolves, to different
+ * text. Nothing about that is specific to `grammar.bnf`, which is why the spelling is now the one
+ * that file already uses — `` `crates/…/x.rs, item_name` `` — and the old one is banned rather than
+ * deprecated, because an accepted second spelling is how the first one comes back.
+ *
+ * **This is not the guard `apps/corpus/CLAUDE.md` forbids rebuilding.** That one proves a cited line
+ * is on disk and implies it says something; 159 dead references accumulated under it. An anchor is a
+ * NAME, so reordering a file, inserting an item, or rewriting every comment in it cannot make a
+ * citation point somewhere else. It either names something the file defines or it does not.
+ *
+ * **What it still cannot prove**, and the residue is the same one the grammar guard admits:
+ *
+ *   - **That the item says what the citation claims.** `lower.rs, HirExpr` beside a sentence about
+ *     the checker passes here. What changed is that a wrong anchor is now a wrong NAME — legible to
+ *     a reader who knows the tree — instead of a number nobody can evaluate by eye.
+ *   - **That a citation should have been there at all.** Where the claim is «this is pinned in that
+ *     file» and no single item carries it, the conversion wrote the bare path and no anchor. Nothing
+ *     checks a bare path: see `design/discarded`, which records why, and what would change it.
  */
-const CITATION = /`([\w./-]+\.(?:rs|toml|bnf|mjs|ts|tsx|yml|json)):(\d+)(?:-(\d+))?`/g;
+const RUST_CITATION = /`(crates\/[\w./-]+\.rs),\s*([A-Za-z_][A-Za-z0-9_]*)`/g;
 
-interface Citation {
-  /** `<page>:<line in the page>` — so a failure message points at the prose, not the target. */
-  where: string;
-  span: string;
-  path: string;
-  last: number;
+/**
+ * The banned spelling: any backticked path with a line number after it.
+ *
+ * Wider than the anchor form on purpose — it covers every extension the old guard read, so that
+ * converting `.rs` cannot leave `packages/…/x.ts:12` as a legal unchecked form beside it. The
+ * optional backtick before the colon is not decoration; `` `grammar.bnf`:462 `` was in the tree, and
+ * a pattern anchored on the bare filename walked straight past it.
+ */
+const LINE_CITATION = /`?[\w./-]+\.(?:rs|toml|bnf|mjs|ts|tsx|yml|json)`?:\d+(?:-\d+)?`?/;
+
+/**
+ * Every item a Rust file DEFINES: `fn`, `struct`, `enum`, `trait`, `union`, `type`, `mod`, `const`,
+ * `static`, and `macro_rules!`.
+ *
+ * A name only MENTIONED — in a `use`, in a call, in a doc comment — is not defined, and that is the
+ * whole of the improvement rather than an oversight. Four of the thirteen cited an import for a
+ * claim about the item it imports; under this rule those cite the item, and the file that merely
+ * names it cannot stand in for the file that has it.
+ */
+const RUST_DEF =
+  /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:default\s+)?(?:const\s+|async\s+|unsafe\s+|extern\s+"[^"]*"\s+)*(?:fn|struct|enum|trait|union|type|mod|static|const)\s+([A-Za-z_][A-Za-z0-9_]*)|^\s*macro_rules!\s+([A-Za-z_][A-Za-z0-9_]*)/;
+
+function rustItemsOf(path: string): Set<string> {
+  const full = join(repoRoot, path);
+  if (!existsSync(full)) return new Set();
+  return new Set(
+    readFileSync(full, "utf8").split("\n").flatMap((line) => {
+      const m = RUST_DEF.exec(line);
+      return m ? [(m[1] ?? m[2]) as string] : [];
+    }),
+  );
 }
 
-const citations: Citation[] = mdxUnder(CONTENT_ROOT).flatMap((file) => {
+interface RustCitation {
+  /** `<page>:<line in the page>` — so a failure message points at the prose, not the target. */
+  where: string;
+  path: string;
+  anchor: string;
+}
+
+const contentPages = mdxUnder(CONTENT_ROOT);
+
+const rustCitations: RustCitation[] = contentPages.flatMap((file) => {
   const page = relative(repoRoot, file);
   return readFileSync(file, "utf8").split("\n").flatMap((line, index) =>
-    [...line.matchAll(CITATION)].map((m) => ({
+    [...line.matchAll(RUST_CITATION)].map((m) => ({
       where: `${page}:${index + 1}`,
-      span: `${m[1]}:${m[2]}${m[3] ? `-${m[3]}` : ""}`,
       path: m[1],
-      last: Number(m[3] ?? m[2]),
+      anchor: m[2],
     })),
   );
 });
 
-describe("every inline file:line citation resolves", () => {
-  // Same reason as above: a regex that stops matching would turn this into a vacuous pass.
+describe("every source citation names an item that exists", () => {
+  // Without these two a regex that stopped matching would report a clean sweep of nothing.
   it("finds citations at all", () => {
-    expect(citations.length).toBeGreaterThan(0);
+    expect(rustCitations.length).toBeGreaterThan(20);
   });
 
-  it.each(citations)("$where cites $span", ({ path, last }) => {
-    const target = join(repoRoot, path);
-    expect(existsSync(target), `${path} is not on disk`).toBe(true);
-    const lines = readFileSync(target, "utf8").split("\n").length;
-    expect(last, `${path} has ${lines} lines`).toBeLessThanOrEqual(lines);
+  it("reads items out of a cited file", () => {
+    expect(rustItemsOf("crates/fossil-hir/src/lower.rs").has("HirExpr")).toBe(true);
+  });
+
+  it.each(contentPages.map((file) => ({ id: relative(repoRoot, file), file })))(
+    "$id cites no line numbers",
+    ({ file }) => {
+      const offender = readFileSync(file, "utf8")
+        .split("\n")
+        .findIndex((line) => LINE_CITATION.test(line));
+      expect(
+        offender,
+        `line ${offender + 1} cites a file by line number, a spelling this guard cannot check; ` +
+          "write `path/to/file.rs, item_name`, transclude it, or name the file with no line",
+      ).toBe(-1);
+    },
+  );
+
+  it.each(rustCitations)("$where cites $path, $anchor", ({ path, anchor }) => {
+    expect(existsSync(join(repoRoot, path)), `${path} is not on disk`).toBe(true);
+    const items = rustItemsOf(path);
+    expect(items.has(anchor), `${path} defines no ${anchor}`).toBe(true);
   });
 });
 
