@@ -15,11 +15,9 @@
 //! through `parse -> lower -> typecheck_mapping` to assert "the suggestion
 //! compiles".
 //!
-//! It said `fossil_shex::generate_split_suggestion` here, which is the OTHER
-//! implementation of that idea and the one nothing calls: the checker consumes
-//! the format-neutral `Rejection::Disjunction` that `fossil_shex::rejection_of`
-//! builds, and renders the syntax itself. Naming the uncalled one mattered
-//! because it is the one still written in the retired surface.
+//! The checker consumes the format-neutral `Rejection::Disjunction` that
+//! `fossil_shex::rejection_of` builds, and renders the syntax itself — no
+//! renderer lives on the `ShEx` side.
 //!
 //! Why structured (not Markdown-message-substring): type-safe, future-proof
 //! for other suggestion-emitting diagnostics, and avoids brittle string
@@ -38,6 +36,8 @@
 //! `suggestion_source` precedent exactly — structured, not string-parsed.
 //! Defaults to `None`; plain data (wasm-clean).
 
+pub use fossil_graph_schema::Span;
+
 /// What a [`Diagnostic`]'s span was measured against.
 ///
 /// A byte offset means nothing without knowing its origin, and fossil has two.
@@ -51,10 +51,6 @@
 /// Making the frame part of the diagnostic is what stops that from being an
 /// unwritten rule nobody can check. `MappingRelative` is the default because
 /// nearly every diagnostic comes from a per-mapping query.
-// `Hash` because `SpanLabel` derives it and carries one. NOT MINE — one word,
-// added because the whole workspace failed to compile without it.
-pub use fossil_graph_schema::Span;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SpanFrame {
     /// Offsets from the start of the enclosing mapping. Must be rebased.

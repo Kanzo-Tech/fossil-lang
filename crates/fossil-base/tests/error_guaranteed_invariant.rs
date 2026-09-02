@@ -1,6 +1,6 @@
 //! Contract test: [`fossil_base::ErrorGuaranteed`] invariants.
 //!
-//! Two invariants:
+//! The invariants:
 //!
 //! 1. Every construction path ([`delay_span_bug`] / [`bug`]) returns an
 //!    `ErrorGuaranteed` AND accumulates at least one [`Diagnostic`].

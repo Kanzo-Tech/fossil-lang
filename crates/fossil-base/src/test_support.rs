@@ -211,16 +211,13 @@ impl System for DecodingHost {
     fn providers(&self) -> &'static [&'static Provider] {
         TABLE
     }
-    /// **The introspected-schema table, delegated** — it was the trait default
-    /// `None`, and that is why no test above this crate could take a source row
-    /// from introspection.
-    ///
-    /// `lookup_inferred` reads `db.system().descriptors()`, so with `None` it
-    /// missed unconditionally and no fixture above this crate could take a
-    /// source row from introspection at all.
-    /// [`register_inferred`] is the other half: a host puts the descriptor in
-    /// before the compile, exactly as `fossil_introspect::pre_introspect_and_register`
-    /// and the browser's `registerInferredDescriptor` do.
+    /// **The introspected-schema table, delegated.** `fossil_hir`'s
+    /// `lookup_inferred` reads `db.system().descriptors()`, so under the trait
+    /// default `None` no fixture above this crate could take a source row from
+    /// introspection at all. [`register_inferred`] is the other half: a host
+    /// puts the descriptor in before the compile, exactly as
+    /// `fossil_introspect::pre_introspect_and_register` and the browser's
+    /// `registerInferredDescriptor` do.
     fn descriptors(&self) -> Option<&fossil_descriptors_input::DescriptorCache> {
         self.0.descriptors()
     }
