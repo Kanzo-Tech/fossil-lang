@@ -64,8 +64,9 @@
 //!
 //! The native `DuckExecutor` impl is `fossil-mcp`'s `ConnectionExecutor`
 //! (`crates/fossil-mcp/src/executor.rs`), NOT `fossil-layout`: that crate is the
-//! layout post-pass and links no engine at all. The browser impl is
-//! `fossil-graph-wasm`, not `fossil-wasm`.
+//! layout post-pass and does not depend on this one. The browser impl is
+//! `fossil-graph-wasm`'s `JsExecutor`, not `fossil-wasm`, which does not depend
+//! on this crate at all.
 //!
 //! ## What bounds a verb
 //!

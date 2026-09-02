@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Graph query surface over GraphAr+DuckDB. Verb-level operations (schema, discovery, aggregate, GraphRAG, viewport, sql) with JSON Schema contracts. Transport-agnostic — bindings live in fossil-mcp, fossil-cli, @fossil-lang/corpus."
+description = "Graph query surface over a GraphAr corpus. Verb-level operations with JSON Schema contracts; emits DuckDB-dialect SQL and links no engine to run it. Transport-agnostic — the bindings are fossil-mcp and fossil-graph-wasm."
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -39,6 +39,5 @@ serde_yaml_ng = { workspace = true }
 
 [dev-dependencies]
 # Snapshot the generated JSON Schemas so a hand-edit to a Params/Result struct
-# triggers a visible diff against the canonical wire contract. The bindings
-# (fossil-mcp, @fossil-lang/corpus) consume the same snapshots.
+# triggers a visible diff against the canonical wire contract.
 insta = { workspace = true }

@@ -1,10 +1,9 @@
 //! Verb execution: the [`DuckExecutor`] seam + per-verb SQL generation.
 //!
 //! The verb→SQL logic lives here (pure string building, WASM-safe) so every
-//! binding reuses it: the native impl (`fossil-layout`, `duckdb` crate) and
-//! the WASM impl (`fossil-wasm`, DuckDB-WASM) differ only in how they satisfy
-//! [`DuckExecutor`] — they never re-derive a verb's SQL
-//!.
+//! binding reuses it: the native impl (`fossil-mcp`, the `duckdb` crate) and
+//! the WASM impl (`fossil-graph-wasm`, DuckDB-WASM) differ only in how they
+//! satisfy [`DuckExecutor`] — they never re-derive a verb's SQL.
 //!
 //! [`dispatch`] matches the [`Operation`] enum and returns the verb's `Result`
 //! serialised to JSON — the transport-agnostic wire form every binding ships.
@@ -103,9 +102,9 @@ struct Context<'a, E: DuckExecutor> {
 
 /// Dispatch one [`Operation`] against the manifest + executor.
 ///
-/// Returns the verb's `Result` as JSON. Every variant is handled: the four
-/// that had no implementation were deleted rather than stubbed, so the match
-/// is exhaustive and a new verb cannot be added without wiring it.
+/// Returns the verb's `Result` as JSON. The match is exhaustive — a verb with
+/// no implementation is deleted rather than stubbed — so a new one cannot be
+/// added without wiring it.
 ///
 /// # Errors
 ///
@@ -1072,9 +1071,6 @@ mod tests {
         Manifest::load(&MapSource(map)).expect("load manifest")
     }
 
-    /// Canned executor: matches the verb SQL shapes by substring so the verb
-    /// wiring is testable without a real `DuckDB` (SQL correctness is covered by
-    /// the fossil-layout integration test).
     /// Drive a future to completion synchronously. Our test executors never
     /// suspend (they return ready values), so a noop-waker poll loop returns on
     /// the first poll — no runtime dependency needed.
@@ -1105,7 +1101,6 @@ mod tests {
             if sql.contains("count(*)") {
                 return Ok(vec![serde_json::json!({ "n": 3 })]);
             }
-            // samples query
             Ok(vec![
                 serde_json::json!({ "sample": "30" }),
                 serde_json::json!({ "sample": "41" }),
@@ -1114,8 +1109,8 @@ mod tests {
     }
 
     /// Executor backed by a closure — canned responses keyed on the SQL, so a
-    /// verb's wiring (param → SQL → result shaping) is tested without real `DuckDB`
-    /// (SQL correctness is the fossil-layout integration test's job).
+    /// verb's wiring (param → SQL → result shaping) is tested without real `DuckDB`.
+    /// SQL correctness is `crates/fossil-mcp/tests/graph_verbs.rs`'s job.
     struct FnExecutor<F: Fn(&str) -> Vec<Value>>(F);
     impl<F: Fn(&str) -> Vec<Value>> DuckExecutor for FnExecutor<F> {
         async fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
