@@ -87,6 +87,14 @@ manifest can settle.
 Each of those has a vacuity check beside it, because a glob that stops matching is how a guard
 stops guarding without anyone noticing.
 
+**A vacuity check is not a floor, and there is no floor.** These suites are `it.each` over what the
+tree contains, so deleting the last citation on a page deletes its tests and the suite shrinks
+without going red. That is deliberate and it has no honest fix: deleting a citation because the
+claim became a `<Program>` is what this page asks for, and it is the same diff as deleting one
+because the sentence quietly stopped carrying evidence. Nor does the headline number help — one
+conversion took the citation suite from 36 to 35 while the total stayed at 601, because the link
+suite grew by one at the same time. `design/discarded` carries the rejected floor.
+
 **What none of them prove: that the sentence is true.** No test of this shape will. They make a
 claim locatable and falsifiable; the rest is reading.
 

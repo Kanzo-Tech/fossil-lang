@@ -381,6 +381,13 @@ describe("the group diagram is the manifests", () => {
  *   - **That a citation should have been there at all.** Where the claim is «this is pinned in that
  *     file» and no single item carries it, the conversion wrote the bare path and no anchor. Nothing
  *     checks a bare path: see `design/discarded`, which records why, and what would change it.
+ *   - **That the evidence has not thinned out.** `it.each` makes one test per citation, so removing
+ *     a citation removes a test and the suite gets SMALLER without going red. There is no honest
+ *     floor: deleting a citation because the claim became a `<Program>` is the outcome this site
+ *     wants, and it is the same diff as deleting one because the sentence stopped carrying evidence.
+ *     Watching the total does not help either — measured on this branch, one conversion took this
+ *     suite from 36 to 35 while the total held at 601, because the link suite grew by one in the
+ *     same commit. `design/discarded` carries the rejected floor and what would bring it back.
  */
 const RUST_CITATION = /`(crates\/[\w./-]+\.rs),\s*([A-Za-z_][A-Za-z0-9_]*)`/g;
 
