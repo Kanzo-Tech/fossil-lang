@@ -1165,29 +1165,14 @@ export interface LevelQuery extends BoxQuery {
 /**
  * The coarsest level whose population fits a budget — **pure, synchronous, and nobody's session.**
  *
- * This is deliberately not a step inside the read, and three arguments say why.
+ * Not a step inside the read, and the three arguments for that are in `/docs/design/one-door`
+ * under *The level is the caller's*: Zarr picks on the client, monotone refinement cannot be
+ * stated unless "the same rectangle at the same level" is expressible, and a budget is made of
+ * pixels, which stop at this argument list.
  *
- * - **Zarr decides the level on the client.** Its multiscale metadata says which levels exist and
- *   the reader picks; the store answers for the one it is asked about. Copying the *shape* of that
- *   is the point of naming Zarr at all.
- * - **"The same rectangle at the same level" has to be expressible.** It is the statement monotone
- *   refinement is *about* — `{drawn closer} ⊇ {drawn farther} ∩ {new window}` compares two levels
- *   over one rectangle — and a reader that chose its own level inside the read could not be asked
- *   the question. The decision and the test are the same decision.
- * - **A budget is made of pixels.** Screen size, device ratio and what a person finds legible are
- *   the host's facts and none of them is a corpus's business. They stop at this function's
- *   argument list.
- *
- * And it exists at all rather than being left to each consumer, because the arithmetic below is
- * exactly the kind that gets re-derived differently in every reader — which is the failure this
- * module was written against.
- *
- * **The estimate is the tiles, not the area.** A rectangle covering 9% of the extent of the
- * million-vertex fixture holds 25% of its vertices, because a layout clusters; area is off by 2.8×
- * there, which is a level and a half. Tiles are not: `tiles × chunk_size` over-counts the same
- * rectangle by 1.57×, under one level, and it is *monotone in the rectangle*, which area is too but
- * uniformity is not. `count` caps it, because a rectangle covering the corpus cannot hold more than
- * the corpus.
+ * **The estimate is the tiles, not the area**, and the measurements that decided it are on the
+ * same page. `count` caps it, because a rectangle covering the corpus cannot hold more than the
+ * corpus.
  */
 export function levelFor({ budget, chunkSize, count, ...box }: LevelQuery): number {
   const rows = chunkSize ?? (box.codes as TileCodes & { chunkSize?: number }).chunkSize ?? 0;

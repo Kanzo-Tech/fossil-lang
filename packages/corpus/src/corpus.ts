@@ -1,13 +1,12 @@
 /**
  * A corpus, opened from a URL — **the door**, with the addressing underneath and invisible.
  *
- * There were three entry points over one manifest and no rule for choosing between them:
- * `createGraphClient` for the verbs, `openCorpus` for the camera, `resolveCorpus` for the URLs.
- * The first two took the same two arguments and answered overlapping questions in two languages
- * through two SQL generators — `node` was `read` with `subject = '…'`, `neighbours` was `expand`.
- * This is the one door now. `createGraphClient` is the transport it dispatches through, and
+ * There were three entry points over one manifest and no rule for choosing between them, and this
+ * is the one door now: `createGraphClient` is the transport it dispatches through, and
  * `resolveCorpus` stays published on its own subpath because it is the arithmetic a third-party
- * reader would otherwise re-derive: synchronous, WASM-free, and provably separable.
+ * reader would otherwise re-derive — synchronous, WASM-free, and provably separable.
+ * `/docs/design/one-door` has what the removal settled, and why the camera grew this object rather
+ * than opening a fourth beside it.
  *
  * **The object has two halves and the line between them is not a spelling.** `extent`, `window`,
  * `node` and `neighbours` compute which FILES to open and open those; `schema`, `read`, `expand`,
@@ -287,10 +286,9 @@ export interface LevelInfo {
   /**
    * Whether a written `vertex/<Type>/l{k}/` answers this level, or the full tiles are strided.
    *
-   * **The two select the same rows.** `dense_id % 2^k == 0` is the definition and a level file is a
-   * cache of it; if they could disagree there would be two contracts, which is worse than having no
-   * pyramid at all. What a written level changes is the byte count, and that is why it is reported
-   * on the answer ({@link ViewCost.read}) rather than being a different call.
+   * **The two select the same rows** — `dense_id % 2^k == 0` is the definition and a level file is
+   * a cache of it. What a written level changes is the byte count; see {@link ViewCost.read} and
+   * `/docs/design/one-door` for why that is a cost and not a second contract.
    */
   readonly written: boolean;
 }
@@ -343,11 +341,10 @@ export interface ViewCost {
   /** Compressed bytes those runs hold, from the Parquet footer. */
   readonly bytes: number;
   /**
-   * Which artefact answered the level, and it is the whole of decision two.
-   *
-   * `strided` means no `l{k}/` is written, so the full tiles were opened and the predicate strided
-   * them: **the same rows, more bytes**. `level` means a written level file answered. A caller
-   * watching this number is watching the pyramid arrive without its contract changing.
+   * Which artefact answered the level: `strided` means the full tiles were opened and the
+   * predicate strided them — **the same rows, more bytes** — and `level` means a written `l{k}/`
+   * answered. A caller watching this is watching the pyramid arrive without the contract changing;
+   * `/docs/design/one-door` is why that is reported here rather than being a second call.
    */
   readonly read: 'strided' | 'level';
   /**
@@ -362,15 +359,13 @@ export interface ViewCost {
 /**
  * A rectangle at a level, drawn — **and it is a function of its arguments and nothing else.**
  *
- * That is the property this member exists for. A Zarr read of a region at a level does not depend
- * on the session that asked, and neither does this: no cap that moves with what the window happens
- * to hold, no stride derived from a count, no state between calls. The same rectangle at the same
- * level is the same answer, however the camera got there.
+ * No cap that moves with what the window holds, no stride derived from a count, no state between
+ * calls. `/docs/design/one-door` argues why that purity is the specification rather than a
+ * property this happens to have, and `/docs/design/camera` measures what it buys.
  *
- * Parallel arrays rather than objects, because the consumer is a renderer that uploads them: at a
- * level whose population is twenty thousand, a `PlacedVertex[]` is twenty thousand objects built to
- * be read four fields at a time and thrown away. {@link Corpus.window} is the one that answers with
- * rows, and it answers a different question — see {@link Corpus.view}.
+ * Parallel arrays rather than objects, because the consumer is a renderer that uploads them: at
+ * twenty thousand marks a `PlacedVertex[]` is twenty thousand objects built to be read four fields
+ * at a time and thrown away. {@link Corpus.window} is the one that answers with rows.
  */
 export interface View {
   readonly type: string;
@@ -454,8 +449,10 @@ export interface Corpus {
    * `property_groups`, and adds per-field cardinality and role for a type the call names.
    *
    * They disagree, and on the conformance corpus they disagree loudly: `property_groups` declares
-   * ONE property against five columns on disk, so `schema()` reports no fields and this reports
-   * `dense_id, subject, x, y, cluster_id`. That is not one of them being wrong. A verb composes
+   * THREE properties against seven columns on disk, so `schema()` speaks of `subject`,
+   * `birth_year` and `postcode` while this reports those plus `dense_id`, `x`, `y` and
+   * `cluster_id` — the four the writer puts there and the vocabulary does not name. That is not
+   * one of them being wrong. A verb composes
    * SQL before it has seen a byte and can only read the declaration; this had a round trip to
    * spend and spent it on the artefact. Where the two must agree is a corpus guard's job —
    * `apps/corpus`'s `declared-count` is the one that catches a manifest lying about its rows.
@@ -495,14 +492,8 @@ export interface Corpus {
   /**
    * The coarsest level whose population fits a budget — **pure, synchronous, and separate.**
    *
-   * It is a second function rather than an argument to {@link Corpus.view}, and the reasons are
-   * argued once, on `levelFor` in `./address.ts`, which is the arithmetic this delegates to. The
-   * short form: Zarr's client picks the level; *«the same rectangle at the same level»* has to be
-   * expressible or monotone refinement cannot be stated, let alone tested; and a budget is made of
-   * pixels, which is the host's business and not a corpus's.
-   *
-   * The estimate is over tiles, not area — a rectangle covering 9% of the million-vertex fixture
-   * holds 25% of it, and a corpus with 128 communities is not uniform anywhere.
+   * A second function rather than an argument to {@link Corpus.view}; `levelFor` in `./address.ts`
+   * is the arithmetic, and `/docs/design/one-door` is why the level is the caller's.
    */
   levelFor(params: LevelBudget): number;
   /**
@@ -511,14 +502,9 @@ export interface Corpus {
    * **This and {@link Corpus.window} both take a rectangle and they are not the same question.**
    * `window` answers *what is here*: every row, every column, complete for incidence, no bound.
    * This answers *what to draw at this resolution*: a decimation, positions and one categorical,
-   * bounded by the level rather than by a cap. The rule for choosing is which of the two nouns the
-   * caller wants — rows, or a picture — and the invariant that keeps them one contract rather than
-   * two is that **`view` at level 0 selects the same vertices `window` does over the same
-   * rectangle**, which `tests/view.test.ts` asserts against the fixture.
-   *
-   * It replaces five things a consumer used to order by hand — `resolveCorpus`, `openCorpus`,
-   * `mortonTilesFor`, `parseTileCodes` and a `BoundedSource` of its own — with one call whose
-   * answer carries what it cost.
+   * bounded by the level rather than by a cap. What keeps them one contract rather than two is
+   * that **`view` at level 0 selects the same vertices `window` does over the same rectangle**,
+   * which `tests/view.test.ts` asserts against the fixture.
    */
   view(params: ViewParams): Promise<View>;
   /** One vertex by identity, or `null`. */
@@ -567,10 +553,10 @@ export interface Corpus {
   // **What a verb sees is the manifest's vocabulary, not the payload's.** {@link openCorpus}
   // refuses to take the column list off `property_groups` and reads the bytes instead, with the
   // count that decided it; the verbs have no bytes to read at the time they compose SQL, so they
-  // take the manifest at its word. On the conformance corpus that is one declared property
-  // against five columns on disk, so `read` answers with `subject` and `schema` reports no
-  // fields, while `types` above reports all five. Neither is wrong and they are not the same
-  // question — see {@link Corpus.types}.
+  // take the manifest at its word. On the conformance corpus that is three declared properties
+  // against seven columns on disk, so `read` answers with `subject`, `birth_year` and `postcode`
+  // while `types` above reports all seven. Neither is wrong and they are not the same question —
+  // see {@link Corpus.types}.
 
   /**
    * The type lists, and per-field statistics for a named `vertex_type`.
@@ -1206,7 +1192,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         // Morton order and subjects are not, so every tile's `min`/`max` for `subject` overlaps
         // every other's and the engine skips nothing. At five million vertices the `subject`
         // column is 8.016 compressed bytes per row, so one lookup reads about 40 MB — column
-        // pruning is the only thing keeping it off the other five columns.
+        // pruning is the only thing keeping it off the other six.
         const rows = await query(
           `SELECT * FROM read_parquet(${list(payloadFiles.get(type.type)!)}) ` +
             `WHERE ${ident(IDENTITY)} IN (${ids.map(lit).join(', ')})`,
