@@ -53,8 +53,9 @@
 //! that decides what a written path means is deciding something about a
 //! program. This crate decides it; `fossil-base` no longer can.
 //!
-//! It depends on nothing, which is what lets `fossil-base` depend on **it**
-//! instead of the other way round.
+//! It depends on nothing, so each of the five takes it directly and none of
+//! them pays for a substrate edge to reach it — `fossil-base` has no dependency
+//! on it at all.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
