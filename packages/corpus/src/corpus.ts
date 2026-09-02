@@ -1,13 +1,12 @@
 /**
  * A corpus, opened from a URL — **the door**, with the addressing underneath and invisible.
  *
- * There were three entry points over one manifest and no rule for choosing between them:
- * `createGraphClient` for the verbs, `openCorpus` for the camera, `resolveCorpus` for the URLs.
- * The first two took the same two arguments and answered overlapping questions in two languages
- * through two SQL generators — `node` was `read` with `subject = '…'`, `neighbours` was `expand`.
- * This is the one door now. `createGraphClient` is the transport it dispatches through, and
+ * There were three entry points over one manifest and no rule for choosing between them, and this
+ * is the one door now: `createGraphClient` is the transport it dispatches through, and
  * `resolveCorpus` stays published on its own subpath because it is the arithmetic a third-party
- * reader would otherwise re-derive: synchronous, WASM-free, and provably separable.
+ * reader would otherwise re-derive — synchronous, WASM-free, and provably separable.
+ * `/docs/design/one-door` has what the removal settled, and why the camera grew this object rather
+ * than opening a fourth beside it.
  *
  * **The object has two halves and the line between them is not a spelling.** `extent`, `window`,
  * `node` and `neighbours` compute which FILES to open and open those; `schema`, `read`, `expand`,
@@ -73,8 +72,13 @@ import {
   type EdgeTiles,
   type Gap,
   GRAPH_INFO_PATH,
+  levelFor as levelForBox,
+  mortonTilesFor,
+  parseTileCodes,
   resolveCorpus,
+  strideOf,
   type CorpusAddressing,
+  type TileCodesDocument,
   type VertexAddress,
 } from './address.js';
 import { createGraphClient, type GraphClient } from './client.js';
@@ -216,7 +220,15 @@ export interface PlacedEdge {
   readonly dst: bigint;
 }
 
-/** A rectangle in the corpus's own coordinates. `w` and `h` extend from `x`/`y`. */
+/**
+ * A rectangle in the corpus's own coordinates. `w` and `h` extend from `x`/`y`.
+ *
+ * **Half-open on the far edge** — `x <= v.x < x + w`, and the same in `y`. It matters at exactly
+ * one rectangle and it is the one a caller reaches for first: a box clamped to
+ * {@link Corpus.extent} excludes the vertices sitting *on* the maximum, which is 17 of a million on
+ * the bench corpus. A caller framing the whole extent nudges the far edge past it. The
+ * `TileCodes` box is inclusive there, and the note beside the predicate says why the two differ.
+ */
 export interface Box {
   readonly x: number;
   readonly y: number;
@@ -263,6 +275,135 @@ export interface WindowAnswer extends Answer {
   readonly tiles: readonly bigint[];
   readonly vertices: readonly PlacedVertex[];
   readonly edges: readonly PlacedEdge[];
+}
+
+/**
+ * One level of the pyramid — Zarr's `multiscales` entry, spelled for this corpus.
+ *
+ * A reader asks the store which levels exist and then decides; it does not hand a budget over and
+ * hope. {@link Corpus.levels} is the list, {@link Corpus.levelFor} is the arithmetic that turns a
+ * budget into one of these, and {@link Corpus.view} answers for the one it is given.
+ */
+export interface LevelInfo {
+  /** *k*. Level 0 is every vertex. */
+  readonly level: number;
+  /** `2^k` — one `dense_id` in this many survives. */
+  readonly stride: number;
+  /** How many vertices the whole type has at this level: `ceil(count / stride)`. */
+  readonly count: number;
+  /**
+   * Whether a written `vertex/<Type>/l{k}/` answers this level, or the full tiles are strided.
+   *
+   * **The two select the same rows** — `dense_id % 2^k == 0` is the definition and a level file is
+   * a cache of it. What a written level changes is the byte count; see {@link ViewCost.read} and
+   * `/docs/design/one-door` for why that is a cost and not a second contract.
+   */
+  readonly written: boolean;
+}
+
+/** What {@link Corpus.levelFor} takes: a rectangle and what it may cost. */
+export interface LevelBudget extends Box {
+  type?: string;
+  /** How many vertices the caller is willing to be handed. */
+  budget: number;
+}
+
+/** What {@link Corpus.view} takes — a rectangle, a level, and nothing about the session. */
+export interface ViewParams extends Box {
+  /** The vertex type, defaulting to the first the index names. */
+  type?: string;
+  /**
+   * Which level of detail. **The caller's, always** — see {@link Corpus.levelFor} for why this is
+   * not derived here.
+   */
+  level: number;
+  /** Which column carries the categorical the caller will colour by. Defaults to `cluster_id`. */
+  fill?: string;
+  /**
+   * Addresses that ride whatever the rectangle and the level select — a pinned vertex.
+   *
+   * They are exempt from the level, because a pin is one `dense_id` and an odd one is a multiple of
+   * no stride above 1. Their tiles are counted on {@link ViewCost.tiles}, so a pin's fetch is on the
+   * ledger rather than hidden in it.
+   */
+  pinned?: readonly (number | bigint)[];
+  /** Whether to answer with the edges among the drawn set. Defaults to `true`. */
+  links?: boolean;
+  /**
+   * The shortest edge worth a row, **in the corpus's own units**.
+   *
+   * A pixel floor is the caller's, and it converts: a renderer with `p` corpus units per pixel and a
+   * three-pixel floor passes `3p`. Nothing here knows what a pixel is.
+   */
+  minLinkLength?: number;
+}
+
+/** What one answer cost, in the terms a reader can check against a network tab. */
+export interface ViewCost {
+  /** Tiles the rectangle and the pins selected. */
+  readonly tiles: number;
+  /** Tiles the type has. */
+  readonly ofTiles: number;
+  /** Maximal runs of adjacent tiles — what those tiles cost in `Range` requests. */
+  readonly runs: number;
+  /** Compressed bytes those runs hold, from the Parquet footer. */
+  readonly bytes: number;
+  /**
+   * Which artefact answered the level: `strided` means the full tiles were opened and the
+   * predicate strided them — **the same rows, more bytes** — and `level` means a written `l{k}/`
+   * answered. A caller watching this is watching the pyramid arrive without the contract changing;
+   * `/docs/design/one-door` is why that is reported here rather than being a second call.
+   */
+  readonly read: 'strided' | 'level';
+  /**
+   * How the tiles were chosen: the published code anchor (`vertex/<Type>/codes.json`, arithmetic,
+   * no Parquet reader) or the per-tile `x`/`y` boxes in the footers.
+   */
+  readonly addressed: 'anchor' | 'footer';
+  /** Wall clock for the queries this answer issued. */
+  readonly ms: number;
+}
+
+/**
+ * A rectangle at a level, drawn — **and it is a function of its arguments and nothing else.**
+ *
+ * No cap that moves with what the window holds, no stride derived from a count, no state between
+ * calls. `/docs/design/one-door` argues why that purity is the specification rather than a
+ * property this happens to have, and `/docs/design/camera` measures what it buys.
+ *
+ * Parallel arrays rather than objects, because the consumer is a renderer that uploads them: at
+ * twenty thousand marks a `PlacedVertex[]` is twenty thousand objects built to be read four fields
+ * at a time and thrown away. {@link Corpus.window} is the one that answers with rows.
+ */
+export interface View {
+  readonly type: string;
+  readonly box: Box;
+  readonly level: number;
+  /** `2^level`. */
+  readonly stride: number;
+  /**
+   * How many vertices the rectangle holds at **level 0** — the denominator, and the one number that
+   * says whether a coarse view is a picture of the whole rectangle or a picture of part of it.
+   */
+  readonly matched: number;
+  /**
+   * `dense_id`s, marks first and then anchors. In this type's own numbering: a `dense_id` is unique
+   * within one vertex type and repeats across a union of two, so a caller drawing more than one
+   * type pairs these with {@link View.type} itself.
+   */
+  readonly denseIds: BigUint64Array;
+  /** `x, y` per row, marks first and then anchors. */
+  readonly positions: Float32Array;
+  /** The `fill` column per row, as written. Only the first {@link View.marks} are meaningful. */
+  readonly categories: Uint32Array;
+  /**
+   * How many of the rows are **drawn**. A prefix length rather than a count: the rows past it are
+   * anchors — far ends the links need, at their real positions, out of tiles already opened.
+   */
+  readonly marks: number;
+  /** Pairs of row indices into {@link View.positions}. At least one end of each is a mark. */
+  readonly links: Uint32Array;
+  readonly cost: ViewCost;
 }
 
 /** What {@link Corpus.neighbours} took and what it reached. */
@@ -316,8 +457,10 @@ export interface Corpus {
    * `property_groups`, and adds per-field cardinality and role for a type the call names.
    *
    * They disagree, and on the conformance corpus they disagree loudly: `property_groups` declares
-   * ONE property against five columns on disk, so `schema()` reports no fields and this reports
-   * `dense_id, subject, x, y, cluster_id`. That is not one of them being wrong. A verb composes
+   * THREE properties against seven columns on disk, so `schema()` speaks of `subject`,
+   * `birth_year` and `postcode` while this reports those plus `dense_id`, `x`, `y` and
+   * `cluster_id` — the four the writer puts there and the vocabulary does not name. That is not
+   * one of them being wrong. A verb composes
    * SQL before it has seen a byte and can only read the declaration; this had a round trip to
    * spend and spent it on the artefact. Where the two must agree is a corpus guard's job —
    * `apps/corpus`'s `declared-count` is the one that catches a manifest lying about its rows.
@@ -345,6 +488,33 @@ export interface Corpus {
   extent(type?: string): Promise<Extent | null>;
   /** The vertices in a rectangle and the edges among them. */
   window(params: WindowParams): Promise<WindowAnswer>;
+  /**
+   * Which levels of detail exist — the multiscale metadata, and the first half of the Zarr shape.
+   *
+   * Every level from 0 to the one holding a single vertex is listed, because every one of them is
+   * answerable: level *k* is the predicate `dense_id % 2^k == 0`, which needs no bytes on disk.
+   * {@link LevelInfo.written} is the only thing a pyramid on disk changes, and it changes a cost
+   * rather than an answer.
+   */
+  levels(type?: string): readonly LevelInfo[];
+  /**
+   * The coarsest level whose population fits a budget — **pure, synchronous, and separate.**
+   *
+   * A second function rather than an argument to {@link Corpus.view}; `levelFor` in `./address.ts`
+   * is the arithmetic, and `/docs/design/one-door` is why the level is the caller's.
+   */
+  levelFor(params: LevelBudget): number;
+  /**
+   * A rectangle at a level of detail, ready to draw — **the door a camera goes through.**
+   *
+   * **This and {@link Corpus.window} both take a rectangle and they are not the same question.**
+   * `window` answers *what is here*: every row, every column, complete for incidence, no bound.
+   * This answers *what to draw at this resolution*: a decimation, positions and one categorical,
+   * bounded by the level rather than by a cap. What keeps them one contract rather than two is
+   * that **`view` at level 0 selects the same vertices `window` does over the same rectangle**,
+   * which `tests/view.test.ts` asserts against the fixture.
+   */
+  view(params: ViewParams): Promise<View>;
   /** One vertex by identity, or `null`. */
   node(id: string, params?: NodeParams): Promise<PlacedVertex | null>;
   /**
@@ -391,10 +561,10 @@ export interface Corpus {
   // **What a verb sees is the manifest's vocabulary, not the payload's.** {@link openCorpus}
   // refuses to take the column list off `property_groups` and reads the bytes instead, with the
   // count that decided it; the verbs have no bytes to read at the time they compose SQL, so they
-  // take the manifest at its word. On the conformance corpus that is one declared property
-  // against five columns on disk, so `read` answers with `subject` and `schema` reports no
-  // fields, while `types` above reports all five. Neither is wrong and they are not the same
-  // question — see {@link Corpus.types}.
+  // take the manifest at its word. On the conformance corpus that is three declared properties
+  // against seven columns on disk, so `read` answers with `subject`, `birth_year` and `postcode`
+  // while `types` above reports all seven. Neither is wrong and they are not the same question —
+  // see {@link Corpus.types}.
 
   /**
    * The type lists, and per-field statistics for a named `vertex_type`.
@@ -680,6 +850,39 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     })),
   };
 
+  /**
+   * The tile-code anchors, read **while the corpus is opening** — one small JSON per vertex type.
+   *
+   * It is not lazy, and the reason is {@link Corpus.levelFor}: a camera asks which level to draw
+   * before it asks for anything, and a level that arrived as a promise would be a request between
+   * the camera moving and a URL being computable, which is the `viewport` verb this format deleted.
+   * So the anchor is bought with the manifests. It is 5,498 B at a million vertices — two orders of
+   * magnitude under the footer it replaces, and it replaces it: with an anchor, which tiles a
+   * rectangle touches is arithmetic and no Parquet reader is on the path.
+   *
+   * A type that declares no `codes:` is a legal corpus and simply has no entry here; `view` falls
+   * back to the footer boxes and says so on {@link ViewCost.addressed}.
+   */
+  const anchors = new Map<string, TileCodesDocument>();
+  {
+    const declared = addressing.types.filter((type) => type.codesUrl !== null);
+    if (declared.length > 0) {
+      const rows = await query(
+        `SELECT filename, content FROM read_text(${list(declared.map((t) => t.codesUrl!))})`,
+      );
+      const byUrl = new Map(rows.map((row) => [text(row, 'filename'), text(row, 'content')]));
+      for (const type of declared) {
+        const content = byUrl.get(type.codesUrl!);
+        // A `codes:` the manifest names and the store does not carry is a corpus that lies about
+        // its own addressing, and the honest response is the slower path rather than an exception:
+        // the footers answer the same question, and `ViewCost.addressed` reports which one ran.
+        if (content !== undefined) {
+          anchors.set(type.type, parseTileCodes(content, `${type.type}'s tile-code anchor`));
+        }
+      }
+    }
+  }
+
   const extents = new Map<string, Extent | null>();
 
   const vertexOf = (type: string, row: QueryRow): PlacedVertex => {
@@ -738,6 +941,17 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     readonly x1: number;
     readonly y0: number;
     readonly y1: number;
+    /**
+     * Where the tile's bytes begin in its file, and how far they run.
+     *
+     * Off the same footer read as the box, because it is the same row of `parquet_metadata` — and
+     * needed for the same reason the box is: {@link Corpus.view} reports what an answer cost, and a
+     * cost report whose byte figure is a guess is not one. `min(coalesce(dictionary_page_offset,
+     * data_page_offset))` is where a row group starts — the dictionary page comes first when there
+     * is one, and `file_offset` is not reliably populated by every writer.
+     */
+    readonly start: number;
+    readonly bytes: number;
   }
 
   const boxes = new Map<string, Promise<readonly TileBox[]>>();
@@ -758,18 +972,26 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       // bytes as signed, which is meaningless for an unsigned column, so a writer that gets it
       // right leaves them empty and a reader that only knows the deprecated pair concludes the
       // footer carries no box at all. `coalesce` reads either.
+      // No `WHERE path_in_schema IN ('x','y')`, and that is deliberate rather than sloppy: the box
+      // still comes only from those two columns, through the CASE arms, and the two sums below want
+      // EVERY column of the row group. One footer read answers both, which is what keeps this "read
+      // once and kept" rather than "read twice and kept".
       const rows = await query(
         `SELECT file_name AS file, row_group_id AS rg, ` +
+          `min(coalesce(dictionary_page_offset, data_page_offset)) AS start, ` +
+          `sum(total_compressed_size) AS bytes, ` +
           `min(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS x0, ` +
           `max(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS x1, ` +
           `min(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS y0, ` +
           `max(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS y1 ` +
-          `FROM parquet_metadata(${list(urls)}) WHERE path_in_schema IN ('x', 'y') GROUP BY 1, 2`,
+          `FROM parquet_metadata(${list(urls)}) GROUP BY 1, 2`,
       );
       const merged = new Map<bigint, TileBox>();
       for (const row of rows) {
         const tile = perGroup ? BigInt(String(row['rg'])) : index.get(String(row['file']));
         const [x0, x1, y0, y1] = ['x0', 'x1', 'y0', 'y1'].map((k) => Number(row[k]));
+        const start = Number(row['start'] ?? 0);
+        const bytes = Number(row['bytes'] ?? 0);
         // A tile whose name did not come back verbatim, or whose footer carries no statistics for
         // x or y, has no box — and a tile with no box is one this cannot exclude. Keeping it is
         // the conservative answer: the read stays correct and only loses the pruning.
@@ -778,13 +1000,15 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         merged.set(
           tile,
           held === undefined
-            ? { tile, x0: x0!, x1: x1!, y0: y0!, y1: y1! }
+            ? { tile, x0: x0!, x1: x1!, y0: y0!, y1: y1!, start, bytes }
             : {
                 tile,
                 x0: Math.min(held.x0, x0!),
                 x1: Math.max(held.x1, x1!),
                 y0: Math.min(held.y0, y0!),
                 y1: Math.max(held.y1, y1!),
+                start: Math.min(held.start, start),
+                bytes: held.bytes + bytes,
               },
         );
       }
@@ -800,6 +1024,50 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
    */
   const intersecting = (all: readonly TileBox[], { x, y, w, h }: Box): readonly TileBox[] =>
     all.filter((b) => b.x1 >= x && b.x0 < x + w && b.y1 >= y && b.y0 < y + h);
+
+  /**
+   * Selected tiles collapsed into maximal runs, each a single byte interval — what a rectangle
+   * costs in `Range` requests rather than in tiles.
+   *
+   * Two tiles join a run when they are consecutive ordinals **and their bytes actually abut**. The
+   * second condition is not paranoia about the format: Parquet does not promise that row groups are
+   * written back to back, and a run whose members are not contiguous names an interval containing
+   * bytes belonging to nobody. Against the corpora this repo writes every boundary abuts — measured,
+   * 0 gaps in 244 — so the O(√n)-runs claim holds as O(√n) requests, and it is checked rather than
+   * assumed. A tile with no footer entry contributes a run of its own and no bytes.
+   */
+  interface TileRun {
+    first: number;
+    last: number;
+    bytes: number;
+  }
+
+  const runsOf = (tiles: readonly number[], weights: Map<number, TileBox>): TileRun[] => {
+    const runs: TileRun[] = [];
+    let end: number | null = null;
+    for (const tile of tiles) {
+      const box = weights.get(tile);
+      const open = runs[runs.length - 1];
+      if (open !== undefined && box !== undefined && tile === open.last + 1 && end === box.start) {
+        open.last = tile;
+        open.bytes += box.bytes;
+      } else {
+        runs.push({ first: tile, last: tile, bytes: box?.bytes ?? 0 });
+      }
+      end = box === undefined ? null : box.start + box.bytes;
+    }
+    return runs;
+  };
+
+  /**
+   * The same rectangle in the addressing layer's spelling — `{x, y, w, h}` against `{xlo, xhi,
+   * ylo, yhi}`, and the far edge is **inclusive** there where {@link boxOf} is half-open here.
+   *
+   * The mismatch is one grid cell wide and it errs the safe way: `mortonTilesFor` may name one more
+   * tile than the `WHERE` will keep a row from, which costs bytes. Erring the other way would lose
+   * the vertices on the seam, which costs a wrong picture.
+   */
+  const gridBox = ({ x, y, w, h }: Box) => ({ xlo: x, xhi: x + w, ylo: y, yhi: y + h });
 
   const boxOf = ({ x, y, w, h }: Box): string =>
     `x >= ${x} AND x < ${x + w} AND y >= ${y} AND y < ${y + h}`;
@@ -932,7 +1200,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         // Morton order and subjects are not, so every tile's `min`/`max` for `subject` overlaps
         // every other's and the engine skips nothing. At five million vertices the `subject`
         // column is 8.016 compressed bytes per row, so one lookup reads about 40 MB — column
-        // pruning is the only thing keeping it off the other five columns.
+        // pruning is the only thing keeping it off the other six.
         const rows = await query(
           `SELECT * FROM read_parquet(${list(payloadFiles.get(type.type)!)}) ` +
             `WHERE ${ident(IDENTITY)} IN (${ids.map(lit).join(', ')})`,
@@ -1212,42 +1480,241 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       };
     },
 
+    levels(type) {
+      const address = vertexType(type);
+      const count = Number(address.count ?? 0n);
+      const out: LevelInfo[] = [];
+      for (let level = 0; ; level += 1) {
+        const stride = strideOf(level);
+        out.push({
+          level,
+          stride,
+          count: Math.ceil(count / stride),
+          // Nothing writes a level yet, and the field is here rather than absent because what
+          // arrives when one does is a cheaper read of the same rows — see {@link ViewCost.read}.
+          written: false,
+        });
+        if (stride >= count) return out;
+      }
+    },
+
+    levelFor({ type, budget, ...box }) {
+      const address = vertexType(type);
+      const count = Number(address.count ?? 0n);
+      const codes = anchors.get(address.type);
+      if (codes === undefined) {
+        // No anchor, so no rectangle reaches the tiles without a Parquet reader — and this member
+        // may not have one, because a camera calls it before it asks for anything. The whole type
+        // is the only pure answer, and it is the conservative one: too coarse, never too fine.
+        return budget > 0 && count > budget ? Math.ceil(Math.log2(count / budget)) : 0;
+      }
+      return levelForBox({ box: gridBox(box), codes, budget, chunkSize: address.chunkSize, count });
+    },
+
+    async view(params) {
+      const started = Date.now();
+      const {
+        type,
+        level,
+        fill = 'cluster_id',
+        pinned = [],
+        links: wantLinks = true,
+        minLinkLength = 0,
+        ...box
+      } = params;
+      const address = vertexType(type);
+      if (!has(address.type, 'x') || !has(address.type, 'y')) {
+        throw new CorpusReadError(
+          `${address.type} carries no x/y, so no rectangle names any of it — its payload is ` +
+            `${fieldsOf(address.type).map((f) => f.name).join(', ') || 'empty'}`,
+        );
+      }
+      if (!Number.isInteger(level) || level < 0) {
+        throw new CorpusReadError(`a level is a non-negative integer; got ${String(level)}`);
+      }
+      const stride = strideOf(level);
+      const chunk = BigInt(address.chunkSize);
+      const pins = [...new Set(pinned.map((id) => BigInt(id)))].sort(ascending);
+
+      /**
+       * Which tiles, and by which artefact.
+       *
+       * The anchor is preferred because a code range describes a tile more tightly than its `x`/`y`
+       * box does; `/docs/design/corpus` measures the two over the same nine windows. The footer
+       * path is the fallback for a corpus publishing no `codes:`, and it stays correct, only looser.
+       */
+      const all = await tileBoxes(address.type);
+      const boxed = BigInt(all.length) === address.tiles;
+      const codes = anchors.get(address.type);
+      const addressed: ViewCost['addressed'] = codes !== undefined ? 'anchor' : 'footer';
+      const selected = new Set<number>(
+        codes !== undefined
+          ? mortonTilesFor({ box: gridBox(box), codes })
+          : boxed
+            ? intersecting(all, box).map((b) => Number(b.tile))
+            : all.map((b) => Number(b.tile)),
+      );
+      // A pin's tile is COUNTED. Left out of the selection the disjunct that brings the pin back
+      // has nothing to match against, and the fetch it costs would be missing from the ledger
+      // rather than absent from the read.
+      for (const id of pins) selected.add(Number(address.tileOf(id)));
+
+      const held = [...selected].sort((a, b) => a - b);
+      const weights = new Map(all.map((b) => [Number(b.tile), b]));
+      const runs = runsOf(held, weights);
+      const bytes = runs.reduce((sum, run) => sum + run.bytes, 0);
+
+      const urls = distinct(held.map((tile) => address.tileUrl(tile)));
+      const empty: View = {
+        type: address.type,
+        box,
+        level,
+        stride,
+        matched: 0,
+        denseIds: new BigUint64Array(0),
+        positions: new Float32Array(0),
+        categories: new Uint32Array(0),
+        marks: 0,
+        links: new Uint32Array(0),
+        cost: { tiles: 0, ofTiles: all.length, runs: 0, bytes: 0, read: 'strided', addressed, ms: 0 },
+      };
+      if (urls.length === 0) return empty;
+
+      const ranges = (column: string): string =>
+        runs
+          .map(
+            (run) =>
+              `${column} BETWEEN ${BigInt(run.first) * chunk} AND ${BigInt(run.last + 1) * chunk - 1n}`,
+          )
+          .join(' OR ');
+      const pinList = pins.length > 0 ? `dense_id IN (${pins.join(', ')})` : null;
+      const strided = stride > 1 ? `dense_id % ${stride} = 0` : 'TRUE';
+
+      const base =
+        `WITH held AS (\n` +
+        `  SELECT dense_id, x, y, ${ident(fill)} AS cat FROM read_parquet(${list(urls)})\n` +
+        `  WHERE ${ranges('dense_id')}\n` +
+        `), inrect AS (\n  SELECT * FROM held WHERE ${boxOf(box)}\n` +
+        `), pool AS (\n  SELECT dense_id, x, y, cat FROM inrect WHERE ${strided}\n` +
+        (pinList === null
+          ? ''
+          : `  UNION\n  SELECT dense_id, x, y, cat FROM held WHERE ${pinList}\n`) +
+        `), vis AS (\n` +
+        `  SELECT dense_id, x, y, cat, (SELECT count(*) FROM inrect) AS matched,\n` +
+        `         (row_number() OVER (ORDER BY dense_id) - 1)::INTEGER AS local FROM pool\n)`;
+
+      // The `src` orientations of every incident edge type, addressed by the tiles already chosen.
+      // The addressing decides which orientations exist and why one is missing; reproducing that
+      // rule here is how the two halves of a read drift apart.
+      const plan = addressing.tilesFor({ type: address.type, tiles: held, directions: ['src'] });
+      const edgeUrls = wantLinks ? distinct([...plan.edgeUrls]) : [];
+
+      /**
+       * The far ends, and why they are in the same answer.
+       *
+       * `span` keeps an edge with at least one end drawn and BOTH ends positioned — both in `held`,
+       * which is the tiles that were opened. An edge neither of whose ends is drawn is an edge
+       * somewhere else. `anchor` numbers the far ends past the marks, so `marks` stays a prefix
+       * length and a caller can slice rather than filter.
+       */
+      const floor = Number.isFinite(minLinkLength) && minLinkLength > 0 ? minLinkLength : 0;
+      const long =
+        floor > 0
+          ? ` AND (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) >= ${floor * floor}`
+          : '';
+      const withEdges =
+        edgeUrls.length === 0
+          ? base
+          : `${base}, span AS (\n` +
+            `  SELECT sv.local AS src, tv.local AS dst, e.src_dense, e.dst_dense\n` +
+            `  FROM read_parquet(${list(edgeUrls)}) e\n` +
+            `  JOIN held a ON a.dense_id = e.src_dense\n` +
+            `  JOIN held b ON b.dense_id = e.dst_dense\n` +
+            `  LEFT JOIN vis sv ON sv.dense_id = e.src_dense\n` +
+            `  LEFT JOIN vis tv ON tv.dense_id = e.dst_dense\n` +
+            `  WHERE (${ranges('e.src_dense')})\n` +
+            `    AND (sv.dense_id IS NOT NULL OR tv.dense_id IS NOT NULL)${long}\n` +
+            `), anchor AS (\n` +
+            `  SELECT h.dense_id, h.x, h.y,\n` +
+            `         ((SELECT count(*) FROM vis) + row_number() OVER (ORDER BY h.dense_id) - 1)::INTEGER AS local\n` +
+            `  FROM held h WHERE h.dense_id IN (\n` +
+            `    SELECT src_dense FROM span WHERE src IS NULL\n` +
+            `    UNION SELECT dst_dense FROM span WHERE dst IS NULL)\n)`;
+
+      const pointsSql =
+        edgeUrls.length === 0
+          ? `${withEdges}\nSELECT local, dense_id, x, y, cat, matched, TRUE AS mark FROM vis ORDER BY local`
+          : `${withEdges}\nSELECT local, dense_id, x, y, cat, matched, TRUE AS mark FROM vis\n` +
+            `UNION ALL\nSELECT local, dense_id, x, y, 0, NULL::BIGINT, FALSE AS mark FROM anchor\n` +
+            `ORDER BY local`;
+
+      const points = await query(pointsSql);
+      const links =
+        edgeUrls.length === 0
+          ? []
+          : await query(
+              `${withEdges}\nSELECT coalesce(sp.src, sa.local) AS src, coalesce(sp.dst, da.local) AS dst\n` +
+                `FROM span sp\n` +
+                `LEFT JOIN anchor sa ON sa.dense_id = sp.src_dense\n` +
+                `LEFT JOIN anchor da ON da.dense_id = sp.dst_dense`,
+            );
+
+      const rows = points.length;
+      const denseIds = new BigUint64Array(rows);
+      const positions = new Float32Array(rows * 2);
+      const categories = new Uint32Array(rows);
+      let marks = 0;
+      let matched = 0;
+      for (let i = 0; i < rows; i += 1) {
+        const row = points[i]!;
+        denseIds[i] = idOf(row['dense_id'], `${address.type}.dense_id`);
+        positions[i * 2] = floatOf(row['x'] ?? 0, `${address.type}.x`);
+        positions[i * 2 + 1] = floatOf(row['y'] ?? 0, `${address.type}.y`);
+        categories[i] = Number(row['cat'] ?? 0) >>> 0;
+        // `mark` is TRUE down the sample and FALSE down the anchors, and the answer is ordered by
+        // `local`, so this is a prefix length rather than a count.
+        if (row['mark'] === true || row['mark'] === 1) marks = i + 1;
+        if (i === 0) matched = Number(row['matched'] ?? 0);
+      }
+      const edges = new Uint32Array(links.length * 2);
+      for (let i = 0; i < links.length; i += 1) {
+        edges[i * 2] = Number(links[i]!['src']) >>> 0;
+        edges[i * 2 + 1] = Number(links[i]!['dst']) >>> 0;
+      }
+
+      return {
+        type: address.type,
+        box,
+        level,
+        stride,
+        matched,
+        denseIds,
+        positions,
+        categories,
+        marks,
+        links: edges,
+        cost: {
+          tiles: held.length,
+          ofTiles: all.length,
+          runs: runs.length,
+          bytes,
+          // Nothing writes `l{k}/` yet, so every level is the predicate over the full tiles: the
+          // same rows, more bytes. The day a level file exists this is the number that changes and
+          // the answer above is not.
+          read: 'strided',
+          addressed,
+          ms: Date.now() - started,
+        },
+      };
+    },
+
     /**
      * One vertex by identity.
      *
-     * **`id` is the subject IRI, and this is the decision the handover left without an owner.**
-     *
-     * The alternative was the `dense_id`, and it is the cheap one: a shift names the tile, one
-     * request answers, and the whole lookup is `O(1)`. It is refused because *the spatial order is
-     * the id space* — redoing the layout ranks every vertex by the Morton code of its new position
-     * and lets that rank be its id, so a `dense_id` held anywhere outside the corpus names a
-     * different vertex after the next write. A bookmark, a selection, a link from another system
-     * and a row in somebody else's database all key on something, and an address is not something
-     * to key on.
-     *
-     * The tree used to contradict itself about this and no longer does. `apps/corpus/guards`'s
-     * `identity-is-the-subject` says *"`dense_id` is an address and cannot also be an identity"*
-     * and the conformance corpus marks `subject` `is_primary`; `crates/fossil-df/src/lib.rs` —
-     * `vertex_info`, the one writer — marked `dense_id` instead, on every corpus `fossil run`
-     * produced. One field, two answers, and what that resolved to in practice was that nothing
-     * read it. It marks `subject` now.
-     *
-     * **The flag is still not consulted, and the reason is no longer the disagreement.** It is not
-     * reachable: `./manifest.ts` is a line scanner, `properties` is nested one level deeper than
-     * anything it addresses, and `scan` on the conformance corpus's own `Person.vertex.yml`
-     * returns `property_groups: [{ file_type: 'parquet', properties: '' }]` — the flag is not a
-     * value this reader has, it is a value this reader cannot see. Getting at it means a third
-     * shape in `ScannedManifest` (a sequence of mappings inside a mapping inside a sequence),
-     * which is exactly the nesting that module refuses by name, plus the same growth in
-     * `apps/corpus/guards/manifest.mjs`, which is a deliberate copy for a third party who has
-     * neither this repository nor npm.
-     *
-     * Second reason, independent of the first: {@link openCorpus} already refuses to take the
-     * payload vocabulary off the manifest, and says why — the conformance corpus declares **one**
-     * property against **five** columns on disk. A flag on a property list that does not enumerate
-     * the payload would name the identity of some corpora and be silent about others, while
-     * `DESCRIBE` sees every one. The column name is the stable thing, so the column name is what
-     * this keys on.
+     * **`id` is the subject IRI, never the `dense_id`** — a re-layout renumbers every vertex, so
+     * an address held outside the corpus names a different one after the next write. That decision,
+     * the alternative it refuses, what would reverse it, and why `is_primary` is not consulted are
+     * on `/docs/design/corpus` under *A reader is handed the subject IRI*.
      *
      * **What it costs, measured rather than asserted.** Where the type declares an `index:` this is
      * a seek: two reads, no scan of either table, and see {@link Corpus.types} — `indexed` says

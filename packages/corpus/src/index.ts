@@ -54,6 +54,9 @@ export type { QueryFn, QueryRow } from './query.js';
 export {
   resolveCorpus,
   parseTileCodes,
+  levelFor,
+  strideOf,
+  mortonTilesFor,
   shiftFor,
   tailRows,
   tileOf,
@@ -76,6 +79,9 @@ export type {
   AddressedTiles,
   TileCodes,
   TileCodesDocument,
+  Box as CorpusBox,
+  BoxQuery,
+  LevelQuery,
 } from './address.js';
 
 // The door. It had a subpath of its own — `@fossil-lang/corpus/corpus` — whose one justification
@@ -95,10 +101,15 @@ export type {
   PlacedVertex,
   CorpusVertexType,
   Extent,
+  LevelBudget,
+  LevelInfo,
   Neighbourhood,
   NeighboursParams,
   NodeParams,
   OpenCorpusOptions,
+  View,
+  ViewCost,
+  ViewParams,
   WindowAnswer,
   WindowParams,
 } from './corpus.js';

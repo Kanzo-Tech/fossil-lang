@@ -1,0 +1,193 @@
+---
+title: The camera
+description: Residency against visibility, a canonical camera, and the three properties a level-of-detail view owes its reader — fidelity, monotone refinement and path independence — each with the number that was measured rather than chosen.
+direction:
+  summary: A reader that separates what is loaded from what is drawn keeps the coarse level on screen while the fine one arrives; today the two are the same set, and the whole-extent view opens 245 tiles of 245 to draw one vertex in 64.
+---
+
+A corpus is [addressed, not queried](/docs/design/corpus): a reader computes the URL of every tile
+it wants before it issues a request. [One door](/docs/design/one-door) is the shape that arithmetic
+is published in. This page is the other side of it — what a *reader* has to be, and what it owes
+whoever is looking at the picture.
+
+## Three things, and today two of them are one
+
+A renderer that pans across more data than it can hold keeps three states apart. The naming is a
+game engine's, and the separation is the reason each part can be tested without the other two.
+
+<div className="fd-steps">
+
+**Residency — what is loaded.** A cache over tiles, with an eviction policy. It needs no engine and
+no camera: it is a set of tile numbers, the bytes behind them, and a rule for what to drop. It is
+the only part that touches the network.
+
+**Visibility — what is drawn, out of what is loaded.** A level, a rectangle, and a predicate. It
+needs no network at all: everything it decides, it decides over bytes already in hand.
+
+**The camera — centre and zoom, canonical, with the rectangle derived.** Not a rectangle that
+accumulates pan and zoom deltas. Two numbers and a derivation, so that "the same camera" is a
+comparison of two numbers rather than of an accumulated transform.
+
+</div>
+
+**Today residency and visibility are the same set, and the cost of that is measurable.** Over the
+million-vertex bench corpus, four camera rectangles, budget twenty thousand:
+
+| window | level | tiles opened | runs | bytes | drawn | matched |
+| --- | --- | --- | --- | --- | --- | --- |
+| whole extent | 6 | **245 / 245** | 1 | 21,402,452 | 15,625 | 1,000,000 |
+| 50% | 5 | 145 / 245 | 4 | 12,805,975 | 18,308 | 585,828 |
+| 25% | 4 | 47 / 245 | 4 | 4,159,450 | 11,008 | 176,145 |
+| 10% | 2 | 15 / 245 | 4 | 1,325,310 | 7,105 | 28,372 |
+
+The first row is the whole corpus opened — 20.4 MB — to draw one vertex in sixty-four. It is not a
+bug in the addressing: at the whole extent every tile *does* intersect the rectangle, and the
+predicate `dense_id % 64 = 0` is spread across all of them. It is the absence of a level artefact
+crossed with the absence of a residency notion, and the two fixes are independent.
+
+The second row is the argument for the separation, in one number: **every one of the 145 tiles the
+50% view opens was already among the 245 the whole-extent view opened.** A reader with residency
+draws that frame from bytes it holds, and the network cost of that zoom step is zero. A reader
+without it re-issues the read, and the interval between the camera moving and the answer arriving is
+an interval with nothing on screen.
+
+That interval is what the separation buys, and it is the same trick as not clearing the previous
+frame until the next one is ready: **the coarse level stays on screen while the fine one arrives.**
+Zarr's readers call it progressive refinement and it is only expressible if "what is drawn" and
+"what is loaded" are two sets. [Monotone refinement](#2-monotone-refinement) is what makes the old
+frame *correct* to leave up rather than merely better than blank: every vertex it drew is still
+drawn, in the same place, at the finer level.
+
+The interface the writer's half needs is already stated: a written level flips `cost.read` from
+`strided` to `level` and changes the byte count and nothing else. It is being implemented in
+`crates/fossil-layout` and `crates/fossil-sinks`; this side needs no change when it lands.
+
+## The three properties
+
+`apps/playground/scripts/verify-properties.mjs` is the measurement, and it runs against a real
+million-vertex corpus on disk through a real engine — no browser, no GPU, no
+`requestAnimationFrame`. What it cannot check is the picture. What it checks is every claim the
+picture rests on.
+
+### 1. Fidelity — a coarse view is the same image with fewer points
+
+For any region *R*, `|level_k ∩ R| / |level_k|` ≈ `|level_0 ∩ R| / |level_0|`. A view that fails
+this is not slower or emptier: it is **wrong about the shape of the graph**. It shows a cloud the
+corpus does not have, and nothing on screen says so.
+
+The statistic is **total variation distance** between two normalised density grids, 48×48 over the
+extent. Total variation and not a χ², because the question is about a picture: TV is exactly the
+largest fraction of the ink that can land in the wrong place, it is bounded in [0, 1], and it does
+not grow with the grid the way a χ² statistic does.
+
+**The tolerance is measured, not chosen.** Any subsample of size *n* carries sampling noise, so the
+question is not "is the distance small" but "is it larger than a subsample of the same size with no
+spatial structure at all". The null is `hash(dense_id) % 2^k = 0` — the same population, drawn
+pseudo-randomly instead of by the Morton stride, over the same grid.
+
+| level | drawn | TV from level 0 | random subsample of the same size | ratio |
+| --- | --- | --- | --- | --- |
+| 2 | 250,000 | **0.0073** | 0.0277 | 3.8× closer |
+| 4 | 62,500 | **0.0227** | 0.0634 | 2.8× |
+| 6 | 15,625 | **0.0644** | 0.1326 | 2.1× |
+| 8 | 3,907 | **0.1727** | 0.2489 | 1.4× |
+
+The Morton decimation beats an unstructured subsample of its own size at every level, which is the
+form the claim has to take: it is not "the error is small", it is "the error is smaller than the
+error you cannot avoid".
+
+Over regions rather than cells — eight window/level pairs, windows from 50% down to 5% of the extent
+— the share of the drawn set landing inside a window is within **1.54%** of the share of the whole
+graph. Worst case is the 5% window at level 4: **0.720% against 0.709%**. The band it is checked
+against is measured too: at the smallest region and coarsest level tested the level-0 share is over
+a thousand vertices, and a binomial of that size has a relative standard error of about 3%.
+
+### 2. Monotone refinement — zooming in only adds
+
+`{drawn at the closer zoom} ⊇ {drawn at the farther zoom} ∩ {inside the closer window}`.
+
+This is the property that makes a zoom *refine* the picture instead of replacing it, and it is
+bought by quantising the stride **up to a power of two**: `dense_id % 2^(k+1) = 0` is a strict subset
+of `dense_id % 2^k = 0`, so a vertex drawn once stays drawn, in the same place, at every closer
+zoom. An arbitrary `ceil(matched / limit)` does not nest — the multiples of 37 and of 21 meet only
+at 777 — and the price of the quantisation is at most one extra halving of the sample.
+
+In the door's own terms, one fixed rectangle at six consecutive levels:
+
+| step | vertices carried | lost | moved |
+| --- | --- | --- | --- |
+| 6 → 5 | 6,310 | 0 | 0 |
+| 5 → 4 | 12,625 | 0 | 0 |
+| 4 → 3 | 25,244 | 0 | 0 |
+| 3 → 2 | 50,516 | 0 | 0 |
+| 2 → 1 | 101,058 | 0 | 0 |
+| 1 → 0 | 202,126 | 0 | 0 |
+
+And in the camera's terms — a real zoom path, where the window shrinks as well as the level
+changing, so a vertex may leave the frame honestly — `verify-nesting.mjs` carries **100.0%** of the
+previous picture across every one of five steps, counting only the vertices still inside the tighter
+window so that every loss would be resampling rather than leaving the frame.
+
+The two forms are one property and it is asserted once: the camera-path script is *run* from the
+property suite rather than restated in it.
+
+### 3. Path independence — the same rectangle by two routes is the same picture
+
+The one that was broken, and **the cause was not where it was looked for.**
+
+`view` is a pure function of `(rect, level)` — the same rectangle at level 3 asked twice with the
+whole corpus queried in between returns the same 73,228 marks. So a route can only change the answer
+by changing the **rectangle**. And it did.
+
+The renderer holds the positions it was handed and derives its space→screen map from *their extent*.
+A camera reads back through `screenToSpacePosition`, which answers in that map's coordinates; the
+corpus answers in the coordinates it was written in. cosmos.gl's `setPointPositions(positions)`
+called with no second argument means, in its own documentation, *use `config.rescalePositions`* —
+which, with the simulation off, is rescaling. So the map is rebuilt from whichever answer just
+arrived, and the loop closes:
+
+```
+view → answer → new map → a different rectangle for the same camera → …
+```
+
+Measured through the library's own scale accessor, with the camera set once and never touched:
+
+| points uploaded | derived scale | rectangle the source is asked about |
+| --- | --- | --- |
+| 15,625 over the extent | 1.2003 | x[175.7, 925.5] |
+| 8,000 over a 30% box | 0.3334 | x[−798.8, 1900.5] |
+| 2,500 over a 10% box | 1.0004 | x[101.1, 1000.7] |
+
+One camera, three questions, **12.9× the area** between the first two. The predicted factors from
+the transcribed arithmetic are 1.2000 / 0.3333 / 1.0000, which is why the transcription is trusted.
+
+Driven over the million-vertex corpus, two routes ending on the *identical* camera rectangle — the
+same object, so nothing here is a floating-point argument:
+
+| | rectangle asked about | level | drawn |
+| --- | --- | --- | --- |
+| rescaled, straight in | x[−981, 347] | 4 | 8,395 |
+| rescaled, wandering | x[−3719, −1022] | 0 | **0** |
+| pinned, either route | x[−253, 1355] | 5 | 18,308 |
+
+The second row is the blank canvas that was reported. Its derived scale walks 1.0000 → 1.2104 →
+4.8441 → 1.6247 → 0.5963 across five camera moves, and the rectangle walks off the corpus with it.
+Pinned, both routes agree exactly: 18,308 against 18,308, sharing 100% of the union.
+
+The fix is one line of renderer configuration, and it is the same sentence as the one that turns the
+force simulation off: **a renderer whose source hands back the coordinates its next query is
+expressed in must not move them.** It belongs upstream, in the renderer, rather than in a consumer
+pinning it from a child component.
+
+**A canonical camera is the more robust form of the same fix and is worth having anyway.** Centre
+and zoom as the state, with the rectangle derived on demand, means a route cannot accumulate error
+into the camera even where a renderer does move the ground under it — and it puts the whole thing in
+pure arithmetic testable with no browser. It was not, however, the cause here: the app accumulates
+no deltas of its own. The rectangle was correct arithmetic over a moving definition of the space.
+
+## What this reads is what the app is
+
+The property suite does not take a flag to decide which state the app is in. It reads the app's own
+source and derives the answer from the string that does the pinning, so the verdict is what the app
+**is** rather than what a flag says it is. A flag that reports what the code does is a second copy of
+the fact, and the two copies drift in the direction nobody tests.

@@ -1,10 +1,13 @@
 /**
  * Check the canvas's SOURCE against the corpus, in Node, with no browser and no GPU.
  *
- * `src/tiles.ts` is the half of the canvas that is fossil's: it turns a rectangle into tile runs,
- * tile runs into a `dense_id` predicate, and rows into the parallel typed arrays
- * `@kanzo-tech/graph` uploads. The other half — cosmos.gl's lifetime, the query loop, the buffers
- * — is kanzo's, and is tested next door.
+ * `src/tiles.ts` is the half of the canvas that is fossil's, and it is a CONSUMER now: a viewport
+ * becomes a finite box, `corpus.levelFor` picks the level, `corpus.view` answers it, and a `View`
+ * becomes the parallel typed arrays `@kanzo-tech/graph` uploads. The addressing, the sampling and
+ * the SQL are `@fossil-lang/corpus`'s — see `/docs/design/one-door`. The other half — cosmos.gl's
+ * lifetime, the query loop, the buffers — is kanzo's, and is tested next door. What this script
+ * checks is the composition: that the door, driven through the contract, answers what the window
+ * claims.
  *
  * **This exists because the renderer's half cannot be driven here and the source's half can.**
  * cosmos.gl draws from `requestAnimationFrame`, and a browser does not fire one in a tab that is
@@ -20,7 +23,9 @@
  *   1. `extent()` and `total()` answer with **zero queries** — the opening frame issues none.
  *   2. Every drawn mark is inside the window rectangle, and every one of them comes out of a tile
  *      the run list named. A mark from an unopened tile would mean the predicate and the byte
- *      ledger disagree, which is the whole claim.
+ *      ledger disagree, which is the whole claim. The ledger counts the tiles the DOOR opened,
+ *      which is the code anchor's selection and so never more than the footer boxes' — tighter is
+ *      the improvement, and this checks the direction rather than an equality.
  *   3. `marks` is a PREFIX: `mark` is true down the sample and false down the anchors, and the
  *      answer is ordered so that a caller can slice rather than filter.
  *   4. Every anchor is an end some link needs, out of a tile that was already read — NOT
@@ -42,6 +47,7 @@ import { registerHooks } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { openCorpus } from '@fossil-lang/corpus';
 import { resolveCorpus } from '@fossil-lang/corpus/address';
 import { BOUNDED_DEFAULTS, denseOf, typeOf, vertexId } from '@kanzo-tech/graph';
 
@@ -126,16 +132,14 @@ const addressing = resolveCorpus({ manifestFiles, base: root });
 const type = addressing.vertexType();
 
 // ---- the host's one capability, counted ----
-const registry = new Map();
+//
+// No registration step. `openCorpus` composes `read_parquet('<url>')` against the real addresses,
+// and so does everything under it; the app's own reads go straight at URLs too, so a name in a
+// virtual filesystem would be a second addressing scheme for one of the two paths.
 let queries = 0;
-const register = async (name, url) => {
-  registry.set(name, url);
-};
 const query = async (sql) => {
   queries++;
-  let text = sql;
-  for (const [name, url] of registry) text = text.split(`'${name}'`).join(`'${url}'`);
-  return duckQuery(text);
+  return duckQuery(sql);
 };
 
 const num = (v) => (typeof v === 'bigint' ? Number(v) : Number(v));
@@ -149,11 +153,13 @@ console.log(
 
 /** The last ledger the source reported, so the script can check what it says it opened. */
 let lastCost = null;
+// The door, opened against the same directory the addressing above was resolved from. Everything
+// it costs — the manifests, one `DESCRIBE` per type, the tile-code anchors — is paid here, before
+// the counter below starts, because none of it is a camera move.
+const corpus = await openCorpus(root, { query });
 const source = corpusSource({
-  addressing,
+  corpus,
   boxes,
-  register,
-  query,
   onCost: (cost) => {
     lastCost = cost;
   },
@@ -266,7 +272,15 @@ async function window(fraction, { limit = BOUNDED_DEFAULTS.limit } = {}) {
   );
   ok('n is what the window held, not what came back', slice.n === held, `${slice.n} vs ${held}`);
   ok('marks never exceed the limit', marks <= limit, `${marks} ≤ ${limit}`);
-  ok('the ledger counts the tiles the query opened', lastCost.tiles === chosen.length, `${lastCost.tiles} vs ${chosen.length}`);
+  // The ledger is the DOOR's tile count, and the door addresses by the published code anchor where
+  // one exists — a code range is a tighter description of a tile than the rectangular hull of an
+  // arc that snakes. So this is not an equality against `chosen`, which is the footer path: it is
+  // that the anchor never opens a tile the footer would not have, and never opens none.
+  ok(
+    'the ledger counts no more tiles than the footer would have',
+    lastCost.tiles > 0 && lastCost.tiles <= chosen.length,
+    `${lastCost.tiles} by ${lastCost.addressed} vs ${chosen.length} by footer box`,
+  );
 
   return { slice, rect, marks, held, chosen, runs, bytes, payload };
 }
@@ -309,7 +323,10 @@ console.log('\npinned');
   );
   const pin = vertexId(0, far);
   const view = { xMin: rect.xlo, yMin: rect.ylo, xMax: rect.xhi, yMax: rect.yhi };
-  const bare = selectTiles(boxes, rect).length;
+  // The same window without the pin, so the +1 below is measured against the door's own addressing
+  // rather than against a second implementation of it.
+  await source.slice({ view, limit: BOUNDED_DEFAULTS.limit, fill: 'cluster_id' });
+  const bare = lastCost.tiles;
   const slice = await source.slice({ view, limit: BOUNDED_DEFAULTS.limit, pinned: [pin], fill: 'cluster_id' });
   let found = false;
   for (let i = 0; i < slice.marks; i++) if (denseOf(slice.vertices[i]) === far) found = true;

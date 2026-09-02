@@ -1,11 +1,15 @@
 /**
  * How a window is sampled down to what a renderer will draw, as one SQL scalar.
  *
- * Its own module, and it imports NOTHING. `src/tiles.ts` reaches `@kanzo-tech/graph` and
- * `@duckdb/duckdb-wasm` through its import graph, so a Node script that wanted this expression
- * out of that file would have to resolve a browser bundle to read a string. The verification
- * this expression exists to satisfy — `scripts/verify-nesting.mjs` — runs in Node, so the claim
- * lives where both a browser and a script can pick it up without either paying for the other.
+ * Its own module, and it imports NOTHING, so the one script that drives it —
+ * `scripts/verify-nesting.mjs` — can read it in Node without resolving a browser bundle.
+ *
+ * **The app does not build this string any more, and that is not a reason to delete it.**
+ * `src/tiles.ts` is a consumer of `corpus.levelFor` + `corpus.view` now, and the decimation is
+ * `dense_id % 2^level = 0` inside the door. The property the expression below exists to state is
+ * the same one the door's level IS — a power-of-two stride, so refining only ever adds — and
+ * `verify-nesting.mjs` is what holds the claim to a measurement over a real corpus. What it no
+ * longer is, is the app's own SQL; what it still is, is the argument, with its numbers.
  */
 
 /**

@@ -7,7 +7,7 @@ manifest with no rule for choosing between them; two of them took the same two
 arguments and answered overlapping questions in two languages.
 
 - **`@fossil-lang/corpus`** — `openCorpus(url, { query, wasmUrl })`. Discovery,
-  the camera (`extent`, `window`, `node`, `neighbours`) and the six verbs
+  the camera (`extent`, `levelFor`, `view`, `window`, `node`, `neighbours`) and the six verbs
   (`read`, `expand`, `path`, `aggregate`, `schema`, `executeSql`) on one object.
   **Start here.** No tiles, no `dense_id`, no Morton, no `by_source`, no
   prefixes, no footers.
@@ -64,7 +64,16 @@ const corpus = await openCorpus('https://data.example/graph', {
 
 corpus.types;                              // vertex types with counts and columns, edge types
 const box = await corpus.extent();         // the coordinates a window is expressed in
-const view = await corpus.window({ x: box.minX, y: box.minY, w: 100, h: 100 });
+const rows = await corpus.window({ x: box.minX, y: box.minY, w: 100, h: 100 });
+
+// The camera. `levelFor` is a SEPARATE pure function, so the level is the
+// caller's: `view(rect, level)` is the same answer however the camera got there.
+const rect = { x: box.minX, y: box.minY, w: 1000, h: 1000 };
+const level = corpus.levelFor({ ...rect, budget: 20_000 }); // pixels are the host's
+const frame = await corpus.view({ ...rect, level });        // typed arrays, not rows
+frame.marks;      // a prefix length — everything past it is an anchor
+frame.cost.read;  // 'strided' or 'level': which artefact answered, same rows either way
+
 const one = await corpus.node('https://example.org/person/15');
 const hood = await corpus.neighbours([one.id], { depth: 2 });
 
@@ -121,9 +130,11 @@ it. `crates/fossil-mcp` does the identical thing for the identical reason.
 **A verb reads the manifest's vocabulary; the camera reads the bytes.** A verb
 composes SQL before it has seen a byte, so its column list is `property_groups`;
 `openCorpus` had a round trip to spend and spent it on a `DESCRIBE`. On the
-conformance corpus that is one declared property against five columns on disk,
-so `read` answers with `subject` and `corpus.types` reports all five. Neither is
-wrong and they are not the same question.
+conformance corpus that is **three** declared properties against **seven**
+columns on disk, so `read` answers with `subject`, `birth_year` and `postcode`
+while `corpus.types` reports all seven — the four the manifest never names are
+`dense_id`, `x`, `y` and `cluster_id`, which the writer puts there and the
+vocabulary does not. Neither is wrong and they are not the same question.
 
 - **`read`** — rows of one vertex type under a `where` predicate, an order and
   a limit. `where` is SQL and carries the same authority as `executeSql`: gate

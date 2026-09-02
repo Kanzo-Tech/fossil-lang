@@ -21,9 +21,10 @@
  * thing it is addressing within one frame. The layout is the compiler's output and so is its
  * geometry: if a placement is wrong it is wrong upstream, and it is fixed by recompiling.
  */
-import { GraphCanvas, type BoundedSource } from '@kanzo-tech/graph';
+import { openCorpus } from '@fossil-lang/corpus';
+import { GraphCanvas, useGraphContext, type BoundedSource } from '@kanzo-tech/graph';
 import { categoricalCapacity } from '@kanzo-tech/ui';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Bench } from './bench.js';
 import * as duck from './duckdb.js';
@@ -42,11 +43,57 @@ export interface CanvasProps {
 }
 
 /**
+ * **Pin the frame**, which is the one line between a camera that refines and one that breaks.
+ *
+ * cosmos.gl rescales the positions it is handed to fill its space, deriving the map from the extent
+ * of *that upload*. With the simulation off — the correct default here — `rescalePositions` resolves
+ * to on, and `setPointPositions` is called with no second argument. So every answer rebuilds the map
+ * from itself, and `screenToSpacePosition`, which the query loop reads the camera with, starts
+ * speaking a coordinate system the corpus never wrote. The rectangle the source is asked about is
+ * then a function of the PREVIOUS answer.
+ *
+ * Measured over the bench corpus, two routes to the same camera rectangle: straight in, the source
+ * is asked about x[−981, 347] and draws 8,395; wandering in and out and back, it is asked about
+ * x[−3719, −1022], which is off the corpus, and draws **nothing**. Pinned, both ask x[−253, 1355]
+ * and draw the same 18,308. `scripts/verify-properties.mjs` is that measurement and
+ * `/frame-probe.html` is where the arithmetic was checked against the library's own `getScaleX()`.
+ *
+ * A component rather than a prop because `@kanzo-tech/graph` publishes no passthrough for cosmos.gl
+ * config — `useGraphContext` is the seam it does publish, and a child of `GraphCanvas` is where it
+ * can be read. **The fix belongs upstream**: a renderer whose source hands back the coordinates its
+ * next query is expressed in must not move them, and the day `GraphCanvas` says so this goes.
+ */
+function PinFrame() {
+  const { getGraph } = useGraphContext();
+  useEffect(() => {
+    let live = true;
+    // The renderer is built in an effect of its own and there is no ready signal to await from out
+    // here, so this waits for the instance rather than assuming it. A macrotask and not a frame:
+    // `requestAnimationFrame` does not fire in a tab that is not visible, and this must not depend
+    // on being watched.
+    const pin = () => {
+      if (!live) return;
+      const graph = getGraph();
+      if (graph === null) {
+        setTimeout(pin, 16);
+        return;
+      }
+      graph.setConfigPartial({ rescalePositions: false });
+    };
+    pin();
+    return () => {
+      live = false;
+    };
+  }, [getGraph]);
+  return null;
+}
+
+/**
  * The canvas, its source, and a ledger of what the last frame cost.
  *
  * `useMemo` over the source and not `useState`: it is a value derived from the corpus and the
  * boxes, and rebuilding it is what the query loop watches for. Rebuilt on every render it would
- * re-register the payloads and re-ask `total()` once per frame.
+ * re-open the corpus and re-ask `total()` once per frame.
  */
 export default function Canvas({ bench, boxes }: CanvasProps) {
   const [cost, setCost] = useState<SliceCost | null>(null);
@@ -65,17 +112,20 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
    */
   const slots = useMemo(() => categoricalCapacity(document.documentElement), []);
 
+  /**
+   * The corpus, opened once — and as a PROMISE, which is what keeps this component unchanged.
+   *
+   * `openCorpus` is asynchronous and a `BoundedSource` is not: the query loop builds the source
+   * synchronously and calls it later. Handing the promise to `corpusSource` means there is no
+   * loading branch here and no state machine around the canvas — the source awaits it inside its
+   * own members, once. `bench.base` is absolute for the reason `bench.ts` records: DuckDB resolves
+   * a URL inside its Worker, where a relative one names the wrong directory.
+   */
+  const corpus = useMemo(() => openCorpus(bench.base, { query: duck.query }), [bench]);
+
   const source: BoundedSource = useMemo(
-    () =>
-      corpusSource({
-        addressing: bench.addressing,
-        boxes,
-        register: duck.registerUrl,
-        query: duck.query,
-        onCost,
-        slots,
-      }),
-    [bench, boxes, onCost, slots],
+    () => corpusSource({ corpus, boxes, onCost, slots }),
+    [corpus, boxes, onCost, slots],
   );
 
   return (
@@ -91,11 +141,15 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
         share a colour, they share <em>the</em> colour: everything past the last slot resolves to
         the muted token, and 937,496 of the million vertices came back one grey. The simulation is
         off on purpose: a force would move the points out from under the coordinates the next query
-        is expressed in.
+        is expressed in. <strong>The renderer&apos;s own rescale is off for the same reason</strong>{' '}
+        — see <code>PinFrame</code> above — and without it two routes to the same camera rectangle
+        asked this source about two different rectangles, one of them off the corpus entirely.
       </p>
 
       <div className="can-surface">
-        <GraphCanvas source={source} fill="cluster_id" onFailure={onFailure} />
+        <GraphCanvas source={source} fill="cluster_id" onFailure={onFailure}>
+          <PinFrame />
+        </GraphCanvas>
       </div>
 
       {failure && <p className="str-bad">{failure}</p>}
@@ -129,6 +183,12 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
             <dt>answered in</dt>
             <dd>{cost.ms.toFixed(0)} ms</dd>
           </div>
+          <div>
+            <dt>addressed by</dt>
+            <dd>
+              {cost.addressed} <span className="str-dim">· read {cost.read}</span>
+            </dd>
+          </div>
         </dl>
       )}
 
@@ -149,19 +209,26 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
       </p>
 
       <p className="str-note">
-        <strong>links is 0 on this corpus, and that is the corpus rather than the reader.</strong>{' '}
+        <strong>
+          Almost every edge of this corpus is missing from every frame, and that is the corpus
+          rather than the reader.
+        </strong>{' '}
         A bounded reader can only draw an edge whose far end it has a position for, and it has
         positions for the tiles it fetched. This demo corpus is{' '}
         <code>apps/corpus/guards/fixture.mjs</code>, whose edges are a <em>ring over the
         pre-layout index</em> plus one chord per vertex inside its cluster — so after the Morton
         renumbering the destinations are scattered across the whole id space. Measured over its{' '}
-        {n(bench.stamp.edges)} edges: <strong>2,096 (0.10%)</strong> have both ends in the same
-        tile and <strong>61,244 (3.06%)</strong> within eight tiles of each other. Nothing is
-        broken and nothing here would fix it: an edge to a vertex 200 tiles away is a request for
-        another tile, which is the read a windowed corpus exists not to make. A corpus whose
-        adjacency follows its geometry draws them; this one is a spatial index with a random graph
-        laid over it, and it is honest for the panel to say so rather than to fetch the corpus to
-        hide it.
+        {n(bench.stamp.edges)} edges, at the four windows{' '}
+        <code>scripts/verify-canvas.mjs</code> opens: the whole-corpus view draws{' '}
+        <strong>62,024 (3.10%)</strong>, a 30% window <strong>22,309</strong>, a 10% window{' '}
+        <strong>2,796</strong>, a 2% window <strong>77</strong>. This paragraph said{' '}
+        <em>links is 0 on this corpus</em>, which was true of no window the panel opens and false
+        by 62,024 of the one it opens with — the ledger four lines above was printing the
+        counter-example the whole time. Nothing is broken and nothing here would fix it: an edge to
+        a vertex 200 tiles away is a request for another tile, which is the read a windowed corpus
+        exists not to make. A corpus whose adjacency follows its geometry draws them; this one is a
+        spatial index with a random graph laid over it, and it is honest for the panel to say so
+        rather than to fetch the corpus to hide it.
       </p>
     </div>
   );

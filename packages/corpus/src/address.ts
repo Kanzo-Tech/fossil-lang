@@ -17,21 +17,15 @@
  * - **No bytes.** Nothing here fetches, decodes or reads Parquet. `tileUrl` hands back a string.
  * - **No cache, no debounce, no sampling.** Those are the reader's, and they stay there.
  *
- * **Boxes used to be on that list, and the layout pass is what took them off.** It read: *which
- * tiles a rectangle touches comes from the per-tile `x`/`y` statistics in the Parquet footers … the
- * address is the half that cannot be re-derived from the corpus itself.* That was true when it was
- * written and the renumbering falsified it — `dense_id` is a vertex's rank by Morton code, so a
- * rectangle is a set of code ranges and a code range is a run of tiles. {@link mortonTilesFor} is
- * that decomposition, and it is arithmetic: no fetch, no reader, no engine, and no promise.
- *
- * What it needs instead is **one number per tile end** — {@link TileCodes} — because a rank is not
- * a code and no amount of `chunk_size` recovers the one from the other. The corpus publishes it:
- * `vertex/<Type>/codes.json`, named by the manifest and addressed by {@link VertexAddress.codesUrl},
- * parsed by {@link parseTileCodes}. That is 5,498 B on a million-vertex corpus — 1,960 B is what the
- * same 245 pairs pack to, and the difference buys a document with no endianness, no width and no
- * offset table to get wrong — against 1.15 MB of footer at five million. And it buys a *tighter*
- * answer rather than a looser one: 1.00× over-read against the geometric path's 1.13× on the same
- * window. The seam moved; it did not vanish, and it is now the smaller half.
+ * **Boxes used to be on that list, and the layout pass is what took them off.** `dense_id` is a
+ * vertex's rank by Morton code, so a rectangle is a set of code ranges and a code range is a run of
+ * tiles: {@link mortonTilesFor} is that decomposition, and it is arithmetic — no fetch, no reader,
+ * no engine, no promise. What it needs instead is **one number per tile end**
+ * ({@link TileCodes}), because a rank is not a code and no amount of `chunk_size` recovers the one
+ * from the other; the corpus publishes it as `vertex/<Type>/codes.json`, addressed by
+ * {@link VertexAddress.codesUrl} and parsed by {@link parseTileCodes}. `/docs/design/corpus` has
+ * why a JSON document and not a packed one, and what the anchor path over-reads against the footer
+ * path over the same windows. The seam moved; it did not vanish, and it is now the smaller half.
  *
  * `openCorpus` in `./corpus.ts` is the layer that does all three, by taking an engine from the host
  * rather than growing one. It sits **on** this module and does not absorb it: the subpath
@@ -1129,4 +1123,55 @@ export function mortonTilesFor({ box, extent, codes }: BoxQuery): number[] {
   }
   const grid = gridBoxOf(box, against);
   return grid === null ? [] : tilesForGrid(grid, codes);
+}
+
+// ---------------------------------------------------------------------------
+// The other half of a camera's question: which LEVEL, and how coarse that is
+// ---------------------------------------------------------------------------
+
+/**
+ * The decimation level *k* means: **the vertices whose `dense_id` is a multiple of 2^k**.
+ *
+ * Over a Morton-ordered `dense_id` that is one vertex per quadtree cell of depth *k*, so a level is
+ * a level of the same curve the tile address is read off — not a sample, not a budget, not a cap.
+ * Two consequences follow from the definition alone and neither needs a byte on disk:
+ *
+ * - **It nests.** `dense_id % 2^(k+1) == 0` is a strict subset of `dense_id % 2^k == 0`, so
+ *   refining only ever ADDS, and a vertex drawn once stays drawn at the same position.
+ * - **It is a function of the level and nothing else.** No `matched`, no `limit`, no camera. Which
+ *   is what makes {@link levelFor} a *separate* function rather than a step inside the read.
+ */
+export const strideOf = (level: number): number => 2 ** Math.max(0, Math.trunc(level));
+
+/** What {@link levelFor} takes: a rectangle, what it may cost, and the anchor that sizes it. */
+export interface LevelQuery extends BoxQuery {
+  /**
+   * How many vertices the caller is willing to be handed. **A budget, not a cap** — the answer is
+   * a level, and a level's population is whatever the rectangle holds at that level.
+   */
+  budget: number;
+  /** Rows per tile. Taken from the anchor when it carries one, as `codes.json` does. */
+  chunkSize?: number;
+  /** The type's `vertex_count`, when known — the ceiling on any estimate. */
+  count?: number;
+}
+
+/**
+ * The coarsest level whose population fits a budget — **pure, synchronous, and nobody's session.**
+ *
+ * Not a step inside the read, and the three arguments for that are in `/docs/design/one-door`
+ * under *The level is the caller's*: Zarr picks on the client, monotone refinement cannot be
+ * stated unless "the same rectangle at the same level" is expressible, and a budget is made of
+ * pixels, which stop at this argument list.
+ *
+ * **The estimate is the tiles, not the area**, and the measurements that decided it are on the
+ * same page. `count` caps it, because a rectangle covering the corpus cannot hold more than the
+ * corpus.
+ */
+export function levelFor({ budget, chunkSize, count, ...box }: LevelQuery): number {
+  const rows = chunkSize ?? (box.codes as TileCodes & { chunkSize?: number }).chunkSize ?? 0;
+  const tiles = mortonTilesFor(box).length;
+  const estimate = Math.min(tiles * rows || 0, count ?? Number.POSITIVE_INFINITY);
+  if (!(budget > 0) || !(estimate > budget)) return 0;
+  return Math.ceil(Math.log2(estimate / budget));
 }
