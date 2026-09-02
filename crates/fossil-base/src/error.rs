@@ -12,10 +12,10 @@
 //!
 //! # Construction invariant
 //!
-//! `ErrorGuaranteed` cannot be constructed outside this module. The two
-//! public construction paths are [`delay_span_bug`] and [`bug`], both of
-//! which push at least one [`Diagnostic`] to the Salsa accumulator before
-//! returning the taint. There is no public path from external code to
+//! `ErrorGuaranteed` cannot be constructed outside this module. Every public
+//! path in — [`raise`], and [`delay_span_bug`] / [`bug`] which go through it —
+//! pushes exactly one [`Diagnostic`] to the Salsa accumulator before returning
+//! the taint. There is no public path from external code to
 //! `ErrorGuaranteed::new()`. The invariant is structurally enforced — a
 //! `Default` impl would defeat it and is intentionally omitted.
 
@@ -24,16 +24,16 @@ use salsa::Accumulator;
 
 /// Type-check failure taint.
 ///
-/// Construct via [`delay_span_bug`] or [`bug`] — both push a [`Diagnostic`]
-/// to the accumulator before returning, so any `ErrorGuaranteed` value
-/// implies "at least one diagnostic was emitted".
+/// Construct via [`raise`], [`delay_span_bug`] or [`bug`] — each pushes a
+/// [`Diagnostic`] to the accumulator before returning, so any
+/// `ErrorGuaranteed` value implies "at least one diagnostic was emitted".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ErrorGuaranteed(std::marker::PhantomData<()>);
 
 impl ErrorGuaranteed {
-    /// Module-private constructor — only [`delay_span_bug`] / [`bug`] call
-    /// this. Keeping it private is what enforces the "at least one diagnostic
-    /// per `ErrorGuaranteed`" construction invariant.
+    /// Module-private constructor — [`raise`] is its one caller, and every
+    /// other path in reaches it through there. Keeping it private is what
+    /// enforces the "one diagnostic per `ErrorGuaranteed`" invariant.
     #[must_use]
     const fn new() -> Self {
         Self(std::marker::PhantomData)
@@ -78,10 +78,6 @@ pub fn delay_span_bug(
     span: Span,
     message: impl Into<String>,
 ) -> ErrorGuaranteed {
-    // `delay_span_bug` is the generic taint emitter — it carries neither a
-    // structured suggestion source nor a did-you-mean candidate.
-    // Suggestion-emitting call sites build their own `Diagnostic` and attach
-    // the structured fields via the builders.
     raise(db, Diagnostic::new(Severity::Error, message, span))
 }
 

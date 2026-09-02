@@ -9,9 +9,9 @@
 //! `read_file` is — never a query key, never interned — BEFORE invoking
 //! `compile()`. Rust never does network IO from the WASM-gated crates.
 //!
-//! Implements `InputDescriptor` so existing forward-propagation code paths in
-//! `fossil-hir` can dispatch by `&dyn InputDescriptor` without specialisation
-//! (passes a hot-path `&dyn`, NOT a `Box<dyn>` — CLAUDE.md hard rule).
+//! It implements `InputDescriptor`, and nothing dispatches through that trait:
+//! `fossil-hir` reads the struct's `columns` directly (`lookup_inferred`), so
+//! the impl below is the trait's only one that is not a stub.
 
 use crate::{DescriptorError, FieldType, InputDescriptor, InputSchema};
 use fossil_graph_schema::Primitive;
@@ -44,8 +44,7 @@ pub struct InferredDescriptor {
     /// order to *read* the source, but the checker only ever sees what the
     /// program says, so that is the only string both ends can agree on.
     pub uri: SmolStr,
-    /// Ordered columns (order is significant — Phase 3 CORE-05 column-position
-    /// fallback parsing depends on it).
+    /// Ordered columns; the order is the source's own and is significant.
     pub columns: Vec<InferredColumn>,
     /// Opaque token identifying the state of the source this was read from.
     /// The cache compares it; nothing interprets it. The native host writes
@@ -75,19 +74,15 @@ impl InferredDescriptor {
 }
 
 impl InputDescriptor for InferredDescriptor {
-    // Trait signature returns `&str` (not `&'static str`) for Phase 3+ dynamic
-    // naming compatibility — see `InputDescriptor::name` doc and the mirror
-    // allow on `CsvDescriptor::name` in `lib.rs`.
+    // `&str` and not `&'static str`: the trait's signature, so an impl may
+    // compute its name.
     #[allow(clippy::unnecessary_literal_bound)]
     fn name(&self) -> &str {
         "inferred"
     }
 
-    // `parse()` is a no-op for InferredDescriptor — there is no raw blob to
-    // parse; the host constructed the columns directly via DuckDB DESCRIBE.
-    // We satisfy the trait by returning a freshly-built InputSchema from
-    // self.columns. Plan 13-02 wires the actual lower.rs/check.rs path
-    // around this trait method.
+    // There is no raw blob to parse — the host built the columns from a
+    // `DESCRIBE` — so this projects `self.columns` into an `InputSchema`.
     fn parse(&self, _raw: &[u8]) -> Result<InputSchema, DescriptorError> {
         let mut fields = indexmap::IndexMap::new();
         for c in &self.columns {

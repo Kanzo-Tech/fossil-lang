@@ -1091,11 +1091,11 @@ fn named_arg_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
 ///
 /// **This is the function the three hand-written arms turned into.** `where`,
 /// `select` and `join` each counted their own arguments, each phrased the
-/// failure differently, and the other ten verbs had nowhere to count from
-/// because their rows declared no parameters to count. Arity, named-argument
-/// resolution and the refusal of a name no parameter answers to now happen once
-/// here, for thirteen rows, out of [`SigSpec`] — which is what a signature was
-/// already for on the scalar side.
+/// failure differently, and every other verb had nowhere to count from because
+/// its row declared no parameters to count. Arity, named-argument resolution
+/// and the refusal of a name no parameter answers to now happen once here, for
+/// every `Receiver::Relation` row, out of [`SigSpec`] — which is what a
+/// signature was already for on the scalar side.
 fn bind_stage_args<'a>(
     db: &dyn fossil_base::Db,
     row: &'a crate::stdlib::RegistryEntry,
@@ -3858,7 +3858,7 @@ Sales := Order.join(Person)
     }
 
     /// A verb the lowering does not implement is named, not ignored — and the
-    /// message counts the catalogue's relation members, so the gap between what
+    /// message lists the catalogue's relation members, so the gap between what
     /// a relation HAS and what the lowering DOES is visible.
     #[test]
     fn an_unknown_source_verb_is_a_diagnostic() {

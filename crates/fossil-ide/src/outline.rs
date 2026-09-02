@@ -1,10 +1,9 @@
 //! `textDocument/documentSymbol` — the document outline.
 //!
 //! Produces the hierarchical-capable symbol list a client renders in its
-//! outline / breadcrumb panel: one entry per top-level Fossil definition (a
-//! mapping, and the shape its header targets). v0.1 emits a **flat** list (no
-//! nesting) — adequate for the playground outline; per-mapping property children
-//! are a v2 refinement.
+//! outline / breadcrumb panel: one entry per [`crate::SymbolIndex`] entry. The
+//! list is **flat** (no nesting) — per-mapping property children would be the
+//! refinement.
 //!
 //! # Source: the [`SymbolIndex`], translated to LSP coordinates
 //!
@@ -22,6 +21,7 @@
 //! |------------------|------------------|------------------------------------|
 //! | `Mapping`        | `CLASS`          | a mapping produces typed subjects   |
 //! | `Shape`          | `INTERFACE`      | a `ShEx` shape is a structural type |
+//! | `Source`         | `VARIABLE`       | a `:=` binds a name to a value      |
 //!
 //! WASM-clean: returns `lsp_types::DocumentSymbol` directly (`lsp-types` itself
 //! is wasm32-clean), so the playground consumes it with no translation.
@@ -34,12 +34,11 @@ use crate::line_index::LineIndex;
 use crate::position::line_index;
 
 /// Build the document outline for `file`: a flat `Vec<DocumentSymbol>` in source
-/// order, one entry per top-level definition (mapping / shape).
+/// order, one entry per top-level definition (source / mapping / shape).
 ///
-/// Each symbol's `range` and `selection_range` are the (UTF-16) range of the
-/// defining node — v0.1 uses the same range for both (the whole declaration is
-/// also the selection target). Returns an empty `Vec` for a file with no
-/// top-level definitions.
+/// Each symbol's `range` and `selection_range` are the same (UTF-16) range of
+/// the defining node — the whole declaration is also the selection target.
+/// Returns an empty `Vec` for a file with no top-level definitions.
 #[must_use]
 pub fn document_symbols(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<DocumentSymbol> {
     let index = SymbolIndex::build(db, file);

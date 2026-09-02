@@ -83,9 +83,6 @@ impl FossilDb {
             catalogue: Catalogue::default(),
         };
         let _ = db.files.registry(&db);
-        // The host DECLARES its table through `System::providers`; the
-        // catalogue is what everything READS, and it seeds itself from that
-        // declaration. Forcing it here keeps the allocation outside any query.
         let _ = db.catalogue.registry(&db);
         db
     }
@@ -129,8 +126,6 @@ mod tests {
 
     #[test]
     fn with_event_callback_constructs_a_db_and_fires_at_least_one_event() {
-        // Counter captured by the callback — the test asserts the Salsa
-        // runtime invoked the callback at least once during query execution.
         let counter: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
         let counter_clone = counter.clone();
         let callback: Box<dyn Fn(salsa::Event) + Send + Sync + 'static> = Box::new(move |_evt| {
@@ -140,8 +135,6 @@ mod tests {
         let system: Arc<dyn System> = Arc::new(NativeSystem::default());
         let db = FossilDb::with_event_callback(system, callback);
         let file = SourceFile::new(&db, "x".to_string(), "x.fossil".to_string());
-        // Executing a tracked function flushes a `WillExecute` event through
-        // the registered callback.
         let _ = _read_text(&db, file);
 
         assert!(

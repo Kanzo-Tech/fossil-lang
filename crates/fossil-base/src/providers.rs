@@ -254,7 +254,6 @@ pub fn provider(table: &[&'static Provider], constructor: &str) -> Option<&'stat
 /// A HOST is what has a use for this: it holds buffers somebody opened and
 /// nothing in them says what they are, and a file the installed table claims is
 /// an INPUT — bytes a program reads through `io.…` — rather than a program.
-/// `fossil-wasm`'s `diagnostics_for_file` is the first caller.
 #[must_use]
 pub fn claimed(table: &[&'static Provider], uri: &str) -> bool {
     table.iter().any(|p| p.accepts(uri))
@@ -306,9 +305,9 @@ impl Catalogue {
     /// Seeding from the host here rather than at each constructor is not
     /// convenience. A `Db` implementation that forgot to seed would get [`DATA`]
     /// and silently lose the rows that read TYPES, so every shape document in
-    /// that session would decode to nothing — a wrong answer, not an error, in
-    /// six implementations that have no test between them. Taking `&dyn Db`
-    /// instead of `&dyn salsa::Database` is what makes forgetting unspellable.
+    /// that session would decode to nothing — a wrong answer, not an error.
+    /// Taking `&dyn Db` instead of `&dyn salsa::Database` is what makes
+    /// forgetting unspellable.
     ///
     /// Force it from the database constructor anyway. Salsa 0.26 lets an input
     /// be created while a query runs and nothing checks, but the created input

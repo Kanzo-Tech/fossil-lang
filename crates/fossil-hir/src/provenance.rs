@@ -139,10 +139,10 @@ pub struct ExprTypeEntry<'db> {
 /// or an empty table if the mapping had a type error (the error already
 /// emitted ≥1 diagnostic).
 ///
-/// The literal cases are the simple ones and behave as they read: a
-/// `Template` RHS synthesises `IriTemplate`, a `StringLit` synthesises
-/// `String`. A `FieldRef` resolves only where the mapping's source has a row;
-/// without one it synthesises no entry at all.
+/// The literal cases are the simple ones and behave as they read: a `StringLit`
+/// synthesises `String`, an `Interpolation` a `String` unless something above it
+/// expects a reference. A `FieldRef` resolves only where the mapping's source
+/// has a row; without one it synthesises no entry at all.
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn expr_types<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> ExprTypes<'db> {
@@ -262,7 +262,7 @@ Users : Person from User
             expr_id: _,
         }) = ty_origin(&db, m, ExprId(0))
         {
-            // Reachable for property 0 (Template → IriTemplate).
+            // Reachable for property 0, the identity.
         }
     }
 

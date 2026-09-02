@@ -54,12 +54,11 @@
 //! hands over the Nth shape the document DECLARES, so the IRI can only be one
 //! the document declares.
 //!
-//! Thirteen programs were driven through [`resolve_target_shape`] to settle it
-//! — a misspelt header name, an unregistered document, an unknown extension, a
-//! malformed document, one that decodes to no shapes, no `type` line at all, a
-//! provider that does not read types, an unknown constructor, an arity
-//! mismatch, a bare-string document — and every one answered `Ok(None)`. Not
-//! one reached a construction site.
+//! Every way a program can fail to bring a shape in was driven through
+//! [`resolve_target_shape`] to settle it — the corpus is
+//! `a_document_that_cannot_answer_leaves_the_mapping_with_no_shape_clause`, one
+//! row per way, plus the no-`type`-line case beside it — and every one answered
+//! `Ok(None)`. Not one reached a construction site.
 //!
 //! `Ok(None)` therefore means two things that used to be one, and the second is
 //! the residue: a mapping with NO SHAPE CLAUSE, and a mapping whose shape name
@@ -234,24 +233,21 @@ impl<'db> ResolvedShape<'db> {
 /// Three cases, and the third one used to be the opposite of what it says:
 ///
 /// 1. **A narrowed literal** (`datatype: Some(p)`) expects that primitive.
-/// 2. **An edge** (`targets` non-empty) expects an [`TyKind::Iri`]: the value is
-///    a reference to another node, and the only thing a reference can be is an
-///    IRI. This is the one place the old `Iri` default was right, and it is now
-///    the only place it happens.
+/// 2. **An edge** (`targets` non-empty) expects a [`TyKind::Ref`] to the shapes
+///    the constraint names: the value is a reference to another node, and
+///    naming WHICH is what stops every reference being one type.
 /// 3. **Anything else** — the document mentioned the predicate and said nothing
 ///    about its value — expects NOTHING. The checker enforces the cardinality
 ///    and leaves the type alone.
 ///
-/// Case 3 is the fix. `check.rs` resolved a missing value type with
-/// `unwrap_or_else(|| Ty::new(db, TyKind::Iri))` — the NARROWEST type in the
-/// lattice — while this module's own field doc said `None` meant "any value",
-/// the WIDEST. Both could not be right, and `Iri` was the wrong one: a shape
-/// that declines to narrow the value was rejecting a `String`, so
-/// `name = .name` failed against `ex:name .` — a constraint that constrains
-/// nothing. `PropertyConstraint::datatype`'s doc in `fossil-graph-schema`
-/// records the contradiction and asks whoever rewrites this to choose
-/// deliberately; this is the choice. A shape that does not narrow the value
-/// does not narrow the value.
+/// Case 3 is the one that reads backwards. A missing value type resolved to the
+/// NARROWEST type in the lattice while this module's own field doc said `None`
+/// meant "any value", the WIDEST. Both could not be right: a shape that
+/// declines to narrow the value must not reject a `String`, or `name = .name`
+/// fails against `ex:name .` — a constraint that constrains nothing.
+/// `PropertyConstraint::datatype`'s doc in `fossil-graph-schema` records the
+/// contradiction and asks whoever rewrites this to choose deliberately; this is
+/// the choice. A shape that does not narrow the value does not narrow it.
 fn expected_value_ty<'db>(db: &'db dyn fossil_base::Db, c: &PropertyConstraint) -> Option<Ty<'db>> {
     if let Some(p) = c.datatype {
         return Some(Ty::new(db, TyKind::Primitive(p)));
@@ -348,8 +344,8 @@ pub fn suggested_alias(predicate_iri: &str) -> SmolStr {
 /// are deleted: positional binding by local name means every one of the four
 /// failures lands at the `type { … } := io.shex(…)` binding first, and by the
 /// time a mapping asks for its target shape there is no shape IRI left to fail
-/// with. Thirteen programs, one per way of getting it wrong, all answered
-/// `Ok(None)`.
+/// with. One program per way of getting it wrong, all answering `Ok(None)`, is
+/// what settled it — see the module docs.
 ///
 /// **[`Self::NoDocument`] is unreachable by the same argument and is still
 /// here.** `TypeEntry::shape_iri` is `Some` only when `decoded_document`
@@ -819,10 +815,10 @@ User : Person from users
     //
     // The four variants and the four arms of `check::surface_target_shape_error`
     // that rendered them are now deleted too. This tombstone reported them as a
-    // defect and left them standing; thirteen programs driven through
-    // `resolve_target_shape` (one per way a document can fail, plus the ones
-    // that succeed) answered `Ok(None)` or `Ok(Some(_))` and never an `Err`,
-    // and that is what settled it.
+    // defect and left them standing; one program per way a document can fail,
+    // driven through `resolve_target_shape` beside the ones that succeed,
+    // answered `Ok(None)` or `Ok(Some(_))` and never an `Err`, and that is what
+    // settled it.
     //
     // The one thing below them that IS live is the collapse itself, and this is
     // the replacement test for it.

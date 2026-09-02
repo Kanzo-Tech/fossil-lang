@@ -6,13 +6,13 @@ use crate::{ResolveError, ResolvedPath};
 /// the user wrote in their `.fossil` mapping to a concrete URL + cloud
 /// configuration the runtime can act on.
 ///
-/// `Send + Sync + Debug` mirrors the bound on `fossil-base::System` —
-/// resolvers are typically shared across worker threads in
-/// `fossil-layout` and across request handlers in a server host.
+/// `Send + Sync + Debug` mirrors the bound on `fossil-base::System`, so a
+/// resolver can be shared across threads or request handlers.
 ///
-/// Standalone CLIs and the playground mount [`DefaultPathResolver`].
-/// Multi-tenant hosts implement this trait against their own connection
-/// registry and pass an `Arc<dyn PathResolver>` through to the runtime.
+/// **No crate in this workspace mounts one.** The seam is here for a
+/// multi-tenant host, which implements this trait against its own connection
+/// registry; what the workspace itself uses of this crate is
+/// [`crate::ResolvedPath`] alone (`fossil-introspect`, `fossil-mcp`).
 pub trait PathResolver: Send + Sync + std::fmt::Debug {
     /// Resolve `raw_path` — a path string as it appeared in the user's
     /// `.fossil` source — to a concrete [`ResolvedPath`].
@@ -30,7 +30,8 @@ pub trait PathResolver: Send + Sync + std::fmt::Debug {
 /// unchanged; host references (`@…`) are rejected because there is no
 /// host-side connection registry to resolve them against.
 ///
-/// Mounted by `fossil-cli` and the playground.
+/// Nothing in this workspace mounts it; `fossil-cli` resolves `@conn` through
+/// `fossil-locator`'s `SourceAnchor` instead.
 #[derive(Debug, Default)]
 pub struct DefaultPathResolver;
 

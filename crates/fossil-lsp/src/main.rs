@@ -2,7 +2,7 @@
 //!
 //! The server itself is the library half of this crate (`src/lib.rs`): the
 //! host's [`System`](fossil_base::System), the `#[salsa::db]` struct, the
-//! open-file table, the capability set and the twelve handlers. This file owns
+//! open-file table, the capability set and every handler. This file owns
 //! the things that need a socket or a process and nothing else — `Connection::stdio()`,
 //! the `initialize` handshake, `handle_shutdown`, the message loop, the IO-thread
 //! join, and `tracing` to stderr.

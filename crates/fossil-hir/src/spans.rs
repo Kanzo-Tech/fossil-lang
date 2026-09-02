@@ -190,8 +190,8 @@ pub fn spans<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Spa
     Spans::new(db, by_expr, body.ref_spans(db).clone())
 }
 
-/// The mapping-relative [`Span`] of a mapping's HEADER — `User : ex:Person
-/// from users`.
+/// The mapping-relative [`Span`] of a mapping's HEADER — `User : Person from
+/// users`.
 ///
 /// The span every diagnostic about the mapping AS A WHOLE belongs on: the
 /// target shape it names and could not resolve, two of its predicates sharing a

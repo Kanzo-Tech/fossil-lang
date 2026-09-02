@@ -5,47 +5,40 @@
 //! because the `ItemTree` carries SIGNATURES ONLY, so editing one mapping's
 //! body invalidates neither the file's item tree nor its sibling mappings —
 //! and the per-mapping TYPES from
-//! [`fossil_hir::check::typecheck_mapping`] (Phase 3, CORE-04..07). Emits a
-//! [`MirGraph`] of the shape:
-//! `Source → Extend(iri = ...) → TripleEmit* → Sink(GraphAr)`.
+//! [`fossil_hir::check::typecheck_mapping`]. Emits a [`MirGraph`] of the shape
+//! `Source → (pipeline verbs) → EmitVertex → Sink(GraphAr)`;
+//! [`apply_output_shape`] is the pass that adds [`Op::EmitEdge`].
 //!
 //! # Reachability
 //!
 //! The IR defines the whole algebra; the surface reaches only part of it, and
 //! that gap is deliberate — completeness of the IR is a statement about the
-//! algebra, not about what a `.fossil` file can spell. Reachable from source
-//! today: `Source`, `EmitVertex`, `EmitEdge` and `Sink` from the mapping body,
-//! plus `Filter` / `Project` / `Join` from the pipeline verbs `where` /
-//! `select` / `join` on a source binding. The remainder (`Extend` / `Rename` /
-//! `Union` / `GroupBy` / `Aggregate` / `Distinct` / `Empty`) has no spelling in
-//! the language and is exercised by direct `MirGraph` construction instead.
+//! algebra, not about what a `.fossil` file can spell. `ops.push(Op::…)` in this
+//! file is the list of what a program reaches; [`Op::Extend`], [`Op::Rename`]
+//! and [`Op::Empty`] are what it does not, and they are exercised by direct
+//! `MirGraph` construction instead.
 //!
-//! # Phase 4 generalisations over the Phase 1 hardcodes
+//! # What is NOT defaulted
 //!
 //! - **Source row type** comes from [`fossil_hir::check::TypeckOutput`]'s
-//!   `source_row` when type-checking succeeds; otherwise it
-//!   falls back to the Phase 1 `Record({id, name})` so codegen still produces
-//!   output (walking-skeleton preserved — never panic).
-//! - **Multi-property mappings** emit one shared upstream `Extend(field="iri")`
-//!   feeding N `TripleEmit`s (one per non-`iri` property), then one `Sink`.
-//!
-//! # Source URI + format (Phase 5 STDL-06)
-//!
+//!   `source_row`. A source that declares no schema yields a record with NO
+//!   fields (`untyped_row`) and `field_ty` types its columns `String`. It must
+//!   never invent field names: a `Record({id, name})` default made unrelated
+//!   sources look like they had `id` and `name` columns.
 //! - **Source URI + format** are resolved from the mapping's source binding via
-//!   [`fossil_hir::DefMap::lookup_source_call`] — the `io.csv` / `io.json` /
-//!   `io.parquet` constructor name selects the [`SourceFormat`]; the
-//!   constructor's first positional string is the URI. This replaces the
-//!   Phase-1 hardcoded `examples/users.csv` / `Csv`. `def_map(db, file)` is
-//!   already read here (file-keyed, structurally stable across body edits — see
-//!   the barrier note below), so resolving the source call adds NO new
-//!   per-mapping Salsa fan-out. A binding with no recognisable `io.*("...")`
-//!   call (a malformed source) falls back to `examples/users.csv` / `Csv` so
-//!   `lower_to_mir` never panics.
+//!   [`fossil_hir::DefMap::lookup_source_call`] — the constructor name selects
+//!   the [`SourceFormat`], its first positional string is the URI. A binding
+//!   that resolves to no URI is an ERROR and not a default; `resolve_source`
+//!   below says what a default cost. `def_map(db, file)` is already
+//!   read here (file-keyed, structurally stable across body edits — see the
+//!   barrier note below), so resolving the source call adds NO new per-mapping
+//!   Salsa fan-out.
 //!
 //! # CRITICAL barrier rule
 //!
-//! `lower_to_mir` may read `body(db, mapping)`, `typecheck_mapping(db, mapping)`
-//! — all barrier-routed through `mapping_cst_node`.
+//! [`lower_to_mir_pg`] may read `body(db, mapping)` and
+//! `typecheck_mapping(db, mapping)` — all barrier-routed through
+//! `mapping_cst_node`.
 //! It MUST NOT add a `parse(db, file)` read in the per-mapping path (would
 //! break `MAX_PER_MAPPING_FAN_OUT = 1`). `def_map(db, file)` is file-keyed and
 //! structurally stable across body-only edits, so the `def_map` reads here do
@@ -53,20 +46,8 @@
 //!
 //! `tests/fan_out.rs` is what goes red. It edits one property of one mapping in
 //! ten and counts `lower_to_mir_pg` re-executions off Salsa's own events: one.
-//! The rule was written in three places in this file and measured in none —
-//! `MAX_PER_MAPPING_FAN_OUT` exists only in two `fossil-hir` test files, over
-//! `fossil-hir`'s queries, so adding the forbidden read here left the whole of
-//! that crate green. It now takes the count from one to ten.
-//!
-//! # Public Salsa query signature (Phase 2-9 contract — locked)
-//!
-//! ```ignore
-//! #[salsa::tracked]
-//! pub fn lower_to_mir<'db>(
-//!     db: &'db dyn fossil_base::Db,
-//!     mapping: fossil_hir::MappingLoc<'db>,
-//! ) -> MirGraph<'db>;
-//! ```
+//! `fossil-hir`'s own fan-out tests measure `fossil-hir`'s queries, so a
+//! forbidden read added HERE leaves the whole of that crate green.
 
 use fossil_graph_schema::Cardinality as GsCardinality;
 use fossil_graph_schema::{GraphSchema, Primitive, local_name};
@@ -93,7 +74,7 @@ use crate::op::{Expr, Op, SinkRef, SourceFormat, VProp};
 /// [`GraphSchema`] this query has no way to read: MIR is a property graph in
 /// the middle and never learns which schema language is on either side of it.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db mirrors lower_to_mir
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db mirrors `MirGraph<'db>`
 pub fn lower_to_mir_pg<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
@@ -176,9 +157,8 @@ pub fn lower_to_mir_pg<'db>(
             out.predicates(db).clone(),
         ),
     };
-    // v0.1: every prop is typed String (the legacy path types nothing either —
-    // codegen ignores `Ty`). The descriptor-driven type refinement is the next
-    // increment; the backend derives the GraphAr/xsd spelling from `Ty`.
+    // v0.1: every prop is typed String. The descriptor-driven type refinement is
+    // the next increment; the backend derives the GraphAr/xsd spelling from `Ty`.
     let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
 
     let mut ops: Vec<Op<'db>> = Vec::with_capacity(3);
@@ -213,10 +193,9 @@ pub fn lower_to_mir_pg<'db>(
 
     // Classify each non-`iri` property: FieldRef/StringLit → vertex prop;
     // IRI-template that resolves to another subject → edge; dangling template /
-    // constant prefixed-name → neither (v0.1 — mirrors synthesize_sink_plan).
+    // constant prefixed-name → neither (v0.1).
     // (a) Type refinement: a FieldRef prop carries the source field's type
-    // (refined when the source declares a schema; String otherwise — same
-    // as the legacy path, which types nothing). The backend derives the
+    // (refined when the source declares a schema; String otherwise). The backend derives the
     // GraphAr/xsd spelling from `ty`. Cardinality stays `single_valued = true`
     // here (the ShEx-descriptor refinement that would set multi-valued needs the
     // descriptor wired into the lowering — a later increment).
@@ -304,8 +283,8 @@ pub fn lower_to_mir_pg<'db>(
             // arithmetic expression is NEITHER — `net = Row.gross -
             // Row.discount` over two `xsd:float` columns is a float column. An
             // arm answering `Bool` for every `BinOp` writes the property with a
-            // value DuckDB computes as a double and a declared type of boolean,
-            // which is the silent half of a wrong answer.
+            // value the engine computes as a double and a declared type of
+            // boolean, which is the silent half of a wrong answer.
             HirExpr::BinOp { .. } | HirExpr::UnaryOp { .. } => props.push(VProp {
                 name: pred_local,
                 value: lower_property_value(db, &prop.value, &m.source_binding, None),
@@ -356,9 +335,8 @@ pub fn lower_to_mir_pg<'db>(
 
     let type_name = SmolStr::new(local_name(&m.shape_iri));
 
-    // 1: EmitVertex. All emit ops read the source relation at index 0 (the Sink
-    // is nominal — the backend walks every EmitVertex/EmitEdge op, as the legacy
-    // codegen walks every TripleEmit).
+    // 1: EmitVertex. All emit ops read the source relation at index 0; the Sink
+    // is nominal, because the backend walks every EmitVertex/EmitEdge op.
     ops.push(Op::EmitVertex {
         input: source_idx,
         type_name,
@@ -1376,9 +1354,6 @@ fn is_per_row(e: &HirExpr) -> bool {
 
 /// Fold a list of expression parts into a left-leaning Concat chain with
 /// adjacent-literal fusion: `[Lit("a"), Lit("b"), Col]` → `Concat(Lit("ab"), Col)`.
-///
-/// Fusion is required for codegen to produce the snapshot SQL
-/// (`'https://example.org/user/'`, not `'https://example.org/' || 'user/'`).
 fn fold_concat_left<'db>(parts: Vec<Expr<'db>>) -> Expr<'db> {
     let mut fused: Vec<Expr<'db>> = Vec::with_capacity(parts.len());
     for part in parts {

@@ -307,8 +307,9 @@ impl LspState {
     ///
     /// The whole point is that it is the REAL server: the host, the provider
     /// rows and the document registration are `LspState::new`'s, so the events
-    /// counted are the ones a keystroke really emits.
-    /// `tests/didchange_revalidation.rs` is the caller, and the only one.
+    /// counted are the ones a keystroke really emits. The revalidation gates
+    /// (`tests/didchange_revalidation.rs`, `tests/workspace_revalidation.rs`)
+    /// are the callers.
     #[must_use]
     pub fn with_event_callback(
         callback: Box<dyn Fn(salsa::Event) + Send + Sync + 'static>,

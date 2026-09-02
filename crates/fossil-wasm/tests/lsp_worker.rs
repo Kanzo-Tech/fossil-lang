@@ -118,7 +118,7 @@ fn unknown_method_returns_method_not_found() {
 
 #[test]
 fn did_open_emits_per_file_publish_diagnostics() {
-    // B3 fix verification: publish_diagnostics is per-file. didOpen on uri B
+    // publish_diagnostics is per-file. didOpen on uri B
     // must emit publishDiagnostics scoped to B's uri ONLY — never carrying
     // diagnostics from a previously-opened A.
     let mut pg = FossilPlayground::new();

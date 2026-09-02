@@ -1,13 +1,8 @@
 //! Every `LoweringKind::Expr` template is real SQL that a real `DuckDB` binds.
 //!
-//! Native-only, and no longer for the reason this line used to give. It said
-//! `fossil-layout` carried a `wasm32` `compile_error!` tripwire; `1e11a91`
-//! deleted that tripwire, and the crate now compiles for wasm32 and declares it
-//! with `[package.metadata.fossil] wasm = true` — it is IN the
-//! `cargo xtask wasm-check` closure. What stays native is THIS FILE, which
-//! links the `DuckDB` dev-dependency the library no longer has. The gate never
-//! builds it: it runs `cargo check --target wasm32-unknown-unknown` without
-//! `--all-targets`, so no `tests/` target is compiled for wasm32.
+//! Native-only because THIS FILE links the `DuckDB` dev-dependency; the library
+//! compiles for wasm32. The gate never builds it — `cargo xtask wasm-check` runs
+//! without `--all-targets`, so no `tests/` target is compiled for wasm32.
 //!
 //! # The pass criterion, and why it is not "returns a value"
 //!

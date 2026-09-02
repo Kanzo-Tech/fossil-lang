@@ -7,12 +7,6 @@
 //! kind here: `BOOL` was the last, and `true` / `false` arrived as `IDENT` until
 //! it existed. The parser is what this enum describes.
 //!
-//! Nine kinds left in the same commit as the surface they named: `KW_PREFIX`,
-//! `ABS_IRI`, `TEMPLATE`, `PREFIX_DECL`, `TEMPLATE_EXPR`, `IRI_EXPR`,
-//! `FIELD_REF_EXPR`, `PIPE` and `PIPELINE_EXPR`. Each is a tombstone in
-//! `grammar.bnf` — the file declares the
-//! form ABSENT and names no production for it — and none has a node to be built
-//! from any more.
 //! The `repr(u16)` values are an implementation detail of the rowan green
 //! tree and are NOT a compatibility surface: nothing persists a raw value
 //! across a build, so adding or removing a variant renumbers the rest, and
@@ -87,10 +81,9 @@ pub enum SyntaxKind {
     T_QUESTION,
 
     // ─── Keywords ─────────────────────────────────────────────────────
-    // Four, and the grammar reserves exactly six
-    // (grammar.bnf, § RESERVED KEYWORDS) — these four plus `true` / `false`,
-    // which are literals and arrive as [`SyntaxKind::BOOL`] rather than as
-    // keywords of their own. `KW_PREFIX` was a fifth and went with the CURIE.
+    // The `KW_*` half of grammar.bnf, § RESERVED KEYWORDS. The rest of that
+    // list — `true`, `false`, `null` — are LITERALS, reserved by being tokens,
+    // and arrive as [`SyntaxKind::BOOL`] / [`SyntaxKind::NULL`].
     KW_FROM,
     KW_AND,
     KW_OR,

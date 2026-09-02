@@ -16,11 +16,10 @@
 //!
 //! The rest of the surface:
 //!   - bidirectional hover (source-side + target-side types)
-//!   - goto-def (prefixes, mappings, functions, shape refs cross-file)
-//!   - completion (stdlib + prefixes + shape properties; gleam-lsp
-//!     auto-import pattern)
-//!   - code actions: did-you-mean Levenshtein, auto-import prefix,
-//!     split-mapping suggestion
+//!   - goto-def (shape names and property keys into the shape document;
+//!     mappings and `:=` bindings across the open files)
+//!   - completion (stdlib + shape properties + source fields)
+//!   - code actions: did-you-mean Levenshtein, split-mapping suggestion
 //!   - semantic tokens (Monaco depends on this)
 //!   - document outline (textDocument/documentSymbol)
 //!
@@ -28,9 +27,8 @@
 //!
 //! Plain-struct indexes built by a CST walk, and **no Salsa query of their
 //! own** — so the per-mapping `body()` fan-out stays at 1:
-//!   - [`SymbolIndex`] — per-file table of `{mapping, shape}` definitions with
-//!     byte ranges (outline + goto-def hit resolution). It indexed prefix
-//!     declarations too, until there were none.
+//!   - [`SymbolIndex`] — per-file table of `{source, mapping, shape}`
+//!     definitions with byte ranges (outline + goto-def hit resolution).
 //!   - [`WorkspaceIndex`] — cross-file aggregation under the
 //!     open-files-as-workspace model, so a mapping or shape declared in file A
 //!     resolves from file B.
@@ -75,10 +73,6 @@ pub use position::{
     position_to_offset, token_at_position,
 };
 pub use semantic::{decode_tokens, legend_type_name, semantic_legend, semantic_tokens};
-// `documents_named` and `registry_key` were re-exported here. They are
-// `fossil_hir::documents`'s now — the compiler's own answer to which documents
-// a program names and what key each is looked up under — and a re-export would
-// be a second name for one function.
 pub use related::{Related, related_locations};
 pub use shape_documents::register_missing_documents;
 pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};

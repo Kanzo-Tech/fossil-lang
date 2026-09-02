@@ -309,16 +309,6 @@ impl Parser {
         None
     }
 
-    // There was a `peek_contiguous(n)` here — «the next n non-trivia tokens are
-    // lexer-adjacent». It had three callers and all three were the CURIE, which
-    // needed `IDENT SHAPE_SEP IDENT` to carry no whitespace so that `cond ? a :
-    // b` would not parse with `a : b` swallowed as a prefixed name. The CURIE is
-    // gone and disambiguation rule 3 retires the check in as many words
-    // (grammar.bnf, § DISAMBIGUATION RULES): `:` has two readings, a mapping
-    // header and a ternary, and the NODE tells them
-    // apart. A check that disambiguated one absent thing from one present one is
-    // not a check.
-
     pub(crate) fn start(&mut self, kind: SyntaxKind) {
         self.builder.start_node(FossilLang::kind_to_raw(kind));
     }
@@ -346,13 +336,9 @@ impl Parser {
     /// the parser's queue. The diagnostic is drained into the public
     /// `Diagnostic` accumulator by the wrapping [`parse`] Salsa query.
     ///
-    /// An earlier version of this helper consumed the offending token without
-    /// emitting a diagnostic, leaving downstream tools (LSP, CLI) blind to the
-    /// parse error — the ERROR node is no longer the only signal. New code
-    /// should still prefer
-    /// [`recover::expect_or_recover`] with an explicit anchor set, because the
-    /// recovery cascade is local to the caller; this `expect` consumes the
-    /// offending token (which may eat an anchor the caller expected to see).
+    /// Prefer [`recover::expect_or_recover`] with an explicit anchor set: the
+    /// recovery cascade is local to the caller, while this `expect` consumes
+    /// the offending token and may eat an anchor the caller expected to see.
     pub(crate) fn expect(&mut self, kind: SyntaxKind) {
         self.skip_trivia();
         if self.current() == Some(kind) {
@@ -467,8 +453,8 @@ impl Parser {
                 break;
             };
             match t.kind {
-                // A line break ends every retired form. None of the five spans
-                // one, and running past it would swallow the next item.
+                // A line break ends every retired form: none of them spans one,
+                // and running past it would swallow the next item.
                 SyntaxKind::NEWLINE => break,
                 SyntaxKind::WHITESPACE => {}
                 // A comment is trivia everywhere else and is part of the form

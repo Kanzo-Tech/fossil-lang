@@ -5,8 +5,9 @@
 //! **It is the manifest** — the same [`GraphInfo`] / [`VertexInfo`] /
 //! [`EdgeInfo`] values that were written to disk as YAML, from the same
 //! [`GraphArData::manifest`] call, serialised as JSON so a host does not have to
-//! fetch and parse four documents to learn what it just produced. A reader that
-//! opens the corpus later gets the identical description off the bytes.
+//! fetch and parse the YAML index and every type's document to learn what it
+//! just produced. A reader that opens the corpus later gets the identical
+//! description off the bytes.
 //!
 //! # Why this is not a second description
 //!
@@ -20,9 +21,10 @@
 //! now, required and guarded.
 //!
 //! The duplication cost a shipped defect before it was removed: the status named
-//! `vertex/<Type>.parquet` and the layout post-pass deletes that file as its last
-//! act, so a host was handed a path that had just stopped existing. Two
-//! descriptions of one dataset can disagree with the bytes; one cannot.
+//! `vertex/<Type>.parquet`, which is deleted once the layout post-pass has run
+//! (`fossil-cli`'s host), so a host was handed a path that had just stopped
+//! existing. Two descriptions of one dataset can disagree with the bytes; one
+//! cannot.
 //!
 //! # And the two facts that are genuinely not in the corpus
 //!
@@ -80,7 +82,7 @@ pub struct RunReport {
 ///    `apps/corpus`'s `declared-count` guard does. A dropped count is about rows
 ///    that are *not* there and never were. No guard can be written for it, and a
 ///    manifest field no guard can reach is a claim a reader has to take on
-///    trust — the thing `/docs/characteristics/corpus-contract` exists to refuse.
+///    trust.
 /// 2. **A third-party writer has no such number.** The format is documented so
 ///    that somebody else's writer can produce a corpus; `apps/corpus/guards/fixture.mjs`
 ///    is one, in JavaScript, and it emits edge manifests without ever performing

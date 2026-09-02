@@ -372,11 +372,6 @@ fn qualify(df: DataFrame, name: &str) -> datafusion::error::Result<DataFrame> {
     Ok(DataFrame::new(state, plan))
 }
 
-/// A `(source, column)` pair as a DataFusion column reference — qualified when
-/// the source is known, bare when it is not (a retired `.column`, or a
-/// hand-built op list). A bare reference resolves against whichever relation
-/// carries the name, and is ambiguous if two do; that is DataFusion's rule and
-/// its error names both candidates.
 /// One [`AggFn`] as the DataFusion aggregate it is.
 ///
 /// Total on purpose: the catalogue decides which rows are aggregates and a
@@ -391,6 +386,11 @@ fn agg_call(f: AggFn, arg: DfExpr) -> DfExpr {
     }
 }
 
+/// A `(source, column)` pair as a DataFusion column reference — qualified when
+/// the source is known, bare when it is not (a retired `.column`, or a
+/// hand-built op list). A bare reference resolves against whichever relation
+/// carries the name, and is ambiguous if two do; that is DataFusion's rule and
+/// its error names both candidates.
 fn column(source: &str, column: &str) -> DfExpr {
     DfExpr::Column(if source.is_empty() {
         datafusion::common::Column::new_unqualified(column)

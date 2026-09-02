@@ -49,8 +49,8 @@ struct Cell {
 /// The input column types a fossil source can hand an aggregate.
 ///
 /// `Decimal128` is in the list because it is REACHABLE and unrepresentable:
-/// `crates/fossil-introspect/src/lib.rs:90` maps any `DECIMAL…` to
-/// `Primitive::Float`, so the checker calls the column a `Float` while a
+/// `fossil_introspect`'s `duckdb_type_to_fossil_primitive` maps any `DECIMAL…`
+/// to `Primitive::Float`, so the checker calls the column a `Float` while a
 /// Parquet source hands DataFusion a `Decimal128`. The language has no decimal
 /// type (`fossil_graph_schema::Primitive` is nine variants and none is one).
 fn input_columns() -> Vec<(&'static str, DataType, ArrayRef)> {
@@ -180,12 +180,8 @@ async fn the_table_of_declared_against_returned() {
         );
     }
     println!("\n{disagreements} of {} cells disagree.", cells.len());
-    // Sixteen cells, TEN of them disagreeing. Not twelve: `avg` over an
-    // `Int64` returns a `Float64`, so the six that agree are the four over a
-    // `Float64` column plus `math.avg` over each of the two `Int64` ones. This
-    // assertion is the CURRENT state and is expected to move the day the
-    // disagreement is closed — whichever way it is closed — and a SILENT move
-    // is what it exists to stop.
+    // The CURRENT state, expected to move the day the disagreement is closed —
+    // whichever way it is closed. A SILENT move is what it exists to stop.
     assert_eq!(cells.len(), 16, "four aggregates over four input columns");
     assert_eq!(
         disagreements, 10,
@@ -265,9 +261,7 @@ async fn nulls_do_not_move_the_type() {
     }
 }
 
-/// The declaration is REACHABLE, which is the question worth asking of any row:
-/// three MIR operators were found this week carrying parameters nothing in the
-/// workspace ever built.
+/// The declaration is REACHABLE, which is the question worth asking of any row.
 ///
 /// All four rows resolve in the registry, all four declare `Float -> Float`,
 /// and all four are named by `RegistryEntry::agg_fn` — so a program can write

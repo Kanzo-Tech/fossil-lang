@@ -28,7 +28,7 @@
 //!   different context makes every one of those a guess.
 //! - A `leftOperand` outside [`crate::profile`]'s six.
 //! - A `rightOperand` that is not a classification this profile defines.
-//! - An `operator` other than the two used, `odrl:eq` and `odrl:gteq`.
+//! - An `operator` other than `odrl:eq`, `odrl:gteq` and `odrl:lteq`.
 //! - Any nesting the shapes below do not have.
 //!
 //! # The shape

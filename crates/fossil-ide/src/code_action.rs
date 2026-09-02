@@ -245,7 +245,6 @@ mod tests {
     #[test]
     fn did_you_mean_produces_a_replace_edit() {
         let db = db();
-        // `.naem` typo at bytes 38..42 in the field-ref line.
         let src = "User : ex:Person from users\n    ex:n = .naem\n";
         let f = file(&db, src);
         let typo_start = u32::try_from(src.find("naem").unwrap()).unwrap();

@@ -59,7 +59,9 @@ impl Hierarchy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Numeric {
     /// Bucket edges, strictly ascending, in the units of the column. `[0.0, 18.0, 35.0, 65.0]`
-    /// declares four spans: below 18, 18–35, 35–65, and 65 and up.
+    /// publishes five spans: `(-inf, 0)`, `[0, 18)`, `[18, 35)`, `[35, 65)` and `[65, inf)`. The
+    /// two unbounded ones are a partition the edges do not cover, and each raises
+    /// [`crate::Warning::BucketsDoNotCover`] rather than being refused.
     ///
     /// Empty is legal and means the caller has declined to declare a domain, which forces
     /// [`NumericPresentation::ObservedRange`].

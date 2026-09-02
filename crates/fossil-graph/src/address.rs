@@ -133,10 +133,10 @@ pub const fn tile_of(dense_id: u64, shift: u32) -> u64 {
 /// addresses `chunk_size`.
 ///
 /// **This is the arithmetic the manifest's count exists for.** Tiles are
-/// addressed and never listed, HTTP gives no directory, and a tree holding
-/// `chunk0..chunk16` is indistinguishable from a corpus with seventeen tiles: a
-/// hole in the middle breaks the addressing and is caught, a missing tail breaks
-/// nothing at all.
+/// addressed and never listed, HTTP gives no directory, so a tree that stops at
+/// `chunk{k}` is indistinguishable from one whose tail was never written: a hole
+/// in the middle breaks the addressing and is caught, a missing tail breaks
+/// nothing at all. The declared count is what says how far the corpus goes.
 #[must_use]
 pub const fn tiles_of(count: u64, chunk_size: u64) -> Option<u64> {
     if shift_for(chunk_size).is_none() {

@@ -409,7 +409,7 @@ User : Person from users
         );
     }
 
-    /// Hover on the `ex:name = .name` line returns `None` for the HELLO
+    /// Hover on the `name = users.name` line returns `None` for the HELLO
     /// fixture — no descriptor is registered for its `users` source, so
     /// `resolve_source_scope` returns `None` and the `FieldRef` synthesises no
     /// entry. A `FieldRef` hover needs a row to resolve against; given one,
@@ -418,7 +418,7 @@ User : Person from users
     #[test]
     fn hover_on_field_ref_returns_none_without_a_source_row() {
         let (db, file) = db_with_text(HELLO);
-        // Line 4 is `    ex:name = .name`. Cursor inside the property at
+        // Line 4 is `    name = users.name`. Cursor inside the property at
         // character 14 (somewhere on the value).
         let info = hover(&db, file, 4, 14);
         assert!(

@@ -12,7 +12,7 @@
 //! the EXACT mechanism the LSP `didChange` path uses (the revision
 //! bump is the cancellation trigger). No new tracked queries land
 //! in the Workspace lifecycle path, so `MAX_PER_MAPPING_FAN_OUT` stays at 1
-//! (verified by `fossil-hir::tests::invalidation_regression`, 3/3).
+//! (`crates/fossil-hir/tests/invalidation_regression.rs` is what proves it).
 //!
 //! # Why `FileHandle` is a `u32` newtype (not the Salsa interned id)
 //!
@@ -105,9 +105,8 @@ impl OpenFiles {
         Some(f)
     }
 
-    /// URI → handle lookup. Used by the LSP Worker to dispatch
-    /// `textDocument/...` notifications from the JS side.
-    #[allow(dead_code)] // the LSP Worker wires the first caller; the accessor is part of the published surface.
+    /// URI → handle lookup, behind `FossilPlayground::lookup_handle_by_uri`.
+    /// The LSP Worker dispatches `textDocument/...` notifications through it.
     pub(crate) fn lookup_uri(&self, uri: &str) -> Option<FileHandle> {
         self.by_uri.get(uri).copied()
     }

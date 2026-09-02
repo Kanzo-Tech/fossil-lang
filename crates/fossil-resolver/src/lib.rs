@@ -13,10 +13,11 @@
 //! Fossil itself does NOT know about clouds — the [`PathResolver`] trait is
 //! the host-injection seam — the same pattern as `fossil-base::System` for the
 //! filesystem: the capability is behind a host-supplied object, never on the
-//! Salsa `Db` trait. A standalone CLI mounts
-//! [`DefaultPathResolver`] which passes paths through unchanged; a
-//! multi-tenant host like Keasy mounts an implementation that resolves
-//! `@conn-name/path` against the calling org's per-connection credentials.
+//! Salsa `Db` trait. It is a seam for a multi-tenant host such as Keasy, which
+//! resolves `@conn-name/path` against the calling org's per-connection
+//! credentials; no crate in this workspace mounts a resolver, and what they do
+//! take from here is [`ResolvedPath`] / [`CloudSecret`] (`fossil-introspect`
+//! renders the `CREATE SECRET`, `fossil-mcp` carries the pair).
 //!
 //! ## Design notes (vs the angelip2303 predecessor)
 //!

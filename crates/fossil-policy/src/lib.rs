@@ -332,7 +332,7 @@ pub struct PrivacyPolicy {
     pub uid: String,
     /// The `odrl:profile` IRI. A reader that does not recognise it should not
     /// try to read the `leftOperand`s, and one that does knows exactly which
-    /// four terms it is going to find.
+    /// terms it is going to find.
     pub profile: String,
     /// The k every shape's quasi-identifier set must reach. Corpus-level: the
     /// bound is a property of the release, and a per-shape k would be four
@@ -342,8 +342,8 @@ pub struct PrivacyPolicy {
     pub absent_quasi_identifier: AbsentQuasiIdentifier,
     /// The suppression allowance, in parts per million of the released
     /// population. An integer, because the manifest that records the outcome is
-    /// parsed by four independent readers and a float is the one scalar they
-    /// can disagree about over the same bytes.
+    /// parsed by independent readers and a float is the one scalar they can
+    /// disagree about over the same bytes.
     pub suppression_budget_ppm: u64,
     /// One entry per shape the policy covers. A shape the policy does not
     /// mention is **not** silently exempt: the verifier reports it, because a

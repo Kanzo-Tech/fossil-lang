@@ -1,15 +1,15 @@
 //! Where the layout pass gets its bytes, and where it puts them.
 //!
 //! The pass itself is arithmetic over Arrow — Louvain, a Morton renumbering, a
-//! gather, one sort. **None of it is about files.** What was about files was
-//! eight functions at the bottom of [`crate::layout`], every one of them
-//! `std::fs`, and that was the single reason a crate declaring
-//! `[package.metadata.fossil] wasm = true` could not actually run in a browser:
-//! it *compiled* for `wasm32` and then had nothing to open.
+//! gather, one sort. **None of it is about files.** What was about files was a
+//! handful of `std::fs` helpers at the bottom of [`crate::layout`], and that was
+//! the single reason a crate declaring `[package.metadata.fossil] wasm = true`
+//! could not actually run in a browser: it *compiled* for `wasm32` and then had
+//! nothing to open.
 //!
 //! So the seam is here, and it is deliberately the narrowest one that works:
 //! **open a URL for reading, create a URL for writing, ensure a prefix exists.**
-//! Three methods. Everything above them is unchanged and unaware.
+//! Everything above them is unchanged and unaware.
 //!
 //! # Why a trait and not bytes in, bytes out
 //!
@@ -29,8 +29,9 @@
 //!
 //! `LayoutIo` is a `&dyn` parameter — the pass takes one reference and calls it
 //! a few dozen times, so the vtable is free and the alternative is making
-//! `enrich_layout` generic over a type parameter that appears in nine helper
-//! signatures. But the *reader* and the *writer* it hands back are enums, not
+//! `enrich_layout` generic over a type parameter that would then appear in every
+//! helper signature it threads through. But the *reader* and the *writer* it
+//! hands back are enums, not
 //! boxes, because `parquet` puts them in hot loops: [`Source`] is what every
 //! column chunk is decoded through and [`Sink`] is what every row group is
 //! encoded into. That is the split `CLAUDE.md` asks for — `&dyn` at the seam,

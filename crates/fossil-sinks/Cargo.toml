@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Output sinks: GraphAr Parquet writer (arrow + parquet)"
+description = "The canonical GraphAr manifest model — the tiling a corpus declares"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -19,8 +19,8 @@ workspace = true
 # policy check, so it names policy vocabulary, and `fossil-policy` names nothing
 # — it is a serde/serde_json/thiserror leaf and knows nothing about GraphAr.
 fossil-policy = { path = "../fossil-policy" }
-# fossil-sinks is a plan + manifest generator, NOT an I/O library: it declares the tiling
-# and never byte-writes Parquet, so emission is all `serde_yaml_ng` opens.
+# A plan + manifest generator, NOT an I/O library: it declares the tiling and never
+# byte-writes Parquet, so the only emission here is YAML.
 serde = { workspace = true }
 serde_yaml_ng = { workspace = true }
 # `arrow-schema` sub-crate ONLY — NOT the `arrow` umbrella crate, whose default features

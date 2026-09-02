@@ -6,11 +6,11 @@
 //! author didn't intend to publish surfaces as a snapshot diff and fails CI
 //! until reviewed (`cargo insta review` to accept).
 //!
-//! Downstream consumers (fossil-mcp, fossil-cli, @fossil-lang/corpus
-//! codegen) treat the accepted `.snap` files as the source of truth. The
-//! TS bindings, in particular, regenerate their wrapper types from these
-//! schemas via openapi-typescript at the playground/keasy `pnpm openapi`
-//! step.
+//! Nothing reads the `.snap` files at run time. What the bindings consume is
+//! the same `schemars` derive: `fossil-mcp` through `Verb::params_schema`, and
+//! `@fossil-lang/corpus` through `examples/dump_schemas.rs` and its
+//! `scripts/gen-types.sh`. These snapshots are the review surface over that
+//! derive, not a second artefact.
 
 use fossil_graph::operations::{Operation, RawSqlAccess, Verb, aggregate, discovery, schema, sql};
 use schemars::schema_for;

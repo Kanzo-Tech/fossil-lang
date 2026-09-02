@@ -1,12 +1,11 @@
-//! Graph layout precompute (W3.1) — pure, host-agnostic algorithms.
+//! Graph layout precompute — pure, host-agnostic algorithms, and the pass that
+//! applies them to a written corpus.
 //!
 //! The writer emits `x`/`y`/`cluster_id` as placeholders (`0`); this fills them,
-//! so the viewport verb returns meaningful positions and the Parquet can be
-//! morton-sorted for predicate pushdown.
+//! so a reader addressing the corpus gets meaningful positions and the Parquet
+//! can be morton-sorted for predicate pushdown.
 //!
-//! This module is the **algorithmic core** — deliberately decoupled from the
-//! `materialize` hot path (which reads the edge set + rewrites the vertex
-//! Parquet, a separate slice). Two pure functions over a `dense_id` edge list:
+//! The pure half, over a `dense_id` edge list:
 //!
 //! - [`community_hierarchy`] — modularity communities, and the whole hierarchy
 //!   of them, which is what [`enrich_layout`] partitions by. This is the pyramid
@@ -21,15 +20,13 @@
 //!   land near each other. `ForceAtlas2` refinement is a later slice; this gives
 //!   the viewport real, stable coordinates without an iterative force sim.
 //!
-//! All three are pure (no I/O, no RNG, no engine) so they unit-test in isolation
-//! and [`enrich_layout`] can wire them with confidence.
+//! Each is pure (no I/O, no RNG, no engine) so they unit-test in isolation and
+//! [`enrich_layout`] can wire them with confidence.
 //!
-//! And so is the second half of this file, which is the part that used to be
-//! otherwise. `enrich_layout` reads and writes Parquet — through `parquet-rs`
-//! and `arrow-rs`, and through the one encoder the writer itself uses. There is
-//! no database here: see `docs/design/one-engine.mdx`, and the "No engine"
-//! section of [`enrich_layout`] for why the substitution was smaller than the
-//! statements it replaced made it look.
+//! And so is the second half of this file. `enrich_layout` reads and writes
+//! Parquet — through `parquet-rs` and `arrow-rs`, and through the one encoder the
+//! writer itself uses. There is no database here: see
+//! `docs/design/one-engine.mdx`.
 
 // This is deliberate numeric code: dense ids / cluster counts cast to/from `f32`
 // coordinates and `f64` grid maths, and tight index loops over `dense_id` arrays.
@@ -192,10 +189,6 @@ use std::sync::Arc;
 use arrow::array::{
     Array, ArrayRef, Float32Array, RecordBatch, RecordBatchReader, StringArray, UInt32Array,
 };
-// `concat_batches`, `lexsort_to_indices`, `SortColumn` and `take_record_batch`
-// stood here and are gone with the adjacency remap's five copies of an
-// orientation: the relation is a `Vec<u64>` now and `sort_unstable` orders it.
-// See `read_adjacency`.
 use arrow::compute::{cast, interleave_record_batch};
 use arrow::datatypes::{DataType, SchemaRef};
 use arrow::error::ArrowError;
@@ -329,9 +322,9 @@ pub enum LayoutError {
         #[source]
         source: std::io::Error,
     },
-    /// An Arrow kernel — the concat, the lexicographic sort, or the gather that
-    /// applies either — refused what it was handed. Reachable only through a
-    /// column whose type is not what the writer declares.
+    /// An Arrow kernel — the cast or the gather — refused what it was handed.
+    /// Reachable only through a column whose type is not what the writer
+    /// declares.
     #[error("layout arrow op on `{target}` failed: {source}")]
     Arrow {
         target: String,
@@ -575,10 +568,9 @@ const LAYOUT_BASE_BYTES: u64 = 16 * 1024 * 1024;
 const VERTEX_PAYLOAD_PERMILLE: u64 = 1_300;
 
 /// What [`enrich_layout_within`] will hold, in bytes, for a corpus of this
-/// shape — the three terms above, summed.
-///
-/// Four terms: a floor the corpus does not change, one per vertex, one per
-/// adjacency row, and one per uncompressed byte of the vertex file.
+/// shape — the terms above, summed: a floor the corpus does not change, one per
+/// vertex, one per adjacency row, and one per uncompressed byte of the vertex
+/// file.
 ///
 /// **Every input is a footer read.** `vertex_count` and `adjacency_rows` are
 /// `num_rows`, `vertex_payload_bytes` is the sum of the row groups'
@@ -655,18 +647,19 @@ pub const fn estimated_peak_bytes(
 /// # No engine
 ///
 /// Everything below is `arrow-rs` and `parquet-rs`: the files are read with
-/// `ParquetRecordBatchReaderBuilder` and written with the encoder
-/// [`fossil_df::files::batches_to_parquet`], the same one the writer that
-/// produced them uses. There was a `DuckDB` connection here, and what it was
-/// used for was `COPY` — see `docs/design/one-engine.mdx`.
+/// `ParquetRecordBatchReaderBuilder` and written through
+/// [`fossil_df::files::TileWriter`], the row-group container in the same module
+/// as `batches_to_parquet`, which wrote the staged files being read. There was a
+/// `DuckDB` connection here, and what it was used for was `COPY` — see
+/// `docs/design/one-engine.mdx`.
 ///
 /// The reason the substitution is small is that the relational work was never
 /// relational. `dense_id` is a gapless `0..n`, so the join against the mapping
 /// table is an array index; the new numbering is a permutation, so the `ORDER BY`
 /// that sorts by it is that permutation applied as a gather; and a tile is a
 /// contiguous range of the result, so the per-tile `WHERE` is a slice. One real
-/// sort survives — the adjacency re-sort, which is genuinely a sort of the whole
-/// relation and is [`lexsort_to_indices`] here.
+/// sort survives — the adjacency re-sort, which is a `sort_unstable` over one
+/// packed `u64` per row; see [`read_adjacency`].
 ///
 /// # What it does
 ///
@@ -792,8 +785,8 @@ fn footprint(io: &dyn LayoutIo, url: &str) -> Result<(u64, u64), LayoutError> {
 
 /// [`enrich_layout`], against a filesystem the caller chooses.
 ///
-/// The pass is arithmetic over Arrow and only eight functions of it were ever
-/// about files. This is that seam made a parameter, and the whole reason it
+/// The pass is arithmetic over Arrow and only a handful of its functions were
+/// ever about files. This is that seam made a parameter, and the whole reason it
 /// exists is that **a browser has no filesystem**: `fossil-df-wasm` hands the
 /// corpus to JS as `{rel_path, bytes}` pairs, so the pass runs against
 /// [`MemoryFs`](crate::io::MemoryFs) with the staged Parquet already in it and
@@ -907,11 +900,11 @@ pub fn enrich_layout_with(
         // The partition that is *written* and the partition that is *drawn*
         // answer different questions, so they are not the same partition.
         //
-        // `cluster_id` is read by `viewport`'s aggregate mode, one super-node
-        // per cluster under a LIMIT, so it must fit CLUSTER_BUDGET — which on
-        // this corpus means the top of the hierarchy. Placement wants the
-        // opposite: the finest level, whose communities are small enough that
-        // several fit in one window. Using the budget partition for both was
+        // `cluster_id` is what a drawing reader colours and aggregates by, one
+        // super-node per cluster under a row cap, so it must fit CLUSTER_BUDGET
+        // — which on this corpus means the top of the hierarchy. Placement wants
+        // the opposite: the finest level, whose communities are small enough
+        // that several fit in one window. Using the budget partition for both was
         // measured and cost the ordering below its entire reason for existing —
         // at the top level every community is a root and there are no siblings
         // left to put side by side.
@@ -1129,11 +1122,6 @@ pub fn enrich_layout_with(
             })
     };
 
-    // `write vertex chunks` stood here and now measures nothing: the writes moved
-    // inside the per-type loop, where `gather + write vertex tiles` covers them.
-    // A phase that always reports +0.00 G is a line that teaches a reader the
-    // wrong shape of the pass.
-
     // Every adjacency: both endpoints remapped through their own type's mapping,
     // **re-sorted** because the manifest declares `ordered: true` and a CSR
     // sorted on `src_dense` stops being sorted the instant those values are
@@ -1192,14 +1180,11 @@ pub fn enrich_layout_with(
         keys.sort_unstable();
         probe.sample(&format!("{step}: sort"));
 
-        // The remapped relation is NOT written back over its input. It used to
-        // be, and the corpus then shipped `by_source.parquet` beside
-        // `by_source/` — the uncut relation published next to its own cut, which
-        // is two containers for one set of rows and one too many. A reader that
-        // globs finds both; `fossil-mcp` read that file while every other reader
-        // addressed the tiles, which is the disagreement `apps/corpus`'s
-        // `declared-tiling` fires on. The input is a staging artefact and the
-        // caller deletes it, exactly as it deletes the staged vertex Parquet.
+        // The remapped relation is NOT written back over its input: publishing
+        // the uncut relation beside its own cut is two containers for one set of
+        // rows, which is what `apps/corpus`'s `declared-tiling` fires on. The
+        // input is a staging artefact and the caller deletes it, exactly as it
+        // deletes the staged vertex Parquet.
 
         // Which endpoint addresses this file is which endpoint it is ordered by.
         // The tile space is that endpoint's type's, and the two are different
@@ -1260,11 +1245,6 @@ pub fn enrich_layout_with(
 // engine would have done.
 // ──────────────────────────────────────────────────────────────────────────
 
-/// The local filesystem path a layout URL names.
-///
-/// A plain path and `file://` are the two forms that resolve; anything else is
-/// [`LayoutError::Remote`]. See [`VertexLayoutTarget::vertex_parquet`] for why
-/// the type is still a URL.
 /// Every `(subject, dense_id)` pair of one vertex type, or `None` when the
 /// payload carries no `subject` column.
 ///
@@ -1921,10 +1901,10 @@ fn morton_ranks(morton: &[u32]) -> (Vec<u32>, Vec<u32>) {
 /// the next type should start.
 ///
 /// [`cluster_layout`] always begins at the origin, so laying several types out
-/// independently puts every one of them in the same place. Read back through the
-/// `viewport` verb that is worse than ugly: a rectangle answers with vertices
-/// from unrelated types that share nothing but coordinates, and the picture
-/// looks like a graph rather than like a mistake.
+/// independently puts every one of them in the same place. Read back by a camera
+/// that is worse than ugly: a rectangle answers with vertices from unrelated
+/// types that share nothing but coordinates, and the picture looks like a graph
+/// rather than like a mistake.
 ///
 /// The gap is [`TYPE_GUTTER`], wide enough that the seam reads as a seam. This
 /// separates the types; it does not lay them out together — cross-type edges
@@ -2491,8 +2471,8 @@ mod tests {
 ///
 /// This is what [`weakly_connected_components`] cannot give. WCC is a
 /// reachability partition, so on a connected graph it answers "one community"
-/// — measured on a 5M-vertex benchmark corpus it put 1,998 of 2,000 vertices in
-/// a single cluster, and a viewport window then retained **375 of 27,244
+/// — measured on a benchmark corpus it put 1,998 of 2,000 vertices in a single
+/// cluster, and a viewport window then retained **375 of 27,244
 /// incident edges (1.4%)**, barely four times chance. Positions derived from
 /// that partition are topology-blind, and a spatial index over topology-blind
 /// positions is fast access to noise.
@@ -2558,10 +2538,10 @@ fn hierarchy(mut graph: Weighted) -> Vec<Vec<u32>> {
 ///
 /// A hierarchy has no single "the" partition, so something has to choose, and
 /// the choice is not free in either direction. Too coarse and a community is
-/// larger than any window, so grouping by it buys the viewport nothing. Too fine
-/// and `viewport`'s aggregate mode, which answers one super-node per cluster
-/// under a `LIMIT`, starts dropping communities off the end of the list rather
-/// than reporting that it did — see [`CLUSTER_BUDGET`].
+/// larger than any window, so grouping by it buys a camera nothing. Too fine and
+/// an aggregate read, which answers one super-node per cluster under a row cap,
+/// starts dropping communities off the end of the list rather than reporting
+/// that it did — see [`CLUSTER_BUDGET`].
 ///
 /// Levels compose by lookup, not by recomputation: level *l* is indexed by level
 /// *l−1*'s community ids, so walking up is `c ← levels[l][c]`. The walk stops at

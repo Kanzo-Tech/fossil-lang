@@ -36,8 +36,8 @@ fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The DataFusion executor — the SINGLE `run` path (lower_to_mir_pg → execute_graph
 # → write_to_dir). Re-exports `OutputDescriptorKind`, and `RunReport` is the shape
-# `run` prints. DuckDB now serves only the layout post-pass + CSV type
-# pre-introspection.
+# `run` prints. The write path is DataFusion end to end; the only DuckDB left
+# on a normal edge of this crate is `fossil-introspect`'s pre-compile DESCRIBE.
 fossil-df           = { path = "../fossil-df" }
 # The privacy policy a run is verified against. The host READS the document
 # (a file is a host's job, like a shape document) and hands the parsed value to
@@ -51,8 +51,9 @@ fossil-policy       = { path = "../fossil-policy" }
 # walks the tree for it. `tests/census` counts `PROPERTY` nodes with it too.
 fossil-syntax       = { path = "../fossil-syntax" }
 # The layout post-pass — `enrich_layout`, called by `enrich_written_layout`
-# after the write. It links no DuckDB: it holds no connection, no secret and no
-# path resolver.
+# after the write. It links no DuckDB — no connection, no secret, no path
+# resolver — though it does reach DataFusion through `fossil-df` for one
+# encoder; `crates/xtask/tests/engine_reach.rs` is what derives that.
 fossil-layout       = { path = "../fossil-layout" }
 # `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot
 # disagree about a chunk — and `Privacy`, because the run summary says what the

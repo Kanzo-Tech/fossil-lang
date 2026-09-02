@@ -1,8 +1,8 @@
 //! Typed errors for verb dispatch and execution.
 //!
-//! Surface-level only — transport bindings translate `GraphError` into their
-//! native error shape (JSON-RPC error for `fossil-mcp`, HTTP 4xx/5xx for
-//! `fossil-mcp`, exit code + miette for `fossil-cli`).
+//! Surface-level only — each binding translates `GraphError` into its own
+//! error shape: a JSON-RPC error in `fossil-mcp`, a `JsError` in
+//! `fossil-graph-wasm`.
 
 use thiserror::Error;
 

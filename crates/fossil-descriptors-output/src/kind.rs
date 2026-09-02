@@ -3,12 +3,12 @@
 //!
 //! This enum exists because [`crate::OutputDescriptor`] is a trait and Salsa
 //! 0.26 cannot intern or memoize trait objects (`Box<dyn OutputDescriptor>`) —
-//! they lack structural equality. Inside a `#[salsa::tracked]` query body
-//! (`fossil_hir`'s `typecheck_mapping`), dispatch goes through this enum's
-//! variants (concrete types), not through `&dyn OutputDescriptor`.
+//! they lack structural equality. Dispatch goes through this enum's variants
+//! (concrete types), not through `&dyn OutputDescriptor`.
 //!
-//! The trait stays as the OUTSIDE-Salsa surface API (e.g. for the playground
-//! UI listing loaded descriptors).
+//! The consumers are the HOSTS — `fossil-cli`, `fossil-df` and
+//! `fossil-df-wasm` carry one into the executor. `fossil-hir` is not among
+//! them and cannot be: it has no dependency on this crate.
 
 use crate::AcceptAllDescriptor;
 use fossil_graph_schema::{GraphSchema, Renames};
@@ -17,11 +17,10 @@ use fossil_shex::ShExDescriptor;
 /// Concrete-type dispatch surface for the bidirectional checker.
 ///
 /// Each variant carries the descriptor's owned state so Salsa's `interned`
-/// / tracked-struct interning can equate descriptors structurally. New
-/// variants (e.g. future `Shacl`) are an architectural addition — they
-/// require updating every match arm in `fossil-hir`'s typecheck path. That
-/// churn is acceptable: adding a new output descriptor is a major
-/// architectural change.
+/// / tracked-struct interning can equate descriptors structurally. A new
+/// variant is an architectural addition — every match arm in every host that
+/// carries one has to answer for it, which is acceptable churn: adding an
+/// output descriptor is a major architectural change.
 //
 // `large_enum_variant`: the `ShEx(ShExDescriptor)` variant carries a
 // `shex_ast::Schema` + a resolved `HashMap<String, ShapeBinding>` — large
@@ -46,17 +45,17 @@ pub enum OutputDescriptorKind {
     /// says. [`Self::ShEx`] survives beside it because the browser executor is
     /// handed a raw `ShEx` blob with no registry in front of it.
     Lowered(GraphSchema),
-    /// Phase 1 stub — accepts any graph. Used when no shape target is loaded
-    /// (the walking-skeleton case) or as the degraded fallback if a host
-    /// can't resolve a `ShEx` schema.
+    /// Accepts any graph. Used when no shape target is loaded (the
+    /// walking-skeleton case) or as the degraded fallback when a host cannot
+    /// resolve a `ShEx` schema.
     AcceptAll(AcceptAllDescriptor),
 }
 
 impl OutputDescriptorKind {
     /// Inherent `const` default: the descriptor an executor uses when the
-    /// program declares no output shape (`fossil_cli::host`'s `output_shape`,
-    /// `fossil_df_wasm`'s `build_program`). Backward checking is a no-op and
-    /// the produced graph is accepted whole.
+    /// program declares no output shape (`fossil_cli::host`'s
+    /// `resolve_output_descriptor`, `fossil_df_wasm`'s `build_program`).
+    /// Backward checking is a no-op and the produced graph is accepted whole.
     ///
     /// This is const-evaluable because [`AcceptAllDescriptor`] is a unit
     /// struct (no fields, no heap, no non-const constructors). If a future
@@ -160,11 +159,10 @@ mod tests {
         assert!(!kind.accepts_anything());
     }
 
-    /// SC#5 structural property: the enum supports swapping descriptors
-    /// (a parsed `ShEx` document against the no-contract fallback) without
-    /// `fossil-hir` source changes. This test exercises the swap pattern —
-    /// building both variants and matching on them in the same function
-    /// body — which IS the swap surface.
+    /// The structural property: the enum supports swapping descriptors — a
+    /// parsed `ShEx` document against the no-contract fallback — and a
+    /// consumer matches on the variants in one function body, which IS the
+    /// swap surface.
     #[test]
     fn output_descriptor_kind_swap_does_not_require_fossil_hir_change() {
         let schema_src = r#"{
@@ -178,8 +176,8 @@ mod tests {
         );
         let kinds: [&OutputDescriptorKind; 2] = [&accept_all, &shex];
         for k in kinds {
-            // The match shape itself is the swap surface. New variants
-            // require a new match arm in fossil-hir, intentionally.
+            // The match shape itself is the swap surface. A new variant
+            // requires a new arm in every host that carries one.
             let _name: &'static str = match k {
                 OutputDescriptorKind::ShEx(_) => "shex",
                 OutputDescriptorKind::Lowered(_) => "lowered",

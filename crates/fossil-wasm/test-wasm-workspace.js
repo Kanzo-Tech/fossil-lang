@@ -59,7 +59,9 @@ function main() {
     const diags1 = pg.check();
     assert.ok(Array.isArray(diags1), 'check returns an array');
     console.log(`check() -> ${diags1.length} rows`);
-    // Every row carries the LSP shape — { uri, range, severity, message }.
+    // Every row carries the CheckRow shape — { uri, range, severity, message }.
+    // That is the playground's panel shape, NOT the LSP wire: the worker
+    // publishes lsp_types::Diagnostic, which has no `uri` field.
     for (const d of diags1) {
         assert.ok(typeof d.uri === 'string', 'row.uri is a string');
         assert.ok(d.range && d.range.start && d.range.end, 'row.range is well-formed');
@@ -68,7 +70,7 @@ function main() {
         assert.ok(typeof d.message === 'string', 'row.message is a string');
     }
 
-    // ----- multi-file isolation + diagnostics_for (B3) -----
+    // ----- multi-file isolation + diagnostics_for -----
     const h2 = pg.open_file('b.fossil', source);
     const perFileA = pg.diagnostics_for(h1);
     const perFileB = pg.diagnostics_for(h2);

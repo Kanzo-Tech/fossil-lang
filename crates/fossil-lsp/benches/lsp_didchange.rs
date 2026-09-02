@@ -1,7 +1,7 @@
 //! The ADVISORY Criterion benchmark for the `didChange` round-trip budget.
 //!
 //! It calls [`fossil_lsp::handle_notification`] with a real
-//! `textDocument/didChange` notification over the canonical 200-line fixture —
+//! `textDocument/didChange` notification over `canonical_200.fossil` —
 //! the same function `tests/didchange_budget.rs` gates and the same function
 //! `src/main.rs` calls off the wire. There is no `round_trip` here any more, so
 //! there is nothing left to keep in sync.
@@ -91,7 +91,7 @@ fn bench_didchange(c: &mut Criterion) {
     let uri = fixture_uri();
 
     let mut group = c.benchmark_group("lsp_didchange");
-    // A handful of samples is enough for a 200-line file; keep wall time low.
+    // A handful of samples is enough for a fixture this size; keep wall time low.
     group.sample_size(20);
     group.measurement_time(Duration::from_secs(5));
 

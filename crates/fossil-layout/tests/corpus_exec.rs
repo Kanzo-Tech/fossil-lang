@@ -4,14 +4,9 @@
 //! the same result-set bytes — on native `DuckDB` 1.10502 AND `DuckDB`-WASM
 //! 1.33.x.
 //!
-//! Native-only, and no longer for the reason this line used to give. It said
-//! `fossil-layout` carried a `wasm32` `compile_error!` tripwire; `1e11a91`
-//! deleted that tripwire, and the crate now compiles for wasm32 and declares it
-//! with `[package.metadata.fossil] wasm = true` — it is IN the
-//! `cargo xtask wasm-check` closure. What stays native is THIS FILE, which
-//! links the `DuckDB` dev-dependency the library no longer has. The gate never
-//! builds it: it runs `cargo check --target wasm32-unknown-unknown` without
-//! `--all-targets`, so no `tests/` target is compiled for wasm32.
+//! Native-only because THIS FILE links the `DuckDB` dev-dependency; the library
+//! compiles for wasm32. The gate never builds it — `cargo xtask wasm-check` runs
+//! without `--all-targets`, so no `tests/` target is compiled for wasm32.
 //!
 //! This is tier 1 of the two-tier parity strategy:
 //!
@@ -24,9 +19,9 @@
 //!    reproduced digests. It is MANUAL and on-demand: nothing in CI runs it, so
 //!    a pass only exists if someone ran it and said so.
 //!
-//! A snapshot tier above these used to lock the generated SQL text of a
-//! 30-mapping corpus; `af39ff4` deleted the SQL-codegen path and the crate that
-//! held it, and the `sql_sha256` digest below now carries what it used to.
+//! A snapshot tier above these used to lock the generated SQL text; `af39ff4`
+//! deleted the SQL-codegen path and the crate that held it, and the
+//! `sql_sha256` digest below now carries what it used to.
 //!
 //! # The cross-engine result-set serialization (reproduced byte-for-byte by JS)
 //!
@@ -62,13 +57,12 @@ struct ExecEntry {
     expected_rows: &'static [&'static [&'static str]],
 }
 
-/// The executable subset of the 30-mapping corpus. These mirror the shapes the
-/// deleted codegen-snapshot tier locked, but in a
-/// queryable `SELECT` form (that tier locked the `COPY` form; executing a
-/// `SELECT` is simpler to assert and is what DuckDB-WASM runs too). Every entry
-/// reads a fixture CSV under `examples/` and ends in `ORDER BY` for a stable
-/// row order. All projected columns are `CAST(... AS VARCHAR)` so the result
-/// serialization is engine-portable.
+/// The executable corpus, mirroring the shapes the deleted codegen-snapshot
+/// tier locked but in a queryable `SELECT` form (that tier locked the `COPY`
+/// form; executing a `SELECT` is simpler to assert and is what DuckDB-WASM runs
+/// too). Every entry reads a fixture CSV under `examples/` and ends in `ORDER
+/// BY` for a stable row order. All projected columns are `CAST(... AS VARCHAR)`
+/// so the result serialization is engine-portable.
 const EXEC_CORPUS: &[ExecEntry] = &[
     ExecEntry {
         name: "project_two_cols",

@@ -11,9 +11,10 @@
 //!    opener (```` ```fossil ````).
 //! 4. `result.contents.kind` is `"markdown"`.
 //!
-//! Pattern mirrors Phase 1's `lsp_smoke.rs`: all frames written upfront,
-//! then stdin dropped, then stdout drained and parsed. Those mechanics are
-//! `tests/common/mod.rs` now, written once for all three wire tests.
+//! Pattern mirrors `lsp_smoke.rs`: all frames written upfront, then stdin
+//! dropped, then stdout drained and parsed. Those mechanics are
+//! `tests/common/mod.rs` now, written once for every test that drives the
+//! binary over the wire.
 //!
 //! # The program is written to disk, and it has to be
 //!
@@ -159,8 +160,8 @@ fn lsp_hover_on_the_identity_returns_markdown_naming_a_reference() {
 // impossible. Nobody has measured whether it would pass.
 //
 // These two tests exercise `fossil_ide::hover::render_markdown` — the exact
-// rendering function the LSP hover handler (`main.rs::handle_request`) calls
-// on the `ExprTypeEntry` returned by `ty_origin`. The closure synthesis +
+// rendering function the LSP hover handler (`fossil_lsp::handle_request`)
+// calls on the `ExprTypeEntry` returned by `ty_origin`. The closure synthesis +
 // forward propagation are driven IN-PROCESS via fossil-hir's public
 // provenance types + fossil-descriptors-input's `InferredDescriptor`, so the
 // integration boundary tested is hover.rs's Markdown body — identical to what
@@ -213,8 +214,8 @@ fn bare_db() -> FossilDb {
 fn hover_inside_synthesized_closure_via_typecheck_mapping() {
     let db = bare_db();
     let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
-    // The closure rendering for the canonical SC#3 predicate
-    // `users |> filter(.age >= 18)`. It is written out by hand because the
+    // The closure rendering for `users |> filter(.age >= 18)`, written out by
+    // hand because the
     // function that produced it, `fossil_hir::check::render_closure`, is
     // deleted along with `synthesize_closure` — so this asserts the RENDERING
     // of a provenance kind nothing produces. It survives only until
@@ -262,9 +263,8 @@ fn hover_inside_synthesized_closure_via_typecheck_mapping() {
     );
 }
 
-/// `FieldRef` hover OUTSIDE a closure (Phase 3 widening of Phase 2's
-/// literal-only path): a `.field` resolved against an introspected source row
-/// surfaces its type.
+/// `FieldRef` hover OUTSIDE a closure: a `.field` resolved against an
+/// introspected source row surfaces its type.
 ///
 /// The `String` type is proven to come from forward propagation by
 /// resolving the `name` column through `record_from_inferred` (the same

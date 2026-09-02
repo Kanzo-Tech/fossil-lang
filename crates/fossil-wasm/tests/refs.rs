@@ -21,7 +21,7 @@ use fossil_wasm::refs_native;
 // unaliased local csv.
 //
 // It opened `prefix ex: <https://ex.org/>` and closed on a CURIE mapping with
-// leading-dot references, and was green throughout step 8 for the same reason
+// leading-dot references, and was green for the same reason
 // its native twin was — `source_refs` reads `DefMap::sources`, so the only lines
 // it can see are the two `:=` bindings, and those were already in the live
 // surface. The retired half never reached an assertion. See that file's header

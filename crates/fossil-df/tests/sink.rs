@@ -1,6 +1,6 @@
 //! Native sink (fase 1): `execute_graph` → `write_to_dir` lays the W0b GraphAr
-//! tree on disk (vertex/edge Parquet + the 3 manifest YAMLs), and the Parquet
-//! reads back with the rows the executor produced.
+//! tree on disk (vertex/edge Parquet + a manifest YAML per type plus the graph
+//! index), and the Parquet reads back with the rows the executor produced.
 
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]

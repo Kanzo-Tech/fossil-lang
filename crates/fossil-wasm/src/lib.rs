@@ -12,8 +12,8 @@
 //! | [`WasmPlayground::open_file`]   | [`FileHandle`]                       | `textDocument/didOpen`     |
 //! | [`WasmPlayground::update_file`] | `()`                                 | `textDocument/didChange`   |
 //! | [`WasmPlayground::close_file`]  | `()`                                 | `textDocument/didClose`    |
-//! | [`WasmPlayground::check`]       | `Array<{ uri, range, severity, message }>` | LSP `publishDiagnostics` (workspace-wide) |
-//! | [`WasmPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | per-file `publishDiagnostics` (the worker's drain) |
+//! | [`WasmPlayground::check`]       | `Array<{ uri, range, severity, message }>` | the playground's panel, workspace-wide |
+//! | [`WasmPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | the same rows scoped to one file |
 //! | [`WasmPlayground::hover`]       | `{ markdown, range } \| null`        | `textDocument/hover`       |
 //! | [`WasmPlayground::completions`] | `Array<{ label, kind, detail }>`     | `textDocument/completion`  |
 //! | [`WasmPlayground::goto_definition`] | `Array<{ uri, range }>`          | `textDocument/definition`  |
@@ -138,10 +138,8 @@ impl WasmDb {
 pub struct FossilPlayground {
     db: WasmDb,
     /// The system handle is owned by `db` via `Arc<dyn System>`; we retain a
-    /// typed `Arc<WasmSystem>` here to reach the in-memory filesystem — the
-    /// shape-document loop reads through it, and future host wiring (e.g. a
-    /// `VirtualFS` import) writes to it — without round-tripping through the
-    /// trait object.
+    /// typed `Arc<WasmSystem>` here so the shape-document loop can reach the
+    /// in-memory filesystem without round-tripping through the trait object.
     system: Arc<WasmSystem>,
     /// The open-file lifecycle map (handle → `SourceFile` + URI index).
     /// Mutated by `open_file` / `update_file` / `close_file`; iterated by
@@ -176,8 +174,8 @@ impl FossilPlayground {
     }
 
     // A `classification()` method sat here, returning the `{ name, wasm_class }`
-    // manifest for the playground to gray out the native-only functions. There
-    // are none: see the tombstone below `inferred_descriptor_native`.
+    // manifest for the playground to gray out the native-only stdlib functions.
+    // There are none: `crates/fossil-hir/src/stdlib.rs` records the removal.
 }
 
 /// The JS-facing workspace — `FossilPlayground` on the JS side, and a
@@ -247,9 +245,9 @@ fn busy_error(method: &str) -> JsError {
 impl WasmPlayground {
     /// Construct a new playground.
     ///
-    /// Installs `console_error_panic_hook` (idempotent —
-    /// Don't-Hand-Roll #8) so any panic inside compiler-core surfaces as a
-    /// `console.error` stack trace in the host (browser `DevTools` or Node).
+    /// Installs `console_error_panic_hook` (idempotent) so any panic inside
+    /// compiler-core surfaces as a `console.error` stack trace in the host
+    /// (browser `DevTools` or Node).
     #[wasm_bindgen(constructor)]
     #[must_use]
     pub fn new() -> Self {
@@ -351,12 +349,11 @@ impl WasmPlayground {
         serde_wasm_bindgen::to_value(&pg.check_rows()).map_err(JsError::from)
     }
 
-    /// Per-file diagnostic drain — the accessor the LSP Worker consumes for its
-    /// per-file `publishDiagnostics` notifications.
-    /// `check()` returns the workspace-wide flat array; `diagnostics_for`
-    /// returns just one file's rows so the worker can dispatch one notification
-    /// per affected URI without partitioning the workspace array on the JS
-    /// side.
+    /// Per-file diagnostic drain: `check()` returns the workspace-wide flat
+    /// array, this returns one file's rows, so a host can refresh one buffer's
+    /// panel without partitioning the workspace array on the JS side. It is NOT
+    /// what the LSP Worker publishes — that is
+    /// [`fossil_ide::lsp_diagnostics`], through `lsp_worker::publish_diagnostics`.
     ///
     /// # Errors
     ///
@@ -440,7 +437,7 @@ impl WasmPlayground {
     /// when nothing there has a definition.
     ///
     /// `uri` is the key the host opened the buffer under, verbatim — and two of
-    /// the four positions goto-def recognises resolve into the shape document,
+    /// the three positions goto-def recognises resolve into the shape document,
     /// so a host with one pane has to read it before moving a cursor.
     ///
     /// # Errors
@@ -495,7 +492,7 @@ impl WasmPlayground {
 // call `serde_wasm_bindgen::to_value` and construct
 // `JsError`s, both of which call wasm-bindgen extern intrinsics that panic
 // on native targets ("cannot call wasm-bindgen imported functions on
-// non-wasm targets" — wasm-bindgen 0.2 lib.rs:101). Splitting the
+// non-wasm targets" — wasm-bindgen 0.2). Splitting the
 // pure-Rust half out into a separate non-#[wasm_bindgen] impl block lets
 // `cargo test -p fossil-wasm --test workspace` exercise the full lifecycle
 // natively (the wasm-bindgen attribute layer is a transparent pass-through
@@ -701,7 +698,7 @@ impl FossilPlayground {
     /// `#[wasm_bindgen]` wrapper).
     ///
     /// Cargo-tests call THIS function — the wasm-bindgen wrapper panics on
-    /// the native test target (wasm-bindgen 0.2 lib.rs:101). Mirrors the
+    /// the native test target (wasm-bindgen 0.2). Mirrors the
     /// `*_native` / `*_result` / `*_rows` convention documented in
     /// `tests/workspace.rs`.
     ///
@@ -751,9 +748,9 @@ impl Default for FossilPlayground {
 // CLI commands for the BROWSER host: keasy's client-compute job runner reads a
 // program's typed lineage (which `@conn`s + `schema =` it references) and the
 // supported source providers WITHOUT subprocessing the `fossil` binary. Both
-// delegate to the shared, WASM-clean `fossil_registry` implementation — the SAME
-// code `fossil-cli` runs natively — so the browser and the CLI can never
-// diverge.
+// delegate to `fossil_lineage` (WASM-clean) over
+// `fossil_descriptors_output::PROVIDERS` — the SAME two calls `fossil-cli`'s
+// `host.rs` makes natively — so the browser and the CLI can never diverge.
 //
 // Free functions (not `FossilPlayground` methods): they are stateless and
 // program-text-driven (the job runner has the script string, not the editor's
@@ -884,10 +881,10 @@ fn to_check_row(
 
 // `diagnostics_for_file`, `severity_to_lsp_int`, `span_to_range` and
 // `utf16_to_pos` lived here, and every one of them had a twin in
-// `fossil-lsp/src/main.rs`. They are `crates/fossil-ide/src/diagnostics.rs` now
-// — which carries the measurements this file used to: the twenty-one rows a
-// `ShExJ` document produced before the `claimed` guard, the fourteen the `ShExC`
-// one did, and the three of those that were an internal compiler error.
+// `fossil-lsp/src/main.rs`. They are `crates/fossil-ide/src/diagnostics.rs` now.
+// The measurements this file used to carry — what a shape document produced
+// before the `claimed` guard — are in
+// `crates/fossil-wasm/tests/documents_are_not_programs.rs`.
 
 // ----- LSP dispatch test hook -----
 //

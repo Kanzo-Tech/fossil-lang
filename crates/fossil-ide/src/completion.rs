@@ -32,11 +32,6 @@
 //! key can be written here at all* are answers to the same question — where
 //! the cursor is — and asking it three times is how they came to disagree.
 //!
-//! A source between the first and the second was **prefixes**: declared ones
-//! from the cross-file index plus a well-known set offered as auto-importable.
-//! It went whole with the `prefix` declaration; a vocabulary is not a form this
-//! language has.
-//!
 //! # Domain + WASM boundary
 //!
 //! Returns `lsp_types::CompletionItem` directly; no stdio / JSON-RPC. The stdlib
@@ -709,10 +704,10 @@ mod tests {
     use fossil_base::{Catalogue, Files, System};
     use std::sync::Arc;
 
-    // A minimal host db stand-in, so these unit tests exercise the stdlib +
-    // prefix sources (which are unconditional) without a filesystem fixture.
-    // The shape-property source needs a program naming a real document on
-    // disk, and is exercised end-to-end in `tests/completion.rs`.
+    // A minimal host db stand-in, so these unit tests exercise the stdlib
+    // source without a filesystem fixture. The shape-property source needs a
+    // program naming a real document on disk, and is exercised end-to-end in
+    // `tests/completion.rs`.
     #[salsa::db]
     #[derive(Clone)]
     struct HostDb {
@@ -794,15 +789,12 @@ mod tests {
         );
     }
 
-    /// Source 4: with a host-registered `InferredDescriptor`, the ROW BINDING's
+    /// Source 3: with a host-registered `InferredDescriptor`, the ROW BINDING's
     /// dot offers the source's columns as Field completions.
     ///
-    /// The fixture was `prefix ex: <…>` + `ex:name = .name` and every one of
-    /// those three is a form the parser refuses by name: `retired::PREFIX_DECL`,
-    /// `retired::CURIE`, `retired::LEADING_DOT`. It passed because the trigger
-    /// was «a `DOT` under a `MAPPING`», which a refused leading dot still is —
-    /// so the test proved the columns were offered where the language cannot
-    /// write anything at all. `u.` is the position they belong to.
+    /// `u.` is the position they belong to, and the only one: the trigger was
+    /// «a `DOT` under a `MAPPING`», which a refused leading `.` still is, so
+    /// the columns were offered where the language cannot write anything.
     #[test]
     fn offers_source_fields_after_the_row_binding_s_dot() {
         use fossil_descriptors_input::{InferredColumn, InferredDescriptor};

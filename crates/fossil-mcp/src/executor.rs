@@ -2,7 +2,7 @@
 //!
 //! `fossil-graph` owns the verb→SQL logic (WASM-clean); this crate only
 //! satisfies the [`DuckExecutor`] seam by running that SQL and converting each
-//! result row to a JSON object. The WASM counterpart (`fossil-wasm`, W5)
+//! result row to a JSON object. The WASM counterpart, `fossil_graph_wasm::JsExecutor`,
 //! implements the same seam against DuckDB-WASM — neither re-derives a verb's
 //! SQL.
 //!
@@ -81,7 +81,7 @@ impl ConnectionExecutor<'_> {
     }
 }
 
-/// Convert an owned `DuckDB` value to JSON. Lists recurse (the `find_path` verb
+/// Convert an owned `DuckDB` value to JSON. Lists recurse (the `path` verb
 /// returns `VARCHAR[]` path columns); unhandled exotic types fall back to their
 /// debug string so a verb never fails on an unexpected column type.
 fn duck_to_json(v: DuckValue) -> Value {

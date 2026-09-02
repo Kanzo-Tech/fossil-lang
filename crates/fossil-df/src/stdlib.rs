@@ -36,9 +36,7 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
         "substring" => "substr",
         "trim" => "btrim",
         "upper" => "upper",
-        // Shared, and reached only through a template: these are the names the
-        // nine `InlineForm` variants used to hide in a doc-comment, so they
-        // could never appear here before ruling 15.
+        // Shared, and reached only through a template.
         "regexp_replace" => "regexp_replace",
         // The two that differ.
         //
@@ -80,25 +78,11 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
 /// one work — or breaking one — is a diff in this list and not a surprise in a
 /// user's program.
 ///
-/// **It is down to one cause from four, and that is the change worth reading.**
-/// Three of the four were not capability gaps at all:
-///
-/// - `str.split` and `anon.hash` recorded a Cargo feature and a lookup that
-///   searched one function package. `string_to_array` and `sha256` are real
-///   DataFusion functions living in the nested and crypto packages, absent from
-///   `all_default_functions()`. `str.split` renders now — `nested_expressions`
-///   is on and `render_expr_template` searches both packages — and `anon.hash`
-///   left the language, which is why `crypto_expressions` stays off.
-/// - `core.require` and the five `validate.*` rows needed `error()`, which has
-///   no DataFusion spelling: there is no way to raise from an expression. They
-///   are deleted from the language rather than carried as a permanent gap.
-/// - `parse.json` needed a JSON extraction DataFusion does not ship. Also
-///   deleted.
-///
-/// What is left is the four aggregates, and they are here for a reason that is
-/// not a gap either: an aggregate in a SCALAR position is a pipeline with a
-/// group-by, and only the scalar rendering is missing. They remain the spelling
-/// of a `group_by`'s aggregations — see `datafusion_name`.
+/// What is left is the aggregates, and they are here for a reason that is not a
+/// gap: an aggregate in a SCALAR position is a pipeline with a group-by, and
+/// only the scalar rendering is missing. They remain the spelling of a
+/// `group_by`'s aggregations — see `datafusion_name`. What left the language
+/// instead of staying a gap is `/docs/design/expressions`.
 #[cfg(test)]
 const UNREACHABLE_ON_DATAFUSION: &[&str] = &["math.avg", "math.max", "math.min", "math.sum"];
 
@@ -110,12 +94,9 @@ mod tests {
     /// Every catalogued function reaches an implementation on this engine, or
     /// is named above as one that does not.
     ///
-    /// **This test got teeth.** It used to check that a `Builtin`'s name had a
-    /// `DataFusion` spelling and that a `Udf`'s name was in a map — a question
-    /// about two lookup tables. It now PLANS each row's template through the
-    /// real renderer, so it fails on a template that is not valid SQL, not just
-    /// on a name that is not in a list. The nine `InlineForm` variants it could
-    /// not see at all are included for the first time.
+    /// It PLANS each row's template through the real renderer, so it fails on a
+    /// template that is not valid SQL, not just on a name that is not in a
+    /// list.
     #[test]
     fn every_catalogued_function_is_reachable_or_declared_unreachable() {
         use datafusion::logical_expr::lit;

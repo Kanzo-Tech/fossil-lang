@@ -13,8 +13,6 @@ publish = false
 [lints]
 workspace = true
 
-# No dependencies, and that is the crate's whole claim. It is `std::path` and a
-# `HashMap`, which is why it can sit under `fossil-base` rather than beside it:
-# the substrate is what everything depends on, and a crate the substrate itself
-# depends on has to cost nothing.
+# No dependencies, and that is the crate's whole claim: `std::path` and a
+# `HashMap`. Every reader takes it directly rather than through the substrate.
 [dependencies]

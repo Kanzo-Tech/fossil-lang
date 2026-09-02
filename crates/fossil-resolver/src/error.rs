@@ -22,11 +22,13 @@ pub enum ResolveError {
     /// fetch failed, connection name unknown, signed URL minting refused
     /// by the upstream provider, …).
     ///
-    /// The `String` payload is the host's diagnostic message — bindings
-    /// (fossil-cli, fossil-mcp, keasy proxy) surface it verbatim to the
-    /// caller. Hosts that want a typed error of their own wrap their error
-    /// in their crate and convert it to a string at this boundary; the
-    /// resolver crate stays free of host-specific error enums.
+    /// The `String` payload is the host's diagnostic message, surfaced
+    /// verbatim to the caller. Hosts that want a typed error of their own wrap
+    /// their error in their crate and convert it to a string at this boundary;
+    /// the resolver crate stays free of host-specific error enums.
+    ///
+    /// **Nothing constructs this variant** — [`ResolveError::host`], its only
+    /// maker, has no caller in the workspace.
     #[error("resolver error: {0}")]
     Host(String),
 }

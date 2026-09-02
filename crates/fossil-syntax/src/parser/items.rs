@@ -48,10 +48,11 @@
 //!
 //! # The retired spellings are REFUSED here, not recovered past
 //!
-//! Three of the six live in this module — the vocabulary declaration
+//! Three of them live in this module — the vocabulary declaration
 //! ([`parse_program`]), the CURIE in a shape or a property key
 //! ([`parse_shape_expr`], [`parse_property_lhs`]) and the `<…>` absolute IRI
-//! ([`parse_property_lhs`]). Each CONSUMES its form under an `ERROR` node and
+//! ([`parse_shape_expr`], [`parse_property`]). Each CONSUMES its form under an
+//! `ERROR` node and
 //! reports [`super::diag::retired`]'s message for it, because leaving the
 //! tokens to `recover_to` produces `unexpected token` for something the parser
 //! recognised exactly.
@@ -218,7 +219,7 @@ pub(crate) fn parse_program(p: &mut Parser) {
 // SourceDef: IDENT DEFINE Expression
 //
 // The one binding form. `users := io.csv("u.csv")` reads a file and
-// `adultos := users |> where(...)` derives a relation; both are a name, `:=`
+// `adults := users.where(...)` derives a relation; both are a name, `:=`
 // and an expression, and `def_map` keys both on SOURCE_DEF.
 // ───────────────────────────────────────────────────────────────────────
 fn parse_source_def(p: &mut Parser) {
@@ -537,8 +538,8 @@ fn parse_mapping(p: &mut Parser) {
             recover::recover_to(p, TOP_LEVEL_ANCHORS);
         }
     } else {
-        // Body missing — emit recovery and continue past. Grammar.bnf says
-        // MappingBody := Property+ (1-or-more); a missing body is a parse
+        // Body missing — emit recovery and continue past. `MappingBody :=
+        // SubjectAssign Property+` (grammar.bnf), so a missing body is a parse
         // error.
         recover::recover_to(p, TOP_LEVEL_ANCHORS);
     }
@@ -652,7 +653,8 @@ fn parse_shape_expr(p: &mut Parser) -> ShapeOutcome {
     ShapeOutcome::HeaderContinues
 }
 
-// MappingBody: Property+
+// MappingBody: (SubjectAssign | Property)* — see this module's header for the
+// three obligations `fossil_hir::body::body` checks instead of this function.
 fn parse_mapping_body(p: &mut Parser) {
     p.start(SyntaxKind::MAPPING_BODY);
     loop {
@@ -786,7 +788,7 @@ fn parse_property_lhs(p: &mut Parser) {
 }
 
 // =====================================================================
-// Disambiguation-rule unit tests (Task 2a per Blocker 1)
+// Disambiguation-rule unit tests
 // =====================================================================
 //
 // These tests pin the forks the parser actually takes, independently of the
@@ -794,9 +796,10 @@ fn parse_property_lhs(p: &mut Parser) {
 // class where `UPDATE_EXPECT=1` bakes the wrong shape into the baseline.
 //
 // They are NOT proof that the parser implements `grammar.bnf` — nothing
-// mechanical checks that file against this one, and its own header says so. The
-// three rules the grammar still numbers are here, and so are the five retired
-// spellings, because a refusal is as much a fork as an acceptance and the one
+// mechanical checks that file against this one, and its own header says so.
+// Rules 3, 6, 7 and 8 are here (rule 5's fork is fixture `31_type_def_and_
+// type_as_a_binding_name`), and so is every retired spelling this module
+// refuses, because a refusal is as much a fork as an acceptance and the one
 // thing this parser must not do with a dead form is take it quietly.
 
 #[cfg(test)]
@@ -936,7 +939,7 @@ mod disambiguation {
         );
     }
 
-    // ── The five retired spellings, each refused by name ───────────────
+    // ── The retired spellings, each refused by name ────────────────────
     //
     // A rejection that is mute is the worst result available here: this tree
     // has a measured case of the opposite — `lower_property` ending in a bare

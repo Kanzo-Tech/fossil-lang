@@ -1069,11 +1069,10 @@ shop:Order {
     }
 
     /// Every `(min, max)` pair `ShEx` can hand over, and the `Occurs` it decodes
-    /// to. The rows are the five cases the enum this replaces had names for,
-    /// plus the three encodings that fell through to its `Range` arm — the pair
-    /// is produced directly now, so there is no intermediate spelling to drift
-    /// from. `(None, Some(-1))` is degenerate in both: `-1` only means
-    /// "unbounded" beside an explicit `min`.
+    /// to — the cases the enum this replaces had names for, and the encodings
+    /// that fell through to its `Range` arm. The pair is produced directly now,
+    /// so there is no intermediate spelling to drift from. `(None, Some(-1))`
+    /// is degenerate: `-1` only means "unbounded" beside an explicit `min`.
     #[test]
     fn occurs_decodes_every_shex_min_max_encoding() {
         let cases: &[(&str, Option<i32>, Option<i32>, Occurs)] = &[

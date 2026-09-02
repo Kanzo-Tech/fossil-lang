@@ -54,7 +54,7 @@ enum Commands {
         /// Path to the `.fossil` source file.
         file: PathBuf,
     },
-    /// Compile + execute a `.fossil` file via native `DuckDB`, materialising
+    /// Compile + execute a `.fossil` file via native `DataFusion`, materialising
     /// `GraphAr` Parquet under `--dest` (the W0b column shape) plus YAML
     /// manifests. The output descriptor is program-resident — the single source
     /// of truth (`io.rdf(schema = …)` `ShEx`, else synthesised) — never a flag.

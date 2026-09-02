@@ -48,8 +48,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 # `NativeSystem` — a `System` with a descriptor cache and nothing else. It is
-# what lets these tests have a host without depending on one; `fossil-cli`
-# would be a loop, since it takes this crate as a dev-dependency for the same
-# reason.
+# what lets these tests have a host without depending on one: `fossil-cli`
+# would be a cycle, because it depends on this crate.
 fossil-base = { path = "../fossil-base", features = ["test-support"] }
 tempfile = { workspace = true }

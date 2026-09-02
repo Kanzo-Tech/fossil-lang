@@ -12,9 +12,9 @@
 //!
 //! The rule used to be a sentence on `ReadParams` — *«a binding that gates the
 //! escape hatch MUST gate this field with it»* — which is an obligation a
-//! binding author discharges by remembering. Three bindings exist and each one
-//! wires its own permission; the sentence had no way to notice a fourth that
-//! wired only one.
+//! binding author discharges by remembering. Each binding wires its own
+//! permission; the sentence had no way to notice one that wired only half of
+//! it.
 //!
 //! So the two fields are no longer `String`. They are [`RawSql`], which has
 //! **no `Deserialize` impl** and one constructor taking a [`RawSqlAccess`]

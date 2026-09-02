@@ -11,41 +11,14 @@
 //! FOSSIL_MEM_PROBE=1 fossil run …
 //! ```
 //!
-//! # Why it is not in `fossil-base`
+//! Three decisions are argued in `/docs/design/cost`: why it is not in `fossil-base` (that `ps`
+//! call was `fossil-layout`'s only edge to the compiler substrate), why the clock is `Instant`
+//! (NTP steps a wall clock backwards), and why it is off on wasm32 (`Instant::now()` is
+//! `unimplemented!()` there, and taking it before consulting the switch aborted every browser run).
 //!
-//! It lived there, on the argument that the substrate is the thing under both halves. But it is
-//! not substrate: it asks the OS for a number and reads a monotonic clock, which is exactly the
-//! I/O `fossil-base`'s `System` exists to keep behind a trait — and it did neither through
-//! `System`. The consequence was structural rather than aesthetic: this `ps` call was the ONLY
-//! edge from `fossil-layout` to `fossil-base`, so a post-pass over Parquet linked the whole
-//! compiler substrate in order to time a phase.
-//!
-//! # The clock is `Instant`, on purpose
-//!
-//! Not `System::now()`. That returns a `SystemTime` — a wall clock, which NTP may step backwards
-//! mid-run, and a negative phase duration in the middle of a memory report is worse than no report.
-//! `Instant` is monotonic and is what an elapsed duration is measured with. Taking the clock from
-//! `System` would also mean depending on `fossil-base` again, for a number no query ever sees:
-//! nothing here is inside a Salsa query, and nothing here is reproducible by construction — a
-//! timing report that did not vary between two runs would be broken.
-//!
-//! Off, it is a bool test per phase. On, it shells out to `ps` per phase — which is fine at this
-//! granularity (a dozen calls per run) and is the honest number, because it includes the
-//! allocator's fragmentation where a counting allocator would not.
-//!
-//! # And on `wasm32-unknown-unknown` there is no clock at all
-//!
-//! `Instant::now()` there is `unimplemented!()` in `std` — it panics with «time not implemented on
-//! this platform», which under `panic = "abort"` reaches JS as a bare `RuntimeError: unreachable`
-//! naming nothing. [`Probe::new`] took the clock unconditionally, before consulting the switch, so
-//! every browser run of `fossil_df::execute_graph` aborted on its first line. Nothing caught it:
-//! `cargo xtask wasm-check` compiles and does not run, and the executor's JS suite loads a
-//! `packages/executor/pkg/` that is gitignored, so it was testing a two-and-a-half-month-old
-//! artefact built before this crate existed.
-//!
-//! So the probe is **off on wasm32**, and an off probe now holds no clock — which is the same fix
-//! from both sides: it cannot read a clock it never took, and there was nothing for it to report
-//! anyway ([`rss_bytes`] is `0` there, and there is no `ps` to ask).
+//! Off, it is a bool test per phase. On, it shells out to `ps` per phase — a dozen calls per run,
+//! and the honest number, because it includes the allocator's fragmentation where a counting
+//! allocator would not.
 
 /// A phase-by-phase RSS report over one pass of work. See the module docs.
 #[derive(Debug)]
