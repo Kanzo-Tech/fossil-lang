@@ -101,7 +101,7 @@ pub enum Op<'db> {
     /// `UnionOp(left, right, relation)` — multiset union of two same-schema
     /// streams, under the name the unified row answers to.
     ///
-    /// `relation` is there for the same reason [`JoinSide::relation`] is: a
+    /// `relation` is there for the same reason [`JoinSide::relations`] is: a
     /// column reference carries the relation it belongs to, and after a union
     /// neither input's name is that relation. `Staff.union(Contractor)` yields
     /// rows from both, so addressing them as `Staff.email` would name the row
@@ -186,13 +186,12 @@ pub enum Op<'db> {
     /// output.
     Sink { input: usize, sink: SinkRef },
 
-    /// `Empty(schema)` — the empty relation. Carries the column schema
-    /// it would have produced so codegen can emit a `SELECT ... WHERE false`
-    /// (or `LIMIT 0`) shell of the right shape. It is a distinct variant rather
-    /// than a `Source` carrying an empty marker because a `Source` that yields
-    /// no rows is a special case every downstream operator would have to reason
-    /// about; a variant of its own is self-documenting and keeps `schema_of`
-    /// total.
+    /// `Empty(schema)` — the empty relation, carrying the column schema it
+    /// would have produced. Nothing constructs it and `fossil_df::plan` does
+    /// not execute it; it is the identity of [`Op::Union`] and the target a
+    /// statically-false filter rewrites to. A variant of its own rather than a
+    /// `Source` with an empty marker, so `schema_of` stays total and no
+    /// downstream operator has to reason about a source that yields no rows.
     Empty { schema: Vec<SmolStr> },
 }
 
@@ -334,29 +333,24 @@ pub struct VProp<'db> {
 // `fossil_hir::stdlib::AggFn`. A copy on this side of the lowering would be a
 // second table to keep in step with four rows of `math/`.
 
-/// Source formats.
+/// Source formats. `fossil_df::read_source` is where each one picks its reader.
 ///
-/// The three native `io/` constructors map to a `DuckDB` table
-/// function in codegen (`read_csv_auto` / `read_json_auto` / `read_parquet`)
-/// that runs identically on native DuckDB and DuckDB-WASM.
-///
-/// [`Provider`](Self::Provider) covers formats DuckDB can't read natively: the
-/// core stays format-agnostic — codegen scans a relation an external provider
-/// materialises, and the decode lives outside the core. Carrying the provider
-/// name makes this non-`Copy`.
+/// [`Provider`](Self::Provider) covers the formats no built-in reader handles:
+/// the core stays format-agnostic — the plan scans a relation an external
+/// provider materialises, and the decode lives outside the core. Carrying the
+/// provider name makes this non-`Copy`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-#[allow(clippy::doc_markdown)] // read_csv_auto/read_json_auto/read_parquet are SQL fn names
 pub enum SourceFormat {
-    /// `io.csv(...)` → `read_csv_auto`.
+    /// `io.csv(...)`.
     Csv,
-    /// `io.json(...)` → `read_json_auto`.
+    /// `io.json(...)`.
     Json,
-    /// `io.parquet(...)` → `read_parquet`.
+    /// `io.parquet(...)`.
     Parquet,
-    /// A format DuckDB cannot read natively (e.g. RDF), backed by an external
-    /// source provider named `name` (`io.<name>(...)`). Codegen scans the
-    /// relation the provider materialises; the runtime invokes the provider
-    /// before the source prelude. The core never sees the format's internals.
+    /// A format with no built-in reader (e.g. RDF), backed by an external
+    /// source provider named `name` (`io.<name>(...)`). The plan scans the
+    /// relation the provider materialises; the host invokes the provider before
+    /// execution. The core never sees the format's internals.
     Provider { name: SmolStr },
 }
 

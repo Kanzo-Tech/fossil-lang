@@ -1,12 +1,12 @@
 //! `fossil-mir` — Mid-level IR (typed operator algebra).
 //!
-//! Ships the complete typed algebra (`Source`, `Project`, `Extend`, `Rename`,
-//! `Filter`, `Join`, `Union`, `GroupBy`, `Aggregate`, `Distinct`, `EmitVertex`,
-//! `EmitEdge`, `Sink`) plus an [`op::Op::Empty`] node and a typed [`op::Expr`]
-//! ADT. The HIR → MIR lowering [`lower::lower_to_mir_pg`] lowers the
-//! property-graph shape (`Source`, `EmitVertex`, `EmitEdge`, `Sink`) from
-//! `.fossil` source; the remaining operators have no surface syntax and are
-//! exercised via direct `MirGraph` construction.
+//! Ships the complete typed algebra and a typed [`op::Expr`] ADT. [`op::Op`] is
+//! the list of operators and its variants' doc comments are the signatures; no
+//! second copy of that list is written here.
+//!
+//! The HIR → MIR lowering [`lower::lower_to_mir_pg`] reaches every operator but
+//! [`op::Op::Extend`], [`op::Op::Rename`] and [`op::Op::Empty`], which have no
+//! surface syntax and are exercised by direct `MirGraph` construction.
 //! `fossil-df` consumes the [`graph::MirGraph`] and executes it on `DataFusion`.
 //!
 //! # Failure discipline
