@@ -216,3 +216,32 @@ guard nobody has watched fail is a sentence rather than a guard.
 The write half has its probe already — `FOSSIL_MEM_PROBE=1` and the two examples under
 `fossil-layout` — and what it lacks is the same discipline: W1 is `peak(10N) === peak(N)`, and it is
 red, and being red in public is the point of writing it down.
+
+## The instrument, and the three decisions inside it
+
+`FOSSIL_MEM_PROBE` is a crate of its own — `fossil-mem-probe` — and each half of that sentence was
+argued.
+
+**It is not in `fossil-base`.** It lived there once, on the reasoning that the substrate is what
+sits under both halves of the write path. It is not substrate: it asks the operating system for a
+number and reads a monotonic clock, which is precisely the I/O that `fossil-base`'s `System` exists
+to hold behind a trait — and it did neither through `System`. The cost was structural rather than
+tidy. That `ps` call was the **only** edge from `fossil-layout` to `fossil-base`, so a post-pass
+over Parquet linked the whole compiler substrate in order to time a phase. A crate that depends on
+nothing is what lets both halves report through one instrument without either depending on the
+other.
+
+**The clock is `Instant` and not `System::now()`.** A `SystemTime` is a wall clock, and NTP may
+step one backwards mid-run; a negative phase duration in the middle of a memory report is worse
+than no report. Nothing in the probe is inside a Salsa query and nothing about it is reproducible
+by construction — a timing report identical across two runs would be broken — so the usual reason
+to take a clock from `System` does not apply.
+
+**It is off on `wasm32`, and an off probe holds no clock.** `Instant::now()` on
+`wasm32-unknown-unknown` is `unimplemented!()` in `std`: it panics with *"time not implemented on
+this platform"*, which under `panic = "abort"` reaches JavaScript as a bare `RuntimeError:
+unreachable` naming nothing. The probe took its clock before consulting its switch, so every
+browser run of `execute_graph` aborted on its first line. What makes it worth recording is that
+nothing caught it — `cargo xtask wasm-check` compiles and does not run, and the executor's
+JavaScript suite loaded a gitignored `pkg/` that predated the crate by two and a half months. The
+switch is consulted first and the clock second, on every platform.
