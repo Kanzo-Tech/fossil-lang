@@ -17,7 +17,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "The privacy policy document a corpus is verified against — ODRL structure, DPV classification, a four-term fossil profile"
+description = "The privacy policy document a corpus is verified against — ODRL structure, DPV classification, a six-term fossil profile"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -28,6 +28,6 @@ doctest = false
 serde = { workspace = true }
 # The policy document is JSON-LD, and it is read with a JSON parser. See
 # `src/document.rs` for why that is a restriction rather than a shortcut, and
-# for the four things it refuses rather than guesses at.
+# for what it refuses rather than guesses at.
 serde_json = { workspace = true }
 thiserror = { workspace = true }
