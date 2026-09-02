@@ -17,13 +17,13 @@ workspace = true
 # The ShEx decode (parse + resolved constraint table) lives in the neutral
 # `fossil-shex` crate so the INPUT descriptor can derive source column types
 # from the same table (compile-time, always). The rudof crates are transitive
-# via fossil-shex; shex_validation stays out — AST-only here (per
-# rudof-wasm.md). This crate no longer re-exports any of it: a consumer that
+# via fossil-shex; shex_validation stays out — AST-only here, which is what
+# keeps the decode wasm-clean. This crate no longer re-exports any of it: a consumer that
 # wants `ShExDescriptor` names `fossil_shex::` itself.
 #
 # Note: do NOT add a `fossil-hir` path dep here. `ShapeId` mapping lives in
-# fossil-hir's `shapes.rs` (plan 03-05); the kind enum here carries only the
-# `fossil-shex` resolved-table types.
+# fossil-hir's `shapes.rs`; the kind enum here carries only the `fossil-shex`
+# resolved-table types.
 fossil-shex = { path = "../fossil-shex" }
 # `Provider` — the registry row this crate exists to supply. No cycle:
 # fossil-base depends on fossil-descriptors-INPUT and fossil-graph-schema, and

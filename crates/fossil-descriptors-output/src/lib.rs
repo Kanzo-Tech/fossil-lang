@@ -100,18 +100,15 @@ pub fn decode_shex(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
 pub trait OutputDescriptor: Send + Sync + std::fmt::Debug {
     /// Stable, lowercase, namespace-free identifier (e.g. `"shex"`, `"accept-all"`).
     ///
-    /// Trait signature returns `&str` (not `&'static str`) so Phase 3+
-    /// implementations can return dynamically-computed names.
+    /// `&str` and not `&'static str`, so an impl may compute its name.
     fn name(&self) -> &str;
 
-    /// Phase 1: tells the type-checker whether the descriptor is a permissive
-    /// "anything goes" pass-through (used for demos with no shape target).
-    /// Phase 3 CORE-06 supersedes with shape-aware queries
-    /// (`type_for_property`, `cardinality`, `is_closed`).
+    /// Whether the descriptor is a permissive "anything goes" pass-through —
+    /// the no-shape-target case.
     fn accepts_anything(&self) -> bool;
 }
 
-/// Phase 1 stub: accept-all output descriptor.
+/// The accept-all output descriptor.
 ///
 /// Returns `true` for [`OutputDescriptor::accepts_anything`]. It survives as
 /// the `AcceptAll` variant of [`OutputDescriptorKind`]: the fallback when no
@@ -128,8 +125,7 @@ pub trait OutputDescriptor: Send + Sync + std::fmt::Debug {
 pub struct AcceptAllDescriptor;
 
 impl OutputDescriptor for AcceptAllDescriptor {
-    // Phase 1 returns a literal; the trait signature stays `&str` for
-    // Phase 3+ dynamic naming (see OutputDescriptor::name() doc).
+    // A literal here; the trait's `&str` is for an impl that computes one.
     #[allow(clippy::unnecessary_literal_bound)]
     fn name(&self) -> &str {
         "accept-all"

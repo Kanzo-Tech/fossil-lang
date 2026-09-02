@@ -1,6 +1,9 @@
-//! Derive an [`InferredDescriptor`] from a `ShEx` shape — the **compile-time,
-//! always** source-type path for RDF inputs (`io.rdf("data.ttl", schema:
-//! "person.shex")`).
+//! Derive an [`InferredDescriptor`] from a `ShEx` shape, for an RDF input
+//! (`io.rdf("data.ttl", schema: "person.shex")`).
+//!
+//! **It has no caller.** The live path for a `schema =` argument is
+//! `fossil_hir::def_map`, which resolves the document through the provider
+//! registry; nothing in the workspace reaches this function.
 //!
 //! A `ShEx` shape *is* the schema: each triple constraint declares a predicate
 //! (→ column name) and a value type (→ column [`Primitive`]). Unlike CSV/JSON

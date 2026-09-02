@@ -18,19 +18,13 @@ publish = false
 workspace = true
 
 [dependencies]
-# Phase 1: trait + minimal CSV stub. csv / roxmltree / jsonschema stay deferred
-# to Phase 5 STDL-06 (already declared at workspace level for inheritance).
-#
-# Phase 3 plan 03-02 (CORE-05): consumes serde + serde_json for the
-# `InferredDescriptor` JSON round-trip. Per the Serious N2 fix to the Wave-1
-# plan layout, the consumer crate owns its dep declarations; plan 03-01 owns
-# the workspace-level `serde` + `serde_json` entries in the root Cargo.toml.
+# `serde` + `serde_json` are the `InferredDescriptor` JSON round-trip: a host
+# sends the introspected column list over a wire.
 indexmap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# `serde` feature on smol_str opt-in for `InferredDescriptor` JSON round-trip
-# (plan 13-01). Other consumers of smol_str in the workspace remain
-# unaffected — Cargo feature unification merges features additively.
+# The `serde` feature on smol_str, for the same round-trip. Other consumers of
+# smol_str are unaffected — Cargo feature unification merges additively.
 smol_str = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 

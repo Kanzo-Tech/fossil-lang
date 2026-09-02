@@ -5,10 +5,11 @@
 //! body → triple terms).
 //!
 //! The crate ships the trait plus a [`CsvDescriptor`] stub returning a
-//! hardcoded `{id: String, name: String}` schema. That stub exists for the
-//! `hello.fossil` walking-skeleton demo and for nothing else.
-//!
-//! JSON Schema / XSD / Parquet implementations would attach at the same trait.
+//! hardcoded `{id: String, name: String}` schema. **Nothing outside this file
+//! names either**: the live path is [`InferredDescriptor`], built from the
+//! host's own `DESCRIBE`, and no caller in the workspace goes through
+//! [`InputDescriptor`]. JSON Schema / XSD / Parquet implementations would
+//! attach at the same trait.
 //!
 //! ## The host introspects: `InferredDescriptor`
 //!
@@ -41,8 +42,7 @@ pub use shex::{ShExInputError, inferred_descriptor_from_shex};
 pub trait InputDescriptor: Send + Sync + std::fmt::Debug {
     /// Stable, lowercase, namespace-free identifier (e.g. `"csv"`, `"json"`).
     ///
-    /// Trait signature returns `&str` (not `&'static str`) so
-    /// implementations can return dynamically-computed names.
+    /// `&str` and not `&'static str`, so an impl may compute its name.
     fn name(&self) -> &str;
 
     /// Parse a raw descriptor blob into an [`InputSchema`].
@@ -106,8 +106,7 @@ pub enum DescriptorError {
 pub struct CsvDescriptor;
 
 impl InputDescriptor for CsvDescriptor {
-    // Phase 1 returns a literal; the trait signature stays `&str` for
-    // Phase 3+ dynamic naming (see InputDescriptor::name() doc).
+    // A literal here; the trait's `&str` is for an impl that computes one.
     #[allow(clippy::unnecessary_literal_bound)]
     fn name(&self) -> &str {
         "csv"
@@ -148,7 +147,6 @@ mod tests {
 
     #[test]
     fn csv_descriptor_ignores_raw_input() {
-        // Phase 1 stub: any bytes → same hardcoded schema.
         let d = CsvDescriptor;
         let s1 = d.parse(b"").unwrap();
         let s2 = d.parse(b"completely different content").unwrap();
