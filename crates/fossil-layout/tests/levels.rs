@@ -334,3 +334,131 @@ fn level_cost_against_the_whole_type() {
         );
     }
 }
+
+/// **What a coarse view actually draws, measured** — the number the decision to
+/// read a level file rests on, and which nothing in this tree had measured.
+///
+/// `a_level_induces_essentially_no_edges_which_is_why_none_are_written` measures
+/// the **induced** set: edges with BOTH ends in the level. That is the right
+/// question for *writing* an edge pyramid and the wrong one for *reading* a
+/// vertex level, because the camera's rule is not the induced set. `view` keeps
+/// an edge with **at least one end drawn** and both ends *positioned* — both in
+/// the tiles it opened — and then the renderer's floor cuts the short ones. So
+/// the edges a coarse view draws scale with the marks (`V/2^k · degree`), not
+/// with their square, and the induced count says nothing about them.
+///
+/// That distinction is what decides whether a level file can answer at all. A
+/// read of `l{k}/` holds the level's rows and nothing else, so the far end of a
+/// mark-incident edge is not in it: reading the level means those edges and
+/// their anchors go. The question is therefore not *how many edges are induced*
+/// but **how many survive the three-pixel floor at the zoom where the pyramid is
+/// used** — if that is near zero the level file costs no picture, and if it is
+/// not, the bytes cost a drawing that is there today.
+///
+/// The floor is the app's: `@kanzo-tech/graph`'s `BOUNDED_DEFAULTS.minLinkPixels`
+/// is 3, `apps/playground/src/tiles.ts` multiplies it by the corpus units a
+/// pixel covers, and at the whole extent on a 1,200-pixel canvas that is
+/// `3 · width / 1200`.
+///
+/// Same fixture as `level_cost_against_the_whole_type`, deliberately: the byte
+/// ratio and this ratio have to be read against each other, and two corpora
+/// would make that a comparison between two graphs.
+///
+/// `cargo test -p fossil-layout --test levels -- --ignored --nocapture`
+#[test]
+#[ignore = "an instrument: it writes a 300,000-vertex corpus and measures it"]
+#[allow(clippy::cast_precision_loss)] // human-readable ratios in a println
+fn what_the_pixel_floor_leaves_of_a_coarse_view() {
+    const BIG: u32 = 300_000;
+    const CANVAS_PX: f64 = 1_200.0;
+    const MIN_LINK_PX: f64 = 3.0;
+
+    let f = fixture(dir("levels_camera"), BIG, 14);
+    let chunk = f.targets[0].chunk_size;
+    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+
+    let plan = VertexLevels::planned(u64::from(BIG), chunk).expect("above the floor");
+    let payload = lit(&f.root.join("chunks").join("tiles.parquet"));
+    let by_source = lit(Path::new(&f.adjacencies[0].parquet));
+    let db = Connection::open_in_memory().expect("duckdb");
+
+    // The extent the whole-extent view is drawn against, from the written
+    // positions rather than from the generator's: the layout pass moves every
+    // vertex, and a floor derived from the wrong extent is a floor in the wrong
+    // units.
+    let (min_x, max_x): (f64, f64) = db
+        .query_row(
+            &format!("SELECT min(x), max(x) FROM read_parquet('{payload}')"),
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("the extent");
+    let floor = MIN_LINK_PX * (max_x - min_x) / CANVAS_PX;
+    let total = scalar(
+        &db,
+        &format!("SELECT count(*) FROM read_parquet('{by_source}')"),
+    );
+    println!(
+        "corpus: {BIG} vertices, {total} edges, extent {min_x:.1}..{max_x:.1}, \
+         floor {floor:.3} corpus units ({MIN_LINK_PX} px at {CANVAS_PX} px)"
+    );
+
+    for &level in &plan.levels {
+        let step = 1u64 << level;
+        let marks = scalar(
+            &db,
+            &format!("SELECT count(*) FROM read_parquet('{payload}') WHERE dense_id % {step} = 0"),
+        );
+        // The camera's rule, spelled once and filtered three ways: at least one
+        // end a mark, both ends positioned (the whole extent opens every tile,
+        // so that is every vertex), and the length floor on top.
+        let counts = format!(
+            "WITH v AS (SELECT dense_id, x, y FROM read_parquet('{payload}')), \
+                  e AS (SELECT a.dense_id AS s, b.dense_id AS d, \
+                               (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) AS d2 \
+                        FROM read_parquet('{by_source}') r \
+                        JOIN v a ON a.dense_id = r.src_dense \
+                        JOIN v b ON b.dense_id = r.dst_dense \
+                        WHERE r.src_dense % {step} = 0 OR r.dst_dense % {step} = 0)"
+        );
+        let incident = scalar(&db, &format!("{counts} SELECT count(*) FROM e"));
+        let induced = scalar(
+            &db,
+            &format!("{counts} SELECT count(*) FROM e WHERE s % {step} = 0 AND d % {step} = 0"),
+        );
+        let drawn = scalar(
+            &db,
+            &format!("{counts} SELECT count(*) FROM e WHERE d2 >= {}", floor * floor),
+        );
+        let drawn_induced = scalar(
+            &db,
+            &format!(
+                "{counts} SELECT count(*) FROM e \
+                 WHERE d2 >= {} AND s % {step} = 0 AND d % {step} = 0",
+                floor * floor
+            ),
+        );
+        // An anchor is a far end that is NOT a mark, over the edges that survive
+        // the floor — the points a level read cannot position and therefore
+        // cannot draw.
+        let anchors = scalar(
+            &db,
+            &format!(
+                "{counts} SELECT count(DISTINCT x) FROM ( \
+                   SELECT s AS x FROM e WHERE d2 >= {f2} AND s % {step} != 0 \
+                   UNION SELECT d FROM e WHERE d2 >= {f2} AND d % {step} != 0)",
+                f2 = floor * floor
+            ),
+        );
+        println!(
+            "l{level}: {marks} marks · mark-incident {incident} ({induced} induced) · \
+             past the floor {drawn} ({drawn_induced} induced) · anchors {anchors} · \
+             a level read draws {:.2}% of the edges this view draws today",
+            if drawn == 0 {
+                100.0
+            } else {
+                (drawn_induced as f64 / drawn as f64) * 100.0
+            }
+        );
+    }
+}
