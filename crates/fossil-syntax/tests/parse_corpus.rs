@@ -1,6 +1,5 @@
-//! Parser corpus driver. Eighteen fixtures; it was
-//! thirty until the forms the HIR never read left the grammar, then twenty,
-//! and then three more went with the CURIE and the backtick.
+//! Parser corpus driver. The fixture count is asserted against the disk by
+//! `no_fixture_spells_a_retired_form`, at the bottom of this file.
 //!
 //! Every fixture is written in the spelling `grammar.bnf` specifies, and the
 //! rewrite was a rewrite rather than a patch: a shape is a bare name resolved
@@ -12,7 +11,7 @@
 //! the token left the lexer, so `a |> f()` now arrives as an unlexable `|` and
 //! a `GT` and the parser answers `retired::PIPELINE`.
 //! `no_fixture_spells_a_retired_form` reads `retired::PIPELINE` along with the
-//! other four, so the operator cannot come back through a regenerated snapshot.
+//! other five, so the operator cannot come back through a regenerated snapshot.
 //! Bucket 1 keeps its name because it keeps its subject: a pipeline is a chain,
 //! and the chain is spelled `User.filter(…)`, chained, with the dot every other
 //! postfix form already used.
@@ -231,8 +230,8 @@ fixture_test!(
 // accumulator, so the recovery + diagnostic plumbing must be exercised
 // independently of CST shape.
 //
-// Coverage: 9 of the 10 corpus recovery fixtures emit ≥1 diagnostic.
-// The remaining 1 is a documented exception:
+// Every `*_recovers` fixture is in the table below except one, which is a
+// documented exception:
 //
 //   - `12_double_minus_unary_recovers.fossil` (`@subject = - - x`) parses
 //     cleanly: unary `-` is right-associative (L7 in grammar.bnf
@@ -248,8 +247,7 @@ use salsa::Accumulator;
 
 #[test]
 fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
-    // 9 fixtures expected to emit ≥1 diagnostic. See the module-level
-    // comment above for why fixture 12 is the only one excluded.
+    // See the comment above for why fixture 12 is the only one excluded.
     let recovery_fixtures: &[(&str, &str)] = &[
         ("01_pipeline_postfix", "04_missing_arg_recovers"),
         ("01_pipeline_postfix", "05_trailing_pipe_recovers"),

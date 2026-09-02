@@ -33,12 +33,8 @@ mod hello_fossil_integration {
     //! and assert the top-level CST shape (1 `TYPE_DEF` + 1 `SOURCE_DEF` +
     //! 1 `MAPPING` with header + 2-property body).
     //!
-    //! The program is the target spelling, and every line of it changed in this
-    //! commit: the `prefix` declaration went, the shape is a bare name resolved
-    //! against the `type` binding, the identity is a quoted string with a
-    //! `{expr}` hole rather than a backtick with `${ex:}`, and the property
-    //! value is a qualified `User.name`. It is `apps/docs/programs/shop/`
-    //! shrunk to one mapping — the reference program, not an invention.
+    //! The program is `apps/docs/programs/shop/` shrunk to one mapping — the
+    //! reference program, not an invention.
 
     use super::*;
     use std::sync::Arc;

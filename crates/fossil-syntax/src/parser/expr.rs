@@ -16,15 +16,11 @@
 //! `crates/parser/src/grammar/expressions.rs`. The Pratt shape is materially
 //! cleaner than nested precedence functions.
 //!
-//! The specified table has EIGHT levels and this parser now implements exactly
-//! those eight. `|>` held a ninth at the tightest-binding end of the low side
-//! until the pipeline was retired for being a second spelling of `a.f()`, and
-//! every level moved up one when it went
-//! (grammar.bnf, § OPERATOR PRECEDENCE TABLE). A citation of «L8 unary» or
-//! «L9 postfix» predates that renumbering.
-//!
-//! The binding POWERS below did not change with the renumbering — only the
-//! level names did — so `1` and `2` are simply unused now.
+//! The `BNF` column below is the level the specified table gives each operator,
+//! and this parser implements every one of them. A citation of «L8 unary» or
+//! «L9 postfix» predates the renumbering `|>` left behind
+//! (grammar.bnf, § OPERATOR PRECEDENCE TABLE); the binding POWERS never moved,
+//! only the level names, which is why the lowest few are unused.
 //!
 //! Binding-power table (lbp = left binding power; rbp = right binding
 //! power; tighter operators → higher numbers). The `BNF` column is the
@@ -47,10 +43,12 @@
 //! ERROR otherwise.
 //!
 //! The primaries match the grammar exactly: `PrimaryExpr` is a literal, an IDENT
-//! or a parenthesised expression. The four retired forms — the leading-dot
-//! `FieldRef`, the CURIE `ex:name`, the `<…>` absolute IRI and the backtick
-//! `TEMPLATE` — each get a REFUSAL arm rather than nothing, because the parser
-//! can still see what was written and a bare `unexpected token` throws that away.
+//! or a parenthesised expression. The retired forms this file refuses BY NAME
+//! are the leading-dot `FieldRef`, the CURIE `ex:name` and the `<…>` absolute
+//! IRI, each with an arm in [`parse_primary`], plus `|>` in infix position in
+//! [`parse_expression`]. The backtick reaches no production at all and is named
+//! in `super::Parser::bump_as_error`. A bare `unexpected token` would throw away
+//! what the parser can still see.
 //!
 //! `true` and `false` are tokens (grammar.bnf, BOOL) because a program writes
 //! `verified = true` and there is no binding for the name to resolve against.
@@ -163,11 +161,7 @@ const TERNARY_RBP: Bp = 3;
 fn peek_infix(p: &Parser) -> Option<(Bp, Bp, Assoc, SyntaxKind)> {
     let k = p.current()?;
     Some(match k {
-        // There is no arm for `|>`, and there is no token for it either. It held
-        // L1; retiring it moved every level up one
-        // (grammar.bnf, § OPERATOR PRECEDENCE TABLE). The binding powers below
-        // did not change — only the level NAMES did, so `or` is L2 where it used
-        // to be called L3. The
+        // There is no arm for `|>`, and there is no token for it either: the
         // refusal is in `parse_expression`, in infix position, because that is
         // the only place `|>` could ever stand.
         // L2
@@ -456,15 +450,10 @@ fn parse_interpolated_string(p: &mut Parser) {
 /// The body of one hole.
 ///
 /// It takes an EXPRESSION and nothing else (grammar.bnf, Interpolation), so
-/// this is one call — and that is the whole of it. There was a special arm for
-/// `${ex:}`, a prefix with no local part, which was the commonest hole in the
-/// old corpus (115 of 215) and was NOT an expression at all: `PrefixedName`
-/// requires a local part, so the form was admitted in this one position and
-/// nowhere else. It died with the CURIE, and a full IRI is written out —
-/// `"https://shop.example/user/{User.email}"`.
-///
-/// `{ex:}` still produces a diagnostic rather than silence: `ex` parses as a
-/// primary and the `:` after it reaches nothing that wants one.
+/// this is one call — and that is the whole of it. `{ex:}`, the prefix-with-no-
+/// local-part hole the CURIE admitted in this one position, is not an
+/// expression and needs no arm: `ex` parses as a primary and the `:` after it
+/// reaches nothing that wants one, so the diagnostic is not silence.
 fn parse_interpolation_body(p: &mut Parser) {
     p.skip_trivia();
     parse_expression(p, 0);

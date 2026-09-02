@@ -47,16 +47,10 @@ pub(crate) const TOP_LEVEL_ANCHORS: &[SyntaxKind] = &[SyntaxKind::IDENT];
 /// practical anchor is `DEDENT` plus whatever starts the next property
 /// (an `IDENT`, or the `AT_ATTR` of the identity).
 ///
-/// `ABS_IRI` was a fourth: the absolute-IRI property key was dispatched to
-/// `parse_property_lhs` so the key could be CONSUMED and named. `<…>` is not a
-/// token any more; the refusal moved to a `LT` arm, which
-/// needs no anchor because it consumes the whole form.
+/// The retired `<…>` key needs no anchor: `items::parse_property` refuses it on
+/// an `LT` arm that consumes the whole form.
 pub(crate) const MAPPING_BODY_ANCHORS: &[SyntaxKind] =
     &[SyntaxKind::DEDENT, SyntaxKind::IDENT, SyntaxKind::AT_ATTR];
-
-// There was a `CLOSE_BRACKET_ANCHORS` here — `RBRACE` / `RPAREN` / `DEDENT`,
-// for recovering inside a `{ … }` annotation block. The annotation block was
-// its only caller and it went with the form.
 
 /// Consume tokens into an `ERROR` node until the current token is in
 /// `anchors` (or EOF). The anchor token itself is NOT consumed — it remains

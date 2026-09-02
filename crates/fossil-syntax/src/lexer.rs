@@ -8,13 +8,10 @@
 //! and `Newline` as real tokens (NOT `#[logos(skip)]`) because the indent
 //! pass needs them to measure leading columns.
 //!
-//! One `Token` variant per terminal of the lexical layer
-//! (grammar.bnf, § LEXICAL LAYER), and now with no exception — `BOOL` was the
-//! last one missing and `True` / `False` close it.
-//! `KwPrefix`, `Template`, `AbsIri` and `Pipe` were the four
-//! that outlived their surface and all four are gone — with them the backtick,
-//! `${`, `<…>` and `|>` stop being tokens at all, so a byte that used to open a
-//! retired spelling now reaches the parser as itself.
+//! Every terminal of the lexical layer (grammar.bnf, § LEXICAL LAYER) has a
+//! variant here, and nothing here outlives its surface: the backtick, `${`,
+//! `<…>` and `|>` are not tokens, so a byte that used to open a retired
+//! spelling reaches the parser as itself.
 //!
 //! Critical ordering rules (logos uses longest-match, with declaration order as
 //! tiebreaker for equal-length matches):
@@ -50,11 +47,10 @@ pub enum Token {
     Comment,
 
     // ───────────────────────────────────────────────────────────────────
-    // Keywords. The grammar reserves exactly four (grammar.bnf, KEYWORD) —
-    // `from`, `and`, `or`, `not`. `true` and `false` are reserved by the same
-    // list but are LITERALS rather than keywords, and have their own rules
-    // below. Declared BEFORE the `Ident` regex so logos's tiebreaker selects
-    // the dedicated keyword on equal-length matches.
+    // Keywords — `from`, `and`, `or`, `not`. `true`, `false` and `null` are on
+    // the same reserved list but are LITERALS rather than keywords, and have
+    // their own rules below. Declared BEFORE the `Ident` regex so logos's
+    // tiebreaker selects the dedicated keyword on equal-length matches.
     // ───────────────────────────────────────────────────────────────────
     // The list is `grammar.bnf, § RESERVED KEYWORDS`, and
     // `xtask/tests/grammar_tombstones.rs` holds it against these attributes in
@@ -74,11 +70,11 @@ pub enum Token {
     KwNot,
 
     // ───────────────────────────────────────────────────────────────────
-    // Attribute marker — `AT_ATTR := '@' IDENT`, and the sigil is decided.
-    // The grammar accepts exactly two names, told apart by
-    // position: `@rename` above a type binding, `@subject` as the first line
-    // of a mapping body. This lexer emits one token for any name; both the
-    // position check and `@rename` itself are the parser's outstanding work.
+    // Attribute marker — `AT_ATTR := '@' IDENT`. The grammar accepts exactly
+    // two names, told apart by POSITION: `@rename` above a type binding,
+    // `@subject` as the first line of a mapping body. This lexer emits one
+    // token for any name; `items::parse_rename_attr` and
+    // `items::parse_subject_assign` each check the name and refuse the other's.
     // ───────────────────────────────────────────────────────────────────
     #[regex(r"@[A-Za-z_][A-Za-z0-9_]*")]
     AtAttr,

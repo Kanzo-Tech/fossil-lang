@@ -6,15 +6,15 @@
 //! `parse(db, file)` Salsa query iterates them after CST construction,
 //! accumulating each via `to_diagnostic().accumulate(db)`.
 //!
-//! Five variants: the three the Pratt expression parser and the full item
-//! parser needed, `UnlexableCharacter` for the byte the
-//! lexer has no rule for, and [`ParseDiagnostic::RetiredSpelling`] for a form
-//! this parser RECOGNISES and refuses. The `to_diagnostic` adapter keeps the
+//! The variants split by what the parser can SAY: what it wanted, the byte the
+//! lexer has no rule for ([`ParseDiagnostic::UnlexableCharacter`]), and the two
+//! forms it RECOGNISES and refuses ([`ParseDiagnostic::RetiredSpelling`],
+//! [`ParseDiagnostic::Malformed`]). The `to_diagnostic` adapter keeps the
 //! parser decoupled from the public `Diagnostic` shape.
 //!
 //! # Why a retired spelling gets its own variant
 //!
-//! The other four say what the parser wanted. A retired spelling is the case
+//! The others say what the parser wanted. A retired spelling is the case
 //! where the parser knows exactly what the author wrote AND exactly what to
 //! write instead, and `expected IDENT, found SHAPE_SEP` throws both away. This
 //! matters more here than it usually would: the measured failure mode in this
@@ -65,13 +65,8 @@ impl ParseDiagnostic {
     #[must_use]
     pub fn to_diagnostic(self) -> Diagnostic {
         match self {
-            // Parse diagnostics carry neither a structured suggestion source
-            // nor a did-you-mean candidate (Markdown-only hints today). Those
-            // structured fields belong to the `ShEx` `OneOf`-rejection emitter
-            // and the did-you-mean quick-fix, which have a replacement to
-            // propose; a parse error has only a position. Built via the
-            // `Diagnostic::new` builder so future field additions stay
-            // non-breaking here.
+            // A parse error has only a position — no replacement to propose —
+            // so no arm below sets `did_you_mean` or `suggestion_source`.
             Self::ExpectedToken { want, got, span } => Diagnostic::new(
                 Severity::Error,
                 format!("expected {want:?}, found {got:?}"),
@@ -201,7 +196,7 @@ mod tests {
     #[test]
     fn every_retired_message_says_what_to_write_instead() {
         // A refusal that only says «no» costs the author a search through a
-        // grammar they do not have. Each of the five names its replacement.
+        // grammar they do not have. Each names its replacement.
         for m in [
             retired::PREFIX_DECL,
             retired::CURIE,

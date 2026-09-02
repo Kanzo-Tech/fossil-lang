@@ -41,12 +41,6 @@ macro_rules! ast_node {
     };
 }
 
-// `PrefixDecl` was a view here, with `name()` and `iri()` accessors reading a
-// `PREFIX_DECL`'s `IDENT` and `ABS_IRI` tokens. The node kind is gone and so are
-// both tokens — there is no vocabulary declaration left to introduce, and a
-// constant IRI is a STRING; its two consumers were
-// `fossil_hir::def_map`'s prefix table and `fossil_ide::prefix_index`, and both
-// went with it.
 ast_node!(SourceDef, SOURCE_DEF);
 ast_node!(PolicyDef, POLICY_DEF);
 ast_node!(Mapping, MAPPING);
@@ -109,7 +103,7 @@ impl MappingBody {
 
 impl MappingHeader {
     /// The header's mapping name (the `IDENT` immediately before the
-    /// `SHAPE_SEP` — `User` in `User : ex:Person from users`).
+    /// `SHAPE_SEP` — `People` in `People : Person from User`).
     #[must_use]
     pub fn name(&self) -> Option<smol_str::SmolStr> {
         self.0
@@ -127,7 +121,7 @@ impl MappingHeader {
     }
 
     /// The expression on the right of `from` — the source-binding
-    /// reference (`users` in `examples/hello.fossil`). Returned as a
+    /// reference (`User` in `examples/hello.fossil`). Returned as a
     /// raw [`SyntaxNode`] kept at `EXPR` kind because the upstream Pratt
     /// parser already wraps every right-hand side in an EXPR composite.
     #[must_use]

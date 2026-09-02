@@ -7,9 +7,8 @@
 //! cast top-level CST children into these views to walk the structural
 //! sub-nodes (`MappingHeader.shape_expr()`, `Mapping.body()`, etc.).
 //!
-//! The `Mapping`, `MappingHeader`, `MappingBody`, `Property` and `SourceDef`
-//! views live in `super` (`crates/fossil-syntax/src/ast/mod.rs`); the item
-//! views added alongside the full item parser live here.
+//! `super` (`crates/fossil-syntax/src/ast/mod.rs`) holds the rest of the views;
+//! the item views added alongside the full item parser live here.
 
 use crate::kind::{SyntaxKind, SyntaxNode};
 
@@ -36,16 +35,7 @@ macro_rules! ast_node {
     };
 }
 
-// `Import`, `RecordLiteral`, `AnnotationBlock` and `InClause` were views here.
-// Each wrapped a node kind the parser built and the HIR never cast, and all
-// four node kinds are gone — see `grammar.bnf` for what each one was and what
-// it would take to bring it back.
-
 ast_node!(ShapeExpr, SHAPE_EXPR);
-
-// `IriExpr` was a view here, over the `IRI_EXPR` node that wrapped the CURIE,
-// the `<…>` absolute IRI and the backtick template. All three spellings went —
-// a constant IRI is a STRING now — and so did the node.
 
 impl ShapeExpr {
     /// The shape's NAME — `Person` in `Users : Person from Adults`.

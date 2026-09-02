@@ -19,8 +19,8 @@
 //!    column 0 closes the block above it exactly as any other token would.
 //!
 //! INDENT/DEDENT lexing is the classic week-eater in an indentation-sensitive
-//! language, and it was named the highest-overrun risk here before a line of it
-//! existed. The 3-fixture corpus at the bottom of this file is the gate.
+//! language. The unit tests at the bottom of this file and
+//! `tests/fixtures/05_toplevel_indent/` are the gate.
 
 use crate::kind::SyntaxKind;
 use crate::lexer::{Token, raw_lex_lossless};
@@ -143,10 +143,7 @@ pub fn lex_with_indents(input: &str) -> Vec<LexedToken> {
 /// in `lexer.rs`: the lexer finds the boundaries, and everything between them
 /// is re-lexed into ORDINARY tokens so the ordinary expression parser reads it.
 /// Python spent seven years leaving f-strings to a hand-written post-pass over
-/// STRING tokens; the rule here is not to repeat that, and the
-/// cost of repeating it is measurable in this tree — see the `lower_placeholder`
-/// this commit deletes, which parsed holes at MIR-lowering time and echoed back
-/// as literal text anything it did not recognise.
+/// STRING tokens; the rule here is not to repeat that.
 ///
 /// The other reason it is here and not in `lexer.rs`: `fossil-wasm`'s
 /// `tokenize` feeds the editor from `raw_lex` DIRECTLY, and its `Token`
