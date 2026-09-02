@@ -232,3 +232,65 @@ fn a_small_type_writes_no_levels_at_all() {
         .collect();
     assert!(strays.is_empty(), "a type under the floor grew {strays:?}");
 }
+
+/// **What happens to the edges: nothing is written, and this is why.**
+///
+/// The induced edge set of a level — the edges with BOTH endpoints in it — does
+/// nest, exactly as the vertices do, so it is not rejected for the reason a
+/// synthetic centroid is. It is rejected because it is empty. A level keeps
+/// `1/2^k` of the vertices and an edge needs two of them, so it keeps on the
+/// order of `1/2^2k` of the edges: at the coarsest level of this fixture that is
+/// a 1-in-262,144 draw against 14 edges per vertex, and the file the pyramid
+/// would gain is a file with nothing in it.
+///
+/// So a coarse camera draws points and no links. That is not a new state for it
+/// to be in — `links` is already 0 in a window whose edges leave the frame — and
+/// the alternative is the one thing the whole design refuses: an edge between two
+/// survivors standing in for a path through vertices that are not drawn is a
+/// synthetic edge, and replacing it with the path when the camera zooms moves
+/// every line on screen. What draws the links is the payload's own
+/// `by_source` tiles, over the window, at the zoom where there are links to draw.
+#[test]
+fn a_level_induces_essentially_no_edges_which_is_why_none_are_written() {
+    let mut f = fixture(dir("levels_edges"), ROWS, 14);
+    f.targets[0].chunk_size = CHUNK;
+    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+
+    let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("above the floor");
+    let by_source = lit(Path::new(&f.adjacencies[0].parquet));
+    let db = Connection::open_in_memory().expect("duckdb");
+    let total = scalar(
+        &db,
+        &format!("SELECT count(*) FROM read_parquet('{by_source}')"),
+    );
+    assert!(total > 0, "the fixture has edges to lose");
+
+    let mut induced = Vec::new();
+    for &level in &plan.levels {
+        let step = 1u64 << level;
+        induced.push(scalar(
+            &db,
+            &format!(
+                "SELECT count(*) FROM read_parquet('{by_source}') \
+                 WHERE src_dense % {step} = 0 AND dst_dense % {step} = 0"
+            ),
+        ));
+    }
+    println!(
+        "edges {total}, induced per level {:?} at {:?}",
+        induced, plan.levels
+    );
+
+    // Under a hundredth of the edges at the FINEST written level, which is the
+    // most generous of the three, and non-increasing as the level coarsens —
+    // the nesting the vertices have, inherited.
+    assert!(
+        induced[0] * 100 < total,
+        "the finest level induces {} of {total} edges, which is enough to be worth a file",
+        induced[0]
+    );
+    assert!(
+        induced.windows(2).all(|w| w[1] <= w[0]),
+        "induced edge counts do not nest: {induced:?}"
+    );
+}
