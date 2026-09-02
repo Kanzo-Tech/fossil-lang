@@ -195,6 +195,126 @@ impl IndexAddress {
     }
 }
 
+/// Where a vertex type's **written levels** are, and which ones exist.
+///
+/// **Level `k` is `dense_id % 2^k == 0`, whatever this says.** A level is a
+/// predicate over the payload and a written `l{k}/` is a cache of it, so a corpus
+/// declaring none draws the identical picture and only reads more. What this
+/// block changes is a byte count.
+///
+/// **The numbers are declared and not derived**, unlike everything else here.
+/// `fossil_sinks::manifest::VertexLevels` argues why: a level list is at most
+/// three integers whatever the corpus is, and *which* levels a writer spent bytes
+/// on is a policy — a reader re-deriving it from `vertex_count` and `chunk_size`
+/// would reimplement the writer's plan and 404 the day the plan moved.
+///
+/// **A level needs no second anchor.** Level `k`'s row `i` is the payload row
+/// with `dense_id == i · 2^k`, so tile `j` of a level covers the `dense_id` range
+/// `[j · chunk_size · 2^k, (j+1) · chunk_size · 2^k)` — a contiguous run of
+/// payload tiles, which the published `codes:` anchor already bounds in Morton
+/// space.
+#[derive(Debug, Clone, Serialize)]
+pub struct LevelAddress {
+    /// The levels written, finest first, as the manifest declares them.
+    pub levels: Vec<u32>,
+    /// Rows per tile within a level set. Declared rather than inherited from the
+    /// payload's, because turning a level tile back into a `dense_id` range
+    /// multiplies by it and a number that has to be assumed is one a writer can
+    /// change in silence.
+    pub chunk_size: u64,
+    /// `log2(chunk_size)` — a level tile's address is this shift plus the level.
+    pub shift: u32,
+    /// Which container carries the level tiles. The corpus's, never a second answer.
+    pub container: Container,
+    /// The vertex type's own prefix, which a level's prefix is relative to.
+    #[serde(skip)]
+    vertex_prefix: String,
+    /// Filename stem of a level set's prefix — `l`, as the writer spells it.
+    #[serde(skip)]
+    stem: String,
+    /// The type's `vertex_count`, for the row and tile counts a level has.
+    #[serde(skip)]
+    count: Option<u64>,
+    /// The manifest file this was read from, for the error messages that name it.
+    #[serde(skip)]
+    path: String,
+}
+
+impl LevelAddress {
+    /// Whether level `k` is written.
+    ///
+    /// `false` is not a refusal and not an absence of the level: the level exists
+    /// at every `k` — it is a predicate — and this says only whether reading it
+    /// costs the level's bytes or the type's.
+    #[must_use]
+    pub fn has(&self, level: u32) -> bool {
+        self.levels.contains(&level)
+    }
+
+    /// Where level `k`'s tiles are, resolved, with a trailing separator.
+    #[must_use]
+    pub fn prefix(&self, level: u32) -> String {
+        prefix_of(&join(&[&self.vertex_prefix, &format!("{}{level}", self.stem)]))
+    }
+
+    /// The tile of level `k` holding `dense_id`: a shift by `log2(chunk_size) + k`.
+    ///
+    /// Never a division, and `k` more bits fall off than the payload's own
+    /// address drops — level `k` holds one row in `2^k`, so a tile of it spans
+    /// that many times the ids.
+    #[must_use]
+    pub const fn tile_of(&self, level: u32, dense_id: u64) -> u64 {
+        tile_of(dense_id, self.shift.saturating_add(level))
+    }
+
+    /// The file tile `j` of level `k` is in, spelled by the corpus's container.
+    #[must_use]
+    pub fn tile_url(&self, level: u32, tile: u64) -> String {
+        tile_url_for(&self.prefix(level), "chunk", self.container, tile)
+    }
+
+    /// How many rows level `k` holds — `ceil(count / 2^k)` — or `None` when the
+    /// manifest declares no count.
+    #[must_use]
+    pub fn rows(&self, level: u32) -> Option<u64> {
+        self.count.map(|c| c.div_ceil(1u64 << level.min(63)))
+    }
+
+    /// How many tiles level `k` has, or `None` when the manifest declares no count.
+    #[must_use]
+    pub fn tiles(&self, level: u32) -> Option<u64> {
+        self.rows(level).and_then(|r| tiles_of(r, self.chunk_size))
+    }
+
+    /// Every file of level `k`, in order and distinct.
+    ///
+    /// Refuses a level nobody wrote by naming what does answer it — the predicate
+    /// over the payload — because a URL under `l{k}/` for an unwritten `k` is the
+    /// one failure a reader cannot tell from an empty level.
+    pub fn files(&self, level: u32) -> Result<Vec<String>> {
+        if !self.has(level) {
+            let written = self
+                .levels
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(invalid(format!(
+                "{} writes levels {written} and not {level}, so its files are not addressable — \
+                 the predicate over the payload is what answers that level",
+                self.path
+            )));
+        }
+        let tiles = self.tiles(level).ok_or_else(|| {
+            invalid(format!(
+                "{} declares no vertex_count, so how many tiles level {level} has is not derivable",
+                self.path
+            ))
+        })?;
+        Ok(distinct((0..tiles).map(|k| self.tile_url(level, k))))
+    }
+}
+
 /// One vertex type's address: where its tiles are and which `dense_id` range each holds.
 #[derive(Debug, Clone, Serialize)]
 pub struct VertexAddress {
@@ -220,6 +340,13 @@ pub struct VertexAddress {
     /// cost rather than refusing. That is the opposite of [`VertexAddress::count`],
     /// whose absence makes a question unanswerable.
     pub index: Option<IndexAddress>,
+    /// The **written levels** of this type, or `None` when the manifest declares
+    /// none.
+    ///
+    /// `None` is a legal corpus and the most legal of the optional blocks: a
+    /// level is a predicate, so every level is answerable with or without this,
+    /// and what it changes is which bytes answer it. See [`LevelAddress`].
+    pub levels: Option<LevelAddress>,
     /// The manifest file this was read from, for the error messages that name it.
     #[serde(skip)]
     path: String,
@@ -745,6 +872,7 @@ fn vertex_address(
     let count = optional_count(doc, "vertex_count");
     let tiles = count.and_then(|c| tiles_of(c, chunk_size));
     let index = index_address(&prefix, path, doc, count, container)?;
+    let levels = level_address(&prefix, path, doc, count, container)?;
 
     Ok(VertexAddress {
         vertex_type,
@@ -755,8 +883,78 @@ fn vertex_address(
         tiles,
         container,
         index,
+        levels,
         path: path.to_string(),
     })
+}
+
+/// The `levels:` block of a vertex manifest, resolved, or `None` when there is
+/// none.
+///
+/// Every field is required once the block is present, on [`index_address`]'s
+/// argument: a block naming a prefix without its level list reads exactly like a
+/// corpus that declares no pyramid, and the difference between those two is a
+/// reader opening `l6/` or striding a million rows.
+fn level_address(
+    vertex_prefix: &str,
+    path: &str,
+    doc: &Value,
+    count: Option<u64>,
+    container: Container,
+) -> Result<Option<LevelAddress>> {
+    let Some(declared) = mapping(doc, path, "levels")? else {
+        return Ok(None);
+    };
+    let stem = match scalar(declared, "prefix") {
+        Some(v) if !v.is_empty() => v,
+        _ => {
+            return Err(invalid(format!(
+                "{path} declares levels and no prefix, so the tiles they name cannot be composed"
+            )));
+        }
+    };
+    let listed = declared
+        .get("levels")
+        .and_then(Value::as_sequence)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if listed.is_empty() {
+        return Err(invalid(format!(
+            "{path} declares levels and no level list, so which of them is written is not \
+             derivable — and it is a policy, not arithmetic a reader can redo"
+        )));
+    }
+    let levels = listed
+        .iter()
+        .map(|value| {
+            value
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok())
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "{path} declares level {}, which is not a level",
+                        value.as_str().unwrap_or("a non-scalar")
+                    ))
+                })
+        })
+        .collect::<Result<Vec<u32>>>()?;
+    let raw = scalar(declared, "chunk_size").unwrap_or_default();
+    let chunk_size = raw.parse::<u64>().unwrap_or(0);
+    let shift = shift_for(chunk_size).ok_or_else(|| {
+        invalid(format!(
+            "{path} declares a level tile of {raw} rows, which no shift addresses"
+        ))
+    })?;
+    Ok(Some(LevelAddress {
+        levels,
+        chunk_size,
+        shift,
+        container,
+        vertex_prefix: vertex_prefix.to_string(),
+        stem,
+        count,
+        path: path.to_string(),
+    }))
 }
 
 /// The `index:` block of a vertex manifest, resolved, or `None` when there is none.

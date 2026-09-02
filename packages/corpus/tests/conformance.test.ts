@@ -66,6 +66,16 @@ interface Case {
   }>;
   throws?: Array<{ vertex_type: string; message: string }>;
   resolve_throws?: string;
+  levels?: Array<{
+    type: string;
+    written: number[];
+    chunk_size: number;
+    sizes?: Array<{ level: number; rows: string; tiles: string }>;
+    tile_of?: Array<{ level: number; dense_id: string; tile: string }>;
+    addresses?: Array<{ level: number; tile: number; path: string }>;
+    files?: Array<{ level: number; paths: string[] }>;
+    refused?: Array<{ level: number; message: string }>;
+  }>;
 }
 
 const table = JSON.parse(readFileSync(join(CONFORMANCE, 'expected.json'), 'utf8')) as {
@@ -178,6 +188,64 @@ describe('the conformance corpus', () => {
             const edge = corpus.edges.find((e) => e.edgeType === refused.edge_type)!;
             expect(edge.adjacency(refused.direction)).toBeNull();
             expect(edge.directions).not.toContain(refused.direction);
+          }
+        });
+      }
+
+      it('reports a pyramid only where the manifest declares one', () => {
+        // A reader that invented a level list would compose `l6/chunk0.parquet` against a corpus
+        // that never wrote one — a 404 for a level the predicate over the payload answers.
+        const declared = new Set((expected.levels ?? []).map((l) => l.type));
+        for (const type of corpus.types) {
+          expect(type.levels === null).toBe(!declared.has(type.type));
+        }
+      });
+
+      for (const expectation of expected.levels ?? []) {
+        describe(`the pyramid over ${expectation.type}`, () => {
+          const levels = () => corpus.vertexType(expectation.type).levels!;
+
+          it('reports the levels the writer spent bytes on, and their tile size', () => {
+            expect([...levels().levels]).toEqual(expectation.written);
+            expect(levels().chunkSize).toBe(expectation.chunk_size);
+            for (const level of expectation.written) expect(levels().has(level)).toBe(true);
+          });
+
+          if ((expectation.sizes ?? []).length > 0) {
+            it('holds what the level predicate selects, counted', () => {
+              for (const size of expectation.sizes!) {
+                expect(levels().rows(size.level)).toBe(BigInt(size.rows));
+                expect(levels().tiles(size.level)).toBe(BigInt(size.tiles));
+              }
+            });
+          }
+
+          if ((expectation.tile_of ?? []).length > 0) {
+            it('shifts a dense_id into a LEVEL tile: the payload shift plus k', () => {
+              for (const v of expectation.tile_of!) {
+                expect(levels().tileOf(v.level, BigInt(v.dense_id))).toBe(BigInt(v.tile));
+              }
+            });
+          }
+
+          if ((expectation.addresses ?? []).length > 0) {
+            it('composes the level addresses in the table', () => {
+              for (const address of expectation.addresses!) {
+                expect(levels().tileUrl(address.level, address.tile)).toBe(address.path);
+              }
+            });
+          }
+
+          for (const set of expectation.files ?? []) {
+            it(`enumerates level ${set.level}`, () => {
+              expect([...levels().files(set.level)]).toEqual(set.paths);
+            });
+          }
+
+          for (const refused of expectation.refused ?? []) {
+            it(`refuses to address level ${refused.level}, which nobody wrote`, () => {
+              expect(() => levels().files(refused.level)).toThrow(refused.message);
+            });
           }
         });
       }

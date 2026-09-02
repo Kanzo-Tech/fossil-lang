@@ -1,0 +1,8 @@
+name: graph
+prefix: ''
+container: files
+vertices:
+- vertex/Person.vertex.yml
+edges:
+- edge/Person_knows_Person/Person_knows_Person.edge.yml
+version: gar/v1

@@ -114,6 +114,76 @@ export function resolve(root, base = "") {
       // ignored: ignoring it reads exactly like a corpus that declares none, and
       // guessing the sort of files whose `ordered_by` is missing returns a
       // plausible stranger instead of nothing.
+      /**
+       * The WRITTEN levels, or `null`. A level is the predicate `dense_id % 2^k == 0` over the
+       * payload whatever this says, so `null` is a corpus and not a gap — what a written level
+       * changes is which bytes answer, never which rows.
+       *
+       * A block that names a prefix and no level list is refused on the index's argument: which
+       * levels a writer spent bytes on is a POLICY, a reader cannot re-derive it from
+       * `vertex_count` and `chunk_size` without reimplementing the writer's plan, and a
+       * half-declared pyramid read as none is the difference between opening `l6/` and striding a
+       * million rows.
+       */
+      levels: (() => {
+        const declared = info.levels;
+        if (declared === undefined || declared === null || Array.isArray(declared)) return null;
+        const stem = declared.prefix;
+        if (typeof stem !== "string" || stem === "") {
+          throw new Error(`${info.rel} declares levels and no prefix, so the tiles they name cannot be composed`);
+        }
+        const listed = Array.isArray(declared.levels) ? declared.levels : [];
+        if (listed.length === 0) {
+          throw new Error(
+            `${info.rel} declares levels and no level list, so which of them is written is not ` +
+              `derivable — and it is a policy, not arithmetic a reader can redo`,
+          );
+        }
+        const written = listed.map((raw) => {
+          const level = Number(raw);
+          if (!Number.isInteger(level) || level < 0) {
+            throw new Error(`${info.rel} declares level ${raw}, which is not a level`);
+          }
+          return level;
+        });
+        const levelChunk = Number(declared.chunk_size);
+        const levelShift = Number.isInteger(levelChunk) && levelChunk > 0 ? shiftFor(BigInt(levelChunk)) : null;
+        if (levelShift === null) {
+          throw new Error(
+            `${info.rel} declares a level tile of ${declared.chunk_size} rows, which no shift addresses`,
+          );
+        }
+        const count = needRows(info, "vertex_count");
+        const levelPrefix = (level) => withSlash(rel(typePrefix, `${stem}${level}`));
+        const rows = (level) => Math.ceil(count / 2 ** level);
+        return {
+          levels: written,
+          chunkSize: levelChunk,
+          shift: Number(levelShift),
+          container,
+          has: (level) => written.includes(level),
+          prefix: levelPrefix,
+          // `k` more bits of `dense_id` fall off than the payload's own address drops: level `k`
+          // holds one row in `2^k`, so a tile of it spans that many times the ids.
+          tileOf: (level, denseId) => tileOf(denseId, levelShift + BigInt(level)),
+          tileUrl: (level, tile) => tileUrlFor(levelPrefix(level), "chunk", container)(tile),
+          rows,
+          tiles: (level) => Math.ceil(rows(level) / levelChunk),
+          files: (level) => {
+            if (!written.includes(level)) {
+              throw new Error(
+                `${info.rel} writes levels ${written.join(", ")} and not ${level}, so its files are ` +
+                  `not addressable — the predicate over the payload is what answers that level`,
+              );
+            }
+            const urls = [];
+            for (let k = 0; k < Math.ceil(rows(level) / levelChunk); k += 1) {
+              urls.push(tileUrlFor(levelPrefix(level), "chunk", container)(k));
+            }
+            return distinct(urls);
+          },
+        };
+      })(),
       index: (() => {
         const declared = info.index;
         if (declared === undefined || declared === null || Array.isArray(declared)) return null;

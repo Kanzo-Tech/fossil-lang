@@ -254,6 +254,107 @@ fn check_refusals(label: &str, case: &Value, corpus: &ResolvedCorpus) -> usize {
     checked
 }
 
+/// The **written pyramid**: which levels a type has, what each holds, where its
+/// tiles are, and the level it refuses to address.
+///
+/// A type the table says nothing about must report NONE. A reader that invented a
+/// level list would compose `l6/chunk0.parquet` against a corpus that never wrote
+/// one — a 404 for a level the predicate over the payload answers perfectly well,
+/// which is the failure mode a pyramid is worth having only if it cannot have.
+///
+/// Returns how many level addresses were checked, for the non-vacuity count.
+fn check_levels(label: &str, case: &Value, corpus: &ResolvedCorpus) -> usize {
+    let declared: Vec<String> = list(case, "levels")
+        .iter()
+        .map(|l| s(l, "type"))
+        .collect();
+    for vertex in &corpus.types {
+        assert_eq!(
+            vertex.levels.is_some(),
+            declared.contains(&vertex.vertex_type),
+            "{label}: {} reports a pyramid the table does not declare, or misses one",
+            vertex.vertex_type
+        );
+    }
+
+    let mut checked = 0;
+    for want in list(case, "levels") {
+        let vertex = corpus
+            .vertex_type(Some(&s(want, "type")))
+            .unwrap_or_else(|e| panic!("{label}: {e}"));
+        let levels = vertex
+            .levels
+            .as_ref()
+            .unwrap_or_else(|| panic!("{label}: {} declares levels and the reader sees none", vertex.vertex_type));
+
+        let written: Vec<u64> = levels.levels.iter().map(|&l| u64::from(l)).collect();
+        let wanted: Vec<u64> = list(want, "written")
+            .iter()
+            .map(|l| l.as_u64().expect("a level"))
+            .collect();
+        assert_eq!(written, wanted, "{label}: written levels");
+        assert_eq!(
+            levels.chunk_size,
+            u(want, "chunk_size"),
+            "{label}: level chunk_size"
+        );
+
+        for size in list(want, "sizes") {
+            let level = u32::try_from(u(size, "level")).expect("a level");
+            assert_eq!(levels.rows(level), Some(u(size, "rows")), "{label}: l{level} rows");
+            assert_eq!(levels.tiles(level), Some(u(size, "tiles")), "{label}: l{level} tiles");
+        }
+
+        for entry in list(want, "tile_of") {
+            let level = u32::try_from(u(entry, "level")).expect("a level");
+            let dense_id = u(entry, "dense_id");
+            assert_eq!(
+                levels.tile_of(level, dense_id),
+                u(entry, "tile"),
+                "{label}: l{level} tile_of({dense_id})"
+            );
+        }
+
+        for address in list(want, "addresses") {
+            let level = u32::try_from(u(address, "level")).expect("a level");
+            assert_eq!(
+                levels.tile_url(level, u(address, "tile")),
+                s(address, "path"),
+                "{label}: composed the wrong level URL"
+            );
+            checked += 1;
+        }
+
+        for set in list(want, "files") {
+            let level = u32::try_from(u(set, "level")).expect("a level");
+            let got = levels
+                .files(level)
+                .unwrap_or_else(|e| panic!("{label}: l{level} files: {e}"));
+            assert_eq!(
+                serde_json::to_value(&got).unwrap(),
+                set["paths"],
+                "{label}: l{level} files"
+            );
+            checked += 1;
+        }
+
+        for refused in list(want, "refused") {
+            let level = u32::try_from(u(refused, "level")).expect("a level");
+            let expected = s(refused, "message");
+            let error = levels
+                .files(level)
+                .err()
+                .unwrap_or_else(|| panic!("{label}: addressed level {level}, which nobody wrote"));
+            let message = error.to_string();
+            assert!(
+                message.contains(&expected),
+                "{label}: refused l{level} with \"{message}\", which does not say \"{expected}\""
+            );
+        }
+    }
+    checked
+}
+
 /// The URLs a set of vertex tiles addresses, and what that set is complete for.
 fn check_windows(label: &str, case: &Value, corpus: &ResolvedCorpus) {
     for (i, want) in list(case, "windows").iter().enumerate() {
@@ -340,6 +441,7 @@ fn every_address_in_the_table_reproduces() {
         check_types(&label, case, &corpus);
         checked_addresses += check_addresses(&label, case, &root, &corpus);
         checked_refusals += check_refusals(&label, case, &corpus);
+        checked_addresses += check_levels(&label, case, &corpus);
         check_windows(&label, case, &corpus);
     }
 

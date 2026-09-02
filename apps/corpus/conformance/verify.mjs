@@ -199,6 +199,63 @@ for (const expected of table.cases) {
     }
   }
 
+  // The written pyramid. A type the table says nothing about must report NONE — a reader that
+  // invented a level list would compose `l6/chunk0.parquet` against a corpus that never wrote one,
+  // and 404 for a level the predicate over the payload answers perfectly well.
+  const pyramids = new Map((expected.levels ?? []).map((l) => [l.type, l]));
+  for (const type of corpus.types) {
+    const want = pyramids.get(type.type);
+    if (want === undefined) {
+      if (type.levels !== null) {
+        fail(`${label}: ${type.type} reports a pyramid its manifest does not declare`);
+      }
+      continue;
+    }
+    const levels = type.levels;
+    if (levels === null) {
+      fail(`${label}: ${type.type} declares levels ${want.written.join(", ")} and the reader sees none`);
+      continue;
+    }
+    same(
+      `${label}: ${type.type} levels`,
+      { written: levels.levels, chunk_size: levels.chunkSize },
+      { written: want.written, chunk_size: want.chunk_size },
+    );
+    for (const size of want.sizes ?? []) {
+      same(
+        `${label}: ${type.type} level ${size.level}`,
+        { rows: String(levels.rows(size.level)), tiles: String(levels.tiles(size.level)) },
+        { rows: size.rows, tiles: size.tiles },
+      );
+    }
+    for (const v of want.tile_of ?? []) {
+      const got = levels.tileOf(v.level, BigInt(v.dense_id));
+      if (got !== BigInt(v.tile)) {
+        fail(`${label}: level ${v.level} tile_of(${v.dense_id}) = ${got}, not ${v.tile}`);
+      }
+    }
+    for (const address of want.addresses ?? []) {
+      const got = levels.tileUrl(address.level, address.tile);
+      if (got !== address.path) fail(`${label}: composed ${got}, not ${address.path}`);
+    }
+    for (const set of want.files ?? []) {
+      same(`${label}: level ${set.level} files`, levels.files(set.level), set.paths);
+    }
+    for (const refused of want.refused ?? []) {
+      let threw = null;
+      try {
+        levels.files(refused.level);
+      } catch (error) {
+        threw = error.message;
+      }
+      if (threw === null) {
+        fail(`${label}: addressed level ${refused.level}, which this corpus does not write`);
+      } else if (!threw.includes(refused.message)) {
+        fail(`${label}: refused level ${refused.level} with "${threw}", which does not say "${refused.message}"`);
+      }
+    }
+  }
+
   for (const [index, expectation] of (expected.windows ?? []).entries()) {
     const got = corpus.window({
       type: expectation.type,

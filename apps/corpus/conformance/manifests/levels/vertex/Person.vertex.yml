@@ -1,0 +1,18 @@
+type: Person
+vertex_count: 1000000
+chunk_size: 4096
+prefix: vertex/Person/
+property_groups:
+- file_type: parquet
+  properties:
+  - name: subject
+    data_type: string
+    is_primary: true
+levels:
+  prefix: l
+  levels:
+  - 6
+  - 7
+  - 8
+  chunk_size: 4096
+version: gar/v1
