@@ -21,6 +21,7 @@
  * thing it is addressing within one frame. The layout is the compiler's output and so is its
  * geometry: if a placement is wrong it is wrong upstream, and it is fixed by recompiling.
  */
+import { openCorpus } from '@fossil-lang/corpus';
 import { GraphCanvas, useGraphContext, type BoundedSource } from '@kanzo-tech/graph';
 import { categoricalCapacity } from '@kanzo-tech/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -92,7 +93,7 @@ function PinFrame() {
  *
  * `useMemo` over the source and not `useState`: it is a value derived from the corpus and the
  * boxes, and rebuilding it is what the query loop watches for. Rebuilt on every render it would
- * re-register the payloads and re-ask `total()` once per frame.
+ * re-open the corpus and re-ask `total()` once per frame.
  */
 export default function Canvas({ bench, boxes }: CanvasProps) {
   const [cost, setCost] = useState<SliceCost | null>(null);
@@ -111,17 +112,20 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
    */
   const slots = useMemo(() => categoricalCapacity(document.documentElement), []);
 
+  /**
+   * The corpus, opened once — and as a PROMISE, which is what keeps this component unchanged.
+   *
+   * `openCorpus` is asynchronous and a `BoundedSource` is not: the query loop builds the source
+   * synchronously and calls it later. Handing the promise to `corpusSource` means there is no
+   * loading branch here and no state machine around the canvas — the source awaits it inside its
+   * own members, once. `bench.base` is absolute for the reason `bench.ts` records: DuckDB resolves
+   * a URL inside its Worker, where a relative one names the wrong directory.
+   */
+  const corpus = useMemo(() => openCorpus(bench.base, { query: duck.query }), [bench]);
+
   const source: BoundedSource = useMemo(
-    () =>
-      corpusSource({
-        addressing: bench.addressing,
-        boxes,
-        register: duck.registerUrl,
-        query: duck.query,
-        onCost,
-        slots,
-      }),
-    [bench, boxes, onCost, slots],
+    () => corpusSource({ corpus, boxes, onCost, slots }),
+    [corpus, boxes, onCost, slots],
   );
 
   return (
@@ -178,6 +182,12 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
           <div>
             <dt>answered in</dt>
             <dd>{cost.ms.toFixed(0)} ms</dd>
+          </div>
+          <div>
+            <dt>addressed by</dt>
+            <dd>
+              {cost.addressed} <span className="str-dim">· read {cost.read}</span>
+            </dd>
           </div>
         </dl>
       )}

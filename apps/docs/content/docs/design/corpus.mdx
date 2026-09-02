@@ -621,8 +621,10 @@ interface BoundedSource {
 Both sides had already written the same sentence about the same deleted verb. `fossil-graph` says
 the camera is addressed and not queried; that package's own reader says *what replaces `viewport` is
 a tile brought by a computed URL, which is another source*. `apps/playground/src/tiles.ts` is that
-other source, and the seam between the two is a `WHERE` clause on `dense_id`: nothing in it knows
-how cosmos.gl holds a buffer, and nothing in the renderer knows what a corpus is.
+other source, and it is a *consumer* of [the one door](/docs/design/one-door): a viewport becomes a
+finite box, `levelFor` picks the level, `view` answers it, and what is left in the file is the
+mapping between two vocabularies. Nothing in it knows how cosmos.gl holds a buffer, and nothing in
+the renderer knows what a corpus is.
 
 **The division is: the renderer owns the contract and the picture, fossil owns the address.** That
 package ships a fossil reader of its own — `openCorpus`, on its `duckdb` subpath — and the
