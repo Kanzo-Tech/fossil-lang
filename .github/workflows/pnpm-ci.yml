@@ -82,6 +82,23 @@ jobs:
       # gate. Both are gone: the acceptance corpus is `apps/docs/programs/`, run
       # by `crates/fossil-cli/tests/programs.rs`, which is a Rust test on the
       # Rust side of the seam and never enters a pnpm filter.
+      # `@fossil-lang/corpus` has three suites — `address-cost`, `cost`, `containers` —
+      # gated on `describe.skipIf(!hasDuckdb)`, and no job that ran vitest installed the
+      # binary, so they were GREEN with zero assertions: the Morton over-read table, the
+      # container comparison and the cost model were all unasserted here while reading as
+      # covered. Pinned for the reason `corpus.yml` gives beside the same block — these
+      # suites read Parquet footer statistics, and a silent CLI major should turn a run
+      # red on purpose rather than by surprise.
+      - name: Install the duckdb binary (three suites skip themselves without it)
+        env:
+          DUCKDB_VERSION: v1.5.3
+        run: |
+          curl -fsSL -o /tmp/duckdb.zip \
+            "https://github.com/duckdb/duckdb/releases/download/${DUCKDB_VERSION}/duckdb_cli-linux-amd64.zip"
+          unzip -q -o /tmp/duckdb.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/duckdb
+          duckdb -version
+
       - name: Test all packages
         run: pnpm --filter "./packages/*" test
 

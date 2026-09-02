@@ -85,12 +85,19 @@ jobs:
         run: pnpm --filter @fossil-lang/wasm build:wasm
 
       - name: Build all packages (recursive)
-        run: pnpm -r build
+        run: pnpm --filter "./packages/*" build
 
-      # No exclusion: `@fossil-lang/examples` and its `examples.yml` gate are
-      # both deleted. Same as pnpm-ci.yml.
+      # Filtered to `./packages/*`, like every other recursive step in this repo.
+      # It read `pnpm -r test`, which reaches `apps/corpus` — whose test script
+      # hard-requires the `duckdb` binary this job never installs, so the gate
+      # before publishing exited 2 on a missing dependency rather than on a
+      # failing package. `apps/` is `private: true` and nothing here publishes
+      # it; CLAUDE.md states the filter as the invariant that makes an app
+      # unpublishable by accident, and this was the one step that did not honour
+      # it. The `@fossil-lang/examples` exclusion the old comment mentioned is
+      # gone because that package is.
       - name: Test (gate before publishing)
-        run: pnpm -r test
+        run: pnpm --filter "./packages/*" test
 
       # The tag (e.g. v0.3.0-alpha.5) is the single source of truth: strip the
       # leading `v` to get the version, and derive the dist-tag from a prerelease
