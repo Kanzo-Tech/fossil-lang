@@ -1,7 +1,7 @@
 //! The HARD CI gate for the `didChange` round-trip budget.
 //!
 //! It calls [`fossil_lsp::handle_notification`] with a real
-//! `textDocument/didChange` notification over the canonical 200-line fixture,
+//! `textDocument/didChange` notification over `canonical_200.fossil`,
 //! against a real [`fossil_lsp::LspState`]. That is not «the same work the
 //! handler performs» — it IS the handler, so the list of steps is not written
 //! down here and cannot go stale: whatever the handler does on a keystroke is
@@ -60,7 +60,7 @@
 //! `< 100ms` assertion FLAKES on shared CI runners (cold caches, neighbour
 //! noise, slow debug builds). The hard gate therefore asserts a GENEROUS
 //! margin ([`BUDGET_MS`]) that still catches algorithmic blow-up (an O(n²)
-//! regression on a 200-line file would blow well past it) without flaking. The
+//! regression on a fixture this size would blow well past it) without flaking. The
 //! tight `< 100ms` goal + the 20%-regression check live in the ADVISORY
 //! Criterion benchmark (`benches/lsp_didchange.rs`), which calls the same
 //! function.
@@ -97,8 +97,9 @@ use serde_json::json;
 
 /// The margined hard-gate budget. The design goal is < 100ms on dev hardware;
 /// this 400ms ceiling absorbs CI noise + debug-build overhead while still
-/// catching an algorithmic regression (which would be seconds, not ms) on a
-/// 200-line file. Tightening this is the Criterion benchmark's job (advisory).
+/// catching an algorithmic regression (which would be seconds, not ms) on the
+/// canonical fixture. Tightening this is the Criterion benchmark's job
+/// (advisory).
 const BUDGET_MS: u128 = 400;
 
 /// Warm-up + measured iterations. The first analysis primes Salsa's caches; we

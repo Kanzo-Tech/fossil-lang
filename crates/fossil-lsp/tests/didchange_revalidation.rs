@@ -9,8 +9,8 @@
 //! `WillExecute` is emitted only where the walk gives up and runs a body, so a
 //! walk that grew tenfold while still validating everything it touched emits
 //! exactly as many `WillExecute` events as before. `MAX_REEXECUTIONS = 18` is
-//! blind to it by construction, and on a 200-line file so is a millisecond
-//! budget with a 400 ms ceiling over a 3 ms measurement.
+//! blind to it by construction, and on the canonical fixture so is a
+//! millisecond budget with a 400 ms ceiling over a 3 ms measurement.
 //!
 //! So this counts the other event. `DidValidateMemoizedValue` is emitted from
 //! salsa's `Memo::mark_as_verified`, which has exactly two callers in

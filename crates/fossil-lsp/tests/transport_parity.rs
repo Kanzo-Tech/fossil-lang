@@ -5,7 +5,7 @@
 //! `lsp_worker` speaks the same JSON-RPC over `postMessage` to a Web Worker.
 //! They cannot be collapsed into one binary — two transports, two hosts (a real
 //! filesystem versus buffers only), two `#[salsa::db]` structs — and neither is
-//! deletable. What IS one thing is the twelve ANSWERS, and the module docs on
+//! deletable. What IS one thing is the ANSWERS, and the module docs on
 //! both sides claimed that agreement in prose. Prose does not notice a defect
 //! being fixed on one side:
 //!
