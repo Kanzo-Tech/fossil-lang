@@ -95,6 +95,17 @@ function manifestFiles(root: string): Record<string, string> {
 }
 
 describe('the conformance corpus', () => {
+  it('declares a pyramid somewhere, so the level assertions are not an empty loop', () => {
+    // Its own non-vacuity check, and it earned one: the `levels` case was deleted from
+    // `expected.json` by a `git checkout` of a file that was not yet in the index, and every level
+    // assertion in all three harnesses ran over an empty list and stayed green — the six cases
+    // with no pyramid carry every other count.
+    const addresses = table.cases.flatMap((c) =>
+      (c.levels ?? []).flatMap((l) => l.addresses ?? []),
+    );
+    expect(addresses.length).toBeGreaterThanOrEqual(4);
+  });
+
   it('has cases', () => {
     expect(table.cases.length).toBeGreaterThan(0);
   });

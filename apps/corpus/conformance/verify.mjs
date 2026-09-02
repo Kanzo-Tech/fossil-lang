@@ -108,6 +108,16 @@ const table = JSON.parse(readFileSync(pathJoin(HERE, "expected.json"), "utf8"));
  * indifferent to which engine a reader would open the files with — this block opens none.
  */
 function runCases(resolve) {
+/**
+ * How many LEVEL addresses were composed across the whole table.
+ *
+ * Its own counter, and it earned one: the `levels` case was deleted from `expected.json` by a
+ * `git checkout` of a file that was not yet in the index, and every level assertion in all three
+ * harnesses ran over an empty list and stayed green — the six cases with no pyramid carry the
+ * other counts. A non-vacuity check shared with them is one that cannot see a section of the
+ * table disappear.
+ */
+let checkedLevels = 0;
 for (const expected of table.cases) {
   const root = pathJoin(HERE, expected.root);
   const label = expected.name;
@@ -237,9 +247,11 @@ for (const expected of table.cases) {
     for (const address of want.addresses ?? []) {
       const got = levels.tileUrl(address.level, address.tile);
       if (got !== address.path) fail(`${label}: composed ${got}, not ${address.path}`);
+      checkedLevels += 1;
     }
     for (const set of want.files ?? []) {
       same(`${label}: level ${set.level} files`, levels.files(set.level), set.paths);
+      checkedLevels += 1;
     }
     for (const refused of want.refused ?? []) {
       let threw = null;
@@ -286,6 +298,10 @@ for (const expected of table.cases) {
     `${label}: ${corpus.types.length} type(s), ${corpus.edges.length} edge type(s), ` +
       `${(expected.addresses ?? []).length} address(es)${expected.on_disk ? " checked on disk" : ""}`,
   );
+}
+
+if (checkedLevels < 5) {
+  fail(`non-vacuity: ${checkedLevels} level address(es) checked, so the table declares no pyramid`);
 }
 
 // The base is prepended and nothing else happens to it.

@@ -359,6 +359,94 @@
           "gaps": []
         }
       ]
+    },
+    {
+      "name": "levels",
+      "root": "manifests/levels",
+      "on_disk": false,
+      "about": "A corpus that declares a WRITTEN PYRAMID. Level `k` is `dense_id % 2^k == 0` over the payload — a predicate, answerable by any reader with or without a file — and `levels:` says which of those levels a writer spent bytes on. That is the one thing here a reader cannot derive: re-deriving it from `vertex_count` and `chunk_size` means reimplementing the writer's plan, and 404ing the day the plan moves. The numbers are the bench corpus's: a million vertices at 4,096 to a tile is 245 tiles, the coarsest level that fits in ONE tile is 8, and three levels from there is 6, 7, 8 — seven tiles of rows whatever the corpus is. Addressing them needs nothing new: level `k`'s tile `j` covers `[j·4096·2^k, (j+1)·4096·2^k)`, which is the payload's own shift plus `k`. The container spells the filename exactly as it spells the payload's, which the `rowgroups` case pins for the other spelling.",
+      "container": "files",
+      "types": [
+        {
+          "type": "Person",
+          "prefix": "vertex/Person/",
+          "chunk_size": 4096,
+          "shift": 12
+        }
+      ],
+      "edges": [
+        {
+          "edge_type": "knows",
+          "src_type": "Person",
+          "dst_type": "Person",
+          "prefix": "edge/Person_knows_Person/",
+          "directions": ["src", "dst"],
+          "adjacencies": [
+            {
+              "direction": "src",
+              "prefix": "edge/Person_knows_Person/by_source/",
+              "column": "src_dense",
+              "chunk_size": 4096,
+              "shift": 12
+            },
+            {
+              "direction": "dst",
+              "prefix": "edge/Person_knows_Person/by_target/",
+              "column": "dst_dense",
+              "chunk_size": 4096,
+              "shift": 12
+            }
+          ]
+        }
+      ],
+      "tile_of": [
+        { "type": "Person", "dense_id": "999999", "tile": "244" }
+      ],
+      "addresses": [
+        { "kind": "vertex", "type": "Person", "tile": 244, "path": "vertex/Person/chunk244.parquet" }
+      ],
+      "refused": [],
+      "levels": [
+        {
+          "about": "The pyramid, as a reader must compose it. `rows` is `ceil(vertex_count / 2^k)` and `tiles` is that over the level's own `chunk_size`, which is DECLARED rather than inherited from the payload's: a reader turning a level tile back into a `dense_id` range multiplies by it, and a number that has to be assumed is one a writer can change in silence. The three levels are 4 + 2 + 1 = 7 tiles, which is `2^3 - 1` and is the pyramid's whole cost at any corpus size.",
+          "type": "Person",
+          "written": [6, 7, 8],
+          "chunk_size": 4096,
+          "sizes": [
+            { "level": 6, "rows": "15625", "tiles": "4" },
+            { "level": 7, "rows": "7813", "tiles": "2" },
+            { "level": 8, "rows": "3907", "tiles": "1" }
+          ],
+          "tile_of": [
+            { "level": 6, "dense_id": "0", "tile": "0" },
+            { "level": 6, "dense_id": "262143", "tile": "0" },
+            { "level": 6, "dense_id": "262144", "tile": "1" },
+            { "level": 6, "dense_id": "999999", "tile": "3" },
+            { "level": 7, "dense_id": "524287", "tile": "0" },
+            { "level": 7, "dense_id": "524288", "tile": "1" },
+            { "level": 8, "dense_id": "999999", "tile": "0" }
+          ],
+          "addresses": [
+            { "level": 6, "tile": 0, "path": "vertex/Person/l6/chunk0.parquet" },
+            { "level": 6, "tile": 3, "path": "vertex/Person/l6/chunk3.parquet" },
+            { "level": 7, "tile": 1, "path": "vertex/Person/l7/chunk1.parquet" },
+            { "level": 8, "tile": 0, "path": "vertex/Person/l8/chunk0.parquet" }
+          ],
+          "files": [
+            {
+              "level": 8,
+              "paths": ["vertex/Person/l8/chunk0.parquet"]
+            }
+          ],
+          "refused": [
+            {
+              "about": "A level nobody wrote is not addressable and is still ANSWERABLE — by the predicate over the payload, which is what the message has to say. A reader that composed `l5/chunk0.parquet` here would 404 against a corpus that can draw level 5 perfectly well.",
+              "level": 5,
+              "message": "writes levels 6, 7, 8 and not 5"
+            }
+          ]
+        }
+      ]
     }
   ],
   "answers": {

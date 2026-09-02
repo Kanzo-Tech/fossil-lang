@@ -405,6 +405,7 @@ fn every_address_in_the_table_reproduces() {
 
     let mut checked_addresses = 0usize;
     let mut checked_refusals = 0usize;
+    let mut checked_levels = 0usize;
 
     for case in cases {
         let label = s(case, "name");
@@ -441,7 +442,7 @@ fn every_address_in_the_table_reproduces() {
         check_types(&label, case, &corpus);
         checked_addresses += check_addresses(&label, case, &root, &corpus);
         checked_refusals += check_refusals(&label, case, &corpus);
-        checked_addresses += check_levels(&label, case, &corpus);
+        checked_levels += check_levels(&label, case, &corpus);
         check_windows(&label, case, &corpus);
     }
 
@@ -455,6 +456,16 @@ fn every_address_in_the_table_reproduces() {
     assert!(
         checked_refusals >= 3,
         "non-vacuity: {checked_refusals} refusal(s) checked"
+    );
+    // Its own counter, and it earned one: the `levels` case was deleted from the
+    // table by a `git checkout` of a file that was not yet in the index, and every
+    // level assertion in all three harnesses ran over an empty list and stayed
+    // green — because the address count above is carried by the six cases that
+    // have no pyramid. A shared non-vacuity counter is one that cannot see a
+    // section of the table disappear.
+    assert!(
+        checked_levels >= 5,
+        "non-vacuity: {checked_levels} level address(es) checked, so the table declares no pyramid"
     );
 }
 
