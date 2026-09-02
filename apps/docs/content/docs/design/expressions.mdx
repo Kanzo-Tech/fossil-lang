@@ -60,16 +60,16 @@ equivalence is demonstrated rather than asserted.
 
 <Program src="expressions/expressions.fossil" region="two-paths" title="expressions.fossil" />
 
-The catalogue is 51 rows: thirteen relation verbs, three source constructors, and **35 functions an
-expression may call**. Twenty-two of the 35 render on the DataFusion backend; the thirteen that do
-not are pinned in `crates/fossil-df/src/stdlib.rs:78` with the cause beside each — six because
-DataFusion has no way to raise from an expression, four because an aggregate is not a scalar call at
-all, two because the function lives in an optional package this crate does not register, and one
-because DataFusion ships no JSON extraction. **That list is measured, not guessed:** the test beside
-it plans each catalogued row's real template through the renderer and compares what fails against
-the list, so a function becoming reachable — or stopping — is a diff there and not a surprise in
-someone's program. A call *running* is a separate claim, and a narrower one
-(`crates/fossil-df/tests/expressions.rs:42` asserts the values, not the plan).
+The catalogue is 41 rows: twelve relation verbs, four source constructors, and **25 functions an
+expression may call**. Twenty-one of the 25 render on the DataFusion backend; the four that do not
+are pinned in `crates/fossil-df/src/stdlib.rs:103` with the cause beside them, and it is one cause
+and not four — `math.sum`, `avg`, `min` and `max` are aggregates, and an aggregate in a scalar
+position is [a pipeline with a group-by](/docs/design/algebra) rather than a call this backend
+declines to render. **That list is measured, not guessed:** the test beside it plans each catalogued
+row's real template through the renderer and compares what fails against the list, so a function
+becoming reachable — or stopping — is a diff there and not a surprise in someone's program. A call
+*running* is a separate claim, and a narrower one (`crates/fossil-df/tests/expressions.rs:42`
+asserts the values, not the plan).
 
 ## The drop is loud
 
