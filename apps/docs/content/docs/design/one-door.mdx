@@ -1,0 +1,141 @@
+---
+title: One door for a camera
+description: "`view(rect, level)` is a pure function and `levelFor(rect, budget)` is a second one beside it; why the level is the caller's, why a written pyramid changes bytes and not rows, and why this grew `openCorpus` instead of opening a port next to it."
+direction:
+  summary: "`view` takes a rectangle and a level and depends on nothing else — the same rectangle at the same level is the same answer, however the camera got there."
+---
+
+A consumer that wanted a picture out of a corpus used to order five concepts by hand —
+`resolveCorpus`, `openCorpus`, `mortonTilesFor`, `parseTileCodes` and a renderer's source contract —
+and sew them together with SQL of its own. That is the arithmetic `@fossil-lang/corpus` exists to
+publish, being re-derived by its own consumer. There is one call now:
+
+```ts
+const level = corpus.levelFor({ x, y, w, h, budget: 20_000 });
+const frame = await corpus.view({ x, y, w, h, level });
+```
+
+Everything below is why those are two calls and not one, why the second returns the same rows with
+or without a pyramid on disk, and why neither of them is a new entry point.
+
+## Purity is the specification, not a property it happens to have
+
+`view` is a function of its arguments and of the corpus bytes. No cap that moves with what the
+window happens to hold, no stride derived from a running count, no state carried between calls. The
+same rectangle at the same level is the same answer.
+
+That is not tidiness. It is the only form in which the two properties a level-of-detail reader owes
+its reader can be *stated*:
+
+- **Monotone refinement** compares `view(R, k+1)` with `view(R, k)` — one rectangle, two levels. A
+  reader that chose its own level inside the read cannot be asked the question.
+- **Path independence** compares `view(R, k)` reached one way with `view(R, k)` reached another. If
+  the answer could depend on the session, the comparison has no left-hand side.
+
+Both are measured on [the camera](/docs/design/camera). The measurement that matters here is the
+narrow one: over a million-vertex corpus, the same rectangle at level 3 asked twice with the whole
+corpus queried in between returns the same **73,228** marks in the same order.
+
+## The level is the caller's
+
+`levelFor` is a **separate, synchronous, pure** function. It takes a rectangle and a budget and
+returns an integer. It is not a step inside the read, and three arguments say why.
+
+**Zarr decides the level on the client.** Its multiscale metadata says which levels exist; the
+reader picks one and the store answers for the level it was asked about. Copying the *shape* of that
+is the point of naming Zarr at all — see [prior art](/docs/design/prior-art).
+
+**"The same rectangle at the same level" has to be expressible.** It is what monotone refinement is
+*about*. The API decision and the test are the same decision: choosing the level inside `view`
+deletes the property along with the parameter.
+
+**A budget is made of pixels.** Screen size, device pixel ratio and what a person finds legible are
+the host's facts, and none of them is a corpus's business. They stop at `levelFor`'s argument list —
+nothing behind it knows what a pixel is. The same rule governs `minLinkLength`, which is in the
+corpus's own units: a renderer with `p` units per pixel and a three-pixel floor passes `3p`.
+
+It exists at all — rather than being left to each consumer — because the arithmetic below is exactly
+the kind that gets re-derived differently in every reader, which is the failure the addressing
+module was written against.
+
+### It estimates over tiles, and area would be wrong by a level and a half
+
+A rectangle covering **9%** of the extent of the million-vertex fixture holds **25%** of its
+vertices, because a layout clusters: area is off by 2.8× there, which is a level and a half.
+Counting tiles is not. `tiles × chunk_size` over-counts the same rectangle by **1.57×** — under one
+level — and, unlike a uniformity assumption, it is monotone in the rectangle. The declared
+`vertex_count` caps it, because a rectangle covering the corpus cannot hold more than the corpus.
+
+## No pyramid on disk: the same rows, more bytes, and the cost says so
+
+`dense_id % 2^k == 0` **is** the definition of level *k*. A written `vertex/<Type>/l{k}/` is a cache
+of that definition and nothing else.
+
+This is the whole of the second decision. If a level file and the predicate could disagree there
+would be **two contracts**, which is strictly worse than having no pyramid: a reader would have to
+know which one it got in order to know what it was looking at, and the two would drift in the
+direction nobody tests. So they select the same rows by construction, and what a written level
+changes is the **byte count**.
+
+A byte count is a number the caller is already watching, so that is where the difference is
+reported:
+
+| field | what it says |
+| --- | --- |
+| `cost.read` | `strided` — the full tiles were opened and the predicate strided them. `level` — a written level file answered. |
+| `cost.bytes` | compressed bytes of the runs, from the Parquet footer. |
+| `cost.runs` | maximal runs of adjacent tiles: what those tiles cost in `Range` requests. |
+| `cost.addressed` | `anchor` — the published tile-code document, arithmetic only. `footer` — the per-tile `x`/`y` boxes. |
+
+The day a level file exists, `cost.read` flips to `level`, `cost.bytes` falls, and **nothing else
+changes**: not the rows, not the API, not a test. That is the property being bought by refusing to
+make the pyramid a second contract. The writer's half of it lives in `crates/fossil-layout` and
+`crates/fossil-sinks`; this side needs no change when it lands.
+
+## It grew `openCorpus` rather than opening a port beside it
+
+The camera needs an engine — reading tiles and striding them is SQL — so it cannot live on the
+`@fossil-lang/corpus/address` subpath, which exists precisely by having no engine, no `fetch` and no
+promise. That leaves two shapes: a member of the existing door, or a second function taking the same
+two arguments.
+
+**This package already made that mistake once and corrected it.** `createGraphClient` took
+`{ query, manifestFiles }` and returned the verbs; `openCorpus` took `(url, { query })` and returned
+discovery plus the camera. Two entry points over one manifest with no rule for choosing between
+them is how one question came to have two answers, in two languages, over two SQL generators. It was
+folded in for exactly this reason, and `packages/corpus/src/index.ts` still carries the note where
+the export used to be. Adding `view` as a third would have re-run the argument that removal settled.
+
+There was also a `./corpus` subpath, whose one justification was that its closure reached no WASM.
+The door reaches the verbs now, so the justification went and the subpath went with it. The
+objection it answered was never large: `openCorpus` runs a `DESCRIBE` per vertex type before it
+returns, so a caller holding one is already in *I have an engine* territory.
+
+`view` and `window` are **two members and not two doors**, and the invariant that keeps them one
+contract is asserted rather than asserted-about: `view` at level 0 selects what `window` selects over
+the same rectangle. They answer different questions — `window` answers with rows for a reader,
+`view` answers with parallel typed arrays for a renderer that will upload them — and at twenty
+thousand marks the difference between a `PlacedVertex[]` and four typed arrays is twenty thousand
+objects built to be read four fields at a time and thrown away.
+
+## What the answer carries
+
+```ts
+interface View {
+  box, level, stride     // what was asked
+  matched                // what the rectangle holds at LEVEL 0 — the denominator
+  denseIds, positions, categories
+  marks                  // a PREFIX LENGTH, not a count
+  links
+  cost
+}
+```
+
+`marks` is a prefix length because the rows past it are **anchors**: far ends of edges the sample did
+not draw, at their real coordinates, out of tiles that were already opened. They cost no request. An
+anchor is not "a vertex outside the rectangle" — that wording was wrong and measurably so; there are
+two ways to be one, outside the rectangle or inside it and not in the sample, and a verification
+counting 420 of the second kind is what caught it.
+
+`matched` is the population at level 0, which is the one number that says whether a coarse view is a
+picture of the whole rectangle or a picture of one corner of it.
