@@ -149,19 +149,26 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
       </p>
 
       <p className="str-note">
-        <strong>links is 0 on this corpus, and that is the corpus rather than the reader.</strong>{' '}
+        <strong>
+          Almost every edge of this corpus is missing from every frame, and that is the corpus
+          rather than the reader.
+        </strong>{' '}
         A bounded reader can only draw an edge whose far end it has a position for, and it has
         positions for the tiles it fetched. This demo corpus is{' '}
         <code>apps/corpus/guards/fixture.mjs</code>, whose edges are a <em>ring over the
         pre-layout index</em> plus one chord per vertex inside its cluster — so after the Morton
         renumbering the destinations are scattered across the whole id space. Measured over its{' '}
-        {n(bench.stamp.edges)} edges: <strong>2,096 (0.10%)</strong> have both ends in the same
-        tile and <strong>61,244 (3.06%)</strong> within eight tiles of each other. Nothing is
-        broken and nothing here would fix it: an edge to a vertex 200 tiles away is a request for
-        another tile, which is the read a windowed corpus exists not to make. A corpus whose
-        adjacency follows its geometry draws them; this one is a spatial index with a random graph
-        laid over it, and it is honest for the panel to say so rather than to fetch the corpus to
-        hide it.
+        {n(bench.stamp.edges)} edges, at the four windows{' '}
+        <code>scripts/verify-canvas.mjs</code> opens: the whole-corpus view draws{' '}
+        <strong>62,024 (3.10%)</strong>, a 30% window <strong>22,309</strong>, a 10% window{' '}
+        <strong>2,796</strong>, a 2% window <strong>77</strong>. This paragraph said{' '}
+        <em>links is 0 on this corpus</em>, which was true of no window the panel opens and false
+        by 62,024 of the one it opens with — the ledger four lines above was printing the
+        counter-example the whole time. Nothing is broken and nothing here would fix it: an edge to
+        a vertex 200 tiles away is a request for another tile, which is the read a windowed corpus
+        exists not to make. A corpus whose adjacency follows its geometry draws them; this one is a
+        spatial index with a random graph laid over it, and it is honest for the panel to say so
+        rather than to fetch the corpus to hide it.
       </p>
     </div>
   );
