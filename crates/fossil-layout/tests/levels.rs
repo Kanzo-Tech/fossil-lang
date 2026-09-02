@@ -294,3 +294,43 @@ fn a_level_induces_essentially_no_edges_which_is_why_none_are_written() {
         "induced edge counts do not nest: {induced:?}"
     );
 }
+
+/// **What the default view costs, measured** — an instrument rather than a
+/// test, which is why it is `#[ignore]`d and CI never runs it.
+///
+/// It shares `common`'s fixture rather than copying a generator into
+/// `examples/`, and it asserts nothing about a byte count: a compressor is
+/// entitled to change its mind. What it reports is the ratio the pyramid exists
+/// for — the bytes a camera reads to draw a level, against the bytes it reads to
+/// stride the whole type for the same picture.
+///
+/// `cargo test -p fossil-layout --test levels -- --ignored --nocapture`
+#[test]
+#[ignore = "an instrument: it writes a 300,000-vertex corpus and measures it"]
+#[allow(clippy::cast_precision_loss)] // a human-readable percentage in a println
+fn level_cost_against_the_whole_type() {
+    const BIG: u32 = 300_000;
+    let f = fixture(dir("levels_cost"), BIG, 14);
+    let chunk = f.targets[0].chunk_size;
+    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+
+    let plan = VertexLevels::planned(u64::from(BIG), chunk).expect("above the floor");
+    let chunks = f.root.join("chunks");
+    let payload = fs::metadata(chunks.join("tiles.parquet"))
+        .expect("payload")
+        .len();
+    let tiles = u64::from(BIG).div_ceil(chunk);
+    println!("payload: {tiles} tiles, {} kB", payload / 1024);
+    for &k in &plan.levels {
+        let bytes = fs::metadata(chunks.join(plan.level_prefix(k)).join("tiles.parquet"))
+            .expect("a level")
+            .len();
+        let rows = VertexLevels::rows_at(u64::from(BIG), k);
+        println!(
+            "l{k}: {rows} rows, {} tile(s), {} kB — {:.1}% of the payload",
+            rows.div_ceil(chunk),
+            bytes / 1024,
+            (bytes as f64 / payload as f64) * 100.0
+        );
+    }
+}
