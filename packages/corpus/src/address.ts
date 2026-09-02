@@ -1130,3 +1130,69 @@ export function mortonTilesFor({ box, extent, codes }: BoxQuery): number[] {
   const grid = gridBoxOf(box, against);
   return grid === null ? [] : tilesForGrid(grid, codes);
 }
+
+// ---------------------------------------------------------------------------
+// The other half of a camera's question: which LEVEL, and how coarse that is
+// ---------------------------------------------------------------------------
+
+/**
+ * The decimation level *k* means: **the vertices whose `dense_id` is a multiple of 2^k**.
+ *
+ * Over a Morton-ordered `dense_id` that is one vertex per quadtree cell of depth *k*, so a level is
+ * a level of the same curve the tile address is read off — not a sample, not a budget, not a cap.
+ * Two consequences follow from the definition alone and neither needs a byte on disk:
+ *
+ * - **It nests.** `dense_id % 2^(k+1) == 0` is a strict subset of `dense_id % 2^k == 0`, so
+ *   refining only ever ADDS, and a vertex drawn once stays drawn at the same position.
+ * - **It is a function of the level and nothing else.** No `matched`, no `limit`, no camera. Which
+ *   is what makes {@link levelFor} a *separate* function rather than a step inside the read.
+ */
+export const strideOf = (level: number): number => 2 ** Math.max(0, Math.trunc(level));
+
+/** What {@link levelFor} takes: a rectangle, what it may cost, and the anchor that sizes it. */
+export interface LevelQuery extends BoxQuery {
+  /**
+   * How many vertices the caller is willing to be handed. **A budget, not a cap** — the answer is
+   * a level, and a level's population is whatever the rectangle holds at that level.
+   */
+  budget: number;
+  /** Rows per tile. Taken from the anchor when it carries one, as `codes.json` does. */
+  chunkSize?: number;
+  /** The type's `vertex_count`, when known — the ceiling on any estimate. */
+  count?: number;
+}
+
+/**
+ * The coarsest level whose population fits a budget — **pure, synchronous, and nobody's session.**
+ *
+ * This is deliberately not a step inside the read, and three arguments say why.
+ *
+ * - **Zarr decides the level on the client.** Its multiscale metadata says which levels exist and
+ *   the reader picks; the store answers for the one it is asked about. Copying the *shape* of that
+ *   is the point of naming Zarr at all.
+ * - **"The same rectangle at the same level" has to be expressible.** It is the statement monotone
+ *   refinement is *about* — `{drawn closer} ⊇ {drawn farther} ∩ {new window}` compares two levels
+ *   over one rectangle — and a reader that chose its own level inside the read could not be asked
+ *   the question. The decision and the test are the same decision.
+ * - **A budget is made of pixels.** Screen size, device ratio and what a person finds legible are
+ *   the host's facts and none of them is a corpus's business. They stop at this function's
+ *   argument list.
+ *
+ * And it exists at all rather than being left to each consumer, because the arithmetic below is
+ * exactly the kind that gets re-derived differently in every reader — which is the failure this
+ * module was written against.
+ *
+ * **The estimate is the tiles, not the area.** A rectangle covering 9% of the extent of the
+ * million-vertex fixture holds 25% of its vertices, because a layout clusters; area is off by 2.8×
+ * there, which is a level and a half. Tiles are not: `tiles × chunk_size` over-counts the same
+ * rectangle by 1.57×, under one level, and it is *monotone in the rectangle*, which area is too but
+ * uniformity is not. `count` caps it, because a rectangle covering the corpus cannot hold more than
+ * the corpus.
+ */
+export function levelFor({ budget, chunkSize, count, ...box }: LevelQuery): number {
+  const rows = chunkSize ?? (box.codes as TileCodes & { chunkSize?: number }).chunkSize ?? 0;
+  const tiles = mortonTilesFor(box).length;
+  const estimate = Math.min(tiles * rows || 0, count ?? Number.POSITIVE_INFINITY);
+  if (!(budget > 0) || !(estimate > budget)) return 0;
+  return Math.ceil(Math.log2(estimate / budget));
+}
