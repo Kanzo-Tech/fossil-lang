@@ -412,7 +412,7 @@ three did not end the same way**, and the difference is the useful part.
 
 ### 1. `GraphArData` holds every batch — still true
 
-`crates/fossil-df/src/lib.rs:406` collects each vertex projection before registering it as a
+`crates/fossil-df/src/lib.rs:425` collects each vertex projection before registering it as a
 `MemTable`, and both edge orientations are collected beside them, so the whole materialised graph is
 resident before the writer is called. 0.16 GiB of Arrow at one million, **1.64 at ten** — 10.3× for
 10×, exactly linear. The count is hand-run: if the value became a stream tomorrow no assertion would

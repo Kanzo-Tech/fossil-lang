@@ -28,7 +28,7 @@ graph LR
 fields are the columns of the file, with the types the file has, and every expression in the body is
 synthesised from it. That row type comes from the file itself: one
 `DESCRIBE SELECT * FROM read_csv_auto(…)` per binding, run by the native host before the compiler
-exists (`crates/fossil-introspect/src/lib.rs:320`) and cached per source. The programs are small and
+exists (`crates/fossil-introspect/src/lib.rs:318`) and cached per source. The programs are small and
 the sources are large, so it is the only step of a compile that costs real time.
 
 **Backward, from the shape.** `Users : Person from Adults` names the type the body must produce.

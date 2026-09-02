@@ -136,7 +136,10 @@ crates/
   fossil-descriptors-{input,output}/   trait + impls (ShEx, inferred)
   fossil-resolver/         host-injected cloud path resolution (s3://, az://)  [NATIVE-ONLY]
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
-  fossil-sinks/            the canonical GraphAr manifest model (atop arrow + parquet)
+  fossil-sinks/            the canonical GraphAr manifest model. It byte-writes nothing —
+                           `arrow-schema` for the types, `serde_yaml_ng` to emit, and
+                           `fossil-policy` because a declared bound is part of what the
+                           artefact says about itself
   fossil-df/               DataFusion backend for the property-graph MIR
   fossil-policy/           the privacy policy document a corpus is verified against — ODRL for
                            structure, DPV for classification, and a fossil profile for the terms
@@ -158,8 +161,8 @@ crates/
   fossil-layout/           the layout post-pass — Louvain + Morton over Parquet through
                            arrow-rs. It links no `DuckDB` (that is a dev-dependency) but it
                            DOES link `DataFusion`, transitively through `fossil-df` for the
-                           one function `files::batches_to_parquet`. This line said "linking
-                           no engine" and `cargo tree -p fossil-layout -e normal -i
+                           one module `files` (`TileWriter`). This line said "linking no
+                           engine" and `cargo tree -p fossil-layout -e normal -i
                            datafusion` says otherwise; `crates/xtask/tests/engine_reach.rs`
                            is the guard that now derives the real linkers. It
                            COMPILES for wasm32 and declares it with `[package.metadata.fossil]

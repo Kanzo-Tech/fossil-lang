@@ -60,16 +60,20 @@ equivalence is demonstrated rather than asserted.
 
 <Program src="expressions/expressions.fossil" region="two-paths" title="expressions.fossil" />
 
-The catalogue is 51 rows: thirteen relation verbs, three source constructors, and **35 functions an
-expression may call**. Twenty-two of the 35 render on the DataFusion backend; the thirteen that do
-not are pinned in `crates/fossil-df/src/stdlib.rs:78` with the cause beside each — six because
-DataFusion has no way to raise from an expression, four because an aggregate is not a scalar call at
-all, two because the function lives in an optional package this crate does not register, and one
-because DataFusion ships no JSON extraction. **That list is measured, not guessed:** the test beside
-it plans each catalogued row's real template through the renderer and compares what fails against
-the list, so a function becoming reachable — or stopping — is a diff there and not a surprise in
-someone's program. A call *running* is a separate claim, and a narrower one
-(`crates/fossil-df/tests/expressions.rs:42` asserts the values, not the plan).
+`catalogue.bnf` is the roll: `fn seq.*` are the relation verbs, `row … ; op Source` the source
+constructors, and everything else is **a function an expression may call** — `core`, `math`, `parse`
+and `str`. No number is written here, because the file is the count and this page would be the
+second place to keep it.
+
+What does not render on the DataFusion backend is pinned as `UNREACHABLE_ON_DATAFUSION` in
+`crates/fossil-df/src/stdlib.rs`, and what is left in it is **the aggregates and nothing else**.
+That is not a gap: an aggregate in a scalar position is a pipeline with a `group_by`, so only the
+scalar rendering is missing, and the same rows are the spelling of a `group_by`'s aggregations.
+**The list is measured, not guessed:** the test beside it plans each catalogued row's real template
+through the renderer and compares what fails against the list, so a function becoming reachable — or
+stopping — is a diff there and not a surprise in someone's program. A call *running* is a separate
+claim, and a narrower one (`crates/fossil-df/tests/expressions.rs:42` asserts the values, not the
+plan).
 
 ## The drop is loud
 

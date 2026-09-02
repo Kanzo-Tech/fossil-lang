@@ -52,19 +52,27 @@ choice and the three conditions that reverse it stated there.
 
 ## What the constraint table has to carry
 
-Choosing what goes in the neutral vocabulary is the design work, and two things earn their place.
+Choosing what goes in the neutral vocabulary is the design work, and the table is smaller than it
+looks: a shape is its IRI and its predicates, and a predicate carries its cardinality.
 
 **Cardinality, at full resolution.** Not "required or not" — the real count. *Exactly one* against
 *one or more* is the difference between a property you may repeat and one you may not, and a table
 that collapses them cannot support the check on the [typing page](/docs/design/types) that
 distinguishes a missing required property from a legitimately absent optional one.
 
-**Closure, which has three states and not two.** Whether a node may carry predicates the shape does
-not mention is a property of the *shape*, and it is tempting to model it as a bit:
+**Closure is NOT in it, and the reason is that fossil only has the writing side.** A `closed` field
+was carried for a while — `ShEx` `CLOSED`, SHACL `sh:closed` — and no checker ever read it. Wiring it
+would have changed nothing: a property key is a bare name resolved against this table, so a key no
+predicate declares is already an error, with a did-you-mean over the ones that do, unconditionally
+and for every shape. Openness has no way to be expressed from the side a mapping writes on, and a
+flag that can only select the behaviour that already happens is not a flag.
+
+If it ever returns — for a reader that validates graphs it did not write — it cannot return as a
+bit, because there are three states and not two:
 
 | state | a node may carry | what a boolean loses |
 | --- | --- | --- |
-| `closed` | only the predicates the shape names | nothing — the bit keeps this one |
+| `closed` | only the predicates the shape names | nothing — a bit keeps this one |
 | `open` | any predicate beyond them | nothing — and this one |
 | `EXTRA p` | `p` again, with values that do **not** match its constraint | the state itself: neither closed nor open, so a bit rounds it to one of the other two |
 

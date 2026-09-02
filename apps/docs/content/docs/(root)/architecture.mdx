@@ -41,7 +41,7 @@ The mutual arrow is `engine ↔ corpus`, and one edge holds it:
 
 | direction | edge | why it is there |
 | --- | --- | --- |
-| corpus → engine | `fossil-layout → fossil-df` | one function, `files::batches_to_parquet`, the single Arrow→Parquet encoder — moving it would put `arrow` + `parquet` into `fossil-graph-wasm`'s browser bundle, which has neither |
+| corpus → engine | `fossil-layout → fossil-df` | one module, `files` — the single Arrow→Parquet writer, `TileWriter` for the pass itself. Moving it would put `arrow` + `parquet` into `fossil-graph-wasm`'s browser bundle, which has neither |
 | engine → corpus | `fossil-cli → fossil-layout` | the post-pass runs after the write, so the thing that writes calls it |
 | engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
 | engine → corpus | `fossil-cli → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk — and `Privacy`, which the run summary prints |
@@ -60,8 +60,8 @@ but the stitch that closes the loop is one function.
 [One engine](/docs/design/one-engine) is where the rest of the filing gets settled.
 
 `fossil-policy` is filed under **corpus** and not under the engine that reads it, for the reason
-`fossil-sinks` is: the declared bound is part of what the artefact says about itself, and the crate
-that models it has no fossil dependency of its own. Four of the eight `engine → corpus` edges are
+`fossil-sinks` is: the declared bound is part of what the artefact says about itself. `fossil-policy`
+is the crate with no fossil dependency at all — `fossil-sinks` has one, and it is this. Four of the eight `engine → corpus` edges are
 its arrivals, which is what took that arrow from four to eight in one landing.
 
 `fossil-kanon` was filed under *no home* on the strongest version of that reason: it had no
@@ -100,7 +100,7 @@ projection directly.
 The attractive cut is three numbered rings by where the code runs. It is not the cut, and
 [three hosts](/docs/design/three-hosts) is where the three reference compilers say why. What survives
 is not a ring: two crates with a `cfg` and a written reason — `crates/fossil-lsp/src/lib.rs:98`,
-because `lsp-server` uses crossbeam and stdio, and `crates/fossil-resolver/src/lib.rs:48`, because
+because `lsp-server` uses crossbeam and stdio, and `crates/fossil-resolver/src/lib.rs:49`, because
 credential material is deliberately kept off the wasm boundary.
 
 ## A list is not a check
