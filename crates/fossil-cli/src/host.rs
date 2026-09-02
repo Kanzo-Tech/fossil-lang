@@ -427,11 +427,9 @@ fn local_dest_dir(url: &str) -> Option<PathBuf> {
 ///
 /// `memory_bytes` is the run's declared memory budget, and it is one number held
 /// against each STAGE rather than against their sum: the `DataFusion` pool the
-/// write path executes under, and then the layout pass, which has no engine at
-/// all — it holds `arrow` arrays and estimates against them from the staged
-/// Parquet footers. This said `DuckDB`'s `memory_limit`, and that engine left
-/// the layout pass; the pass is `arrow-rs` and `parquet-rs` throughout.
-/// `None` runs both unbounded.
+/// write path executes under, and then the layout pass, which plans no query —
+/// it holds `arrow` arrays and estimates against them from the staged Parquet
+/// footers. `None` runs both unbounded.
 ///
 /// # Errors
 /// Returns a compile, read, or materialisation error.
@@ -534,7 +532,7 @@ pub fn run(
 
     // W3.1b layout post-pass: replace the placeholder x/y/cluster_id with a real
     // WCC partition + deterministic placement, rewriting each vertex Parquet in
-    // place (DuckDB — the one remaining native-runtime use on this path).
+    // place.
     //
     // **There is nothing to repoint any more, and that is the change.** A
     // `RunStatus` was built here BEFORE the pass and patched BY it, because it
@@ -549,9 +547,9 @@ pub fn run(
 }
 
 /// Run the W3 layout enrichment over the just-written `GraphAr` tree: for each
-/// vertex type, point `DuckDB` at its `vertex/<Type>.parquet` plus the CSR Parquet
-/// of any self-edge, and rewrite the placeholder `x/y/cluster_id` with a real
-/// layout. Local-filesystem paths (the `run_to_dir` dest is a local dir).
+/// vertex type, point the pass at its `vertex/<Type>.parquet` plus the CSR
+/// Parquet of any self-edge, and rewrite the placeholder `x/y/cluster_id` with a
+/// real layout. Local-filesystem paths (the `run_to_dir` dest is a local dir).
 ///
 /// `memory_bytes` is the run's budget again, and it now **reaches** this half of
 /// the write path. It did not, and the gap was not small: `let _ =
@@ -598,12 +596,6 @@ fn enrich_written_layout(
             }
         })
         .collect();
-
-    // The tile directories are not created here. `DuckDB`'s COPY writes a file
-    // and not the directory above it, so somebody has to — and once the layout
-    // emits edge tiles under a prefix it derives for itself, that somebody can
-    // only be the layout. Two callers creating the same directory is one of them
-    // being wrong about which directories exist.
 
     // Every adjacency file, both orientations, cross-type included — the layout
     // renumbers `dense_id`, and a file left out keeps ids that now belong to

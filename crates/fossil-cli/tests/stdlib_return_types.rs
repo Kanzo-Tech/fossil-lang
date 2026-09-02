@@ -49,11 +49,11 @@
 //!
 //! # What this does NOT prove
 //!
-//! - **The 16 `Op` rows.** A `PlanOp` names an operator of the algebra; there is
-//!   no scalar expression to `DESCRIBE`. That covers the 12 relation verbs
+//! - **The `Op` rows.** A `PlanOp` names an operator of the algebra; there is
+//!   no scalar expression to `DESCRIBE`. That covers every relation verb
 //!   (`SigTy::Rows`, true by construction), `seq.count` (`Integer` over
-//!   `COUNT(*)`) and the three `io/` constructors (`SigTy::Rows`). Their return
-//!   types are asserted by reading, not by an engine.
+//!   `COUNT(*)`) and the `io/` constructors (`SigTy::Rows`). Their return types
+//!   are asserted by reading, not by an engine.
 //! - **That the type is the RIGHT one.** It proves `sig.ret` and the template
 //!   agree, not that either is what the language should say. `parse.decimal`
 //!   returning `Float` is a compromise recorded in its own row; this test would
