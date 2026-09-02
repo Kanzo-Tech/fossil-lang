@@ -196,7 +196,7 @@ use fossil_df::files::TileWriter;
 use fossil_mem_probe::Probe;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
-use fossil_sinks::manifest::{TILE_CODES_FILE, TILES_FILE};
+use fossil_sinks::manifest::{TILE_CODES_FILE, TILES_FILE, VertexLevels};
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -1061,6 +1061,36 @@ pub fn enrich_layout_with(
         writer.finish().map_err(write_err(&payload))?;
         probe.mark("gather + write vertex tiles");
 
+        // The pyramid, when the type is big enough to have earned one.
+        //
+        // Level `k` is the rows whose NEW `dense_id` is a multiple of 2^k, and
+        // it is selected by that predicate over `new_dense` rather than by
+        // striding the write order — the two are the same list only where the
+        // numbering is gapless, and a gap would silently make the file and the
+        // predicate disagree. Which is the one property this must not break:
+        // the file is an optimisation of the predicate, so a corpus without it
+        // draws the identical picture and only reads more.
+        //
+        // `VertexLevels::planned` is the only place the levels are chosen, and
+        // whoever declares them in the manifest calls the same function.
+        if let Some(plan) = VertexLevels::planned(rows as u64, target.chunk_size) {
+            write_levels(
+                io,
+                target,
+                &plan,
+                &batch_refs,
+                &starts,
+                &Enriched {
+                    gather: &gather,
+                    new_dense: &new_dense,
+                    xs: &xs,
+                    ys: &ys,
+                    cluster_ids: &cluster_ids,
+                },
+            )?;
+            probe.mark("write levels");
+        }
+
         // The anchor, cut on the same loop bound the tiles were: `lo[k]` is the
         // code of tile `k`'s first row and `hi[k]` the code of its last. Both
         // are non-decreasing in `k` because `row_codes` is — the rows are in
@@ -1484,6 +1514,124 @@ fn replace_columns(
         columns[index] = Arc::clone(array);
     }
     RecordBatch::try_new(schema, columns).map_err(arrow_err(url))
+}
+
+/// The four columns the layout pass replaces, plus the permutation that says
+/// which file row each written row came from — borrowed as one argument so that
+/// [`write_levels`] takes six and not ten.
+struct Enriched<'a> {
+    /// File row of each written row, in write order.
+    gather: &'a [u32],
+    /// The new `dense_id` of each written row. **Not** its index: a `dense_id`
+    /// that no row carries is skipped, so these are the values a level's
+    /// predicate is evaluated against.
+    new_dense: &'a [u32],
+    xs: &'a [f32],
+    ys: &'a [f32],
+    cluster_ids: &'a [u32],
+}
+
+/// Write one vertex type's **level sets** — the decimated pyramid a zoomed-out
+/// camera reads instead of striding the whole type.
+///
+/// # What a level is
+///
+/// Level `k` is the rows whose `dense_id` is a multiple of `2^k`, which over a
+/// Morton-ordered `dense_id` is one vertex per quadtree cell of depth `k`. Every
+/// row is a real vertex at its real position — there is no synthetic centroid
+/// here, because a centroid cannot nest: replace it with its children and every
+/// point on screen moves. A decimation nests by construction, so zooming in only
+/// ever ADDS.
+///
+/// # The property this must not break
+///
+/// **The file and the predicate select the same rows.** A level set is an
+/// optimisation of `dense_id % 2^k == 0` over the payload and nothing else, so a
+/// corpus without one draws the same picture and only reads more. That is what
+/// keeps the pyramid from becoming a second contract, and it is why the
+/// selection here is a predicate over [`Enriched::new_dense`] rather than a
+/// stride over the write order: the two coincide only while the numbering is
+/// gapless, and a hole would make the file quietly disagree with the predicate
+/// a reader without one evaluates.
+/// `crates/fossil-layout/tests/levels.rs` is that test.
+///
+/// # Each level is a payload set, addressed by the same rule
+///
+/// Level `k` goes under `<chunk_prefix><stem>{k}/`, tiled at the plan's
+/// `chunk_size` into one Parquet whose row groups are its tiles — the same
+/// shape, the same filename and the same container as the payload beside it. So
+/// a reader that can address a type can address a level of it with no new
+/// arithmetic, and tile `j` of level `k` is the `dense_id` range
+/// `[j·chunk·2^k, (j+1)·chunk·2^k)`, which the published code anchor already
+/// bounds in Morton space.
+fn write_levels(
+    io: &dyn LayoutIo,
+    target: &VertexLayoutTarget,
+    plan: &VertexLevels,
+    batch_refs: &[&RecordBatch],
+    starts: &[u32],
+    rows: &Enriched<'_>,
+) -> Result<(), LayoutError> {
+    let Some(first) = batch_refs.first() else {
+        return Ok(());
+    };
+    for &level in &plan.levels {
+        // `level` is a small integer by construction — the coarsest is the
+        // finest `k` whose level fits one tile — but the shift is masked rather
+        // than trusted, because a panic in a writer is the most expensive way to
+        // learn that an invariant moved.
+        let step = 1u32 << level.min(31);
+        let picks: Vec<usize> = rows
+            .new_dense
+            .iter()
+            .enumerate()
+            .filter(|&(_, &dense)| dense % step == 0)
+            .map(|(i, _)| i)
+            .collect();
+        let prefix = format!("{}{}", target.chunk_prefix, plan.level_prefix(level));
+        io.ensure_prefix(&prefix)?;
+        let url = format!("{prefix}{TILES_FILE}");
+        let mut writer = open_tiles(io, &url, first.schema())?;
+        for tile in picks.chunks(plan.chunk_size as usize) {
+            let gathered: Vec<(usize, usize)> = tile
+                .iter()
+                .map(|&i| locate(starts, rows.gather[i]))
+                .collect();
+            let batch = interleave_record_batch(batch_refs, &gathered).map_err(arrow_err(&url))?;
+            let take = |pick: &dyn Fn(usize) -> u32| -> Vec<u32> {
+                tile.iter().map(|&i| pick(i)).collect()
+            };
+            let enriched = replace_columns(
+                &batch,
+                &url,
+                &[
+                    (
+                        "dense_id",
+                        Arc::new(UInt32Array::from(take(&|i| rows.new_dense[i]))) as ArrayRef,
+                    ),
+                    (
+                        "x",
+                        Arc::new(Float32Array::from(
+                            tile.iter().map(|&i| rows.xs[i]).collect::<Vec<f32>>(),
+                        )),
+                    ),
+                    (
+                        "y",
+                        Arc::new(Float32Array::from(
+                            tile.iter().map(|&i| rows.ys[i]).collect::<Vec<f32>>(),
+                        )),
+                    ),
+                    (
+                        "cluster_id",
+                        Arc::new(UInt32Array::from(take(&|i| rows.cluster_ids[i]))),
+                    ),
+                ],
+            )?;
+            writer.tile(&enriched).map_err(write_err(&url))?;
+        }
+        writer.finish().map_err(write_err(&url))?;
+    }
+    Ok(())
 }
 
 /// Write one vertex type's **tile-code anchor** — the document

@@ -82,7 +82,8 @@ use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
     AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Privacy,
-    Property, PropertyGroup, TILE_CODES_FILE, VertexCodes, VertexIndex, VertexInfo, data_type_name,
+    Property, PropertyGroup, TILE_CODES_FILE, VertexCodes, VertexIndex, VertexInfo, VertexLevels,
+    data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -1933,6 +1934,18 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
     info = info.with_codes(VertexCodes {
         path: TILE_CODES_FILE.to_string(),
     });
+    // And the pyramid, when the type is big enough to have earned one — same
+    // place and same reasoning as the two above: the manifest is the plan, and
+    // the layout pass is what fills it.
+    //
+    // **`VertexLevels::planned` is the one place the levels are chosen**, and
+    // the pass calls it over the same two numbers this does — `rows` is the
+    // count this manifest declares and the count the pass writes — so the
+    // manifest cannot name a level nobody wrote. A second copy of the rule on
+    // either side is a 404 in a camera the day one of them moves.
+    if let Some(levels) = VertexLevels::planned(rows, DEFAULT_CHUNK_SIZE) {
+        info = info.with_levels(levels);
+    }
     info
 }
 
