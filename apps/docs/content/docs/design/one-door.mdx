@@ -92,6 +92,33 @@ changes**: not the rows, not the API, not a test. That is the property being bou
 make the pyramid a second contract. The writer's half of it lives in `crates/fossil-layout` and
 `crates/fossil-sinks`; this side needs no change when it lands.
 
+## The relational work is two clauses, and the SQL still cannot go
+
+`crates/fossil-layout` makes the argument from the writer's side — *the relational work was never
+relational*: a tile is a slice of a Morton-ordered file, a stride is a modulo, a level is a modulo.
+Read against `view`, that is true of most of what the query says. Only two clauses are relational:
+the box test `x BETWEEN … AND y BETWEEN …`, and the join that finds the edges among the drawn set.
+Everything else — which tiles, which run of `dense_id`, which residues survive the level — is
+arithmetic this package already performs in TypeScript before a character of SQL exists.
+
+**It still cannot come out, and the reason is the host contract.** `@fossil-lang/corpus` asks a
+host for exactly one capability — `query(sql) => Record<string, unknown>[]` — and links no engine
+(see the argument in `packages/corpus/src/query.ts`). SQL is not a language choice here; it is the
+*only channel* through which a byte of a corpus reaches this package. Arithmetic that stays in
+TypeScript is arithmetic performed on rows that already crossed that boundary.
+
+The cost of moving it is measurable on the bench corpus. `chunk_size` is 4,096 over 245 tiles, so
+the whole-extent view at level 6 opens 1,000,000 rows and returns **15,625**. Pushing the modulo
+down means the engine skips 63 rows in 64 inside its own memory; performing it in TypeScript means
+a million rows crossing as plain objects to have 984,375 of them discarded — 64× the rows, built
+four fields at a time and thrown away, which is the same waste `view` returns typed arrays to
+avoid.
+
+So what the SQL is allowed to be is the constraint that survives: **every clause in it is a
+function of numbers computed above it**, never of anything read. That is what makes `view` a pure
+function of `(rect, level)` at all, and it is why the tile ranges, the stride and the pin list are
+built by named helpers rather than written into the template as prose.
+
 ## It grew `openCorpus` rather than opening a port beside it
 
 The camera needs an engine — reading tiles and striding them is SQL — so it cannot live on the
