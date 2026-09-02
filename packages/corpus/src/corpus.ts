@@ -382,10 +382,26 @@ export interface View {
   /** `2^level`. */
   readonly stride: number;
   /**
-   * How many vertices the rectangle holds at **level 0** — the denominator, and the one number that
-   * says whether a coarse view is a picture of the whole rectangle or a picture of part of it.
+   * How many vertices the rectangle holds **at {@link View.matchedAt}** — the denominator, and the
+   * one number that says whether a coarse view is a picture of the whole rectangle or of part of
+   * it.
    */
   readonly matched: number;
+  /**
+   * The level {@link View.matched} counts at: `0` when the payload was strided, and
+   * {@link View.level} when a written level answered.
+   *
+   * **A field rather than a footnote, because the honest answer is not always level 0.** `matched`
+   * is `count(*)` over the rows that were read, and a level file holds one row in `2^k` — so a
+   * read of `l{k}/` cannot count level 0 without opening the very bytes the pyramid exists to
+   * avoid. The two ways of not saying so were both worse: reporting `matched · 2^k` invents an
+   * estimate the type does not admit to, and letting the field mean different things depending on
+   * `cost.read` is the two-contracts failure the pyramid was designed to refuse.
+   *
+   * `matched · 2^matchedAt` is the caller's own arithmetic if it wants an estimate, and it is an
+   * estimate — the decimation is uniform in `dense_id`, not in the rectangle.
+   */
+  readonly matchedAt: number;
   /**
    * `dense_id`s, marks first and then anchors. In this type's own numbering: a `dense_id` is unique
    * within one vertex type and repeats across a union of two, so a caller drawing more than one
@@ -956,11 +972,18 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
   const boxes = new Map<string, Promise<readonly TileBox[]>>();
 
-  const tileBoxes = (type: string): Promise<readonly TileBox[]> => {
-    const cached = boxes.get(type);
+  /**
+   * @param level When given, the footers of that WRITTEN level's tiles rather than the payload's.
+   *   One `parquet_metadata` read over a handful of files, cached beside the payload's under its
+   *   own key — and it is what keeps `ViewCost.bytes` a measurement under a level read instead of
+   *   the payload's number wearing a level's label.
+   */
+  const tileBoxes = (type: string, level?: number): Promise<readonly TileBox[]> => {
+    const key = level === undefined ? type : `${type}\u0000l${level}`;
+    const cached = boxes.get(key);
     if (cached) return cached;
     const address = addressing.vertexType(type);
-    const urls = payloadFiles.get(type)!;
+    const urls = level === undefined ? payloadFiles.get(type)! : [...address.levels!.files(level)];
     // Which tile a footer row is about. Under `files` it is the file — one per tile, and the row
     // groups inside it are one tile's worth however many there are. Under `rowgroups` it is the
     // ordinal, and this is the one place in this file where that ordinal is the address: a vertex
@@ -1014,7 +1037,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       }
       return [...merged.values()];
     })();
-    boxes.set(type, loading);
+    boxes.set(key, loading);
     return loading;
   };
 
@@ -1490,9 +1513,9 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
           level,
           stride,
           count: Math.ceil(count / stride),
-          // Nothing writes a level yet, and the field is here rather than absent because what
-          // arrives when one does is a cheaper read of the same rows — see {@link ViewCost.read}.
-          written: false,
+          // The manifest's own `levels:`, and it changes a cost rather than an answer: every level
+          // in this list is answerable either way, and `written` says only which bytes answer it.
+          written: address.levels?.has(level) ?? false,
         });
         if (stride >= count) return out;
       }
@@ -1547,6 +1570,23 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const boxed = BigInt(all.length) === address.tiles;
       const codes = anchors.get(address.type);
       const addressed: ViewCost['addressed'] = codes !== undefined ? 'anchor' : 'footer';
+      /**
+       * Whether a written level answers this read, and **why asking for links is what decides it.**
+       *
+       * A level file holds the level's rows and nothing else, so the far end of a mark-incident
+       * edge is not in it — and the camera keeps an edge with ONE end drawn, not two. Measured on
+       * the 300,000-vertex bench corpus with the app's own three-pixel floor
+       * (`crates/fossil-layout/tests/levels.rs`, `what_the_pixel_floor_leaves_of_a_coarse_view`):
+       * the level-6 view draws 58,554 edges and 52,415 anchors, of which the level file can
+       * position **476 — 0.81%**. So reading `l{k}/` for a view that asked for links would not be
+       * the same answer more cheaply; it would be a different picture, and `/docs/design/one-door`
+       * said the day a level exists nothing else changes. It was written before that was measured.
+       *
+       * The rule that keeps one contract is therefore: **the pyramid answers when the answer is
+       * points.** A caller that asks for links opens the payload and `cost.read` says `strided`.
+       */
+      const levelSet = address.levels;
+      const viaLevel = levelSet !== null && levelSet.has(level) && !wantLinks;
       const selected = new Set<number>(
         codes !== undefined
           ? mortonTilesFor({ box: gridBox(box), codes })
@@ -1559,12 +1599,57 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       // rather than absent from the read.
       for (const id of pins) selected.add(Number(address.tileOf(id)));
 
-      const held = [...selected].sort((a, b) => a - b);
-      const weights = new Map(all.map((b) => [Number(b.tile), b]));
-      const runs = runsOf(held, weights);
-      const bytes = runs.reduce((sum, run) => sum + run.bytes, 0);
+      const payloadTiles = [...selected].sort((a, b) => a - b);
+      /**
+       * The same tiles, read off the pyramid — arithmetic, and **no second anchor.**
+       *
+       * Level `k`'s tile `j` covers the `dense_id` range `[j·chunk·2^k, (j+1)·chunk·2^k)`, so a run
+       * of payload tiles is a run of level tiles under the level's own shift. That is the whole of
+       * why the manifest writes no `codes:` per level: whichever artefact addressed the payload —
+       * the anchor or the footers — has already addressed the level, and `cost.addressed` keeps
+       * naming the one that did.
+       */
+      const levelTilesOf = (tiles: readonly number[]): number[] => {
+        const out = new Set<number>();
+        for (const run of runsOf(tiles, new Map(all.map((b) => [Number(b.tile), b])))) {
+          const lo = levelSet!.tileOf(level, BigInt(run.first) * chunk);
+          const hi = levelSet!.tileOf(level, BigInt(run.last + 1) * chunk - 1n);
+          for (let t = lo; t <= hi; t += 1n) out.add(Number(t));
+        }
+        return [...out].sort((a, b) => a - b);
+      };
 
-      const urls = distinct(held.map((tile) => address.tileUrl(tile)));
+      const source = viaLevel
+        ? { all: await tileBoxes(address.type, level), tiles: levelTilesOf(payloadTiles) }
+        : { all, tiles: payloadTiles };
+      const held = source.tiles;
+      const weights = new Map(source.all.map((b) => [Number(b.tile), b]));
+      const runs = runsOf(held, weights);
+      /**
+       * **How wide a tile of what was read is, in `dense_id`.**
+       *
+       * The payload's `chunk_size` for a payload read, and a level's own tile times `2^k` for a
+       * level read — level `k` keeps one id in `2^k`, so its tile of `chunkSize` rows spans that
+       * many times the ids. Using the payload's number over a level file is the bug this line
+       * exists as: the range clause bounded tile 0 of `l6` at 8 ids where it holds 512, so the
+       * read came back with one row and looked like a corpus rather than like a predicate.
+       */
+      const span = viaLevel ? BigInt(levelSet!.chunkSize) << BigInt(level) : chunk;
+      // A pin's tile is a PAYLOAD tile even under a level read, so its cost is measured against
+      // the payload's footers and added to the ledger the level's own runs opened.
+      const pinTiles = viaLevel
+        ? [...new Set(pins.map((id) => Number(address.tileOf(id))))].sort((a, b) => a - b)
+        : [];
+      const pinRuns = runsOf(pinTiles, new Map(all.map((b) => [Number(b.tile), b])));
+      const bytes = [...runs, ...pinRuns].reduce((sum, run) => sum + run.bytes, 0);
+
+      // A pin is one `dense_id` and an odd one is a multiple of no stride above 1, so the level
+      // file does not carry it. Its PAYLOAD tile is opened for it — which is what
+      // `ViewCost.tiles` counting a pin's tile has always meant, now with the bytes to match.
+      const pinUrls = viaLevel ? distinct(pins.map((id) => address.tileUrl(address.tileOf(id)))) : [];
+      const urls = distinct(
+        viaLevel ? held.map((tile) => levelSet!.tileUrl(level, tile)) : held.map((tile) => address.tileUrl(tile)),
+      );
       const empty: View = {
         type: address.type,
         box,
@@ -1575,8 +1660,17 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         positions: new Float32Array(0),
         categories: new Uint32Array(0),
         marks: 0,
+        matchedAt: viaLevel ? level : 0,
         links: new Uint32Array(0),
-        cost: { tiles: 0, ofTiles: all.length, runs: 0, bytes: 0, read: 'strided', addressed, ms: 0 },
+        cost: {
+          tiles: 0,
+          ofTiles: source.all.length,
+          runs: 0,
+          bytes: 0,
+          read: viaLevel ? 'level' : 'strided',
+          addressed,
+          ms: 0,
+        },
       };
       if (urls.length === 0) return empty;
 
@@ -1584,16 +1678,28 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         runs
           .map(
             (run) =>
-              `${column} BETWEEN ${BigInt(run.first) * chunk} AND ${BigInt(run.last + 1) * chunk - 1n}`,
+              `${column} BETWEEN ${BigInt(run.first) * span} AND ${BigInt(run.last + 1) * span - 1n}`,
           )
           .join(' OR ');
       const pinList = pins.length > 0 ? `dense_id IN (${pins.join(', ')})` : null;
       const strided = stride > 1 ? `dense_id % ${stride} = 0` : 'TRUE';
 
-      const base =
-        `WITH held AS (\n` +
+      /**
+       * The rows the answer is computed over — and note what is NOT conditional on where they came
+       * from: `pool` still applies `dense_id % 2^k = 0` below, over a level file whose every row
+       * already satisfies it. That is deliberate and it is the contract, executed rather than
+       * asserted: a level file that disagreed with the predicate could change the BYTES this read
+       * costs and could not change the rows it answers with.
+       */
+      const heldSql =
         `  SELECT dense_id, x, y, ${ident(fill)} AS cat FROM read_parquet(${list(urls)})\n` +
         `  WHERE ${ranges('dense_id')}\n` +
+        (pinUrls.length === 0
+          ? ''
+          : `  UNION ALL\n  SELECT dense_id, x, y, ${ident(fill)} AS cat FROM ` +
+            `read_parquet(${list(pinUrls)}) WHERE dense_id IN (${pins.join(', ')})\n`);
+      const base =
+        `WITH held AS (\n${heldSql}` +
         `), inrect AS (\n  SELECT * FROM held WHERE ${boxOf(box)}\n` +
         `), pool AS (\n  SELECT dense_id, x, y, cat FROM inrect WHERE ${strided}\n` +
         (pinList === null
@@ -1688,20 +1794,18 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         level,
         stride,
         matched,
+        matchedAt: viaLevel ? level : 0,
         denseIds,
         positions,
         categories,
         marks,
         links: edges,
         cost: {
-          tiles: held.length,
-          ofTiles: all.length,
-          runs: runs.length,
+          tiles: held.length + pinTiles.length,
+          ofTiles: source.all.length,
+          runs: runs.length + pinRuns.length,
           bytes,
-          // Nothing writes `l{k}/` yet, so every level is the predicate over the full tiles: the
-          // same rows, more bytes. The day a level file exists this is the number that changes and
-          // the answer above is not.
-          read: 'strided',
+          read: viaLevel ? 'level' : 'strided',
           addressed,
           ms: Date.now() - started,
         },
