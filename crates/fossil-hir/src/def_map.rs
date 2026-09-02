@@ -441,9 +441,9 @@ impl<'db> DefMap<'db> {
     ///
     /// A shape NO binding introduced falls back to the first document, and that
     /// is deliberate: it is the misspelt-shape case, where every document is
-    /// equally wrong and what the author needs is the list of what one of them
-    /// declares (`TargetShapeError::Undeclared` carries it, with a did-you-mean
-    /// over it).
+    /// equally wrong. What the author needs is the list of names the program
+    /// bound, and `crate::lower::unbound_shape_message` is what carries it, with
+    /// a did-you-mean over them.
     #[must_use]
     pub fn shape_binding_for(
         self,
@@ -792,10 +792,9 @@ pub(crate) fn parse_source_call(
 /// It took a `binder` parameter because a `TYPE_DEF` used `=` where a
 /// `SOURCE_DEF` used `:=`. There is ONE binder now: `:=` binds a name
 /// (grammar.bnf, DEFINE) and `=` assigns a value (grammar.bnf, ASSIGN), and what
-/// is being bound is read off the left-hand side rather than off the glyph. Both callers
-/// pass `DEFINE`, so the parameter is one call away from being a constant — it
-/// stays spelled out because the FIRST occurrence being the binder is the fact
-/// this function rests on, and later `ASSIGN`s inside the call are
+/// is being bound is read off the left-hand side rather than off the glyph. The
+/// parameter stays spelled out because the FIRST occurrence being the binder is
+/// the fact this function rests on, and later `ASSIGN`s inside the call are
 /// named-argument separators the URI scan below already knows to skip.
 fn parse_call_after(
     node: &fossil_syntax::SyntaxNode,

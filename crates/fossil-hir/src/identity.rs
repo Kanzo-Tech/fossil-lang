@@ -448,9 +448,9 @@ mod tests {
             .collect()
     }
 
-    /// Two mappings, one shape, one template — and a second shape with its own.
-    /// The table is keyed by SHAPE, so the two `Person` mappings contribute one
-    /// entry between them.
+    /// Two mappings over one shape, minting the same identity from two sources.
+    /// The table is one entry per MAPPING, so both are in it;
+    /// [`SubjectTemplates::for_shape`] is where the deduplication happens.
     const TWO_MAPPINGS: &str = "\
 type { Person } := io.shex(\"person.shex\")
 users := io.csv(\"u.csv\")

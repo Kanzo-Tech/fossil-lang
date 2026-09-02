@@ -58,7 +58,7 @@ pub struct SourceDefHeader {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct MappingHeader {
     pub ast_id: FileAstId<MappingNode>,
-    /// `User` in `User : ex:Person from users`.
+    /// `User` in `User : Person from users`.
     pub name: SmolStr,
     /// Source binding name from the `from` clause if it's a simple `IDENT`;
     /// `None` if the source is a complex `Expression` — a complex source is
@@ -142,9 +142,9 @@ fn extract_mapping_header(
 
     // There was a `shape_iris: Vec<SmolStr>` collected here, one entry per
     // IRI_EXPR in the SHAPE_EXPR, because a shape could be an intersection.
-    // Nothing ever read the field, and the intersection is gone: a header has
-    // one shape, and `lower_to_hir` resolves it against the prefix table this
-    // query deliberately does not depend on.
+    // Nothing ever read the field, and the intersection is gone: a header names
+    // one shape, and `lower_to_hir` resolves that name against `def_map`'s type
+    // bindings, which this query deliberately does not depend on.
 
     // Source binding: scan tokens after KW_FROM for a single IDENT. Complex
     // expressions are signalled as `None` and are resolved through the body

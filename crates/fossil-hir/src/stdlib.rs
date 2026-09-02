@@ -53,11 +53,10 @@
 //!
 //! There is one border and it is semantic: `LoweringKind::Expr` is a scalar
 //! SQL expression and `LoweringKind::Op` names an operator of the algebra, a
-//! closed set — [`PlanOp`], and the size of it is not written here. It said
-//! **14** while [`PlanOp`]'s own doc said **13**, which is what a count
-//! maintained in two places does; the enum is the one place that cannot be
-//! wrong about how many variants it has. `Udf` is gone — see
-//! [`LoweringKind::Expr`] for what that cost and bought.
+//! closed set — [`PlanOp`], and the size of it is not written here or anywhere
+//! else: the enum is the one place that cannot be wrong about how many variants
+//! it has. `Udf` is gone — see [`LoweringKind::Expr`] for what that cost and
+//! bought.
 //!
 //! ## `WasmClass` is gone as a CONCEPT
 //!

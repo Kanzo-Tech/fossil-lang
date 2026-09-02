@@ -1,8 +1,7 @@
-//! Bidirectional type checker — the real `synth`/`check`/`compatible`
-//! algorithm, where a pointer-equality stub used to stand.
+//! Bidirectional type checker — `synth` + `compatible`.
 //!
 //! The architectural keystone: [`typecheck_mapping`] is the ONLY Salsa-tracked
-//! entry per mapping. `synth` / `check` / `check_property` / `lookup_field` /
+//! entry per mapping. `synth` / `check_property` / `lookup_field` /
 //! `compatible` are plain-Rust helpers called from inside it — this preserves
 //! the `MAX_PER_MAPPING_FAN_OUT = 1` invariant (LOAD-BEARING).
 //!
@@ -528,7 +527,6 @@ impl Checker<'_> {
         // the fallback for a mapping whose type name bound nothing, which has
         // already been told so.
         let bound_at = def_map(db, self.expr.file).lookup_type_span(db, type_name.as_str());
-        let document = self.resolved_shape.as_ref().map(|s| s.document.clone());
         let declared_at = |iri: &SmolStr| {
             let shape = self.resolved_shape.as_ref()?;
             Some((
@@ -569,7 +567,6 @@ impl Checker<'_> {
                     d = d.with_document_label(span, iri.to_string(), doc);
                 }
             }
-            let _ = &document;
             d = d.with_help(format!(
                 "a short name is the last segment of the predicate IRI, and fossil never picks \
                  between two. Give one of them another name above the binding: \
@@ -873,16 +870,13 @@ mod tests;
 /// Compatibility check: is `actual` a subtype of `expected`, AND does
 /// `actual`'s cardinality satisfy the constraint?
 ///
-/// A pointer-equality stub stood here first; what replaced it is `subtypes`
-/// (S-Refl, S-IntFlt, S-TmplIri, S-SeqCov) + two-span blame with real spans
-/// from [`Spans`]. S-Opt and S-OptCov went with `TyKind::Optional`, and the
-/// cardinality check went with them — see the body.
+/// The subtype half is `subtypes`, below; the cardinality a shape declares is
+/// not read here — see the body.
 ///
 /// `expected` is an `Option` because a shape document may decline to narrow a
 /// predicate's value type at all (`ex:name .`), and `None` is that: the
-/// cardinality still binds, the type does not. It used to arrive as
-/// `TyKind::Iri` — the narrowest type in the lattice standing in for the
-/// widest — so a constraint that constrained nothing rejected a `String`. See
+/// cardinality still binds, the type does not. A constraint that constrains
+/// nothing must not reject a `String`. See
 /// [`crate::shapes::ShapeConstraint::value_ty`].
 ///
 /// Plain-Rust (NOT `#[salsa::tracked]`). Called from within the tracked
@@ -1132,8 +1126,8 @@ pub struct Declared {
 // Spelling an operator for a diagnostic is `crate::display`'s, beside the enums,
 // because the census needs the same table and two tables agree until one moves.
 
-/// Recursive subtyping — four rules: S-Refl, S-IntFlt, S-TmplIri, S-SeqCov,
-/// plus an error-taint escape so one mismatch does not cascade.
+/// Recursive subtyping — the rules are the arms below, each named where it
+/// sits, plus an error-taint escape so one mismatch does not cascade.
 /// Direct enum dispatch — NO `Box<dyn>`, NO trait objects.
 pub(crate) fn subtypes<'db>(
     db: &'db dyn fossil_base::Db,
@@ -1292,8 +1286,8 @@ impl<'db> Expr<'db> {
 
     /// Raise a built [`Diagnostic`], in the frame this checker's spans are in.
     ///
-    /// THE emission point, and it is one so that the frame is decided once. It
-    /// was `delay_span_bug` at twenty-seven call sites, each defaulting to
+    /// THE emission point, and it is one so that the frame is decided once.
+    /// `delay_span_bug` at each call site defaults to
     /// `SpanFrame::MappingRelative` — correct for a body and silently wrong for
     /// a pipeline, whose span is already file-absolute.
     ///
@@ -1335,11 +1329,6 @@ impl<'db> Expr<'db> {
 // is not in `grammar.bnf`), `expected_value_ty` emits `Primitive` or `Iri`, and
 // `record_from_inferred` types every descriptor column bare. A rule over a type
 // that cannot exist is not a rule.
-
-// `demands_one_or_more` lived here as a five-armed match over a cardinality
-// enum that could hold two spellings of one fact (`Exact(3)` answered `true`
-// where `Range { min: 3, max: Some(3) }` answered `false`). `Occurs` is a
-// `(min, max)` pair and carries the answer as `Occurs::demands_one_or_more`.
 
 impl<'db> Expr<'db> {
     /// Inference-mode descent over a leaf [`HirExpr`].
@@ -1404,8 +1393,8 @@ impl<'db> Expr<'db> {
             // `Adults.name`, even when it draws `from Adults`»* — so the name on
             // the left is a BINDING and the name after `from` is a RELATION, and
             // the two coincide only when the relation is a binding that reads a
-            // file. Nine of the twenty-three conformance programs are written as
-            // the grammar says and were rejected by this equality.
+            // file. The conformance programs are written as the grammar says
+            // and were rejected by this equality.
             //
             // It is a lookup over the scope, and the scope is what a `join` puts
             // two rows in: `Purchase.amount` and `User.email` land on different
@@ -1462,12 +1451,10 @@ impl<'db> Expr<'db> {
                 self.synth_call(expr_id, func, args),
                 ProvenanceKind::FnResult { name: func.clone() },
             ),
-            // T-Edge: `Person(User.email)` is an IRI — the identity of a
-            // `Person`, built from this row. This is the ONLY per-row producer
-            // of `TyKind::Iri` the language has, which is what makes the
-            // `expected_value_ty` rule for a shape-ranged predicate satisfiable
-            // at all (`shapes.rs`, case 2: «the only thing a reference can be is
-            // an IRI»). Before it, that rule could be met by nothing.
+            // T-Edge: `Person(User.email)` is the identity of a `Person`, built
+            // from this row. It is the only per-row producer of a reference the
+            // language has, which is what makes `expected_value_ty`'s rule for a
+            // shape-ranged predicate satisfiable at all.
             HirExpr::Edge { target, args } => (
                 self.synth_edge(expr_id, target, args),
                 ProvenanceKind::FnResult {
@@ -1692,11 +1679,11 @@ impl<'db> Expr<'db> {
 
     /// T-Edge: type a `Person(User.email)` against the target type's identity.
     ///
-    /// Always `Iri` — «the only thing a reference to another node can be is an
-    /// IRI», which is the rule [`crate::shapes::expected_value_ty`] applies on
-    /// the other side. The type is returned even when the constructor is wrong,
-    /// because poisoning is done through `record_error` and returning `Error`
-    /// here as well would report the same property twice.
+    /// The type is a reference to the SHAPE the target names — the other side
+    /// of the rule [`crate::shapes::expected_value_ty`] applies. It is returned
+    /// even when the constructor is wrong, because poisoning is done through
+    /// `record_error` and returning `Error` here as well would report the same
+    /// property twice.
     ///
     /// Three things can go wrong and each is a diagnostic with a real span:
     ///
@@ -1919,9 +1906,8 @@ impl<'db> Expr<'db> {
             // A pipeline is lifted out of `Call` by `crate::lower`, and so is a
             // source binding (on the `io.` prefix), so what reaches here is the
             // relation written where a value belongs — `M.x = io.csv("u.csv")`.
-            // That used to type as `xsd:string`, because the three `io/` rows
-            // declared `String`; the message does not name verbs any more
-            // because the rows are no longer only verbs.
+            // The message does not name verbs, because the rows with a `Rows`
+            // return are no longer only verbs.
             || {
                 Ty::new(
                     db,
@@ -2172,8 +2158,8 @@ impl<'db> Expr<'db> {
     /// column no shape can check.
     ///
     /// A branch the checker cannot type yields to the other branch, and if
-    /// neither can be typed the conditional cannot either: it is `Unknown`, not
-    /// an invented `String`.
+    /// neither can be typed the conditional cannot either: `None`, not an
+    /// invented `String`.
     fn synth_ternary(
         &mut self,
         expr_id: ExprId,
@@ -2210,8 +2196,8 @@ impl<'db> Expr<'db> {
 
         match (t, o) {
             (Some(t), Some(o)) => {
-                // Same type, or one is a subtype of the other (Integer widens
-                // into Float; an interpolation widens into an IRI).
+                // Same type, or one is a subtype of the other — Integer widens
+                // into Float, a reference into a wider set of shapes.
                 if subtypes(db, t, o) {
                     Some(o)
                 } else if subtypes(db, o, t) {

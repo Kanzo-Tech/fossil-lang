@@ -1,15 +1,9 @@
 //! `fossil-hir` — types + name resolution + minimal type check.
 //!
-//! This crate collapses what was originally three crates
-//! (`fossil-types + fossil-resolve + fossil-typeck`) into one, matching the
-//! `ty_python_semantic` pattern.
-//!
 //! # What lives here
 //!
-//! - The [`Ty`] ADT (`Primitive`, `Seq`, `Record`, `Iri`, `IriTemplate`,
-//!   `Error`). `Optional`, `Fn` and `Unknown` were three more, and none of them
-//!   was ever constructed by anything a program could reach.
-//! - [`DefMap`] = prefix table + source bindings + mapping list, populated by
+//! - The [`Ty`] ADT — [`TyKind`] is the list, and there is no count here.
+//! - [`DefMap`] = source bindings + type bindings + mapping list, populated by
 //!   the [`def_map`] Salsa query.
 //! - Interned [`MappingLoc`]/[`SourceLoc`] location IDs (the rust-analyzer
 //!   pattern).
@@ -82,13 +76,9 @@ pub mod spans;
 /// it, and the checker cannot depend on a crate that depends on the checker —
 /// which is what `fossil-registry` was until it was folded in here.
 pub mod stdlib;
-// The host-with-a-decoder this crate's tests use was a private `test_support`
-// module here. It moved to `fossil_base::test_support` (feature
-// `test-support`, a dev-dependency below) because `#[cfg(test)]` made it
-// unreachable from any other crate's integration tests, and `fossil-mir` and
-// `fossil-hir/tests/diagnostic_corpus.rs` both need the same one. The reason it
-// is not the real ShEx decoder is unchanged: this crate names no schema
-// language, and reaching for one as a dev-dependency puts it back.
+// The host-with-a-decoder this crate's tests use is `fossil_base::test_support`
+// (feature `test-support`) and not a real ShEx decoder: this crate names no
+// schema language, and reaching for one as a dev-dependency puts it back.
 pub mod ty;
 
 // Type re-exports only; the query functions are intentionally kept under their
@@ -103,10 +93,6 @@ pub use lower::{BinOp, FloatBits, HirExpr, HirFile, HirMapping, HirProperty, Pro
 pub use provenance::{
     ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind, expr_types, mapping_at, ty_origin,
 };
-// The `spans()` query function is reachable as `fossil_hir::spans::spans`
-// (the module path is intentional — the bare `spans` name would shadow the
-// module). Mirrors the rust-analyzer convention of keeping Salsa query
-// functions under their module paths.
 pub use check::{Checker, TypeckOutput, compatible, render_split_suggestion, typecheck_mapping};
 pub use didyoumean::did_you_mean;
 pub use spans::Spans;

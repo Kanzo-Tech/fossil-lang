@@ -240,11 +240,9 @@ fn resolve_leaf_row<'db>(
     }
 
     // RDF destructuring source member (`{ A, B } := io.rdf(..., schema =
-    // "x.shex")`): the member's shape, resolved at COMPILE TIME, IS the source
-    // row type. One column per shape constraint (literal datatype → typed
-    // Primitive, shape-ref → IRI String) plus the `subject` IRI column every
-    // pivoted RDF row carries (so `iri = .subject` types). This is the same
-    // "schema → Record at compile time" path CSV uses — no runtime column
+    // io.shex("x.shex"))`): the member's shape, resolved at COMPILE TIME, IS
+    // the source row type — see `record_from_shape` for the columns it yields.
+    // Same "schema → Record at compile time" path CSV uses; no runtime column
     // resolution in the provider.
     if let Some(shape_iri) = dm.lookup_source_shape_iri(db, source_name) {
         // The PAIR: `schema = io.shex("x.shex")` names the row that reads the
@@ -969,16 +967,16 @@ fn pipe_error(
 
 /// Build a `Record` [`Ty`] from a decoded [`Shape`] — the COMPILE-TIME source
 /// row type for an `io.rdf` destructuring member. One field per constraint plus
-/// the always-present
-/// `subject` IRI column (the pivoted RDF row carries the entity IRI there, so
-/// `iri = .subject` types).
+/// the always-present `subject` column (the pivoted RDF row carries the entity
+/// IRI there, so `@subject = User.subject` types).
 ///
 /// Two rules, and they are the same two the output side applies in
 /// [`fossil_graph_schema::OutputShapes::to_graph_schema`], which branches on
 /// the same `targets` field:
 ///
 /// - A constraint with **targets** is an edge, and the source-side value of an
-///   edge is the referenced subject's IRI — so the column is [`TyKind::Iri`].
+///   edge is the referenced subject — so the column is a [`TyKind::Ref`] to the
+///   shapes the constraint names.
 /// - Anything else takes its declared datatype, and a constraint the document
 ///   did not narrow is a `String` column. That is the permissive
 ///   walking-skeleton default, and it is the same one
