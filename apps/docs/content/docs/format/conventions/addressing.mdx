@@ -376,10 +376,64 @@ endpoints costs more than it saves by a wide margin
 ([Adjacency](/docs/format/conventions/adjacency#csr-not-lca)). With nothing to hoist, the interior
 nodes are empty.
 
-**The level-of-detail pyramid is not that tree either.** Zoom reads a different relation rather than
-filtering one: a tile at aggregation level 3 holds super-nodes that do not exist at level 0, and each
-level has its own `dense_id` space, its own Morton renumbering and its own flat tiling of 4,096 rows.
-It is **`k` flat tilings**, not a tree of `k` levels.
+**The level-of-detail pyramid is not that tree either**, and it is not the aggregation this
+paragraph used to describe. It said a level tile holds *super-nodes that do not exist at level 0*,
+each level carrying its own `dense_id` space and its own Morton renumbering. What was built is a
+**decimation**, for the reason the design page gives at length: a synthetic centroid cannot nest, so
+replacing it with its children moves every point on screen.
+
+**Level `k` is the vertices whose `dense_id` is a multiple of `2^k`.** Over a Morton-ordered
+`dense_id` that is one vertex per quadtree cell of depth `k`. Three things follow from the definition
+alone, and none of them needs a byte on disk:
+
+- **It nests, by construction.** `dense_id % 2^(k+1) == 0` is a strict subset of
+  `dense_id % 2^k == 0`, so refining only ever ADDS and a vertex drawn once stays drawn at the same
+  position.
+- **Every row is a real vertex** at the position the payload gives it. There is no synthetic node
+  anywhere in the pyramid, and `cluster_id` is a colour rather than a level of anything.
+- **There is no second `dense_id` space.** A level shares the payload's numbering, so a level tile is
+  addressed by the payload's own shift plus `k` — level `k` keeps one id in `2^k`, so its tile of
+  `chunk_size` rows spans that many times the ids: tile `j` covers
+  `[j · chunk_size · 2^k, (j+1) · chunk_size · 2^k)`.
+
+So it is **`k` flat tilings of one id space**, not a tree of `k` levels and not `k` id spaces.
+
+### `levels:` — which of them are written
+
+A level is a predicate, so a reader answers any level with or without a file: striding the payload
+selects the same rows and reads more bytes. A written level is a **cache of that predicate**, and
+what it changes is a byte count.
+
+```yaml
+levels:
+  prefix: l
+  levels:
+  - 6
+  - 7
+  - 8
+  chunk_size: 4096
+```
+
+Level `k`'s tiles live under `<prefix of the type><stem>{k}/`, and inside it the corpus's
+[container](#two-containers-one-address) spells the filenames exactly as it does for the
+payload — `l6/chunk0.parquet` where the payload is `chunk0.parquet`, `l6/tiles.parquet` where it is
+`tiles.parquet`. No level writes an anchor of its own: whichever artefact addressed the payload has
+already addressed the level.
+
+**The numbers are declared, and that is a departure from the tile-code anchor beside it.** The
+anchor is two integers per tile and therefore grows with the corpus, so inlining it would charge
+every reader of a manifest for the size of the graph; a level list is at most three integers
+**whatever the corpus is**. And it is not derivable: which levels a writer chose to spend bytes on is
+a *policy*, and a reader re-deriving it from `vertex_count` and `chunk_size` would be reimplementing
+the writer's plan and would 404 the day the plan moved.
+
+`chunk_size` is declared for the same reason rather than inherited from the payload's: a reader
+turning a level tile back into a `dense_id` range multiplies by it, and a number that has to be
+assumed is one a writer can change in silence.
+
+**Absent is a corpus and not a gap.** A type under the floor a writer spends bytes at — 64 tiles, at
+which point the pyramid is under 11% of the type — declares no `levels:` and draws the identical
+picture.
 
 ## Encoding is chosen per column
 

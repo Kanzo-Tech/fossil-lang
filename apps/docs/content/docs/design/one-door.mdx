@@ -87,10 +87,62 @@ reported:
 | `cost.runs` | maximal runs of adjacent tiles: what those tiles cost in `Range` requests. |
 | `cost.addressed` | `anchor` — the published tile-code document, arithmetic only. `footer` — the per-tile `x`/`y` boxes. |
 
-The day a level file exists, `cost.read` flips to `level`, `cost.bytes` falls, and **nothing else
-changes**: not the rows, not the API, not a test. That is the property being bought by refusing to
-make the pyramid a second contract. The writer's half of it lives in `crates/fossil-layout` and
-`crates/fossil-sinks`; this side needs no change when it lands.
+The day a level file exists, `cost.read` flips to `level` and `cost.bytes` falls.
+
+**This section used to end "and nothing else changes: not the rows, not the API, not a test — this
+side needs no change when it lands", and that was written before anybody measured it.** Two things
+change, and both are consequences of what a level file *is* rather than of how it is read.
+
+### A level file cannot position an anchor, and that is what decides when it may answer
+
+`marks` is a prefix length because the rows past it are anchors: far ends of edges the sample did
+not draw, **out of tiles that were already opened**. A level file holds the level's rows and nothing
+else, so those far ends are not in it — and the camera keeps an edge with *one* end drawn, not two.
+
+The number that settles it is not the induced count. `crates/fossil-layout/tests/levels.rs`,
+`a_level_induces_essentially_no_edges_which_is_why_none_are_written` measures edges with **both**
+ends in the level, which is the right question for writing an *edge* pyramid and the wrong one for
+reading a *vertex* level: the edges a coarse view draws scale with the marks, `V/2^k · degree`, not
+with their square. Measured on the same 300,000-vertex corpus with the app's own three-pixel floor
+(`what_the_pixel_floor_leaves_of_a_coarse_view`):
+
+| level | marks | edges past the floor | anchors | of those edges, a level file can position |
+| --- | --- | --- | --- | --- |
+| 5 | 9,375 | 116,380 | 94,011 | 1,835 — **1.58%** |
+| 6 | 4,688 | 58,554 | 52,415 | 476 — **0.81%** |
+| 7 | 2,344 | 29,446 | 27,871 | 120 — **0.41%** |
+
+So reading `l{k}/` for a view that asked for links would not be the same answer more cheaply. It
+would be a different picture, missing 99% of its edges and all of its anchors, with `cost.read`
+reporting the swap as a byte count.
+
+**The rule that keeps one contract is therefore: the pyramid answers when the answer is points.**
+`links: false` reads the level; asking for links opens the payload and `cost.read` says `strided`.
+Nobody loses a drawing they have today, and a caller takes the bytes by asking for something a level
+can answer. What is *not* on the table is the level file answering a different question under the
+same name — see `design/discarded`, where the two alternatives and what would bring each back are
+written down.
+
+The predicate stays in the SQL either way. `pool` applies `dense_id % 2^k = 0` over a level file
+whose every row already satisfies it, which is the identity being asserted rather than assumed: a
+level file that disagreed with the predicate could change what a read **costs** and could not change
+what it **answers**.
+
+### `matched` says which level it counted
+
+`matched` is `count(*)` over the rows that were read, so a level read cannot count level 0 without
+opening the bytes the pyramid exists to avoid. `View.matchedAt` is that level — `0` when the payload
+was strided, `level` when a written level answered.
+
+The two ways of not saying so were both worse. Reporting `matched · 2^k` invents an estimate the
+type does not admit to; letting the field mean different things depending on `cost.read` is exactly
+the two-contracts failure this page refuses everywhere else. `matched · 2^matchedAt` is the caller's
+own arithmetic if it wants an estimate, and it is an estimate: the decimation is uniform in
+`dense_id`, not in the rectangle.
+
+The writer's half lives in `crates/fossil-layout` and `crates/fossil-sinks`, and the reader's in
+`packages/corpus` — `tests/view-levels.test.ts` builds the corpus the assertion needs, because the
+conformance one is three orders under the floor at which a writer spends bytes on a level.
 
 ## The relational work is two clauses, and the SQL still cannot go
 
@@ -152,7 +204,7 @@ objects built to be read four fields at a time and thrown away.
 ```ts
 interface View {
   box, level, stride     // what was asked
-  matched                // what the rectangle holds at LEVEL 0 — the denominator
+  matched, matchedAt     // what the rectangle holds, and at which level it was counted
   denseIds, positions, categories
   marks                  // a PREFIX LENGTH, not a count
   links
@@ -166,5 +218,8 @@ anchor is not "a vertex outside the rectangle" — that wording was wrong and me
 two ways to be one, outside the rectangle or inside it and not in the sample, and a verification
 counting 420 of the second kind is what caught it.
 
-`matched` is the population at level 0, which is the one number that says whether a coarse view is a
-picture of the whole rectangle or a picture of one corner of it.
+`matched` is the population of the rectangle at `matchedAt` — level 0 whenever the payload was
+read, which is every view that asked for links and every level nobody wrote. It is the one number
+that says whether a coarse view is a picture of the whole rectangle or a picture of one corner of
+it, and the section above is why it carries the level it was counted at rather than promising a
+level it would have to buy the bytes for.
