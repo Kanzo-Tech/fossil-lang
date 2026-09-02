@@ -121,8 +121,10 @@ crates/
   fossil-base/             Salsa Db trait + System abstraction (thin Db, fat System)
   fossil-locator/          the ONE rule turning a written reference into something a reader can
                            open — `@conn`, scheme, absolute, else the program's directory; never
-                           the cwd. Depends on NOTHING, which is what puts it UNDER `fossil-base`
-                           rather than inside it: a substrate «doesn't know about file paths»
+                           the cwd. It was a module of `fossil-base` and is not one now: a
+                           substrate «doesn't know about file paths». It depends on NOTHING and
+                           `fossil-base` does not depend on IT — each of its five readers
+                           (`fossil-hir`, `-cli`, `-introspect`, `-df`, `-lsp`) takes it direct
   fossil-syntax/           lossless CST + parser
   fossil-hir/              types + name resolution + bidirectional checker + the stdlib
                            catalog. `stdlib.rs` owns the TYPES a row is written in; the ROWS
@@ -136,11 +138,23 @@ crates/
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
   fossil-sinks/            the canonical GraphAr manifest model (atop arrow + parquet)
   fossil-df/               DataFusion backend for the property-graph MIR
+  fossil-policy/           the privacy policy document a corpus is verified against — ODRL for
+                           structure, DPV for classification, and a fossil profile for the terms
+                           neither vocabulary has. A SECOND document and not an annotation on the
+                           shape: a shape is vocabulary and travels, a classification is
+                           jurisdiction and does not
+  fossil-kanon/            Mondrian strict multidimensional k-anonymity over Arrow arrays,
+                           WASM-clean. Two separable halves: `anonymize` DERIVES a
+                           generalisation, `verify::assess` CHECKS a published one needing no
+                           hierarchy and no sensitive column — so an auditor with the Parquet and
+                           no entitlement to the diagnosis column still gets the answer
   fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each source's columns,
                            and the `--creds-stdin` payload that authenticates one. `fossil-cli`
-                           calls it before the compile. The one crate linking `DuckDB` on a
-                           normal edge — and it is native by that edge and by `fossil-resolver`,
-                           without a tripwire of its own
+                           calls it before the compile. It links `DuckDB` on a normal edge, and
+                           it is not the only crate that does — `cargo tree -e normal -i duckdb
+                           --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
+                           holds it against `deny.toml`. Native by that edge and by
+                           `fossil-resolver`, without a tripwire of its own
   fossil-layout/           the layout post-pass — Louvain + Morton over Parquet through
                            arrow-rs. It links no `DuckDB` (that is a dev-dependency) but it
                            DOES link `DataFusion`, transitively through `fossil-df` for the
@@ -155,7 +169,8 @@ crates/
                            write. Depends on NOTHING; both halves of the write path
                            (fossil-df, fossil-layout) report through it
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract
-  fossil-graph/            the typed verb surface over GraphAr+DuckDB (WASM-clean)
+  fossil-graph/            the typed verb surface over a GraphAr corpus. It EMITS SQL in
+                           DuckDB's dialect and links no engine to run it (WASM-clean)
   fossil-mcp/              that same verb surface as a native server-side service
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
   fossil-cli/              fossil's native HOST *and* the binary over it: `src/host.rs` is the
@@ -169,7 +184,9 @@ crates/
   fossil-wasm/             WASM host shim (FossilPlayground API + the tokenizer the editor reuses)
   fossil-df-wasm/          the fossil-df executor exposed to JS
   fossil-graph-wasm/       wasm-bindgen binding for the fossil-graph verb surface
-  xtask/                   repo automation; `cargo xtask wasm-check` is its one command
+  xtask/                   repo automation. Two commands: `wasm-check` derives the wasm32
+                           subset from the cdylib closure, `catalogue [--check]` regenerates
+                           every projection of `catalogue.bnf`
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
