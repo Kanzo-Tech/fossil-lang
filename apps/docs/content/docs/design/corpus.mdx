@@ -364,17 +364,29 @@ so a level tile is a contiguous run of payload tiles and the published code anch
 in Morton space.
 </Callout>
 
-<Callout type="warn" title="The edges get no pyramid, and not for the reason that rejects a centroid">
-A level's **induced** edge set — both endpoints in it — nests exactly as its vertices do, so it is
-not refused for a centroid's reason. It is refused because it is empty. A level keeps 1/2^*k* of the
-vertices and an edge needs two of them, so it keeps on the order of 1/2^2*k* of the edges: measured
-over a fixture of **27,976 edges** at mean degree 14, the three written levels induce **1, 0 and 0**.
+<Callout type="warn" title="The edges get a pyramid, and it is not the one this said was empty">
+**This callout was titled "the edges get no pyramid" and the measurement under it was the wrong
+set.** A level's **induced** edge set — both endpoints in it — nests exactly as its vertices do, so
+it is not refused for a centroid's reason; it is refused because it is empty. A level keeps 1/2^*k*
+of the vertices and an edge needs two of them, so it keeps on the order of 1/2^2*k* of the edges:
+measured over a fixture of **27,976 edges** at mean degree 14, the three written levels induce
+**1, 0 and 0**.
 
-So a coarse camera draws points and no links, which is not a new state for it to be in — `links` is
-already 0 in a window whose edges leave the frame. The alternative is what this page refuses twice
-over: an edge between two survivors standing in for a path through vertices nobody drew is synthetic,
-and replacing it with the real path as the camera zooms moves every line on screen. Links come from
-the payload's own `by_source` tiles, over the window, at the zoom where there are links to draw.
+The set a camera draws is not that one. `view` keeps an edge with **one** end drawn and both ends
+positioned, so the edges a coarse view draws scale with the marks — `V/2^k · degree` — and not with
+their square. **Level *k* of a relation is therefore the edges incident to a level-*k* vertex**,
+`src_dense % 2^k = 0 OR dst_dense % 2^k = 0`, and each row carries **both endpoints' coordinates**
+so that the line can be drawn without opening the payload the pyramid exists to avoid. It is a
+decimation like the vertex one: every row a real edge between two real vertices at their real
+positions, nothing contracted, and it nests because its vertices do —
+`crates/fossil-sinks/src/manifest.rs, EdgeLevels` and
+`crates/fossil-layout/tests/levels.rs, an_edge_level_holds_the_incident_edges_at_the_payload_s_own_coordinates`.
+
+What this page refuses is unchanged and it is the same refusal twice: an edge between two survivors
+standing in for a path through vertices nobody drew is synthetic, and replacing it with the real path
+as the camera zooms moves every line on screen. The reader's half is outstanding — see
+[the reference viewer](/docs/design/reference-viewer), which carries what a frame costs with and
+without it, and until it lands links come from the payload's own `by_source` tiles.
 </Callout>
 
 ### The addressing and the reader do not meet, and Morton is why they could

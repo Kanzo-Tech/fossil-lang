@@ -100,6 +100,24 @@ unoccupied. These are the four, and the two that were read expecting to be wrong
 | **Parquet's `LogicalType` against its deprecated `ConvertedType`** | What settles that an unsigned address is expressible at all, and what it costs to read one back. Unsignedness is an *annotation* on a signed physical `INT32`, so `uint32` is not an exotic type — but the format's original `min`/`max` statistics were defined by **signed** byte comparison and are therefore meaningless for it. A writer that gets this right leaves them empty and fills `min_value`/`max_value`; a reader that only knows the deprecated pair concludes the footer carries no box for exactly the column the whole address is built on. That is not hypothetical here: four checks in this repository passed over NULL for that reason before the fallback was written. |
 | **dbt, Delta, Lance, Malloy** | Five projects that have already been through "does the specification get its own repository". None of them separates the implementation. Delta shows co-location does not prevent drift and that what fixes it is a **process** (`protocol_rfcs/`, specification PR before implementation PR); Malloy is the counterexample, with twenty-five satellite repositories and one frozen 159 releases behind. |
 
+## Multiscale readers
+
+The claim on [the reference viewer](/docs/design/reference-viewer) is that four communities have
+converged on the same three parts — a declared level list, an address that is arithmetic, and a
+client that picks the level — and that fossil differs from all of them in the same three places,
+because a graph has edges. These are the systems that claim is measured against.
+
+| source | what it settles |
+| --- | --- |
+| **OME-NGFF / OME-Zarr `multiscales`** | The level list as a **document** rather than a rule: one entry per resolution, each carrying the path to its array, and an ordering the specification fixes — the `datasets` paths *MUST be ordered from largest (i.e. highest resolution) to smallest*. `levels:` is that document, finest first for the same reason, and the difference is what the entries are: a subset of one array rather than a resampling of it. |
+| **OGC Two Dimensional Tile Matrix Set 2.0** (17-083r4) | Declared, never derived, and its own reason for it: each tile matrix publishes its width and height in tiles *so that the range of relevant tile indexes does not have to be calculated by the client application*. That is the argument for `levels:` carrying numbers where `codes:` carries a path, and against a reader re-deriving the writer's plan from `vertex_count`. |
+| **XYZ / slippy-map tiles** | The floor of the addressing claim: `z/x/y` composed from the viewport, no listing, no discovery request, and a level chosen client-side from the scale. It is what `tile = dense_id >> 12` plus `levelFor` amounts to, minus the rank problem below. |
+| **Zarr v3's `sharding_indexed` codec** | Many addressable chunks inside one object with an index at its end, so that an address stays arithmetic while a request stays one request. It is the same trade `container: rowgroups` makes with row groups and a Parquet footer, arrived at independently. |
+| **Cloud Optimized GeoTIFF** | The other container answer: the whole pyramid inside one file as reduced-resolution directories, read by range request. Named because it is the alternative to a directory per level, and the reason it is not needed here is that a level is one range request either way — the coarsest level is the one that fits a single tile. |
+| **Mapbox Vector Tile 2.1** | The counter-example that makes the coordinate rule worth stating. A vector tile's geometry lives in the tile's own integer grid, so the same feature carries different coordinates at different zooms and *the point did not move* is not expressible. Here a level shares the payload's coordinate space exactly, and both halves of the pyramid are checked against the payload's own `x`/`y`. |
+| **GraphMaps** — Nachmanson, Prutkin, Lee, Henry Riche, Holroyd & Chen ([arXiv:1506.06745](https://arxiv.org/abs/1506.06745)) | That the shape transfers to a graph at all, published: a sequence of layers where *each layer refines the previous one*, the layer selected by zoom, and only the entities intersecting the viewport drawn. It is this model with a different rule for assigning a vertex to a level. |
+| **ASK-GraphView** — Abello, van Ham & Krishnan, *IEEE TVCG* 12(5):669–676, 2006 | The alternative, at the largest scale anyone has published it: a clustering hierarchy over the graph, navigated by expanding one cluster into its children. That expansion is the meta-node that moves every point on screen, which is why the levels here are a decimation. Cited to size the refusal, not as a design followed. |
+
 ## Compilers, and how they cut a tree
 
 | source | what it settles |
