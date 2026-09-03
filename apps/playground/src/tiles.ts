@@ -288,40 +288,40 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
       const level = corpus.levelFor({ ...box, type, budget: limit });
 
       /**
-       * **Where the pyramid is, this asks for points** — and that is a decision of this app's,
-       * which is why it is here and not behind `view`.
+       * **This asked for points where the pyramid is, and the picture said no.**
        *
-       * `@fossil-lang/corpus` will read a written `l{k}/` only for a view that asked for no links,
-       * and the reason is measured: a level file holds the level's rows, the camera keeps an edge
-       * with ONE end drawn, and the far ends of those edges are not in it. At the app's own
-       * three-pixel floor over 300,000 vertices the level-6 view draws 58,554 edges and 52,415
-       * anchors, of which a level file positions 476.
+       * The library will read a written `l{k}/` only for a view that asked for no links, and the
+       * bytes are real: at a million vertices the whole extent is 4 tiles and 335 kB against 245
+       * tiles and 20,901 kB — 62.4×, measured by `scripts/measure-pyramid.mjs`.
        *
-       * So the trade is real and it is this app's to make. Taking it:
+       * It was taken here, on the argument that the edge layer at that zoom is a layer this
+       * renderer already calls illegible — `BOUNDED_DEFAULTS` sets 20,000 marks because «above
+       * about 50,000 points a live layout stops being comfortable and the edge layer is already fog
+       * well before that». **That argument was wrong about what is on screen, and the screen is
+       * what settles it.** The same rectangle:
        *
-       * - **The bytes.** The whole-extent view goes from 245 tiles to 4 — one `Range` request
-       *   instead of the runs the payload needs.
-       * - **What it costs is a layer this renderer already calls illegible.** `BOUNDED_DEFAULTS`
-       *   sets 20,000 marks because «above about 50,000 points a live layout stops being
-       *   comfortable and the edge layer is already fog well before that». The whole-extent answer
-       *   carries 57,103 points and 58,554 lines, which is past that ceiling on both counts.
-       * - **It is not a cliff, because of where `levelFor` lands.** At a budget of 20,000 over a
-       *   million vertices the whole extent asks for level 6 — the FINEST written level — and the
-       *   first zoom step asks for 5, which nobody wrote. So the edges come back on the first zoom
-       *   in: a point cloud that grows an edge layer as a reader approaches, which is what a
-       *   level-of-detail read is supposed to look like.
+       * | | marks | anchors | links | points drawn |
+       * | --- | --- | --- | --- | --- |
+       * | strided | 15,625 | 60,136 | 62,024 | **75,761** |
+       * | level | 15,625 | 0 | 0 | **15,625** |
        *
-       * `corpus.levels()` is the manifest's own answer, so a corpus that writes no pyramid takes
-       * the other branch everywhere and this app draws exactly what it drew before.
+       * The anchors are not fog. They are 4× the marks, they are real vertices at real
+       * coordinates, and they are what fills the frame — so dropping them turns a zoomed-out view
+       * into a sparse cloud with holes in it rather than into a cheaper version of the same
+       * picture. `cost.read` reporting `strided` here is the honest outcome: this app draws the
+       * picture and pays the bytes.
+       *
+       * **What would change it** is a way to keep the far ends without opening the payload for
+       * them — an edge representation a level can carry that is not a synthetic edge, which the
+       * design refuses for a measured reason of its own. Until then the pyramid is read by a
+       * caller that wants a point cloud, and this is not one.
        */
-      const written = corpus.levels(type)[level]?.written ?? false;
       const answer = await corpus.view({
         ...box,
         type,
         level,
         fill: column(fill),
         pinned: pins,
-        links: !written,
         minLinkLength,
       });
 
