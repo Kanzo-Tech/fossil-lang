@@ -84,7 +84,7 @@ fn a_level_file_holds_exactly_what_the_level_predicate_selects() {
         VertexLevels::planned(u64::from(ROWS), CHUNK).expect("4,000 rows is above the floor");
     assert_eq!(
         plan.levels,
-        vec![7, 8, 9],
+        vec![5, 6, 7, 8, 9],
         "the plan this corpus is checked against"
     );
 

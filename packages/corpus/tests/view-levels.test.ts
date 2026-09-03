@@ -38,7 +38,7 @@ const require = createRequire(import.meta.url);
 const ROWS = 600;
 const CHUNK = 8;
 /** What `VertexLevels::planned(600, 8)` plans, and this fixture therefore writes. */
-const LEVELS = [5, 6, 7];
+const LEVELS = [3, 4, 5, 6, 7];
 
 let query: QueryFn;
 let corpus: Corpus;

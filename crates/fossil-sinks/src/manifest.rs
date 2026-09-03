@@ -357,25 +357,33 @@ pub struct VertexLevels {
     pub chunk_size: u64,
 }
 
-/// How many levels a pyramid carries: **three**, and the number is where the
-/// pyramid meets the window rather than a taste.
+/// How many levels a pyramid carries: **five**, and the number is where the
+/// pyramid meets the CAMERA rather than a taste.
 ///
-/// Each level is one 2× zoom step, and the coarsest is [`VertexLevels::planned`]'s
-/// one-tile level, so three of them cover a 4× zoom range from there. Below the
-/// finest, the camera strides the payload — which nests, because the stride is
-/// quantised to a power of two — and reads only the tiles its window touches, so
-/// the pyramid does not need to reach level 0. The crossover is the arithmetic:
-/// the finest level holds about `4 · chunk_size` rows, which is the order of a
-/// camera's point budget, so a view wanting more points than it holds is a view
-/// zoomed in far enough that the window is a fraction of the corpus.
-pub const LEVEL_WINDOW: u32 = 3;
+/// Each level halves the rows. A camera's zoom step doubles the linear scale,
+/// which quadruples the area and so the points — **so one zoom step crosses two
+/// levels**, and a window of three covers one and a half of them. That is not a
+/// theory: over the bench corpus's own camera path `levelFor` asks for 6, 5, 4
+/// and 2 across four rectangles, and a three-level pyramid answered exactly one.
+/// The other three fell to the payload, at 26,359 kB against the 1,534 kB the
+/// one answered frame cost.
+///
+/// Five levels cover two and a half zoom steps from [`VertexLevels::planned`]'s
+/// one-tile level. Below the finest the camera strides the payload — which
+/// nests, because the stride is quantised to a power of two — and that is cheap
+/// there for the reason the pyramid is not: a zoomed-in window touches few
+/// tiles, and the read the pyramid replaces is the zoomed-OUT one that touches
+/// every tile of the type.
+pub const LEVEL_WINDOW: u32 = 5;
 
 /// The floor, in tiles: below this a type gets no pyramid.
 ///
 /// The pyramid's cost is `2^LEVEL_WINDOW - 1` tiles' worth of rows **whatever
 /// `V` is**, so expressing the floor in tiles is expressing it as a fraction of
-/// the corpus: at 64 tiles the pyramid is under 11% of the type and at 245 it is
-/// 2.7%, falling as the corpus grows. It is set conservatively on purpose, and
+/// the corpus: at 245 tiles the pyramid is 12.7% of the type, falling as the
+/// corpus grows, and right at the 64-tile floor it is 48% — which is the price
+/// of a window wide enough to answer a camera and is paid by the smallest
+/// corpora that get one at all. It is set conservatively on purpose, and
 /// the asymmetry is the argument — **a floor set too high costs a corpus
 /// nothing but a slower zoom-out, because the predicate over the payload draws
 /// the identical picture; a floor set too low charges every small corpus bytes
@@ -1227,29 +1235,33 @@ version: gar/v1
     }
 
     /// The corpus the encargo is about: a million vertices at 4,096 rows a tile
-    /// is 245 tiles, and the levels that come out of it are the three the
-    /// default view needs. 15,625 is exactly what that view draws.
+    /// is 245 tiles, and the levels that come out of it are the five a camera
+    /// path needs. 15,625 is exactly what the whole-extent view draws at the
+    /// 20,000-mark budget; the two finer ones are what a zoom step asks for
+    /// next, and were the levels a three-wide window did not write.
     #[test]
     fn planned_levels_over_a_million_vertices() {
         let plan = VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).expect("above the floor");
-        assert_eq!(plan.levels, vec![6, 7, 8]);
+        assert_eq!(plan.levels, vec![4, 5, 6, 7, 8]);
         let rows: Vec<u64> = plan
             .levels
             .iter()
             .map(|&k| VertexLevels::rows_at(1_000_000, k))
             .collect();
-        assert_eq!(rows, vec![15_625, 7_813, 3_907]);
+        assert_eq!(rows, vec![62_500, 31_250, 15_625, 7_813, 3_907]);
         // The coarsest fits one tile and the one above it does not, which is
         // the whole definition of where the pyramid stops.
-        assert!(rows[2] <= DEFAULT_CHUNK_SIZE);
+        assert_eq!(rows[4], VertexLevels::rows_at(1_000_000, 8));
+        assert!(rows[4] <= DEFAULT_CHUNK_SIZE);
         assert!(VertexLevels::rows_at(1_000_000, 7) > DEFAULT_CHUNK_SIZE);
-        // And the pyramid costs 2.7% of the type it is a pyramid of.
-        assert_eq!(rows.iter().sum::<u64>(), 27_345);
+        // 121,095 rows is 31 tiles' worth against the type's 245 — 12.7%, and
+        // the number the five-level window is priced at.
+        assert_eq!(rows.iter().sum::<u64>(), 121_095);
     }
 
     /// The cost is bounded by TILES and not by `V`, which is the property the
     /// floor is expressed in tiles because of: ten times the corpus, the same
-    /// seven tiles' worth of pyramid, a tenth of the fraction.
+    /// thirty-one tiles' worth of pyramid, a tenth of the fraction.
     #[test]
     fn the_pyramid_costs_a_constant_number_of_tiles() {
         for &v in &[300_000u64, 1_000_000, 5_000_000, 10_000_000] {
@@ -1338,7 +1350,7 @@ version: gar/v1
             .with_levels(VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).unwrap());
         let yaml = info.to_yaml().expect("serialise");
         assert!(
-            yaml.contains("levels:\n  prefix: l\n  levels:\n  - 6\n  - 7\n  - 8\n  chunk_size: 4096\n"),
+            yaml.contains("levels:\n  prefix: l\n  levels:\n  - 4\n  - 5\n  - 6\n  - 7\n  - 8\n  chunk_size: 4096\n"),
             "{yaml}"
         );
     }

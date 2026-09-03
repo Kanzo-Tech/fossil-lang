@@ -146,13 +146,22 @@ export function tailRows(count, chunkSize = TILE_ROWS) {
 }
 
 /**
- * How many levels a written pyramid carries: **three**.
+ * How many levels a written pyramid carries: **five**, and the number is where the pyramid meets
+ * the CAMERA rather than a taste.
  *
- * Each level is one 2× zoom step and the coarsest fits in a single tile, so three of them cover a
- * 4× zoom range from there. Below the finest, a camera strides the payload — which nests, because
- * the stride is quantised to a power of two — so the pyramid does not have to reach level 0.
+ * Each level halves the rows, and a camera's zoom step doubles the linear scale — which QUADRUPLES
+ * the area and so the points. One zoom step therefore crosses two levels, and a window of three
+ * covered 1.5 steps: measured over the bench corpus's own camera path, `levelFor` asked for 6, 5,
+ * 4 and 2 across four rectangles and a three-level pyramid answered exactly one of them. The other
+ * three fell to the payload — 26,359 kB against 1,534 kB for the frame the pyramid did answer.
+ *
+ * Five levels cover 2.5 zoom steps from the one-tile level and cost `2^5 − 1 = 31` tiles' worth of
+ * rows, whatever `V` is: 12.7% of a million-vertex type against the three-level window's 2.9%, and
+ * measured end to end at +16% of the corpus on disk once the edge levels beside them are counted.
+ * Below the finest the camera strides the payload, which is cheap there because the window is
+ * small — the pyramid buys the zoomed-OUT end, where every tile is touched.
  */
-export const LEVEL_WINDOW = 3n;
+export const LEVEL_WINDOW = 5n;
 
 /**
  * The floor, in TILES: below this a type gets no pyramid.
