@@ -25,7 +25,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execute, lit, scalar } from "./duck.mjs";
-import { TILE_ROWS, mortonOf } from "./arithmetic.mjs";
+import { TILE_ROWS, levelPlan, levelRows, mortonOf } from "./arithmetic.mjs";
 
 const GOLDEN_ANGLE = 2.3999632;
 const CLUSTER_SPACING = 100;
@@ -210,6 +210,56 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       : `COPY (SELECT subject, dense_id FROM v ORDER BY subject)
            TO '${lit(join(indexPrefix, "tiles.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
 
+  /**
+   * **The written pyramid**, or nothing where the type is under the floor.
+   *
+   * Level `k` is the rows whose `dense_id` is a multiple of `2^k`, which over a Morton-ordered
+   * `dense_id` is one vertex per quadtree cell of depth `k`. Every row is a real vertex at its real
+   * position — there is no synthetic centroid here, because a centroid cannot nest: replace it with
+   * its children and every point on screen moves. A decimation nests by construction, so zooming in
+   * only ever ADDS.
+   *
+   * **The file is a cache of the predicate and nothing else.** A corpus without one draws the same
+   * picture and only reads more, which is what keeps the pyramid from being a second contract — so
+   * the selection below is the predicate itself rather than a stride over the write order, which
+   * would coincide with it only while the numbering is gapless.
+   *
+   * Each level is a payload set addressed by the same rule: `l{k}/` under the type's own prefix,
+   * tiled at the same `chunk_size` into the same container. A reader that can address a type can
+   * address a level of it with no new arithmetic — tile `j` of level `k` is the `dense_id` range
+   * `[j·chunk·2^k, (j+1)·chunk·2^k)`.
+   *
+   * Which levels get written is {@link levelPlan}, whose borders are published in
+   * `vectors.json` and executed by BOTH writers — this one and
+   * `fossil_sinks::manifest::VertexLevels::planned`.
+   */
+  const plan = levelPlan(BigInt(count), BigInt(tileRows));
+  const levelCopy =
+    plan === null
+      ? ""
+      : plan.levels
+          .map((level) => {
+            // The prefixes are made here rather than beside the others at the top: which of them
+            // exist is the plan's answer, and a directory made for a level nobody writes is a
+            // prefix a reader can list and find empty.
+            mkdirSync(join(vertexPrefix, `l${level}`), { recursive: true });
+            const step = 2 ** level;
+            const held = Number(levelRows(BigInt(count), BigInt(level)));
+            const prefix = join(vertexPrefix, `l${level}`);
+            const rows = `SELECT * FROM v WHERE dense_id % ${step} = 0`;
+            if (layout !== "files") {
+              return `COPY (${rows} ORDER BY dense_id) TO '${lit(join(prefix, "tiles.parquet"))}'
+                        (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
+            }
+            return Array.from(
+              { length: Math.ceil(held / tileRows) },
+              (_, k) =>
+                `COPY (${rows} ORDER BY dense_id LIMIT ${tileRows} OFFSET ${k * tileRows})
+                   TO '${lit(join(prefix, `chunk${k}.parquet`))}' (FORMAT PARQUET);`,
+            ).join("\n");
+          })
+          .join("\n");
+
   // Both orientations tiled, each on the column it is ordered by: the out-edges
   // of a vertex are in the `by_source` tile its id names and the in-edges in the
   // `by_target` one, and a fixture that only wrote the source half would leave
@@ -258,6 +308,7 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
         FROM read_csv('${lit(edgeCsv)}', header = true);
     ${vertexCopy}
     ${indexCopy}
+    ${levelCopy}
     ${edgeTileCopy}
   `);
 
@@ -331,6 +382,23 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       // with the corpus, and everything that touches a corpus reads it in full.
       "codes:",
       "  path: codes.json",
+      // Which decimated levels are written, and where. The NUMBERS, unlike the anchor above, and
+      // the asymmetry is the point: an anchor is two integers per tile and grows with the corpus,
+      // a level list is at most three integers whatever the corpus is — and which levels a writer
+      // spent bytes on is a POLICY, so a reader re-deriving it would 404 the day the policy moved.
+      //
+      // A sequence inside a mapping, which is one level deeper than this manifest had ever gone.
+      // `manifest.mjs` was grown to read it; before that it scanned to `''` and a corpus with a
+      // pyramid read exactly like one without.
+      ...(plan === null
+        ? []
+        : [
+            "levels:",
+            "  prefix: l",
+            "  levels:",
+            ...plan.levels.map((level) => `  - ${level}`),
+            `  chunk_size: ${tileRows}`,
+          ]),
       "version: gar/v1",
       "",
     ].join("\n"),

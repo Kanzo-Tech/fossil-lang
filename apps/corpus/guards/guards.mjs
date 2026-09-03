@@ -942,6 +942,100 @@ export const GUARDS = [
   },
 
   {
+    id: "a-level-is-the-predicate",
+    title: "A written level holds exactly the rows the level predicate selects",
+    proves:
+      "That every `vertex/<Type>/l{k}/` the manifest declares is a CACHE of `dense_id % 2^k == 0` " +
+      "over the payload and nothing else — checked as a symmetric difference over EVERY column, " +
+      "in both directions, so a level that dropped a row and a level that invented one are two " +
+      "different failures and both are caught. It also checks the tiling: a level tile is a " +
+      "`dense_id` range like any other, `[j·chunk_size·2^k, (j+1)·chunk_size·2^k)`, which is what " +
+      "lets a reader address a level with the shift it already has and no second anchor. " +
+      "Nothing else can catch a divergence here: a level set is well-formed Parquet with the " +
+      "payload's own schema, so a writer that wrote every 63rd row, or the right rows in the wrong " +
+      "order, or a stride over the write order where the numbering has a hole in it, produces a " +
+      "corpus that opens, answers, draws, and is a different graph at every zoom than the one the " +
+      "payload holds. There is no exception to throw; the only way to see it is to evaluate the " +
+      "predicate against the payload and diff.",
+    cannotProve:
+      "That a corpus SHOULD carry a pyramid. An absent `levels:` block is a legal corpus and the " +
+      "common one — a level is a predicate, so a reader answers every level with or without a " +
+      "file, and what a written one changes is a byte count. Nor WHICH levels a writer ought to " +
+      "have written: that is a policy, published as the `level_plan` section of `vectors.json` and " +
+      "executed by both writers, and a corpus is free to declare a different set as long as the " +
+      "files hold what they say.",
+    run(corpus) {
+      const failures = [];
+      const notes = [];
+      for (const type of corpus.types) {
+        if (type.levels === null) continue;
+        if (type.levels.error !== null) {
+          failures.push(`${type.name}: the manifest ${type.levels.error}`);
+          continue;
+        }
+        if (type.files.length === 0) {
+          failures.push(`${type.name}: declares levels over a payload with no tiles`);
+          continue;
+        }
+        const chunk = type.levels.chunkSize;
+        if (chunk <= 0n || (chunk & (chunk - 1n)) !== 0n) {
+          failures.push(`${type.name}: a level tile of ${chunk} rows, which no shift addresses`);
+          continue;
+        }
+        // Every column the payload carries, not just `dense_id`: a level that selected the right
+        // ids and carried the wrong position for them draws a picture that is wrong about where
+        // everything is, and an id-only diff is green for it.
+        const columns = [...type.columns].join(", ");
+        const payload = fileList(type.files);
+        for (const set of type.levels.sets) {
+          if (set.files.length === 0) {
+            failures.push(`${type.name}: declares level ${set.level} and ${set.prefix}/ holds no tiles`);
+            continue;
+          }
+          const level = fileList(set.files);
+          const step = 2 ** set.level;
+          const predicate = `SELECT ${columns} FROM read_parquet(${payload}) WHERE dense_id % ${step} = 0`;
+          const held = `SELECT ${columns} FROM read_parquet(${level})`;
+          const bad = scalar(
+            `SELECT count(*) FROM (
+               (${predicate} EXCEPT ALL ${held}) UNION ALL (${held} EXCEPT ALL ${predicate}))`,
+          );
+          failures.push(
+            ...violations(
+              bad,
+              `${type.name} level ${set.level}: the file and the predicate \`dense_id % ${step} = 0\` disagree about which rows the level holds`,
+            ),
+          );
+          // The tiling, under the container that makes a file a tile. In the row-group container a
+          // level is one file and its tiles are its row groups, which `footer-is-the-index` is the
+          // guard for; here a file IS tile `j` and its ids have to be inside tile `j`'s range.
+          if (set.files.length > 1 || type.layout === "files") {
+            const span = BigInt(step) * chunk;
+            for (const [j, file] of set.files.entries()) {
+              const lo = BigInt(j) * span;
+              const hi = lo + span;
+              const stray = scalar(
+                `SELECT count(*) FROM read_parquet(${fileList([file])})
+                   WHERE dense_id < ${lo} OR dense_id >= ${hi}`,
+              );
+              failures.push(
+                ...violations(
+                  stray,
+                  `${type.name} level ${set.level} tile ${j}: rows outside [${lo}, ${hi}), so the shift a reader already has addresses the wrong file`,
+                ),
+              );
+            }
+          }
+          notes.push(
+            `${type.name}: level ${set.level} is ${scalar(`SELECT count(*) FROM read_parquet(${level})`)} row(s) over ${set.files.length} file(s)`,
+          );
+        }
+      }
+      return result(failures, notes);
+    },
+  },
+
+  {
     id: "csr-and-csc",
     title: "`by_source` is CSR and `by_target` is CSC",
     proves:

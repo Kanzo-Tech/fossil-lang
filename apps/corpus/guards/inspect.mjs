@@ -201,6 +201,38 @@ export function inspect(root) {
        * `code-anchor` is what reports it. An inspector that collapsed the two
        * would be reporting a broken corpus as an old one.
        */
+      /**
+       * The WRITTEN levels, when the manifest declares any, or `null`.
+       *
+       * `null` is a legal corpus on `codes`' argument and more strongly: a level
+       * is the predicate `dense_id % 2^k == 0` over the payload, so every level
+       * is answerable with or without a file, and a written one changes a byte
+       * count rather than an answer. A type under the writers' floor — 64 tiles
+       * — declares none, and most fixtures are under it.
+       *
+       * A declared level whose files are not on disk is a different finding and
+       * comes back as an empty `files` for that level, which
+       * `a-level-is-the-predicate` reports.
+       */
+      levels: (() => {
+        const declared = info.levels;
+        if (declared === undefined || declared === null || Array.isArray(declared)) return null;
+        const stem = String(declared.prefix ?? "");
+        const listed = Array.isArray(declared.levels) ? declared.levels : [];
+        if (stem === "" || listed.length === 0) {
+          return { stem, chunkSize: 0n, sets: [], error: "declares levels and no prefix or no level list" };
+        }
+        return {
+          stem,
+          chunkSize: BigInt(declared.chunk_size ?? 0),
+          error: null,
+          sets: listed.map((raw) => {
+            const level = Number(raw);
+            const at = join(root, prefix, `${stem}${level}`);
+            return { level, prefix: `${prefix}/${stem}${level}`, files: existsSync(at) ? payload(at) : [] };
+          }),
+        };
+      })(),
       codes: (() => {
         const declared = info.codes;
         if (declared === undefined || declared === null) return null;

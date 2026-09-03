@@ -22,7 +22,7 @@ interface Table {
 export function VectorTable({
   of,
 }: {
-  of: "tile_of" | "tile_url" | "declared_count" | "morton2" | "quantize";
+  of: "tile_of" | "tile_url" | "declared_count" | "level_plan" | "morton2" | "quantize";
 }) {
   // Off the repo root, not off `process.cwd()`: the file lives with the checker that executes it,
   // and this page renders it from there rather than keeping a copy on this side of the tree.

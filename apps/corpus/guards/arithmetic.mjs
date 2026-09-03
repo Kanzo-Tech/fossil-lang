@@ -145,6 +145,75 @@ export function tailRows(count, chunkSize = TILE_ROWS) {
   return tiles === 0n ? 0n : count - (tiles - 1n) * chunkSize;
 }
 
+/**
+ * How many levels a written pyramid carries: **three**.
+ *
+ * Each level is one 2× zoom step and the coarsest fits in a single tile, so three of them cover a
+ * 4× zoom range from there. Below the finest, a camera strides the payload — which nests, because
+ * the stride is quantised to a power of two — so the pyramid does not have to reach level 0.
+ */
+export const LEVEL_WINDOW = 3n;
+
+/**
+ * The floor, in TILES: below this a type gets no pyramid.
+ *
+ * Expressed in tiles because the pyramid's cost is `2^LEVEL_WINDOW − 1` tiles' worth of rows
+ * whatever the corpus is, so a floor in tiles is a floor as a fraction of the corpus: at 64 tiles
+ * the pyramid is under 11% of the type and at 245 it is 2.7%, falling as the corpus grows. The
+ * asymmetry is the argument — a floor set too high costs a corpus nothing but a slower zoom-out,
+ * because the predicate over the payload draws the identical picture; a floor set too low charges
+ * every small corpus bytes for a view it can already serve in a handful of range requests.
+ */
+export const LEVEL_FLOOR_TILES = 64n;
+
+/**
+ * How many rows level `k` of a type of `count` rows holds — `ceil(count / 2^k)`.
+ *
+ * @param {bigint} count
+ * @param {bigint} level
+ * @returns {bigint}
+ */
+export function levelRows(count, level) {
+  const step = 1n << level;
+  return (count + step - 1n) / step;
+}
+
+/**
+ * **Which levels a writer writes**, or `null` where it writes none.
+ *
+ * Level `k` is the vertices whose `dense_id` is a multiple of `2^k`, which over a Morton-ordered
+ * `dense_id` is one vertex per quadtree cell of depth `k`. This says which of those levels are
+ * spent bytes on: the coarsest is the finest `k` whose level fits in ONE tile — coarser buys
+ * nothing, because one tile is already one range request and the whole level is the minimum read —
+ * and {@link LEVEL_WINDOW} levels run finer from there.
+ *
+ * **This is the second implementation of `fossil_sinks::manifest::VertexLevels::planned`**, in the
+ * sense the rest of this directory is: written from the published convention rather than from
+ * fossil's source, and pinned to it by the `level_plan` section of `vectors.json`, which both
+ * halves execute. The plan is not something a READER derives — which levels exist is declared in
+ * the manifest, because it is a policy — but it is something a WRITER has to decide, and there are
+ * two writers.
+ *
+ * Computed by shifting rather than by a logarithm, because the answer has to be the same integer in
+ * every language that re-implements it.
+ *
+ * @param {bigint} count rows in the vertex type
+ * @param {bigint} [chunkSize] rows per tile, from the manifest
+ * @returns {{ levels: number[], chunkSize: number } | null}
+ */
+export function levelPlan(count, chunkSize = TILE_ROWS) {
+  if (typeof count !== "bigint" || typeof chunkSize !== "bigint") {
+    throw new TypeError("levelPlan takes BigInt count and chunk_size, for tilesOf's reason");
+  }
+  if (chunkSize <= 0n || count <= chunkSize * LEVEL_FLOOR_TILES) return null;
+  let coarsest = 1n;
+  while (levelRows(count, coarsest) > chunkSize) coarsest += 1n;
+  const finest = coarsest > LEVEL_WINDOW - 1n ? coarsest - (LEVEL_WINDOW - 1n) : 1n;
+  const levels = [];
+  for (let k = finest; k <= coarsest; k += 1n) levels.push(Number(k));
+  return { levels, chunkSize: Number(chunkSize) };
+}
+
 /** Spread the low 16 bits of `n` into the even bit positions of a `u32`. */
 function spread(n) {
   let v = n & 0xffff;

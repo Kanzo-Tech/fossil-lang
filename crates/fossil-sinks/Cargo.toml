@@ -32,3 +32,8 @@ arrow-schema = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+# Dev-only, and for one test: `tests/level_plan_vectors.rs` reads
+# `apps/corpus/guards/vectors.json` at runtime rather than transcribing its rows,
+# so a border edited on the other writer's side turns this crate red. It is a
+# dev-dependency, so it reaches no wasm build and no consumer.
+serde_json = { workspace = true }

@@ -32,6 +32,63 @@
       }
     ]
   },
+  "level_plan": {
+    "formula": "none when count ≤ chunk_size·64; else coarsest = min k with ceil(count / 2^k) ≤ chunk_size, finest = max(coarsest − 2, 1), levels = finest..coarsest",
+    "levels": "level `k` is the vertices whose `dense_id` is a multiple of `2^k` — over a Morton-ordered `dense_id`, one vertex per quadtree cell of depth `k`. Every level is ANSWERABLE by any reader, with or without a file, because it is a predicate over the payload; this table is which levels a WRITER spends bytes on, and it is a policy rather than something a reader derives. The manifest declares the numbers for exactly that reason.",
+    "input": "unsigned 64-bit vertex_count; chunk_size a power of two. The floor is expressed in TILES — 64 — so it is a fraction of the corpus rather than an absolute size, and the window is 3 levels",
+    "output": "the levels written, finest first, and `ceil(count / 2^k)` rows in each. The three of them together are `2^3 − 1 = 7` tiles' worth of rows whatever the corpus is",
+    "vectors": [
+      {
+        "count": "262144",
+        "chunk_size": 4096,
+        "levels": [],
+        "rows": [],
+        "why": "the floor exactly — 64 tiles — and it is not crossed. A type here gets no pyramid and draws the identical picture off the predicate"
+      },
+      {
+        "count": "262145",
+        "chunk_size": 4096,
+        "levels": [5, 6, 7],
+        "rows": ["8193", "4097", "2049"],
+        "why": "one row over the floor, which is where the first pyramid appears. The coarsest level is the finest one that fits in a single tile"
+      },
+      {
+        "count": "1000000",
+        "chunk_size": 4096,
+        "levels": [6, 7, 8],
+        "rows": ["15625", "7813", "3907"],
+        "why": "the bench corpus: 245 tiles, and the pyramid is 4 + 2 + 1 = 7 of them — 2.7% of the type"
+      },
+      {
+        "count": "600",
+        "chunk_size": 8,
+        "levels": [5, 6, 7],
+        "rows": ["19", "10", "5"],
+        "why": "the floor is crossed by the SMALL term. 600 rows at 8 to a tile is 75 tiles, which is why a fixture can carry a real pyramid without being large"
+      },
+      {
+        "count": "4000",
+        "chunk_size": 8,
+        "levels": [7, 8, 9],
+        "rows": ["32", "16", "8"],
+        "why": "the coarsest level holds exactly one tile — the boundary the search stops at, and the one an off-by-one in the loop moves"
+      },
+      {
+        "count": "300",
+        "chunk_size": 64,
+        "levels": [],
+        "rows": [],
+        "why": "the conformance corpus. Five tiles is three orders under the floor, which is why the artefact every implementation is checked against carries no pyramid and the `levels` case in `expected.json` is manifest-only"
+      },
+      {
+        "count": "9007199254740993",
+        "chunk_size": 4096,
+        "levels": [40, 41, 42],
+        "rows": ["8193", "4097", "2049"],
+        "why": "2^53 + 1, where a Number loses the tail — the same border `declared_count` publishes, on the search that finds the coarsest level"
+      }
+    ]
+  },
   "declared_count": {
     "formula": "tiles = (count + chunk_size − 1) >> shift; tail_rows = count − (tiles − 1)·chunk_size",
     "counts": "rows in the logical table — every row of every tile of one vertex type, or every row of one orientation of one edge type. The two orientations of an edge are one relation stored twice, so `edge_count` covers both and each of them separately has to add up to it. It is NOT the largest `dense_id` (that is `count − 1`, because the ids are a gapless `0..count−1`) and it is NOT a number of tiles.",

@@ -455,6 +455,25 @@ const MUTATIONS = [
     },
   },
   {
+    guard: "a-level-is-the-predicate",
+    what: "a level file carrying the right ids at the wrong coordinates",
+    // The one mutation that needs a corpus of a different SHAPE rather than a different content:
+    // the pristine fixture is 70,000 rows at 4,096 to a tile, which is 18 tiles against a floor of
+    // 64, so it declares no pyramid and there is nothing to break. Crossing the floor by the small
+    // term is what keeps this cheap — 40,000 rows at 512 is 79 tiles — and it is the same move
+    // `levels.rs` makes on the writer's side for the same reason.
+    layout: "files",
+    mutate(dir) {
+      rmSync(dir, { recursive: true, force: true });
+      write(dir, { count: 40_000, clusters: 32, layout: "files", chunkSize: 512 });
+      // Ids untouched, positions moved. **An id-only diff is green for this**, which is why the
+      // guard compares every column: a level that names the right vertices at the wrong places
+      // draws a picture that is wrong about where everything is, and nothing else in this
+      // directory reads a level file at all.
+      rewrite(join(dir, VERTEX_DIR, "l5", "chunk0.parquet"), "SELECT * REPLACE (x + 1 AS x) FROM m");
+    },
+  },
+  {
     guard: "tile-of",
     what: "the `by_target` tiles are cut on `src_dense`, which is the source half again",
     // The one break that is only nameable where a tile has a name: `tile-of` asks the row-group

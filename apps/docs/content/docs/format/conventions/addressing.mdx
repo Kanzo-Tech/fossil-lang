@@ -435,6 +435,16 @@ assumed is one a writer can change in silence.
 which point the pyramid is under 11% of the type — declares no `levels:` and draws the identical
 picture.
 
+Which levels a writer writes is a **policy**, not something a reader derives — but there is more than
+one writer, so the policy is published as vectors and both of them execute it:
+`fossil_sinks::manifest::VertexLevels::planned` through
+`crates/fossil-sinks/tests/level_plan_vectors.rs`, and `apps/corpus/guards/fixture.mjs` through
+`levelPlan` in `guards/arithmetic.mjs`. `a-level-is-the-predicate` then checks the files against the
+predicate rather than against the plan, because a corpus is free to declare a different set as long
+as what it wrote is what it says.
+
+<VectorTable of="level_plan" />
+
 ## Encoding is chosen per column
 
 Dictionary encoding is right for one of the four drawing columns and wrong for the others. Five
