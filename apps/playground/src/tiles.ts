@@ -55,6 +55,16 @@ export interface SliceCost {
   runs: number;
   bytes: number;
   /**
+   * **The rectangle this source was asked about**, in the corpus's own coordinates.
+   *
+   * On the ledger because the one thing the numbers beside it cannot show is whether it is the
+   * rectangle on SCREEN. Every check on the data side passes — a window loses no vertex at any
+   * zoom, the sample bins cell-for-cell against the predicate — so a frame with a straight-edged
+   * black region is a frame whose points cover a different rectangle than the one being looked at,
+   * and this is the number that says so.
+   */
+  box: { x: number; y: number; w: number; h: number } | null;
+  /**
    * Which artefact answered the level — a written `l{k}/` (`level`) or the full tiles under the
    * level's predicate (`strided`): **the same rows, more bytes** — and how the tiles were chosen,
    * by the published code anchor (arithmetic, no Parquet reader) or by the footers' boxes. Both are
@@ -258,6 +268,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
           ofTiles: boxes.length,
           runs: 0,
           bytes: 0,
+          box: null,
           read: 'strided',
           addressed: 'anchor',
           matched: 0,
@@ -327,6 +338,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
 
       cost({
         ...answer.cost,
+        box: { x: box.x, y: box.y, w: box.w, h: box.h },
         matched: answer.matched,
         marks: answer.marks,
         anchors: answer.positions.length / 2 - answer.marks,

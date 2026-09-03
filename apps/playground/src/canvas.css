@@ -48,3 +48,62 @@
   touch-action: none;
 }
 
+
+/*
+ * The comparison table: two modes, four rows, and the active column marked.
+ *
+ * A table and not a second `.str-ledger`, because the ledger's grid is one thing measured many
+ * ways and this is one measurement taken two ways — the column heading is the variable, so a
+ * reader has to be able to run their eye down it. `.str-ledger` still carries each mode's own
+ * detail underneath, where the numbers stop having a counterpart on the other side.
+ */
+
+.can-compare {
+  width: 100%;
+  border-collapse: collapse;
+  font: 11px var(--mono);
+  table-layout: fixed;
+}
+
+.can-compare caption {
+  caption-side: top;
+  text-align: left;
+  color: var(--muted);
+  padding-bottom: 0.4rem;
+  line-height: 1.6;
+}
+
+.can-compare th,
+.can-compare td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: baseline;
+}
+
+.can-compare thead th {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+/* Which column is on screen. A border rather than a fill: the numbers are the content and a tinted
+ * cell reads as a state on the number instead of on the mode. */
+.can-compare thead th.on {
+  color: var(--fg);
+  border-bottom-color: var(--ok);
+}
+
+.can-compare tbody th {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* Buttons carry the mode, and `aria-pressed` carries which one — so the styling reads the same
+ * attribute a screen reader does rather than a class that could disagree with it. */
+.can button[aria-pressed='true'] {
+  border-color: var(--ok);
+  color: var(--fg);
+}
