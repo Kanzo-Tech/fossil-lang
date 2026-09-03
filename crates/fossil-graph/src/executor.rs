@@ -1046,6 +1046,7 @@ mod tests {
             prefix: "edge/Person_knows_Person/".into(),
             adj_lists: vec![],
             property_groups: vec![],
+            levels: None,
             version: "gar/v1".into(),
         };
         let graph = GraphInfo::new(

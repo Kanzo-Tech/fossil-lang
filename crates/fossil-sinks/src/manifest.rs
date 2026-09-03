@@ -487,8 +487,103 @@ pub struct EdgeInfo {
     pub adj_lists: Vec<AdjList>,
     /// Property groups carried on the edge.
     pub property_groups: Vec<PropertyGroup>,
+    /// **Which decimated levels of this relation are written, and where** — the
+    /// edges a zoomed-out camera draws without opening the vertex payload. See
+    /// [`EdgeLevels`].
+    ///
+    /// `Option` for [`VertexInfo::levels`]' reason: absent is a corpus and not a
+    /// gap. A reader without one draws the same edges out of the adjacency and
+    /// the payload, and only reads more.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels: Option<EdgeLevels>,
     /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
     pub version: String,
+}
+
+/// Where an edge type's **level sets** live, and which levels exist.
+///
+/// # What an edge level is, and why it carries positions
+///
+/// **Level `k` of a relation is the edges incident to a level-`k` vertex** — in
+/// either orientation, `src_dense % 2^k == 0 OR dst_dense % 2^k == 0` — and each
+/// row carries **both endpoints' coordinates**.
+///
+/// The positions are the whole point, and they are the reason this exists at
+/// all. A camera keeps an edge with ONE end drawn, so the other end has to be
+/// *positioned* to draw the line; a vertex level holds one row in `2^k` and the
+/// far end is almost never one of them. Measured on the bench corpus at the
+/// app's own three-pixel floor, a vertex level can position **0.79%** of the
+/// edges the same view draws — so a pyramid of vertices alone answers a view
+/// with links by opening the payload, which is the read it exists to avoid.
+/// Carrying `src_x`/`src_y`/`dst_x`/`dst_y` makes a level set **self-drawing**:
+/// the lines and their endpoints come out of one file and no vertex tile is
+/// opened for them.
+///
+/// # It is a decimation and not an aggregation
+///
+/// Every row is a **real edge between two real vertices at their real
+/// positions**. Nothing here is contracted, and that is what keeps the standing
+/// refusal intact: an edge between two survivors standing in for a path through
+/// vertices that are not drawn is a synthetic edge, and replacing it with the
+/// path when the camera zooms moves every line on screen. This set only ever
+/// *loses* edges as `k` grows, and it nests — level `k+1`'s vertices are a
+/// subset of level `k`'s, so its edges are too.
+///
+/// # Addressed by the rule the vertex levels already have
+///
+/// Tile `j` of level `k` holds the rows whose `src_dense` is in
+/// `[j · chunk_size · 2^k, (j+1) · chunk_size · 2^k)` — the source vertex
+/// level's own tile range. So a reader that can address a vertex level can
+/// address the edges beside it with no new arithmetic, and there is no second
+/// anchor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EdgeLevels {
+    /// Filename stem of a level set's prefix, relative to the edge type's own
+    /// [`EdgeInfo::prefix`] — [`LEVEL_PREFIX_STEM`], the same stem the vertex
+    /// levels use, because it is the same convention and not a second one.
+    pub prefix: String,
+    /// The levels written, finest first. The SOURCE type's levels: a level of a
+    /// relation is defined by which vertices are in it, so a relation whose
+    /// source type has no pyramid has none either.
+    pub levels: Vec<u32>,
+    /// Rows per tile of the SOURCE vertex type — the number tile `j`'s
+    /// `dense_id` range is built from, and equal to [`EdgeInfo::src_chunk_size`].
+    /// Declared for [`VertexLevels::chunk_size`]'s reason: a reader multiplies
+    /// by it, and a number that has to be assumed is one a writer can change in
+    /// silence.
+    pub chunk_size: u64,
+}
+
+impl EdgeLevels {
+    /// The pyramid a relation gets, given its SOURCE type's own plan, or `None`
+    /// where the source type gets none.
+    ///
+    /// **One plan, two artefacts.** The levels are the source type's, not a
+    /// second choice made here: a level of a relation is *which vertices are in
+    /// it*, so a relation whose source type writes 6, 7, 8 writes 6, 7, 8 or it
+    /// writes nothing. [`VertexLevels::planned`] stays the one place the
+    /// numbers are chosen.
+    #[must_use]
+    pub fn from_vertex(plan: Option<&VertexLevels>) -> Option<Self> {
+        plan.map(|p| Self {
+            prefix: LEVEL_PREFIX_STEM.to_string(),
+            levels: p.levels.clone(),
+            chunk_size: p.chunk_size,
+        })
+    }
+
+    /// The prefix level `k`'s tiles live under, relative to the edge type's own
+    /// [`EdgeInfo::prefix`] — `<stem>{k}/`.
+    #[must_use]
+    pub fn level_prefix(&self, level: u32) -> String {
+        format!("{}{level}/", self.prefix)
+    }
+
+    /// Whether level `k` is written.
+    #[must_use]
+    pub fn has(&self, level: u32) -> bool {
+        self.levels.contains(&level)
+    }
 }
 
 /// `GraphAr` top-level **graph info** (`<name>.graph.yml`) — the aggregate
@@ -685,6 +780,14 @@ impl VertexInfo {
 }
 
 impl EdgeInfo {
+    /// Declare which decimated levels of this relation are written, and where.
+    /// See [`EdgeLevels`].
+    #[must_use]
+    pub fn with_levels(mut self, levels: EdgeLevels) -> Self {
+        self.levels = Some(levels);
+        self
+    }
+
     /// Serialize this edge-info to `GraphAr` v1.0.0 YAML.
     ///
     /// # Errors
@@ -833,6 +936,7 @@ mod tests {
                 },
             ],
             property_groups: vec![],
+            levels: None,
             version: GRAPHAR_VERSION.to_string(),
         }
     }

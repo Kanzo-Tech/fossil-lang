@@ -1577,8 +1577,8 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
        * edge is not in it — and the camera keeps an edge with ONE end drawn, not two. Measured on
        * the 300,000-vertex bench corpus with the app's own three-pixel floor
        * (`crates/fossil-layout/tests/levels.rs`, `what_the_pixel_floor_leaves_of_a_coarse_view`):
-       * the level-6 view draws 58,554 edges and 52,415 anchors, of which the level file can
-       * position **476 — 0.81%**. So reading `l{k}/` for a view that asked for links would not be
+       * the level-6 view draws 51,254 edges and 46,571 anchors, of which the level file can
+       * position **405 — 0.79%**. So reading `l{k}/` for a view that asked for links would not be
        * the same answer more cheaply; it would be a different picture, and `/docs/design/one-door`
        * said the day a level exists nothing else changes. It was written before that was measured.
        *

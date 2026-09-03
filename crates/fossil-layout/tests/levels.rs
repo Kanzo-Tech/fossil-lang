@@ -45,6 +45,25 @@ fn lit(path: &Path) -> String {
     path.to_string_lossy().replace('\'', "''")
 }
 
+/// **The relation the pass WROTE, not the one it was given.**
+///
+/// `enrich_layout` renumbers every vertex, so the staged `by_source.parquet` the
+/// fixture hands it carries the OLD `dense_id`s and the tiles it emits carry the
+/// new ones. Measured on this fixture: 27,976 rows each and **55,698 of them
+/// differ** — which is all of them. A test that reads the staged file and joins
+/// it to the written payload on `dense_id` is joining two different numberings
+/// and gets an answer about nothing; the edges it counts are not edges of this
+/// corpus.
+///
+/// That is not hypothetical. It is what
+/// `what_the_pixel_floor_leaves_of_a_coarse_view` did on the day it was written,
+/// and the table it printed was wrong in the direction that mattered: random
+/// pairs are LONGER than real edges, so a length floor over a mis-joined
+/// relation keeps far more of them than the corpus has.
+fn written_relation(root: &Path, orientation: &str) -> String {
+    lit(&root.join(orientation).join("tiles.parquet"))
+}
+
 fn scalar(db: &Connection, sql: &str) -> i64 {
     db.query_row(sql, [], |row| row.get(0)).expect(sql)
 }
@@ -257,7 +276,7 @@ fn a_level_induces_essentially_no_edges_which_is_why_none_are_written() {
     enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
 
     let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("above the floor");
-    let by_source = lit(Path::new(&f.adjacencies[0].parquet));
+    let by_source = written_relation(&f.root, "by_source");
     let db = Connection::open_in_memory().expect("duckdb");
     let total = scalar(
         &db,
@@ -379,7 +398,7 @@ fn what_the_pixel_floor_leaves_of_a_coarse_view() {
 
     let plan = VertexLevels::planned(u64::from(BIG), chunk).expect("above the floor");
     let payload = lit(&f.root.join("chunks").join("tiles.parquet"));
-    let by_source = lit(Path::new(&f.adjacencies[0].parquet));
+    let by_source = written_relation(&f.root, "by_source");
     let db = Connection::open_in_memory().expect("duckdb");
 
     // The extent the whole-extent view is drawn against, from the written
@@ -459,6 +478,101 @@ fn what_the_pixel_floor_leaves_of_a_coarse_view() {
             } else {
                 (drawn_induced as f64 / drawn as f64) * 100.0
             }
+        );
+    }
+}
+
+/// **The edge level and the edge predicate select the same edges, at the same
+/// coordinates.**
+///
+/// A level of a relation is the edges incident to a level-`k` vertex —
+/// `src % 2^k == 0 OR dst % 2^k == 0` — and every row carries both endpoints'
+/// positions so that a camera can draw the line without opening the vertex
+/// payload. Two things can go wrong independently and neither throws:
+///
+/// - the WRONG EDGES, which an `EXCEPT ALL` in both directions against the
+///   predicate over the adjacency catches;
+/// - the right edges at the WRONG PLACES, which only a join back to the payload
+///   catches — and which is the whole reason the file carries coordinates at
+///   all, so an edge-only diff would be green for the failure this exists to
+///   prevent.
+#[test]
+fn an_edge_level_holds_the_incident_edges_at_the_payload_s_own_coordinates() {
+    let mut f = fixture(dir("levels_edge_sets"), ROWS, 14);
+    f.targets[0].chunk_size = CHUNK;
+    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+
+    let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("above the floor");
+    let by_source = written_relation(&f.root, "by_source");
+    let payload = lit(&f.root.join("chunks").join("tiles.parquet"));
+    let db = Connection::open_in_memory().expect("duckdb");
+
+    for &level in &plan.levels {
+        let step = 1u64 << level;
+        let set = lit(&f.root.join(format!("l{level}")).join("tiles.parquet"));
+
+        // Non-vacuity first: a level file that is empty passes every diff below
+        // for the wrong reason, and an empty file is exactly what a wrong
+        // predicate produces.
+        let held = scalar(&db, &format!("SELECT count(*) FROM read_parquet('{set}')"));
+        assert!(
+            held > 0,
+            "level {level} holds no edges, so every assertion below is over an empty file"
+        );
+
+        let predicate = format!(
+            "SELECT src_dense, dst_dense FROM read_parquet('{by_source}') \
+             WHERE src_dense % {step} = 0 OR dst_dense % {step} = 0"
+        );
+        let file = format!("SELECT src_dense, dst_dense FROM read_parquet('{set}')");
+        let differ = scalar(
+            &db,
+            &format!(
+                "SELECT count(*) FROM (({predicate} EXCEPT ALL {file}) \
+                 UNION ALL ({file} EXCEPT ALL {predicate}))"
+            ),
+        );
+        assert_eq!(
+            differ, 0,
+            "level {level}: the file and `src % {step} = 0 OR dst % {step} = 0` disagree by \
+             {differ} edge(s)"
+        );
+
+        // The coordinates are the payload's own, for BOTH ends. A level naming
+        // the right edges at the wrong places draws a picture that is wrong
+        // about where everything is, and the diff above is green for it.
+        let misplaced = scalar(
+            &db,
+            &format!(
+                "SELECT count(*) FROM read_parquet('{set}') e \
+                   JOIN read_parquet('{payload}') s ON s.dense_id = e.src_dense \
+                   JOIN read_parquet('{payload}') d ON d.dense_id = e.dst_dense \
+                  WHERE e.src_x != s.x OR e.src_y != s.y OR e.dst_x != d.x OR e.dst_y != d.y"
+            ),
+        );
+        assert_eq!(
+            misplaced, 0,
+            "level {level}: {misplaced} edge(s) carry coordinates the payload disagrees with"
+        );
+
+        println!("l{level}: {held} edges, both ends placed as the payload places them");
+    }
+
+    // It nests, which is what makes zooming in only ever ADD a line.
+    for pair in plan.levels.windows(2) {
+        let (fine, coarse) = (pair[0], pair[1]);
+        let a = lit(&f.root.join(format!("l{fine}")).join("tiles.parquet"));
+        let b = lit(&f.root.join(format!("l{coarse}")).join("tiles.parquet"));
+        let escaped = scalar(
+            &db,
+            &format!(
+                "SELECT count(*) FROM ((SELECT src_dense, dst_dense FROM read_parquet('{b}')) \
+                 EXCEPT ALL (SELECT src_dense, dst_dense FROM read_parquet('{a}')))"
+            ),
+        );
+        assert_eq!(
+            escaped, 0,
+            "level {coarse} holds {escaped} edge(s) level {fine} does not, so the levels do not nest"
         );
     }
 }

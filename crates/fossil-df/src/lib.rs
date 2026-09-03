@@ -82,7 +82,8 @@ use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
     AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Privacy,
-    Property, PropertyGroup, TILE_CODES_FILE, VertexCodes, VertexIndex, VertexInfo, VertexLevels,
+    EdgeLevels, Property, PropertyGroup, TILE_CODES_FILE, VertexCodes, VertexIndex, VertexInfo,
+    VertexLevels,
     data_type_name,
 };
 
@@ -1793,7 +1794,17 @@ impl GraphArData {
                 let rows = self
                     .edge_table(edge)
                     .map_or(0, |e| count_rows(&e.by_source));
-                edge_info(edge, rows)
+                // The SOURCE type's own row count, because a level of a relation
+                // is *which vertices are in it*: a relation whose source type
+                // gets no pyramid gets none either, and one whose source writes
+                // 6, 7, 8 writes 6, 7, 8. `VertexLevels::planned` stays the one
+                // place the numbers are chosen.
+                let source_rows = self
+                    .vertices
+                    .iter()
+                    .find(|v| v.label == edge.source)
+                    .map_or(0, |v| count_rows(&v.batches));
+                edge_info(edge, rows, source_rows)
             })
             .collect();
         (graph, vertices, edges)
@@ -1953,8 +1964,10 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
 /// (only `src_dense`/`dst_dense`); both CSR + CSC adjacencies are ordered.
 ///
 /// `rows` is one orientation's row count, which is the relation's: the two
-/// orientations are the same edges twice.
-fn edge_info(edge: &GraphEdge, rows: u64) -> EdgeInfo {
+/// orientations are the same edges twice. `source_rows` is the SOURCE vertex
+/// type's count, and it is here for one reason: the levels of a relation are the
+/// levels of the vertices in it.
+fn edge_info(edge: &GraphEdge, rows: u64, source_rows: u64) -> EdgeInfo {
     EdgeInfo {
         src_type: edge.source.clone(),
         edge_type: edge.label.clone(),
@@ -1988,6 +2001,14 @@ fn edge_info(edge: &GraphEdge, rows: u64) -> EdgeInfo {
             },
         ],
         property_groups: vec![],
+        // The pyramid of edges, when the source type earned one. Declared here
+        // and written by the layout pass, the same split the vertex levels have
+        // — and derived from `VertexLevels::planned` over the SOURCE type's
+        // count rather than chosen again, so a manifest cannot name a level set
+        // nobody wrote.
+        levels: EdgeLevels::from_vertex(
+            VertexLevels::planned(source_rows, DEFAULT_CHUNK_SIZE).as_ref(),
+        ),
         version: GRAPHAR_VERSION.to_string(),
     }
 }

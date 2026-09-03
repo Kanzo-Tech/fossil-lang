@@ -330,6 +330,7 @@ mod tests {
                 file_type: "parquet".into(),
             }],
             property_groups: vec![],
+            levels: None,
             version: "gar/v1".into(),
         };
         let graph = GraphInfo::new(

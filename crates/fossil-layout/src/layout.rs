@@ -190,13 +190,13 @@ use arrow::array::{
     Array, ArrayRef, Float32Array, RecordBatch, RecordBatchReader, StringArray, UInt32Array,
 };
 use arrow::compute::{cast, interleave_record_batch};
-use arrow::datatypes::{DataType, SchemaRef};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::error::ArrowError;
 use fossil_df::files::TileWriter;
 use fossil_mem_probe::Probe;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
-use fossil_sinks::manifest::{TILE_CODES_FILE, TILES_FILE, VertexLevels};
+use fossil_sinks::manifest::{EdgeLevels, TILE_CODES_FILE, TILES_FILE, VertexLevels};
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -825,6 +825,17 @@ pub fn enrich_layout_with(
     // reported dangling endpoint, not as a lookup with nothing to look in.
     let mut maps: Vec<Vec<u32>> = vec![Vec::new(); targets.len()];
 
+    // `new_dense_id → (x, y)` per vertex type, index-aligned with `targets`.
+    //
+    // Held past the vertex phase for one reason: an EDGE level carries both of
+    // its endpoints' coordinates, and the far end of an edge is an arbitrary
+    // vertex rather than one of the level's own. Without this the adjacency
+    // phase would have to read the payload back to place a line — which is the
+    // read the whole pyramid exists to avoid, moved from the reader to the
+    // writer. Two `f32` per vertex: 8 MB at a million, against the batches this
+    // pass already holds.
+    let mut placed: Vec<Vec<(f32, f32)>> = vec![Vec::new(); targets.len()];
+
     for (index, target) in targets.iter().enumerate() {
         let vurl = target.vertex_parquet.as_str();
         // Checked before anything is written, so a bad tile size is a refusal
@@ -1139,6 +1150,19 @@ pub fn enrich_layout_with(
             probe.mark("write identity index");
         }
 
+        // Where every vertex of this type ended up, keyed by the address it
+        // ended up with. `xs`/`ys` are in WRITE order and `new_dense` is that
+        // row's address, so this is a permutation and not a second computation.
+        // The adjacency phase draws its level sets out of it — see `placed`.
+        let mut by_address = vec![(0f32, 0f32); rows];
+        for i in 0..rows {
+            let at = new_dense[i] as usize;
+            if at < by_address.len() {
+                by_address[at] = (xs[i], ys[i]);
+            }
+        }
+        placed[index] = by_address;
+
         maps[index] = new_ids;
     }
 
@@ -1263,6 +1287,21 @@ pub fn enrich_layout_with(
         }
         writer.finish().map_err(write_err(&payload))?;
         probe.sample(&format!("{step}: write tiles"));
+
+        // The pyramid of EDGES, written once per relation and from the
+        // source-ordered half — the two orientations are one relation stored
+        // twice, and `keys` here is already every edge of it, sorted by source.
+        if adjacency.ordered_by == Endpoint::Src {
+            let src = index_of(&adjacency.src_type, aurl)?;
+            let dst = index_of(&adjacency.dst_type, aurl)?;
+            let source_count = placed[src].len() as u64;
+            if let Some(plan) = VertexLevels::planned(source_count, endpoint.chunk_size) {
+                let levels = EdgeLevels::from_vertex(Some(&plan))
+                    .expect("a plan yields a level set");
+                write_edge_levels(io, aurl, &levels, &keys, &placed[src], &placed[dst])?;
+                probe.sample(&format!("{step}: write edge levels"));
+            }
+        }
     }
     probe.mark("remap adjacencies + write edge tiles");
     probe.finish();
@@ -1918,6 +1957,133 @@ fn unpack(
     columns[src_index] = Arc::new(UInt32Array::from(src));
     columns[dst_index] = Arc::new(UInt32Array::from(dst));
     RecordBatch::try_new(Arc::clone(schema), columns).map_err(arrow_err(url))
+}
+
+/// Write one relation's **level sets** — the edges a zoomed-out camera draws
+/// without opening the vertex payload.
+///
+/// # What a level of a relation is
+///
+/// Level `k` is the edges **incident to a level-`k` vertex** in either
+/// orientation — `src % 2^k == 0 || dst % 2^k == 0` — and every row carries
+/// BOTH endpoints' coordinates.
+///
+/// The coordinates are the reason this file exists. A camera keeps an edge with
+/// ONE end drawn, so the far end has to be positioned to draw the line, and a
+/// vertex level holds one row in `2^k`: measured on the bench corpus at the
+/// app's own three-pixel floor, a vertex level can position 0.79% of the edges
+/// the same view draws. Carrying `src_x`/`src_y`/`dst_x`/`dst_y` makes the set
+/// **self-drawing** — the lines and their ends come out of this file and no
+/// vertex tile is opened for them.
+///
+/// # It decimates and does not aggregate
+///
+/// Every row is a real edge between two real vertices at their real positions.
+/// Nothing is contracted, which is what keeps the standing refusal intact: an
+/// edge between two survivors standing in for a path through vertices that are
+/// not drawn is synthetic, and replacing it with the path when the camera zooms
+/// moves every line on screen. And it nests, because level `k+1`'s vertices are
+/// a subset of level `k`'s.
+///
+/// # Tiled by the rule the vertex levels already have
+///
+/// Tile `j` holds the rows whose `src_dense` is in
+/// `[j · chunk_size · 2^k, (j+1) · chunk_size · 2^k)` — the source level's own
+/// tile range, so a reader addresses these with the shift it already has.
+/// `keys` arrives sorted by source, so each tile is a run and one pass finds
+/// every one of them.
+fn write_edge_levels(
+    io: &dyn LayoutIo,
+    adjacency: &str,
+    plan: &EdgeLevels,
+    keys: &[u64],
+    src_placed: &[(f32, f32)],
+    dst_placed: &[(f32, f32)],
+) -> Result<(), LayoutError> {
+    // The relation's own directory, which is the parent of the orientation's:
+    // `…/edge/A_b_A/by_source.parquet` → `…/edge/A_b_A/`. The level sets belong
+    // to the relation and not to one half of it.
+    let orientation = tile_prefix(adjacency);
+    let relation = orientation
+        .trim_end_matches('/')
+        .rsplit_once('/')
+        .map_or_else(|| orientation.clone(), |(head, _)| format!("{head}/"));
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("src_dense", DataType::UInt32, false),
+        Field::new("dst_dense", DataType::UInt32, false),
+        Field::new("src_x", DataType::Float32, false),
+        Field::new("src_y", DataType::Float32, false),
+        Field::new("dst_x", DataType::Float32, false),
+        Field::new("dst_y", DataType::Float32, false),
+    ]));
+    let shift = shift_for(plan.chunk_size).ok_or_else(|| LayoutError::TileSize {
+        vertex_type: String::new(),
+        rows: plan.chunk_size,
+    })?;
+
+    for &level in &plan.levels {
+        // Masked rather than trusted, for `write_levels`' reason: a panic in a
+        // writer is the most expensive way to learn that an invariant moved.
+        let step = 1u32 << level.min(31);
+        let span = shift + level.min(31);
+        let prefix = format!("{relation}{}", plan.level_prefix(level));
+        io.ensure_prefix(&prefix)?;
+        let url = format!("{prefix}{TILES_FILE}");
+        let mut writer = open_tiles(io, &url, Arc::clone(&schema))?;
+
+        let mut start = 0usize;
+        while start < keys.len() {
+            let tile = ((keys[start] >> 32) as u32) >> span;
+            let mut end = start + 1;
+            while end < keys.len() && (((keys[end] >> 32) as u32) >> span) == tile {
+                end += 1;
+            }
+            let (mut src, mut dst) = (Vec::new(), Vec::new());
+            let (mut sx, mut sy, mut dx, mut dy) =
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            for &key in &keys[start..end] {
+                let s = (key >> 32) as u32;
+                let d = key as u32;
+                if s % step != 0 && d % step != 0 {
+                    continue;
+                }
+                // An endpoint outside its type's table is a dangling one, which
+                // this pass reports elsewhere and does not draw: skipped rather
+                // than placed at the origin, because a line to (0, 0) is a lie
+                // about where a vertex is.
+                let (Some(&(x0, y0)), Some(&(x1, y1))) =
+                    (src_placed.get(s as usize), dst_placed.get(d as usize))
+                else {
+                    continue;
+                };
+                src.push(s);
+                dst.push(d);
+                sx.push(x0);
+                sy.push(y0);
+                dx.push(x1);
+                dy.push(y1);
+            }
+            if !src.is_empty() {
+                let batch = RecordBatch::try_new(
+                    Arc::clone(&schema),
+                    vec![
+                        Arc::new(UInt32Array::from(src)) as ArrayRef,
+                        Arc::new(UInt32Array::from(dst)),
+                        Arc::new(Float32Array::from(sx)),
+                        Arc::new(Float32Array::from(sy)),
+                        Arc::new(Float32Array::from(dx)),
+                        Arc::new(Float32Array::from(dy)),
+                    ],
+                )
+                .map_err(arrow_err(&url))?;
+                writer.tile(&batch).map_err(write_err(&url))?;
+            }
+            start = end;
+        }
+        writer.finish().map_err(write_err(&url))?;
+    }
+    Ok(())
 }
 
 /// The last path component of an adjacency URL, without its extension —

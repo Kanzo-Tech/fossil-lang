@@ -287,6 +287,7 @@ mod tests {
                 },
             ],
             property_groups: vec![],
+            levels: None,
             version: "gar/v1".into(),
         }
     }

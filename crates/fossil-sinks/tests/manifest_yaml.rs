@@ -63,6 +63,7 @@ fn knows_edge() -> EdgeInfo {
             },
         ],
         property_groups: vec![],
+        levels: None,
         version: GRAPHAR_VERSION.to_string(),
     }
 }
