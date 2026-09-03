@@ -90,17 +90,31 @@ for (const links of [true, false]) {
   );
 }
 
-const [withLinks, points] = answers;
-if (points.view.cost.read === 'level') {
-  const ratio = withLinks.view.cost.bytes / Math.max(points.view.cost.bytes, 1);
-  // Tiles rather than runs, deliberately: both reads are contiguous here, so the runs are 1 and 1
-  // and a ratio over them would say the pyramid bought nothing. What it bought is how much of the
-  // corpus a range request has to cover.
+// The same picture off the PAYLOAD, for the comparison to be a comparison. A level one finer than
+// the finest written one is not a level this corpus wrote, so it is answered by striding the tiles
+// and opening the adjacency — the read the pyramid replaces, at the same rectangle.
+const finest = written.length === 0 ? null : Math.min(...written.map((l) => l.level));
+if (finest !== null && finest > 0) {
+  const view = await corpus.view({ ...box, type, level: finest - 1, links: true });
   console.log(
-    `\n  ${ratio.toFixed(1)}× fewer bytes for the same ${points.view.marks.toLocaleString('en-US')} marks — ` +
-      `${points.view.cost.tiles} tile(s) opened rather than ${withLinks.view.cost.tiles}`,
+    `  payload  · read ${view.cost.read.padEnd(7)} · ` +
+      `${String(view.cost.tiles).padStart(3)}/${view.cost.ofTiles} tile(s) · ${kB(view.cost.bytes).padStart(10)} · ` +
+      `marks ${view.marks.toLocaleString('en-US')} · ` +
+      `anchors ${(view.positions.length / 2 - view.marks).toLocaleString('en-US')} · ` +
+      `links ${(view.links.length / 2).toLocaleString('en-US')} — level ${finest - 1}, which nobody wrote`,
   );
-} else {
+  const cheap = answers[0];
+  if (cheap.view.cost.read === 'level') {
+    console.log(
+      `\n  ${(view.cost.bytes / Math.max(cheap.view.cost.bytes, 1)).toFixed(1)}× fewer bytes for the same ` +
+        `picture — ${cheap.view.cost.tiles} tile(s) rather than ${view.cost.tiles}, ` +
+        `${cheap.view.links.length / 2} links rather than ${view.links.length / 2}`,
+    );
+  }
+}
+
+const [, points] = answers;
+if (points.view.cost.read !== 'level') {
   // Not a failure and worth saying: the camera's level and the writer's window are set by
   // different rules — a budget in marks against a coarsest level that fits one tile — and they
   // meet at some corpus sizes and miss by one at others. At 300,000 vertices the budget asks for

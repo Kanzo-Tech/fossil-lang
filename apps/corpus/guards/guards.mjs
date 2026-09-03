@@ -1031,6 +1031,64 @@ export const GUARDS = [
           );
         }
       }
+
+      // The relation's own levels, which are a different predicate over a different table and
+      // carry something the vertex sets do not: the endpoints' COORDINATES. A level naming the
+      // right edges at the wrong places draws a picture that is wrong about where everything is,
+      // and an edge-only diff is green for it — which is why the join below exists.
+      for (const edge of corpus.edges) {
+        if (edge.levels === null) continue;
+        if (edge.levels.error !== null) {
+          failures.push(`${edge.rel}: the manifest ${edge.levels.error}`);
+          continue;
+        }
+        const source = corpus.types.find((t) => t.name === edge.srcType);
+        const target = corpus.types.find((t) => t.name === edge.dstType);
+        if (source === undefined || target === undefined) continue;
+        const relation = edge.bySource.tiles;
+        if (relation.length === 0) {
+          failures.push(`${edge.rel}: declares levels over an orientation with no tiles`);
+          continue;
+        }
+        for (const set of edge.levels.sets) {
+          if (set.files.length === 0) {
+            failures.push(`${edge.rel}: declares level ${set.level} and ${set.prefix}/ holds no tiles`);
+            continue;
+          }
+          const held = fileList(set.files);
+          const step = 2 ** set.level;
+          const predicate =
+            `SELECT src_dense, dst_dense FROM read_parquet(${fileList(relation)}) ` +
+            `WHERE src_dense % ${step} = 0 OR dst_dense % ${step} = 0`;
+          const file = `SELECT src_dense, dst_dense FROM read_parquet(${held})`;
+          const bad = scalar(
+            `SELECT count(*) FROM ((${predicate} EXCEPT ALL ${file}) UNION ALL (${file} EXCEPT ALL ${predicate}))`,
+          );
+          failures.push(
+            ...violations(
+              bad,
+              `${edge.rel} level ${set.level}: the file and \`src % ${step} = 0 OR dst % ${step} = 0\` disagree about which edges the level holds`,
+            ),
+          );
+          // Both ends, against the payload each end's type carries. This is the assertion the
+          // coordinates exist for: without it a level draws real edges in imaginary places.
+          const misplaced = scalar(
+            `SELECT count(*) FROM read_parquet(${held}) e
+               JOIN read_parquet(${fileList(source.files)}) s ON s.dense_id = e.src_dense
+               JOIN read_parquet(${fileList(target.files)}) d ON d.dense_id = e.dst_dense
+              WHERE e.src_x != s.x OR e.src_y != s.y OR e.dst_x != d.x OR e.dst_y != d.y`,
+          );
+          failures.push(
+            ...violations(
+              misplaced,
+              `${edge.rel} level ${set.level}: edges carrying coordinates the payload disagrees with`,
+            ),
+          );
+          notes.push(
+            `${edge.rel}: level ${set.level} is ${scalar(`SELECT count(*) FROM read_parquet(${held})`)} edge(s), both ends placed as the payload places them`,
+          );
+        }
+      }
       return result(failures, notes);
     },
   },

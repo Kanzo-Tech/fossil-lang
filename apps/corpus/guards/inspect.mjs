@@ -289,6 +289,32 @@ export function inspect(root) {
       adjLists,
       bySource: orientation("src", "by_source", "src_dense"),
       byTarget: orientation("dst", "by_target", "dst_dense"),
+      /**
+       * The WRITTEN levels of this relation, or `null`.
+       *
+       * A level of a relation is the edges incident to a level-`k` vertex, carrying both
+       * endpoints' coordinates so a coarse camera draws the line without opening the vertex
+       * payload. `null` is a corpus and not a gap, on the vertex block's argument.
+       */
+      levels: (() => {
+        const declared = info.levels;
+        if (declared === undefined || declared === null || Array.isArray(declared)) return null;
+        const stem = String(declared.prefix ?? "");
+        const listed = Array.isArray(declared.levels) ? declared.levels : [];
+        if (stem === "" || listed.length === 0) {
+          return { stem, chunkSize: 0n, sets: [], error: "declares levels and no prefix or no level list" };
+        }
+        return {
+          stem,
+          chunkSize: BigInt(declared.chunk_size ?? 0),
+          error: null,
+          sets: listed.map((raw) => {
+            const level = Number(raw);
+            const at = join(root, prefix, `${stem}${level}`);
+            return { level, prefix: `${prefix}/${stem}${level}`, files: existsSync(at) ? payload(at) : [] };
+          }),
+        };
+      })(),
     };
   });
 

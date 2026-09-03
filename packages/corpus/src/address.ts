@@ -297,6 +297,50 @@ export interface EdgeAddress {
   readonly directions: readonly Direction[];
   /** The declared orientation, or `null` when the corpus does not publish one. */
   adjacency(direction: Direction): AdjacencyAddress | null;
+  /**
+   * The **written levels of this relation**, or `null` when the manifest declares none.
+   *
+   * A level of a relation is the edges incident to a level-`k` vertex, carrying BOTH endpoints'
+   * coordinates — which is what lets a coarse camera draw a line without opening the vertex
+   * payload for its far end. `null` is a corpus and not a gap: a reader without one draws the same
+   * edges out of the adjacency and the payload, and only reads more.
+   */
+  readonly levels: EdgeLevelAddress | null;
+}
+
+/**
+ * Where a relation's **level sets** are, and which ones exist.
+ *
+ * The sibling of {@link LevelAddress} and addressed by the same rule: tile `j` of level `k` holds
+ * the rows whose `src_dense` is in `[j · chunkSize · 2^k, (j+1) · chunkSize · 2^k)` — the SOURCE
+ * level's own tile range — so a reader that can address a vertex level can address the edges beside
+ * it with no new arithmetic and no second anchor.
+ *
+ * **What it carries that no other set does is the endpoints' coordinates.** `src_x`, `src_y`,
+ * `dst_x`, `dst_y` beside the two ids, which makes a level set self-drawing: the lines and their
+ * far ends come out of one file. Measured on the bench corpus at a three-pixel floor, a VERTEX
+ * level can position 0.79% of the edges the same view draws, so a pyramid without this one answers
+ * a view with links by opening the payload — the read it exists to avoid.
+ */
+export interface EdgeLevelAddress {
+  /** The levels written, finest first — the source type's own. */
+  readonly levels: readonly number[];
+  /** Rows per tile of the SOURCE vertex type, which the tile's `dense_id` range is built from. */
+  readonly chunkSize: number;
+  /** Which container carries them. The corpus's, never a second answer. */
+  readonly container: Container;
+  /** Whether level `k` is written. `false` is a cost and not a refusal. */
+  has(level: number): boolean;
+  /** Where level `k`'s tiles are, resolved, with a trailing separator. */
+  prefix(level: number): string;
+  /** The tile of level `k` a `src_dense` falls in: the source's shift plus `k`. */
+  tileOf(level: number, srcDense: bigint): bigint;
+  /** The file tile `j` of level `k` is in, spelled by the corpus's container. */
+  tileUrl(level: number, tile: number | bigint): string;
+  /** How many tiles level `k` has, or `null` when the source declares no count. */
+  tiles(level: number): bigint | null;
+  /** Every file of level `k`, in order and distinct. Refuses a level nobody wrote. */
+  files(level: number): readonly string[];
 }
 
 /** Why an orientation is missing from an answer. Both reasons are honest; they are not the same. */
@@ -726,6 +770,90 @@ function codesUrlFor(vertexPrefix: string, path: string, yaml: ScannedManifest):
   return join(vertexPrefix, relative);
 }
 
+/**
+ * The `levels:` block of an EDGE manifest, resolved, or `null` when there is none.
+ *
+ * Every field is required once the block is present, on {@link levelAddress}'s argument. The tile
+ * count comes from the SOURCE type's `vertex_count` and not from `edge_count`, because a level tile
+ * here is a range of `src_dense` — the relation's own row count says nothing about how many of
+ * those ranges there are.
+ */
+function edgeLevelAddress(
+  edgePrefix: string,
+  path: string,
+  yaml: ScannedManifest,
+  src: VertexAddress,
+  container: Container,
+): EdgeLevelAddress | null {
+  const declared = mapping(yaml, path, 'levels');
+  if (declared === null) return null;
+  const stem = scalarOf(declared, 'prefix');
+  if (stem === undefined || stem === '') {
+    throw new CorpusManifestError(
+      `${path} declares levels and no prefix, so the tiles they name cannot be composed`,
+    );
+  }
+  const listed = listOf(declared, 'levels');
+  if (listed.length === 0) {
+    throw new CorpusManifestError(
+      `${path} declares levels and no level list, so which of them is written is not derivable — ` +
+        `and it is a policy, not arithmetic a reader can redo`,
+    );
+  }
+  const levels = listed.map((raw) => {
+    const level = Number(raw);
+    if (!Number.isInteger(level) || level < 0) {
+      throw new CorpusManifestError(`${path} declares level ${raw}, which is not a level`);
+    }
+    return level;
+  });
+  const chunkSize = Number(scalarOf(declared, 'chunk_size'));
+  const shift = shiftFor(chunkSize);
+  if (shift === null) {
+    throw new CorpusManifestError(
+      `${path} declares a level tile of ${scalarOf(declared, 'chunk_size') ?? 'nothing'} rows, ` +
+        `which no shift addresses`,
+    );
+  }
+  const written = new Set(levels);
+  const prefix = (level: number): string => prefixOf(join(edgePrefix, `${stem}${level}`));
+  const url = (level: number, tile: number | bigint): string =>
+    tileUrlFor(prefix(level), 'chunk', container)(tile);
+  const tiles = (level: number): bigint | null => {
+    if (src.count === null) return null;
+    const span = BigInt(chunkSize) << BigInt(Math.max(0, Math.trunc(level)));
+    return (src.count + span - 1n) / span;
+  };
+  return {
+    levels,
+    chunkSize,
+    container,
+    has: (level) => written.has(level),
+    prefix,
+    tileOf: (level, srcDense) => tileOf(srcDense, shift + BigInt(Math.max(0, Math.trunc(level)))),
+    tileUrl: url,
+    tiles,
+    files: (level) => {
+      if (!written.has(level)) {
+        throw new CorpusManifestError(
+          `${path} writes levels ${levels.join(', ')} and not ${level}, so its files are not ` +
+            `addressable — the adjacency and the payload are what answer that level`,
+        );
+      }
+      const count = tiles(level);
+      if (count === null) {
+        throw new CorpusManifestError(
+          `${path} names a source type declaring no vertex_count, so how many tiles level ` +
+            `${level} has is not derivable`,
+        );
+      }
+      const urls: string[] = [];
+      for (let k = 0n; k < count; k += 1n) urls.push(url(level, k));
+      return distinct(urls);
+    },
+  };
+}
+
 function edgeAddress(
   base: string,
   path: string,
@@ -803,6 +931,7 @@ function edgeAddress(
     prefix,
     directions: (['src', 'dst'] as const).filter((d) => declared.has(d)),
     adjacency: (direction) => declared.get(direction) ?? null,
+    levels: edgeLevelAddress(prefix, path, yaml, src, container),
   };
 }
 

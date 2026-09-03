@@ -297,6 +297,54 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
     })
     .join("\n");
 
+  /**
+   * **The pyramid of EDGES**, or nothing where the source type is under the floor.
+   *
+   * Level `k` of a relation is the edges incident to a level-`k` vertex — `src % 2^k = 0 OR
+   * dst % 2^k = 0` — and every row carries BOTH endpoints' coordinates. The coordinates are the
+   * whole point: a camera keeps an edge with ONE end drawn, so the far end has to be positioned to
+   * draw the line, and a vertex level holds one row in `2^k`. Measured on the bench corpus at a
+   * three-pixel floor, a vertex level can position 0.79% of the edges the same view draws. With
+   * the ends in the row the set is SELF-DRAWING: the lines and their ends come out of one file and
+   * no vertex tile is opened for them.
+   *
+   * Nothing here is contracted. Every row is a real edge between two real vertices at their real
+   * positions, which is what keeps the standing refusal intact — an edge standing in for a path
+   * through vertices that are not drawn moves every line on screen when the camera zooms.
+   *
+   * The levels are the SOURCE type's, from the same {@link levelPlan} the vertex sets use, and
+   * tiled by the source level's own `dense_id` range so a reader addresses them with the shift it
+   * already has.
+   */
+  const edgeLevelCopy =
+    plan === null
+      ? ""
+      : plan.levels
+          .map((level) => {
+            const step = 2 ** level;
+            const dir = join(edgeDir, `l${level}`);
+            mkdirSync(dir, { recursive: true });
+            const rows =
+              `SELECT e.src_dense, e.dst_dense, s.x AS src_x, s.y AS src_y, d.x AS dst_x, d.y AS dst_y
+                 FROM e JOIN v s ON s.dense_id = e.src_dense JOIN v d ON d.dense_id = e.dst_dense
+                WHERE (e.src_dense % ${step} = 0 OR e.dst_dense % ${step} = 0)`;
+            if (layout !== "files") {
+              return `COPY (${rows} ORDER BY e.src_dense, e.dst_dense)
+                        TO '${lit(join(dir, "tiles.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
+            }
+            // One file per level tile, whose `dense_id` range is the source level's own. The
+            // range is appended with `AND`, which is why the disjunction above is PARENTHESISED:
+            // `AND` binds tighter than `OR`, so without them every tile file also held every edge
+            // whose source is in the level, unrestricted — 152 rows where the predicate has 76.
+            const span = tileRows * step;
+            return Array.from({ length: Math.ceil(count / span) }, (_, k) =>
+              `COPY (${rows} AND e.src_dense >= ${k * span} AND e.src_dense < ${(k + 1) * span}
+                       ORDER BY e.src_dense, e.dst_dense)
+                 TO '${lit(join(dir, `chunk${k}.parquet`))}' (FORMAT PARQUET);`,
+            ).join("\n");
+          })
+          .join("\n");
+
   execute(`
     CREATE TEMP TABLE v AS
       SELECT dense_id::UINTEGER AS dense_id, subject::VARCHAR AS subject,
@@ -310,6 +358,7 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
     ${indexCopy}
     ${levelCopy}
     ${edgeTileCopy}
+    ${edgeLevelCopy}
   `);
 
   rmSync(vertexCsv);
@@ -461,6 +510,18 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       "  prefix: by_target/",
       "  file_type: parquet",
       "property_groups: []",
+      // Which decimated levels of this RELATION are written. The source type's levels, because a
+      // level of a relation is which vertices are in it — and the numbers rather than a rule, on
+      // the vertex block's argument: which levels a writer spent bytes on is a policy.
+      ...(plan === null
+        ? []
+        : [
+            "levels:",
+            "  prefix: l",
+            "  levels:",
+            ...plan.levels.map((level) => `  - ${level}`),
+            `  chunk_size: ${tileRows}`,
+          ]),
       "version: gar/v1",
       "",
     ].join("\n"),

@@ -1042,6 +1042,36 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   };
 
   /**
+   * **What a set of files weighs**, from the same footers the boxes come from, read once per set.
+   *
+   * `ViewCost.bytes` counted the vertex tiles and nothing else, while `view` was also opening the
+   * adjacency for every answer that asked for links: at a million vertices that is 13 MB of
+   * `by_source` against a 21 MB report, so the ledger was short by 38% of what it read. A cost
+   * report that omits a file it opened is worse than no cost report, because it is believed.
+   *
+   * **The COLUMNS the query projects, not the whole tile.** Parquet is columnar and the engine
+   * reads the chunks it needs: a vertex tile of this corpus is 21 MB and the four columns a view
+   * draws with are 12.7 MB of it, the rest being `subject` — the widest column and one no frame
+   * ever paints. A ledger that charged a frame for it would be as wrong as one that omitted the
+   * adjacency, in the other direction, and the two errors nearly cancelling is worse than either.
+   *
+   * Keyed on the URL list and the column list, because a set read two ways is two reads.
+   */
+  const weights = new Map<string, Promise<number>>();
+  const bytesOf = (urls: readonly string[], columns: readonly string[]): Promise<number> => {
+    if (urls.length === 0) return Promise.resolve(0);
+    const key = `${columns.join(',')}\u0000${urls.join('\u0000')}`;
+    const cached = weights.get(key);
+    if (cached) return cached;
+    const loading = query(
+      `SELECT sum(total_compressed_size) AS bytes FROM parquet_metadata(${list([...urls])}) ` +
+        `WHERE path_in_schema IN (${columns.map((c) => `'${c.replace(/'/g, "''")}'`).join(', ')})`,
+    ).then((rows) => Number(rows[0]?.['bytes'] ?? 0));
+    weights.set(key, loading);
+    return loading;
+  };
+
+  /**
    * The tiles a rectangle can touch. Pure, and the box is half-open on the far edge exactly as
    * {@link boxOf} is, so a tile the `WHERE` would empty is never opened.
    */
@@ -1586,7 +1616,26 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
        * points.** A caller that asks for links opens the payload and `cost.read` says `strided`.
        */
       const levelSet = address.levels;
-      const viaLevel = levelSet !== null && levelSet.has(level) && !wantLinks;
+      /**
+       * The relations whose own level `k` is written, when every incident one is.
+       *
+       * **All or none, deliberately.** A view drawing the edges of two relations out of one and
+       * the payload out of the other would be reading level `k` and level 0 in the same answer and
+       * reporting one number for it. Where any incident relation is missing its level set, the
+       * read is the payload's and `cost.read` says `strided`.
+       */
+      const edgeLevels = (() => {
+        const incident = addressing.edges.filter(
+          (e) => e.srcType === address.type || e.dstType === address.type,
+        );
+        if (incident.length === 0) return null;
+        const sets = incident.map((e) => e.levels);
+        return sets.every((s) => s !== null && s.has(level))
+          ? (sets as NonNullable<(typeof sets)[number]>[])
+          : null;
+      })();
+      const viaLevel =
+        levelSet !== null && levelSet.has(level) && (!wantLinks || edgeLevels !== null);
       const selected = new Set<number>(
         codes !== undefined
           ? mortonTilesFor({ box: gridBox(box), codes })
@@ -1623,8 +1672,8 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         ? { all: await tileBoxes(address.type, level), tiles: levelTilesOf(payloadTiles) }
         : { all, tiles: payloadTiles };
       const held = source.tiles;
-      const weights = new Map(source.all.map((b) => [Number(b.tile), b]));
-      const runs = runsOf(held, weights);
+      const boxOfTile = new Map(source.all.map((b) => [Number(b.tile), b]));
+      const runs = runsOf(held, boxOfTile);
       /**
        * **How wide a tile of what was read is, in `dense_id`.**
        *
@@ -1641,7 +1690,6 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         ? [...new Set(pins.map((id) => Number(address.tileOf(id))))].sort((a, b) => a - b)
         : [];
       const pinRuns = runsOf(pinTiles, new Map(all.map((b) => [Number(b.tile), b])));
-      const bytes = [...runs, ...pinRuns].reduce((sum, run) => sum + run.bytes, 0);
 
       // A pin is one `dense_id` and an odd one is a multiple of no stride above 1, so the level
       // file does not carry it. Its PAYLOAD tile is opened for it — which is what
@@ -1650,6 +1698,12 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const urls = distinct(
         viaLevel ? held.map((tile) => levelSet!.tileUrl(level, tile)) : held.map((tile) => address.tileUrl(tile)),
       );
+      // The vertex half, weighed over the four columns a view draws with rather than over the
+      // whole tile — `runs` carries the tile's total and that total includes `subject`.
+      const drawnColumns = distinct(['dense_id', 'x', 'y', fill]);
+      const readUrls = distinct([...urls, ...pinUrls]);
+      const bytes = await bytesOf(readUrls, drawnColumns);
+
       const empty: View = {
         type: address.type,
         box,
@@ -1712,8 +1766,23 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       // The `src` orientations of every incident edge type, addressed by the tiles already chosen.
       // The addressing decides which orientations exist and why one is missing; reproducing that
       // rule here is how the two halves of a read drift apart.
-      const plan = addressing.tilesFor({ type: address.type, tiles: held, directions: ['src'] });
-      const edgeUrls = wantLinks ? distinct([...plan.edgeUrls]) : [];
+      const plan = viaLevel
+        ? null
+        : addressing.tilesFor({ type: address.type, tiles: held, directions: ['src'] });
+      /**
+       * Where the lines come from, and it is one file or two relations.
+       *
+       * Under a level read they come from the relation's OWN level set, whose tiles carry the same
+       * ordinals the vertex level's do — both are `src_dense` shifted by the source's shift plus
+       * `k`, from one plan — so the tiles already selected address them with no new arithmetic.
+       * Each row carries both endpoints' coordinates, which is what lets the far ends be drawn
+       * without opening a vertex tile for them.
+       */
+      const edgeUrls = !wantLinks
+        ? []
+        : viaLevel
+          ? distinct(edgeLevels!.flatMap((set) => held.map((tile) => set.tileUrl(level, tile))))
+          : distinct([...plan!.edgeUrls]);
 
       /**
        * The far ends, and why they are in the same answer.
@@ -1724,14 +1793,48 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
        * length and a caller can slice rather than filter.
        */
       const floor = Number.isFinite(minLinkLength) && minLinkLength > 0 ? minLinkLength : 0;
-      const long =
+      /**
+       * The renderer's floor, over whichever pair of columns holds the two ends.
+       *
+       * Two callers and one expression: the payload path reads the ends off two joins of `held`,
+       * the level path reads them off the edge row itself. Written once because a floor spelled
+       * twice is a floor that drifts, and a view whose links obey a different threshold from the
+       * one it reports is a view that cannot be compared with itself.
+       */
+      const lengthFloor = (ax: string, ay: string, bx: string, by: string): string =>
         floor > 0
-          ? ` AND (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) >= ${floor * floor}`
+          ? ` AND (${ax} - ${bx}) * (${ax} - ${bx}) + (${ay} - ${by}) * (${ay} - ${by}) >= ${floor * floor}`
           : '';
+      const long = lengthFloor('a.x', 'a.y', 'b.x', 'b.y');
+      /**
+       * The level read's own edge half: the lines and their ends out of one file.
+       *
+       * `links` keeps an edge with at least one end drawn, which is the same rule the payload path
+       * applies — and `anchor` places the other end from the edge row rather than from a vertex
+       * tile, which is the whole difference. The length floor is applied here as it is there, over
+       * coordinates the file already carries.
+       */
+      const levelEdges =
+        `${base}, links AS (\n` +
+        `  SELECT src_dense, dst_dense, src_x, src_y, dst_x, dst_y\n` +
+        `  FROM read_parquet(${list(edgeUrls)})\n` +
+        `  WHERE (${ranges('src_dense')})${lengthFloor('src_x', 'src_y', 'dst_x', 'dst_y')}\n` +
+        `    AND (src_dense IN (SELECT dense_id FROM vis) OR dst_dense IN (SELECT dense_id FROM vis))\n` +
+        `), anchor AS (\n` +
+        `  SELECT dense_id, x, y,\n` +
+        `         ((SELECT count(*) FROM vis) + row_number() OVER (ORDER BY dense_id) - 1)::INTEGER AS local\n` +
+        `  FROM (SELECT DISTINCT src_dense AS dense_id, src_x AS x, src_y AS y FROM links\n` +
+        `         WHERE src_dense NOT IN (SELECT dense_id FROM vis)\n` +
+        `        UNION\n` +
+        `        SELECT DISTINCT dst_dense, dst_x, dst_y FROM links\n` +
+        `         WHERE dst_dense NOT IN (SELECT dense_id FROM vis))\n)`;
+
       const withEdges =
         edgeUrls.length === 0
           ? base
-          : `${base}, span AS (\n` +
+          : viaLevel
+            ? levelEdges
+            : `${base}, span AS (\n` +
             `  SELECT sv.local AS src, tv.local AS dst, e.src_dense, e.dst_dense\n` +
             `  FROM read_parquet(${list(edgeUrls)}) e\n` +
             `  JOIN held a ON a.dense_id = e.src_dense\n` +
@@ -1759,12 +1862,27 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         edgeUrls.length === 0
           ? []
           : await query(
-              `${withEdges}\nSELECT coalesce(sp.src, sa.local) AS src, coalesce(sp.dst, da.local) AS dst\n` +
-                `FROM span sp\n` +
-                `LEFT JOIN anchor sa ON sa.dense_id = sp.src_dense\n` +
-                `LEFT JOIN anchor da ON da.dense_id = sp.dst_dense`,
+              viaLevel
+                ? `${withEdges}\nSELECT coalesce(sv.local, sa.local) AS src, coalesce(dv.local, da.local) AS dst\n` +
+                  `FROM links l\n` +
+                  `LEFT JOIN vis sv ON sv.dense_id = l.src_dense\n` +
+                  `LEFT JOIN vis dv ON dv.dense_id = l.dst_dense\n` +
+                  `LEFT JOIN anchor sa ON sa.dense_id = l.src_dense\n` +
+                  `LEFT JOIN anchor da ON da.dense_id = l.dst_dense`
+                : `${withEdges}\nSELECT coalesce(sp.src, sa.local) AS src, coalesce(sp.dst, da.local) AS dst\n` +
+                  `FROM span sp\n` +
+                  `LEFT JOIN anchor sa ON sa.dense_id = sp.src_dense\n` +
+                  `LEFT JOIN anchor da ON da.dense_id = sp.dst_dense`,
             );
 
+      // What the lines cost, on the ledger rather than beside it. Under a level read this is the
+      // relation's own level set; under a payload read it is the adjacency tiles the plan named.
+      const edgeBytes = await bytesOf(
+        edgeUrls,
+        viaLevel
+          ? ['src_dense', 'dst_dense', 'src_x', 'src_y', 'dst_x', 'dst_y']
+          : ['src_dense', 'dst_dense'],
+      );
       const rows = points.length;
       const denseIds = new BigUint64Array(rows);
       const positions = new Float32Array(rows * 2);
@@ -1804,7 +1922,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
           tiles: held.length + pinTiles.length,
           ofTiles: source.all.length,
           runs: runs.length + pinRuns.length,
-          bytes,
+          bytes: bytes + edgeBytes,
           read: viaLevel ? 'level' : 'strided',
           addressed,
           ms: Date.now() - started,
