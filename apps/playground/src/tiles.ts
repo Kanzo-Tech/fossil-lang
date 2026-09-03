@@ -286,12 +286,42 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
           : 0;
 
       const level = corpus.levelFor({ ...box, type, budget: limit });
+
+      /**
+       * **Where the pyramid is, this asks for points** — and that is a decision of this app's,
+       * which is why it is here and not behind `view`.
+       *
+       * `@fossil-lang/corpus` will read a written `l{k}/` only for a view that asked for no links,
+       * and the reason is measured: a level file holds the level's rows, the camera keeps an edge
+       * with ONE end drawn, and the far ends of those edges are not in it. At the app's own
+       * three-pixel floor over 300,000 vertices the level-6 view draws 58,554 edges and 52,415
+       * anchors, of which a level file positions 476.
+       *
+       * So the trade is real and it is this app's to make. Taking it:
+       *
+       * - **The bytes.** The whole-extent view goes from 245 tiles to 4 — one `Range` request
+       *   instead of the runs the payload needs.
+       * - **What it costs is a layer this renderer already calls illegible.** `BOUNDED_DEFAULTS`
+       *   sets 20,000 marks because «above about 50,000 points a live layout stops being
+       *   comfortable and the edge layer is already fog well before that». The whole-extent answer
+       *   carries 57,103 points and 58,554 lines, which is past that ceiling on both counts.
+       * - **It is not a cliff, because of where `levelFor` lands.** At a budget of 20,000 over a
+       *   million vertices the whole extent asks for level 6 — the FINEST written level — and the
+       *   first zoom step asks for 5, which nobody wrote. So the edges come back on the first zoom
+       *   in: a point cloud that grows an edge layer as a reader approaches, which is what a
+       *   level-of-detail read is supposed to look like.
+       *
+       * `corpus.levels()` is the manifest's own answer, so a corpus that writes no pyramid takes
+       * the other branch everywhere and this app draws exactly what it drew before.
+       */
+      const written = corpus.levels(type)[level]?.written ?? false;
       const answer = await corpus.view({
         ...box,
         type,
         level,
         fill: column(fill),
         pinned: pins,
+        links: !written,
         minLinkLength,
       });
 
