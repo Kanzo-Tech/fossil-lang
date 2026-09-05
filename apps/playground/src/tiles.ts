@@ -67,12 +67,11 @@ export interface SliceCost {
   box: { x: number; y: number; w: number; h: number } | null;
   /**
    * Which artefact answered the level — a written `l{k}/` (`level`) or the full tiles under the
-   * level's predicate (`strided`): **the same rows, more bytes** — and how the tiles were chosen,
-   * by the published code anchor (arithmetic, no Parquet reader) or by the footers' boxes. Both are
-   * free now that the door reports them, and the first is what says a written pyramid arrived.
+   * level's predicate (`strided`): **the same rows, more bytes**, and the one that says a written
+   * pyramid arrived. How the tiles were CHOSEN is no longer a question with two answers: the
+   * footers' boxes are the only index over it.
    */
   read: ViewCost['read'];
-  addressed: ViewCost['addressed'];
   /** Vertices the rectangle holds at level 0, before the level decimated it, and vertices drawn. */
   matched: number;
   marks: number;
@@ -271,7 +270,6 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
           bytes: 0,
           box: null,
           read: 'strided',
-          addressed: 'anchor',
           matched: 0,
           marks: 0,
           anchors: 0,

@@ -619,10 +619,8 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
             <dd>{cost.ms.toFixed(0)} ms</dd>
           </div>
           <div>
-            <dt>addressed by</dt>
-            <dd>
-              {cost.addressed} <span className="str-dim">· read {cost.read}</span>
-            </dd>
+            <dt>read</dt>
+            <dd>{cost.read}</dd>
           </div>
         </dl>
       )}
