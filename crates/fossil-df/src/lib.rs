@@ -82,8 +82,7 @@ use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
     AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, EdgeLevels, GRAPHAR_VERSION, GraphInfo,
-    Privacy, Property, PropertyGroup, TILE_CODES_FILE, VertexCodes, VertexIndex, VertexInfo,
-    VertexLevels, data_type_name,
+    Privacy, Property, PropertyGroup, VertexIndex, VertexInfo, VertexLevels, data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -1936,16 +1935,8 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
         ordered_by: "subject".to_string(),
         chunk_size: DEFAULT_CHUNK_SIZE,
     });
-    // And where the tile-code anchor will be, for the same reason and in the
-    // same place: the manifest is the plan, and this pass writes placeholder
-    // `x`/`y` it has no codes for. Only the layout pass knows the numbers, and
-    // it writes them under this path — `apps/corpus`'s guards are what go red if
-    // it does not.
-    info = info.with_codes(VertexCodes {
-        path: TILE_CODES_FILE.to_string(),
-    });
     // And the pyramid, when the type is big enough to have earned one — same
-    // place and same reasoning as the two above: the manifest is the plan, and
+    // place and same reasoning as the index above: the manifest is the plan, and
     // the layout pass is what fills it.
     //
     // **`VertexLevels::planned` is the one place the levels are chosen**, and

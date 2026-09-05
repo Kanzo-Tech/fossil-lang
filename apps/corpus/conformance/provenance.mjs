@@ -1,7 +1,7 @@
 /**
  * Where `conformance/corpus/` came from, executed.
  *
- * The corpus every address in `expected.json` resolves against is checked in — twenty Parquet
+ * The corpus every address in `expected.json` resolves against is checked in — twenty-six Parquet
  * files and three manifests. Nothing said how it was made, and the cost of that showed up as a
  * diagnosis: regenerating with `guards/fixture.mjs`'s defaults gives **600** edges against the
  * **596** the manifest declares, which reads exactly like a fixture that has drifted from its
@@ -47,8 +47,14 @@ const CORPUS = join(HERE, "corpus");
  * is five tiles of 64 with the last deliberately partial (44 rows), because a corpus whose count
  * divides its tile size never exercises a tail; `chunkSize: 64` is small enough to read by hand and
  * a power of two, which is what the conventions require and 4,096 is only the measured default of.
+ *
+ * `levels: [1, 2]` is what `fossil_sinks::manifest::VertexLevels::planned(300, 64)` answers, and it
+ * is TOLD to the fixture rather than derived by it — which levels exist is a policy with one
+ * implementation, and a second copy of it here is the drift the fixture's header refuses. Without
+ * it `a-level-is-the-predicate` ran over a corpus with no pyramid, which is a guard passing over
+ * nothing.
  */
-export const RECIPE = { count: 300, clusters: 16, layout: "files", chunkSize: 64 };
+export const RECIPE = { count: 300, clusters: 16, layout: "files", chunkSize: 64, levels: [1, 2] };
 
 const failures = [];
 const notes = [];
@@ -65,12 +71,6 @@ function tree(root) {
   return {
     manifests: all.filter((p) => p.endsWith(".yml")),
     payloads: all.filter((p) => p.endsWith(".parquet")),
-    // The tile-code anchor is neither, and it was invisible here until it
-    // existed: a corpus carries `vertex/<Type>/codes.json`, a reader with no
-    // Parquet reader addresses a rectangle with it, and a `.yml`/`.parquet`
-    // filter walks straight past. Compared as text, like the manifests, because
-    // it is one — a document a stranger reads with `JSON.parse`.
-    documents: all.filter((p) => p.endsWith(".json")),
   };
 }
 
@@ -95,17 +95,18 @@ try {
   const regenerated = tree(written.dir);
 
   // Non-vacuity first: two empty trees agree about everything, and so do two trees this failed to
-  // read. The committed corpus is 3 manifests and 20 payloads — five vertex tiles, five index
-  // five of each adjacency orientation — and the numbers are here so a walker that stopped
-  // descending is a failure rather than a smaller success.
-  if (committed.manifests.length < 3 || committed.payloads.length < 20) {
+  // read. The committed corpus is 3 manifests and 26 payloads — five vertex tiles, five index,
+  // five of each adjacency orientation, and the pyramid's three vertex tiles and three edge tiles
+  // — and the numbers are here so a walker that stopped descending is a failure rather than a
+  // smaller success.
+  if (committed.manifests.length < 3 || committed.payloads.length < 26) {
     fail(
       `non-vacuity: the committed corpus reads as ${committed.manifests.length} manifest(s) and ` +
         `${committed.payloads.length} payload(s), so the comparison below is over almost nothing`,
     );
   }
 
-  const setOf = (t) => JSON.stringify([...t.manifests, ...t.documents, ...t.payloads]);
+  const setOf = (t) => JSON.stringify([...t.manifests, ...t.payloads]);
   if (setOf(committed) !== setOf(regenerated)) {
     fail(
       `the file set differs.\n    committed:   ${setOf(committed)}\n    regenerated: ${setOf(regenerated)}`,
@@ -122,20 +123,6 @@ try {
         `${path} is not what the recipe writes. Either the corpus was made with different ` +
           `parameters than RECIPE records, or the generator has changed under it.`,
       );
-    }
-  }
-
-  // The anchor, byte for byte. It is a projection of the renumbering, so a
-  // regeneration that produces different codes has produced a different corpus —
-  // and one that produces the same codes against different rows is the failure
-  // this catches that nothing else can: the payloads compare as rows, and a
-  // wrong anchor over right rows draws the wrong picture out of the right file.
-  for (const path of committed.documents) {
-    if (!regenerated.documents.includes(path)) continue;
-    const a = readFileSync(join(CORPUS, path), "utf8");
-    const b = readFileSync(join(written.dir, path), "utf8");
-    if (a !== b) {
-      fail(`${path} is not what the recipe writes — the anchor does not reproduce`);
     }
   }
 

@@ -26,11 +26,6 @@ pub const GRAPHAR_VERSION: &str = "gar/v1";
 /// tiles. `@fossil-lang/corpus` spells the same constant.
 pub const TILES_FILE: &str = "tiles.parquet";
 
-/// The **tile-code anchor** of one vertex type, under its own
-/// [`VertexInfo::prefix`]. See [`VertexCodes`] for what is in it and why it is
-/// beside the tiles rather than inside the manifest.
-pub const TILE_CODES_FILE: &str = "codes.json";
-
 /// The filename stem of a **level set**, under a vertex type's own
 /// [`VertexInfo::prefix`]: level `k` lives under `<prefix>l{k}/`, and inside it
 /// the container rules apply unchanged. See [`VertexLevels`].
@@ -236,19 +231,11 @@ pub struct VertexInfo {
     /// the row the index would have found, and `openCorpus` reports the cost.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<VertexIndex>,
-    /// **Where the Morton code of each tile's first and last row is published**
-    /// — the one input the arithmetic address cannot derive. See [`VertexCodes`].
-    ///
-    /// `Option` for [`Self::index`]'s reason: a reader with a Parquet reader
-    /// gets the same tiles out of the footers. The reader this field exists for
-    /// is the one that has no Parquet reader.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub codes: Option<VertexCodes>,
     /// **Which decimated levels of this type are written, and where** — the
     /// pyramid a zoomed-out camera reads instead of striding the whole type.
     /// See [`VertexLevels`].
     ///
-    /// `Option` for [`Self::codes`]' reason, and more strongly: a level is an
+    /// `Option` for [`Self::index`]'s reason, and more strongly: a level is an
     /// optimisation of a predicate, so a corpus without one draws **the same
     /// picture** off `dense_id % 4^k == 0` over the payload and only reads
     /// more. That is what keeps this from being a second contract.
@@ -285,27 +272,6 @@ pub struct VertexIndex {
     pub chunk_size: u64,
 }
 
-/// Where a vertex type's **tile-code anchor** lives: the first and last Morton
-/// code of every tile, plus the extent those codes were quantised against.
-///
-/// `dense_id` is a vertex's RANK by code and not its code, so arithmetic says
-/// which tiles exist and cannot say which ones a window intersects; assuming
-/// the ranks are uniform draws a wrong picture rather than a slow one.
-///
-/// A **path** here and not the numbers, for three reasons and the first is not
-/// size: the manifest is the plan and the codes are an outcome of the layout
-/// pass; there are two per tile, so inlining them makes a constant-size
-/// document grow with the corpus, charged to every reader; and the point of an
-/// arithmetic address is that a camera needs no Parquet reader, which a
-/// Parquet-borne anchor puts back. `/docs/format/conventions/addressing` has the
-/// measurements, and why JSON rather than a packed array.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VertexCodes {
-    /// Path to the anchor document, relative to the vertex type's own
-    /// [`VertexInfo::prefix`] — [`TILE_CODES_FILE`] as the writer spells it.
-    pub path: String,
-}
-
 /// Where a vertex type's **level sets** live, and which levels exist.
 ///
 /// **Level `k` is the vertices whose `dense_id` is a multiple of `4^k`.** Over
@@ -327,16 +293,13 @@ pub struct VertexCodes {
 ///
 /// # What is declared, and what is not
 ///
-/// The **numbers**, unlike [`VertexCodes`]. That is a deliberate departure from
-/// the precedent and the reason is that the two quantities differ in kind: the
-/// code anchor is two `u32` per tile and therefore grows with the corpus, so
-/// inlining it would charge every reader of a manifest for the size of the
-/// graph. A level list is `log4(V / chunk_size)` integers, so sixteen of them
-/// would take a corpus of four billion tiles to reach. And it
-/// is not derivable: which levels a writer chose to spend bytes on is a policy,
-/// and a reader that re-derived it from `vertex_count` and `chunk_size` would
-/// be reimplementing [`VertexLevels::planned`] and would 404 the day the policy
-/// moved.
+/// The **numbers**, and not a path to them. A level list is
+/// `log4(V / chunk_size)` integers, so sixteen of them would take a corpus of
+/// four billion tiles to reach — there is nothing here that grows with the
+/// graph. And it is not derivable: which levels a writer chose to spend bytes
+/// on is a policy, and a reader that re-derived it from `vertex_count` and
+/// `chunk_size` would be reimplementing [`VertexLevels::planned`] and would 404
+/// the day the policy moved.
 ///
 /// # Addressing a level needs nothing new
 ///
@@ -557,8 +520,7 @@ pub struct EdgeInfo {
 /// Tile `j` of level `k` holds the rows whose `src_dense` is in
 /// `[j · chunk_size · 4^k, (j+1) · chunk_size · 4^k)` — the source vertex
 /// level's own tile range. So a reader that can address a vertex level can
-/// address the edges beside it with no new arithmetic, and there is no second
-/// anchor.
+/// address the edges beside it with no new arithmetic.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdgeLevels {
     /// Filename stem of a level set's prefix, relative to the edge type's own
@@ -760,9 +722,6 @@ impl VertexInfo {
             // second pass over the rows in a different order, which the caller
             // that HAS those rows decides to pay. `with_index` is how it says so.
             index: None,
-            // Nor a code anchor: it is an outcome of the layout pass and the
-            // caller that runs one declares it. See [`VertexCodes`].
-            codes: None,
             // Nor a pyramid: the levels are files the layout pass writes, and
             // a type without them draws the same picture off the predicate.
             levels: None,
@@ -774,13 +733,6 @@ impl VertexInfo {
     #[must_use]
     pub fn with_index(mut self, index: VertexIndex) -> Self {
         self.index = Some(index);
-        self
-    }
-
-    /// Declare where this type's tile-code anchor is written. See [`VertexCodes`].
-    #[must_use]
-    pub fn with_codes(mut self, codes: VertexCodes) -> Self {
-        self.codes = Some(codes);
         self
     }
 
@@ -1374,11 +1326,19 @@ version: gar/v1
     /// readers blind.
     #[test]
     fn the_levels_block_is_emitted_in_the_shape_the_line_scanners_read() {
-        let info = VertexInfo::new("Person", 1_000_000, DEFAULT_CHUNK_SIZE, "vertex/Person/", vec![])
-            .with_levels(VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).unwrap());
+        let info = VertexInfo::new(
+            "Person",
+            1_000_000,
+            DEFAULT_CHUNK_SIZE,
+            "vertex/Person/",
+            vec![],
+        )
+        .with_levels(VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).unwrap());
         let yaml = info.to_yaml().expect("serialise");
         assert!(
-            yaml.contains("levels:\n  prefix: l\n  levels:\n  - 1\n  - 2\n  - 3\n  - 4\n  chunk_size: 4096\n"),
+            yaml.contains(
+                "levels:\n  prefix: l\n  levels:\n  - 1\n  - 2\n  - 3\n  - 4\n  chunk_size: 4096\n"
+            ),
             "{yaml}"
         );
     }

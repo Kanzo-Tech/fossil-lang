@@ -220,7 +220,7 @@ fn a_level_nobody_wrote_is_refused_by_name() {
 // ── the relation side, which the Rust reader did not have ────────────────────
 
 /// A relation's levels are its SOURCE type's, addressed by the rule the vertex
-/// levels already have: no second base, no second anchor, no `edge_count`.
+/// levels already have: no second base, no second document, no `edge_count`.
 #[test]
 fn a_relation_is_addressed_by_its_source_levels() {
     let corpus = corpus(Some(300), Some(SMALL), true);

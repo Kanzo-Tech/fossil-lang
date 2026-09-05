@@ -17,4 +17,10 @@ adj_lists:
   prefix: by_target/
   file_type: parquet
 property_groups: []
+levels:
+  prefix: l
+  levels:
+  - 1
+  - 2
+  chunk_size: 64
 version: gar/v1

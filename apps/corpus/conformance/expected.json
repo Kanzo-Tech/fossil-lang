@@ -12,7 +12,7 @@
       "name": "corpus",
       "root": "corpus",
       "on_disk": true,
-      "about": "300 vertices in 5 tiles of 64, both orientations tiled. Passes every guard — `node guards/check.mjs conformance/corpus` — so every address below names a file that is there.",
+      "about": "300 vertices in 5 tiles of 64, both orientations tiled, and a written pyramid of the two levels `fossil_sinks::manifest::VertexLevels::planned(300, 64)` answers. Passes every guard — `node guards/check.mjs conformance/corpus` — so every address below names a file that is there, the level tiles included: this is the only case whose pyramid is BYTES rather than a manifest, so it is the one where a wrongly composed level URL is a 404 a reader can be shown rather than a string a reader can be told.",
       "container": "files",
       "types": [
         {
@@ -109,6 +109,48 @@
           ],
           "complete": true,
           "gaps": []
+        }
+      ],
+      "levels": [
+        {
+          "about": "The pyramid ON DISK. `rows` is `VertexLevels::rows_at(300, k)` and a level tile\u0027s address is the payload\u0027s own shift of 6 plus `VertexLevels::stride_bits(k)`, which is `2k` — so level 1 is a shift of 8 and level 2 a shift of 10, and both are wider than the payload\u0027s because a level tile stands for `4^k` times as many ids. Level 2 holding 19 rows in one tile is why `planned` stops there: one tile is already one range request.",
+          "type": "Person",
+          "written": [1, 2],
+          "chunk_size": 64,
+          "sizes": [
+            { "level": 1, "rows": "75", "tiles": "2" },
+            { "level": 2, "rows": "19", "tiles": "1" }
+          ],
+          "tile_of": [
+            { "level": 1, "dense_id": "0", "tile": "0" },
+            { "level": 1, "dense_id": "255", "tile": "0" },
+            { "level": 1, "dense_id": "256", "tile": "1" },
+            { "level": 1, "dense_id": "299", "tile": "1" },
+            { "level": 2, "dense_id": "0", "tile": "0" },
+            { "level": 2, "dense_id": "299", "tile": "0" }
+          ],
+          "addresses": [
+            { "level": 1, "tile": 0, "path": "vertex/Person/l1/chunk0.parquet" },
+            { "level": 1, "tile": 1, "path": "vertex/Person/l1/chunk1.parquet" },
+            { "level": 2, "tile": 0, "path": "vertex/Person/l2/chunk0.parquet" }
+          ],
+          "files": [
+            {
+              "level": 1,
+              "paths": ["vertex/Person/l1/chunk0.parquet", "vertex/Person/l1/chunk1.parquet"]
+            },
+            {
+              "level": 2,
+              "paths": ["vertex/Person/l2/chunk0.parquet"]
+            }
+          ],
+          "refused": [
+            {
+              "about": "Coarser than anything this corpus wrote, and still answerable off the payload by the predicate — which is what the message has to say rather than 404ing a camera that asked to zoom out one more step.",
+              "level": 3,
+              "message": "writes levels 1, 2 and not 3"
+            }
+          ]
         }
       ],
       "throws": [
@@ -364,7 +406,7 @@
       "name": "levels",
       "root": "manifests/levels",
       "on_disk": false,
-      "about": "A corpus that declares a WRITTEN PYRAMID. Level `k` is `dense_id % 2^k == 0` over the payload — a predicate, answerable by any reader with or without a file — and `levels:` says which of those levels a writer spent bytes on. That is the one thing here a reader cannot derive: re-deriving it from `vertex_count` and `chunk_size` means reimplementing the writer's plan, and 404ing the day the plan moves. The numbers are the bench corpus's: a million vertices at 4,096 to a tile is 245 tiles, the coarsest level that fits in ONE tile is 8, and three levels from there is 6, 7, 8 — seven tiles of rows whatever the corpus is. Addressing them needs nothing new: level `k`'s tile `j` covers `[j·4096·2^k, (j+1)·4096·2^k)`, which is the payload's own shift plus `k`. The container spells the filename exactly as it spells the payload's, which the `rowgroups` case pins for the other spelling.",
+      "about": "A corpus that declares a WRITTEN PYRAMID. Level `k` is `dense_id % 4^k == 0` over the payload — a predicate, answerable by any reader with or without a file — and `levels:` says which of those levels a writer spent bytes on. That is the one thing here a reader cannot derive: re-deriving it from `vertex_count` and `chunk_size` means reimplementing the writer's plan, and 404ing the day the plan moves. The numbers are the bench corpus's, and they are exactly what `fossil_sinks::manifest::VertexLevels::planned(1000000, 4096)` answers: a million vertices at 4,096 to a tile is 245 payload tiles, the coarsest level that fits in ONE tile is 4, and the pyramid is complete from 1 — 62 + 16 + 4 + 1 = 83 tiles, a third of the payload whatever the corpus is. Addressing them needs nothing new: level `k`'s tile `j` covers `[j·4096·4^k, (j+1)·4096·4^k)`, which is the payload's own shift plus `2k`. The container spells the filename exactly as it spells the payload's, which the `rowgroups` case pins for the other spelling.",
       "container": "files",
       "types": [
         {
@@ -408,41 +450,45 @@
       "refused": [],
       "levels": [
         {
-          "about": "The pyramid, as a reader must compose it. `rows` is `ceil(vertex_count / 2^k)` and `tiles` is that over the level's own `chunk_size`, which is DECLARED rather than inherited from the payload's: a reader turning a level tile back into a `dense_id` range multiplies by it, and a number that has to be assumed is one a writer can change in silence. The three levels are 4 + 2 + 1 = 7 tiles, which is `2^3 - 1` and is the pyramid's whole cost at any corpus size.",
+          "about": "The pyramid, as a reader must compose it. `rows` is `VertexLevels::rows_at(vertex_count, k)` — `ceil(vertex_count / 4^k)` — and `tiles` is that over the level's own `chunk_size`, which is DECLARED rather than inherited from the payload's: a reader turning a level tile back into a `dense_id` range multiplies by it, and a number that has to be assumed is one a writer can change in silence. The four levels are 62 + 16 + 4 + 1 = 83 tiles against the payload's 245, which is the series `1/4 + 1/16 + …` and is the pyramid's whole cost at any corpus size.",
           "type": "Person",
-          "written": [6, 7, 8],
+          "written": [1, 2, 3, 4],
           "chunk_size": 4096,
           "sizes": [
-            { "level": 6, "rows": "15625", "tiles": "4" },
-            { "level": 7, "rows": "7813", "tiles": "2" },
-            { "level": 8, "rows": "3907", "tiles": "1" }
+            { "level": 1, "rows": "250000", "tiles": "62" },
+            { "level": 2, "rows": "62500", "tiles": "16" },
+            { "level": 3, "rows": "15625", "tiles": "4" },
+            { "level": 4, "rows": "3907", "tiles": "1" }
           ],
           "tile_of": [
-            { "level": 6, "dense_id": "0", "tile": "0" },
-            { "level": 6, "dense_id": "262143", "tile": "0" },
-            { "level": 6, "dense_id": "262144", "tile": "1" },
-            { "level": 6, "dense_id": "999999", "tile": "3" },
-            { "level": 7, "dense_id": "524287", "tile": "0" },
-            { "level": 7, "dense_id": "524288", "tile": "1" },
-            { "level": 8, "dense_id": "999999", "tile": "0" }
+            { "level": 1, "dense_id": "0", "tile": "0" },
+            { "level": 1, "dense_id": "16383", "tile": "0" },
+            { "level": 1, "dense_id": "16384", "tile": "1" },
+            { "level": 1, "dense_id": "999999", "tile": "61" },
+            { "level": 2, "dense_id": "65535", "tile": "0" },
+            { "level": 2, "dense_id": "65536", "tile": "1" },
+            { "level": 3, "dense_id": "262143", "tile": "0" },
+            { "level": 3, "dense_id": "262144", "tile": "1" },
+            { "level": 3, "dense_id": "999999", "tile": "3" },
+            { "level": 4, "dense_id": "999999", "tile": "0" }
           ],
           "addresses": [
-            { "level": 6, "tile": 0, "path": "vertex/Person/l6/chunk0.parquet" },
-            { "level": 6, "tile": 3, "path": "vertex/Person/l6/chunk3.parquet" },
-            { "level": 7, "tile": 1, "path": "vertex/Person/l7/chunk1.parquet" },
-            { "level": 8, "tile": 0, "path": "vertex/Person/l8/chunk0.parquet" }
+            { "level": 1, "tile": 0, "path": "vertex/Person/l1/chunk0.parquet" },
+            { "level": 1, "tile": 61, "path": "vertex/Person/l1/chunk61.parquet" },
+            { "level": 3, "tile": 3, "path": "vertex/Person/l3/chunk3.parquet" },
+            { "level": 4, "tile": 0, "path": "vertex/Person/l4/chunk0.parquet" }
           ],
           "files": [
             {
-              "level": 8,
-              "paths": ["vertex/Person/l8/chunk0.parquet"]
+              "level": 4,
+              "paths": ["vertex/Person/l4/chunk0.parquet"]
             }
           ],
           "refused": [
             {
-              "about": "A level nobody wrote is not addressable and is still ANSWERABLE — by the predicate over the payload, which is what the message has to say. A reader that composed `l5/chunk0.parquet` here would 404 against a corpus that can draw level 5 perfectly well.",
+              "about": "A level nobody wrote is not addressable and is still ANSWERABLE — by the predicate over the payload, which is what the message has to say. A reader that composed `l5/chunk0.parquet` here would 404 against a corpus that can draw level 5 perfectly well. 5 is coarser than the coarsest level `planned` writes, which is the level a writer stops at because one tile is already one request.",
               "level": 5,
-              "message": "writes levels 6, 7, 8 and not 5"
+              "message": "writes levels 1, 2, 3, 4 and not 5"
             }
           ]
         }

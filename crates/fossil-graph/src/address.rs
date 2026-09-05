@@ -209,13 +209,12 @@ impl IndexAddress {
 /// policy — a reader re-deriving it from `vertex_count` and `chunk_size` would
 /// reimplement the writer's plan and 404 the day the plan moved.
 ///
-/// **A level needs no second anchor.** Level `k`'s row `i` is the payload row
+/// **A level needs no second document.** Level `k`'s row `i` is the payload row
 /// with `dense_id == i · stride(k)`, so tile `j` of a level covers the `dense_id`
 /// range `[j · chunk_size · stride(k), (j+1) · chunk_size · stride(k))` — a
-/// contiguous run of payload tiles, which the published `codes:` anchor already
-/// bounds in Morton space. In bits, which is how this spends it: the payload's
-/// own shift plus [`VertexLevels::stride_bits`], and that is the ONE place the
-/// pyramid's base is written down.
+/// contiguous run of payload tiles. In bits, which is how this spends it: the
+/// payload's own shift plus [`VertexLevels::stride_bits`], and that is the ONE
+/// place the pyramid's base is written down.
 #[derive(Debug, Clone, Serialize)]
 pub struct LevelAddress {
     /// The levels written, finest first, as the manifest declares them.

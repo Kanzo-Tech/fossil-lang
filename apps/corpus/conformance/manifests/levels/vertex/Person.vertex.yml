@@ -11,8 +11,9 @@ property_groups:
 levels:
   prefix: l
   levels:
-  - 6
-  - 7
-  - 8
+  - 1
+  - 2
+  - 3
+  - 4
   chunk_size: 4096
 version: gar/v1

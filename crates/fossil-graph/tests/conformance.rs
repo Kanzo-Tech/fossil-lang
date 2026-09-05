@@ -264,10 +264,7 @@ fn check_refusals(label: &str, case: &Value, corpus: &ResolvedCorpus) -> usize {
 ///
 /// Returns how many level addresses were checked, for the non-vacuity count.
 fn check_levels(label: &str, case: &Value, corpus: &ResolvedCorpus) -> usize {
-    let declared: Vec<String> = list(case, "levels")
-        .iter()
-        .map(|l| s(l, "type"))
-        .collect();
+    let declared: Vec<String> = list(case, "levels").iter().map(|l| s(l, "type")).collect();
     for vertex in &corpus.types {
         assert_eq!(
             vertex.levels.is_some(),
@@ -282,10 +279,12 @@ fn check_levels(label: &str, case: &Value, corpus: &ResolvedCorpus) -> usize {
         let vertex = corpus
             .vertex_type(Some(&s(want, "type")))
             .unwrap_or_else(|e| panic!("{label}: {e}"));
-        let levels = vertex
-            .levels
-            .as_ref()
-            .unwrap_or_else(|| panic!("{label}: {} declares levels and the reader sees none", vertex.vertex_type));
+        let levels = vertex.levels.as_ref().unwrap_or_else(|| {
+            panic!(
+                "{label}: {} declares levels and the reader sees none",
+                vertex.vertex_type
+            )
+        });
 
         let written: Vec<u64> = levels.levels.iter().map(|&l| u64::from(l)).collect();
         let wanted: Vec<u64> = list(want, "written")
@@ -301,8 +300,16 @@ fn check_levels(label: &str, case: &Value, corpus: &ResolvedCorpus) -> usize {
 
         for size in list(want, "sizes") {
             let level = u32::try_from(u(size, "level")).expect("a level");
-            assert_eq!(levels.rows(level), Some(u(size, "rows")), "{label}: l{level} rows");
-            assert_eq!(levels.tiles(level), Some(u(size, "tiles")), "{label}: l{level} tiles");
+            assert_eq!(
+                levels.rows(level),
+                Some(u(size, "rows")),
+                "{label}: l{level} rows"
+            );
+            assert_eq!(
+                levels.tiles(level),
+                Some(u(size, "tiles")),
+                "{label}: l{level} tiles"
+            );
         }
 
         for entry in list(want, "tile_of") {
