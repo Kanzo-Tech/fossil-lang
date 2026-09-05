@@ -5,10 +5,10 @@ direction:
   summary: "`view` takes a rectangle and a level and depends on nothing else — the same rectangle at the same level is the same answer, however the camera got there."
 ---
 
-A consumer that wanted a picture out of a corpus used to order five concepts by hand —
-`resolveCorpus`, `openCorpus`, `mortonTilesFor`, `parseTileCodes` and a renderer's source contract —
-and sew them together with SQL of its own. That is the arithmetic `@fossil-lang/corpus` exists to
-publish, being re-derived by its own consumer. There is one call now:
+A consumer that wanted a picture out of a corpus used to order three concepts by hand —
+`resolveCorpus`, `openCorpus` and a renderer's source contract — and sew them together with SQL of
+its own. That is the arithmetic `@fossil-lang/corpus` exists to publish, being re-derived by its own
+consumer. There is one call now:
 
 ```ts
 const level = corpus.levelFor({ x, y, w, h, budget: 20_000 });
@@ -85,7 +85,6 @@ reported:
 | `cost.read` | `strided` — the full tiles were opened and the predicate strided them. `level` — a written level file answered. |
 | `cost.bytes` | compressed bytes of the runs, from the Parquet footer. |
 | `cost.runs` | maximal runs of adjacent tiles: what those tiles cost in `Range` requests. |
-| `cost.addressed` | `anchor` — the published tile-code document, arithmetic only. `footer` — the per-tile `x`/`y` boxes. |
 
 The day a level file exists, `cost.read` flips to `level` and `cost.bytes` falls.
 

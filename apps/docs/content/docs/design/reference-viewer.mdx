@@ -43,8 +43,7 @@ fossil is the same in all three, and the correspondence is exact rather than rhe
 `levels:` is the declared list — finest first, and declared rather than derived for OGC's reason,
 written out at [`levels:` — which of them are
 written](/docs/format/conventions/addressing#levels-which-of-them-are-written).
-`tile = dense_id >> 12` is the arithmetic, and `vertex/<Type>/codes.json` is the one input it
-cannot derive. `levelFor(rect, budget)` is the client's pick and it is
+`tile = dense_id >> 12` is the arithmetic. `levelFor(rect, budget)` is the client's pick and it is
 [a separate, synchronous, pure function](/docs/design/one-door) precisely so that a camera can
 decide before it asks for anything.
 
@@ -81,10 +80,10 @@ the vertices and for the coordinates the edge levels carry.
 
 **The level is over a rank, not a grid.** A Zarr chunk key is an index into an array and a tile
 matrix cell is a position in a grid; both are the coordinate. `dense_id` is a vertex's **rank** by
-Morton code, and where a code falls in a ranking is a function of how the positions are distributed.
-That is the whole reason `codes.json` exists — assuming the ranks are uniform in the code space
-misses 129 of the 226 tiles holding a matching vertex over nine windows, which is a wrong picture
-rather than a slow one. A raster reader never has this problem and a graph reader cannot avoid it.
+Morton code, and where a code falls in a ranking is a function of how the positions are distributed
+— which no field of a manifest carries. So which tiles a rectangle touches is read off the tiles'
+own `x`/`y` statistics and never computed from `chunk_size`. A raster reader never has this problem
+and a graph reader cannot avoid it.
 
 ### The two systems that already tried this on a graph
 
@@ -140,8 +139,8 @@ reader opens 245 tiles of 245.
 
 **5 · Every byte the frame opened is on the ledger.** A cost a caller cannot see is a cost nobody
 optimises, and the point of reporting bytes at all is that a reader can check them against a network
-tab. `ViewCost` reports `tiles`, `runs`, `bytes`, `read` and `addressed` — and `bytes` counts whole
-vertex tiles and no adjacency at all. **This invariant is false in both directions at once**, which
+tab. `ViewCost` reports `tiles`, `runs`, `bytes` and `read` — and `bytes` counts whole vertex tiles
+and no adjacency at all. **This invariant is false in both directions at once**, which
 the table below is arranged to show.
 
 ## What a frame costs
