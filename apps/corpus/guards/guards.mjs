@@ -945,11 +945,11 @@ export const GUARDS = [
     id: "a-level-is-the-predicate",
     title: "A written level holds exactly the rows the level predicate selects",
     proves:
-      "That every `vertex/<Type>/l{k}/` the manifest declares is a CACHE of `dense_id % 2^k == 0` " +
+      "That every `vertex/<Type>/l{k}/` the manifest declares is a CACHE of `dense_id % 4^k == 0` " +
       "over the payload and nothing else — checked as a symmetric difference over EVERY column, " +
       "in both directions, so a level that dropped a row and a level that invented one are two " +
       "different failures and both are caught. It also checks the tiling: a level tile is a " +
-      "`dense_id` range like any other, `[j·chunk_size·2^k, (j+1)·chunk_size·2^k)`, which is what " +
+      "`dense_id` range like any other, `[j·chunk_size·4^k, (j+1)·chunk_size·4^k)`, which is what " +
       "lets a reader address a level with the shift it already has and no second anchor. " +
       "Nothing else can catch a divergence here: a level set is well-formed Parquet with the " +
       "payload's own schema, so a writer that wrote every 63rd row, or the right rows in the wrong " +
@@ -961,9 +961,9 @@ export const GUARDS = [
       "That a corpus SHOULD carry a pyramid. An absent `levels:` block is a legal corpus and the " +
       "common one — a level is a predicate, so a reader answers every level with or without a " +
       "file, and what a written one changes is a byte count. Nor WHICH levels a writer ought to " +
-      "have written: that is a policy, published as the `level_plan` section of `vectors.json` and " +
-      "executed by both writers, and a corpus is free to declare a different set as long as the " +
-      "files hold what they say.",
+      "have written: that is a policy, and `fossil_sinks::manifest::VertexLevels::planned` is its " +
+      "one implementation. A corpus is free to declare a different set as long as the files hold " +
+      "what they say.",
     run(corpus) {
       const failures = [];
       const notes = [];
@@ -993,7 +993,7 @@ export const GUARDS = [
             continue;
           }
           const level = fileList(set.files);
-          const step = 2 ** set.level;
+          const step = 4 ** set.level;
           const predicate = `SELECT ${columns} FROM read_parquet(${payload}) WHERE dense_id % ${step} = 0`;
           const held = `SELECT ${columns} FROM read_parquet(${level})`;
           const bad = scalar(
@@ -1056,7 +1056,7 @@ export const GUARDS = [
             continue;
           }
           const held = fileList(set.files);
-          const step = 2 ** set.level;
+          const step = 4 ** set.level;
           const predicate =
             `SELECT src_dense, dst_dense FROM read_parquet(${fileList(relation)}) ` +
             `WHERE src_dense % ${step} = 0 OR dst_dense % ${step} = 0`;

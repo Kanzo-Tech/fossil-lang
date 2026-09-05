@@ -205,10 +205,9 @@ export function inspect(root) {
        * The WRITTEN levels, when the manifest declares any, or `null`.
        *
        * `null` is a legal corpus on `codes`' argument and more strongly: a level
-       * is the predicate `dense_id % 2^k == 0` over the payload, so every level
+       * is the predicate `dense_id % 4^k == 0` over the payload, so every level
        * is answerable with or without a file, and a written one changes a byte
-       * count rather than an answer. A type under the writers' floor — 64 tiles
-       * — declares none, and most fixtures are under it.
+       * count rather than an answer.
        *
        * A declared level whose files are not on disk is a different finding and
        * comes back as an empty `files` for that level, which

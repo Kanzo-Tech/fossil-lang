@@ -115,7 +115,7 @@ export function resolve(root, base = "") {
       // guessing the sort of files whose `ordered_by` is missing returns a
       // plausible stranger instead of nothing.
       /**
-       * The WRITTEN levels, or `null`. A level is the predicate `dense_id % 2^k == 0` over the
+       * The WRITTEN levels, or `null`. A level is the predicate `dense_id % 4^k == 0` over the
        * payload whatever this says, so `null` is a corpus and not a gap — what a written level
        * changes is which bytes answer, never which rows.
        *
@@ -155,7 +155,7 @@ export function resolve(root, base = "") {
         }
         const count = needRows(info, "vertex_count");
         const levelPrefix = (level) => withSlash(rel(typePrefix, `${stem}${level}`));
-        const rows = (level) => Math.ceil(count / 2 ** level);
+        const rows = (level) => Math.ceil(count / 4 ** level);
         return {
           levels: written,
           chunkSize: levelChunk,
@@ -163,9 +163,9 @@ export function resolve(root, base = "") {
           container,
           has: (level) => written.includes(level),
           prefix: levelPrefix,
-          // `k` more bits of `dense_id` fall off than the payload's own address drops: level `k`
-          // holds one row in `2^k`, so a tile of it spans that many times the ids.
-          tileOf: (level, denseId) => tileOf(denseId, levelShift + BigInt(level)),
+          // `2k` more bits of `dense_id` fall off than the payload's own address drops: level `k`
+          // holds one row in `4^k`, so a tile of it spans that many times the ids.
+          tileOf: (level, denseId) => tileOf(denseId, levelShift + 2n * BigInt(level)),
           tileUrl: (level, tile) => tileUrlFor(levelPrefix(level), "chunk", container)(tile),
           rows,
           tiles: (level) => Math.ceil(rows(level) / levelChunk),
