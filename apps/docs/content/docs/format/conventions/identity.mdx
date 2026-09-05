@@ -78,8 +78,12 @@ index:
 
 `ordered_by` is named rather than assumed, because a corpus whose identity is some other column
 indexes that column instead, and a `prefix` without it names files whose sort a reader would have to
-guess. `chunk_size` is declared separately from the payload's because index tile `k` is the `k`th
-slice of the **sorted** order and has nothing to do with the `dense_id` range payload tile `k` holds.
+guess. **The index is the one artefact of a corpus that is not a
+[projection](/docs/format/conventions/addressing#projections-the-payload-and-the-levels-in-one-list):
+it is a second ORDER over the same rows, so the Morton cut does not address it.** Everything else is
+that one sequence at some `scale`, whose tile `k` is a `dense_id` range; tile `k` here is the `k`th
+slice of the **sorted** order. Hence its own `chunk_size`, no `scale`, and files spelled `tile{k}`
+where a projection's are `chunk{k}`.
 
 ### Disjoint ranges are the whole mechanism
 
@@ -131,11 +135,11 @@ both ways.
 
 ## Thirty-two bits in the column, sixty-four in the arithmetic
 
-A vertex payload carries `dense_id` as **`uint32`** — the spelling its manifest declares under
-`property_groups`, and the width of the column on disk — so **one vertex type holds at most
-4,294,967,295 vertices**. An adjacency's `src_dense` and `dst_dense` are the same width, and an edge
-manifest declares no properties at all: those two columns are the relation rather than a payload of
-it, and their names and widths come from the convention.
+A vertex payload carries `dense_id` as **`uint32`** — the spelling its projection declares under
+`properties`, and the width of the column on disk — so **one vertex type holds at most
+4,294,967,295 vertices**. An adjacency's `src_dense` and `dst_dense` are declared the same width in
+the same place: those two columns are the relation rather than a payload of it, and they are the
+whole of what an adjacency projection carries.
 
 **The arithmetic is wider than the column, and deliberately.** `tile_of` takes and returns an
 unsigned **64-bit** integer, and the [published

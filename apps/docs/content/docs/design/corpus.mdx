@@ -82,8 +82,8 @@ level deeper than anything it addresses, so getting at it means a third shape in
 — a sequence of mappings inside a mapping inside a sequence — which is the nesting that module
 refuses by name, plus the same growth in `apps/corpus/guards/manifest.mjs`, a deliberate copy for a
 third party who has neither this repository nor npm. And independently: the reader already refuses
-to take the payload vocabulary off the manifest at all, because `property_groups` enumerates three
-properties where `DESCRIBE` sees seven columns. A flag on a list that does not enumerate the
+to take the payload vocabulary off the manifest at all, because a payload projection's `properties`
+enumerates three where `DESCRIBE` sees seven columns. A flag on a list that does not enumerate the
 payload would name the identity of some corpora and be silent about others. The **column name** is
 the stable thing, so the column name is what it keys on.
 
@@ -141,8 +141,8 @@ them, `<name>.graph.yml`, `<label>.vertex.yml` and `<source>_<edge>_<destination
 | file | the keys, all of them GraphAr's |
 | --- | --- |
 | graph info | `name`, `prefix`, `vertices`, `edges`, `version` |
-| vertex info | `type`, `chunk_size`, `prefix`, `property_groups`, `version`; per property `name`, `data_type`, `is_primary`, `is_nullable` |
-| edge info | `src_type`, `edge_type`, `dst_type`, `chunk_size`, `src_chunk_size`, `dst_chunk_size`, `directed`, `prefix`, `adj_lists`, `property_groups`, `version`; per adjacency `ordered`, `aligned_by`, `prefix`, `file_type` |
+| vertex info | `type`, `chunk_size`, `prefix`, `version`; per property `name`, `data_type`, `is_primary`, `is_nullable` |
+| edge info | `src_type`, `edge_type`, `dst_type`, `chunk_size`, `src_chunk_size`, `dst_chunk_size`, `directed`, `prefix`, `version`; per projection `ordered`, `aligned_by`, `file_type` |
 
 > **fossil follows GraphAr as far as GraphAr specifies, and no further** — because past that point
 > there is nothing left to follow but a C++ implementation.
@@ -158,18 +158,19 @@ checked against the rows on disk after the layout pass has re-read, renumbered a
 (`c573e73`). Required, because tiles are addressed and never listed: a hole in the middle is caught
 by the addressing, and **a missing tail is caught by nothing.**
 
-Eight divergences follow from that rule. None of them is a bug.
+Nine divergences follow from that rule. None of them is a bug.
 
 | key or artefact | GraphAr specifies | fossil does | why |
 | --- | --- | --- | --- |
 | `data_type` | ten built-ins, none unsigned; its parser accepts eight spellings and throws on the rest | `uint32` for `dense_id` and `cluster_id`, `binary` as the Arrow fallback (`crates/fossil-df/src/lib.rs`) | the address is a `u32`, so GraphAr's own reader throws on the first property of every corpus fossil writes |
 | a count | nothing; three files under `cpp/` that no specification names | `vertex_count` and `edge_count` in the YAML | a decimal integer has a width and cannot have a byte order |
 | offset table | required for `ordered_by_source`/`ordered_by_dest` edges | none emitted, anywhere | a vertex's run is a predicate on the tile already fetched, not a second request. **A real divergence from a specified thing** |
-| `chunk_size` on an edge | rows per edge chunk, recommended 2²² | equals `src_chunk_size` and is the addressing unit, so nothing bounds the row count (`crates/fossil-sinks/src/manifest.rs`) | `by_source/tile{k}.parquet` holds every edge out of vertex tile `k`. Same key, different meaning: a reader taking the borrowed name at its borrowed value gets a number instead of an error |
-| data-file paths | none, anywhere | `<prefix>chunk{k}.parquet` and `<edge prefix><adjacency prefix>tile{k}.parquet`, one level, one property group | there is nothing here to diverge from |
+| `chunk_size` on an edge | rows per edge chunk, recommended 2²² | equals `src_chunk_size` and is the addressing unit, so nothing bounds the row count (`crates/fossil-sinks/src/manifest.rs`) | `by_source/chunk{k}.parquet` holds every edge out of vertex tile `k`. Same key, different meaning: a reader taking the borrowed name at its borrowed value gets a number instead of an error |
+| data-file paths | none, anywhere | `<type prefix><projection path>chunk{k}.parquet`, and `<vertex prefix><index prefix>tile{k}.parquet` for the one artefact that is not a projection | there is nothing here to diverge from |
 | `chunk_size` on a vertex | any value; recommends 2¹⁸ | 4,096, and a power of two | the address is `dense_id >> 12`, not a division; the value is measured on five million vertices, not recommended |
 | `iri` | no field; its one escape hatch is on the graph info | on the vertex info and the edge info, omitted when empty | RDF type and predicate IRIs. A non-RDF corpus is exactly the borrowed shape |
-| an `adj_lists` entry with no `prefix` | prose names the prefix; the worked example omits it from all three entries | reported absent rather than composed from convention | conformance case `unaddressable`. The specification's own example reads here as a corpus nobody can address |
+| a projection entry with no `path` | prose names the prefix; the worked example omits it from all three `adj_lists` entries | reported absent rather than composed from convention | conformance case `unaddressable`. The specification's own example reads here as a corpus nobody can address |
+| `projections` | `property_groups` on both infos and `adj_lists` on the edge — three blocks for the payload, the orientations and the columns each carries | one block, whose entries are `{ path, scale, aligned_by?, ordered?, file_type, properties }` (`crates/fossil-sinks/src/manifest.rs, Projection`) | the four blocks fossil had described one rule: a corpus is an order, a cut, and projections of that sequence, and the payload is the projection at `scale: 1`. A GraphAr reader looks for `property_groups` and `adj_lists` and finds neither, which makes this the largest of the nine — and it costs nothing that was not already spent on `uint32` |
 
 <Callout type="warn" title="What would reverse all of this">
 GraphAr specifying what it presently leaves to `cpp/`: a data-file path, a count with a declared
@@ -347,14 +348,12 @@ Two things about the pyramid are decided, and each is spelled where it lives —
   one tile is already one range request. The series `1/4 + 1/16 + …` is **a third of the type
   whatever V is**, the same third an OME-Zarr pyramid pays, so there is no window and no floor left
   to bound it; the one size that gets no pyramid is the one a single range request already answers.
-- **The manifest declares the numbers.** A level list is `log4(V / chunk_size)` integers, so nothing
-  here grows with the graph. And which levels a writer spent bytes on is a **policy**, not a
-  derivation — a reader recomputing it from `vertex_count` would be reimplementing the writer and
-  would 404 the day the policy moved. One function chooses them, and both the pass that writes the
-  files and the caller that declares them call it.
-
-Addressing a level needs nothing new. Level *k*'s row *i* is the payload row with `dense_id = i·4^k`,
-so a level tile is a contiguous run of payload tiles, addressed by the payload's own shift plus `2k`.
+- **The manifest declares the scales.** A level is one `projections` entry carrying `scale: 4^k`, so
+  the list is `log4(V / chunk_size)` entries, nothing here grows with the graph, and a reader
+  recomputing it from `vertex_count` would be reimplementing the writer and would 404 the day the
+  policy moved. One function chooses them, and both the pass that writes the files and the caller
+  that declares them call it. **The exponent never leaves the writer**: what crosses into the
+  document is the product, so addressing a level is the payload's own shift plus `log2(scale)`.
 </Callout>
 
 <Callout type="warn" title="The edges get a pyramid, and it is not the one this said was empty">
@@ -372,7 +371,7 @@ their square. **Level *k* of a relation is therefore the edges incident to a lev
 so that the line can be drawn without opening the payload the pyramid exists to avoid. It is a
 decimation like the vertex one: every row a real edge between two real vertices at their real
 positions, nothing contracted, and it nests because its vertices do —
-`crates/fossil-sinks/src/manifest.rs, EdgeLevels` and
+`crates/fossil-sinks/src/manifest.rs, Projection` and
 `crates/fossil-layout/tests/levels.rs, an_edge_level_holds_the_incident_edges_at_the_payload_s_own_coordinates`.
 
 What this page refuses is unchanged and it is the same refusal twice: an edge between two survivors

@@ -111,9 +111,9 @@ target.
 | the question | the address |
 | --- | --- |
 | the vertices of a window | `chunk{k}.parquet` for each `k` in the window's runs of `dense_id` |
-| the edges drawn in it | `by_source/tile{k}.parquet`, the same `k` — every drawable edge has its source on screen |
-| the out-edges of `v` | `by_source/tile{v >> shift}.parquet`, filtered to `src_dense = v` |
-| the in-edges of `v` | `by_target/tile{v >> shift}.parquet`, filtered to `dst_dense = v` |
+| the edges drawn in it | `by_source/chunk{k}.parquet`, the same `k` — every drawable edge has its source on screen |
+| the out-edges of `v` | `by_source/chunk{v >> shift}.parquet`, filtered to `src_dense = v` |
+| the in-edges of `v` | `by_target/chunk{v >> shift}.parquet`, filtered to `dst_dense = v` |
 
 The filenames are the file-per-tile container's; in the other one every row is
 [the set's single file](#two-containers-one-address) and the `k` is what the footer is asked for.
@@ -134,8 +134,8 @@ completeness only for those — `src` for the drawable set, `dst` for every edge
 in the window, both for every edge incident to it.
 
 A missing orientation has two causes that are not one fact. *The caller did not ask* is a choice.
-*The corpus does not publish it* is a property of the artefact: an edge type with no `adj_lists`
-entry for a direction, or one declaring it with no `prefix`, has tiles nobody can address, and the
+*The corpus does not publish it* is a property of the artefact: an edge type with no projection
+`aligned_by` that direction, or one declaring it with no `path`, has tiles nobody can address, and the
 answer says so rather than composing a URL that 404s. And an orientation applies to a window only if
 its **own `dense_id` space is that window's** — on `Author authored Paper`, `by_target` tile `k`
 addresses `Paper`'s tile `k`, a different set of vertices. Guard: `declared-tiling`; conformance case
@@ -337,51 +337,44 @@ alone, and none of them needs a byte on disk:
 - **Every row is a real vertex** at the position the payload gives it. There is no synthetic node
   anywhere in the pyramid, and `cluster_id` is a colour rather than a level of anything.
 - **There is no second `dense_id` space.** A level shares the payload's numbering, so a level tile is
-  addressed by the payload's own shift plus `2k` — level `k` keeps one id in `4^k`, so its tile of
-  `chunk_size` rows spans that many times the ids: tile `j` covers
-  `[j · chunk_size · 4^k, (j+1) · chunk_size · 4^k)`.
+  addressed by the payload's own shift plus `log2(scale)`, and tile `j` covers
+  `[j · chunk_size · scale, (j+1) · chunk_size · scale)`.
 
 So it is **`k` flat tilings of one id space**, not a tree of `k` levels and not `k` id spaces.
 
-### `levels:` — which of them are written
+### `projections:` — the payload and the levels in one list
 
-A level is a predicate, so a reader answers any level with or without a file: striding the payload
-selects the same rows and reads more bytes. A written level is a **cache of that predicate**, and
-what it changes is a byte count.
+A corpus is an order, a cut, and **projections of that sequence** — one block, finest first, in
+which the payload is the entry whose `scale` is `1` rather than a special case:
 
 ```yaml
-levels:
-  prefix: l
-  levels:
-  - 1
-  - 2
-  - 3
-  - 4
-  chunk_size: 4096
+projections:
+- { path: '',  scale: 1,  file_type: parquet, properties: [ ... ] }
+- { path: l1/, scale: 4,  file_type: parquet, properties: [ ... ] }
+- { path: l2/, scale: 16, file_type: parquet, properties: [ ... ] }
 ```
 
-Level `k`'s tiles live under `<prefix of the type><stem>{k}/`, and inside it the corpus's
-[container](#two-containers-one-address) spells the filenames exactly as it does for the
-payload — `l1/chunk0.parquet` where the payload is `chunk0.parquet`, `l1/tiles.parquet` where it is
-`tiles.parquet`. A level set carries no index of its own.
+`path` is where the tiles are, relative to the type's own `prefix`, and inside it the corpus's
+[container](#two-containers-one-address) spells the filenames exactly as it does for the payload —
+`l1/chunk0.parquet` where the payload is `chunk0.parquet`, `l1/tiles.parquet` where it is
+`tiles.parquet`. **`scale` is how many `dense_id`s one row stands for**, so a projection holds
+`vertex_count.div_ceil(scale)` rows and a reader adds `log2(scale)` to the type's own shift and needs
+no exponent of its own. Both are [OME-NGFF's own spellings](/docs/design/prior-art). No projection
+declares a `chunk_size` — the cut does not change with the scale — so the type's own number addresses
+every one of them, and [the identity index](/docs/format/conventions/identity), which is not a
+projection, is the one artefact carrying its own.
 
-**The numbers are declared, and they are not derivable.** A level list is
-`log4(vertex_count / chunk_size)` integers, so nothing here grows with the graph. And which levels a
+**The scales are declared, and they are not derivable.** The list is
+`log4(vertex_count / chunk_size)` entries, so nothing here grows with the graph. And which levels a
 writer chose to spend bytes on is a *policy*: a reader re-deriving it from `vertex_count` and
-`chunk_size` would be reimplementing the writer's plan and would 404 the day the plan moved.
+`chunk_size` would be reimplementing the writer's plan and would 404 the day the plan moved. One
+function chooses them: `crates/fossil-sinks/src/manifest.rs, VertexLevels`.
+`a-level-is-the-predicate` checks the files against the predicate rather than against the plan,
+because a corpus is free to declare a different set as long as what it wrote is what it says.
 
-`chunk_size` is declared for the same reason rather than inherited from the payload's: a reader
-turning a level tile back into a `dense_id` range multiplies by it, and a number that has to be
-assumed is one a writer can change in silence.
-
-**Absent is a corpus and not a gap.** A type that fits a single tile declares no `levels:` and draws
-the identical picture — one range request already answers it, so there is no coarser view left to
-write. Every type over that size carries the pyramid, complete.
-
-Which levels a writer writes is a **policy** rather than something a reader derives, and the policy
-is one function: `crates/fossil-sinks/src/manifest.rs, VertexLevels`. `a-level-is-the-predicate`
-checks the files against the predicate rather than against the plan, because a corpus is free to
-declare a different set as long as what it wrote is what it says.
+**A single projection is a corpus and not a gap.** A type that fits a single tile declares the
+payload alone and draws the identical picture — one range request already answers it, so there is no
+coarser view left to write. Every type over that size carries the pyramid, complete.
 
 ## Encoding is chosen per column
 
@@ -407,7 +400,7 @@ and 36.0 kB** against **4 requests and 37.0 kB** for all six columns, from 68.8 
 ## The address is published, not described
 
 All of the above is arithmetic over four manifest fields — `prefix`, `chunk_size`, `aligned_by` and
-the adjacency's own `prefix` — and a reader that re-derives it from this page has copied a convention
+the projection's own `path` — and a reader that re-derives it from this page has copied a convention
 no compiler compares against the corpus. Change a prefix or a shift and the copy composes URLs that
 404 at runtime, in a browser, with no type error and nothing red.
 

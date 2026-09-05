@@ -101,15 +101,15 @@ ordered by, so a hop out of one vertex is two files whose names are arithmetic:
 
 ```sql
 -- everything vertex 41000 touches: 41000 >> 12 = 10, in both directions
-SELECT dst_dense AS far FROM read_parquet('edge/Person_knows_Person/by_source/tile10.parquet')
+SELECT dst_dense AS far FROM read_parquet('edge/Person_knows_Person/by_source/chunk10.parquet')
  WHERE src_dense = 41000
 UNION ALL
-SELECT src_dense FROM read_parquet('edge/Person_knows_Person/by_target/tile10.parquet')
+SELECT src_dense FROM read_parquet('edge/Person_knows_Person/by_target/chunk10.parquet')
  WHERE dst_dense = 41000;
 ```
 
-Which prefix is which direction is in the edge type's manifest, one `adj_lists` entry per
-orientation: `aligned_by` names the column that addresses it, `prefix` names the directory. Do not
+Which path is which direction is in the edge type's manifest, one `projections` entry at `scale: 1`
+per orientation: `aligned_by` names the column that addresses it, `path` names the directory. Do not
 follow only `by_source` — in a knowledge graph "the papers by this author" is an in-edge, and half
 the directions is a wrong answer and not a partial one. The `WITH RECURSIVE` over the whole relation
 that these two files replace did not return in 45 seconds

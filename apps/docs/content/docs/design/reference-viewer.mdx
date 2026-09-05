@@ -40,9 +40,9 @@ viewport deserves is a function of pixels, and pixels are the client's business.
 </div>
 
 fossil is the same in all three, and the correspondence is exact rather than rhetorical.
-`levels:` is the declared list — finest first, and declared rather than derived for OGC's reason,
-written out at [`levels:` — which of them are
-written](/docs/format/conventions/addressing#levels-which-of-them-are-written).
+`projections:` is the declared list — finest first, and declared rather than derived for OGC's
+reason, written out at [`projections:` — the payload and the levels in one
+list](/docs/format/conventions/addressing#projections-the-payload-and-the-levels-in-one-list).
 `tile = dense_id >> 12` is the arithmetic. The pick is the client's in the sense that matters: the
 canvas goes in, `frame` derives the level at one mark per pixel, and `level` names one outright for
 a caller that would rather say it. [One door](/docs/design/one-door) is why that moved inside the
@@ -199,7 +199,7 @@ Row (d) is the one the model wants and no reader can produce. The edge level at 
 **62,024 rows** — exactly the links row (b) draws — and the far ends it positions are exactly the
 **60,136** anchors row (b) returns, because a level of a relation is the edges incident to a
 level-*k* vertex and every row carries both endpoints' coordinates
-(`crates/fossil-sinks/src/manifest.rs, EdgeLevels`). So the same frame, drawn identically, is
+(`crates/fossil-sinks/src/manifest.rs, Projection`). So the same frame, drawn identically, is
 1,533 kB against 26,359 kB — **17.2× (derived)** — and the bytes are on disk today.
 
 ### The same frame, as the camera zooms
@@ -283,7 +283,8 @@ stays. What would close it is a second pair of fields weighed the same way, and 
 query already knows.
 
 **3 · There is no level of detail for the identity index, and no statement of whether it needs one.**
-`VertexIndex` carries a prefix, an ordered-by column and a chunk size, and no `levels:`. At a
+The index is [not a projection](/docs/format/conventions/identity), so it carries a prefix, an
+ordered-by column and a chunk size of its own, and no `scale`. At a
 million vertices `index/tiles.parquet` is **8,522 kB — 41% of the payload (derived)**, the largest
 artefact in the corpus after the two it serves. The honest framing is that a *lookup* does not need
 a pyramid: the index tiles' footers carry disjoint `subject` ranges, so a binary search over them

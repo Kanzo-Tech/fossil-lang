@@ -13,7 +13,7 @@ A sorted adjacency file is not merely convenient to scan — it **is** the CSR s
 algorithm wants, offsets and values, already laid out:
 
 ```
-by_source/tile10.parquet, ordered by src_dense    the CSR a reader already has
+by_source/chunk10.parquet, ordered by src_dense    the CSR a reader already has
 
  row   src_dense   dst_dense                      offsets[41000] = 0  first row of 41000
    0       41000        8300  ┐                   offsets[41001] = 3  one past its last
@@ -51,8 +51,8 @@ it is ordered by, so one edge is written into two tiles that have nothing to do 
 ```mermaid
 graph LR
   E["edge <b>41000 → 8300</b>"]
-  E -->|"src_dense 41000 >> 12 = <b>10</b>"| S["<b>by_source/tile10</b>.parquet<br/>every edge out of<br/>vertices 40960–45055"]
-  E -->|"dst_dense 8300 >> 12 = <b>2</b>"| T["<b>by_target/tile2</b>.parquet<br/>every edge into<br/>vertices 8192–12287"]
+  E -->|"src_dense 41000 >> 12 = <b>10</b>"| S["<b>by_source/chunk10</b>.parquet<br/>every edge out of<br/>vertices 40960–45055"]
+  E -->|"dst_dense 8300 >> 12 = <b>2</b>"| T["<b>by_target/chunk2</b>.parquet<br/>every edge into<br/>vertices 8192–12287"]
 ```
 
 On a cross-type edge those are two different `dense_id` spaces, which is why `src_chunk_size` and
@@ -68,17 +68,18 @@ the same hole with `vertex_count` ([Identity](/docs/format/conventions/identity)
 
 ### Given a `dense_id`, where its edges are
 
-Every part of this comes out of the edge type's manifest — nothing is agreed out of band. `prefix`
-is the URL, the one part a reader cannot compute; `aligned_by` is the arithmetic, and the shift comes
-from `src_chunk_size` for the source-aligned list and `dst_chunk_size` for the target-aligned one.
+Every part of this comes out of the edge type's manifest — nothing is agreed out of band. Each
+orientation is a [projection](/docs/format/conventions/addressing#projections-the-payload-and-the-levels-in-one-list)
+at `scale: 1`: `path` is the URL, the one part a reader cannot compute; `aligned_by` is the
+arithmetic, its shift `src_chunk_size` for the source-aligned one and `dst_chunk_size` for the other.
 
 ```yaml
 prefix: edge/Person_knows_Person/
 src_chunk_size: 4096
 dst_chunk_size: 4096
-adj_lists:
-- { ordered: true, aligned_by: src, prefix: by_source/, file_type: parquet }
-- { ordered: true, aligned_by: dst, prefix: by_target/, file_type: parquet }
+projections:
+- { path: by_source/, scale: 1, aligned_by: src, ordered: true, file_type: parquet }
+- { path: by_target/, scale: 1, aligned_by: dst, ordered: true, file_type: parquet }
 ```
 
 So the **out-edges and in-edges of `v`** are two addressed reads, and the work follows the frontier
@@ -89,9 +90,9 @@ sequenceDiagram
   participant R as reader
   participant S as by_source/
   participant T as by_target/
-  R->>S: GET {prefix}by_source/tile{v >> shift(src_chunk_size)}.parquet
+  R->>S: GET {prefix}by_source/chunk{v >> shift(src_chunk_size)}.parquet
   S-->>R: filter src_dense = v → the far ends v points at
-  R->>T: GET {prefix}by_target/tile{v >> shift(dst_chunk_size)}.parquet
+  R->>T: GET {prefix}by_target/chunk{v >> shift(dst_chunk_size)}.parquet
   T-->>R: filter dst_dense = v → the far ends that point at v
 ```
 
