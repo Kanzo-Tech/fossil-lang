@@ -16,7 +16,7 @@
  * | reader | what it is |
  * | --- | --- |
  * | `./reader.mjs` | plain Node, written from the conventions and from nothing else |
- * | `./wasm-reader.mjs` | `fossil_graph::address` compiled to wasm32, through `fossil-graph-wasm` |
+ * | `./wasm-reader.mjs` | `fossil_graph::plan` compiled to wasm32, through `fossil-graph-wasm` |
  * | `packages/corpus/src/address.ts` | the published module, run by `packages/corpus/tests/conformance.test.ts` |
  *
  * It was two, and both were JavaScript. A mistake they share — a shift taken as signed, a count

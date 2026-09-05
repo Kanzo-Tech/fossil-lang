@@ -446,7 +446,7 @@ a workspace that has no `@kanzo-tech/graph` and never will; nothing in `crates/`
 import to disambiguate. And the crate is not misnamed the way the package was: `fossil-graph` is a
 verb surface over a **property graph**, which is what it says it is, whereas the package's whole
 public shape had already moved to the corpus. Renaming them would have spent a cross-language
-rename — every `fossil_graph::address` in the conformance tables, the `fossil_graph_wasm` artefact
+rename — every `fossil_graph::plan` in the conformance tables, the `fossil_graph_wasm` artefact
 stem in `packages/corpus/pkg/`, and the `pkg/` filenames in the published `files` list — to fix an
 ambiguity that does not exist there.
 
@@ -458,7 +458,7 @@ directory rename that would have been tidier happened**: `apps/corpus/` keeps it
 
 <Callout type="info">
   The three readers of `conformance/expected.json` are unchanged in number and in kind — the rename
-  moved `packages/graph/` to `packages/corpus/` and touched no arithmetic. `fossil_graph::address`
+  moved `packages/graph/` to `packages/corpus/` and touched no arithmetic. `fossil_graph::plan`
   is still the third one, and still spelled that way.
 </Callout>
 
@@ -671,7 +671,7 @@ graph LR
   R[["recipe · provenance.mjs"]] --> C
   C --> JS["reader.mjs · from the conventions alone"]
   C --> TS["resolveCorpus · the published module"]
-  C --> RS["fossil_graph::address · native and wasm32"]
+  C --> RS["fossil_graph::plan · native and wasm32"]
   JS --> D{"diff"}
   TS --> D
   RS --> D
@@ -706,7 +706,7 @@ are exactly the borders `vectors.json` publishes because a port can get them wro
 the same language family is what is not missing; a third reader in a different one is a different
 claim.
 
-`fossil_graph::address` is that reader. It goes through no struct of the writer's — `fossil-graph`'s
+`fossil_graph::plan` is that reader. It goes through no struct of the writer's — `fossil-graph`'s
 other manifest module deserialises into `fossil-sinks`' own types, which proves those types
 round-trip and says nothing about the artefact, so this one reads a generic YAML value and asks the
 document a stranger's questions. It opens no byte, which is also what makes it indifferent to which

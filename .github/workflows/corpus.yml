@@ -23,7 +23,7 @@ name: corpus
 # guards, not here.
 #
 # Which is why `verify.mjs` runs here with `--without-wasm`. Its third reader is
-# `fossil_graph::address` compiled to wasm32, and reaching it means `packages/corpus/pkg/`,
+# `fossil_graph::plan` compiled to wasm32, and reaching it means `packages/corpus/pkg/`,
 # a Rust toolchain and `wasm-bindgen-cli` — the third thing the paragraph above refuses.
 # The flag is the explicit refusal rather than a silent skip: without it the run fails,
 # because a leg that disappears when its dependency is missing is how a conformance suite

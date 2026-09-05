@@ -4,7 +4,7 @@
  * `reader.mjs` is plain Node written from the conventions. `resolveCorpus` in
  * `@fossil-lang/corpus/address` is the published TypeScript. Both are JavaScript, and a mistake they
  * share — a shift taken as signed, a count that went through a `Number` — is invisible to a diff of
- * the two. This one is `fossil_graph::address`, compiled to wasm32 and reached through
+ * the two. This one is `fossil_graph::plan`, compiled to wasm32 and reached through
  * `fossil-graph-wasm`'s `Corpus`: a different language, a different integer width, and the build
  * that actually ships to a browser.
  *

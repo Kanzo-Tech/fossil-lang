@@ -22,7 +22,7 @@ build, which is the intended coupling: a page cannot drift from a table it does 
 
 `conformance/expected.json` is a table of addresses that none of its executors wrote. Three read it:
 `conformance/reader.mjs` (plain Node, from the conventions), `packages/corpus/src/address.ts` (the
-published module, run from `packages/corpus/tests/conformance.test.ts`), and `fossil_graph::address`
+published module, run from `packages/corpus/tests/conformance.test.ts`), and `fossil_graph::plan`
 — natively in `crates/fossil-graph/tests/conformance.rs`, and as wasm32 through
 `conformance/wasm-reader.mjs`.
 
