@@ -16,8 +16,13 @@
 //! the YAML is spelled the way the writer spells it; what it contains is a
 //! fixture's business.
 //!
+//! It writes to STDOUT, so regenerating the fixture is a redirect — and the
+//! redirect is the command, because without it this prints and changes nothing
+//! while `fixture_is_not_stale` stays red:
+//!
 //! ```sh
-//! cargo run -p fossil-graph --example dump_fixture
+//! cargo run -p fossil-graph --example dump_fixture \
+//!   > packages/corpus/tests/fixtures/manifest.json
 //! ```
 
 use fossil_sinks::manifest::{
