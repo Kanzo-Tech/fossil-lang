@@ -47,8 +47,7 @@ import { registerHooks } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { openCorpus } from '@fossil-lang/corpus';
-import { resolveCorpus } from '@fossil-lang/corpus/address';
+import { openCorpus, resolveCorpus } from '@fossil-lang/corpus';
 import { BOUNDED_DEFAULTS, denseOf, typeOf, vertexId } from '@kanzo-tech/graph';
 
 import { query as duckQuery } from '../../corpus/guards/duck.mjs';
@@ -156,7 +155,18 @@ let lastCost = null;
 // The door, opened against the same directory the addressing above was resolved from. Everything
 // it costs — the manifests, one `DESCRIBE` per type, the tile-code anchors — is paid here, before
 // the counter below starts, because none of it is a camera move.
-const corpus = await openCorpus(root, { query });
+/**
+ * The reader's wasm, resolved from this package rather than from a bundler.
+ *
+ * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32 — the
+ * addressing has one implementation now, and Node is the host that has to say where it lives.
+ */
+const CORPUS_WASM_URL = new URL(
+  '../node_modules/@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm',
+  import.meta.url,
+);
+
+const corpus = await openCorpus(root, { query, wasmUrl: CORPUS_WASM_URL });
 const source = corpusSource({
   corpus,
   boxes,

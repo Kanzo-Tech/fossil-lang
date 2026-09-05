@@ -35,6 +35,7 @@
  * hands back the tiled tree**, so this file stages bytes and opens them, and there is no
  * stand-in left to document.
  */
+import corpusWasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url';
 import { openCorpus, type Corpus } from '@fossil-lang/corpus';
 import type { GraphArFile } from '@fossil-lang/executor';
 
@@ -42,6 +43,16 @@ import { query, register } from './duckdb.js';
 
 /** Where the corpus is addressed from. Any prefix works; it just has to be consistent. */
 export const CORPUS_URL = 'corpus';
+
+/**
+ * Where the corpus reader's wasm lives, named once for the whole app.
+ *
+ * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32 — there is no
+ * second implementation of the addressing on this side any more, so opening a corpus is what needs
+ * it rather than only the verbs. Vite rewrites the `?url` at build time, which is the same way
+ * `check.ts` reaches the compiler's wasm and `run.ts` the executor's.
+ */
+export const CORPUS_WASM_URL = corpusWasmUrl;
 
 /** A single-quoted SQL string literal. Every path in this module reaches SQL through here. */
 const lit = (value: string) => `'${value.replace(/'/g, "''")}'`;
@@ -62,7 +73,7 @@ export async function stage(files: readonly GraphArFile[]): Promise<void> {
 
 /** Open the corpus through the reference door. Throws if the manifest cannot address itself. */
 export function open(): Promise<Corpus> {
-  return openCorpus(CORPUS_URL, { query });
+  return openCorpus(CORPUS_URL, { query, wasmUrl: CORPUS_WASM_URL });
 }
 
 /**

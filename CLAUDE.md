@@ -193,10 +193,13 @@ crates/
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
-  corpus/                  two halves over one manifest. The verbs are the root barrel and NEED
-                           the gitignored `pkg/`; the addressing (`resolveCorpus` — no WASM) is
-                           `@fossil-lang/corpus/address`, and it has a subpath because a barrel
-                           import is not one. `tests/address-standalone.test.ts` proves it.
+  corpus/                  ONE door over one manifest, and every part of it needs the gitignored
+                           `pkg/`. The addressing is no longer a second implementation: it is
+                           `fossil_graph::plan` compiled to wasm32, and `resolveCorpus` is a
+                           binding over it. The subpath `@fossil-lang/corpus/address` existed so a
+                           caller could address a corpus WITHOUT wasm, and it is deleted with its
+                           standalone test — composing a URL now costs loading the module, which is
+                           the price of there being one reader instead of two.
                            It was `@fossil-lang/graph` and it is not a graph: its door is
                            `openCorpus` and the thing that DOES draw one, `@kanzo-tech/graph`,
                            sits beside it in the playground's `package.json`. The Rust crates

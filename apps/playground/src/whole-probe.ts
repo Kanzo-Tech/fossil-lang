@@ -23,6 +23,7 @@
 import { openCorpus } from '@fossil-lang/corpus';
 
 import { openBench } from './bench.js';
+import { CORPUS_WASM_URL } from './corpus.js';
 import * as duck from './duckdb.js';
 import { FOOTER_SQL, extentOf, toTileBox, windowIn, type Rect } from './stream.js';
 import { corpusSource, type SliceCost } from './tiles.js';
@@ -75,7 +76,7 @@ async function main(): Promise<void> {
   );
   say('');
 
-  const corpus = openCorpus(bench.base, { query: duck.query });
+  const corpus = openCorpus(bench.base, { query: duck.query, wasmUrl: CORPUS_WASM_URL });
 
   // ---- the windowed path ----
   let streamCost: SliceCost | null = null;

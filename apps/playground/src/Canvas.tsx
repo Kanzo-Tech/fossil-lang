@@ -31,6 +31,7 @@ import { openCrossfilter, paintMask, type Crossfilter, type CrossfilterCost } fr
 import * as duck from './duckdb.js';
 import Histogram from './Histogram.js';
 import { coordinatorFor } from './mosaic.js';
+import { CORPUS_WASM_URL } from './corpus.js';
 import type { TileBox } from './stream.js';
 import { corpusSource, type SliceCost } from './tiles.js';
 import { wholeSource, type WholeCost } from './whole.js';
@@ -290,7 +291,7 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
    * own members, once. `bench.base` is absolute for the reason `bench.ts` records: DuckDB resolves
    * a URL inside its Worker, where a relative one names the wrong directory.
    */
-  const corpus = useMemo(() => openCorpus(bench.base, { query: duck.query }), [bench]);
+  const corpus = useMemo(() => openCorpus(bench.base, { query: duck.query, wasmUrl: CORPUS_WASM_URL }), [bench]);
 
   const streaming: BoundedSource = useMemo(
     () => corpusSource({ corpus, boxes, onCost, slots }),

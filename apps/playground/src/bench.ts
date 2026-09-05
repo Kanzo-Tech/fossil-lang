@@ -5,20 +5,21 @@
  * time; this module opens it the way any reader would: fetch the manifests, hand them to
  * `resolveCorpus`, and get back every URL the corpus can produce.
  *
- * ## The import is the claim
+ * ## What addressing costs now
  *
- * `@fossil-lang/corpus/address`, not `@fossil-lang/corpus`. The barrel needs the WASM verb
- * surface and static-imports `pkg/`; the addressing subpath imports nothing but a YAML reader.
- * That separation is enforced by `packages/corpus/tests/address-standalone.test.ts`, which
- * builds the package with no `pkg/` at all and runs `resolveCorpus` from a consumer with an
- * otherwise empty `node_modules`. So "computing the URLs needs no engine" is not a claim this
- * app makes about itself — it is a property of the module it imports, tested next door.
+ * It used to cost nothing: `@fossil-lang/corpus/address` was a subpath that imported a YAML
+ * reader and no engine, and a test next door built the package with no `pkg/` at all to prove it.
+ * **That subpath is gone**, and so is the claim. The addressing is `fossil_graph::plan` compiled
+ * to wasm32 — one implementation instead of two — so composing a URL costs loading a wasm module
+ * where it used to cost parsing three small YAML files.
  *
- * `resolveCorpus` is synchronous. Everything asynchronous here is fetching the three small
- * YAML files it reads; once they are in hand, every tile URL in a million-vertex corpus is
- * available without another request.
+ * What survives is the shape of the win: `resolveCorpus` is still SYNCHRONOUS once the module is
+ * up, so every tile URL in a million-vertex corpus becomes available on one line with no further
+ * request. The init is awaited once, here, and memoised for the rest of the session.
  */
-import { resolveCorpus, type CorpusAddressing } from '@fossil-lang/corpus/address';
+import { initFossilGraphWasm, resolveCorpus, type CorpusAddressing } from '@fossil-lang/corpus';
+
+import { CORPUS_WASM_URL } from './corpus.js';
 
 /** What `scripts/bench-corpus.mjs` recorded about the corpus it wrote. */
 export interface BenchStamp {
@@ -136,8 +137,9 @@ export async function openBench(): Promise<Bench | null> {
   const manifestFiles: Record<string, string> = { 'graph.graph.yml': indexText };
   for (const [path, text] of rest) manifestFiles[path] = text;
 
-  // The whole of the addressing, and it is synchronous. Every tile URL of a million-vertex
-  // corpus becomes available on this line, with no engine loaded and no further request.
+  // The whole of the addressing, and it is synchronous once the module is up. Every tile URL of a
+  // million-vertex corpus becomes available on this line, with no further request.
+  await initFossilGraphWasm({ wasmUrl: CORPUS_WASM_URL });
   const resolveStarted = performance.now();
   const addressing = resolveCorpus({ manifestFiles, base });
   const resolveMs = performance.now() - resolveStarted;

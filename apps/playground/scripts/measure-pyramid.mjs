@@ -50,7 +50,21 @@ const root = resolve(app, 'public/bench', String(count));
 /** The renderer's own cap — `BOUNDED_DEFAULTS.limit` in `@kanzo-tech/graph`. */
 const BUDGET = Number(flag('budget', 20000));
 
-const corpus = await openCorpus(root, { query: async (sql) => duckQuery(sql) });
+/**
+ * The reader's wasm, resolved from this package rather than from a bundler.
+ *
+ * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32 — the
+ * addressing has one implementation now, and Node is the host that has to say where it lives.
+ */
+const CORPUS_WASM_URL = new URL(
+  '../node_modules/@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm',
+  import.meta.url,
+);
+
+const corpus = await openCorpus(root, {
+  query: async (sql) => duckQuery(sql),
+  wasmUrl: CORPUS_WASM_URL,
+});
 const type = corpus.types.vertices[0].type;
 const extent = await corpus.extent();
 if (extent === null) {
