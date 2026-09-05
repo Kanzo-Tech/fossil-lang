@@ -51,11 +51,13 @@
 //! different RELATION and not a filter, and a `WHERE` cannot change which table
 //! it reads. This said *a level-3 tile holds supernodes that do not exist at
 //! level 0*, and that is not what was built: a level is the DECIMATION
-//! `dense_id % 2^k == 0`, every row a real vertex sharing the payload's own
-//! numbering, because a synthetic centroid cannot nest. What makes it a
-//! different relation is still the point — the rows live in
-//! [`address::LevelAddress`]'s own tiles — and what makes it addressable is that
-//! the numbering is shared: a level tile is the payload's shift plus `k`. The
+//! `dense_id % fossil_sinks::manifest::VertexLevels::stride(k) == 0`, every row
+//! a real vertex sharing the payload's own numbering, because a synthetic
+//! centroid cannot nest. What makes it a different relation is still the point —
+//! the rows live in [`address::LevelAddress`]'s own tiles, and the relation's in
+//! [`address::EdgeLevelAddress`]'s — and what makes it addressable is that the
+//! numbering is shared: a level tile is the payload's shift plus
+//! `VertexLevels::stride_bits(k)`, which is the one place that base is spelled. The
 //! camera computes a level and tile addresses and asks for bytes; no bbox, no
 //! SQL, no `DuckDB` on that path. A filter that must change the picture answers
 //! with ids and the canvas masks its resident tiles with them — one mechanism,

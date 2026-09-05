@@ -31,6 +31,7 @@
 
 use std::collections::BTreeMap;
 
+use fossil_sinks::manifest::VertexLevels;
 use serde::Serialize;
 use serde_yaml_ng::Value;
 
@@ -197,22 +198,24 @@ impl IndexAddress {
 
 /// Where a vertex type's **written levels** are, and which ones exist.
 ///
-/// **Level `k` is `dense_id % 2^k == 0`, whatever this says.** A level is a
-/// predicate over the payload and a written `l{k}/` is a cache of it, so a corpus
-/// declaring none draws the identical picture and only reads more. What this
-/// block changes is a byte count.
+/// **Level `k` is the vertices whose `dense_id` is a multiple of the stride
+/// [`VertexLevels`] publishes, whatever this says.** A level is a predicate
+/// over the payload and a written `l{k}/` is a cache of it, so a corpus declaring
+/// none draws the identical picture and only reads more. What this block changes
+/// is a byte count.
 ///
 /// **The numbers are declared and not derived**, unlike everything else here.
-/// `fossil_sinks::manifest::VertexLevels` argues why: a level list is at most
-/// three integers whatever the corpus is, and *which* levels a writer spent bytes
-/// on is a policy — a reader re-deriving it from `vertex_count` and `chunk_size`
-/// would reimplement the writer's plan and 404 the day the plan moved.
+/// [`VertexLevels`] argues why: *which* levels a writer spent bytes on is a
+/// policy — a reader re-deriving it from `vertex_count` and `chunk_size` would
+/// reimplement the writer's plan and 404 the day the plan moved.
 ///
 /// **A level needs no second anchor.** Level `k`'s row `i` is the payload row
-/// with `dense_id == i · 2^k`, so tile `j` of a level covers the `dense_id` range
-/// `[j · chunk_size · 2^k, (j+1) · chunk_size · 2^k)` — a contiguous run of
-/// payload tiles, which the published `codes:` anchor already bounds in Morton
-/// space.
+/// with `dense_id == i · stride(k)`, so tile `j` of a level covers the `dense_id`
+/// range `[j · chunk_size · stride(k), (j+1) · chunk_size · stride(k))` — a
+/// contiguous run of payload tiles, which the published `codes:` anchor already
+/// bounds in Morton space. In bits, which is how this spends it: the payload's
+/// own shift plus [`VertexLevels::stride_bits`], and that is the ONE place the
+/// pyramid's base is written down.
 #[derive(Debug, Clone, Serialize)]
 pub struct LevelAddress {
     /// The levels written, finest first, as the manifest declares them.
@@ -222,7 +225,8 @@ pub struct LevelAddress {
     /// multiplies by it and a number that has to be assumed is one a writer can
     /// change in silence.
     pub chunk_size: u64,
-    /// `log2(chunk_size)` — a level tile's address is this shift plus the level.
+    /// `log2(chunk_size)` — a level tile's address is this shift plus
+    /// [`VertexLevels::stride_bits`].
     pub shift: u32,
     /// Which container carries the level tiles. The corpus's, never a second answer.
     pub container: Container,
@@ -254,17 +258,24 @@ impl LevelAddress {
     /// Where level `k`'s tiles are, resolved, with a trailing separator.
     #[must_use]
     pub fn prefix(&self, level: u32) -> String {
-        prefix_of(&join(&[&self.vertex_prefix, &format!("{}{level}", self.stem)]))
+        prefix_of(&join(&[
+            &self.vertex_prefix,
+            &format!("{}{level}", self.stem),
+        ]))
     }
 
-    /// The tile of level `k` holding `dense_id`: a shift by `log2(chunk_size) + k`.
+    /// The tile of level `k` holding `dense_id`: a shift by the payload's own
+    /// plus [`VertexLevels::stride_bits`].
     ///
-    /// Never a division, and `k` more bits fall off than the payload's own
-    /// address drops — level `k` holds one row in `2^k`, so a tile of it spans
-    /// that many times the ids.
+    /// Never a division, and more bits fall off than the payload's own address
+    /// drops — level `k` holds one row per [`VertexLevels::stride`], so a tile
+    /// of it spans that many times the ids.
     #[must_use]
     pub const fn tile_of(&self, level: u32, dense_id: u64) -> u64 {
-        tile_of(dense_id, self.shift.saturating_add(level))
+        tile_of(
+            dense_id,
+            self.shift.saturating_add(VertexLevels::stride_bits(level)),
+        )
     }
 
     /// The file tile `j` of level `k` is in, spelled by the corpus's container.
@@ -273,11 +284,12 @@ impl LevelAddress {
         tile_url_for(&self.prefix(level), "chunk", self.container, tile)
     }
 
-    /// How many rows level `k` holds — `ceil(count / 2^k)` — or `None` when the
-    /// manifest declares no count.
+    /// How many rows level `k` holds, or `None` when the manifest declares no
+    /// count. [`VertexLevels::rows_at`] is the division; this only supplies the
+    /// count.
     #[must_use]
     pub fn rows(&self, level: u32) -> Option<u64> {
-        self.count.map(|c| c.div_ceil(1u64 << level.min(63)))
+        self.count.map(|c| VertexLevels::rows_at(c, level))
     }
 
     /// How many tiles level `k` has, or `None` when the manifest declares no count.
@@ -433,6 +445,124 @@ impl AdjacencyAddress {
     }
 }
 
+/// Where a relation's **level sets** are, and which ones exist.
+///
+/// The sibling of [`LevelAddress`], addressed by the rule the vertex levels
+/// already have: tile `j` of level `k` holds the rows whose `src_dense` is in
+/// `[j · chunk_size · stride(k), (j+1) · chunk_size · stride(k))` — the SOURCE
+/// level's own tile range — so a reader that can address a vertex level can
+/// address the edges beside it with no new arithmetic and no second anchor.
+/// `fossil_sinks::manifest::EdgeLevels` is the writer's half of it.
+///
+/// **What it carries that no other set does is the endpoints' coordinates**, so
+/// a level set is self-drawing: the lines and their far ends come out of one
+/// file. A camera keeps an edge with one end drawn, and a VERTEX level almost
+/// never holds the other end — so a pyramid of vertices alone answers a view
+/// with links by opening the payload, which is the read it exists to avoid.
+///
+/// The counts come from the SOURCE type's `vertex_count` and never from
+/// `edge_count`: a level tile here is a range of `src_dense`, and the relation's
+/// own row count says nothing about how many of those ranges there are.
+#[derive(Debug, Clone, Serialize)]
+pub struct EdgeLevelAddress {
+    /// The levels written, finest first — the source type's own. A level of a
+    /// relation is *which vertices are in it*, so this is not a second choice.
+    pub levels: Vec<u32>,
+    /// Rows per tile of the SOURCE vertex type, which the tile's `dense_id`
+    /// range is built from. Declared for [`LevelAddress::chunk_size`]'s reason.
+    pub chunk_size: u64,
+    /// `log2(chunk_size)` — a level tile's address is this shift plus
+    /// [`VertexLevels::stride_bits`].
+    pub shift: u32,
+    /// Which container carries the level tiles. The corpus's, never a second answer.
+    pub container: Container,
+    /// The edge type's own prefix, which a level's prefix is relative to.
+    #[serde(skip)]
+    edge_prefix: String,
+    /// Filename stem of a level set's prefix — `l`, the same stem the vertex
+    /// levels use, because it is the same convention and not a second one.
+    #[serde(skip)]
+    stem: String,
+    /// The SOURCE type's `vertex_count`, for the tile count a level has.
+    #[serde(skip)]
+    src_count: Option<u64>,
+    /// The manifest file this was read from, for the error messages that name it.
+    #[serde(skip)]
+    path: String,
+}
+
+impl EdgeLevelAddress {
+    /// Whether level `k` is written. `false` is a cost and not a refusal — the
+    /// adjacency and the payload answer every level.
+    #[must_use]
+    pub fn has(&self, level: u32) -> bool {
+        self.levels.contains(&level)
+    }
+
+    /// Where level `k`'s tiles are, resolved, with a trailing separator.
+    #[must_use]
+    pub fn prefix(&self, level: u32) -> String {
+        prefix_of(&join(&[
+            &self.edge_prefix,
+            &format!("{}{level}", self.stem),
+        ]))
+    }
+
+    /// The tile of level `k` a `src_dense` falls in: the source's shift plus
+    /// [`VertexLevels::stride_bits`], and never a division.
+    #[must_use]
+    pub const fn tile_of(&self, level: u32, src_dense: u64) -> u64 {
+        tile_of(
+            src_dense,
+            self.shift.saturating_add(VertexLevels::stride_bits(level)),
+        )
+    }
+
+    /// The file tile `j` of level `k` is in, spelled by the corpus's container.
+    #[must_use]
+    pub fn tile_url(&self, level: u32, tile: u64) -> String {
+        tile_url_for(&self.prefix(level), "chunk", self.container, tile)
+    }
+
+    /// How many tiles level `k` has, or `None` when the source type declares no
+    /// count.
+    #[must_use]
+    pub fn tiles(&self, level: u32) -> Option<u64> {
+        self.src_count
+            .map(|c| VertexLevels::rows_at(c, level))
+            .and_then(|rows| tiles_of(rows, self.chunk_size))
+    }
+
+    /// Every file of level `k`, in order and distinct.
+    ///
+    /// Refuses a level nobody wrote by naming what does answer it — the
+    /// adjacency and the payload — because a URL under `l{k}/` for an unwritten
+    /// `k` is the one failure a reader cannot tell from an empty level.
+    pub fn files(&self, level: u32) -> Result<Vec<String>> {
+        if !self.has(level) {
+            let written = self
+                .levels
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(invalid(format!(
+                "{} writes levels {written} and not {level}, so its files are not addressable — \
+                 the adjacency and the payload are what answer that level",
+                self.path
+            )));
+        }
+        let tiles = self.tiles(level).ok_or_else(|| {
+            invalid(format!(
+                "{} names a source type declaring no vertex_count, so how many tiles level \
+                 {level} has is not derivable",
+                self.path
+            ))
+        })?;
+        Ok(distinct((0..tiles).map(|k| self.tile_url(level, k))))
+    }
+}
+
 /// One edge type's address, with an entry per orientation the manifest declares.
 #[derive(Debug, Clone, Serialize)]
 pub struct EdgeAddress {
@@ -454,6 +584,13 @@ pub struct EdgeAddress {
     pub directions: Vec<Direction>,
     /// The declared orientations, in `directions` order.
     pub adjacencies: Vec<AdjacencyAddress>,
+    /// The **written levels of this relation**, or `None` when the manifest
+    /// declares none.
+    ///
+    /// `None` is a corpus and not a gap, for [`VertexAddress::levels`]' reason:
+    /// a reader without one draws the same edges out of the adjacency and the
+    /// payload, and only reads more. See [`EdgeLevelAddress`].
+    pub levels: Option<EdgeLevelAddress>,
 }
 
 impl EdgeAddress {
@@ -888,20 +1025,28 @@ fn vertex_address(
     })
 }
 
-/// The `levels:` block of a vertex manifest, resolved, or `None` when there is
-/// none.
+/// What a `levels:` block declares, whichever manifest carries it.
+struct DeclaredLevels {
+    stem: String,
+    levels: Vec<u32>,
+    chunk_size: u64,
+    shift: u32,
+}
+
+/// The `levels:` block of a manifest, parsed, or `None` when there is none.
+///
+/// **One function for the vertex block and the edge block**, whose declared
+/// fields are the same three: the stem, the level list, and the tile size the
+/// list is addressed in. What differs is only what a level's tiles are counted
+/// against — the type's own `vertex_count` on one side, the SOURCE type's on the
+/// other — so the counting stays with each caller and the reading does not get a
+/// second copy.
 ///
 /// Every field is required once the block is present, on [`index_address`]'s
 /// argument: a block naming a prefix without its level list reads exactly like a
 /// corpus that declares no pyramid, and the difference between those two is a
-/// reader opening `l6/` or striding a million rows.
-fn level_address(
-    vertex_prefix: &str,
-    path: &str,
-    doc: &Value,
-    count: Option<u64>,
-    container: Container,
-) -> Result<Option<LevelAddress>> {
+/// reader opening `l4/` or striding a million rows.
+fn declared_levels(path: &str, doc: &Value) -> Result<Option<DeclaredLevels>> {
     let Some(declared) = mapping(doc, path, "levels")? else {
         return Ok(None);
     };
@@ -945,14 +1090,61 @@ fn level_address(
             "{path} declares a level tile of {raw} rows, which no shift addresses"
         ))
     })?;
-    Ok(Some(LevelAddress {
+    Ok(Some(DeclaredLevels {
+        stem,
         levels,
         chunk_size,
         shift,
+    }))
+}
+
+/// The `levels:` block of a VERTEX manifest, resolved, or `None` when there is none.
+fn level_address(
+    vertex_prefix: &str,
+    path: &str,
+    doc: &Value,
+    count: Option<u64>,
+    container: Container,
+) -> Result<Option<LevelAddress>> {
+    let Some(declared) = declared_levels(path, doc)? else {
+        return Ok(None);
+    };
+    Ok(Some(LevelAddress {
+        levels: declared.levels,
+        chunk_size: declared.chunk_size,
+        shift: declared.shift,
         container,
         vertex_prefix: vertex_prefix.to_string(),
-        stem,
+        stem: declared.stem,
         count,
+        path: path.to_string(),
+    }))
+}
+
+/// The `levels:` block of an EDGE manifest, resolved, or `None` when there is none.
+///
+/// The tile count comes from the SOURCE type's `vertex_count` and not from
+/// `edge_count`, because a level tile here is a range of `src_dense` — the
+/// relation's own row count says nothing about how many of those ranges there
+/// are.
+fn edge_level_address(
+    edge_prefix: &str,
+    path: &str,
+    doc: &Value,
+    src: &VertexAddress,
+    container: Container,
+) -> Result<Option<EdgeLevelAddress>> {
+    let Some(declared) = declared_levels(path, doc)? else {
+        return Ok(None);
+    };
+    Ok(Some(EdgeLevelAddress {
+        levels: declared.levels,
+        chunk_size: declared.chunk_size,
+        shift: declared.shift,
+        container,
+        edge_prefix: edge_prefix.to_string(),
+        stem: declared.stem,
+        src_count: src.count,
         path: path.to_string(),
     }))
 }
@@ -1084,6 +1276,7 @@ fn edge_address(
     // readers this is diffed against both report the orientations in that order.
     adjacencies.sort_by_key(|a| a.direction);
 
+    let levels = edge_level_address(&prefix, path, doc, src, container)?;
     Ok(EdgeAddress {
         edge_type,
         src_type,
@@ -1092,6 +1285,7 @@ fn edge_address(
         prefix,
         directions: adjacencies.iter().map(|a| a.direction).collect(),
         adjacencies,
+        levels,
     })
 }
 
