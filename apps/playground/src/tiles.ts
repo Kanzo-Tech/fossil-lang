@@ -295,17 +295,22 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
           ? BOUNDED_DEFAULTS.minLinkPixels * perPixel
           : 0;
 
-      // **The canvas, in pixels, which is what the door now takes.** `perPixel` is the renderer's
-      // own scale — corpus units per pixel — so the rectangle's width over it IS the width in
-      // pixels of the thing being drawn into. Nothing is invented here and no constant is
-      // introduced: the door converts at one mark per pixel and the renderer already told us the
-      // scale. Where it did not, the honest fallback is the square that holds `limit` marks,
-      // because a budget in marks is the only resolution such a caller has expressed.
+      // **The renderer's budget, converted, and NOT the canvas.** The door takes pixels and
+      // spends one mark per pixel, so `limit` marks is the square that holds them.
+      //
+      // `perPixel` makes the real canvas derivable — corpus units per pixel, so the rectangle's
+      // width over it is the width in pixels — and asking for that instead is exactly the
+      // reference viewer's own direction. It is not this app's call. Measured on the bench corpus
+      // at a million vertices: the canvas is about 920×400, so deriving from it asks for 368,000
+      // marks against `limit`'s 20,000, which drops the frame from level 3 to level 1 and draws
+      // **250,000 points where 15,625 were asked for**. The result is a visibly laggy canvas and a
+      // solid smear, because `BOUNDED_DEFAULTS.limit` is 20,000 for a stated reason — above about
+      // fifty thousand points a live layout stops being comfortable.
+      //
+      // So the budget stays the renderer's until the renderer raises it, which is where that
+      // decision belongs.
       const side = Math.max(1, Math.sqrt(limit));
-      const pixels =
-        perPixel !== undefined && Number.isFinite(perPixel) && perPixel > 0
-          ? { w: Math.max(1, box.w / perPixel), h: Math.max(1, box.h / perPixel) }
-          : { w: side, h: side };
+      const pixels = { w: side, h: side };
 
       /**
        * **This asked for points where the pyramid is, and the picture said no.**
