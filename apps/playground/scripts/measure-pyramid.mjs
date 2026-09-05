@@ -25,6 +25,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { openCorpus } from '@fossil-lang/corpus';
@@ -51,19 +52,22 @@ const root = resolve(app, 'public/bench', String(count));
 const BUDGET = Number(flag('budget', 20000));
 
 /**
- * The reader's wasm, resolved from this package rather than from a bundler.
+ * The reader's wasm, as BYTES rather than a URL.
  *
- * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32 — the
- * addressing has one implementation now, and Node is the host that has to say where it lives.
+ * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32, and Node is
+ * the host that has to say where that lives. A `file://` URL is the obvious answer and it does not
+ * work: wasm-bindgen's init calls `fetch`, and undici refuses the `file:` scheme with «not
+ * implemented... yet...». A `Response` over the bytes is in the accepted union and needs no
+ * network, which is also what a script reading a corpus off local disk should be doing.
  */
-const CORPUS_WASM_URL = new URL(
-  '../node_modules/@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm',
-  import.meta.url,
+const CORPUS_WASM = new Response(
+  await readFile(new URL('../node_modules/@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm', import.meta.url)),
+  { headers: { 'content-type': 'application/wasm' } },
 );
 
 const corpus = await openCorpus(root, {
   query: async (sql) => duckQuery(sql),
-  wasmUrl: CORPUS_WASM_URL,
+  wasmUrl: CORPUS_WASM,
 });
 const type = corpus.types.vertices[0].type;
 const extent = await corpus.extent();

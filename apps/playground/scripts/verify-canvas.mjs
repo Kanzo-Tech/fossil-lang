@@ -45,12 +45,27 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { openCorpus, resolveCorpus } from '@fossil-lang/corpus';
+import { initFossilGraphWasm, openCorpus, resolveCorpus } from '@fossil-lang/corpus';
 import { BOUNDED_DEFAULTS, denseOf, typeOf, vertexId } from '@kanzo-tech/graph';
 
 import { query as duckQuery } from '../../corpus/guards/duck.mjs';
+
+/**
+ * The reader's wasm, as BYTES rather than a URL.
+ *
+ * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32, and Node is
+ * the host that has to say where that lives. A `file://` URL is the obvious answer and it does not
+ * work: wasm-bindgen's init calls `fetch`, and undici refuses the `file:` scheme with «not
+ * implemented... yet...». A `Response` over the bytes is in the accepted union and needs no
+ * network, which is also what a script reading a corpus off local disk should be doing.
+ */
+const CORPUS_WASM = new Response(
+  await readFile(new URL('../node_modules/@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm', import.meta.url)),
+  { headers: { 'content-type': 'application/wasm' } },
+);
 
 /**
  * `./stream.js` from a `.ts` file is TypeScript's own spelling of a relative import, and Node's
@@ -127,6 +142,11 @@ for (const path of manifestPaths) manifestFiles[path] = readFileSync(join(root, 
 
 // A local directory is a legitimate base for the duckdb CLI: every `tileUrl` it composes is a
 // path the binary can open, which is the same string a browser would have fetched.
+//
+// The module first, because `resolveCorpus` is a binding now: the addressing is
+// `fossil_graph::plan` at wasm32, so it is synchronous but not free-standing. `openCorpus` below
+// does its own init and the call is memoised, so this is the same boot rather than a second one.
+await initFossilGraphWasm({ wasmUrl: CORPUS_WASM });
 const addressing = resolveCorpus({ manifestFiles, base: root });
 const type = addressing.vertexType();
 
@@ -155,18 +175,8 @@ let lastCost = null;
 // The door, opened against the same directory the addressing above was resolved from. Everything
 // it costs — the manifests, one `DESCRIBE` per type, the tile-code anchors — is paid here, before
 // the counter below starts, because none of it is a camera move.
-/**
- * The reader's wasm, resolved from this package rather than from a bundler.
- *
- * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32 — the
- * addressing has one implementation now, and Node is the host that has to say where it lives.
- */
-const CORPUS_WASM_URL = new URL(
-  '../node_modules/@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm',
-  import.meta.url,
-);
 
-const corpus = await openCorpus(root, { query, wasmUrl: CORPUS_WASM_URL });
+const corpus = await openCorpus(root, { query, wasmUrl: CORPUS_WASM });
 const source = corpusSource({
   corpus,
   boxes,
@@ -361,7 +371,16 @@ console.log('\nunbounded');
   }
   ok('±Infinity is a rectangle DuckDB can answer', threw === null, threw ?? '');
   if (slice) {
-    ok('an open rectangle holds the whole corpus', slice.n === count, `${slice.n} of ${count}`);
+    // `n` is what the window held AT THE LEVEL IT WAS COUNTED, and `cost.matchedAt` names that
+    // level. Asserting the corpus total here would be asserting that the door opened the payload
+    // to count rows the pyramid exists to avoid reading -- which is the read it replaces.
+    const stride = 4 ** (lastCost?.matchedAt ?? 0);
+    const held = Math.ceil(count / stride);
+    ok(
+      'an open rectangle holds the whole corpus at the level it counted',
+      slice.n === held,
+      `${slice.n} of ${count} counted at level ${lastCost?.matchedAt ?? 0} — expected ${held}`,
+    );
     ok('an open rectangle still respects the limit', slice.marks <= 500, `${slice.marks}`);
   }
 }

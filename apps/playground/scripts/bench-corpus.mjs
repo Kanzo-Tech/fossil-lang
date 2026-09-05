@@ -87,7 +87,14 @@ if (!force && already?.count === count && existsSync(resolve(dir, 'graph.graph.y
 }
 
 const started = Date.now();
-const report = write(dir, { count, clusters, layout: 'rowgroups' });
+// The pyramid this app exists to demonstrate, and the fixture is TOLD it rather than deriving
+// it: which levels a corpus carries is a policy with one implementation,
+// `fossil_sinks::manifest::VertexLevels::planned`, and a second copy here is what the level
+// arithmetic was just consolidated to remove. `planned(count, 4096)` answers `1..=4` for both
+// sizes this script writes -- 300,000 and 1,000,000 -- because the coarsest level is the one
+// that fits a single tile and 4^4 crosses 4,096 for each of them.
+const levels = [1, 2, 3, 4];
+const report = write(dir, { count, clusters, layout: 'rowgroups', levels });
 const ms = Date.now() - started;
 
 /**
