@@ -145,7 +145,8 @@ it — `CREATE OR REPLACE TEMP VIEW "Person"`, and `TEMP` because a host's own
 it. `crates/fossil-mcp` does the identical thing for the identical reason.
 
 **A verb reads the manifest's vocabulary; the camera reads the bytes.** A verb
-composes SQL before it has seen a byte, so its column list is `property_groups`;
+composes SQL before it has seen a byte, so its column list is the payload
+projection's declared `properties`;
 `openCorpus` had a round trip to spend and spent it on a `DESCRIBE`. On the
 conformance corpus that is **three** declared properties against **seven**
 columns on disk, so `read` answers with `subject`, `birth_year` and `postcode`
@@ -197,8 +198,8 @@ const { vertexUrls, edgeUrls, complete, gaps } = corpus.tilesFor({
 ```
 
 **It never composes an address the corpus does not publish.** An edge type with
-no `adj_lists` entry for a direction, or one declaring it with no `prefix`, has
-tiles nobody can address: `adjacency('dst')` is `null` and the direction is
+no projection at `scale: 1` for a direction, or one declaring it with no `path`,
+has tiles nobody can address: `adjacency('dst')` is `null` and the direction is
 absent from `directions`, rather than a string that 404s in a browser with no
 type error. A corpus whose `src_chunk_size` disagrees with the vertex type
 addressing it is refused when it is opened, not at the first request.

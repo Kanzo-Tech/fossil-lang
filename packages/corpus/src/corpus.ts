@@ -50,8 +50,8 @@
  *   way: HTTP gives no directory, and the written alternative was to probe with `HEAD` until a 404.
  *   A corpus that declares no count is the one this refuses to open.
  * - **The payload vocabulary** — from the bytes, with one `DESCRIBE` per vertex type, and
- *   deliberately not from the manifest's `property_groups`. See {@link openCorpus} for the count
- *   that decided it.
+ *   deliberately not from the payload projection's declared `properties`. See {@link openCorpus}
+ *   for the count that decided it.
  * - **The `x`/`y` boxes** — from the Parquet footers, as {@link Corpus.extent}, which is a fifth
  *   member on a surface that names four because without it a caller holding only a URL has no
  *   coordinates to put in a rectangle.
@@ -66,7 +66,7 @@
  */
 
 import {
-  type AdjacencyAddress,
+  type ProjectionAddress,
   CorpusManifestError,
   type Direction,
   type EdgeTiles,
@@ -472,10 +472,10 @@ export interface Corpus {
    * read once while the corpus is opening — counts from the manifest's `vertex_count`, columns
    * from one `DESCRIBE` per type over the bytes — so it is a property rather than a call, it costs
    * nothing to read again, and it cannot go stale within an open corpus. `schema()` is a verb: it
-   * asks the engine, counts with `count(*)`, takes its column list from the manifest's
-   * `property_groups`, and adds per-field cardinality and role for a type the call names.
+   * asks the engine, counts with `count(*)`, takes its column list from the payload projection's
+   * declared `properties`, and adds per-field cardinality and role for a type the call names.
    *
-   * They disagree, and on the conformance corpus they disagree loudly: `property_groups` declares
+   * They disagree, and on the conformance corpus they disagree loudly: the manifest declares
    * THREE properties against seven columns on disk, so `schema()` speaks of `subject`,
    * `birth_year` and `postcode` while this reports those plus `dense_id`, `x`, `y` and
    * `cluster_id` — the four the writer puts there and the vocabulary does not name. That is not
@@ -576,11 +576,11 @@ export interface Corpus {
   // verb's*.
   //
   // **What a verb sees is the manifest's vocabulary, not the payload's.** {@link openCorpus}
-  // refuses to take the column list off `property_groups` and reads the bytes instead, with the
-  // count that decided it; the verbs have no bytes to read at the time they compose SQL, so they
-  // take the manifest at its word. On the conformance corpus that is three declared properties
-  // against seven columns on disk, so `read` answers with `subject`, `birth_year` and `postcode`
-  // while `types` above reports all seven. Neither is wrong and they are not the same question —
+  // refuses to take the column list off the payload's declared `properties` and reads the bytes
+  // instead, with the count that decided it; the verbs have no bytes at the time they compose SQL,
+  // so they take the manifest at its word. On the conformance corpus that is three declared
+  // properties against seven columns on disk, so `read` answers with `subject`, `birth_year` and
+  // `postcode` while `types` reports all seven. Neither is wrong, and they are not the same —
   // see {@link Corpus.types}.
 
   /**
@@ -766,8 +766,8 @@ function text(row: QueryRow, column: string): string {
  *    written down at the time was to probe with `HEAD` until a 404.
  * 3. One `DESCRIBE` per vertex type gives the payload vocabulary.
  *
- * **Why step 3 is not read off the manifest.** `property_groups` carries names *and* types, so this
- * looked free. It is not: on the conformance corpus the manifest declares **one** property
+ * **Why step 3 is not read off the manifest.** The payload projection's `properties` carry names
+ * *and* types, so this looked free. It is not: on the conformance corpus the manifest declares **one** property
  * (`subject`) against **five** columns on disk (`dense_id`, `subject`, `x`, `y`, `cluster_id`), and
  * `packages/corpus`'s own test fixture declares three of which one is `dense_id`. The manifest's
  * property list is a promise; the payload is the artefact, and this reads the artefact. The cost is
@@ -958,7 +958,10 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     const cached = boxes.get(key);
     if (cached) return cached;
     const address = addressing.vertexType(type);
-    const urls = level === undefined ? payloadFiles.get(type)! : [...address.levels!.files(level)];
+    const urls =
+      level === undefined
+        ? payloadFiles.get(type)!
+        : [...address.projectionFiles(strideOf(level))];
     // Which tile a footer row is about. Under `files` it is the file — one per tile, and the row
     // groups inside it are one tile's worth however many there are. Under `rowgroups` it is the
     // ordinal, and this is the one place in this file where that ordinal is the address: a vertex
@@ -1366,7 +1369,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   const readEdges = async (
     vertexTypeName: string,
     groups: readonly EdgeTiles[],
-    restrict: (adjacency: AdjacencyAddress) => string,
+    restrict: (adjacency: ProjectionAddress) => string,
     emitted: Set<string> = new Set(),
   ): Promise<PlacedEdge[]> => {
     const edges: PlacedEdge[] = [];
@@ -1411,8 +1414,12 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
    * written and a run of them is a gap no arithmetic predicts. `read_parquet` over an enumerated
    * list containing one absent file is an error, not an empty relation. The rule this file states
    * elsewhere — never glob — is about the vertex payload, where a glob picks up the staged
-   * single-file copy beside the tiles and counts every row twice; `<adjacency>/tile*.parquet` has
+   * single-file copy beside the tiles and counts every row twice; `<adjacency>/chunk*.parquet` has
    * no such sibling inside it. `fossil-mcp` makes the same exception and says so.
+   *
+   * **`chunk*` and not `tile*`**: the adjacency is the projection at `scale: 1` and spells its
+   * files like every other projection. `tile{k}` is the identity index's alone, being the one
+   * artefact that is not a projection.
    */
   let transport: Promise<GraphClient> | null = null;
 
@@ -1433,7 +1440,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         const source =
           adjacency.container === 'rowgroups'
             ? lit(adjacency.tileUrl(0))
-            : lit(`${adjacency.prefix}tile*.parquet`);
+            : lit(`${adjacency.prefix}chunk*.parquet`);
         await query(
           `CREATE OR REPLACE TEMP VIEW ` +
             `${ident(`${edge.srcType}_${edge.edgeType}_${edge.dstType}`)} AS ` +
@@ -1581,9 +1588,11 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
           level,
           stride: Number(stride),
           count: Number(rowsAt(count, level)),
-          // The manifest's own `levels:`, and it changes a cost rather than an answer: every level
-          // in this list is answerable either way, and `written` says only which bytes answer it.
-          written: address.levels?.has(level) ?? false,
+          // Whether a written `l{k}/` answers this level — a projection COARSER than the payload,
+          // which is why level 0 is `false` where its projection is the payload and always there.
+          // It changes a cost rather than an answer: every level in this list is answerable either
+          // way, and this says only which bytes answer it.
+          written: level > 0 && address.projection(stride) !== null,
         });
         if (stride >= count) return out;
       }
@@ -1635,7 +1644,9 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
        * The rule that keeps one contract is therefore: **the pyramid answers when the answer is
        * points.** A caller that asks for links opens the payload, and `matchedAt` says `0`.
        */
-      const levelSet = address.levels;
+      // The projection this level reads out of, and `null` at level 0 — whose projection IS the
+      // payload, which is the claim the vocabulary rests on and still not a coarser read.
+      const levelSet = level === 0 ? null : address.projection(stride);
       /**
        * The relations whose own level `k` is written, when every incident one is.
        *
@@ -1649,13 +1660,14 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
           (e) => e.srcType === address.type || e.dstType === address.type,
         );
         if (incident.length === 0) return null;
-        const sets = incident.map((e) => e.levels);
-        return sets.every((s) => s !== null && s.has(level))
+        // Source-aligned, always: a level of a relation is *which vertices are in it*, and the
+        // source type's own pyramid is what says which.
+        const sets = incident.map((e) => e.projection(stride, 'src'));
+        return sets.every((s) => s !== null)
           ? (sets as NonNullable<(typeof sets)[number]>[])
           : null;
       })();
-      const viaLevel =
-        levelSet !== null && levelSet.has(level) && (!wantLinks || edgeLevels !== null);
+      const viaLevel = levelSet !== null && (!wantLinks || edgeLevels !== null);
       const selected = new Set<number>(selectedTiles(address, box));
       // A pin's tile is COUNTED. Left out of the selection the disjunct that brings the pin back
       // has nothing to match against, and the fetch it costs would be missing from the ledger
@@ -1674,8 +1686,8 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const levelTilesOf = (tiles: readonly number[]): number[] => {
         const out = new Set<number>();
         for (const run of runsOf(tiles, new Map(all.map((b) => [Number(b.tile), b])))) {
-          const lo = levelSet!.tileOf(level, BigInt(run.first) * chunk);
-          const hi = levelSet!.tileOf(level, BigInt(run.last + 1) * chunk - 1n);
+          const lo = levelSet!.tileOf(BigInt(run.first) * chunk);
+          const hi = levelSet!.tileOf(BigInt(run.last + 1) * chunk - 1n);
           for (let t = lo; t <= hi; t += 1n) out.add(Number(t));
         }
         return [...out].sort((a, b) => a - b);
@@ -1690,13 +1702,14 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       /**
        * **How wide a tile of what was read is, in `dense_id`.**
        *
-       * The payload's `chunk_size` for a payload read, and a level's own tile times `strideOf(k)` for
-       * a level read — level `k` keeps one id in `strideOf(k)`, so its tile of `chunkSize` rows spans that
-       * many times the ids. Using the payload's number over a level file is the bug this line
-       * exists as: the range clause bounded tile 0 of `l6` at 8 ids where it holds 512, so the
-       * read came back with one row and looked like a corpus rather than like a predicate.
+       * The payload's `chunk_size` for a payload read, and a projection's own tile times its
+       * declared `scale` for a level read — one row of it stands for that many ids, so its tile of
+       * `chunkSize` rows spans that many times the ids. Both numbers come off the manifest and
+       * neither is an exponent. Using the payload's over a level file is the bug this line exists
+       * as: the range clause bounded tile 0 of `l6` at 8 ids where it holds 512, so the read came
+       * back with one row and looked like a corpus rather than like a predicate.
        */
-      const span = viaLevel ? BigInt(levelSet!.chunkSize) * strideOf(level) : chunk;
+      const span = viaLevel ? BigInt(levelSet!.chunkSize) * BigInt(levelSet!.scale) : chunk;
       // A pin's tile is a PAYLOAD tile even under a level read, so its cost is measured against
       // the payload's footers and added to the ledger the level's own runs opened.
       const pinTiles = viaLevel
@@ -1709,7 +1722,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       // `FrameCost.tiles` counting a pin's tile has always meant, now with the bytes to match.
       const pinUrls = viaLevel ? distinct(address.tilesOf(pins).map((t) => address.tileUrl(t))) : [];
       const urls = distinct(
-        viaLevel ? held.map((tile) => levelSet!.tileUrl(level, tile)) : held.map((tile) => address.tileUrl(tile)),
+        viaLevel ? held.map((tile) => levelSet!.tileUrl(tile)) : held.map((tile) => address.tileUrl(tile)),
       );
       // The vertex half, weighed over the four columns a view draws with rather than over the
       // whole tile — `runs` carries the tile's total and that total includes `subject`.
@@ -1786,7 +1799,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const edgeUrls = !wantLinks
         ? []
         : viaLevel
-          ? distinct(edgeLevels!.flatMap((set) => held.map((tile) => set.tileUrl(level, tile))))
+          ? distinct(edgeLevels!.flatMap((set) => held.map((tile) => set.tileUrl(tile))))
           : distinct([...plan!.edgeUrls]);
 
       /**

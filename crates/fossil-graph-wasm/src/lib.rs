@@ -145,7 +145,7 @@ pub async fn dispatch_graph(
 // (`apps/corpus/guards/vectors.json`) exist to pin.
 
 use fossil_graph::plan::{
-    AdjacencyAddress, Direction, EdgeAddress, LevelAddress, ReadPlan, VertexAddress, resolve,
+    Direction, EdgeAddress, ProjectionAddress, ReadPlan, VertexAddress, resolve,
 };
 use fossil_sinks::manifest::VertexLevels;
 
@@ -205,18 +205,11 @@ impl Corpus {
         self.inner.vertex_type(name).map_err(|e| to_js_error(&e))
     }
 
-    /// One vertex type's written pyramid. Absent is an error and not `null`:
-    /// every caller here has already read `levels` off the snapshot and would be
-    /// asking for a prefix nobody wrote.
-    fn levels(&self, name: Option<&str>) -> Result<&LevelAddress, JsError> {
-        let vertex = self.vertex(name)?;
-        vertex.levels.as_ref().ok_or_else(|| {
-            JsError::new(&format!(
-                "{} declares no levels, so no level of it is addressable — the predicate over the \
-                 payload is what answers one",
-                vertex.vertex_type
-            ))
-        })
+    /// One projection of a vertex type, or `None` when the manifest writes none
+    /// at that scale — which is a cost and not a refusal, the predicate over the
+    /// payload answering every scale a writer skipped.
+    fn projection(&self, name: Option<&str>, scale: u64) -> Result<Option<&ProjectionAddress>, JsError> {
+        Ok(self.vertex(name)?.projection(scale))
     }
 
     fn edge(&self, edge_type: &str) -> Result<&EdgeAddress, JsError> {
@@ -227,13 +220,17 @@ impl Corpus {
             .ok_or_else(|| JsError::new(&format!("no edge type {edge_type} in the manifest")))
     }
 
-    fn adjacency(
+    /// One projection of a relation, by scale and orientation. `None` for an
+    /// orientation the corpus does not publish as well as for a scale it did not
+    /// write: neither has an address, and both are legitimate corpora.
+    fn edge_projection(
         &self,
         edge_type: &str,
         direction: &str,
-    ) -> Result<Option<&AdjacencyAddress>, JsError> {
+        scale: u64,
+    ) -> Result<Option<&ProjectionAddress>, JsError> {
         let direction = parse_direction(direction)?;
-        Ok(self.edge(edge_type)?.adjacency(direction))
+        Ok(self.edge(edge_type)?.projection(scale, direction))
     }
 }
 
@@ -365,137 +362,133 @@ impl Corpus {
             .map_err(|e| to_js_error(&e))
     }
 
-    /// The file tile `k` of one orientation of one edge type is in, or `null`
-    /// when the corpus does not publish that orientation.
+    /// The tile of one projection holding `dense_id`, or `null` when the corpus
+    /// writes none at that scale.
     ///
-    /// `null` rather than a string is the point: an orientation the manifest does
-    /// not declare has no address, and handing back a URL that 404s is the failure
+    /// **The scale and never the exponent.** Tile `j` covers
+    /// `[j · chunk_size · scale, (j+1) · chunk_size · scale)`, so the shift is
+    /// the type's own plus `log2(scale)` — a product the manifest carries, which
+    /// is why no `4` and no `2k` cross this boundary in either direction.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest.
+    #[wasm_bindgen(js_name = projectionTileOf)]
+    pub fn projection_tile_of(
+        &self,
+        vertex_type: Option<String>,
+        scale: u64,
+        dense_id: u64,
+    ) -> Result<Option<u64>, JsError> {
+        Ok(self
+            .projection(vertex_type.as_deref(), scale)?
+            .map(|p| p.tile_of(dense_id)))
+    }
+
+    /// The file tile `j` of one projection is in, spelled by the corpus's
+    /// container, or `null` when the corpus writes none at that scale.
+    ///
+    /// `null` rather than a string is the point, and it is the point the
+    /// adjacency made when it was a vocabulary of its own: a projection nobody
+    /// wrote has no address, and handing back a URL that 404s is the failure
     /// this whole seam exists to prevent.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest.
+    #[wasm_bindgen(js_name = projectionTileUrl)]
+    pub fn projection_tile_url(
+        &self,
+        vertex_type: Option<String>,
+        scale: u64,
+        tile: u64,
+    ) -> Result<Option<String>, JsError> {
+        Ok(self
+            .projection(vertex_type.as_deref(), scale)?
+            .map(|p| p.tile_url(tile)))
+    }
+
+    /// Every file of one projection of a vertex type, in order and distinct.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest, declares no
+    /// `vertex_count`, or wrote no projection at `scale` — the last one naming
+    /// the scales it did write, because a URL under an `l{k}/` nobody wrote is
+    /// the one failure a reader cannot tell from an empty level.
+    #[wasm_bindgen(js_name = projectionFiles)]
+    pub fn projection_files(
+        &self,
+        vertex_type: Option<String>,
+        scale: u64,
+    ) -> Result<Vec<String>, JsError> {
+        self.vertex(vertex_type.as_deref())?
+            .projection_files(scale)
+            .map_err(|e| to_js_error(&e))
+    }
+
+    /// The tile of one projection of a RELATION holding `dense_id`, or `null`
+    /// when the corpus publishes neither that orientation nor that scale.
+    ///
+    /// The id is the ALIGNED endpoint's, which is what lets a coarse camera draw
+    /// a line without opening the vertex payload for its far end: the tiles
+    /// already selected address these with no new arithmetic.
     ///
     /// # Errors
     ///
     /// A `JsError` when the edge type is not in the manifest, or `direction` is
     /// neither `src` nor `dst`.
-    #[wasm_bindgen(js_name = adjacencyTileUrl)]
-    pub fn adjacency_tile_url(
+    #[wasm_bindgen(js_name = edgeProjectionTileOf)]
+    pub fn edge_projection_tile_of(
         &self,
         edge_type: &str,
         direction: &str,
+        scale: u64,
+        dense_id: u64,
+    ) -> Result<Option<u64>, JsError> {
+        Ok(self
+            .edge_projection(edge_type, direction, scale)?
+            .map(|p| p.tile_of(dense_id)))
+    }
+
+    /// The file tile `j` of one projection of a RELATION is in, or `null` when
+    /// the corpus publishes neither that orientation nor that scale.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the edge type is not in the manifest, or `direction` is
+    /// neither `src` nor `dst`.
+    #[wasm_bindgen(js_name = edgeProjectionTileUrl)]
+    pub fn edge_projection_tile_url(
+        &self,
+        edge_type: &str,
+        direction: &str,
+        scale: u64,
         tile: u64,
     ) -> Result<Option<String>, JsError> {
         Ok(self
-            .adjacency(edge_type, direction)?
-            .map(|a| a.tile_url(tile)))
+            .edge_projection(edge_type, direction, scale)?
+            .map(|p| p.tile_url(tile)))
     }
 
-    /// The tiles of level `k` a batch of `dense_id`s falls in: the payload's own
-    /// shift plus [`stride_bits`], never a division.
+    /// Every file of one projection of a RELATION, in order and distinct.
     ///
     /// # Errors
     ///
-    /// A `JsError` when the type is not in the manifest or declares no levels.
-    #[wasm_bindgen(js_name = levelTilesOf)]
-    pub fn level_tiles_of(
-        &self,
-        vertex_type: Option<String>,
-        level: u32,
-        dense_ids: Vec<u64>,
-    ) -> Result<Vec<u64>, JsError> {
-        let levels = self.levels(vertex_type.as_deref())?;
-        Ok(dense_ids
-            .into_iter()
-            .map(|id| levels.tile_of(level, id))
-            .collect())
-    }
-
-    /// The file tile `j` of level `k` is in, spelled by the corpus's container.
-    ///
-    /// # Errors
-    ///
-    /// A `JsError` when the type is not in the manifest or declares no levels.
-    #[wasm_bindgen(js_name = levelTileUrl)]
-    pub fn level_tile_url(
-        &self,
-        vertex_type: Option<String>,
-        level: u32,
-        tile: u64,
-    ) -> Result<String, JsError> {
-        Ok(self.levels(vertex_type.as_deref())?.tile_url(level, tile))
-    }
-
-    /// How many rows level `k` holds, or `null` when the manifest declares no count.
-    ///
-    /// # Errors
-    ///
-    /// A `JsError` when the type is not in the manifest or declares no levels.
-    #[wasm_bindgen(js_name = levelRows)]
-    pub fn level_rows(
-        &self,
-        vertex_type: Option<String>,
-        level: u32,
-    ) -> Result<Option<u64>, JsError> {
-        Ok(self.levels(vertex_type.as_deref())?.rows(level))
-    }
-
-    /// How many tiles level `k` has, or `null` when the manifest declares no count.
-    ///
-    /// # Errors
-    ///
-    /// A `JsError` when the type is not in the manifest or declares no levels.
-    #[wasm_bindgen(js_name = levelTiles)]
-    pub fn level_tiles(
-        &self,
-        vertex_type: Option<String>,
-        level: u32,
-    ) -> Result<Option<u64>, JsError> {
-        Ok(self.levels(vertex_type.as_deref())?.tiles(level))
-    }
-
-    /// Every file of level `k`, in order and distinct.
-    ///
-    /// # Errors
-    ///
-    /// A `JsError` when the type is not in the manifest, declares no levels,
-    /// declares no `vertex_count`, or did not write level `k` — the last one
-    /// naming what does answer that level, because a URL under `l{k}/` for an
-    /// unwritten `k` is the one failure a reader cannot tell from an empty level.
-    #[wasm_bindgen(js_name = levelFiles)]
-    pub fn level_files(
-        &self,
-        vertex_type: Option<String>,
-        level: u32,
-    ) -> Result<Vec<String>, JsError> {
-        self.levels(vertex_type.as_deref())?
-            .files(level)
-            .map_err(|e| to_js_error(&e))
-    }
-
-    /// The file tile `j` of level `k` of a RELATION is in.
-    ///
-    /// Addressed by the source type's own level tile, which is what lets a
-    /// coarse camera draw a line without opening the vertex payload for its far
-    /// end: the tiles already selected address these with no new arithmetic.
-    ///
-    /// # Errors
-    ///
-    /// A `JsError` when the edge type is not in the manifest or declares no levels.
-    #[wasm_bindgen(js_name = edgeLevelTileUrl)]
-    pub fn edge_level_tile_url(
+    /// A `JsError` when the edge type is not in the manifest, `direction` is
+    /// neither `src` nor `dst`, the aligned endpoint declares no `vertex_count`,
+    /// or the corpus wrote no projection at `scale` in that orientation.
+    #[wasm_bindgen(js_name = edgeProjectionFiles)]
+    pub fn edge_projection_files(
         &self,
         edge_type: &str,
-        level: u32,
-        tile: u64,
-    ) -> Result<String, JsError> {
-        let edge = self.edge(edge_type)?;
-        edge.levels
-            .as_ref()
-            .map(|l| l.tile_url(level, tile))
-            .ok_or_else(|| {
-                JsError::new(&format!(
-                    "{edge_type} declares no levels, so no level of it is addressable — the \
-                     adjacency and the payload are what answer one"
-                ))
-            })
+        direction: &str,
+        scale: u64,
+    ) -> Result<Vec<String>, JsError> {
+        let direction = parse_direction(direction)?;
+        self.edge(edge_type)?
+            .projection_files(scale, direction)
+            .map_err(|e| to_js_error(&e))
     }
 
     /// The URLs a set of vertex tiles addresses, and what that set is complete

@@ -53,12 +53,12 @@ export type { QueryFn, QueryRow } from './query.js';
 // A wasm-free path is that copy, so the copy went and the subpath went with it.
 export { resolveCorpus, CorpusManifestError, GRAPH_INFO_PATH } from './address.js';
 export type {
-  AdjacencyAddress,
   Direction,
   EdgeAddress,
   EdgeTiles,
   Gap,
   IndexAddress,
+  ProjectionAddress,
   GapReason,
   ResolveCorpusOptions,
   CorpusAddressing,

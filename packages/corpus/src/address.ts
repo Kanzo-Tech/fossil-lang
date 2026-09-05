@@ -89,7 +89,8 @@ export const strideOf = (level: number): bigint => idsPerLevelRow(level);
  * How many rows level `k` of a type of `count` rows holds — `ceil(count / strideOf(k))`.
  *
  * A level is a predicate, so this answers for every `k` and not only for the ones a writer spent
- * bytes on — which is what lets {@link LevelAddress.has} be a cost and not a refusal.
+ * bytes on — which is what lets a missing {@link VertexAddress.projection} be a cost and not a
+ * refusal.
  */
 export const rowsAt = (count: bigint, level: number): bigint => rowsAtLevel(count, level);
 
@@ -141,21 +142,37 @@ export interface VertexAddress {
    */
   readonly index: IndexAddress | null;
   /**
-   * The **written levels** of this type, or `null` when the manifest declares none.
+   * **Every projection of this type**, in manifest order: the payload at `scale: 1` and one per
+   * written level. See {@link ProjectionAddress}.
    *
-   * `null` is a legal corpus and the most legal of the three optional blocks: a level is a
-   * predicate, so every level is answerable with or without this, and what it changes is which
-   * bytes answer it. See {@link LevelAddress}.
+   * A type declaring only its payload is a legal corpus and the most legal of them: a level is a
+   * predicate, so every scale is answerable with or without a file for it, and what a written one
+   * changes is which bytes answer it.
    */
-  readonly levels: LevelAddress | null;
+  readonly projections: readonly ProjectionAddress[];
+  /**
+   * One projection by its scale, or `null` when the manifest wrote none at that scale — which is
+   * a cost and not a refusal.
+   */
+  projection(scale: number | bigint): ProjectionAddress | null;
+  /**
+   * Every file of the projection at `scale`, in order and distinct.
+   *
+   * Throws on {@link VertexAddress.files}' argument when the count is absent, and on a scale
+   * nobody wrote — the second one naming the scales that were, because a URL under an unwritten
+   * `l{k}/` is the one failure a reader cannot tell from an empty level.
+   */
+  projectionFiles(scale: number | bigint): readonly string[];
 }
 
 /**
  * Where a vertex type's identity index lives.
  *
- * A second copy of the type ordered by identity, tiled with the same `tile{k}` spelling as
- * everything else. It cannot be a column of the payload: one table has one sort, the payload's is
- * Morton because the spatial order IS the id space, and a lookup by identity needs the other one.
+ * **The one artefact of a corpus that is not a {@link ProjectionAddress}**: it is a second ORDER
+ * over the same rows, so the Morton cut does not address it — which is why it carries a
+ * {@link IndexAddress.chunkSize} of its own, no scale, and keeps the `tile{k}` filename stem every
+ * projection gave up. It cannot be a column of the payload: one table has one sort, the payload's
+ * is Morton because the spatial order IS the id space, and a lookup by identity needs the other.
  *
  * Its tiles are sorted by {@link IndexAddress.orderedBy} with disjoint ranges, which is what lets a
  * reader binary-search the footers to one tile — the thing the payload's own footers cannot do for
@@ -178,33 +195,68 @@ export interface IndexAddress {
   files(): readonly string[];
 }
 
-/** One orientation of one edge type: declared by the manifest, or absent from it. */
-export interface AdjacencyAddress {
-  readonly direction: Direction;
+/**
+ * **One projection of a corpus's sequence, resolved into an address.**
+ *
+ * Every artefact of a corpus except {@link IndexAddress} is one of these: the payload at
+ * `scale: 1`, a vertex level at a coarser scale, an orientation of an adjacency at `scale: 1` with
+ * a {@link direction}, a level of a relation at a coarser scale with one. **The payload is not a
+ * special case** — it is the projection whose scale is one, and this type does not know which of
+ * its instances is which. It is `fossil_graph::plan::ProjectionAddress` as it crosses, and the
+ * argument for the shape is there and in `fossil_sinks::manifest`, not restated here.
+ *
+ * A projection nobody wrote is still ANSWERABLE: a level is the predicate `dense_id % scale == 0`
+ * over the payload, and a written `l{k}/` is a cache of it. So a corpus declaring one projection
+ * draws the identical picture as one declaring five, and only reads more.
+ */
+export interface ProjectionAddress {
   /** Where its tiles are, resolved against the corpus base and with a trailing separator. */
   readonly prefix: string;
-  /** The endpoint column tile `k` filters on: `src_dense` for `src`, `dst_dense` for `dst`. */
-  readonly column: 'src_dense' | 'dst_dense';
-  /** `src_chunk_size` for `src`, `dst_chunk_size` for `dst` — a different space on a cross-type edge. */
+  /**
+   * **How many rows of the underlying sequence one row here stands for** — `1` for the payload and
+   * the adjacency, and the product a level's exponent left its one home as.
+   */
+  readonly scale: number;
+  /**
+   * Which endpoint column addresses these tiles, on an edge projection. `null` on a vertex one,
+   * whose address is its own `dense_id`.
+   */
+  readonly direction: Direction | null;
+  /** The column tile `k` filters on — `src_dense`/`dst_dense` on an edge projection, `dense_id` on a vertex one. */
+  readonly column: 'dense_id' | 'src_dense' | 'dst_dense';
+  /**
+   * Rows per tile: the cut, which does not change with the scale. On an edge projection this is the
+   * ALIGNED endpoint type's — a different space from the other endpoint's on a cross-type edge.
+   */
   readonly chunkSize: number;
+  /** `log2(chunkSize) + log2(scale)` — the shift that names a tile, and never a division. */
   readonly shift: number;
   /**
-   * How many tiles this orientation has — **the endpoint vertex type's tile count, not the edge's.**
+   * How many rows of the sequence this projection addresses: the type's own `vertex_count` divided
+   * by the scale, or the aligned endpoint type's on an edge. `null` when no count is declared.
    *
-   * An edge tile is addressed by a *vertex* tile, so `edge_count / chunk_size` is the wrong
-   * division and it is wrong quietly: on this corpus it gives ten where there are five, and every
-   * URL past the fifth composes cleanly and 404s. `null` when the endpoint type declares no count.
+   * **Not the edge's row count**, on an edge projection. An edge tile is addressed by a *vertex*
+   * tile, so `edge_count / chunkSize` is the wrong division and it is wrong quietly: on the
+   * conformance corpus it gives ten where there are five, and every URL past the fifth composes
+   * cleanly and 404s.
    */
+  readonly rows: bigint | null;
+  /** `ceil(rows / chunkSize)`, or `null` when no count is declared. */
   readonly tiles: bigint | null;
-  /** Which container carries this orientation's tiles. The corpus's, never a second answer. */
+  /** Which container carries these tiles. The corpus's, never a second answer. */
   readonly container: Container;
+  /** The tile of this projection holding `denseId` — its own {@link shift}, never a division. */
+  tileOf(denseId: bigint): bigint;
   /**
-   * `<edge prefix><adj prefix>tile{k}.parquet`. A 404 is "these vertices have no edges here".
+   * The file tile `j` is in: `<prefix>chunk{j}.parquet` under `files`, `<prefix>tiles.parquet`
+   * under `rowgroups` — the same two spellings whatever the scale, because a level is not a
+   * different kind of thing from a payload. {@link IndexAddress} is the artefact that spells its
+   * files `tile{k}` instead, and it is the one that is not a projection.
    *
-   * Under `rowgroups` it is one file for the whole orientation, and the row-group ordinal is *not*
-   * the tile: an adjacency tile is however many edges its vertices happen to have, and a tile whose
-   * vertices have none contributes no row group to be numbered. What locates it is the footer's box
-   * on {@link AdjacencyAddress.column} over the tile's `dense_id` range.
+   * Under `rowgroups` on an adjacency the row-group ordinal is *not* the tile: an adjacency tile is
+   * however many edges its vertices happen to have, and a tile whose vertices have none contributes
+   * no row group to be numbered. What locates it is the footer's box on {@link column} over the
+   * tile's `dense_id` range.
    */
   tileUrl(tile: number | bigint): string;
 }
@@ -224,99 +276,40 @@ export interface EdgeAddress {
   /**
    * The orientations that resolve to an address — never a direction the manifest does not publish.
    *
-   * An `adj_lists` entry the manifest omits, or declares without a `prefix`, is not here. A
-   * corpus that tiles only CSR has `['src']`, and asking it for `dst` returns `null` rather than a
-   * string that 404s.
+   * A projection the manifest omits, or declares without a `path`, is not here. A corpus that tiles
+   * only CSR has `['src']`, and asking it for `dst` returns `null` rather than a string that 404s.
    */
   readonly directions: readonly Direction[];
-  /** The declared orientation, or `null` when the corpus does not publish one. */
-  adjacency(direction: Direction): AdjacencyAddress | null;
   /**
-   * The **written levels of this relation**, or `null` when the manifest declares none.
+   * **Every projection of this relation**: one per orientation at `scale: 1` — the adjacency — and
+   * one per written level, source-aligned and carrying both endpoints' coordinates.
    *
-   * A level of a relation is the edges incident to a level-`k` vertex, carrying BOTH endpoints'
-   * coordinates — which is what lets a coarse camera draw a line without opening the vertex
-   * payload for its far end. `null` is a corpus and not a gap: a reader without one draws the same
-   * edges out of the adjacency and the payload, and only reads more.
-   */
-  readonly levels: EdgeLevelAddress | null;
-}
-
-/**
- * Where a relation's **level sets** are, and which ones exist.
- *
- * The sibling of {@link LevelAddress} and addressed by the same rule: tile `j` of level `k` holds
- * the rows whose `src_dense` is in `[j · chunkSize · stride(k), (j+1) · chunkSize · stride(k))` —
- * the SOURCE level's own tile range — so a reader that can address a vertex level can address the
- * edges beside it with no new arithmetic.
- *
- * **What it carries that no other set does is the endpoints' coordinates.** `src_x`, `src_y`,
- * `dst_x`, `dst_y` beside the two ids, which makes a level set self-drawing: the lines and their
- * far ends come out of one file. Measured on the bench corpus at a three-pixel floor, a VERTEX
- * level can position 0.79% of the edges the same view draws, so a pyramid without this one answers
- * a view with links by opening the payload — the read it exists to avoid.
- */
-export interface EdgeLevelAddress {
-  /** The levels written, finest first — the source type's own. */
-  readonly levels: readonly number[];
-  /** Rows per tile of the SOURCE vertex type, which the tile's `dense_id` range is built from. */
-  readonly chunkSize: number;
-  /** Which container carries them. The corpus's, never a second answer. */
-  readonly container: Container;
-  /** Whether level `k` is written. `false` is a cost and not a refusal. */
-  has(level: number): boolean;
-  /** The file tile `j` of level `k` is in, spelled by the corpus's container. */
-  tileUrl(level: number, tile: number | bigint): string;
-}
-
-/**
- * Where a vertex type's **written levels** are, and which ones exist.
- *
- * **Level `k` is `dense_id % strideOf(k) == 0`, whatever this says.** A level is a predicate over
- * the payload, and a written `l{k}/` is a cache of it — so a corpus declaring none draws the
- * identical picture and only reads more, and that is what keeps the pyramid from being a second
- * contract. What this block changes is a byte count, and `Frame.matchedAt` in `./corpus.ts` is
- * where the difference is visible.
- *
- * **The numbers are declared and not derived**, unlike everything else here, and the manifest side
- * argues why: a level list is `log4(V / chunk_size)` integers whatever the corpus is, and *which*
- * levels a writer spent bytes on is a policy — a reader re-deriving it from `vertex_count` and
- * `chunk_size` would reimplement the writer's plan and 404 the day the plan moved.
- */
-export interface LevelAddress {
-  /** The levels written, finest first, as the manifest declares them. */
-  readonly levels: readonly number[];
-  /**
-   * Rows per tile within a level set. Declared rather than inherited from
-   * {@link VertexAddress.chunkSize}, because turning a level tile back into a `dense_id` range
-   * multiplies by it and a number that has to be assumed is one a writer can change in silence.
-   */
-  readonly chunkSize: number;
-  /** Which container carries the level tiles. The corpus's, never a second answer. */
-  readonly container: Container;
-  /**
-   * Whether level `k` is written.
+   * The same list a vertex type has, told apart by {@link ProjectionAddress.direction}. A relation
+   * declaring only its adjacencies is a corpus and not a gap: a reader draws the same edges out of
+   * the adjacency and the payload, and only reads more.
    *
-   * `false` is not a refusal and not an absence of the level: the level exists at every `k` — it is
-   * a predicate — and this says only whether reading it costs the level's bytes or the type's.
+   * **What a level of a relation carries that no other projection does is the endpoints'
+   * coordinates** — `src_x`, `src_y`, `dst_x`, `dst_y` beside the two ids, which makes it
+   * self-drawing. A VERTEX level can position 0.79% of the edges the same view draws, so a pyramid
+   * without this one answers a view with links by opening the payload.
    */
-  has(level: number): boolean;
-  /** The tile of level `k` holding `denseId`: the payload's shift plus {@link strideBits}. */
-  tileOf(level: number, denseId: bigint): bigint;
-  /** The file tile `j` of level `k` is in, spelled by the corpus's container. */
-  tileUrl(level: number, tile: number | bigint): string;
-  /** How many rows level `k` holds, or `null` when the manifest declares no count. */
-  rows(level: number): bigint | null;
-  /** How many tiles level `k` has, or `null` when the manifest declares no count. */
-  tiles(level: number): bigint | null;
+  readonly projections: readonly ProjectionAddress[];
+  /** The declared orientation's adjacency — its projection at `scale: 1` — or `null`. */
+  adjacency(direction: Direction): ProjectionAddress | null;
   /**
-   * Every file of level `k`, in order and distinct.
+   * One projection by scale and orientation, or `null` when the corpus publishes neither.
    *
-   * Throws on {@link VertexAddress.files}' argument when the count is absent, and on a level that
-   * is not written — the second one because the URL would name a prefix nobody wrote, which is the
-   * one failure a reader cannot tell from an empty level.
+   * A level is always source-aligned: a level of a relation is *which vertices are in it*, and the
+   * source type's own pyramid is what says which.
    */
-  files(level: number): readonly string[];
+  projection(scale: number | bigint, direction: Direction): ProjectionAddress | null;
+  /**
+   * Every file of the projection at `scale` in `direction`, in order and distinct.
+   *
+   * Throws on a scale nobody wrote by naming the ones that were: the adjacency and the payload are
+   * what answer it.
+   */
+  projectionFiles(scale: number | bigint, direction: Direction): readonly string[];
 }
 
 /** Why an orientation is missing from an answer. Both reasons are honest; they are not the same. */
@@ -445,7 +438,7 @@ interface VertexSnapshot {
   readonly tiles: bigint | null;
   readonly container: Container;
   readonly index: IndexSnapshot | null;
-  readonly levels: LevelSnapshot | null;
+  readonly projections: readonly ProjectionSnapshot[];
 }
 
 interface IndexSnapshot {
@@ -456,18 +449,15 @@ interface IndexSnapshot {
   readonly container: Container;
 }
 
-interface LevelSnapshot {
-  readonly levels: readonly number[];
-  readonly chunk_size: bigint;
-  readonly container: Container;
-}
-
-interface AdjacencySnapshot {
-  readonly direction: Direction;
+interface ProjectionSnapshot {
   readonly prefix: string;
-  readonly column: 'src_dense' | 'dst_dense';
+  readonly scale: bigint;
+  /** Absent on a vertex projection — `serde` skips a `None` rather than writing a null. */
+  readonly direction?: Direction;
+  readonly column: 'dense_id' | 'src_dense' | 'dst_dense';
   readonly chunk_size: bigint;
   readonly shift: number;
+  readonly rows: bigint | null;
   readonly tiles: bigint | null;
   readonly container: Container;
 }
@@ -479,8 +469,7 @@ interface EdgeSnapshot {
   readonly count: bigint | null;
   readonly prefix: string;
   readonly directions: readonly Direction[];
-  readonly adjacencies: readonly AdjacencySnapshot[];
-  readonly levels: LevelSnapshot | null;
+  readonly projections: readonly ProjectionSnapshot[];
 }
 
 interface WindowSnapshot {
@@ -541,36 +530,51 @@ function widths(denseIds: Iterable<bigint>): BigUint64Array {
   return BigUint64Array.from(batch);
 }
 
-/** `bigint | undefined` is how an absent `u64` crosses; `null` is how this package spells it. */
-const orNull = (value: bigint | undefined): bigint | null => value ?? null;
-
-function levelAddress(
-  reader: CorpusReader,
-  type: string,
-  declared: LevelSnapshot,
-): LevelAddress {
-  const written = new Set(declared.levels);
+/**
+ * One projection of the snapshot, as the address a reader composes URLs from.
+ *
+ * `tileOf` and `tileUrl` cross back to the reader keyed on the projection's own scale rather than
+ * arriving with the snapshot, because they are functions of an argument the manifest does not
+ * contain. Both are non-null by construction: the only scales this is ever built for are the ones
+ * the snapshot declares.
+ */
+function projectionAddress(
+  declared: ProjectionSnapshot,
+  tileOf: (scale: bigint, denseId: bigint) => bigint | undefined,
+  tileUrl: (scale: bigint, tile: bigint) => string | undefined,
+): ProjectionAddress {
+  const scale = declared.scale;
   return {
-    levels: declared.levels,
+    prefix: declared.prefix,
+    scale: Number(scale),
+    direction: declared.direction ?? null,
+    column: declared.column,
     chunkSize: Number(declared.chunk_size),
+    shift: declared.shift,
+    rows: declared.rows,
+    tiles: declared.tiles,
     container: declared.container,
-    has: (level) => written.has(level),
     // `widths` is OUTSIDE `asked`: a caller handing this a `Number` has made a type error and not
     // written an unaddressable manifest, and the two must not come back as the same class.
-    tileOf: (level, denseId) => {
-      const batch = widths([denseId]);
-      return asked(() => reader.levelTilesOf(type, level, batch)[0]!);
+    tileOf: (denseId) => {
+      const [id] = widths([denseId]);
+      return asked(() => tileOf(scale, id!)!);
     },
-    tileUrl: (level, tile) => asked(() => reader.levelTileUrl(type, level, BigInt(tile))),
-    rows: (level) => asked(() => orNull(reader.levelRows(type, level))),
-    tiles: (level) => asked(() => orNull(reader.levelTiles(type, level))),
-    files: (level) => asked(() => reader.levelFiles(type, level)),
+    tileUrl: (tile) => asked(() => tileUrl(scale, BigInt(tile))!),
   };
 }
 
 function vertexAddress(reader: CorpusReader, declared: VertexSnapshot): VertexAddress {
   const type = declared.type;
   const index = declared.index;
+  const projections = declared.projections.map((p) =>
+    projectionAddress(
+      p,
+      (scale, denseId) => reader.projectionTileOf(type, scale, denseId),
+      (scale, tile) => reader.projectionTileUrl(type, scale, tile),
+    ),
+  );
+  const byScale = new Map(projections.map((p) => [BigInt(p.scale), p]));
   return {
     type,
     prefix: declared.prefix,
@@ -590,8 +594,10 @@ function vertexAddress(reader: CorpusReader, declared: VertexSnapshot): VertexAd
             container: index.container,
             files: () => asked(() => reader.indexFiles(type)),
           },
-    levels: declared.levels === null ? null : levelAddress(reader, type, declared.levels),
-    // `widths` is OUTSIDE `asked`, for the reason {@link levelAddress} states.
+    projections,
+    projection: (scale) => byScale.get(BigInt(scale)) ?? null,
+    projectionFiles: (scale) => asked(() => reader.projectionFiles(type, BigInt(scale))),
+    // `widths` is OUTSIDE `asked`, for the reason {@link projectionAddress} states.
     tileOf: (denseId) => {
       const batch = widths([denseId]);
       return asked(() => reader.tilesOf(type, batch)[0]!);
@@ -607,24 +613,20 @@ function vertexAddress(reader: CorpusReader, declared: VertexSnapshot): VertexAd
 
 function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress {
   const edgeType = declared.edge_type;
-  const adjacencies = new Map<Direction, AdjacencyAddress>(
-    declared.adjacencies.map((adjacency) => [
-      adjacency.direction,
-      {
-        direction: adjacency.direction,
-        prefix: adjacency.prefix,
-        column: adjacency.column,
-        chunkSize: Number(adjacency.chunk_size),
-        shift: adjacency.shift,
-        tiles: adjacency.tiles,
-        container: adjacency.container,
-        tileUrl: (tile) =>
-          asked(() => reader.adjacencyTileUrl(edgeType, adjacency.direction, BigInt(tile))!),
-      },
-    ]),
-  );
-  const levels = declared.levels;
-  const written = new Set(levels?.levels ?? []);
+  const projections = declared.projections.map((p) => {
+    // Non-null by construction: `plan` writes no edge projection without an `aligned_by`, which is
+    // what makes one addressable at all.
+    const at = p.direction!;
+    return projectionAddress(
+      p,
+      (scale, denseId) => reader.edgeProjectionTileOf(edgeType, at, scale, denseId),
+      (scale, tile) => reader.edgeProjectionTileUrl(edgeType, at, scale, tile),
+    );
+  });
+  const key = (scale: number | bigint, direction: Direction): string => `${direction}@${scale}`;
+  const byScale = new Map(projections.map((p) => [key(p.scale, p.direction!), p]));
+  const projection = (scale: number | bigint, direction: Direction): ProjectionAddress | null =>
+    byScale.get(key(scale, direction)) ?? null;
   return {
     edgeType,
     srcType: declared.src_type,
@@ -632,18 +634,13 @@ function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress 
     count: declared.count,
     prefix: declared.prefix,
     directions: declared.directions,
-    adjacency: (direction) => adjacencies.get(direction) ?? null,
-    levels:
-      levels === null
-        ? null
-        : {
-            levels: levels.levels,
-            chunkSize: Number(levels.chunk_size),
-            container: levels.container,
-            has: (level) => written.has(level),
-            tileUrl: (level, tile) =>
-              asked(() => reader.edgeLevelTileUrl(edgeType, level, BigInt(tile))),
-          },
+    projections,
+    // The adjacency is the projection at `scale: 1` — which is why its files are `chunk{k}` like
+    // every other projection rather than a stem of their own.
+    adjacency: (direction) => projection(1, direction),
+    projection,
+    projectionFiles: (scale, direction) =>
+      asked(() => reader.edgeProjectionFiles(edgeType, direction, BigInt(scale))),
   };
 }
 

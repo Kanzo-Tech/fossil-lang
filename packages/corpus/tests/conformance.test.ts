@@ -70,15 +70,21 @@ interface Case {
   }>;
   throws?: Array<{ vertex_type: string; message: string }>;
   resolve_throws?: string;
-  levels?: Array<{
-    type: string;
-    written: number[];
-    chunk_size: number;
-    sizes?: Array<{ level: number; rows: string; tiles: string }>;
-    tile_of?: Array<{ level: number; dense_id: string; tile: string }>;
-    addresses?: Array<{ level: number; tile: number; path: string }>;
-    files?: Array<{ level: number; paths: string[] }>;
-    refused?: Array<{ level: number; message: string }>;
+  /**
+   * The projections a subject declares, and NO OTHER — keyed by `type` for a vertex, by
+   * `edge_type` plus `direction` for one orientation of a relation. One shape for both, because
+   * there is one vocabulary.
+   */
+  projections?: Array<{
+    type?: string;
+    edge_type?: string;
+    direction?: Direction;
+    scales: number[];
+    sizes?: Array<{ scale: number; rows: string; tiles: string }>;
+    tile_of?: Array<{ scale: number; dense_id: string; tile: string }>;
+    addresses?: Array<{ scale: number; tile: number; path: string }>;
+    files?: Array<{ scale: number; paths: string[] }>;
+    refused?: Array<{ scale: number; message: string }>;
   }>;
 }
 
@@ -99,15 +105,18 @@ function manifestFiles(root: string): Record<string, string> {
 }
 
 describe('the conformance corpus', () => {
-  it('declares a pyramid somewhere, so the level assertions are not an empty loop', () => {
+  it('declares a pyramid somewhere, so the projection assertions are not an empty loop', () => {
     // Its own non-vacuity check, and it earned one: the `levels` case was deleted from
     // `expected.json` by a `git checkout` of a file that was not yet in the index, and every level
-    // assertion in all three harnesses ran over an empty list and stayed green — the six cases
-    // with no pyramid carry every other count.
+    // assertion in all three harnesses ran over an empty list and stayed green — the cases with no
+    // pyramid carry every other count.
     const addresses = table.cases.flatMap((c) =>
-      (c.levels ?? []).flatMap((l) => l.addresses ?? []),
+      (c.projections ?? []).flatMap((p) => p.addresses ?? []),
     );
     expect(addresses.length).toBeGreaterThanOrEqual(4);
+    // And a scale above 1 somewhere: a table of payloads passes against a reader that never
+    // learned a coarser projection exists.
+    expect(addresses.some((a) => a.scale > 1)).toBe(true);
   });
 
   it('has cases', () => {
@@ -207,59 +216,98 @@ describe('the conformance corpus', () => {
         });
       }
 
-      it('reports a pyramid only where the manifest declares one', () => {
-        // A reader that invented a level list would compose `l6/chunk0.parquet` against a corpus
-        // that never wrote one — a 404 for a level the predicate over the payload answers.
-        const declared = new Set((expected.levels ?? []).map((l) => l.type));
-        for (const type of corpus.types) {
-          expect(type.levels === null).toBe(!declared.has(type.type));
+      /**
+       * Every subject of the corpus, in the ONE vocabulary — a vertex type and one orientation of
+       * a relation answering the same four questions, because a level, an adjacency and a payload
+       * are all a `path` and a `scale` now.
+       */
+      const subjects = [
+        ...corpus.types.map((t) => ({
+          name: t.type,
+          direction: null as Direction | null,
+          projections: t.projections,
+          projection: (scale: number) => t.projection(scale),
+          files: (scale: number) => t.projectionFiles(scale),
+        })),
+        ...corpus.edges.flatMap((e) =>
+          (['src', 'dst'] as const).map((d) => ({
+            name: e.edgeType,
+            direction: d as Direction | null,
+            projections: e.projections.filter((p) => p.direction === d),
+            projection: (scale: number) => e.projection(scale, d),
+            files: (scale: number) => e.projectionFiles(scale, d),
+          })),
+        ),
+      ];
+      const declared = (subject: (typeof subjects)[number]) =>
+        (expected.projections ?? []).find((p) =>
+          subject.direction === null
+            ? p.type === subject.name
+            : p.edge_type === subject.name && p.direction === subject.direction,
+        );
+
+      it('reports the projections the manifest declares, and no scale it invented', () => {
+        // A reader that invented a scale would compose `l6/chunk0.parquet` against a corpus that
+        // never wrote one — a 404 for a level the predicate over the payload answers. The default
+        // the table does not spell out is a payload, or an orientation the corpus does not publish
+        // at all; anything coarser is a scale the reader made up.
+        for (const subject of subjects) {
+          const want = declared(subject);
+          expect(
+            subject.projections.map((p) => p.scale),
+            subject.direction === null ? subject.name : `${subject.name}/${subject.direction}`,
+          ).toEqual(want?.scales ?? subject.projections.map(() => 1));
         }
       });
 
-      for (const expectation of expected.levels ?? []) {
-        describe(`the pyramid over ${expectation.type}`, () => {
-          const levels = () => corpus.vertexType(expectation.type).levels!;
+      for (const subject of subjects) {
+        const want = declared(subject);
+        if (want === undefined) continue;
+        const label =
+          subject.direction === null ? subject.name : `${subject.name}/${subject.direction}`;
 
-          it('reports the levels the writer spent bytes on, and their tile size', () => {
-            expect([...levels().levels]).toEqual(expectation.written);
-            expect(levels().chunkSize).toBe(expectation.chunk_size);
-            for (const level of expectation.written) expect(levels().has(level)).toBe(true);
-          });
-
-          if ((expectation.sizes ?? []).length > 0) {
-            it('holds what the level predicate selects, counted', () => {
-              for (const size of expectation.sizes!) {
-                expect(levels().rows(size.level)).toBe(BigInt(size.rows));
-                expect(levels().tiles(size.level)).toBe(BigInt(size.tiles));
+        describe(`the projections of ${label}`, () => {
+          if ((want.sizes ?? []).length > 0) {
+            it('holds what the scale selects, counted', () => {
+              for (const size of want.sizes!) {
+                const found = subject.projection(size.scale)!;
+                expect(found.rows, `scale ${size.scale}`).toBe(BigInt(size.rows));
+                expect(found.tiles, `scale ${size.scale}`).toBe(BigInt(size.tiles));
+                // No second `chunk_size` anywhere: the cut does not change with the scale.
+                expect(found.chunkSize).toBe(subject.projection(1)!.chunkSize);
               }
             });
           }
 
-          if ((expectation.tile_of ?? []).length > 0) {
-            it('shifts a dense_id into a LEVEL tile: the payload shift plus k', () => {
-              for (const v of expectation.tile_of!) {
-                expect(levels().tileOf(v.level, BigInt(v.dense_id))).toBe(BigInt(v.tile));
+          if ((want.tile_of ?? []).length > 0) {
+            it('shifts a dense_id by the payload shift plus log2(scale)', () => {
+              for (const v of want.tile_of!) {
+                expect(subject.projection(v.scale)!.tileOf(BigInt(v.dense_id))).toBe(
+                  BigInt(v.tile),
+                );
               }
             });
           }
 
-          if ((expectation.addresses ?? []).length > 0) {
-            it('composes the level addresses in the table', () => {
-              for (const address of expectation.addresses!) {
-                expect(levels().tileUrl(address.level, address.tile)).toBe(address.path);
+          if ((want.addresses ?? []).length > 0) {
+            it('composes the addresses in the table', () => {
+              for (const address of want.addresses!) {
+                const url = subject.projection(address.scale)!.tileUrl(address.tile);
+                expect(url).toBe(address.path);
+                if (expected.on_disk) expect(existsSync(join(root, url))).toBe(true);
               }
             });
           }
 
-          for (const set of expectation.files ?? []) {
-            it(`enumerates level ${set.level}`, () => {
-              expect([...levels().files(set.level)]).toEqual(set.paths);
+          for (const set of want.files ?? []) {
+            it(`enumerates scale ${set.scale}`, () => {
+              expect([...subject.files(set.scale)]).toEqual(set.paths);
             });
           }
 
-          for (const refused of expectation.refused ?? []) {
-            it(`refuses to address level ${refused.level}, which nobody wrote`, () => {
-              expect(() => levels().files(refused.level)).toThrow(refused.message);
+          for (const refused of want.refused ?? []) {
+            it(`refuses to address scale ${refused.scale}, which nobody wrote`, () => {
+              expect(() => subject.files(refused.scale)).toThrow(refused.message);
             });
           }
         });

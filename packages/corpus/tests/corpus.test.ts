@@ -106,7 +106,7 @@ const vertexTiles = () =>
   `[${[0, 1, 2, 3, 4].map((k) => lit(`${CORPUS}/vertex/Person/chunk${k}.parquet`)).join(', ')}]`;
 const adjTiles = (dir: 'by_source' | 'by_target') =>
   `[${[0, 1, 2, 3, 4]
-    .map((k) => lit(`${CORPUS}/edge/Person_knows_Person/${dir}/tile${k}.parquet`))
+    .map((k) => lit(`${CORPUS}/edge/Person_knows_Person/${dir}/chunk${k}.parquet`))
     .join(', ')}]`;
 
 describe('openCorpus — what is inside', () => {
@@ -123,7 +123,7 @@ describe('openCorpus — what is inside', () => {
     expect(person.count).toBe(VERTEX_COUNT);
     expect(person.identity).toBe('subject');
     expect(person.geometry).toBe(true);
-    // Seven on disk against THREE in `property_groups` — the manifest's promise is not the
+    // Seven on disk against THREE in the payload projection — the manifest's promise is not the
     // artefact, which is why the vocabulary is a DESCRIBE and not a read of the manifest. The
     // gap is what matters and not its width: it was five against one before the fixture grew
     // the two quasi-identifiers the declared privacy bound is measured over.
