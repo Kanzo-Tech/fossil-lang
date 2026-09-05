@@ -3,24 +3,23 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { scan } from '../src/manifest.js';
-import {
-  CorpusManifestError,
-  resolveCorpus,
-  shiftFor,
-  tailRows,
-  tileOf,
-  tilesOf,
-  TILE_SHIFT,
-} from '../src/index.js';
+import './boot.js';
+import { CorpusManifestError, resolveCorpus } from '../src/index.js';
 
 /**
- * The addressing module, on the manifests the rest of this package already uses.
+ * The addressing binding, on the manifests the rest of this package already uses.
  *
  * The *contract* lives in `apps/corpus/conformance/expected.json` and is executed by
- * `conformance.test.ts` and by a second implementation with no npm at all. What is here is the
- * behaviour a table of addresses cannot express: what the arithmetic refuses, and what a corpus
- * that declares no adjacency at all resolves to.
+ * `conformance.test.ts`, by `crates/fossil-graph/tests/conformance.rs` and by a second
+ * implementation with no npm at all. What is here is the behaviour a table of addresses cannot
+ * express: what the arithmetic refuses, and what a corpus that declares no adjacency at all
+ * resolves to.
+ *
+ * **Nothing below calls a bare arithmetic function, because there are none left.** `tileOf`,
+ * `tilesOf`, `shiftFor`, `tailRows` and `TILE_SHIFT` were exported from this package and were a
+ * second implementation of `crates/fossil-graph/src/plan.rs`; every published vector below is now
+ * executed the way a reader meets it — off a resolved corpus, whose answer comes out of the one
+ * reader there is.
  */
 
 const manifestFiles: Record<string, string> = JSON.parse(
@@ -56,80 +55,118 @@ const vectors = JSON.parse(
   };
 };
 
+/**
+ * A corpus that says exactly what a vector row says, and nothing else.
+ *
+ * There is no bare composer to run a row against, because the package publishes none: a tile's URL
+ * and a tile's number come off a `VertexAddress` or an `AdjacencyAddress`, and those come off a
+ * manifest. So each row runs against a manifest built to say what the row says — which also asserts
+ * the field the `tile_url` table is about, `container`, is read from `graph.graph.yml` rather than
+ * guessed from a prefix.
+ */
+function corpusOf(options: {
+  prefix: string;
+  edgePrefix?: string;
+  adjPrefix?: string;
+  chunkSize: number;
+  vertexCount: string;
+  container: 'files' | 'rowgroups';
+}) {
+  const { prefix, edgePrefix = '', adjPrefix = '', chunkSize, vertexCount, container } = options;
+  return resolveCorpus({
+    manifestFiles: {
+      'graph.graph.yml': [
+        'name: graph',
+        "prefix: ''",
+        // Absent is `files`, so the row that says so is checked by omitting the field.
+        ...(container === 'files' ? [] : [`container: ${container}`]),
+        'vertices:',
+        '- v.vertex.yml',
+        ...(adjPrefix === '' ? [] : ['edges:', '- e.edge.yml']),
+        'version: gar/v1',
+        '',
+      ].join('\n'),
+      'v.vertex.yml':
+        `type: T\nvertex_count: ${vertexCount}\nchunk_size: ${chunkSize}\n` +
+        `prefix: ${prefix}/\nversion: gar/v1\n`,
+      ...(adjPrefix === ''
+        ? {}
+        : {
+            'e.edge.yml': [
+              'src_type: T',
+              'edge_type: knows',
+              'dst_type: T',
+              `chunk_size: ${chunkSize}`,
+              `src_chunk_size: ${chunkSize}`,
+              `dst_chunk_size: ${chunkSize}`,
+              `prefix: ${edgePrefix}/`,
+              'adj_lists:',
+              '- ordered: true',
+              '  aligned_by: src',
+              `  prefix: ${adjPrefix}/`,
+              '  file_type: parquet',
+              'version: gar/v1',
+              '',
+            ].join('\n'),
+          }),
+    },
+  });
+}
+
 describe('tileOf', () => {
   it('reproduces the published border vectors', () => {
-    // 2³¹ is where a port that took the shift as signed gives a negative tile; 2⁵³ is where one
-    // that went through a `Number` stops being exact. Both are rows in the table below.
+    // The table's own shift is 12, so the corpus that answers it is one tiled at 4,096. 2³¹ is
+    // where a port that took the shift as signed gives a negative tile; 2⁵³ is where one that went
+    // through a `Number` stops being exact. Both are rows in the table.
     expect(vectors.tile_of.vectors.length).toBeGreaterThan(0);
+    const person = corpusOf({
+      prefix: 'v',
+      chunkSize: 4096,
+      vertexCount: '1',
+      container: 'files',
+    }).vertexType();
     for (const { dense_id, tile } of vectors.tile_of.vectors) {
-      expect(tileOf(BigInt(dense_id))).toBe(BigInt(tile));
+      expect(person.tileOf(BigInt(dense_id)), dense_id).toBe(BigInt(tile));
     }
   });
 
   it('refuses a Number, because `>>` truncates to 32 bits before it shifts', () => {
-    expect(() => tileOf(4096 as unknown as bigint)).toThrow(TypeError);
-    expect(() => tileOf(-1n)).toThrow(RangeError);
+    const person = corpusOf({
+      prefix: 'v',
+      chunkSize: 4096,
+      vertexCount: '1',
+      container: 'files',
+    }).vertexType();
+    expect(() => person.tileOf(4096 as unknown as bigint)).toThrow(TypeError);
+    expect(() => person.tileOf(-1n)).toThrow(RangeError);
   });
 
-  it('takes the corpus’s own shift, not the default', () => {
-    expect(tileOf(64n, 6n)).toBe(1n);
-    expect(tileOf(64n)).toBe(0n);
-    expect(shiftFor(4096)).toBe(TILE_SHIFT);
-    // A tile size that is not a power of two forces a division where a shift does — 122,880 is
-    // DuckDB's default row-group size and the corpus's tile size before it was measured.
-    expect(shiftFor(122_880)).toBeNull();
-    expect(shiftFor(0)).toBeNull();
+  it('takes the corpus’s own shift, and not a default', () => {
+    // The same id in two corpora tiled differently is two tiles, which is the whole reason the
+    // shift is a manifest field and not a constant this package carries.
+    const wide = corpusOf({ prefix: 'v', chunkSize: 4096, vertexCount: '1', container: 'files' });
+    const narrow = corpusOf({ prefix: 'v', chunkSize: 64, vertexCount: '1', container: 'files' });
+    expect(wide.vertexType().tileOf(64n)).toBe(0n);
+    expect(narrow.vertexType().tileOf(64n)).toBe(1n);
+    expect(wide.vertexType().shift).toBe(12);
+    expect(narrow.vertexType().shift).toBe(6);
   });
 });
 
 describe('tileUrl', () => {
-  /**
-   * The published `tile_url` table, executed through the module's own resolver.
-   *
-   * Not through a bare composer, because the package publishes none: a tile's URL comes off a
-   * `VertexAddress` or an `AdjacencyAddress`, and those come off a manifest. So each row runs
-   * against a manifest built to say exactly what the row says — which also asserts the field the
-   * table is about, `container`, is read from `graph.graph.yml` and not guessed from a prefix.
-   */
   const composed = (row: (typeof vectors.tile_url.vectors)[number]): string => {
     const prefix = row.prefix.replace(/\/+$/, '');
     // An adjacency's prefix is composed from two manifest fields — the edge type's and the
     // `adj_lists` entry's — so a row that publishes the whole path is split back into them here.
     const cut = prefix.lastIndexOf('/');
-    const edgePrefix = prefix.slice(0, cut);
-    const adjPrefix = prefix.slice(cut + 1);
-    const manifestFiles: Record<string, string> = {
-      'graph.graph.yml': [
-        'name: graph',
-        "prefix: ''",
-        // Absent is `files`, so the row that says so is checked by omitting the field.
-        ...(row.container === 'files' ? [] : [`container: ${row.container}`]),
-        'vertices:',
-        '- v.vertex.yml',
-        'edges:',
-        '- e.edge.yml',
-        'version: gar/v1',
-        '',
-      ].join('\n'),
-      'v.vertex.yml': `type: T\nvertex_count: 1\nchunk_size: 4096\nprefix: ${prefix}/\nversion: gar/v1\n`,
-      'e.edge.yml': [
-        'src_type: T',
-        'edge_type: knows',
-        'dst_type: T',
-        'chunk_size: 4096',
-        'src_chunk_size: 4096',
-        'dst_chunk_size: 4096',
-        `prefix: ${edgePrefix}/`,
-        'adj_lists:',
-        '- ordered: true',
-        '  aligned_by: src',
-        `  prefix: ${adjPrefix}/`,
-        '  file_type: parquet',
-        'version: gar/v1',
-        '',
-      ].join('\n'),
-    };
-    const corpus = resolveCorpus({ manifestFiles });
+    const corpus = corpusOf({
+      prefix,
+      edgePrefix: prefix.slice(0, cut),
+      adjPrefix: prefix.slice(cut + 1),
+      chunkSize: 4096,
+      vertexCount: '1',
+      container: row.container,
+    });
     expect(corpus.container).toBe(row.container);
     return row.stem === 'chunk'
       ? corpus.vertexType().tileUrl(BigInt(row.tile))
@@ -160,17 +197,26 @@ describe('tileUrl', () => {
   });
 });
 
-describe('tilesOf', () => {
+describe('the declared count', () => {
   it('reproduces the published declared_count vectors', () => {
     // The borders that matter: 4,096 @ 4,096 is ONE tile (the off-by-one addresses a `chunk1` that
     // nothing wrote), 4,097 is two with a tail of one (the tile a truncated corpus loses), 300 @ 64
     // is the conformance corpus and catches a hard-coded stride, and 2⁵³+1 is where a `Number`
     // division comes out one tile short and the tail disappears from a reader that never asks.
+    //
+    // **`tail_rows` is not asserted here any more**, and that is the one column this package lost
+    // when its arithmetic went: a tail is a free function of the reader and no resolved corpus
+    // publishes it. `apps/corpus/guards` still executes that column, in plain Node.
     expect(vectors.declared_count.vectors.length).toBeGreaterThan(0);
     for (const v of vectors.declared_count.vectors) {
-      const chunk = BigInt(v.chunk_size);
-      expect(tilesOf(BigInt(v.count), chunk)).toBe(BigInt(v.tiles));
-      expect(tailRows(BigInt(v.count), chunk)).toBe(BigInt(v.tail_rows));
+      const type = corpusOf({
+        prefix: 'v',
+        chunkSize: v.chunk_size,
+        vertexCount: v.count,
+        container: 'files',
+      }).vertexType();
+      expect(type.count, v.count).toBe(BigInt(v.count));
+      expect(type.tiles, v.count).toBe(BigInt(v.tiles));
     }
   });
 
@@ -186,13 +232,6 @@ describe('tilesOf', () => {
       const naive = BigInt(Math.ceil(Number(v.count) / v.chunk_size));
       expect(naive).not.toBe(BigInt(v.tiles));
     }
-  });
-
-  it('refuses a Number count, and a chunk size no shift addresses', () => {
-    expect(() => tilesOf(300 as unknown as bigint, 64n)).toThrow(TypeError);
-    expect(() => tilesOf(-1n, 64n)).toThrow(RangeError);
-    expect(tilesOf(300n, 122_880n)).toBeNull();
-    expect(tailRows(300n, 122_880n)).toBeNull();
   });
 });
 
@@ -211,7 +250,7 @@ describe('resolveCorpus', () => {
     );
     expect(person.type).toBe('Person');
     expect(person.chunkSize).toBe(declared);
-    expect(2 ** Number(person.shift)).toBe(declared);
+    expect(2 ** person.shift).toBe(declared);
     expect(person.tileUrl(0)).toBe('/bench/1000000/vertex/Person/chunk0.parquet');
     // The boundary is what the shift is FOR, so it is asserted at the boundary
     // wherever the fixture puts it.
@@ -272,15 +311,26 @@ describe('resolveCorpus', () => {
     expect(mutated).not.toBe(yaml);
 
     const broken = { ...manifestFiles, 'vertex/Person.vertex.yml': mutated };
+    expect(() => resolveCorpus({ manifestFiles: broken })).toThrow(CorpusManifestError);
     expect(() => resolveCorpus({ manifestFiles: broken })).toThrow('no shift addresses');
   });
 
-  it('is synchronous, and takes no fetch', () => {
-    // The claim, as a type: a request between the camera moving and a URL being computable is the
-    // `viewport` verb this format deleted. `resolveCorpus` returns a corpus, not a promise.
+  it('is synchronous once the module is up, and takes no fetch', () => {
+    // **The claim moved and did not go.** It used to be that addressing needed nothing at all;
+    // it needs an instantiated WASM module, which `./boot.js` gave this file. What it still does
+    // not need is a request: a round trip between the camera moving and a URL being computable is
+    // the `viewport` verb this format deleted, and `resolveCorpus` returns a corpus, not a promise.
     const corpus = resolveCorpus({ manifestFiles });
     expect(corpus).not.toBeInstanceOf(Promise);
     expect(corpus.tilesFor({ tiles: [7] }).vertexUrls).toEqual(['vertex/Person/chunk7.parquet']);
+  });
+
+  it('refuses a vertex type the manifest does not declare, and names the ones it does', () => {
+    // The refusal has one author. A second copy of the type list on this side of the boundary is
+    // what the whole change removed, so the sentence comes back from the reader.
+    const corpus = resolveCorpus({ manifestFiles });
+    expect(() => corpus.vertexType('Nobody')).toThrow(CorpusManifestError);
+    expect(() => corpus.vertexType('Nobody')).toThrow('it names Person');
   });
 });
 
@@ -289,14 +339,12 @@ describe('resolveCorpus', () => {
  *
  * The shape below is not invented here: `fossil-sinks`' own
  * `the_levels_block_is_emitted_in_the_shape_the_line_scanners_read` asserts the emitter produces
- * exactly these bytes, because this is a line scanner and the nested items sit at their key's own
- * indentation rather than one deeper.
+ * exactly these bytes.
  *
- * **What is being defended is a silent failure and not a parse error.** Before the scanner could
- * see a nested sequence, `levels:`'s own `levels:` read as an empty scalar — so a corpus WITH a
- * pyramid resolved to a corpus without one, no throw, no diagnostic, and a camera that opens a
- * million rows to draw fifteen thousand. That is the same failure `index:` had, from the same
- * cause, which is why the assertion below is on the numbers surviving rather than on a URL.
+ * **What is being defended is a silent failure and not a parse error.** A corpus WITH a pyramid
+ * that resolves to a corpus without one throws nothing, diagnoses nothing, and opens a million rows
+ * to draw fifteen thousand — the same failure `index:` had. Which is why the assertion below is on
+ * the numbers surviving rather than on a URL.
  */
 describe('levels — the written pyramid', () => {
   /**
@@ -320,18 +368,6 @@ describe('levels — the written pyramid', () => {
     expect(person!.levels?.has(5)).toBe(false);
   });
 
-  it('leaves a sequence of MAPPINGS exactly where it was', () => {
-    // `properties:` is a nested sequence too, and it is a sequence of mappings. The scanner grew a
-    // rule for scalars only, and this is the assertion that keeps it from growing one for these:
-    // nothing reads a column list off the manifest — `openCorpus` reads the bytes — so collecting
-    // them would be a scanner inventing a shape rather than reading one.
-    const groups = scan('vertex/Person.vertex.yml', manifestFiles['vertex/Person.vertex.yml']!)[
-      'property_groups'
-    ] as Array<Record<string, string>>;
-    expect(groups[0]!['file_type']).toBe('parquet');
-    expect(groups[0]!['properties']).toBe('');
-  });
-
   it('addresses a level tile by the same shift, with 2k more bits falling off', () => {
     const levels = resolveCorpus({ manifestFiles: withLevels() }).types[0]!.levels!;
     // Level 3 keeps one id in 64 — `strideOf(3)`, which is 4³ and not 2³ — so a tile of 4,096 of
@@ -339,7 +375,6 @@ describe('levels — the written pyramid', () => {
     expect(levels.tileOf(3, 0n)).toBe(0n);
     expect(levels.tileOf(3, 262_143n)).toBe(0n);
     expect(levels.tileOf(3, 262_144n)).toBe(1n);
-    expect(levels.prefix(3)).toBe('vertex/Person/l3/');
     expect(levels.tileUrl(3, 1)).toBe('vertex/Person/l3/chunk1.parquet');
     // `ceil(1,000,000 / 64)` rows, which is four tiles of 4,096 — the pyramid's cost in tiles,
     // and the number the manifest's own `planned` was written against.

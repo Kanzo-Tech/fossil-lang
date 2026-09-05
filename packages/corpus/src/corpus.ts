@@ -3,8 +3,8 @@
  *
  * There were three entry points over one manifest and no rule for choosing between them, and this
  * is the one door now: `createGraphClient` is the transport it dispatches through, and
- * `resolveCorpus` stays published on its own subpath because it is the arithmetic a third-party
- * reader would otherwise re-derive — synchronous, WASM-free, and provably separable.
+ * `resolveCorpus` stays exported because a drawing path that does its own fetching wants the URLs
+ * — it is a binding over `fossil_graph::plan` and no longer a reader of its own.
  * `/docs/design/one-door` has what the removal settled, and why the camera grew this object rather
  * than opening a fourth beside it.
  *
@@ -73,6 +73,7 @@ import {
   type Gap,
   GRAPH_INFO_PATH,
   resolveCorpus,
+  rowsAt,
   strideBits,
   strideOf,
   type CorpusAddressing,
@@ -626,13 +627,17 @@ export interface OpenCorpusOptions {
   /** The host's engine. One method, and see `./query.ts` for why it is the only one. */
   query: QueryFn;
   /**
-   * Where `fossil_graph_wasm_bg.wasm` is, for the verbs.
+   * Where `fossil_graph_wasm_bg.wasm` is.
    *
-   * Optional, and only the verbs need it: `types`, `extent`, `rows`, `node` and `neighbours`
-   * write their own SQL and load nothing. Given, it is booted on the first verb call and not at
-   * open — a caller that only draws never instantiates it. Omitted, the caller is taken to have
-   * called `initFossilGraphWasm` itself, which is the same memoised boot; a verb called before
-   * either rejects with what the WASM says.
+   * **It used to be optional because only the verbs needed it**, and a caller that only drew
+   * never instantiated the module. The addressing is the same reader now — `resolveCorpus` asks
+   * `fossil-graph` through that module rather than re-deriving the arithmetic in TypeScript — so
+   * `openCorpus` boots it before it resolves anything, and drawing costs the module too. That is
+   * the price of there being one reader.
+   *
+   * Still optional in the sense that a caller who has already awaited `initFossilGraphWasm` need
+   * not repeat itself: it is the same memoised boot, and omitting it here means the caller did it.
+   * Omitted AND never called, `openCorpus` rejects with what the WASM says.
    */
   wasmUrl?: string | URL | Request | Response;
 }
@@ -784,6 +789,9 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   if (typeof query !== 'function') {
     throw new TypeError('openCorpus needs a query capability: the host brings the engine');
   }
+  // Before anything is resolved, because resolving is what needs it: the addressing is
+  // `fossil_graph::plan` behind this module, not a second implementation of it on this side.
+  if (options.wasmUrl !== undefined) await initFossilGraphWasm({ wasmUrl: options.wasmUrl });
 
   const readText = async (relative: readonly string[]): Promise<Record<string, string>> => {
     if (relative.length === 0) return {};
@@ -1164,7 +1172,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   const readByDenseId = async (type: string, ids: readonly bigint[]): Promise<PlacedVertex[]> => {
     if (ids.length === 0) return [];
     const address = vertexType(type);
-    const tiles = [...new Set(ids.map((id) => address.tileOf(id)))].sort(ascending);
+    const tiles = [...new Set(address.tilesOf(ids))].sort(ascending);
     const rows = await query(
       `SELECT * FROM read_parquet(${list(distinct(tiles.map((k) => address.tileUrl(k))))}) ` +
         `WHERE dense_id IN (${ids.join(', ')})`,
@@ -1328,7 +1336,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       // Then the payload, at the tiles those addresses NAME — not all of them. This is the half
       // that turns a lookup into arithmetic: `tileOf` is a shift.
       const addresses = hits.map((row) => idOf(row.dense_id, `${type.type}.dense_id`));
-      const tiles = [...new Set(addresses.map((d) => type.tileOf(d)))].sort(ascending);
+      const tiles = [...new Set(type.tilesOf(addresses))].sort(ascending);
       const rows = await query(
         `SELECT * FROM read_parquet(${list(distinct(tiles.map((k) => type.tileUrl(k))))}) ` +
           `WHERE dense_id IN (${addresses.join(', ')})`,
@@ -1410,7 +1418,6 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
   const verbs = (): Promise<GraphClient> => {
     transport ??= (async (): Promise<GraphClient> => {
-      if (options.wasmUrl !== undefined) await initFossilGraphWasm({ wasmUrl: options.wasmUrl });
       for (const type of addressing.types) {
         await query(
           `CREATE OR REPLACE TEMP VIEW ${ident(type.type)} AS ` +
@@ -1537,7 +1544,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
           ? []
           : await query(`SELECT * FROM read_parquet(${list(candidates)}) WHERE ${boxOf(box)}`);
       const vertices = rows.map((row) => vertexOf(address.type, row));
-      const tiles = [...new Set(vertices.map((v) => address.tileOf(v.denseId)))].sort(ascending);
+      const tiles = [...new Set(address.tilesOf(vertices.map((v) => v.denseId)))].sort(ascending);
 
       // The addressing decides which orientations apply and why one is missing; this only fetches.
       // Reproducing that rule here is how the two halves of a rectangle read drift apart.
@@ -1566,14 +1573,14 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
     levels(type) {
       const address = vertexType(type);
-      const count = Number(address.count ?? 0n);
+      const count = address.count ?? 0n;
       const out: LevelInfo[] = [];
       for (let level = 0; ; level += 1) {
         const stride = strideOf(level);
         out.push({
           level,
-          stride,
-          count: Math.ceil(count / stride),
+          stride: Number(stride),
+          count: Number(rowsAt(count, level)),
           // The manifest's own `levels:`, and it changes a cost rather than an answer: every level
           // in this list is answerable either way, and `written` says only which bytes answer it.
           written: address.levels?.has(level) ?? false,
@@ -1605,7 +1612,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         throw new CorpusReadError(`a level is a non-negative integer; got ${String(named)}`);
       }
       const level = named ?? levelForCanvas(address, box, pixels);
-      const stride = strideOf(level);
+      const stride = Number(strideOf(level));
       const chunk = BigInt(address.chunkSize);
       const pins = [...new Set(pinned.map((id) => BigInt(id)))].sort(ascending);
 
@@ -1653,7 +1660,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       // A pin's tile is COUNTED. Left out of the selection the disjunct that brings the pin back
       // has nothing to match against, and the fetch it costs would be missing from the ledger
       // rather than absent from the read.
-      for (const id of pins) selected.add(Number(address.tileOf(id)));
+      for (const tile of address.tilesOf(pins)) selected.add(Number(tile));
 
       const payloadTiles = [...selected].sort((a, b) => a - b);
       /**
@@ -1689,20 +1696,18 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
        * exists as: the range clause bounded tile 0 of `l6` at 8 ids where it holds 512, so the
        * read came back with one row and looked like a corpus rather than like a predicate.
        */
-      const span = viaLevel
-        ? BigInt(levelSet!.chunkSize) << BigInt(strideBits(level))
-        : chunk;
+      const span = viaLevel ? BigInt(levelSet!.chunkSize) * strideOf(level) : chunk;
       // A pin's tile is a PAYLOAD tile even under a level read, so its cost is measured against
       // the payload's footers and added to the ledger the level's own runs opened.
       const pinTiles = viaLevel
-        ? [...new Set(pins.map((id) => Number(address.tileOf(id))))].sort((a, b) => a - b)
+        ? [...new Set(address.tilesOf(pins).map(Number))].sort((a, b) => a - b)
         : [];
       const pinRuns = runsOf(pinTiles, new Map(all.map((b) => [Number(b.tile), b])));
 
       // A pin is one `dense_id` and an odd one is a multiple of no stride above 1, so the level
       // file does not carry it. Its PAYLOAD tile is opened for it — which is what
       // `FrameCost.tiles` counting a pin's tile has always meant, now with the bytes to match.
-      const pinUrls = viaLevel ? distinct(pins.map((id) => address.tileUrl(address.tileOf(id)))) : [];
+      const pinUrls = viaLevel ? distinct(address.tilesOf(pins).map((t) => address.tileUrl(t))) : [];
       const urls = distinct(
         viaLevel ? held.map((tile) => levelSet!.tileUrl(level, tile)) : held.map((tile) => address.tileUrl(tile)),
       );
@@ -2026,7 +2031,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const orientations = addressing.tilesFor({ type, tiles: [], directions });
 
       for (let hop = 0; hop < depth && frontier.length > 0; hop += 1) {
-        const tiles = [...new Set(frontier.map((id) => address.tileOf(id)))].sort(ascending);
+        const tiles = [...new Set(address.tilesOf(frontier))].sort(ascending);
         const inFrontier = frontier.join(', ');
         const found = await readEdges(
           type,

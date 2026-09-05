@@ -5,8 +5,8 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 // The transport, imported by module rather than through the barrel: `createGraphClient` is not a
 // public export any more — `openCorpus` is the door — and this file is what still tests it as one.
+import './boot.js';
 import { createGraphClient } from '../src/client.js';
-import { initFossilGraphWasm } from '../src/load.js';
 import type { QueryRow } from '../src/query.js';
 
 // Smoke test for @fossil-lang/corpus: exercises the REAL fossil-graph-wasm module
@@ -24,16 +24,6 @@ const manifestFiles: Record<string, string> = JSON.parse(
 const fakeQuery = vi.fn(async (sql: string): Promise<QueryRow[]> => {
   if (sql.includes('count(*)')) return [{ n: 3 }];
   return [];
-});
-
-beforeAll(async () => {
-  // `--target web` init() defaults to `fetch(url)`, but Node's fetch rejects
-  // `file://`. Read the bytes and pass a BufferSource instead — same approach
-  // as @fossil-lang/wasm's tests, sidestepping the file://-fetch portability gap.
-  const bytes = await readFile(
-    fileURLToPath(new URL('../pkg/fossil_graph_wasm_bg.wasm', import.meta.url)),
-  );
-  await initFossilGraphWasm({ wasmUrl: bytes as unknown as URL });
 });
 
 describe('createGraphClient over fossil-graph-wasm', () => {

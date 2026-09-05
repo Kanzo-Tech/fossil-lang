@@ -1,16 +1,19 @@
 /**
- * The address of a corpus, resolved from its manifest.
+ * The address of a corpus, resolved from its manifest — **by the reader, which is in Rust.**
  *
  * A tile is a fixed range of `dense_id` and its address is a shift, so a reader computes every URL
- * it wants before it emits the first request. That arithmetic was published as prose and copied
- * into a reader by hand, and nothing compared the two: change a prefix or a shift and the reader
- * composes URLs that 404 at runtime, in a browser, with no type error and no failing test. This
- * module is the copy nobody has to make.
+ * it wants before it emits the first request. That arithmetic used to be written twice: once in
+ * `crates/fossil-graph/src/plan.rs`, for `fossil-mcp`, which is a native server with no JS runtime
+ * and therefore cannot be the one that goes; and once here, in a thousand lines of TypeScript that
+ * agreed with it because people kept making it agree. Nothing compared the two. This module is what
+ * is left of the second one: the shapes the answers arrive in, and the calls that ask.
  *
- * **Synchronous, and that is the claim rather than an omission.** It takes no `fetch`, opens no
- * connection and returns no promise. The camera is addressed, not queried — a request between the
- * camera moving and a URL being computable is the `viewport` verb this format deleted. Everything
- * here is a function of the manifest bytes the host already holds.
+ * **It costs a WASM module, and that is the price rather than an oversight.** Composing a URL was
+ * synchronous arithmetic over a parsed manifest and is now a call into `fossil-graph-wasm`, so a
+ * caller must `await initFossilGraphWasm({ wasmUrl })` before {@link resolveCorpus} — the same
+ * precondition every verb already had. The subpath `@fossil-lang/corpus/address` existed exactly so
+ * a third party could address a corpus *without* that, and it is deleted: a WASM-free path is a
+ * second implementation, and a second implementation is what this change removed.
  *
  * **What it does not do**, and each absence is the seam this package is on the far side of:
  *
@@ -18,36 +21,26 @@
  * - **No cache, no debounce, no sampling.** Those are the reader's, and they stay there.
  * - **No rectangles.** Which tiles a box touches comes from the per-tile `x`/`y` statistics in the
  *   Parquet footers — `footer-is-the-index` — and reading a footer needs a Parquet reader. The host
- *   has one, this module would have to grow one, so the host reads its own footers and hands the
- *   tile numbers back to {@link CorpusAddressing.tilesFor}.
- *
- * A published `codes.json` anchor used to answer that third one here, and it is deleted whole. It
- * bought 15 tiles in 4 requests and 1,294 kB against the footers' 17 in 6 and 1,466 — a 13%
- * over-read — and it cost a document, a request per corpus, a parser, a guard, a code path and its
- * fallback, plus a field on the cost report admitting there were two indexes over one question.
+ *   has one, so the host reads its own footers and hands the tile numbers back to
+ *   {@link CorpusAddressing.tilesFor}.
  *
  * `openCorpus` in `./corpus.ts` is the layer that reads those footers, by taking an engine from the
- * host rather than growing one. It sits **on** this module and does not absorb it: the subpath
- * `@fossil-lang/corpus/address` stays importable with no dependencies and no `query`.
+ * host rather than growing one. It sits **on** this module and does not absorb it.
  *
  * @see {@link resolveCorpus}
  */
 
+// '../pkg/fossil_graph_wasm.js' is the wasm-bindgen `--target web` output, gitignored and always
+// present at build time — the same import `./load.js` makes, and the reason this module now needs
+// `initFossilGraphWasm` to have been awaited before any of it runs.
 import {
-  CorpusManifestError,
-  mapping,
-  GRAPH_INFO_PATH,
-  join,
-  list as listOf,
-  mappings,
-  optionalCount,
-  paths,
-  required,
-  requiredNumber,
-  scalar as scalarOf,
-  scan,
-  type ScannedManifest,
-} from './manifest.js';
+  Corpus as CorpusReader,
+  rowsAt as rowsAtLevel,
+  strideBits as bitsPerLevel,
+  strideOf as idsPerLevelRow,
+} from '../pkg/fossil_graph_wasm.js';
+
+import { CorpusManifestError } from './manifest.js';
 
 export { CorpusManifestError, GRAPH_INFO_PATH } from './manifest.js';
 
@@ -74,124 +67,31 @@ export type Direction = 'src' | 'dst';
  */
 export type Container = 'files' | 'rowgroups';
 
-/** The payload file of a row-group container: one per set, its row groups the tiles. */
-const TILES_FILE = 'tiles.parquet';
-
-/**
- * **How many bits of `dense_id` one level drops — and the only place the pyramid's base is written
- * down.**
- *
- * A level is a quarter of the one below it, so `strideOf(k)` is `4^k` and a level tile's address is
- * the payload's shift plus `2k`. That `2` is the whole of the pyramid's arithmetic, and it lives
- * here because it was spelled fourteen times across four implementations when it did not: every
- * reader in this package reaches it through {@link strideBits} or {@link strideOf}, and a second
- * spelling of it is the bug this constant exists to prevent. `VertexLevels::STRIDE_BITS` in
- * `crates/fossil-sinks` is the writer's half of the same number.
- *
- * Quarters and not halves because a camera's zoom step doubles the linear scale, which quadruples
- * the area and so the points — one level per zoom step. In halves one step crossed two levels, and
- * the window and floor constants that existed to bound that are gone: the complete pyramid costs
- * `1/4 + 1/16 + … = 1/3` of the type whatever `V` is, so there is nothing left to cap.
- */
-const STRIDE_BITS = 2;
-
 /**
  * How many bits of `dense_id` level `k` drops — `2k`, and the number a reader ADDS to its payload
  * tile shift to address a level tile.
+ *
+ * The pyramid's base is spelled once, in `VertexLevels::stride_bits`, and reached from here rather
+ * than respelled: a `2^k` on this side of the boundary would be a different corpus.
  */
-export const strideBits = (level: number): number =>
-  STRIDE_BITS * Math.max(0, Math.trunc(level));
+export const strideBits = (level: number): number => bitsPerLevel(level);
 
 /**
  * How many `dense_id`s one row of level `k` stands for — `4^k`.
  *
  * The decimation level *k* means **the vertices whose `dense_id` is a multiple of this**. Over a
  * Morton-ordered `dense_id` that is one vertex per quadtree cell of depth *k*, so a level is a level
- * of the same curve the tile address is read off — not a sample, not a budget, not a cap. Two
- * consequences follow from the definition alone and neither needs a byte on disk:
- *
- * - **It nests.** A multiple of `strideOf(k+1)` is a multiple of `strideOf(k)`, so refining only
- *   ever ADDS, and a vertex drawn once stays drawn at the same position.
- * - **It is a function of the level and nothing else.** No `matched`, no `limit`, no camera, and
- *   nothing this module has to be told.
+ * of the same curve the tile address is read off — not a sample, not a budget, not a cap.
  */
-export const strideOf = (level: number): number => 2 ** strideBits(level);
-
-/** {@link strideOf} in the width a `dense_id` is counted in. */
-const strideBig = (level: number): bigint => 1n << BigInt(strideBits(level));
-
-/** How many bits a `dense_id` is shifted right by, for the default `chunk_size` of 4,096. */
-export const TILE_SHIFT = 12n;
+export const strideOf = (level: number): bigint => idsPerLevelRow(level);
 
 /**
- * The shift that addresses a tile of `rows` rows, or `null` if no shift does.
+ * How many rows level `k` of a type of `count` rows holds — `ceil(count / strideOf(k))`.
  *
- * A tile size that is not a power of two forces a division where a shift does, which is why
- * `chunk_size` is a power of two or the corpus does not have an address.
+ * A level is a predicate, so this answers for every `k` and not only for the ones a writer spent
+ * bytes on — which is what lets {@link LevelAddress.has} be a cost and not a refusal.
  */
-export function shiftFor(rows: number | bigint): bigint | null {
-  const n = BigInt(rows);
-  if (n <= 0n || (n & (n - 1n)) !== 0n) return null;
-  let shift = 0n;
-  for (let r = n; r > 1n; r >>= 1n) shift += 1n;
-  return shift;
-}
-
-/**
- * The tile a `dense_id` lives in — the whole of the addressing scheme.
- *
- * **A `BigInt`, and it refuses a `Number`.** A `dense_id` may carry more than 53 bits, and
- * JavaScript's `>>` truncates to 32 bits *before* it shifts, so the same three characters mean
- * something different here than in the Rust that wrote the corpus. The published border vectors
- * (`apps/corpus/guards/vectors.json`) are 2³¹, where a port that took the shift as signed gives a
- * negative tile, and 2⁵³, where a port that went through a `Number` stops being exact.
- */
-export function tileOf(denseId: bigint, shift: bigint = TILE_SHIFT): bigint {
-  if (typeof denseId !== 'bigint') {
-    throw new TypeError(
-      `tileOf takes a BigInt; got ${typeof denseId}. A dense_id carries more bits than a Number ` +
-        `can hold, and JavaScript's >> truncates to 32 before it shifts.`,
-    );
-  }
-  if (denseId < 0n) throw new RangeError(`dense_id is unsigned; got ${denseId}`);
-  return denseId >> shift;
-}
-
-/**
- * How many tiles a declared row count occupies, or `null` when no shift addresses `chunkSize`.
- *
- * **This is the arithmetic the manifest's count exists for**, and until `vertex_count` and
- * `edge_count` became required fields there was nothing to feed it: tiles are addressed and never
- * listed, HTTP gives no directory, and a tree holding `chunk0..chunk16` was indistinguishable from
- * a corpus with seventeen tiles. A hole in the middle breaks the addressing and is caught; a
- * missing tail breaks nothing at all. One `read_text` of the manifest now settles it.
- *
- * `BigInt` for the same reason {@link tileOf} is, and the border is published rather than argued:
- * `apps/corpus/guards/vectors.json`'s `declared_count` table carries 4,096 @ 4,096 → **one** tile
- * (the off-by-one addresses a `chunk1.parquet` nothing wrote), 4,097 → two with a tail of one (the
- * tile a truncated corpus loses), and 2⁵³+1, where a `Number` division comes out one tile short.
- */
-export function tilesOf(count: bigint, chunkSize: bigint): bigint | null {
-  if (typeof count !== 'bigint') {
-    throw new TypeError(
-      `tilesOf takes a BigInt count; got ${typeof count}. Above 2^53 a Number loses the tail tile.`,
-    );
-  }
-  if (count < 0n) throw new RangeError(`a row count is unsigned; got ${count}`);
-  const shift = shiftFor(chunkSize);
-  if (shift === null) return null;
-  return (count + chunkSize - 1n) >> shift;
-}
-
-/**
- * How many rows the last tile holds — `chunkSize` for a count that divides, the remainder
- * otherwise, and `0` for an empty type, which has no last tile because it has none at all.
- */
-export function tailRows(count: bigint, chunkSize: bigint): bigint | null {
-  const tiles = tilesOf(count, chunkSize);
-  if (tiles === null) return null;
-  return tiles === 0n ? 0n : count - (tiles - 1n) * chunkSize;
-}
+export const rowsAt = (count: bigint, level: number): bigint => rowsAtLevel(count, level);
 
 /** One vertex type's address: where its tiles are and which `dense_id` range each holds. */
 export interface VertexAddress {
@@ -202,7 +102,7 @@ export interface VertexAddress {
   /** Rows per tile. A power of two, checked at resolve. */
   readonly chunkSize: number;
   /** `log2(chunkSize)` — the shift that turns a `dense_id` into a tile number. */
-  readonly shift: bigint;
+  readonly shift: number;
   /** The manifest's `vertex_count`, or `null` when it declares none. */
   readonly count: bigint | null;
   /** `ceil(count / chunkSize)`, or `null` when the manifest declares no count. */
@@ -211,6 +111,14 @@ export interface VertexAddress {
   readonly container: Container;
   /** The tile holding `denseId`. */
   tileOf(denseId: bigint): bigint;
+  /**
+   * The tiles holding a batch of `dense_id`s, in order.
+   *
+   * **The batch is the shape that crosses**, and {@link VertexAddress.tileOf} is one call to it: a
+   * reader asks this of a frontier, of a pin set, of the addresses an index handed back, and a call
+   * per id would pay the boundary once per vertex.
+   */
+  tilesOf(denseIds: Iterable<bigint>): bigint[];
   /**
    * The file tile `k` is in: `<prefix>chunk{k}.parquet` under `files`, `<prefix>tiles.parquet`
    * under `rowgroups`, where every tile of the type names the same file and the footer's box on
@@ -243,7 +151,7 @@ export interface VertexAddress {
 }
 
 /**
- * Where a vertex type's identity index lives, and how to address one of its tiles.
+ * Where a vertex type's identity index lives.
  *
  * A second copy of the type ordered by identity, tiled with the same `tile{k}` spelling as
  * everything else. It cannot be a column of the payload: one table has one sort, the payload's is
@@ -266,8 +174,6 @@ export interface IndexAddress {
   readonly tiles: bigint | null;
   /** Which container carries the index tiles. The corpus's, never a second answer. */
   readonly container: Container;
-  /** `<prefix>tile{k}.parquet`, or `<prefix>tiles.parquet` under `rowgroups`. */
-  tileUrl(tile: number | bigint): string;
   /** Every index file, in order and distinct. Throws when the count is absent, like {@link VertexAddress.files}. */
   files(): readonly string[];
 }
@@ -281,7 +187,7 @@ export interface AdjacencyAddress {
   readonly column: 'src_dense' | 'dst_dense';
   /** `src_chunk_size` for `src`, `dst_chunk_size` for `dst` — a different space on a cross-type edge. */
   readonly chunkSize: number;
-  readonly shift: bigint;
+  readonly shift: number;
   /**
    * How many tiles this orientation has — **the endpoint vertex type's tile count, not the edge's.**
    *
@@ -292,7 +198,6 @@ export interface AdjacencyAddress {
   readonly tiles: bigint | null;
   /** Which container carries this orientation's tiles. The corpus's, never a second answer. */
   readonly container: Container;
-  tileOf(denseId: bigint): bigint;
   /**
    * `<edge prefix><adj prefix>tile{k}.parquet`. A 404 is "these vertices have no edges here".
    *
@@ -360,15 +265,57 @@ export interface EdgeLevelAddress {
   readonly container: Container;
   /** Whether level `k` is written. `false` is a cost and not a refusal. */
   has(level: number): boolean;
-  /** Where level `k`'s tiles are, resolved, with a trailing separator. */
-  prefix(level: number): string;
-  /** The tile of level `k` a `src_dense` falls in: the source's shift plus {@link strideBits}. */
-  tileOf(level: number, srcDense: bigint): bigint;
   /** The file tile `j` of level `k` is in, spelled by the corpus's container. */
   tileUrl(level: number, tile: number | bigint): string;
-  /** How many tiles level `k` has, or `null` when the source declares no count. */
+}
+
+/**
+ * Where a vertex type's **written levels** are, and which ones exist.
+ *
+ * **Level `k` is `dense_id % strideOf(k) == 0`, whatever this says.** A level is a predicate over
+ * the payload, and a written `l{k}/` is a cache of it — so a corpus declaring none draws the
+ * identical picture and only reads more, and that is what keeps the pyramid from being a second
+ * contract. What this block changes is a byte count, and `Frame.matchedAt` in `./corpus.ts` is
+ * where the difference is visible.
+ *
+ * **The numbers are declared and not derived**, unlike everything else here, and the manifest side
+ * argues why: a level list is `log4(V / chunk_size)` integers whatever the corpus is, and *which*
+ * levels a writer spent bytes on is a policy — a reader re-deriving it from `vertex_count` and
+ * `chunk_size` would reimplement the writer's plan and 404 the day the plan moved.
+ */
+export interface LevelAddress {
+  /** The levels written, finest first, as the manifest declares them. */
+  readonly levels: readonly number[];
+  /**
+   * Rows per tile within a level set. Declared rather than inherited from
+   * {@link VertexAddress.chunkSize}, because turning a level tile back into a `dense_id` range
+   * multiplies by it and a number that has to be assumed is one a writer can change in silence.
+   */
+  readonly chunkSize: number;
+  /** Which container carries the level tiles. The corpus's, never a second answer. */
+  readonly container: Container;
+  /**
+   * Whether level `k` is written.
+   *
+   * `false` is not a refusal and not an absence of the level: the level exists at every `k` — it is
+   * a predicate — and this says only whether reading it costs the level's bytes or the type's.
+   */
+  has(level: number): boolean;
+  /** The tile of level `k` holding `denseId`: the payload's shift plus {@link strideBits}. */
+  tileOf(level: number, denseId: bigint): bigint;
+  /** The file tile `j` of level `k` is in, spelled by the corpus's container. */
+  tileUrl(level: number, tile: number | bigint): string;
+  /** How many rows level `k` holds, or `null` when the manifest declares no count. */
+  rows(level: number): bigint | null;
+  /** How many tiles level `k` has, or `null` when the manifest declares no count. */
   tiles(level: number): bigint | null;
-  /** Every file of level `k`, in order and distinct. Refuses a level nobody wrote. */
+  /**
+   * Every file of level `k`, in order and distinct.
+   *
+   * Throws on {@link VertexAddress.files}' argument when the count is absent, and on a level that
+   * is not written — the second one because the URL would name a prefix nobody wrote, which is the
+   * one failure a reader cannot tell from an empty level.
+   */
   files(level: number): readonly string[];
 }
 
@@ -426,7 +373,7 @@ export interface AddressedTiles {
 export interface ResolveCorpusOptions {
   /**
    * The manifest YAMLs, keyed by dataset-relative path, pre-fetched by the host — the same shape
-   * `createGraphClient` already takes. They are small: one index plus one file per type.
+   * the verbs already take. They are small: one index plus one file per type.
    */
   manifestFiles: Record<string, string>;
   /**
@@ -437,11 +384,11 @@ export interface ResolveCorpusOptions {
 }
 
 /**
- * A corpus resolved to addresses. Every method is pure and synchronous.
+ * A corpus resolved to addresses.
  *
  * **It was `ResolvedCorpus`, one import away from `Corpus`, and neither name said what differed.**
  * Both are a corpus; one is the door — asynchronous, engine-backed, answering with rows — and this
- * one is the arithmetic underneath it, which answers with URLs and never reads a byte. So it is
+ * one is the addressing underneath it, which answers with URLs and never reads a byte. So it is
  * named for the layer rather than for the noun the two share, and {@link Corpus.addressing} is
  * where a caller that has outgrown the door reaches it.
  */
@@ -476,469 +423,227 @@ export interface CorpusAddressing {
   }): AddressedTiles;
 }
 
-const COLUMN: Record<Direction, 'src_dense' | 'dst_dense'> = {
-  src: 'src_dense',
-  dst: 'dst_dense',
-};
+// ── what the reader hands back ────────────────────────────────────────────────
+//
+// `Corpus.snapshot()` serialises `fossil_graph::plan::ReadPlan`, so these are that struct's own
+// field names, in `serde`'s spelling. They are the ONLY place this package writes them down: every
+// camelCase name above is produced from one of these below, once, at resolve.
 
-/** A prefix as the manifest writes it: dataset-relative, one trailing separator. */
-function prefixOf(value: string): string {
-  return `${value.replace(/\/+$/, '')}/`;
+interface PlanSnapshot {
+  readonly base: string;
+  readonly container: Container;
+  readonly types: readonly VertexSnapshot[];
+  readonly edges: readonly EdgeSnapshot[];
+}
+
+interface VertexSnapshot {
+  readonly type: string;
+  readonly prefix: string;
+  readonly chunk_size: bigint;
+  readonly shift: number;
+  readonly count: bigint | null;
+  readonly tiles: bigint | null;
+  readonly container: Container;
+  readonly index: IndexSnapshot | null;
+  readonly levels: LevelSnapshot | null;
+}
+
+interface IndexSnapshot {
+  readonly prefix: string;
+  readonly ordered_by: string;
+  readonly chunk_size: bigint;
+  readonly tiles: bigint | null;
+  readonly container: Container;
+}
+
+interface LevelSnapshot {
+  readonly levels: readonly number[];
+  readonly chunk_size: bigint;
+  readonly container: Container;
+}
+
+interface AdjacencySnapshot {
+  readonly direction: Direction;
+  readonly prefix: string;
+  readonly column: 'src_dense' | 'dst_dense';
+  readonly chunk_size: bigint;
+  readonly shift: number;
+  readonly tiles: bigint | null;
+  readonly container: Container;
+}
+
+interface EdgeSnapshot {
+  readonly edge_type: string;
+  readonly src_type: string;
+  readonly dst_type: string;
+  readonly count: bigint | null;
+  readonly prefix: string;
+  readonly directions: readonly Direction[];
+  readonly adjacencies: readonly AdjacencySnapshot[];
+  readonly levels: LevelSnapshot | null;
+}
+
+interface WindowSnapshot {
+  readonly type: string;
+  readonly tiles: readonly number[];
+  readonly vertex_urls: readonly string[];
+  readonly edges: ReadonlyArray<{
+    readonly edge_type: string;
+    readonly direction: Direction;
+    readonly urls: readonly string[];
+  }>;
+  readonly edge_urls: readonly string[];
+  readonly complete: boolean;
+  readonly gaps: ReadonlyArray<{
+    readonly edge_type: string;
+    readonly direction: Direction;
+    readonly reason: GapReason;
+  }>;
 }
 
 /**
- * Where the tiles of one payload set are, in whichever container the corpus declares.
+ * Every refusal the reader makes, as the error this package's callers already catch.
  *
- * One function for the three sets that had a copy of it each — the vertex payload, the identity
- * index and each adjacency orientation — because the only thing that ever differed between them is
- * the stem of the filename. Under `rowgroups` even that goes: a set is one file.
+ * `JsError` crosses as a plain `Error` carrying the Rust message verbatim, so what is preserved
+ * here is the TYPE and not the wording: a manifest that cannot address itself still names what was
+ * wrong, and still does it as a {@link CorpusManifestError}.
  */
-function tileUrlFor(
-  prefix: string,
-  stem: 'chunk' | 'tile',
-  container: Container,
-): (tile: number | bigint) => string {
-  return container === 'rowgroups'
-    ? () => `${prefix}${TILES_FILE}`
-    : (tile) => `${prefix}${stem}${BigInt(tile)}.parquet`;
+function asked<T>(ask: () => T): T {
+  try {
+    return ask();
+  } catch (cause) {
+    if (cause instanceof CorpusManifestError) throw cause;
+    throw new CorpusManifestError(
+      cause instanceof Error ? cause.message : String(cause),
+    );
+  }
 }
-
-/** Distinct, in order. Under `rowgroups` every tile of a set names the same file. */
-const distinct = (urls: readonly string[]): string[] => [...new Set(urls)];
 
 /**
- * Which container the corpus declares, from `graph.graph.yml`.
+ * A batch of `dense_id`s in the width the reader takes them in.
  *
- * Absent is `files`, and it is the one field here with a default rather than a {@link required}: a
- * corpus written before the field existed is the file-per-tile container, so absence is a statement
- * and not a gap. A third spelling is refused, because it would compose a URL.
+ * **It refuses a `Number`**, which `BigUint64Array` does for it, and a negative, which it does not:
+ * `-1n` would arrive as 2⁶⁴−1 and address a tile at the top of the space. A `dense_id` carries more
+ * than 53 bits, and JavaScript's `>>` truncates to 32 *before* it shifts, so the same three
+ * characters mean something different on each side of this boundary — which is why none of them
+ * appear on this one.
  */
-function containerOf(index: ScannedManifest): Container {
-  const declared = index['container'];
-  if (declared === undefined || declared === '') return 'files';
-  if (declared !== 'files' && declared !== 'rowgroups') {
-    throw new CorpusManifestError(
-      `${GRAPH_INFO_PATH} declares container ${String(declared)}; a tile is a file or a row group`,
-    );
+function widths(denseIds: Iterable<bigint>): BigUint64Array {
+  const batch = [...denseIds];
+  for (const id of batch) {
+    if (typeof id !== 'bigint') {
+      throw new TypeError(
+        `a dense_id is a BigInt; got ${typeof id}. It carries more bits than a Number can hold.`,
+      );
+    }
+    if (id < 0n) throw new RangeError(`dense_id is unsigned; got ${id}`);
   }
-  return declared;
+  return BigUint64Array.from(batch);
 }
 
-function vertexAddress(
-  base: string,
-  path: string,
-  yaml: ScannedManifest,
-  container: Container,
-): VertexAddress {
-  const type = required(yaml, path, 'type');
-  const chunkSize = requiredNumber(yaml, path, 'chunk_size');
-  const shift = shiftFor(chunkSize);
-  if (shift === null) {
-    throw new CorpusManifestError(
-      `${path} declares a tile of ${chunkSize} rows, which no shift addresses`,
-    );
-  }
-  const prefix = prefixOf(join(base, required(yaml, path, 'prefix')));
-  const count = optionalCount(yaml, 'vertex_count');
-  const tiles = count === null ? null : tilesOf(count, BigInt(chunkSize));
-  const tileUrl = tileUrlFor(prefix, 'chunk', container);
+/** `bigint | undefined` is how an absent `u64` crosses; `null` is how this package spells it. */
+const orNull = (value: bigint | undefined): bigint | null => value ?? null;
+
+function levelAddress(
+  reader: CorpusReader,
+  type: string,
+  declared: LevelSnapshot,
+): LevelAddress {
+  const written = new Set(declared.levels);
+  return {
+    levels: declared.levels,
+    chunkSize: Number(declared.chunk_size),
+    container: declared.container,
+    has: (level) => written.has(level),
+    // `widths` is OUTSIDE `asked`: a caller handing this a `Number` has made a type error and not
+    // written an unaddressable manifest, and the two must not come back as the same class.
+    tileOf: (level, denseId) => {
+      const batch = widths([denseId]);
+      return asked(() => reader.levelTilesOf(type, level, batch)[0]!);
+    },
+    tileUrl: (level, tile) => asked(() => reader.levelTileUrl(type, level, BigInt(tile))),
+    rows: (level) => asked(() => orNull(reader.levelRows(type, level))),
+    tiles: (level) => asked(() => orNull(reader.levelTiles(type, level))),
+    files: (level) => asked(() => reader.levelFiles(type, level)),
+  };
+}
+
+function vertexAddress(reader: CorpusReader, declared: VertexSnapshot): VertexAddress {
+  const type = declared.type;
+  const index = declared.index;
   return {
     type,
-    prefix,
-    chunkSize,
-    shift,
-    count,
-    tiles,
-    container,
-    index: indexAddress(prefix, path, yaml, count, container),
-    levels: levelAddress(prefix, path, yaml, count, container),
-    tileOf: (denseId) => tileOf(denseId, shift),
-    tileUrl,
-    files: () => {
-      if (tiles === null) {
-        throw new CorpusManifestError(
-          `${path} declares no vertex_count, so how many tiles ${type} has is not derivable — ` +
-            `tiles are addressed and never listed, and HTTP gives no directory to fall back on`,
-        );
-      }
-      const urls: string[] = [];
-      for (let k = 0n; k < tiles; k += 1n) urls.push(tileUrl(k));
-      return distinct(urls);
+    prefix: declared.prefix,
+    chunkSize: Number(declared.chunk_size),
+    shift: declared.shift,
+    count: declared.count,
+    tiles: declared.tiles,
+    container: declared.container,
+    index:
+      index === null
+        ? null
+        : {
+            prefix: index.prefix,
+            orderedBy: index.ordered_by,
+            chunkSize: Number(index.chunk_size),
+            tiles: index.tiles,
+            container: index.container,
+            files: () => asked(() => reader.indexFiles(type)),
+          },
+    levels: declared.levels === null ? null : levelAddress(reader, type, declared.levels),
+    // `widths` is OUTSIDE `asked`, for the reason {@link levelAddress} states.
+    tileOf: (denseId) => {
+      const batch = widths([denseId]);
+      return asked(() => reader.tilesOf(type, batch)[0]!);
     },
-  };
-}
-
-/**
- * The `index:` block of a vertex manifest, resolved, or `null` when there is none.
- *
- * Every field is required ONCE the block is present: a `prefix` with no `ordered_by` names files
- * whose sort a reader would have to guess, and guessing it wrong returns a plausible stranger
- * rather than nothing. A half-declared index is refused rather than ignored, because ignoring it
- * would read exactly like a corpus that declares none — which is the failure the scanner already
- * made once, before it could see a nested map at all.
- */
-function indexAddress(
-  vertexPrefix: string,
-  path: string,
-  yaml: ScannedManifest,
-  count: bigint | null,
-  container: Container,
-): IndexAddress | null {
-  const declared = mapping(yaml, path, 'index');
-  if (declared === null) return null;
-
-  const need = (key: string): string => {
-    const value = scalarOf(declared, key);
-    if (value === undefined || value === '') {
-      throw new CorpusManifestError(
-        `${path} declares an index and no ${key}, so its tiles address nothing`,
-      );
-    }
-    return value;
-  };
-  const prefix = prefixOf(join(vertexPrefix, need('prefix')));
-  const orderedBy = need('ordered_by');
-  const chunkSize = Number(need('chunk_size'));
-  if (!Number.isInteger(chunkSize) || chunkSize <= 0) {
-    throw new CorpusManifestError(
-      `${path} declares an index chunk_size of ${declared.chunk_size}, which is not a row count`,
-    );
-  }
-  const tiles = count === null ? null : tilesOf(count, BigInt(chunkSize));
-  const tileUrl = tileUrlFor(prefix, 'tile', container);
-  return {
-    prefix,
-    orderedBy,
-    chunkSize,
-    tiles,
-    container,
-    tileUrl,
-    files: () => {
-      if (tiles === null) {
-        throw new CorpusManifestError(
-          `${path} declares no vertex_count, so how many index tiles ${required(yaml, path, 'type')} has is not derivable`,
-        );
-      }
-      const urls: string[] = [];
-      for (let k = 0n; k < tiles; k += 1n) urls.push(tileUrl(k));
-      return distinct(urls);
+    tilesOf: (denseIds) => {
+      const batch = widths(denseIds);
+      return asked(() => [...reader.tilesOf(type, batch)]);
     },
+    tileUrl: (tile) => asked(() => reader.vertexTileUrl(type, BigInt(tile))),
+    files: () => asked(() => reader.vertexFiles(type)),
   };
 }
 
-/**
- * Where a vertex type's **written levels** are, and which ones exist.
- *
- * **Level `k` is `dense_id % strideOf(k) == 0`, whatever this says.** A level is a predicate over
- * the payload, and a written `l{k}/` is a cache of it — so a corpus declaring none draws the
- * identical picture and only reads more, and that is what keeps the pyramid from being a second
- * contract. What this block changes is a byte count, and `Frame.matchedAt` in `./corpus.ts` is
- * where the difference is visible.
- *
- * **The numbers are declared and not derived**, unlike everything else here, and the manifest side
- * argues why: a level list is `log4(V / chunk_size)` integers whatever the corpus is, and *which*
- * levels a writer spent bytes on is a policy — a reader re-deriving it from `vertex_count` and
- * `chunk_size` would reimplement the writer's plan and 404 the day the plan moved.
- *
- * **A level needs nothing new to address.** Level `k`'s row `i` is the payload row with
- * `dense_id == i · strideOf(k)`, so tile `j` of a level covers the `dense_id` range
- * `[j · chunkSize · strideOf(k), (j+1) · chunkSize · strideOf(k))` — a contiguous run of payload
- * tiles. In bits, which is how a reader spends it: the payload's own shift plus {@link strideBits}.
- */
-export interface LevelAddress {
-  /** The levels written, finest first, as the manifest declares them. */
-  readonly levels: readonly number[];
-  /**
-   * Rows per tile within a level set. Declared rather than inherited from
-   * {@link VertexAddress.chunkSize}, because turning a level tile back into a `dense_id` range
-   * multiplies by it and a number that has to be assumed is one a writer can change in silence.
-   */
-  readonly chunkSize: number;
-  /** Which container carries the level tiles. The corpus's, never a second answer. */
-  readonly container: Container;
-  /**
-   * Whether level `k` is written.
-   *
-   * `false` is not a refusal and not an absence of the level: the level exists at every `k` — it is
-   * a predicate — and this says only whether reading it costs the level's bytes or the type's.
-   */
-  has(level: number): boolean;
-  /** Where level `k`'s tiles are, resolved against the corpus base, with a trailing separator. */
-  prefix(level: number): string;
-  /**
-   * The tile of level `k` holding `denseId`: a shift by `log2(chunkSize)` plus {@link strideBits},
-   * never a division.
-   */
-  tileOf(level: number, denseId: bigint): bigint;
-  /** The file tile `j` of level `k` is in, spelled by the corpus's container. */
-  tileUrl(level: number, tile: number | bigint): string;
-  /**
-   * How many rows level `k` holds — `ceil(count / strideOf(k))` — or `null` when the manifest
-   * declares no count.
-   */
-  rows(level: number): bigint | null;
-  /** How many tiles level `k` has, or `null` when the manifest declares no count. */
-  tiles(level: number): bigint | null;
-  /**
-   * Every file of level `k`, in order and distinct.
-   *
-   * Throws on {@link VertexAddress.files}' argument when the count is absent, and on a level that
-   * is not written — the second one because the URL would name a prefix nobody wrote, which is the
-   * one failure a reader cannot tell from an empty level.
-   */
-  files(level: number): readonly string[];
-}
-
-/**
- * The `levels:` block of a vertex manifest, resolved, or `null` when there is none.
- *
- * Every field is required once the block is present, on {@link indexAddress}'s argument: a block
- * naming a prefix without its level list reads exactly like a corpus that declares no pyramid, and
- * the difference between those two is a reader opening `l6/` or striding a million rows.
- */
-function levelAddress(
-  vertexPrefix: string,
-  path: string,
-  yaml: ScannedManifest,
-  count: bigint | null,
-  container: Container,
-): LevelAddress | null {
-  const declared = mapping(yaml, path, 'levels');
-  if (declared === null) return null;
-
-  const stem = scalarOf(declared, 'prefix');
-  if (stem === undefined || stem === '') {
-    throw new CorpusManifestError(
-      `${path} declares levels and no prefix, so the tiles they name cannot be composed`,
-    );
-  }
-  const declaredLevels = listOf(declared, 'levels');
-  if (declaredLevels.length === 0) {
-    throw new CorpusManifestError(
-      `${path} declares levels and no level list, so which of them is written is not derivable — ` +
-        `and it is a policy, not arithmetic a reader can redo`,
-    );
-  }
-  const levels = declaredLevels.map((raw) => {
-    const level = Number(raw);
-    if (!Number.isInteger(level) || level < 0) {
-      throw new CorpusManifestError(`${path} declares level ${raw}, which is not a level`);
-    }
-    return level;
-  });
-  const chunkSize = Number(scalarOf(declared, 'chunk_size'));
-  const shift = shiftFor(chunkSize);
-  if (shift === null) {
-    throw new CorpusManifestError(
-      `${path} declares a level tile of ${scalarOf(declared, 'chunk_size') ?? 'nothing'} rows, ` +
-        `which no shift addresses`,
-    );
-  }
-  const written = new Set(levels);
-  const prefix = (level: number): string => prefixOf(join(vertexPrefix, `${stem}${level}`));
-  const rows = (level: number): bigint | null => {
-    if (count === null) return null;
-    const stride = strideBig(level);
-    return (count + stride - 1n) / stride;
-  };
-  const tiles = (level: number): bigint | null => {
-    const at = rows(level);
-    return at === null ? null : tilesOf(at, BigInt(chunkSize));
-  };
-  return {
-    levels,
-    chunkSize,
-    container,
-    has: (level) => written.has(level),
-    prefix,
-    // The whole of a level's addressing: `strideBits(k)` more bits of `dense_id` fall off, because
-    // level `k` holds one row in `strideOf(k)` and a tile of it spans that many times the ids.
-    tileOf: (level, denseId) => tileOf(denseId, shift + BigInt(strideBits(level))),
-    tileUrl: (level, tile) => tileUrlFor(prefix(level), 'chunk', container)(tile),
-    rows,
-    tiles,
-    files: (level) => {
-      if (!written.has(level)) {
-        throw new CorpusManifestError(
-          `${path} writes levels ${levels.join(', ')} and not ${level}, so its files are not ` +
-            `addressable — the predicate over the payload is what answers that level`,
-        );
-      }
-      const count_ = tiles(level);
-      if (count_ === null) {
-        throw new CorpusManifestError(
-          `${path} declares no vertex_count, so how many tiles level ${level} has is not derivable`,
-        );
-      }
-      const urls: string[] = [];
-      for (let k = 0n; k < count_; k += 1n) urls.push(tileUrlFor(prefix(level), 'chunk', container)(k));
-      return distinct(urls);
-    },
-  };
-}
-
-/**
- * The `levels:` block of an EDGE manifest, resolved, or `null` when there is none.
- *
- * Every field is required once the block is present, on {@link levelAddress}'s argument. The tile
- * count comes from the SOURCE type's `vertex_count` and not from `edge_count`, because a level tile
- * here is a range of `src_dense` — the relation's own row count says nothing about how many of
- * those ranges there are.
- */
-function edgeLevelAddress(
-  edgePrefix: string,
-  path: string,
-  yaml: ScannedManifest,
-  src: VertexAddress,
-  container: Container,
-): EdgeLevelAddress | null {
-  const declared = mapping(yaml, path, 'levels');
-  if (declared === null) return null;
-  const stem = scalarOf(declared, 'prefix');
-  if (stem === undefined || stem === '') {
-    throw new CorpusManifestError(
-      `${path} declares levels and no prefix, so the tiles they name cannot be composed`,
-    );
-  }
-  const listed = listOf(declared, 'levels');
-  if (listed.length === 0) {
-    throw new CorpusManifestError(
-      `${path} declares levels and no level list, so which of them is written is not derivable — ` +
-        `and it is a policy, not arithmetic a reader can redo`,
-    );
-  }
-  const levels = listed.map((raw) => {
-    const level = Number(raw);
-    if (!Number.isInteger(level) || level < 0) {
-      throw new CorpusManifestError(`${path} declares level ${raw}, which is not a level`);
-    }
-    return level;
-  });
-  const chunkSize = Number(scalarOf(declared, 'chunk_size'));
-  const shift = shiftFor(chunkSize);
-  if (shift === null) {
-    throw new CorpusManifestError(
-      `${path} declares a level tile of ${scalarOf(declared, 'chunk_size') ?? 'nothing'} rows, ` +
-        `which no shift addresses`,
-    );
-  }
-  const written = new Set(levels);
-  const prefix = (level: number): string => prefixOf(join(edgePrefix, `${stem}${level}`));
-  const url = (level: number, tile: number | bigint): string =>
-    tileUrlFor(prefix(level), 'chunk', container)(tile);
-  const tiles = (level: number): bigint | null => {
-    if (src.count === null) return null;
-    const span = BigInt(chunkSize) * strideBig(level);
-    return (src.count + span - 1n) / span;
-  };
-  return {
-    levels,
-    chunkSize,
-    container,
-    has: (level) => written.has(level),
-    prefix,
-    tileOf: (level, srcDense) => tileOf(srcDense, shift + BigInt(strideBits(level))),
-    tileUrl: url,
-    tiles,
-    files: (level) => {
-      if (!written.has(level)) {
-        throw new CorpusManifestError(
-          `${path} writes levels ${levels.join(', ')} and not ${level}, so its files are not ` +
-            `addressable — the adjacency and the payload are what answer that level`,
-        );
-      }
-      const count = tiles(level);
-      if (count === null) {
-        throw new CorpusManifestError(
-          `${path} names a source type declaring no vertex_count, so how many tiles level ` +
-            `${level} has is not derivable`,
-        );
-      }
-      const urls: string[] = [];
-      for (let k = 0n; k < count; k += 1n) urls.push(url(level, k));
-      return distinct(urls);
-    },
-  };
-}
-
-function edgeAddress(
-  base: string,
-  path: string,
-  yaml: ScannedManifest,
-  types: readonly VertexAddress[],
-  container: Container,
-): EdgeAddress {
-  const srcType = required(yaml, path, 'src_type');
-  const dstType = required(yaml, path, 'dst_type');
-  const edgeType = required(yaml, path, 'edge_type');
-  const prefix = prefixOf(join(base, required(yaml, path, 'prefix')));
-
-  const endpoint = (name: string, role: string): VertexAddress => {
-    const found = types.find((t) => t.type === name);
-    if (!found) {
-      throw new CorpusManifestError(
-        `${path} names ${role} type ${name}, which the index does not declare`,
-      );
-    }
-    return found;
-  };
-  const src = endpoint(srcType, 'source');
-  const dst = endpoint(dstType, 'destination');
-
-  // An edge tile is addressed by a *vertex* tile, so a different number here would address
-  // nothing — and it would address nothing silently, because the URLs still compose and the files
-  // they name mostly exist. Checked once, here, rather than trusted in a comment beside a reader.
-  const sizes: Array<[string, number, VertexAddress]> = [
-    ['src_chunk_size', requiredNumber(yaml, path, 'src_chunk_size'), src],
-    ['dst_chunk_size', requiredNumber(yaml, path, 'dst_chunk_size'), dst],
-  ];
-  for (const [key, declared, vertex] of sizes) {
-    if (declared !== vertex.chunkSize) {
-      throw new CorpusManifestError(
-        `${path} declares ${key} ${declared} against ${vertex.type}'s chunk_size ${vertex.chunkSize}, ` +
-          `so its tiles address nothing`,
-      );
-    }
-  }
-  const chunkSize = requiredNumber(yaml, path, 'chunk_size');
-  if (chunkSize !== sizes[0]![1]) {
-    throw new CorpusManifestError(
-      `${path} declares chunk_size ${chunkSize} and src_chunk_size ${sizes[0]![1]}`,
-    );
-  }
-
-  const declared = new Map<Direction, AdjacencyAddress>();
-  for (const entry of mappings(yaml, 'adj_lists')) {
-    const alignedBy = entry.aligned_by;
-    if (alignedBy !== 'src' && alignedBy !== 'dst') continue;
-    // The one part of a tile's URL a reader cannot compute. An orientation declared without it has
-    // tiles nobody can address, so it is not an address and does not become one here.
-    const adjPrefix = (entry.prefix ?? '').replace(/\/+$/, '');
-    if (adjPrefix === '') continue;
-    const vertex = alignedBy === 'src' ? src : dst;
-    const tilePrefix = prefixOf(join(prefix, adjPrefix));
-    declared.set(alignedBy, {
-      direction: alignedBy,
-      prefix: tilePrefix,
-      column: COLUMN[alignedBy],
-      chunkSize: vertex.chunkSize,
-      shift: vertex.shift,
-      tiles: vertex.tiles,
-      container,
-      tileOf: (denseId) => tileOf(denseId, vertex.shift),
-      tileUrl: tileUrlFor(tilePrefix, 'tile', container),
-    });
-  }
-
+function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress {
+  const edgeType = declared.edge_type;
+  const adjacencies = new Map<Direction, AdjacencyAddress>(
+    declared.adjacencies.map((adjacency) => [
+      adjacency.direction,
+      {
+        direction: adjacency.direction,
+        prefix: adjacency.prefix,
+        column: adjacency.column,
+        chunkSize: Number(adjacency.chunk_size),
+        shift: adjacency.shift,
+        tiles: adjacency.tiles,
+        container: adjacency.container,
+        tileUrl: (tile) =>
+          asked(() => reader.adjacencyTileUrl(edgeType, adjacency.direction, BigInt(tile))!),
+      },
+    ]),
+  );
+  const levels = declared.levels;
+  const written = new Set(levels?.levels ?? []);
   return {
     edgeType,
-    srcType,
-    dstType,
-    count: optionalCount(yaml, 'edge_count'),
-    prefix,
-    directions: (['src', 'dst'] as const).filter((d) => declared.has(d)),
-    adjacency: (direction) => declared.get(direction) ?? null,
-    levels: edgeLevelAddress(prefix, path, yaml, src, container),
+    srcType: declared.src_type,
+    dstType: declared.dst_type,
+    count: declared.count,
+    prefix: declared.prefix,
+    directions: declared.directions,
+    adjacency: (direction) => adjacencies.get(direction) ?? null,
+    levels:
+      levels === null
+        ? null
+        : {
+            levels: levels.levels,
+            chunkSize: Number(levels.chunk_size),
+            container: levels.container,
+            has: (level) => written.has(level),
+            tileUrl: (level, tile) =>
+              asked(() => reader.edgeLevelTileUrl(edgeType, level, BigInt(tile))),
+          },
   };
 }
 
@@ -946,10 +651,14 @@ function edgeAddress(
  * Resolve a corpus's manifest set into the addresses a reader composes URLs from.
  *
  * ```ts
+ * await initFossilGraphWasm({ wasmUrl });
  * const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
  * const person = corpus.vertexType();
  * const { edgeUrls, complete, gaps } = corpus.tilesFor({ tiles: [3, 4], directions: ['src', 'dst'] });
  * ```
+ *
+ * **`initFossilGraphWasm` must have been awaited first.** The resolution runs in
+ * `fossil-graph-wasm`; without the module instantiated this throws the same way a verb call does.
  *
  * Throws {@link CorpusManifestError} when the manifest cannot address itself — a missing file, a
  * `chunk_size` no shift addresses, an endpoint type the index does not declare, or an edge whose
@@ -959,100 +668,51 @@ function edgeAddress(
  */
 export function resolveCorpus(options: ResolveCorpusOptions): CorpusAddressing {
   const { manifestFiles, base = '' } = options;
+  const reader = asked(() => new CorpusReader(manifestFiles, base));
+  const plan = asked(() => reader.snapshot() as PlanSnapshot);
 
-  const read = (path: string): ScannedManifest => {
-    const text = manifestFiles[path];
-    if (text === undefined) {
-      throw new CorpusManifestError(
-        `the manifest names ${path}, which is not among the ${Object.keys(manifestFiles).length} ` +
-          `file(s) given`,
-      );
-    }
-    return scan(path, text);
-  };
+  const types = plan.types.map((declared) => vertexAddress(reader, declared));
+  const edges = plan.edges.map((declared) => edgeAddress(reader, declared));
+  const byName = new Map(types.map((type) => [type.type, type]));
 
-  const index = read(GRAPH_INFO_PATH);
-  // `prefix` on the index is what the per-type paths are relative to; it is `''` in every corpus
-  // fossil writes, and honoured rather than assumed because the field exists to be set.
-  const root = join(base, typeof index['prefix'] === 'string' ? index['prefix'] : '');
-  const container = containerOf(index);
-
-  const types = paths(index, 'vertices').map((path) =>
-    vertexAddress(root, path, read(path), container),
-  );
-  if (types.length === 0) {
-    throw new CorpusManifestError(`${GRAPH_INFO_PATH} names no vertex type`);
-  }
-  const edges = paths(index, 'edges').map((path) =>
-    edgeAddress(root, path, read(path), types, container),
-  );
-
-  const vertexType = (name?: string): VertexAddress => {
-    if (name === undefined) return types[0]!;
-    const found = types.find((t) => t.type === name);
-    if (!found) {
-      throw new CorpusManifestError(
-        `no vertex type ${name} in ${GRAPH_INFO_PATH}; it names ${types.map((t) => t.type).join(', ')}`,
-      );
-    }
-    return found;
-  };
-
-  const incident = (type: string): readonly EdgeAddress[] =>
-    edges.filter((e) => e.srcType === type || e.dstType === type);
-
-  const tilesFor: CorpusAddressing['tilesFor'] = ({ type, tiles, directions = ['src'] }) => {
-    const vertex = vertexType(type);
-    const wanted = new Set(directions);
-    const numbers = [...tiles].map(Number);
-    const edgeTiles: EdgeTiles[] = [];
-    const gaps: Gap[] = [];
-
-    for (const edge of incident(vertex.type)) {
-      // Only the orientations whose *own* `dense_id` space is this window's. On a cross-type edge
-      // `by_target` tile k addresses tile k of the destination type, which is a different set of
-      // vertices — reading it for a window over the source type would answer a question nobody
-      // asked and call it the neighbourhood.
-      const applicable: Direction[] = [];
-      if (edge.srcType === vertex.type) applicable.push('src');
-      if (edge.dstType === vertex.type) applicable.push('dst');
-
-      for (const direction of applicable) {
-        const adjacency = edge.adjacency(direction);
-        if (adjacency === null) {
-          gaps.push({ edgeType: edge.edgeType, direction, reason: 'not-declared' });
-          continue;
-        }
-        if (!wanted.has(direction)) {
-          gaps.push({ edgeType: edge.edgeType, direction, reason: 'not-requested' });
-          continue;
-        }
-        edgeTiles.push({
-          edgeType: edge.edgeType,
-          direction,
-          urls: distinct(numbers.map((k) => adjacency.tileUrl(k))),
-        });
-      }
-    }
-
-    return {
-      type: vertex.type,
-      tiles: numbers,
-      vertexUrls: distinct(numbers.map((k) => vertex.tileUrl(k))),
-      edges: edgeTiles,
-      edgeUrls: distinct(edgeTiles.flatMap((e) => e.urls)),
-      complete: gaps.length === 0,
-      gaps,
-    };
-  };
+  const vertexType = (name?: string): VertexAddress =>
+    // The refusal is the reader's, not a second copy of the list it names: an unknown type here is
+    // told what the manifest DOES declare, and that sentence has one author.
+    byName.get(asked(() => reader.vertexTypeName(name)))!;
 
   return {
-    base,
-    container,
+    base: plan.base,
+    container: plan.container,
     types,
     edges,
     vertexType,
-    incident,
-    tilesFor,
+    incident: (type) => edges.filter((e) => e.srcType === type || e.dstType === type),
+    tilesFor: ({ type, tiles, directions = ['src'] }) => {
+      const window = asked(
+        () =>
+          reader.window(
+            type,
+            BigUint64Array.from([...tiles].map(BigInt)),
+            [...directions],
+          ) as WindowSnapshot,
+      );
+      return {
+        type: window.type,
+        tiles: window.tiles,
+        vertexUrls: window.vertex_urls,
+        edges: window.edges.map((e) => ({
+          edgeType: e.edge_type,
+          direction: e.direction,
+          urls: e.urls,
+        })),
+        edgeUrls: window.edge_urls,
+        complete: window.complete,
+        gaps: window.gaps.map((g) => ({
+          edgeType: g.edge_type,
+          direction: g.direction,
+          reason: g.reason,
+        })),
+      };
+    },
   };
 }

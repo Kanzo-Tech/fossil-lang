@@ -19,8 +19,8 @@
  *   const { types } = await graph.listVertexTypes();
  *
  * The verbs answer questions and return ids; what gets *drawn* comes from tiles, and the tile
- * addresses come from `resolveCorpus` over the same `manifestFiles` — synchronous, WASM-free, and
- * the only published copy of the arithmetic a reader would otherwise re-derive:
+ * addresses come from `resolveCorpus` over the same `manifestFiles` — the same reader, over the
+ * same WASM module the verbs run in:
  *
  *   const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
  *   const { vertexUrls, edgeUrls, complete } = corpus.tilesFor({ tiles, directions: ['src'] });
@@ -42,27 +42,16 @@ export type { QueryFn, QueryRow } from './query.js';
 // `tests/client.test.ts`, and public in the wasm-bindgen sense only because it is generated.
 
 
-// The addressing half, and it deliberately shares nothing with the verb half but the manifest:
-// no WASM to initialise, no `query` callback, no promise. A notebook, a CLI or a server opens the
-// same corpus with this and a Parquet reader of its own choosing.
+// The addressing half. It shares the manifest with the verb half and now shares the READER too:
+// `resolveCorpus` resolves through `fossil-graph-wasm`, so `initFossilGraphWasm` has to have been
+// awaited before it, exactly as for a verb.
 //
-// Reached that way it is `@fossil-lang/corpus/address`, NOT this barrel. Everything above this line
-// static-imports `../pkg/fossil_graph_wasm.js`, so the barrel cannot load without the wasm-bindgen
-// output — which is why the subpath exists and why `tests/address-standalone.test.ts` imports it
-// from a package directory with no `pkg/` in it. The re-export below is for consumers who are
-// already using the verbs and want both halves from one specifier.
-export {
-  resolveCorpus,
-  strideBits,
-  strideOf,
-  shiftFor,
-  tailRows,
-  tileOf,
-  tilesOf,
-  TILE_SHIFT,
-  CorpusManifestError,
-  GRAPH_INFO_PATH,
-} from './address.js';
+// **It had a subpath, `@fossil-lang/corpus/address`, and it is gone.** That entry existed so a
+// notebook, a CLI or a server could address a corpus with no WASM and a Parquet reader of its own —
+// and the only way to keep that promise was a second implementation of the addressing in
+// TypeScript, agreeing with `crates/fossil-graph/src/plan.rs` because people kept making it agree.
+// A wasm-free path is that copy, so the copy went and the subpath went with it.
+export { resolveCorpus, CorpusManifestError, GRAPH_INFO_PATH } from './address.js';
 export type {
   AdjacencyAddress,
   Direction,

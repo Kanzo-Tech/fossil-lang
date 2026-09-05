@@ -4,16 +4,20 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import './boot.js';
 import { resolveCorpus, type Direction, type CorpusAddressing } from '../src/index.js';
 
 /**
  * The conformance corpus, executed against the published module.
  *
  * `apps/corpus/conformance/expected.json` is a table of addresses — what a reader must compose from
- * a manifest and what it must refuse to compose. This file is one of the two implementations that
- * run it; `apps/corpus/conformance/verify.mjs` is the other, in plain Node with no npm at all,
- * because the format's claim is that a reader who has never heard of this package can open the same
- * corpus. Neither implementation wrote the table.
+ * a manifest and what it must refuse to compose. This file runs it through the wasm32 build that
+ * actually ships, which is a different claim from `crates/fossil-graph/tests/conformance.rs`
+ * running the same reader natively: `usize` is 64 bits there and 32 here, and 2^53 is where a port
+ * that went through a double stops being exact. `apps/corpus/conformance/verify.mjs` is the leg
+ * that is a separate implementation, in plain Node with no npm at all, because the format's claim
+ * is that a reader who has never heard of this package can open the same corpus. None of the three
+ * wrote the table.
  *
  * The `corpus` case has bytes: 300 vertices in five tiles of 64, both orientations tiled, passing
  * all fifteen guards. Every address it lists is checked to name a file that is on disk, which is

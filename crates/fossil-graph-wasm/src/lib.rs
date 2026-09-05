@@ -125,27 +125,117 @@ pub async fn dispatch_graph(
 // engine appears anywhere below, which is why a host swapping the one behind
 // `query` changes nothing here.
 //
-// It is exposed here rather than only in `@fossil-lang/corpus` because this is the
-// leg that makes the conformance diff three-sided.
-// `apps/corpus/conformance/expected.json` is executed by plain Node
-// (`conformance/verify.mjs`), by the published TypeScript
-// (`packages/corpus/tests/conformance.test.ts`) and by [`fossil_graph::plan`] —
-// natively in `crates/fossil-graph/tests/conformance.rs` and, through this
-// binding, as the wasm32 build that actually ships. The native run and the wasm
-// run are not the same claim: `usize` is 64 bits there and 32 here, and 2^53 is
-// where a port that went through a double stops being exact.
+// **This is the only reader.** `@fossil-lang/corpus` had a second one — 1,058
+// lines of TypeScript composing the same URLs from the same manifest, agreeing
+// with [`fossil_graph::plan`] because people kept making it agree — and it is
+// gone. What is left below is the binding it reaches this one through, so
+// `apps/corpus/conformance/expected.json` is now executed by exactly two
+// implementations that mean it (plain Node in `conformance/verify.mjs`, and
+// `fossil_graph::plan` natively in `crates/fossil-graph/tests/conformance.rs`)
+// plus one that re-enters this one from JavaScript
+// (`packages/corpus/tests/conformance.test.ts`, through the wasm32 build that
+// actually ships). The native run and the wasm run are not the same claim:
+// `usize` is 64 bits there and 32 here, and 2^53 is where a port that went
+// through a double stops being exact.
+//
+// **Every number of `dense_id` width crosses as a `BigInt`**, in both
+// directions. JavaScript's `>>` truncates to 32 bits *before* it shifts and its
+// `Number` stops being exact at 2^53, so a `u64` that arrived as a double would
+// have lost the two borders the published vectors
+// (`apps/corpus/guards/vectors.json`) exist to pin.
 
-use fossil_graph::plan::{Direction, ReadPlan, resolve};
+use fossil_graph::plan::{
+    AdjacencyAddress, Direction, EdgeAddress, LevelAddress, ReadPlan, VertexAddress, resolve,
+};
+use fossil_sinks::manifest::VertexLevels;
+
+/// How many `dense_id`s one row of level `k` stands for — `4^k`.
+///
+/// The pyramid's base, and JS reads it here rather than respelling it: the
+/// decimation level *k* means the vertices whose `dense_id` is a multiple of
+/// this, so a `2^k` on the far side of the boundary is a different corpus.
+#[must_use]
+// `wasm_bindgen` cannot generate glue for a `const fn`, so this cannot be one.
+#[allow(clippy::missing_const_for_fn)]
+#[wasm_bindgen(js_name = strideOf)]
+pub fn stride_of(level: u32) -> u64 {
+    VertexLevels::stride(level)
+}
+
+/// How many bits of `dense_id` level `k` drops — `2k`, and the number a reader
+/// ADDS to its payload tile shift to address a level tile.
+#[must_use]
+// `wasm_bindgen` cannot generate glue for a `const fn`, so this cannot be one.
+#[allow(clippy::missing_const_for_fn)]
+#[wasm_bindgen(js_name = strideBits)]
+pub fn stride_bits(level: u32) -> u32 {
+    VertexLevels::stride_bits(level)
+}
+
+/// How many rows level `k` of a type of `count` rows holds — `ceil(count / 4^k)`.
+///
+/// A level is a predicate, so this answers for every `k` and not only for the
+/// ones a writer spent bytes on. [`Corpus::level_rows`] is the same number for a
+/// level the manifest declares.
+#[must_use]
+// `wasm_bindgen` cannot generate glue for a `const fn`, so this cannot be one.
+#[allow(clippy::missing_const_for_fn)]
+#[wasm_bindgen(js_name = rowsAt)]
+pub fn rows_at(count: u64, level: u32) -> u64 {
+    VertexLevels::rows_at(count, level)
+}
 
 /// A corpus resolved into a [`ReadPlan`] — synchronous, and it opens no byte.
 ///
-/// The counterpart of `resolveCorpus` in `@fossil-lang/corpus/address`, and the
-/// same arithmetic the native reader runs. A host holds one of these for as long
-/// as it holds the manifest.
+/// A host holds one of these for as long as it holds the manifest.
+/// [`Corpus::snapshot`] is how most of it crosses: what a resolved corpus IS is
+/// data, and data crosses once. The methods below are the part that is not — a
+/// question answered per call, because its answer is a function of an argument
+/// the manifest does not contain.
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Corpus {
     inner: ReadPlan,
+}
+
+impl Corpus {
+    /// One vertex type, or the first the index names. The error is
+    /// [`ReadPlan::vertex_type`]'s, which names what the manifest does declare.
+    fn vertex(&self, name: Option<&str>) -> Result<&VertexAddress, JsError> {
+        self.inner.vertex_type(name).map_err(|e| to_js_error(&e))
+    }
+
+    /// One vertex type's written pyramid. Absent is an error and not `null`:
+    /// every caller here has already read `levels` off the snapshot and would be
+    /// asking for a prefix nobody wrote.
+    fn levels(&self, name: Option<&str>) -> Result<&LevelAddress, JsError> {
+        let vertex = self.vertex(name)?;
+        vertex.levels.as_ref().ok_or_else(|| {
+            JsError::new(&format!(
+                "{} declares no levels, so no level of it is addressable — the predicate over the \
+                 payload is what answers one",
+                vertex.vertex_type
+            ))
+        })
+    }
+
+    fn edge(&self, edge_type: &str) -> Result<&EdgeAddress, JsError> {
+        self.inner
+            .edges
+            .iter()
+            .find(|e| e.edge_type == edge_type)
+            .ok_or_else(|| JsError::new(&format!("no edge type {edge_type} in the manifest")))
+    }
+
+    fn adjacency(&self, edge_type: &str, direction: &str) -> Result<Option<&AdjacencyAddress>, JsError> {
+        let direction = parse_direction(direction)?;
+        Ok(self.edge(edge_type)?.adjacency(direction))
+    }
+}
+
+fn parse_direction(value: &str) -> Result<Direction, JsError> {
+    Direction::parse(value)
+        .ok_or_else(|| JsError::new(&format!("{value} is not an orientation; it is src or dst")))
 }
 
 // `wasm_bindgen` owns every argument that crosses the boundary — `Option<&String>`
@@ -177,41 +267,57 @@ impl Corpus {
     }
 
     /// The whole resolution as plain JS data: the container, every vertex type
-    /// with its prefix, tile size, shift, count and index, and every edge type
-    /// with the orientations it publishes.
+    /// with its prefix, tile size, shift, count, index and declared levels, and
+    /// every edge type with the orientations it publishes.
+    ///
+    /// **This is most of the surface**, and deliberately: what a resolved corpus
+    /// is, is data, and data crosses a boundary once rather than a field at a
+    /// time. Every row-count-width field arrives as a `BigInt`
+    /// (`serialize_large_number_types_as_bigints`), because a `vertex_count`
+    /// above 2^53 through a double comes out one tile short and takes the tail
+    /// tile with it.
     ///
     /// # Errors
     ///
     /// A `JsError` if the resolution cannot be serialised.
     pub fn snapshot(&self) -> Result<JsValue, JsError> {
         self.inner
-            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .serialize(
+                &serde_wasm_bindgen::Serializer::json_compatible()
+                    .serialize_large_number_types_as_bigints(true),
+            )
             .map_err(JsError::from)
     }
 
-    /// The tile a `dense_id` lives in — the whole of the addressing scheme.
+    /// The vertex type a name resolves to — the name itself when the manifest
+    /// declares it, the first type the index names when none is given.
     ///
-    /// **A decimal string in and out.** A `dense_id` may carry more than 53 bits,
-    /// and JavaScript's `>>` truncates to 32 *before* it shifts, so the same three
-    /// characters mean something different on each side of this boundary. The
-    /// published border vectors (`apps/corpus/guards/vectors.json`) are 2^31,
-    /// where a port that took the shift as signed gives a negative tile, and 2^53,
-    /// where one that went through a `Number` stops being exact.
+    /// The lookup exists as a call so the refusal does: a caller naming a type
+    /// this corpus has never heard of gets the diagnosis that names the ones it
+    /// has, from the reader rather than from a second copy of the list.
     ///
     /// # Errors
     ///
-    /// A `JsError` when the type is not in the manifest, or `dense_id` is not a
-    /// decimal integer.
-    #[wasm_bindgen(js_name = tileOf)]
-    pub fn tile_of(&self, vertex_type: Option<String>, dense_id: &str) -> Result<String, JsError> {
-        let vertex = self
-            .inner
-            .vertex_type(vertex_type.as_deref())
-            .map_err(|e| to_js_error(&e))?;
-        let id: u64 = dense_id
-            .parse()
-            .map_err(|_| JsError::new(&format!("dense_id {dense_id} is not a decimal integer")))?;
-        Ok(vertex.tile_of(id).to_string())
+    /// A `JsError` when the type is not in the manifest.
+    #[wasm_bindgen(js_name = vertexTypeName)]
+    pub fn vertex_type_name(&self, vertex_type: Option<String>) -> Result<String, JsError> {
+        Ok(self.vertex(vertex_type.as_deref())?.vertex_type.clone())
+    }
+
+    /// The tiles a batch of `dense_id`s live in — the whole of the addressing
+    /// scheme, and batched because a reader asks it of a frontier and not of an id.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest.
+    #[wasm_bindgen(js_name = tilesOf)]
+    pub fn tiles_of(
+        &self,
+        vertex_type: Option<String>,
+        dense_ids: Vec<u64>,
+    ) -> Result<Vec<u64>, JsError> {
+        let vertex = self.vertex(vertex_type.as_deref())?;
+        Ok(dense_ids.into_iter().map(|id| vertex.tile_of(id)).collect())
     }
 
     /// The file tile `k` of a vertex type is in.
@@ -223,11 +329,35 @@ impl Corpus {
     pub fn vertex_tile_url(
         &self,
         vertex_type: Option<String>,
-        tile: u32,
+        tile: u64,
     ) -> Result<String, JsError> {
-        self.inner
-            .vertex_type(vertex_type.as_deref())
-            .map(|v| v.tile_url(u64::from(tile)))
+        Ok(self.vertex(vertex_type.as_deref())?.tile_url(tile))
+    }
+
+    /// Every payload FILE of a vertex type, in order and distinct.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest, or when it declares no
+    /// `vertex_count` — tiles are addressed and never listed, and HTTP gives no
+    /// directory to fall back on.
+    #[wasm_bindgen(js_name = vertexFiles)]
+    pub fn vertex_files(&self, vertex_type: Option<String>) -> Result<Vec<String>, JsError> {
+        self.vertex(vertex_type.as_deref())?
+            .files()
+            .map_err(|e| to_js_error(&e))
+    }
+
+    /// Every file of a vertex type's identity index, in order and distinct.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest, declares no index, or
+    /// declares no `vertex_count`.
+    #[wasm_bindgen(js_name = indexFiles)]
+    pub fn index_files(&self, vertex_type: Option<String>) -> Result<Vec<String>, JsError> {
+        self.vertex(vertex_type.as_deref())?
+            .index_files()
             .map_err(|e| to_js_error(&e))
     }
 
@@ -247,22 +377,121 @@ impl Corpus {
         &self,
         edge_type: &str,
         direction: &str,
-        tile: u32,
+        tile: u64,
     ) -> Result<Option<String>, JsError> {
-        let direction = Direction::parse(direction).ok_or_else(|| {
-            JsError::new(&format!(
-                "{direction} is not an orientation; it is src or dst"
-            ))
-        })?;
-        let edge = self
-            .inner
-            .edges
-            .iter()
-            .find(|e| e.edge_type == edge_type)
-            .ok_or_else(|| JsError::new(&format!("no edge type {edge_type} in the manifest")))?;
-        Ok(edge
-            .adjacency(direction)
-            .map(|a| a.tile_url(u64::from(tile))))
+        Ok(self
+            .adjacency(edge_type, direction)?
+            .map(|a| a.tile_url(tile)))
+    }
+
+    /// The tiles of level `k` a batch of `dense_id`s falls in: the payload's own
+    /// shift plus [`stride_bits`], never a division.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest or declares no levels.
+    #[wasm_bindgen(js_name = levelTilesOf)]
+    pub fn level_tiles_of(
+        &self,
+        vertex_type: Option<String>,
+        level: u32,
+        dense_ids: Vec<u64>,
+    ) -> Result<Vec<u64>, JsError> {
+        let levels = self.levels(vertex_type.as_deref())?;
+        Ok(dense_ids
+            .into_iter()
+            .map(|id| levels.tile_of(level, id))
+            .collect())
+    }
+
+    /// The file tile `j` of level `k` is in, spelled by the corpus's container.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest or declares no levels.
+    #[wasm_bindgen(js_name = levelTileUrl)]
+    pub fn level_tile_url(
+        &self,
+        vertex_type: Option<String>,
+        level: u32,
+        tile: u64,
+    ) -> Result<String, JsError> {
+        Ok(self.levels(vertex_type.as_deref())?.tile_url(level, tile))
+    }
+
+    /// How many rows level `k` holds, or `null` when the manifest declares no count.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest or declares no levels.
+    #[wasm_bindgen(js_name = levelRows)]
+    pub fn level_rows(
+        &self,
+        vertex_type: Option<String>,
+        level: u32,
+    ) -> Result<Option<u64>, JsError> {
+        Ok(self.levels(vertex_type.as_deref())?.rows(level))
+    }
+
+    /// How many tiles level `k` has, or `null` when the manifest declares no count.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest or declares no levels.
+    #[wasm_bindgen(js_name = levelTiles)]
+    pub fn level_tiles(
+        &self,
+        vertex_type: Option<String>,
+        level: u32,
+    ) -> Result<Option<u64>, JsError> {
+        Ok(self.levels(vertex_type.as_deref())?.tiles(level))
+    }
+
+    /// Every file of level `k`, in order and distinct.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest, declares no levels,
+    /// declares no `vertex_count`, or did not write level `k` — the last one
+    /// naming what does answer that level, because a URL under `l{k}/` for an
+    /// unwritten `k` is the one failure a reader cannot tell from an empty level.
+    #[wasm_bindgen(js_name = levelFiles)]
+    pub fn level_files(
+        &self,
+        vertex_type: Option<String>,
+        level: u32,
+    ) -> Result<Vec<String>, JsError> {
+        self.levels(vertex_type.as_deref())?
+            .files(level)
+            .map_err(|e| to_js_error(&e))
+    }
+
+    /// The file tile `j` of level `k` of a RELATION is in.
+    ///
+    /// Addressed by the source type's own level tile, which is what lets a
+    /// coarse camera draw a line without opening the vertex payload for its far
+    /// end: the tiles already selected address these with no new arithmetic.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the edge type is not in the manifest or declares no levels.
+    #[wasm_bindgen(js_name = edgeLevelTileUrl)]
+    pub fn edge_level_tile_url(
+        &self,
+        edge_type: &str,
+        level: u32,
+        tile: u64,
+    ) -> Result<String, JsError> {
+        let edge = self.edge(edge_type)?;
+        edge.levels
+            .as_ref()
+            .map(|l| l.tile_url(level, tile))
+            .ok_or_else(|| {
+                JsError::new(&format!(
+                    "{edge_type} declares no levels, so no level of it is addressable — the \
+                     adjacency and the payload are what answer one"
+                ))
+            })
     }
 
     /// The URLs a set of vertex tiles addresses, and what that set is complete
@@ -276,17 +505,12 @@ impl Corpus {
     pub fn window(
         &self,
         vertex_type: Option<String>,
-        tiles: Vec<u32>,
+        tiles: Vec<u64>,
         directions: Vec<String>,
     ) -> Result<JsValue, JsError> {
-        let tiles: Vec<u64> = tiles.into_iter().map(u64::from).collect();
         let directions: Vec<Direction> = directions
             .iter()
-            .map(|d| {
-                Direction::parse(d).ok_or_else(|| {
-                    JsError::new(&format!("{d} is not an orientation; it is src or dst"))
-                })
-            })
+            .map(|d| parse_direction(d))
             .collect::<Result<_, _>>()?;
         self.inner
             .window(vertex_type.as_deref(), &tiles, &directions)

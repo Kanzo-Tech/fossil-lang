@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import './boot.js';
 import { createGraphClient, type GraphClient } from '../src/client.js';
-import { initFossilGraphWasm } from '../src/load.js';
 import type { QueryRow } from '../src/query.js';
 
 // End-to-end: the binding's verbs run for real against DuckDB-WASM (the actual
@@ -24,13 +24,8 @@ const manifestFiles: Record<string, string> = JSON.parse(
 let graph: GraphClient;
 
 beforeAll(async () => {
-  // 1. Boot fossil-graph-wasm (verb→SQL core).
-  const wasmBytes = await readFile(
-    fileURLToPath(new URL('../pkg/fossil_graph_wasm_bg.wasm', import.meta.url)),
-  );
-  await initFossilGraphWasm({ wasmUrl: wasmBytes as unknown as URL });
-
-  // 2. Boot DuckDB-WASM (blocking node bindings — no worker, runs in-process).
+  // `./boot.js` brought fossil-graph-wasm up; this is DuckDB-WASM (blocking node
+  // bindings — no worker, runs in-process).
   const dist = dirname(require.resolve('@duckdb/duckdb-wasm'));
   const db = await createDuckDB(
     {

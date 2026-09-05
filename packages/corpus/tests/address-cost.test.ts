@@ -39,20 +39,22 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { TILE_SHIFT } from '../src/address.js';
-
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
 // conventions ask for, and it must not import a type of ours to be one.
 import { write } from '../../../apps/corpus/guards/fixture.mjs';
 // @ts-expect-error — same reason: the guards reach a corpus through the `duckdb` binary and nothing
 // of ours, so a measurement that uses them measures what a stranger would see.
 import { query } from '../../../apps/corpus/guards/duck.mjs';
+// @ts-expect-error — and the tile size this fixture is written at comes from there too. It used to
+// come from `TILE_SHIFT` in `../src/address.js`, which was a second implementation of the reader
+// and is deleted; the guards' copy is the one a third party actually reads.
+import { TILE_ROWS, TILE_SHIFT } from '../../../apps/corpus/guards/arithmetic.mjs';
 
 const hasDuckdb = spawnSync('duckdb', ['-c', 'select 1'], { encoding: 'utf8' }).status === 0;
 
 /** The corpus's own `chunk_size`, and the shift that addresses it. */
 const SHIFT = Number(TILE_SHIFT);
-const CHUNK = 2 ** SHIFT;
+const CHUNK = Number(TILE_ROWS);
 /** Big enough that the tile count is in the tens and a 2% window is not the whole corpus. */
 const VERTICES = 200_000;
 

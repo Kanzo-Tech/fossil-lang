@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import './boot.js';
 import { CorpusManifestError, CorpusReadError, openCorpus, type Corpus } from '../src/corpus.js';
-import { initFossilGraphWasm } from '../src/load.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 /**
@@ -91,14 +91,6 @@ beforeAll(async () => {
   query = async (sql: string): Promise<QueryRow[]> =>
     conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
 
-  // The verbs run in `fossil-graph-wasm`, and `openCorpus` boots it on the first verb call only
-  // when it was told where it is. Here the module is booted directly, which is the other half of
-  // the same memoised init and the shape a host that already holds the WASM is in.
-  await initFossilGraphWasm({
-    wasmUrl: (await readFile(
-      fileURLToPath(new URL('../pkg/fossil_graph_wasm_bg.wasm', import.meta.url)),
-    )) as unknown as URL,
-  });
 
   corpus = await openCorpus(CORPUS, { query });
 }, 60_000);

@@ -9,9 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { strideOf } from '../src/address.js';
+import './boot.js';
+import { rowsAt, strideOf } from '../src/address.js';
 import { openCorpus, type Corpus } from '../src/corpus.js';
-import { initFossilGraphWasm } from '../src/load.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
@@ -116,11 +116,6 @@ beforeAll(async () => {
   write(withLevels, { ...options, levels: LEVELS });
   write(withoutLevels, { ...options, levels: [] });
 
-  await initFossilGraphWasm({
-    wasmUrl: (await readFile(
-      fileURLToPath(new URL('../pkg/fossil_graph_wasm_bg.wasm', import.meta.url)),
-    )) as unknown as URL,
-  });
   corpus = await openCorpus(withLevels, { query });
   flat = await openCorpus(withoutLevels, { query });
 }, 180_000);
@@ -146,7 +141,7 @@ describe.skipIf(!hasDuckdb)('a corpus that declares a pyramid', () => {
     expect(all[0]!.level).toBe(0);
     expect(all[0]!.written).toBe(false);
     for (const { level, stride, count } of all) {
-      expect(stride).toBe(strideOf(level));
+      expect(stride).toBe(Number(strideOf(level)));
       expect(count).toBe(Math.ceil(ROWS / stride));
     }
     // The control declares none, and every level is still listed and still answerable.
@@ -160,7 +155,7 @@ describe.skipIf(!hasDuckdb)('a level read answers with what the predicate select
     const box = await everything();
     const entire = await corpus.rows({ ...box });
     for (const level of LEVELS) {
-      const step = BigInt(strideOf(level));
+      const step = strideOf(level);
       const expected = entire.vertices
         .map((v) => v.denseId)
         .filter((id) => id % step === 0n)
@@ -215,7 +210,7 @@ describe.skipIf(!hasDuckdb)('a level read answers with what the predicate select
     const cheap = await corpus.frame({ ...box, level, links: false });
     const strided = await flat.frame({ ...box, level, links: false });
     expect(cheap.matchedAt).toBe(level);
-    expect(cheap.matched).toBe(Math.ceil(ROWS / strideOf(level)));
+    expect(cheap.matched).toBe(Number(rowsAt(BigInt(ROWS), level)));
     // The payload read still counts level 0, because it read level 0's bytes.
     expect(strided.matchedAt).toBe(0);
     expect(strided.matched).toBe(ROWS);
@@ -227,7 +222,7 @@ describe.skipIf(!hasDuckdb)('a level read answers with what the predicate select
     expect(corpus.levels('Person').find((l) => l.level === level)?.written).toBe(false);
     const frame = await corpus.frame({ ...box, level, links: false });
     expect(frame.matchedAt).toBe(0);
-    expect(frame.marks).toBe(Math.ceil(ROWS / strideOf(level)));
+    expect(frame.marks).toBe(Number(rowsAt(BigInt(ROWS), level)));
   });
 
   it('brings a pin back off the payload, because no level carries an odd id', async () => {

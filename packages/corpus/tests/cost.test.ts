@@ -35,6 +35,7 @@ import { dirname, join, resolve } from 'node:path';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import './boot.js';
 import { openCorpus, type Corpus } from '../src/corpus.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 

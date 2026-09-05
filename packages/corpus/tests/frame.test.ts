@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { strideOf } from '../src/address.js';
+import './boot.js';
+import { rowsAt, strideOf } from '../src/address.js';
 import { openCorpus, type Corpus, type Frame } from '../src/corpus.js';
-import { initFossilGraphWasm } from '../src/load.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 /**
@@ -76,11 +76,6 @@ beforeAll(async () => {
   conn.query(`SET temp_directory = '${spill}'`);
   query = async (sql: string): Promise<QueryRow[]> =>
     conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
-  await initFossilGraphWasm({
-    wasmUrl: (await readFile(
-      fileURLToPath(new URL('../pkg/fossil_graph_wasm_bg.wasm', import.meta.url)),
-    )) as unknown as URL,
-  });
   corpus = await openCorpus(CORPUS, { query });
 }, 60_000);
 
@@ -108,7 +103,7 @@ describe('levels — the multiscale metadata', () => {
     expect(levels).toHaveLength(6);
     expect(levels.at(-1)).toMatchObject({ level: 5, stride: 1024, count: 1 });
     for (const { level, stride, count } of levels) {
-      expect(stride).toBe(strideOf(level));
+      expect(stride).toBe(Number(strideOf(level)));
       expect(count).toBe(Math.ceil(VERTEX_COUNT / stride));
     }
   });
@@ -205,7 +200,7 @@ describe('frame — the same rectangle at the same level is the same answer', ()
         place.set(frame.denseIds[i]!, at);
       }
       if (coarser !== null) for (const id of coarser) expect(ids).toContain(id);
-      expect(frame.stride).toBe(strideOf(level));
+      expect(frame.stride).toBe(Number(strideOf(level)));
       coarser = ids;
     }
   });
@@ -214,11 +209,11 @@ describe('frame — the same rectangle at the same level is the same answer', ()
     const box = await everything();
     for (const level of [0, 1, 3, 5]) {
       const frame = await corpus.frame({ ...box, level });
-      expect(frame.marks).toBe(Math.ceil(VERTEX_COUNT / strideOf(level)));
+      expect(frame.marks).toBe(Number(rowsAt(BigInt(VERTEX_COUNT), level)));
       // A read that came from `l{k}/` cannot count level 0 without opening the bytes the pyramid
       // exists to avoid, so `matched` is counted at `matchedAt` and never silently at zero. A
       // strided read opened the payload, so it can and does.
-      expect(frame.matched).toBe(Math.ceil(VERTEX_COUNT / strideOf(frame.matchedAt)));
+      expect(frame.matched).toBe(Number(rowsAt(BigInt(VERTEX_COUNT), frame.matchedAt)));
       // And `matchedAt` is the only thing that says which artefact replied — a level above zero is
       // a written `l{k}/` and nothing else can report one. There is no second field restating it.
       expect(frame.matchedAt).toBe(corpus.levels()[level]!.written ? level : 0);
@@ -233,11 +228,11 @@ describe('frame — the same rectangle at the same level is the same answer', ()
     const zero = drawn(await corpus.frame({ ...box, level: 0 }));
     expect(zero).toHaveLength(VERTEX_COUNT);
     for (const level of [1, 2]) {
-      const stride = BigInt(strideOf(level));
+      const stride = strideOf(level);
       const selected = zero.filter((id) => id % stride === 0n);
       // Non-vacuity, and it is not ceremony: two empty lists are equal, and a `view` that answered
       // nothing would satisfy the assertion below without the corpus having a pyramid at all.
-      expect(selected).toHaveLength(Math.ceil(VERTEX_COUNT / strideOf(level)));
+      expect(selected).toHaveLength(Number(rowsAt(BigInt(VERTEX_COUNT), level)));
       expect(drawn(await corpus.frame({ ...box, level }))).toEqual(selected);
     }
   });

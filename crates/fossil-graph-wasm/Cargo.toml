@@ -21,6 +21,12 @@ workspace = true
 # the verb→SQL logic and dispatch live in fossil-graph, single-source.
 fossil-graph = { path = "../fossil-graph" }
 
+# `VertexLevels::stride`, `::stride_bits` and `::rows_at` — the pyramid's base,
+# spelled once. Already in this crate's dependency closure through fossil-graph
+# (`plan.rs` addresses a level with it); named here so the binding can export it
+# rather than let a caller respell `4^k` on the far side of the boundary.
+fossil-sinks = { path = "../fossil-sinks" }
+
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) to match
 # wasm-bindgen-cli. The async dispatch awaits a JS Promise via JsFuture.
 wasm-bindgen = { workspace = true }
