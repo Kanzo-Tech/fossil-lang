@@ -39,6 +39,7 @@ import {
   type VertexId,
 } from '@kanzo-tech/graph';
 
+import { frame, levelFor } from './frame.js';
 import { extentOf, type Rect, type TileBox } from './stream.js';
 
 /** What one answer cost, in the terms the panel beside the canvas is already reporting. */
@@ -296,7 +297,10 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
           ? BOUNDED_DEFAULTS.minLinkPixels * perPixel
           : 0;
 
-      const level = corpus.levelFor({ ...box, type, budget: limit });
+      // Through `src/frame.ts`, which is the one module that names the door's drawing surface —
+      // `view()` is being renamed to `frame()` with a different cost shape, and collecting the two
+      // calls there is what keeps that a one-line change. See that file's header.
+      const level = levelFor(corpus, { ...box, type, budget: limit });
 
       /**
        * **This asked for points where the pyramid is, and the picture said no.**
@@ -327,7 +331,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
        * design refuses for a measured reason of its own. Until then the pyramid is read by a
        * caller that wants a point cloud, and this is not one.
        */
-      const answer = await corpus.view({
+      const answer = await frame(corpus, {
         ...box,
         type,
         level,

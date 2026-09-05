@@ -59,6 +59,32 @@ export async function boot(): Promise<void> {
 }
 
 /**
+ * The booted instance and its connection, for a consumer that needs the OBJECTS and not the SQL.
+ *
+ * Exactly one such consumer exists: `src/mosaic.ts`, which hands both to Mosaic's `wasmConnector`
+ * so the crossfilter runs on this engine instead of booting a second one. Everything else in the
+ * app goes through {@link query}, and should — handing out the connection is handing out the
+ * ability to bypass the one capability `@fossil-lang/corpus` asks a host for.
+ *
+ * They throw rather than returning `null` because every caller is downstream of {@link boot} and a
+ * `null` here would surface as a coordinator that silently answers nothing.
+ */
+export function instance(): duckdb.AsyncDuckDB {
+  if (!db) throw new Error('duckdb not booted');
+  return db;
+}
+
+export function connection(): duckdb.AsyncDuckDBConnection {
+  if (!conn) throw new Error('duckdb not booted');
+  return conn;
+}
+
+/** Whether {@link boot} has run — so a consumer can wait rather than throw. */
+export function booted(): boolean {
+  return db !== null && conn !== null;
+}
+
+/**
  * Stage a file in DuckDB's virtual filesystem under the name SQL will call it.
  *
  * This is the seam that makes the whole corpus half work without a server. The executor

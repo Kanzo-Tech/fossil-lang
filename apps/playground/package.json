@@ -13,6 +13,7 @@
     "verify-canvas": "node --experimental-strip-types scripts/verify-canvas.mjs",
     "verify-nesting": "node --experimental-strip-types scripts/verify-nesting.mjs",
     "verify-properties": "node --experimental-strip-types scripts/verify-properties.mjs",
+    "verify-one-engine": "node scripts/verify-one-engine.mjs",
     "test": "node scripts/test.mjs",
     "build": "pnpm run typecheck && vite build",
     "preview": "vite preview --port 3300",
@@ -20,7 +21,8 @@
     "lint": "tsc --noEmit"
   },
   "//kanzo-tech": "The version is exact, not a range: 0.1.0 is the first non-prerelease, and one exact pin is what a consumer of a young library owes it. It also drops the @duckdb/duckdb-wasm peer, so the inert 1.32.0-vs-1.33.1-dev57.0 warning `pnpm install` used to print is gone. What the bump did NOT fix is the tooltip surface: `CodeEditor`'s theme reads `var(--popover)` with no fallback and only kanzo's DARK palettes define that token — see the `--popover` block in src/styles.css, which is where every CodeMirror tooltip in this app got its background back. The @codemirror/* set is here rather than there because they are all OPTIONAL peers of @kanzo-tech/ui — its CodeEditor externalises every one and resolves them from the consumer.",
-  "//kanzo-graph": "@kanzo-tech/graph is the renderer, and the duckdb pin that used to keep it out is GONE from ITS manifest: 0.1.0 names @duckdb/duckdb-wasm nowhere, because the Mosaic half moved to @kanzo-tech/mosaic and the coordinator stopped arriving through @kanzo-tech/ui/analytics. It did not vanish from the world — @uwdata/mosaic-core@0.29.2 holds 1.33.1-dev57.0 as a HARD dependency — so adopting @kanzo-tech/mosaic would put a second engine, and therefore a second crossfilter, in this bundle. It is an OPTIONAL peer living entirely on the ./duckdb subpath and this app does not import it: src/tiles.ts implements BoundedSource directly over the app's own connection, so no coordinator is created and no crossfilter exists to join. Measured, not assumed: the built bundle carries one duckdb wasm asset. What reverses this is a chart beside the canvas AND the two pins agreeing.",
+  "//kanzo-graph": "@kanzo-tech/graph is the renderer, and 0.1.0 names @duckdb/duckdb-wasm nowhere: the Mosaic half moved to @kanzo-tech/mosaic and the coordinator stopped arriving through @kanzo-tech/ui/analytics. src/tiles.ts still implements BoundedSource directly over this app's own connection rather than through @kanzo-tech/graph/duckdb — the corpus answers a rectangle out of its own addressing, which duckBoundedSource has no way to express.",
+  "//kanzo-mosaic": "@kanzo-tech/mosaic IS taken now, and the two conditions its exclusion named are both met. (1) There is a chart beside the canvas — src/Histogram.tsx over birth_year — so the coordinator has two clients and the crossfilter has something to cross. (2) The two DuckDB pins agree, by the root package.json override rather than by a bump: @uwdata/mosaic-core's exact 1.33.1-dev57.0 is forced to this app's 1.32.0. That override is the one the discarded entry asked for and it is measured, not hoped — the note beside it in the root manifest names the file and the md5. mosaic-core and mosaic-sql are DIRECT dependencies here because @kanzo-tech/mosaic declares them as required peers, and one host installing them once is what keeps a single Coordinator: two copies would be two crossfilters. @uwdata/vgplot stays absent — the histogram is ~90 lines of SVG in this app, and pulling a plotting library for one brushable chart would re-introduce the dependency @kanzo-tech/mosaic exists to have removed. The condition that keeps all of this honest is unchanged and still asserted: `pnpm --filter @fossil-lang/playground... build` emits exactly ONE duckdb-*.wasm asset, checked by scripts/verify-one-engine.mjs.",
   "dependencies": {
     "@codemirror/language": "^6.10.0",
     "@codemirror/lint": "^6.8.0",
@@ -36,7 +38,10 @@
     "@fossil-lang/corpus": "workspace:*",
     "@fossil-lang/wasm": "workspace:*",
     "@kanzo-tech/graph": "0.1.0",
+    "@kanzo-tech/mosaic": "0.1.0",
     "@kanzo-tech/ui": "0.1.0",
+    "@uwdata/mosaic-core": "0.29.2",
+    "@uwdata/mosaic-sql": "0.29.0",
     "@lezer/highlight": "^1.2.0",
     "lucide-react": "^1.23.0",
     "react": "^19.0.0",

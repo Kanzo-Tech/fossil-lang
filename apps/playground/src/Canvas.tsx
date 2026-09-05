@@ -24,10 +24,13 @@
 import { openCorpus } from '@fossil-lang/corpus';
 import { GraphCanvas, useGraphContext, type BoundedSource } from '@kanzo-tech/graph';
 import { categoricalCapacity } from '@kanzo-tech/ui';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Bench } from './bench.js';
+import { openCrossfilter, paintMask, type Crossfilter, type CrossfilterCost } from './crossfilter.js';
 import * as duck from './duckdb.js';
+import Histogram from './Histogram.js';
+import { coordinatorFor } from './mosaic.js';
 import type { TileBox } from './stream.js';
 import { corpusSource, type SliceCost } from './tiles.js';
 import { wholeSource, type WholeCost } from './whole.js';
@@ -138,6 +141,73 @@ function PinFrame() {
 }
 
 /**
+ * How much alpha an excluded vertex keeps. Low enough to read as context, high enough that the
+ * shape of what was filtered out is still visible — a crossfilter whose excluded rows vanish is a
+ * filter, and the thing worth seeing is *where in the picture* the brushed range lives.
+ */
+const DIM = 0.07;
+
+/**
+ * The crossfilter's other end: the mask, painted onto whatever is drawn right now.
+ *
+ * A child of `GraphCanvas` for the same reason `PinFrame` is one — `useGraphContext` is the seam
+ * `@kanzo-tech/graph` publishes, and the graph instance is built in an effect inside that element.
+ *
+ * **Two things move independently and this has to survive both.** The mask changes when the reader
+ * brushes; the resident set changes when the camera moves, and a camera move re-uploads colours
+ * from the source, discarding the fade. So the effect depends on both, and it re-captures the
+ * baseline whenever the slice identity changes: the undimmed upload is what a fade is computed
+ * from, and reading back an already-faded buffer to fade it again compounds — four brush moves
+ * would take a live vertex to invisible.
+ *
+ * The retry loop is not defensive padding. `slice` becomes the new answer before cosmos.gl has been
+ * handed the buffers for it, so for a frame or two `getPointColors()` is the previous answer's
+ * array while `resident` is the new one's map. Painting then would fade whichever vertices happen
+ * to sit at those indices now, which is exactly the buffer-index-is-not-an-identity failure
+ * `resident.ts` exists to prevent. `paintMask` reports the mismatch and this waits a macrotask —
+ * not a frame: `requestAnimationFrame` does not fire in a tab that is not visible, and the panel's
+ * own verifier drives it in one that is not.
+ */
+function Mask({ mask }: { mask: Uint8Array | null }) {
+  const { getGraph, getResident, slice } = useGraphContext();
+  const baseline = useRef<{ for: unknown; colors: Float32Array } | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const paint = () => {
+      if (!live) return;
+      const graph = getGraph();
+      if (graph === null) {
+        setTimeout(paint, 16);
+        return;
+      }
+      // A new answer invalidates the baseline: different vertices, different order, different
+      // length. Captured before anything here has touched the buffer, so it is kanzo's colouring.
+      if (baseline.current === null || baseline.current.for !== slice) {
+        const colors = graph.getPointColors();
+        if (colors.length === 0) {
+          setTimeout(paint, 16);
+          return;
+        }
+        baseline.current = { for: slice, colors: new Float32Array(colors) };
+      }
+      if (!paintMask(graph, getResident(), baseline.current.colors, mask, DIM)) {
+        // The renderer has not caught up with this answer yet. Drop the stale baseline so the
+        // retry captures the right one rather than fading the previous frame's colours.
+        baseline.current = null;
+        setTimeout(paint, 16);
+      }
+    };
+    paint();
+    return () => {
+      live = false;
+    };
+  }, [getGraph, getResident, mask, slice]);
+
+  return null;
+}
+
+/**
  * The canvas, its source, and a ledger of what the last frame cost.
  *
  * `useMemo` over the source and not `useState`: it is a value derived from the corpus and the
@@ -243,6 +313,52 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
 
   const source = mode === 'whole' ? baseline : streaming;
 
+  /**
+   * The crossfilter, opened once the corpus is — one coordinator, over the engine already booted.
+   *
+   * `null` until the view exists, which is what `Histogram`'s `ready` gates on: a client connected
+   * before `CREATE VIEW` would issue its domain query against a name DuckDB does not have.
+   *
+   * The count comes off the manifest rather than a `count(*)`, because it is the mask's LENGTH and
+   * the mask is indexed by `dense_id` — so what it needs is the id space, which is what
+   * `vertex_count` declares, and not how many rows a scan happens to find.
+   */
+  const [crossfilter, setCrossfilter] = useState<Crossfilter | null>(null);
+  const [mask, setMask] = useState<Uint8Array | null>(null);
+  const [xfCost, setXfCost] = useState<CrossfilterCost | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    let opened: Crossfilter | null = null;
+    void (async () => {
+      const open = await corpus;
+      const declared = open.types.vertices[0];
+      if (!live || declared === undefined) return;
+      opened = await openCrossfilter({
+        coordinator: coordinatorFor(),
+        corpus: open,
+        type: declared.type,
+        count: Number(declared.count ?? 0n),
+        onMask: (next, cost) => {
+          if (!live) return;
+          setMask(next);
+          setXfCost(cost);
+        },
+      });
+      if (!live) {
+        opened.destroy();
+        return;
+      }
+      setCrossfilter(opened);
+    })();
+    return () => {
+      live = false;
+      opened?.destroy();
+      setCrossfilter(null);
+      setMask(null);
+    };
+  }, [corpus]);
+
   return (
     <div className="can">
       <h2>the corpus, panned</h2>
@@ -278,10 +394,93 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
       <div className="can-surface">
         <GraphCanvas source={source} fill="cluster_id" onFailure={onFailure}>
           <PinFrame />
+          <Mask mask={mask} />
         </GraphCanvas>
       </div>
 
       {failure && <p className="str-bad">{failure}</p>}
+
+      <div className="xf">
+        {crossfilter === null ? (
+          <div className="xf-chart xf-waiting">
+            <p className="str-dim">opening the crossfilter over this corpus…</p>
+          </div>
+        ) : (
+          <Histogram
+            coordinator={coordinatorFor()}
+            field="birth_year"
+            filter={crossfilter.filter}
+            ready
+          />
+        )}
+        <dl className="str-ledger xf-ledger">
+          <div>
+            <dt>survivors</dt>
+            <dd>
+              {xfCost ? n(xfCost.survivors) : '—'}{' '}
+              <span className="str-dim">of {xfCost ? n(xfCost.population) : '—'}</span>
+            </dd>
+          </div>
+          <div>
+            <dt>mask built in</dt>
+            <dd>{xfCost ? `${xfCost.maskMs.toFixed(1)} ms` : '—'}</dd>
+          </div>
+          <div>
+            <dt>engines</dt>
+            <dd>
+              1 <span className="str-dim">coordinator on the app&apos;s own connection</span>
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      <p className="str-note">
+        <strong>The chart and the canvas are two clients of one Mosaic coordinator</strong>, and the
+        coordinator runs on the same DuckDB-WASM the corpus is read through — not a second one.
+        `@uwdata/mosaic-core` names <code>@duckdb/duckdb-wasm@1.33.1-dev57.0</code> as an exact
+        dependency and this app pins <code>1.32.0</code>; the root manifest overrides mosaic&apos;s
+        copy down, and what makes that safe is measured rather than hoped:{' '}
+        <code>wasmConnector</code> takes a pre-existing instance and connection, and given both it
+        never reaches <code>initDatabase()</code>, the only path that fetches a bundle and spawns a
+        worker. The whole surface it then uses is{' '}
+        <code>con.useUnsafe((bindings, conn) =&gt; bindings.runQuery(conn, sql))</code>, and{' '}
+        <code>dist/types/src/parallel/async_connection.d.ts</code> is byte-identical between the two
+        versions. <strong>The built bundle carries one <code>duckdb-*.wasm</code> asset</strong>,
+        which <code>scripts/verify-one-engine.mjs</code> asserts rather than assumes.
+      </p>
+
+      <p className="str-note">
+        <strong>What the crossfilter actually crosses.</strong> The chart brushes{' '}
+        <code>birth_year</code> — the corpus&apos;s only numeric non-positional column, and one of
+        the two <code>graph.graph.yml</code> declares as a <em>quasi-identifier</em> under its
+        declared k-anonymity bound. So the distribution on screen is the generalised one: the writer
+        refused to seal a manifest whose data did not reach the bound, and this is what reached it.
+        The two clients are different <em>kinds</em> on purpose.
+        The chart&apos;s <code>x</code> is a column, so its brush publishes an interval the database
+        evaluates directly. The canvas&apos;s is not: what is drawn is a rectangle-and-level answer
+        from the door, decimated by <code>dense_id % 2^k</code> and cut at a mark budget, and no{' '}
+        <code>WHERE</code> over columns describes <em>that</em>. So it goes the other way, through{' '}
+        <code>IdSetClient</code> — ids out, a mask over the resident tiles — which is the adapter
+        that exists for exactly this arrangement.{' '}
+        <strong>Its cost is the length of that id list</strong>, and the ledger prints it: an
+        unbrushed histogram returns one id per vertex in the corpus, which is the real ceiling on
+        the approach. What would remove it is the door carrying the filtered column back beside{' '}
+        <code>categories</code>, so the mask became a comparison per <em>drawn</em> vertex —
+        twenty thousand rather than a million — and no id crossed the boundary at all.
+      </p>
+
+      <p className="str-note">
+        <strong>The bars are all the same height, and that is the fixture rather than the chart.</strong>{' '}
+        <code>apps/corpus/guards/fixture.mjs</code> assigns <code>birth_year</code> uniformly, so the
+        million vertices fall 50,000 to a bin across twenty bins of two years — measured, not
+        assumed. A flat histogram is the correct picture of a flat column, and the thing worth
+        watching is not the bars but the canvas underneath them: because the layout pass placed
+        vertices by community rather than by birth year, brushing a range fades a{' '}
+        <em>scattered</em> subset rather than a region, which is what says the two encodings are
+        independent. The bin width is snapped to a round number for a measured reason — 40 distinct
+        years cut into a flat 28 bins alternates two-years-and-one, and draws a sawtooth that is an
+        artefact of the divisor.
+      </p>
 
       <table className="can-compare">
         <caption>
