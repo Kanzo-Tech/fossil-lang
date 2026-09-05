@@ -227,7 +227,11 @@ impl Corpus {
             .ok_or_else(|| JsError::new(&format!("no edge type {edge_type} in the manifest")))
     }
 
-    fn adjacency(&self, edge_type: &str, direction: &str) -> Result<Option<&AdjacencyAddress>, JsError> {
+    fn adjacency(
+        &self,
+        edge_type: &str,
+        direction: &str,
+    ) -> Result<Option<&AdjacencyAddress>, JsError> {
         let direction = parse_direction(direction)?;
         Ok(self.edge(edge_type)?.adjacency(direction))
     }

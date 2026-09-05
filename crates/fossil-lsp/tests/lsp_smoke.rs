@@ -4,9 +4,9 @@
 //! `TextDocumentSync::FULL` and emitted a `textDocument/publishDiagnostics`
 //! with an empty `diagnostics` array, then assert the process exited 0.
 //!
-//! The LSP transport end-to-end — binary build + stdio framing + dispatch loop
-//! + shutdown handshake — so a regression in any of those layers fails CI
-//! before the feature tests are reached.
+//! The LSP transport end-to-end — binary build + stdio framing + dispatch
+//! loop + shutdown handshake — so a regression in any of those layers fails
+//! CI before the feature tests are reached.
 //!
 //! The wire mechanics — spawning, writing every frame upfront, dropping stdin,
 //! draining both pipes, asserting exit 0, parsing the frames — are

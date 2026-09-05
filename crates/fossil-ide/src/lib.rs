@@ -72,8 +72,8 @@ pub use position::{
     LineOffsets, line_index, line_offsets, node_at_position, offset_to_lsp_position,
     position_to_offset, token_at_position,
 };
-pub use semantic::{decode_tokens, legend_type_name, semantic_legend, semantic_tokens};
 pub use related::{Related, related_locations};
+pub use semantic::{decode_tokens, legend_type_name, semantic_legend, semantic_tokens};
 pub use shape_documents::register_missing_documents;
 pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};
 pub use workspace::WorkspaceIndex;

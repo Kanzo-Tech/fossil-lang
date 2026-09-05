@@ -13,7 +13,7 @@
 //! # Why this crate is native and cannot be otherwise
 //!
 //! Not the database — introspection and credentials are `fossil-introspect`'s,
-//! and `fossil-layout` links no DuckDB. The reason was written as one of those
+//! and `fossil-layout` links no `DuckDB`. The reason was written as one of those
 //! twice and neither survived; do not write it a third time.
 //!
 //! What is left is [`host::run`], and it is the FILESYSTEM. `fossil_df::run_to_dir`

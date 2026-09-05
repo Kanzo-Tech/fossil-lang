@@ -87,14 +87,14 @@ pub mod ty;
 // avoid name shadowing with the modules themselves.
 pub use ast_id::{AstIdEntry, AstIdMap, FileAstId, MappingNode, SourceDefNode};
 pub use body::{ExprId, HirBody};
+pub use check::{Checker, TypeckOutput, compatible, render_split_suggestion, typecheck_mapping};
 pub use def_map::{DefMap, MappingLoc, SourceLoc};
+pub use didyoumean::did_you_mean;
 pub use item_tree::{ItemHeader, ItemTree, MappingHeader};
 pub use lower::{BinOp, FloatBits, HirExpr, HirFile, HirMapping, HirProperty, PropertyKey, UnOp};
 pub use provenance::{
     ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind, expr_types, mapping_at, ty_origin,
 };
-pub use check::{Checker, TypeckOutput, compatible, render_split_suggestion, typecheck_mapping};
-pub use didyoumean::did_you_mean;
 pub use spans::Spans;
 pub use ty::display::render_ty_kind;
 pub use ty::{Record, RecordField, Ty, TyKind};
