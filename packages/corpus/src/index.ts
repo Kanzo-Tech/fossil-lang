@@ -53,10 +53,9 @@ export type { QueryFn, QueryRow } from './query.js';
 // already using the verbs and want both halves from one specifier.
 export {
   resolveCorpus,
-  parseTileCodes,
   levelFor,
+  strideBits,
   strideOf,
-  mortonTilesFor,
   shiftFor,
   tailRows,
   tileOf,
@@ -77,10 +76,6 @@ export type {
   CorpusAddressing,
   VertexAddress,
   AddressedTiles,
-  TileCodes,
-  TileCodesDocument,
-  Box as CorpusBox,
-  BoxQuery,
   LevelQuery,
 } from './address.js';
 

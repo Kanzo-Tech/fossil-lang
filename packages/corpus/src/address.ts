@@ -16,19 +16,18 @@
  *
  * - **No bytes.** Nothing here fetches, decodes or reads Parquet. `tileUrl` hands back a string.
  * - **No cache, no debounce, no sampling.** Those are the reader's, and they stay there.
+ * - **No rectangles.** Which tiles a box touches comes from the per-tile `x`/`y` statistics in the
+ *   Parquet footers — `footer-is-the-index` — and reading a footer needs a Parquet reader. The host
+ *   has one, this module would have to grow one, so the host reads its own footers and hands the
+ *   tile numbers back to {@link CorpusAddressing.tilesFor}.
  *
- * **Boxes used to be on that list, and the layout pass is what took them off.** `dense_id` is a
- * vertex's rank by Morton code, so a rectangle is a set of code ranges and a code range is a run of
- * tiles: {@link mortonTilesFor} is that decomposition, and it is arithmetic — no fetch, no reader,
- * no engine, no promise. What it needs instead is **one number per tile end**
- * ({@link TileCodes}), because a rank is not a code and no amount of `chunk_size` recovers the one
- * from the other; the corpus publishes it as `vertex/<Type>/codes.json`, addressed by
- * {@link VertexAddress.codesUrl} and parsed by {@link parseTileCodes}. `/docs/design/corpus` has
- * why a JSON document and not a packed one, and what the anchor path over-reads against the footer
- * path over the same windows. The seam moved; it did not vanish, and it is now the smaller half.
+ * A published `codes.json` anchor used to answer that third one here, and it is deleted whole. It
+ * bought 15 tiles in 4 requests and 1,294 kB against the footers' 17 in 6 and 1,466 — a 13%
+ * over-read — and it cost a document, a request per corpus, a parser, a guard, a code path and its
+ * fallback, plus a field on the cost report admitting there were two indexes over one question.
  *
- * `openCorpus` in `./corpus.ts` is the layer that does all three, by taking an engine from the host
- * rather than growing one. It sits **on** this module and does not absorb it: the subpath
+ * `openCorpus` in `./corpus.ts` is the layer that reads those footers, by taking an engine from the
+ * host rather than growing one. It sits **on** this module and does not absorb it: the subpath
  * `@fossil-lang/corpus/address` stays importable with no dependencies and no `query`.
  *
  * @see {@link resolveCorpus}
@@ -77,6 +76,49 @@ export type Container = 'files' | 'rowgroups';
 
 /** The payload file of a row-group container: one per set, its row groups the tiles. */
 const TILES_FILE = 'tiles.parquet';
+
+/**
+ * **How many bits of `dense_id` one level drops — and the only place the pyramid's base is written
+ * down.**
+ *
+ * A level is a quarter of the one below it, so `strideOf(k)` is `4^k` and a level tile's address is
+ * the payload's shift plus `2k`. That `2` is the whole of the pyramid's arithmetic, and it lives
+ * here because it was spelled fourteen times across four implementations when it did not: every
+ * reader in this package reaches it through {@link strideBits} or {@link strideOf}, and a second
+ * spelling of it is the bug this constant exists to prevent. `VertexLevels::STRIDE_BITS` in
+ * `crates/fossil-sinks` is the writer's half of the same number.
+ *
+ * Quarters and not halves because a camera's zoom step doubles the linear scale, which quadruples
+ * the area and so the points — one level per zoom step. In halves one step crossed two levels, and
+ * the window and floor constants that existed to bound that are gone: the complete pyramid costs
+ * `1/4 + 1/16 + … = 1/3` of the type whatever `V` is, so there is nothing left to cap.
+ */
+const STRIDE_BITS = 2;
+
+/**
+ * How many bits of `dense_id` level `k` drops — `2k`, and the number a reader ADDS to its payload
+ * tile shift to address a level tile.
+ */
+export const strideBits = (level: number): number =>
+  STRIDE_BITS * Math.max(0, Math.trunc(level));
+
+/**
+ * How many `dense_id`s one row of level `k` stands for — `4^k`.
+ *
+ * The decimation level *k* means **the vertices whose `dense_id` is a multiple of this**. Over a
+ * Morton-ordered `dense_id` that is one vertex per quadtree cell of depth *k*, so a level is a level
+ * of the same curve the tile address is read off — not a sample, not a budget, not a cap. Two
+ * consequences follow from the definition alone and neither needs a byte on disk:
+ *
+ * - **It nests.** A multiple of `strideOf(k+1)` is a multiple of `strideOf(k)`, so refining only
+ *   ever ADDS, and a vertex drawn once stays drawn at the same position.
+ * - **It is a function of the level and nothing else.** No `matched`, no `limit`, no camera. Which
+ *   is what makes {@link levelFor} a *separate* function rather than a step inside the read.
+ */
+export const strideOf = (level: number): number => 2 ** strideBits(level);
+
+/** {@link strideOf} in the width a `dense_id` is counted in. */
+const strideBig = (level: number): bigint => 1n << BigInt(strideBits(level));
 
 /** How many bits a `dense_id` is shifted right by, for the default `chunk_size` of 4,096. */
 export const TILE_SHIFT = 12n;
@@ -191,19 +233,6 @@ export interface VertexAddress {
    */
   readonly index: IndexAddress | null;
   /**
-   * Where this type's **tile-code anchor** is, or `null` when the manifest declares none.
-   *
-   * The one input {@link mortonTilesFor} needs and cannot derive — see {@link TileCodes}. It is a
-   * URL and not a value, because this module does not fetch: the host reads it once, the way it
-   * already reads the manifest, and hands the parsed document back through {@link parseTileCodes}.
-   *
-   * `null` is a legal corpus, on {@link VertexAddress.index}'s argument and not
-   * {@link VertexAddress.count}'s: a reader that has a Parquet reader answers the same window
-   * question out of the footers, more slowly and more loosely. What it is not is answerable by a
-   * reader that has none, and that is the reader this exists for.
-   */
-  readonly codesUrl: string | null;
-  /**
    * The **written levels** of this type, or `null` when the manifest declares none.
    *
    * `null` is a legal corpus and the most legal of the three optional blocks: a level is a
@@ -312,9 +341,9 @@ export interface EdgeAddress {
  * Where a relation's **level sets** are, and which ones exist.
  *
  * The sibling of {@link LevelAddress} and addressed by the same rule: tile `j` of level `k` holds
- * the rows whose `src_dense` is in `[j · chunkSize · 2^k, (j+1) · chunkSize · 2^k)` — the SOURCE
- * level's own tile range — so a reader that can address a vertex level can address the edges beside
- * it with no new arithmetic and no second anchor.
+ * the rows whose `src_dense` is in `[j · chunkSize · stride(k), (j+1) · chunkSize · stride(k))` —
+ * the SOURCE level's own tile range — so a reader that can address a vertex level can address the
+ * edges beside it with no new arithmetic.
  *
  * **What it carries that no other set does is the endpoints' coordinates.** `src_x`, `src_y`,
  * `dst_x`, `dst_y` beside the two ids, which makes a level set self-drawing: the lines and their
@@ -333,7 +362,7 @@ export interface EdgeLevelAddress {
   has(level: number): boolean;
   /** Where level `k`'s tiles are, resolved, with a trailing separator. */
   prefix(level: number): string;
-  /** The tile of level `k` a `src_dense` falls in: the source's shift plus `k`. */
+  /** The tile of level `k` a `src_dense` falls in: the source's shift plus {@link strideBits}. */
   tileOf(level: number, srcDense: bigint): bigint;
   /** The file tile `j` of level `k` is in, spelled by the corpus's container. */
   tileUrl(level: number, tile: number | bigint): string;
@@ -445,17 +474,6 @@ export interface CorpusAddressing {
     tiles: Iterable<number | bigint>;
     directions?: readonly Direction[];
   }): AddressedTiles;
-  /**
-   * The URLs a *rectangle* addresses — {@link mortonTilesFor} composed with {@link tilesFor}.
-   *
-   * This is the method the module header says the subpath stopped one step short of. A camera has
-   * a rectangle, not a set of tile numbers, and until this existed the caller had to hold a Parquet
-   * reader to get from one to the other. It still holds {@link TileCodes}, which is data — but data
-   * three orders of magnitude smaller than a footer and readable by anything that can read a number.
-   */
-  tilesForBox(
-    params: BoxQuery & { type?: string; directions?: readonly Direction[] },
-  ): AddressedTiles;
 }
 
 const COLUMN: Record<Direction, 'src_dense' | 'dst_dense'> = {
@@ -533,7 +551,6 @@ function vertexAddress(
     tiles,
     container,
     index: indexAddress(prefix, path, yaml, count, container),
-    codesUrl: codesUrlFor(prefix, path, yaml),
     levels: levelAddress(prefix, path, yaml, count, container),
     tileOf: (denseId) => tileOf(denseId, shift),
     tileUrl,
@@ -612,21 +629,21 @@ function indexAddress(
 /**
  * Where a vertex type's **written levels** are, and which ones exist.
  *
- * **Level `k` is `dense_id % 2^k == 0`, whatever this says.** A level is a predicate over the
- * payload, and a written `l{k}/` is a cache of it — so a corpus declaring none draws the identical
- * picture and only reads more, and that is what keeps the pyramid from being a second contract.
- * What this block changes is a byte count, and `ViewCost.read` in `./corpus.ts` is where the
- * difference is reported.
+ * **Level `k` is `dense_id % strideOf(k) == 0`, whatever this says.** A level is a predicate over
+ * the payload, and a written `l{k}/` is a cache of it — so a corpus declaring none draws the
+ * identical picture and only reads more, and that is what keeps the pyramid from being a second
+ * contract. What this block changes is a byte count, and `ViewCost.read` in `./corpus.ts` is where
+ * the difference is reported.
  *
  * **The numbers are declared and not derived**, unlike everything else here, and the manifest side
- * argues why: a level list is at most three integers whatever the corpus is, and *which* levels a
- * writer spent bytes on is a policy — a reader re-deriving it from `vertex_count` and `chunk_size`
- * would reimplement the writer's plan and 404 the day the plan moved.
+ * argues why: a level list is `log4(V / chunk_size)` integers whatever the corpus is, and *which*
+ * levels a writer spent bytes on is a policy — a reader re-deriving it from `vertex_count` and
+ * `chunk_size` would reimplement the writer's plan and 404 the day the plan moved.
  *
- * **A level needs no second anchor.** Level `k`'s row `i` is the payload row with
- * `dense_id == i · 2^k`, so tile `j` of a level covers the `dense_id` range
- * `[j · chunkSize · 2^k, (j+1) · chunkSize · 2^k)` — a contiguous run of payload tiles, which the
- * published `codes:` anchor already bounds in Morton space.
+ * **A level needs nothing new to address.** Level `k`'s row `i` is the payload row with
+ * `dense_id == i · strideOf(k)`, so tile `j` of a level covers the `dense_id` range
+ * `[j · chunkSize · strideOf(k), (j+1) · chunkSize · strideOf(k))` — a contiguous run of payload
+ * tiles. In bits, which is how a reader spends it: the payload's own shift plus {@link strideBits}.
  */
 export interface LevelAddress {
   /** The levels written, finest first, as the manifest declares them. */
@@ -648,11 +665,17 @@ export interface LevelAddress {
   has(level: number): boolean;
   /** Where level `k`'s tiles are, resolved against the corpus base, with a trailing separator. */
   prefix(level: number): string;
-  /** The tile of level `k` holding `denseId`: a shift by `log2(chunkSize) + k`, never a division. */
+  /**
+   * The tile of level `k` holding `denseId`: a shift by `log2(chunkSize)` plus {@link strideBits},
+   * never a division.
+   */
   tileOf(level: number, denseId: bigint): bigint;
   /** The file tile `j` of level `k` is in, spelled by the corpus's container. */
   tileUrl(level: number, tile: number | bigint): string;
-  /** How many rows level `k` holds — `ceil(count / 2^k)` — or `null` when the manifest has no count. */
+  /**
+   * How many rows level `k` holds — `ceil(count / strideOf(k))` — or `null` when the manifest
+   * declares no count.
+   */
   rows(level: number): bigint | null;
   /** How many tiles level `k` has, or `null` when the manifest declares no count. */
   tiles(level: number): bigint | null;
@@ -713,8 +736,11 @@ function levelAddress(
   }
   const written = new Set(levels);
   const prefix = (level: number): string => prefixOf(join(vertexPrefix, `${stem}${level}`));
-  const rows = (level: number): bigint | null =>
-    count === null ? null : (count + (1n << BigInt(level)) - 1n) / (1n << BigInt(level));
+  const rows = (level: number): bigint | null => {
+    if (count === null) return null;
+    const stride = strideBig(level);
+    return (count + stride - 1n) / stride;
+  };
   const tiles = (level: number): bigint | null => {
     const at = rows(level);
     return at === null ? null : tilesOf(at, BigInt(chunkSize));
@@ -725,9 +751,9 @@ function levelAddress(
     container,
     has: (level) => written.has(level),
     prefix,
-    // The whole of a level's addressing: `k` more bits of `dense_id` fall off, because level `k`
-    // holds one row in `2^k` and a tile of it therefore spans `2^k` times the ids.
-    tileOf: (level, denseId) => tileOf(denseId, shift + BigInt(Math.max(0, Math.trunc(level)))),
+    // The whole of a level's addressing: `strideBits(k)` more bits of `dense_id` fall off, because
+    // level `k` holds one row in `strideOf(k)` and a tile of it spans that many times the ids.
+    tileOf: (level, denseId) => tileOf(denseId, shift + BigInt(strideBits(level))),
     tileUrl: (level, tile) => tileUrlFor(prefix(level), 'chunk', container)(tile),
     rows,
     tiles,
@@ -749,25 +775,6 @@ function levelAddress(
       return distinct(urls);
     },
   };
-}
-
-/**
- * The `codes:` block of a vertex manifest, resolved to a URL, or `null` when there is none.
- *
- * One required key, and it is required for {@link indexAddress}'s reason: a block that declares the
- * anchor exists without saying where it is reads exactly like a corpus that declares none, and the
- * difference between those two is what a reader would act on.
- */
-function codesUrlFor(vertexPrefix: string, path: string, yaml: ScannedManifest): string | null {
-  const declared = mapping(yaml, path, 'codes');
-  if (declared === null) return null;
-  const relative = scalarOf(declared, 'path');
-  if (relative === undefined || relative === '') {
-    throw new CorpusManifestError(
-      `${path} declares codes and no path, so the anchor it names cannot be fetched`,
-    );
-  }
-  return join(vertexPrefix, relative);
 }
 
 /**
@@ -821,7 +828,7 @@ function edgeLevelAddress(
     tileUrlFor(prefix(level), 'chunk', container)(tile);
   const tiles = (level: number): bigint | null => {
     if (src.count === null) return null;
-    const span = BigInt(chunkSize) << BigInt(Math.max(0, Math.trunc(level)));
+    const span = BigInt(chunkSize) * strideBig(level);
     return (src.count + span - 1n) / span;
   };
   return {
@@ -830,7 +837,7 @@ function edgeLevelAddress(
     container,
     has: (level) => written.has(level),
     prefix,
-    tileOf: (level, srcDense) => tileOf(srcDense, shift + BigInt(Math.max(0, Math.trunc(level)))),
+    tileOf: (level, srcDense) => tileOf(srcDense, shift + BigInt(strideBits(level))),
     tileUrl: url,
     tiles,
     files: (level) => {
@@ -1047,395 +1054,33 @@ export function resolveCorpus(options: ResolveCorpusOptions): CorpusAddressing {
     vertexType,
     incident,
     tilesFor,
-    tilesForBox: ({ box, extent, codes, type, directions }) =>
-      tilesFor({ type, tiles: mortonTilesFor({ box, extent, codes }), directions }),
   };
-}
-
-// ---------------------------------------------------------------------------
-// The Z-order half: which tiles a rectangle touches, without a reader
-// ---------------------------------------------------------------------------
-
-/**
- * Bits per axis on the grid the layout pass quantises positions onto, so a code is a `u32`.
- *
- * The writer is `morton_codes` in `crates/fossil-layout/src/layout.rs` and the published second
- * implementation is `apps/corpus/guards/arithmetic.mjs`; this is the third, and the three agree
- * against `apps/corpus/guards/vectors.json` rather than against each other.
- */
-export const MORTON_BITS = 16;
-
-/** Cells per axis — `1 << MORTON_BITS`. */
-export const MORTON_SIDE = 1 << MORTON_BITS;
-
-/** A rectangle in the corpus's own coordinates: the camera's question, and the layout's extent. */
-export interface Box {
-  xlo: number;
-  xhi: number;
-  ylo: number;
-  yhi: number;
-}
-
-/** The same rectangle on the Morton grid — `0..65535` per axis, both ends inclusive. */
-export interface GridBox {
-  xlo: number;
-  xhi: number;
-  ylo: number;
-  yhi: number;
-}
-
-/**
- * Quantise one coordinate onto `0..65535` over the extent it was ranked within.
- *
- * **Every step is binary32**, hence the `Math.fround` on each one. The writer's positions, extent
- * and intermediate ratio are all `f32`; JavaScript's arithmetic is binary64, so a literal
- * transcription of the formula is a *different function* — `quantize(147, 0, 167)` is 57687 in
- * binary32 and 57686 in binary64, and one unit here is a different code, a different rank, a
- * different `dense_id` and a different tile. `vectors.json` carries that case.
- */
-export function quantize(v: number, lo: number, hi: number): number {
-  if (!(hi > lo)) return 0;
-  const f = Math.fround;
-  const t = Math.min(Math.max(f(f(f(v) - f(lo)) / f(f(hi) - f(lo))), 0), 1);
-  return Math.round(f(t * 65535));
-}
-
-/** Spread the low 16 bits of `n` into the even bit positions of a `u32`. */
-function spread(n: number): number {
-  let v = n & 0xffff;
-  v = (v | (v << 8)) & 0x00ff00ff;
-  v = (v | (v << 4)) & 0x0f0f0f0f;
-  v = (v | (v << 2)) & 0x33333333;
-  v = (v | (v << 1)) & 0x55555555;
-  return v >>> 0;
-}
-
-/**
- * Interleave two quantised coordinates into a 32-bit Z-order code — `x` in the even bits.
- *
- * `spread(y) << 1` reaches bit 31, so the result is a negative `Number` unless coerced back to
- * unsigned. That coercion is not a detail: without it the top half of the plane sorts before the
- * bottom half, and the corpus satisfies every count-based check while addressing nothing.
- */
-export function morton2(x: number, y: number): number {
-  return (spread(x) | (spread(y) << 1)) >>> 0;
-}
-
-/** The Morton code of a position within an extent — quantise, then interleave. */
-export function mortonOf(x: number, y: number, extent: Box): number {
-  return morton2(quantize(x, extent.xlo, extent.xhi), quantize(y, extent.ylo, extent.yhi));
-}
-
-/** Split a code back into the two grid coordinates {@link morton2} interleaved. */
-export function mortonDecode(code: number): { x: number; y: number } {
-  let x = 0;
-  let y = 0;
-  for (let bit = 0; bit < MORTON_BITS; bit += 1) {
-    x |= ((code >>> (2 * bit)) & 1) << bit;
-    y |= ((code >>> (2 * bit + 1)) & 1) << bit;
-  }
-  return { x, y };
-}
-
-/**
- * A rectangle onto the grid — every vertex inside `box` is in a cell inside the answer.
- *
- * `quantize` is monotone non-decreasing, so `v >= box.xlo` implies `quantize(v) >= quantize(xlo)`
- * and the containment is exact rather than padded. `null` when the rectangle and the extent are
- * disjoint, which is a real answer and not an empty one: `quantize` CLAMPS, so a box entirely left
- * of the extent would otherwise come back as the column of cells at `x = 0`.
- */
-export function gridBoxOf(box: Box, extent: Box): GridBox | null {
-  if (box.xhi < box.xlo || box.yhi < box.ylo) return null;
-  if (box.xhi < extent.xlo || box.xlo > extent.xhi) return null;
-  if (box.yhi < extent.ylo || box.ylo > extent.yhi) return null;
-  return {
-    xlo: quantize(box.xlo, extent.xlo, extent.xhi),
-    xhi: quantize(box.xhi, extent.xlo, extent.xhi),
-    ylo: quantize(box.ylo, extent.ylo, extent.yhi),
-    yhi: quantize(box.yhi, extent.ylo, extent.yhi),
-  };
-}
-
-/**
- * Which Morton codes each tile holds — **the one thing the arithmetic does not derive.**
- *
- * `dense_id` is renumbered into Morton order, so a vertex's address and its position are the same
- * number read two ways and a rectangle is a set of code ranges. What that does NOT give is where
- * one range falls in the *ranking*: `dense_id` is a vertex's RANK by code, not its code, and the
- * rank of a code is a function of how the positions are distributed. `chunk_size` alone cannot say
- * it, and assuming the ranks are uniform in the code space is not a conservative guess — measured
- * over nine windows of the million-vertex fixture it MISSES 129 of the 226 tiles that hold a
- * matching vertex. So this is data, and it is two `u32` per tile: 1,960 B at a million vertices,
- * against the 1.15 MB of Parquet footer the geometric path reads at five million.
- *
- * `lo[k]` is the lowest code in tile `k` and `hi[k]` the highest — the codes of its first and last
- * rows, because the rows within a tile are in code order too. Both are non-decreasing in `k`.
- */
-export interface TileCodes {
-  readonly lo: ArrayLike<number>;
-  readonly hi: ArrayLike<number>;
-  /**
-   * The box the codes were quantised against, when the anchor carries one.
-   *
-   * The **other** half of what a rectangle needs, and the half that was quietly assumed: a code is
-   * `quantize(x, xlo, xhi)` interleaved with `quantize(y, ylo, yhi)`, so a rectangle in the
-   * corpus's own coordinates is a rectangle on the grid only once this is known. It is derivable —
-   * it is the min and max of the `x` and `y` columns — but deriving it means opening every tile's
-   * footer, which is the reader the arithmetic path exists without. So the writer publishes it
-   * beside the codes, in the same document, and {@link mortonTilesFor} takes it from there when the
-   * caller does not pass one.
-   */
-  readonly extent?: Box;
-}
-
-/**
- * The **tile-code anchor** as the writer publishes it: `vertex/<Type>/codes.json`, named by the
- * `codes:` block of the type's manifest and addressed by {@link VertexAddress.codesUrl}.
- *
- * It is JSON and not a packed array of `u32` for the reason the rest of this module is arithmetic:
- * a reader should need nothing it does not already have. Packed is 1,960 B at a million vertices
- * against about 5.4 kB here, and both are two orders of magnitude under the 226 kB of Parquet
- * footer that answers the same question — what the extra 3.4 kB buys is that there is no
- * endianness, no width and no offset table to get wrong, in any language.
- */
-export interface TileCodesDocument extends TileCodes {
-  /** Bits per axis on the grid the writer quantised onto. Must be {@link MORTON_BITS}. */
-  readonly mortonBits: number;
-  /** Rows per tile the anchor was cut at — the type's own `chunk_size`. */
-  readonly chunkSize: number;
-  /** How many tiles it names. `lo.length`, `hi.length`, and the manifest's own count agree. */
-  readonly tiles: number;
-  readonly lo: readonly number[];
-  readonly hi: readonly number[];
-  readonly extent: Box;
-}
-
-/** A number that is a `u32`, which every code and every tile count in the anchor is. */
-function u32(value: unknown, where: string, what: string): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 0xffffffff) {
-    throw new CorpusManifestError(`${where}: ${what} is ${String(value)}, which is not a u32`);
-  }
-  return value;
-}
-
-/**
- * Parse a tile-code anchor. **Synchronous, and it validates rather than trusts.**
- *
- * The host fetches {@link VertexAddress.codesUrl} the way it already fetches the manifest and hands
- * the text here; this module still opens nothing. What comes back satisfies {@link TileCodes}, so
- * it goes straight into {@link mortonTilesFor} and {@link CorpusAddressing.tilesForBox}.
- *
- * Four things are checked, and each one is a wrong picture rather than an exception if it is not:
- *
- * - **`morton_bits` is this module's.** A corpus quantised onto a different grid is addressed by
- *   different arithmetic, and every function here would answer confidently and wrongly.
- * - **`lo` and `hi` are the same length**, and it is `tiles`. A pair per tile is the whole shape.
- * - **`lo[k] <= hi[k]`**, and **both arrays are non-decreasing**. {@link tilesForGrid} answers with
- *   two binary searches, and a binary search over an unsorted array does not fail, it misses.
- * - **The extent is four finite numbers.** A `null` — which is what a non-finite `f32` becomes in
- *   JSON — would quantise every code to zero.
- */
-export function parseTileCodes(text: string, where = 'the tile-code anchor'): TileCodesDocument {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text) as unknown;
-  } catch (cause) {
-    throw new CorpusManifestError(`${where} is not JSON: ${String(cause)}`);
-  }
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new CorpusManifestError(`${where} is not an object`);
-  }
-  const doc = raw as Record<string, unknown>;
-
-  const mortonBits = u32(doc['morton_bits'], where, 'morton_bits');
-  if (mortonBits !== MORTON_BITS) {
-    throw new CorpusManifestError(
-      `${where} declares ${mortonBits} bits per axis and this reader addresses ${MORTON_BITS}; ` +
-        `a different grid is different arithmetic, not a smaller one`,
-    );
-  }
-  const chunkSize = u32(doc['chunk_size'], where, 'chunk_size');
-  const tiles = u32(doc['tiles'], where, 'tiles');
-
-  const codes = (key: 'lo' | 'hi'): number[] => {
-    const value = doc[key];
-    if (!Array.isArray(value)) {
-      throw new CorpusManifestError(`${where}: ${key} is not an array`);
-    }
-    if (value.length !== tiles) {
-      throw new CorpusManifestError(
-        `${where} declares ${tiles} tile(s) and ${value.length} ${key} code(s)`,
-      );
-    }
-    return value.map((v, k) => u32(v, where, `${key}[${k}]`));
-  };
-  const lo = codes('lo');
-  const hi = codes('hi');
-  for (let k = 0; k < tiles; k += 1) {
-    if (lo[k]! > hi[k]!) {
-      throw new CorpusManifestError(`${where}: tile ${k} spans ${lo[k]}..${hi[k]}, backwards`);
-    }
-    if (k > 0 && (lo[k - 1]! > lo[k]! || hi[k - 1]! > hi[k]!)) {
-      throw new CorpusManifestError(
-        `${where}: tile ${k} does not follow tile ${k - 1} in code order, so no binary search ` +
-          `over these arrays finds it`,
-      );
-    }
-  }
-
-  const box = doc['extent'];
-  if (box === null || typeof box !== 'object' || Array.isArray(box)) {
-    throw new CorpusManifestError(`${where} publishes no extent, so no rectangle reaches the grid`);
-  }
-  const side = (key: keyof Box): number => {
-    const value = (box as Record<string, unknown>)[key];
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-      throw new CorpusManifestError(
-        `${where}: extent.${key} is ${String(value)}, which is not a finite coordinate`,
-      );
-    }
-    return value;
-  };
-  const extent: Box = { xlo: side('xlo'), xhi: side('xhi'), ylo: side('ylo'), yhi: side('yhi') };
-
-  return { mortonBits, chunkSize, tiles, lo, hi, extent };
-}
-
-/** Smallest tile whose codes can reach `code`, or `codes.lo.length` when none can. */
-function firstTile(codes: TileCodes, code: number): number {
-  let a = 0;
-  let b = codes.hi.length - 1;
-  let found = codes.hi.length;
-  while (a <= b) {
-    const mid = (a + b) >> 1;
-    if (codes.hi[mid]! >= code) {
-      found = mid;
-      b = mid - 1;
-    } else a = mid + 1;
-  }
-  return found;
-}
-
-/** Largest tile whose codes can reach down to `code`, or `-1` when none can. */
-function lastTile(codes: TileCodes, code: number): number {
-  let a = 0;
-  let b = codes.lo.length - 1;
-  let found = -1;
-  while (a <= b) {
-    const mid = (a + b) >> 1;
-    if (codes.lo[mid]! <= code) {
-      found = mid;
-      a = mid + 1;
-    } else b = mid - 1;
-  }
-  return found;
-}
-
-/**
- * The tiles a grid rectangle touches: descend the quadtree, stop where the answer stops changing.
- *
- * A node of the Z-order tree is a code range `[base, base + 4^level)` AND a square of cells, which
- * is what makes the descent possible at all — one test on the square says whether the node is
- * outside the rectangle, inside it, or on its edge, and two binary searches over {@link TileCodes}
- * say which tiles the range falls in. The recursion stops on any of three answers rather than on
- * depth: outside (nothing), inside (every tile the range touches), or **the range is within one
- * tile** — refining a node that cannot split the answer costs work and buys nothing.
- *
- * The result **over-covers**, because the curve enters and leaves the rectangle: a tile whose code
- * range straddles the boundary is named whole. Measured against the tiles that actually hold a
- * matching vertex, over nine windows of the million-vertex fixture, that over-read is **1.00×** —
- * the geometric path over the same windows is 1.41×, and 1.13× on the 10% one the design page
- * records. A code range is a tighter description of a tile than its `x`/`y` box: the box is the
- * hull of an arc that snakes, and the arc is what the vertices are on.
- */
-export function tilesForGrid(grid: GridBox, codes: TileCodes): number[] {
-  const tiles = codes.lo.length;
-  if (tiles === 0 || codes.hi.length !== tiles) return [];
-  const selected = new Set<number>();
-  const stack: Array<[number, number]> = [[0, MORTON_BITS]];
-  while (stack.length > 0) {
-    const [base, level] = stack.pop()!;
-    const side = 2 ** level;
-    const { x, y } = mortonDecode(base);
-    const x1 = x + side - 1;
-    const y1 = y + side - 1;
-    if (x1 < grid.xlo || x > grid.xhi || y1 < grid.ylo || y > grid.yhi) continue;
-    const span = 4 ** level;
-    const first = firstTile(codes, base);
-    const last = lastTile(codes, base + span - 1);
-    // A gap in the ranking: no tile holds a code in this range, so no vertex does either.
-    if (first > last) continue;
-    const inside = x >= grid.xlo && x1 <= grid.xhi && y >= grid.ylo && y1 <= grid.yhi;
-    if (inside || first === last || level === 0) {
-      for (let k = first; k <= last; k += 1) selected.add(k);
-      continue;
-    }
-    const quarter = span / 4;
-    for (let i = 0; i < 4; i += 1) stack.push([base + i * quarter, level - 1]);
-  }
-  return [...selected].sort((a, b) => a - b);
-}
-
-/** What {@link mortonTilesFor} and {@link CorpusAddressing.tilesForBox} take. */
-export interface BoxQuery {
-  /** The rectangle, in the corpus's own coordinates. */
-  box: Box;
-  /**
-   * The extent the type's positions were quantised against — its own bounding box.
-   *
-   * **Optional since the anchor publishes it.** It was required and had to be, because the only
-   * way to obtain it was to scan every tile's `x`/`y`; a {@link TileCodesDocument} carries it, so
-   * the ordinary call passes `codes` alone. An explicit one still wins, which is what
-   * `address-morton.test.ts` builds its own renumberings with.
-   */
-  extent?: Box;
-  /** Which codes each tile holds. See {@link TileCodes} for why this is not derivable. */
-  codes: TileCodes;
-}
-
-/** The tiles a rectangle in corpus coordinates touches. Synchronous, and it reads no byte. */
-export function mortonTilesFor({ box, extent, codes }: BoxQuery): number[] {
-  const against = extent ?? codes.extent;
-  if (against === undefined) {
-    throw new CorpusManifestError(
-      `a rectangle reaches the Morton grid through the extent its codes were quantised against, ` +
-        `and neither the call nor the anchor carries one`,
-    );
-  }
-  const grid = gridBoxOf(box, against);
-  return grid === null ? [] : tilesForGrid(grid, codes);
 }
 
 // ---------------------------------------------------------------------------
 // The other half of a camera's question: which LEVEL, and how coarse that is
 // ---------------------------------------------------------------------------
 
-/**
- * The decimation level *k* means: **the vertices whose `dense_id` is a multiple of 2^k**.
- *
- * Over a Morton-ordered `dense_id` that is one vertex per quadtree cell of depth *k*, so a level is
- * a level of the same curve the tile address is read off — not a sample, not a budget, not a cap.
- * Two consequences follow from the definition alone and neither needs a byte on disk:
- *
- * - **It nests.** `dense_id % 2^(k+1) == 0` is a strict subset of `dense_id % 2^k == 0`, so
- *   refining only ever ADDS, and a vertex drawn once stays drawn at the same position.
- * - **It is a function of the level and nothing else.** No `matched`, no `limit`, no camera. Which
- *   is what makes {@link levelFor} a *separate* function rather than a step inside the read.
- */
-export const strideOf = (level: number): number => 2 ** Math.max(0, Math.trunc(level));
-
-/** What {@link levelFor} takes: a rectangle, what it may cost, and the anchor that sizes it. */
-export interface LevelQuery extends BoxQuery {
+/** What {@link levelFor} takes: how much the rectangle holds, and what it may cost. */
+export interface LevelQuery {
+  /**
+   * How many of the type's tiles the caller's rectangle touches.
+   *
+   * **The caller's number, because this module has no rectangle** — see the header. A host with a
+   * Parquet reader intersects the per-tile `x`/`y` boxes in the footers and passes the count; a
+   * host without one passes the type's whole tile count, which is the conservative answer and gives
+   * back the level the whole type needs.
+   */
+  tiles: number;
+  /** Rows per tile — the type's own `chunk_size`. */
+  chunkSize: number;
+  /** The type's `vertex_count`, when known — the ceiling on any estimate. */
+  count?: number;
   /**
    * How many vertices the caller is willing to be handed. **A budget, not a cap** — the answer is
    * a level, and a level's population is whatever the rectangle holds at that level.
    */
   budget: number;
-  /** Rows per tile. Taken from the anchor when it carries one, as `codes.json` does. */
-  chunkSize?: number;
-  /** The type's `vertex_count`, when known — the ceiling on any estimate. */
-  count?: number;
 }
 
 /**
@@ -1449,11 +1094,13 @@ export interface LevelQuery extends BoxQuery {
  * **The estimate is the tiles, not the area**, and the measurements that decided it are on the
  * same page. `count` caps it, because a rectangle covering the corpus cannot hold more than the
  * corpus.
+ *
+ * The logarithm is in the pyramid's own base and reaches it through {@link strideBits}, because a
+ * level drops `strideOf(k)` of the population and not `2^k`: dividing by the wrong base answers
+ * with twice the level, which is the picture the whole corpus zoomed out by two steps.
  */
-export function levelFor({ budget, chunkSize, count, ...box }: LevelQuery): number {
-  const rows = chunkSize ?? (box.codes as TileCodes & { chunkSize?: number }).chunkSize ?? 0;
-  const tiles = mortonTilesFor(box).length;
-  const estimate = Math.min(tiles * rows || 0, count ?? Number.POSITIVE_INFINITY);
+export function levelFor({ tiles, chunkSize, count, budget }: LevelQuery): number {
+  const estimate = Math.min(tiles * chunkSize || 0, count ?? Number.POSITIVE_INFINITY);
   if (!(budget > 0) || !(estimate > budget)) return 0;
-  return Math.ceil(Math.log2(estimate / budget));
+  return Math.ceil(Math.log2(estimate / budget) / strideBits(1));
 }

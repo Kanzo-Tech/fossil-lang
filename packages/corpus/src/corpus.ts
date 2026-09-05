@@ -72,13 +72,11 @@ import {
   type EdgeTiles,
   type Gap,
   GRAPH_INFO_PATH,
-  levelFor as levelForBox,
-  mortonTilesFor,
-  parseTileCodes,
+  levelFor as levelForTiles,
   resolveCorpus,
+  strideBits,
   strideOf,
   type CorpusAddressing,
-  type TileCodesDocument,
   type VertexAddress,
 } from './address.js';
 import { createGraphClient, type GraphClient } from './client.js';
@@ -226,8 +224,7 @@ export interface PlacedEdge {
  * **Half-open on the far edge** — `x <= v.x < x + w`, and the same in `y`. It matters at exactly
  * one rectangle and it is the one a caller reaches for first: a box clamped to
  * {@link Corpus.extent} excludes the vertices sitting *on* the maximum, which is 17 of a million on
- * the bench corpus. A caller framing the whole extent nudges the far edge past it. The
- * `TileCodes` box is inclusive there, and the note beside the predicate says why the two differ.
+ * the bench corpus. A caller framing the whole extent nudges the far edge past it.
  */
 export interface Box {
   readonly x: number;
@@ -287,14 +284,14 @@ export interface WindowAnswer extends Answer {
 export interface LevelInfo {
   /** *k*. Level 0 is every vertex. */
   readonly level: number;
-  /** `2^k` — one `dense_id` in this many survives. */
+  /** `strideOf(k)` — one `dense_id` in this many survives. */
   readonly stride: number;
   /** How many vertices the whole type has at this level: `ceil(count / stride)`. */
   readonly count: number;
   /**
    * Whether a written `vertex/<Type>/l{k}/` answers this level, or the full tiles are strided.
    *
-   * **The two select the same rows** — `dense_id % 2^k == 0` is the definition and a level file is
+   * **The two select the same rows** — `dense_id % strideOf(k) == 0` is the definition and a level file is
    * a cache of it. What a written level changes is the byte count; see {@link ViewCost.read} and
    * `/docs/design/one-door` for why that is a cost and not a second contract.
    */
@@ -355,11 +352,6 @@ export interface ViewCost {
    * `/docs/design/one-door` is why that is reported here rather than being a second call.
    */
   readonly read: 'strided' | 'level';
-  /**
-   * How the tiles were chosen: the published code anchor (`vertex/<Type>/codes.json`, arithmetic,
-   * no Parquet reader) or the per-tile `x`/`y` boxes in the footers.
-   */
-  readonly addressed: 'anchor' | 'footer';
   /** Wall clock for the queries this answer issued. */
   readonly ms: number;
 }
@@ -379,7 +371,7 @@ export interface View {
   readonly type: string;
   readonly box: Box;
   readonly level: number;
-  /** `2^level`. */
+  /** `strideOf(level)`. */
   readonly stride: number;
   /**
    * How many vertices the rectangle holds **at {@link View.matchedAt}** — the denominator, and the
@@ -392,13 +384,13 @@ export interface View {
    * {@link View.level} when a written level answered.
    *
    * **A field rather than a footnote, because the honest answer is not always level 0.** `matched`
-   * is `count(*)` over the rows that were read, and a level file holds one row in `2^k` — so a
+   * is `count(*)` over the rows that were read, and a level file holds one row in `strideOf(k)` — so a
    * read of `l{k}/` cannot count level 0 without opening the very bytes the pyramid exists to
-   * avoid. The two ways of not saying so were both worse: reporting `matched · 2^k` invents an
+   * avoid. The two ways of not saying so were both worse: reporting `matched · strideOf(k)` invents an
    * estimate the type does not admit to, and letting the field mean different things depending on
    * `cost.read` is the two-contracts failure the pyramid was designed to refuse.
    *
-   * `matched · 2^matchedAt` is the caller's own arithmetic if it wants an estimate, and it is an
+   * `matched · strideOf(matchedAt)` is the caller's own arithmetic if it wants an estimate, and it is an
    * estimate — the decimation is uniform in `dense_id`, not in the rectangle.
    */
   readonly matchedAt: number;
@@ -508,7 +500,7 @@ export interface Corpus {
    * Which levels of detail exist — the multiscale metadata, and the first half of the Zarr shape.
    *
    * Every level from 0 to the one holding a single vertex is listed, because every one of them is
-   * answerable: level *k* is the predicate `dense_id % 2^k == 0`, which needs no bytes on disk.
+   * answerable: level *k* is the predicate `dense_id % strideOf(k) == 0`, which needs no bytes on disk.
    * {@link LevelInfo.written} is the only thing a pyramid on disk changes, and it changes a cost
    * rather than an answer.
    */
@@ -866,39 +858,6 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     })),
   };
 
-  /**
-   * The tile-code anchors, read **while the corpus is opening** — one small JSON per vertex type.
-   *
-   * It is not lazy, and the reason is {@link Corpus.levelFor}: a camera asks which level to draw
-   * before it asks for anything, and a level that arrived as a promise would be a request between
-   * the camera moving and a URL being computable, which is the `viewport` verb this format deleted.
-   * So the anchor is bought with the manifests. It is 5,498 B at a million vertices — two orders of
-   * magnitude under the footer it replaces, and it replaces it: with an anchor, which tiles a
-   * rectangle touches is arithmetic and no Parquet reader is on the path.
-   *
-   * A type that declares no `codes:` is a legal corpus and simply has no entry here; `view` falls
-   * back to the footer boxes and says so on {@link ViewCost.addressed}.
-   */
-  const anchors = new Map<string, TileCodesDocument>();
-  {
-    const declared = addressing.types.filter((type) => type.codesUrl !== null);
-    if (declared.length > 0) {
-      const rows = await query(
-        `SELECT filename, content FROM read_text(${list(declared.map((t) => t.codesUrl!))})`,
-      );
-      const byUrl = new Map(rows.map((row) => [text(row, 'filename'), text(row, 'content')]));
-      for (const type of declared) {
-        const content = byUrl.get(type.codesUrl!);
-        // A `codes:` the manifest names and the store does not carry is a corpus that lies about
-        // its own addressing, and the honest response is the slower path rather than an exception:
-        // the footers answer the same question, and `ViewCost.addressed` reports which one ran.
-        if (content !== undefined) {
-          anchors.set(type.type, parseTileCodes(content, `${type.type}'s tile-code anchor`));
-        }
-      }
-    }
-  }
-
   const extents = new Map<string, Extent | null>();
 
   const vertexOf = (type: string, row: QueryRow): PlacedVertex => {
@@ -1042,6 +1001,28 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   };
 
   /**
+   * The payload boxes of every type that has geometry, resolved **while the corpus is opening.**
+   *
+   * It is not lazy, and the reason is {@link Corpus.levelFor}: a camera asks which level to draw
+   * before it asks for anything, and a level that arrived as a promise would be a request between
+   * the camera moving and a URL being computable, which is the `viewport` verb this format deleted.
+   * So the footers are bought with the manifests.
+   *
+   * **This is not an extra read.** `tileBoxes` is read once per corpus and cached whatever calls it
+   * first; all this does is decide that the first caller is `openCorpus`. What it replaces is a
+   * `read_text` of one `codes.json` per type — a second index over the question these same bytes
+   * answer, and the request that paid for it.
+   */
+  const footers = new Map<string, readonly TileBox[]>();
+  await Promise.all(
+    addressing.types
+      .filter((type) => has(type.type, 'x') && has(type.type, 'y'))
+      .map(async (type) => {
+        footers.set(type.type, await tileBoxes(type.type));
+      }),
+  );
+
+  /**
    * **What a set of files weighs**, from the same footers the boxes come from, read once per set.
    *
    * `ViewCost.bytes` counted the vertex tiles and nothing else, while `view` was also opening the
@@ -1079,6 +1060,22 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     all.filter((b) => b.x1 >= x && b.x0 < x + w && b.y1 >= y && b.y0 < y + h);
 
   /**
+   * The tiles a rectangle can touch, or the whole set when the footers do not bound it.
+   *
+   * A type whose every tile carries an `x`/`y` box is pruned; one where any tile's footer declares
+   * none is read whole, which is the conservative answer and the one this had before the boxes were
+   * cached at all. The comparison is against the TILE count and not the file count: under the
+   * row-group container one file carries every tile.
+   */
+  const selectedTiles = (type: VertexAddress, box: Box): readonly number[] => {
+    const all = footers.get(type.type);
+    if (all === undefined) return [];
+    return (BigInt(all.length) === type.tiles ? intersecting(all, box) : all).map((b) =>
+      Number(b.tile),
+    );
+  };
+
+  /**
    * Selected tiles collapsed into maximal runs, each a single byte interval — what a rectangle
    * costs in `Range` requests rather than in tiles.
    *
@@ -1111,16 +1108,6 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     }
     return runs;
   };
-
-  /**
-   * The same rectangle in the addressing layer's spelling — `{x, y, w, h}` against `{xlo, xhi,
-   * ylo, yhi}`, and the far edge is **inclusive** there where {@link boxOf} is half-open here.
-   *
-   * The mismatch is one grid cell wide and it errs the safe way: `mortonTilesFor` may name one more
-   * tile than the `WHERE` will keep a row from, which costs bytes. Erring the other way would lose
-   * the vertices on the seam, which costs a wrong picture.
-   */
-  const gridBox = ({ x, y, w, h }: Box) => ({ xlo: x, xhi: x + w, ylo: y, yhi: y + h });
 
   const boxOf = ({ x, y, w, h }: Box): string =>
     `x >= ${x} AND x < ${x + w} AND y >= ${y} AND y < ${y + h}`;
@@ -1553,15 +1540,19 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
     levelFor({ type, budget, ...box }) {
       const address = vertexType(type);
-      const count = Number(address.count ?? 0n);
-      const codes = anchors.get(address.type);
-      if (codes === undefined) {
-        // No anchor, so no rectangle reaches the tiles without a Parquet reader — and this member
-        // may not have one, because a camera calls it before it asks for anything. The whole type
-        // is the only pure answer, and it is the conservative one: too coarse, never too fine.
-        return budget > 0 && count > budget ? Math.ceil(Math.log2(count / budget)) : 0;
-      }
-      return levelForBox({ box: gridBox(box), codes, budget, chunkSize: address.chunkSize, count });
+      // Synchronous, over footers already read: `openCorpus` bought them, so a camera deciding
+      // which level to draw before it asks for anything gets an answer and not a promise. A type
+      // with no geometry has no boxes and falls back to its whole tile count, which the `count`
+      // ceiling turns into the level the whole type needs — too coarse, never too fine.
+      const tiles = footers.has(address.type)
+        ? selectedTiles(address, box).length
+        : Number(address.tiles ?? 0n);
+      return levelForTiles({
+        tiles,
+        chunkSize: address.chunkSize,
+        count: address.count === null ? undefined : Number(address.count),
+        budget,
+      });
     },
 
     async view(params) {
@@ -1589,17 +1580,10 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const chunk = BigInt(address.chunkSize);
       const pins = [...new Set(pinned.map((id) => BigInt(id)))].sort(ascending);
 
-      /**
-       * Which tiles, and by which artefact.
-       *
-       * The anchor is preferred because a code range describes a tile more tightly than its `x`/`y`
-       * box does; `/docs/design/corpus` measures the two over the same nine windows. The footer
-       * path is the fallback for a corpus publishing no `codes:`, and it stays correct, only looser.
-       */
+      // Which tiles: the per-tile `x`/`y` boxes in the Parquet footers, which is the ONE index
+      // over that question — `footer-is-the-index`. It is the same array `levelFor` answered from
+      // and `openCorpus` already read; awaited here for the type that has no geometry cached.
       const all = await tileBoxes(address.type);
-      const boxed = BigInt(all.length) === address.tiles;
-      const codes = anchors.get(address.type);
-      const addressed: ViewCost['addressed'] = codes !== undefined ? 'anchor' : 'footer';
       /**
        * Whether a written level answers this read, and **why asking for links is what decides it.**
        *
@@ -1607,8 +1591,8 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
        * edge is not in it — and the camera keeps an edge with ONE end drawn, not two. Measured on
        * the 300,000-vertex bench corpus with the app's own three-pixel floor
        * (`crates/fossil-layout/tests/levels.rs`, `what_the_pixel_floor_leaves_of_a_coarse_view`):
-       * the level-6 view draws 51,254 edges and 46,571 anchors, of which the level file can
-       * position **405 — 0.79%**. So reading `l{k}/` for a view that asked for links would not be
+       * a coarse view draws 51,254 edges and 46,571 far ends, of which a VERTEX level can position
+       * **405 — 0.79%**. So reading `l{k}/` for a view that asked for links would not be
        * the same answer more cheaply; it would be a different picture, and `/docs/design/one-door`
        * said the day a level exists nothing else changes. It was written before that was measured.
        *
@@ -1636,13 +1620,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       })();
       const viaLevel =
         levelSet !== null && levelSet.has(level) && (!wantLinks || edgeLevels !== null);
-      const selected = new Set<number>(
-        codes !== undefined
-          ? mortonTilesFor({ box: gridBox(box), codes })
-          : boxed
-            ? intersecting(all, box).map((b) => Number(b.tile))
-            : all.map((b) => Number(b.tile)),
-      );
+      const selected = new Set<number>(selectedTiles(address, box));
       // A pin's tile is COUNTED. Left out of the selection the disjunct that brings the pin back
       // has nothing to match against, and the fetch it costs would be missing from the ledger
       // rather than absent from the read.
@@ -1650,13 +1628,12 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
       const payloadTiles = [...selected].sort((a, b) => a - b);
       /**
-       * The same tiles, read off the pyramid — arithmetic, and **no second anchor.**
+       * The same tiles, read off the pyramid — arithmetic, and **nothing new to address it with.**
        *
-       * Level `k`'s tile `j` covers the `dense_id` range `[j·chunk·2^k, (j+1)·chunk·2^k)`, so a run
-       * of payload tiles is a run of level tiles under the level's own shift. That is the whole of
-       * why the manifest writes no `codes:` per level: whichever artefact addressed the payload —
-       * the anchor or the footers — has already addressed the level, and `cost.addressed` keeps
-       * naming the one that did.
+       * Level `k`'s tile `j` covers the `dense_id` range `[j·chunk·stride, (j+1)·chunk·stride)`, so
+       * a run of payload tiles is a run of level tiles under the level's own shift. That is why the
+       * manifest writes no per-level index: the footers that addressed the payload have already
+       * addressed the level.
        */
       const levelTilesOf = (tiles: readonly number[]): number[] => {
         const out = new Set<number>();
@@ -1677,13 +1654,15 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       /**
        * **How wide a tile of what was read is, in `dense_id`.**
        *
-       * The payload's `chunk_size` for a payload read, and a level's own tile times `2^k` for a
-       * level read — level `k` keeps one id in `2^k`, so its tile of `chunkSize` rows spans that
+       * The payload's `chunk_size` for a payload read, and a level's own tile times `strideOf(k)` for
+       * a level read — level `k` keeps one id in `strideOf(k)`, so its tile of `chunkSize` rows spans that
        * many times the ids. Using the payload's number over a level file is the bug this line
        * exists as: the range clause bounded tile 0 of `l6` at 8 ids where it holds 512, so the
        * read came back with one row and looked like a corpus rather than like a predicate.
        */
-      const span = viaLevel ? BigInt(levelSet!.chunkSize) << BigInt(level) : chunk;
+      const span = viaLevel
+        ? BigInt(levelSet!.chunkSize) << BigInt(strideBits(level))
+        : chunk;
       // A pin's tile is a PAYLOAD tile even under a level read, so its cost is measured against
       // the payload's footers and added to the ledger the level's own runs opened.
       const pinTiles = viaLevel
@@ -1722,7 +1701,6 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
           runs: 0,
           bytes: 0,
           read: viaLevel ? 'level' : 'strided',
-          addressed,
           ms: 0,
         },
       };
@@ -1740,7 +1718,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
       /**
        * The rows the answer is computed over — and note what is NOT conditional on where they came
-       * from: `pool` still applies `dense_id % 2^k = 0` below, over a level file whose every row
+       * from: `pool` still applies `dense_id % strideOf(k) = 0` below, over a level file whose every row
        * already satisfies it. That is deliberate and it is the contract, executed rather than
        * asserted: a level file that disagreed with the predicate could change the BYTES this read
        * costs and could not change the rows it answers with.
@@ -1924,7 +1902,6 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
           runs: runs.length + pinRuns.length,
           bytes: bytes + edgeBytes,
           read: viaLevel ? 'level' : 'strided',
-          addressed,
           ms: Date.now() - started,
         },
       };

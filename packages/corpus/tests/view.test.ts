@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { strideOf } from '../src/address.js';
 import { openCorpus, type Corpus, type View } from '../src/corpus.js';
 import { initFossilGraphWasm } from '../src/load.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
@@ -26,9 +27,9 @@ import type { QueryFn, QueryRow } from '../src/query.js';
  *    the Zarr property in one sentence and it is the whole reason the level is an argument.
  * 2. **Level 0 selects what `window` selects.** The two members take a rectangle and are not the
  *    same question; this is the invariant that keeps them one contract rather than two.
- * 3. **A level nests.** `dense_id % 2^(k+1) == 0` is a strict subset of `dense_id % 2^k == 0`, so
- *    refining only ever adds — asserted over every level the type has, which at 300 vertices is
- *    nine of them.
+ * 3. **A level nests.** A multiple of `strideOf(k+1)` is a multiple of `strideOf(k)`, so refining
+ *    only ever adds — asserted over every level the type has, which in quarters at 300 vertices is
+ *    five of them.
  * 4. **`levelFor` never lies about the direction.** A smaller rectangle never needs a coarser level
  *    than a bigger one containing it, and a bigger budget never needs a coarser level than a
  *    smaller one. Both are monotonicity, and both are what makes a camera's zoom sequence sane.
@@ -98,11 +99,12 @@ describe('levels — the multiscale metadata', () => {
   it('lists every level from all of it down to one vertex', () => {
     const levels = corpus.levels();
     expect(levels[0]).toMatchObject({ level: 0, stride: 1, count: VERTEX_COUNT, written: false });
-    // 2^9 = 512 is the first stride at or above 300, so nine levels above zero.
-    expect(levels).toHaveLength(10);
-    expect(levels.at(-1)).toMatchObject({ level: 9, stride: 512, count: 1 });
+    // In quarters `strideOf(5)` = 1,024 is the first stride at or above 300, so five levels above
+    // zero. In halves it was nine, and a camera crossed two of them per zoom step.
+    expect(levels).toHaveLength(6);
+    expect(levels.at(-1)).toMatchObject({ level: 5, stride: 1024, count: 1 });
     for (const { level, stride, count } of levels) {
-      expect(stride).toBe(2 ** level);
+      expect(stride).toBe(strideOf(level));
       expect(count).toBe(Math.ceil(VERTEX_COUNT / stride));
     }
   });
@@ -145,14 +147,14 @@ describe('levelFor — the budget, and it is a separate function', () => {
     }
   });
 
-  it('estimates over tiles rather than area, so a 64-row budget lands within one level', async () => {
-    // The estimate is `tiles × chunk_size` capped by the count, so over the whole corpus it is
-    // exactly `5 × 64 = 320` against 300 rows — and `ceil(log2(320 / 64))` is 3 where the true
-    // answer over 300 is also 3. Asserted against the arithmetic rather than against a constant
-    // transcribed from a run.
+  it('answers the COARSEST level that fits, and not one coarser', async () => {
+    // The estimate is `tiles × chunk_size` capped by the count — over the whole corpus, `5 × 64`
+    // capped at 300 rows. Asserted as the definition rather than as a formula: the level it names
+    // fits the budget and the one below it does not, which is what "coarsest that fits" means and
+    // what restating `log4` here would only re-derive.
     const level = corpus.levelFor({ ...(await everything()), budget: CHUNK_SIZE });
-    expect(level).toBe(Math.ceil(Math.log2(320 / CHUNK_SIZE)));
     expect(corpus.levels()[level]!.count).toBeLessThanOrEqual(CHUNK_SIZE);
+    expect(corpus.levels()[level - 1]!.count).toBeGreaterThan(CHUNK_SIZE);
   });
 });
 
@@ -200,7 +202,7 @@ describe('view — the same rectangle at the same level is the same answer', () 
         place.set(view.denseIds[i]!, at);
       }
       if (coarser !== null) for (const id of coarser) expect(ids).toContain(id);
-      expect(view.stride).toBe(2 ** level);
+      expect(view.stride).toBe(strideOf(level));
       coarser = ids;
     }
   });
@@ -210,15 +212,14 @@ describe('view — the same rectangle at the same level is the same answer', () 
     for (const level of [0, 1, 3, 5]) {
       const view = await corpus.view({ ...box, level });
       expect(view.matched).toBe(VERTEX_COUNT);
-      expect(view.marks).toBe(Math.ceil(VERTEX_COUNT / 2 ** level));
+      expect(view.marks).toBe(Math.ceil(VERTEX_COUNT / strideOf(level)));
     }
   });
 
-  it('reports which artefact addressed the tiles and which one answered the level', async () => {
+  it('reports which artefact answered the level, and what the read cost', async () => {
     const view = await corpus.view({ ...(await everything()), level: 1 });
-    // The conformance corpus publishes `codes:`, so the tiles come from the anchor and no
-    // rectangle-to-tile question reaches a Parquet reader.
-    expect(view.cost.addressed).toBe('anchor');
+    // The conformance corpus writes no `l{k}/`, so the payload is opened and strided — the same
+    // rows, more bytes, and the field that says so is the only one a pyramid would flip.
     expect(view.cost.read).toBe('strided');
     expect(view.cost.tiles).toBeGreaterThan(0);
     expect(view.cost.bytes).toBeGreaterThan(0);
