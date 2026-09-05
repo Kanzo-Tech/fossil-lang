@@ -1,6 +1,6 @@
 //! Integration: **the level files and the level predicate select the same rows.**
 //!
-//! Level `k` is defined as `dense_id % 2^k == 0` over the payload, and a written
+//! Level `k` is defined as `dense_id % 4^k == 0` over the payload, and a written
 //! `vertex/<Type>/l{k}/` is an optimisation of exactly that — a coarse camera
 //! reading a small file instead of striding a large one. The whole reason the
 //! pyramid can be added without becoming a second contract is that the two paths
@@ -31,12 +31,12 @@ use duckdb::Connection;
 use fossil_layout::layout::enrich_layout;
 use fossil_sinks::manifest::VertexLevels;
 
-/// Rows in the fixture, and a tile size that puts it well over
-/// `LEVEL_FLOOR_TILES` without making the test a benchmark. The floor is
-/// expressed in TILES precisely so that it can be crossed by either term, and
-/// crossing it with the small one is what keeps this a two-second test: 4,000
-/// rows at 8 rows a tile is 500 tiles, where 4,096 rows a tile would need a
-/// quarter of a million vertices to say the same thing.
+/// Rows in the fixture, and a tile size that buys a five-level pyramid without
+/// making the test a benchmark. A type earns levels the moment it is over one
+/// tile, and the coarsest is the one that fits back into one — so it is the
+/// RATIO that sets the depth, and taking it with the small term is what keeps
+/// this a two-second test: 4,000 rows at 8 a tile spans five levels, where
+/// 4,096 rows a tile would need four million vertices to say the same thing.
 const ROWS: u32 = 4_000;
 /// A power of two, because a tile's address is a shift and not a division.
 const CHUNK: u64 = 8;
@@ -80,11 +80,10 @@ fn a_level_file_holds_exactly_what_the_level_predicate_selects() {
     f.targets[0].chunk_size = CHUNK;
     enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
 
-    let plan =
-        VertexLevels::planned(u64::from(ROWS), CHUNK).expect("4,000 rows is above the floor");
+    let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("4,000 rows is over one tile");
     assert_eq!(
         plan.levels,
-        vec![5, 6, 7, 8, 9],
+        vec![1, 2, 3, 4, 5],
         "the plan this corpus is checked against"
     );
 
@@ -98,10 +97,10 @@ fn a_level_file_holds_exactly_what_the_level_predicate_selects() {
     let cols = "dense_id, subject, x, y, cluster_id";
 
     for &level in &plan.levels {
-        let step = 1u64 << level;
+        let stride = VertexLevels::stride(level);
         let file = lit(&chunks.join(plan.level_prefix(level)).join("tiles.parquet"));
         let predicate =
-            format!("SELECT {cols} FROM read_parquet('{payload}') WHERE dense_id % {step} = 0");
+            format!("SELECT {cols} FROM read_parquet('{payload}') WHERE dense_id % {stride} = 0");
         let written = format!("SELECT {cols} FROM read_parquet('{file}')");
 
         let missing = scalar(
@@ -140,7 +139,7 @@ fn a_level_file_holds_exactly_what_the_level_predicate_selects() {
             &db,
             &format!(
                 "SELECT count(*) FROM (SELECT dense_id, row_number() OVER () - 1 AS pos \
-                 FROM read_parquet('{file}')) WHERE dense_id <> pos * {step}"
+                 FROM read_parquet('{file}')) WHERE dense_id <> pos * {stride}"
             ),
         );
         assert_eq!(
@@ -160,7 +159,7 @@ fn a_coarser_level_file_is_a_subset_of_the_finer_one() {
     f.targets[0].chunk_size = CHUNK;
     enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
 
-    let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("above the floor");
+    let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("over one tile");
     let chunks = f.root.join("chunks");
     let db = Connection::open_in_memory().expect("duckdb");
 
@@ -195,7 +194,7 @@ fn the_levels_on_disk_are_the_levels_the_plan_names() {
     f.targets[0].chunk_size = CHUNK;
     enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
 
-    let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("above the floor");
+    let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("over one tile");
     let chunks = f.root.join("chunks");
 
     let mut on_disk: Vec<String> = fs::read_dir(&chunks)
@@ -228,16 +227,16 @@ fn the_levels_on_disk_are_the_levels_the_plan_names() {
     }
 }
 
-/// **Under the floor a type gets no pyramid, and that is not a regression.**
+/// **A type that fits one tile gets no pyramid, and that is not a regression.**
 ///
 /// `fossil run examples/hello.fossil` writes five `Person` vertices and the
 /// walking skeleton asserts them by content; a corpus that grew a directory here
-/// would be a corpus paying for a view it serves in one range request. The
-/// predicate still answers over the payload, which is the whole point of the
-/// floor being safe to set high.
+/// would be a corpus paying for a view one range request already serves. The
+/// predicate still answers over the payload, which is what makes the one
+/// exclusion safe.
 #[test]
 fn a_small_type_writes_no_levels_at_all() {
-    let f = fixture(dir("levels_floor"), 200, 14);
+    let f = fixture(dir("levels_one_tile"), 200, 14);
     assert!(VertexLevels::planned(200, f.targets[0].chunk_size).is_none());
     enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
 
@@ -249,69 +248,7 @@ fn a_small_type_writes_no_levels_at_all() {
             (entry.path().is_dir() && name != "index").then_some(name)
         })
         .collect();
-    assert!(strays.is_empty(), "a type under the floor grew {strays:?}");
-}
-
-/// **What happens to the edges: nothing is written, and this is why.**
-///
-/// The induced edge set of a level — the edges with BOTH endpoints in it — does
-/// nest, exactly as the vertices do, so it is not rejected for the reason a
-/// synthetic centroid is. It is rejected because it is empty. A level keeps
-/// `1/2^k` of the vertices and an edge needs two of them, so it keeps on the
-/// order of `1/2^2k` of the edges: at the coarsest level of this fixture that is
-/// a 1-in-262,144 draw against 14 edges per vertex, and the file the pyramid
-/// would gain is a file with nothing in it.
-///
-/// So a coarse camera draws points and no links. That is not a new state for it
-/// to be in — `links` is already 0 in a window whose edges leave the frame — and
-/// the alternative is the one thing the whole design refuses: an edge between two
-/// survivors standing in for a path through vertices that are not drawn is a
-/// synthetic edge, and replacing it with the path when the camera zooms moves
-/// every line on screen. What draws the links is the payload's own
-/// `by_source` tiles, over the window, at the zoom where there are links to draw.
-#[test]
-fn a_level_induces_essentially_no_edges_which_is_why_none_are_written() {
-    let mut f = fixture(dir("levels_edges"), ROWS, 14);
-    f.targets[0].chunk_size = CHUNK;
-    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
-
-    let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("above the floor");
-    let by_source = written_relation(&f.root, "by_source");
-    let db = Connection::open_in_memory().expect("duckdb");
-    let total = scalar(
-        &db,
-        &format!("SELECT count(*) FROM read_parquet('{by_source}')"),
-    );
-    assert!(total > 0, "the fixture has edges to lose");
-
-    let mut induced = Vec::new();
-    for &level in &plan.levels {
-        let step = 1u64 << level;
-        induced.push(scalar(
-            &db,
-            &format!(
-                "SELECT count(*) FROM read_parquet('{by_source}') \
-                 WHERE src_dense % {step} = 0 AND dst_dense % {step} = 0"
-            ),
-        ));
-    }
-    println!(
-        "edges {total}, induced per level {:?} at {:?}",
-        induced, plan.levels
-    );
-
-    // Under a hundredth of the edges at the FINEST written level, which is the
-    // most generous of the three, and non-increasing as the level coarsens —
-    // the nesting the vertices have, inherited.
-    assert!(
-        induced[0] * 100 < total,
-        "the finest level induces {} of {total} edges, which is enough to be worth a file",
-        induced[0]
-    );
-    assert!(
-        induced.windows(2).all(|w| w[1] <= w[0]),
-        "induced edge counts do not nest: {induced:?}"
-    );
+    assert!(strays.is_empty(), "a type inside one tile grew {strays:?}");
 }
 
 /// **What the default view costs, measured** — an instrument rather than a
@@ -333,7 +270,7 @@ fn level_cost_against_the_whole_type() {
     let chunk = f.targets[0].chunk_size;
     enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
 
-    let plan = VertexLevels::planned(u64::from(BIG), chunk).expect("above the floor");
+    let plan = VertexLevels::planned(u64::from(BIG), chunk).expect("over one tile");
     let chunks = f.root.join("chunks");
     let payload = fs::metadata(chunks.join("tiles.parquet"))
         .expect("payload")
@@ -357,13 +294,12 @@ fn level_cost_against_the_whole_type() {
 /// **What a coarse view actually draws, measured** — the number the decision to
 /// read a level file rests on, and which nothing in this tree had measured.
 ///
-/// `a_level_induces_essentially_no_edges_which_is_why_none_are_written` measures
-/// the **induced** set: edges with BOTH ends in the level. That is the right
+/// The **induced** set — edges with BOTH ends in the level — is the right
 /// question for *writing* an edge pyramid and the wrong one for *reading* a
 /// vertex level, because the camera's rule is not the induced set. `view` keeps
 /// an edge with **at least one end drawn** and both ends *positioned* — both in
 /// the tiles it opened — and then the renderer's floor cuts the short ones. So
-/// the edges a coarse view draws scale with the marks (`V/2^k · degree`), not
+/// the edges a coarse view draws scale with the marks (`V/4^k · degree`), not
 /// with their square, and the induced count says nothing about them.
 ///
 /// That distinction is what decides whether a level file can answer at all. A
@@ -396,7 +332,7 @@ fn what_the_pixel_floor_leaves_of_a_coarse_view() {
     let chunk = f.targets[0].chunk_size;
     enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
 
-    let plan = VertexLevels::planned(u64::from(BIG), chunk).expect("above the floor");
+    let plan = VertexLevels::planned(u64::from(BIG), chunk).expect("over one tile");
     let payload = lit(&f.root.join("chunks").join("tiles.parquet"));
     let by_source = written_relation(&f.root, "by_source");
     let db = Connection::open_in_memory().expect("duckdb");
@@ -423,10 +359,12 @@ fn what_the_pixel_floor_leaves_of_a_coarse_view() {
     );
 
     for &level in &plan.levels {
-        let step = 1u64 << level;
+        let stride = VertexLevels::stride(level);
         let marks = scalar(
             &db,
-            &format!("SELECT count(*) FROM read_parquet('{payload}') WHERE dense_id % {step} = 0"),
+            &format!(
+                "SELECT count(*) FROM read_parquet('{payload}') WHERE dense_id % {stride} = 0"
+            ),
         );
         // The camera's rule, spelled once and filtered three ways: at least one
         // end a mark, both ends positioned (the whole extent opens every tile,
@@ -438,22 +376,25 @@ fn what_the_pixel_floor_leaves_of_a_coarse_view() {
                         FROM read_parquet('{by_source}') r \
                         JOIN v a ON a.dense_id = r.src_dense \
                         JOIN v b ON b.dense_id = r.dst_dense \
-                        WHERE r.src_dense % {step} = 0 OR r.dst_dense % {step} = 0)"
+                        WHERE r.src_dense % {stride} = 0 OR r.dst_dense % {stride} = 0)"
         );
         let incident = scalar(&db, &format!("{counts} SELECT count(*) FROM e"));
         let induced = scalar(
             &db,
-            &format!("{counts} SELECT count(*) FROM e WHERE s % {step} = 0 AND d % {step} = 0"),
+            &format!("{counts} SELECT count(*) FROM e WHERE s % {stride} = 0 AND d % {stride} = 0"),
         );
         let drawn = scalar(
             &db,
-            &format!("{counts} SELECT count(*) FROM e WHERE d2 >= {}", floor * floor),
+            &format!(
+                "{counts} SELECT count(*) FROM e WHERE d2 >= {}",
+                floor * floor
+            ),
         );
         let drawn_induced = scalar(
             &db,
             &format!(
                 "{counts} SELECT count(*) FROM e \
-                 WHERE d2 >= {} AND s % {step} = 0 AND d % {step} = 0",
+                 WHERE d2 >= {} AND s % {stride} = 0 AND d % {stride} = 0",
                 floor * floor
             ),
         );
@@ -464,8 +405,8 @@ fn what_the_pixel_floor_leaves_of_a_coarse_view() {
             &db,
             &format!(
                 "{counts} SELECT count(DISTINCT x) FROM ( \
-                   SELECT s AS x FROM e WHERE d2 >= {f2} AND s % {step} != 0 \
-                   UNION SELECT d FROM e WHERE d2 >= {f2} AND d % {step} != 0)",
+                   SELECT s AS x FROM e WHERE d2 >= {f2} AND s % {stride} != 0 \
+                   UNION SELECT d FROM e WHERE d2 >= {f2} AND d % {stride} != 0)",
                 f2 = floor * floor
             ),
         );
@@ -486,7 +427,7 @@ fn what_the_pixel_floor_leaves_of_a_coarse_view() {
 /// coordinates.**
 ///
 /// A level of a relation is the edges incident to a level-`k` vertex —
-/// `src % 2^k == 0 OR dst % 2^k == 0` — and every row carries both endpoints'
+/// `src % 4^k == 0 OR dst % 4^k == 0` — and every row carries both endpoints'
 /// positions so that a camera can draw the line without opening the vertex
 /// payload. Two things can go wrong independently and neither throws:
 ///
@@ -502,13 +443,13 @@ fn an_edge_level_holds_the_incident_edges_at_the_payload_s_own_coordinates() {
     f.targets[0].chunk_size = CHUNK;
     enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
 
-    let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("above the floor");
+    let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("over one tile");
     let by_source = written_relation(&f.root, "by_source");
     let payload = lit(&f.root.join("chunks").join("tiles.parquet"));
     let db = Connection::open_in_memory().expect("duckdb");
 
     for &level in &plan.levels {
-        let step = 1u64 << level;
+        let stride = VertexLevels::stride(level);
         let set = lit(&f.root.join(format!("l{level}")).join("tiles.parquet"));
 
         // Non-vacuity first: a level file that is empty passes every diff below
@@ -522,7 +463,7 @@ fn an_edge_level_holds_the_incident_edges_at_the_payload_s_own_coordinates() {
 
         let predicate = format!(
             "SELECT src_dense, dst_dense FROM read_parquet('{by_source}') \
-             WHERE src_dense % {step} = 0 OR dst_dense % {step} = 0"
+             WHERE src_dense % {stride} = 0 OR dst_dense % {stride} = 0"
         );
         let file = format!("SELECT src_dense, dst_dense FROM read_parquet('{set}')");
         let differ = scalar(
@@ -534,7 +475,7 @@ fn an_edge_level_holds_the_incident_edges_at_the_payload_s_own_coordinates() {
         );
         assert_eq!(
             differ, 0,
-            "level {level}: the file and `src % {step} = 0 OR dst % {step} = 0` disagree by \
+            "level {level}: the file and `src % {stride} = 0 OR dst % {stride} = 0` disagree by \
              {differ} edge(s)"
         );
 

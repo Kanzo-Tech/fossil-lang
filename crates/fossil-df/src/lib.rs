@@ -81,10 +81,9 @@ use fossil_locator::SourceAnchor;
 use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
-    AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Privacy,
-    EdgeLevels, Property, PropertyGroup, TILE_CODES_FILE, VertexCodes, VertexIndex, VertexInfo,
-    VertexLevels,
-    data_type_name,
+    AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, EdgeLevels, GRAPHAR_VERSION, GraphInfo,
+    Privacy, Property, PropertyGroup, TILE_CODES_FILE, VertexCodes, VertexIndex, VertexInfo,
+    VertexLevels, data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -1797,7 +1796,7 @@ impl GraphArData {
                 // The SOURCE type's own row count, because a level of a relation
                 // is *which vertices are in it*: a relation whose source type
                 // gets no pyramid gets none either, and one whose source writes
-                // 6, 7, 8 writes 6, 7, 8. `VertexLevels::planned` stays the one
+                // `1..=k` writes `1..=k`. `VertexLevels::planned` stays the one
                 // place the numbers are chosen.
                 let source_rows = self
                     .vertices

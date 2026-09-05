@@ -1074,7 +1074,7 @@ pub fn enrich_layout_with(
 
         // The pyramid, when the type is big enough to have earned one.
         //
-        // Level `k` is the rows whose NEW `dense_id` is a multiple of 2^k, and
+        // Level `k` is the rows whose NEW `dense_id` is a multiple of 4^k, and
         // it is selected by that predicate over `new_dense` rather than by
         // striding the write order — the two are the same list only where the
         // numbering is gapless, and a gap would silently make the file and the
@@ -1296,8 +1296,8 @@ pub fn enrich_layout_with(
             let dst = index_of(&adjacency.dst_type, aurl)?;
             let source_count = placed[src].len() as u64;
             if let Some(plan) = VertexLevels::planned(source_count, endpoint.chunk_size) {
-                let levels = EdgeLevels::from_vertex(Some(&plan))
-                    .expect("a plan yields a level set");
+                let levels =
+                    EdgeLevels::from_vertex(Some(&plan)).expect("a plan yields a level set");
                 write_edge_levels(io, aurl, &levels, &keys, &placed[src], &placed[dst])?;
                 probe.sample(&format!("{step}: write edge levels"));
             }
@@ -1575,7 +1575,7 @@ struct Enriched<'a> {
 ///
 /// # What a level is
 ///
-/// Level `k` is the rows whose `dense_id` is a multiple of `2^k`, which over a
+/// Level `k` is the rows whose `dense_id` is a multiple of `4^k`, which over a
 /// Morton-ordered `dense_id` is one vertex per quadtree cell of depth `k`. Every
 /// row is a real vertex at its real position — there is no synthetic centroid
 /// here, because a centroid cannot nest: replace it with its children and every
@@ -1585,7 +1585,7 @@ struct Enriched<'a> {
 /// # The property this must not break
 ///
 /// **The file and the predicate select the same rows.** A level set is an
-/// optimisation of `dense_id % 2^k == 0` over the payload and nothing else, so a
+/// optimisation of `dense_id % 4^k == 0` over the payload and nothing else, so a
 /// corpus without one draws the same picture and only reads more. That is what
 /// keeps the pyramid from becoming a second contract, and it is why the
 /// selection here is a predicate over [`Enriched::new_dense`] rather than a
@@ -1601,7 +1601,7 @@ struct Enriched<'a> {
 /// shape, the same filename and the same container as the payload beside it. So
 /// a reader that can address a type can address a level of it with no new
 /// arithmetic, and tile `j` of level `k` is the `dense_id` range
-/// `[j·chunk·2^k, (j+1)·chunk·2^k)`, which the published code anchor already
+/// `[j·chunk·4^k, (j+1)·chunk·4^k)`, which the published code anchor already
 /// bounds in Morton space.
 fn write_levels(
     io: &dyn LayoutIo,
@@ -1615,16 +1615,14 @@ fn write_levels(
         return Ok(());
     };
     for &level in &plan.levels {
-        // `level` is a small integer by construction — the coarsest is the
-        // finest `k` whose level fits one tile — but the shift is masked rather
-        // than trusted, because a panic in a writer is the most expensive way to
-        // learn that an invariant moved.
-        let step = 1u32 << level.min(31);
+        // `VertexLevels::stride` is the only place the pyramid's base is
+        // written down, and it saturates rather than panicking past `u64`.
+        let stride = VertexLevels::stride(level);
         let picks: Vec<usize> = rows
             .new_dense
             .iter()
             .enumerate()
-            .filter(|&(_, &dense)| dense % step == 0)
+            .filter(|&(_, &dense)| u64::from(dense) % stride == 0)
             .map(|(i, _)| i)
             .collect();
         let prefix = format!("{}{}", target.chunk_prefix, plan.level_prefix(level));
@@ -1965,14 +1963,14 @@ fn unpack(
 /// # What a level of a relation is
 ///
 /// Level `k` is the edges **incident to a level-`k` vertex** in either
-/// orientation — `src % 2^k == 0 || dst % 2^k == 0` — and every row carries
+/// orientation — `src % 4^k == 0 || dst % 4^k == 0` — and every row carries
 /// BOTH endpoints' coordinates.
 ///
 /// The coordinates are the reason this file exists. A camera keeps an edge with
 /// ONE end drawn, so the far end has to be positioned to draw the line, and a
-/// vertex level holds one row in `2^k`: measured on the bench corpus at the
-/// app's own three-pixel floor, a vertex level can position 0.79% of the edges
-/// the same view draws. Carrying `src_x`/`src_y`/`dst_x`/`dst_y` makes the set
+/// vertex level holds one row in `4^k`: on the bench corpus at the app's own
+/// three-pixel floor, levels 1 to 4 position 14.3%, 3.2%, 0.79% and 0.12% of the
+/// edges the same view draws. Carrying `src_x`/`src_y`/`dst_x`/`dst_y` makes the set
 /// **self-drawing** — the lines and their ends come out of this file and no
 /// vertex tile is opened for them.
 ///
@@ -1988,7 +1986,7 @@ fn unpack(
 /// # Tiled by the rule the vertex levels already have
 ///
 /// Tile `j` holds the rows whose `src_dense` is in
-/// `[j · chunk_size · 2^k, (j+1) · chunk_size · 2^k)` — the source level's own
+/// `[j · chunk_size · 4^k, (j+1) · chunk_size · 4^k)` — the source level's own
 /// tile range, so a reader addresses these with the shift it already has.
 /// `keys` arrives sorted by source, so each tile is a run and one pass finds
 /// every one of them.
@@ -2023,10 +2021,13 @@ fn write_edge_levels(
     })?;
 
     for &level in &plan.levels {
-        // Masked rather than trusted, for `write_levels`' reason: a panic in a
-        // writer is the most expensive way to learn that an invariant moved.
-        let step = 1u32 << level.min(31);
-        let span = shift + level.min(31);
+        // A level tile's address is the payload's own shift plus the bits the
+        // level drops, which is `VertexLevels::stride_bits` and nowhere else.
+        // `checked_shr` rather than a mask: past the width of a `dense_id` the
+        // whole level is one tile, which is the answer and not an overflow.
+        let stride = VertexLevels::stride(level);
+        let span = shift + VertexLevels::stride_bits(level);
+        let tile_of = |key: u64| (key >> 32).checked_shr(span).unwrap_or(0);
         let prefix = format!("{relation}{}", plan.level_prefix(level));
         io.ensure_prefix(&prefix)?;
         let url = format!("{prefix}{TILES_FILE}");
@@ -2034,18 +2035,17 @@ fn write_edge_levels(
 
         let mut start = 0usize;
         while start < keys.len() {
-            let tile = ((keys[start] >> 32) as u32) >> span;
+            let tile = tile_of(keys[start]);
             let mut end = start + 1;
-            while end < keys.len() && (((keys[end] >> 32) as u32) >> span) == tile {
+            while end < keys.len() && tile_of(keys[end]) == tile {
                 end += 1;
             }
             let (mut src, mut dst) = (Vec::new(), Vec::new());
-            let (mut sx, mut sy, mut dx, mut dy) =
-                (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            let (mut sx, mut sy, mut dx, mut dy) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
             for &key in &keys[start..end] {
                 let s = (key >> 32) as u32;
                 let d = key as u32;
-                if s % step != 0 && d % step != 0 {
+                if u64::from(s) % stride != 0 && u64::from(d) % stride != 0 {
                     continue;
                 }
                 // An endpoint outside its type's table is a dangling one, which

@@ -251,8 +251,9 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     // ONE Parquet in the prefix, and it is the payload. Two containers at once
     // is one too many — a reader that globs finds both — which is the convention
     // `apps/corpus`'s `declared-tiling` fires on. The anchor beside it is not a
-    // second container: it is JSON, no glob for `*.parquet` reaches it, and it
-    // is listed here so that a third file cannot appear unremarked.
+    // second container: it is JSON, no glob for `*.parquet` reaches it. Nor are
+    // `index/` and `l1/`, which are directories. The list is exhaustive so that
+    // a fourth entry cannot appear unremarked.
     let mut emitted: Vec<String> = fs::read_dir(&chunks)
         .expect("read the tile prefix")
         .filter_map(Result::ok)
@@ -264,9 +265,11 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
         vec![
             "codes.json".to_string(),
             "index".to_string(),
+            "l1".to_string(),
             "tiles.parquet".to_string(),
         ],
-        "the tile prefix holds the payload, the index and the code anchor, and nothing else",
+        "the tile prefix holds the payload, the index, the code anchor and the one level six \
+         vertices at two a tile earn, and nothing else",
     );
 
     // The anchor, read as a stranger reads it: JSON, no Parquet reader in the
