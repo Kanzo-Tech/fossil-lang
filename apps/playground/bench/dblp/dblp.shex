@@ -1,0 +1,36 @@
+PREFIX dblp: <https://dblp.example/voc#>
+PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+
+# An author, and the co-authorship relation is a SELF-EDGE — `@dblp:Person`,
+# not a literal — because that is the only shape the layout pass reads. The
+# adjacency it runs Louvain over is the `by_source` file of a relation whose
+# two endpoints are the SAME vertex type (`fossil-cli/src/host.rs::
+# enrich_written_layout`), so an intermediate `Coauthorship` node would give a
+# corpus whose `cluster_id` came from an empty graph.
+#
+# ## Why `;` and not `*`, which is a DEFECT and not a modelling choice
+#
+# The honest cardinality here is `*`: an author has many co-authors. Writing it
+# does not work. `fossil-mir/src/lower.rs` turns a non-`Single` shape
+# cardinality into `EmitEdge { single_valued: false }`, and
+# `fossil-df/src/lib.rs::materialise_edge` reads that as «the destination is a
+# List» and calls `unnest_columns(["dst_iri"])` unconditionally — which is true
+# of an `io.rdf` pivot and false of every tabular source, where `dst_iri` is a
+# scalar. The run dies in DataFusion:
+#
+#     execute: Internal error: trying to unnest on invalid data type Utf8.
+#
+# So a multi-valued edge cannot currently be written from a CSV at all. It is
+# left alone here — this branch measures the corpus, it does not repair the
+# writer.
+#
+# The workaround is sound for what is being measured. `single_valued` reaches
+# exactly two places: that `unnest`, and the `cardinality:` field the manifest
+# declares. It does NOT filter rows — nothing collapses the edges to one per
+# source — so the corpus carries all 2,099,732 of them, one per input row, and
+# the only casualty is a manifest that says `single` about a relation that is
+# not. Every count below is verified against SNAP's own header after the run.
+dblp:Person {
+  dblp:aid      xsd:integer ;
+  dblp:coauthor @dblp:Person
+}
