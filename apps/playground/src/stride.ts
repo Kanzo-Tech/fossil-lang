@@ -6,10 +6,12 @@
  *
  * **The app does not build this string any more, and that is not a reason to delete it.**
  * `src/tiles.ts` is a consumer of `corpus.levelFor` + `corpus.view` now, and the decimation is
- * `dense_id % 2^level = 0` inside the door. The property the expression below exists to state is
- * the same one the door's level IS — a power-of-two stride, so refining only ever adds — and
- * `verify-nesting.mjs` is what holds the claim to a measurement over a real corpus. What it no
- * longer is, is the app's own SQL; what it still is, is the argument, with its numbers.
+ * `dense_id % 4^level = 0` inside the door — a level per zoom step, since a step quadruples the
+ * points. This stride is the FINER family, `2^k`, which is the one a strided read wants: `4^k` is
+ * `2^2k`, so every level of the door is one of these and the two interleave without either
+ * breaking the property both exist for — refining only ever adds. `verify-nesting.mjs` is what
+ * holds that to a measurement over a real corpus. What this no longer is, is the app's own SQL;
+ * what it still is, is the argument, with its numbers.
  */
 
 /**
@@ -29,8 +31,8 @@
  * drawn once stays drawn, in the same place, at every closer zoom.
  *
  * It is a level of detail and not a budget adjustment. `dense_id` is Morton-ordered by the
- * layout pass, so `dense_id % 2^k = 0` is one vertex per quadtree cell of depth k — the stride
- * names a level of the same curve the tile address is read off. The price is at most one extra
+ * layout pass, so `dense_id % 2^k = 0` is one vertex per HALF a quadtree cell of depth k — the
+ * stride names a step of the same curve the tile address is read off. The price is at most one
  * halving of the sample. The argument and the table are in `/docs/design/corpus`.
  *
  * `- 0.5` keeps `log2` off the exact powers of two, where a double can land on either side of an
