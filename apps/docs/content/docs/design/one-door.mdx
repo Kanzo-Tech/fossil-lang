@@ -68,7 +68,7 @@ level — and, unlike a uniformity assumption, it is monotone in the rectangle. 
 
 ## No pyramid on disk: the same rows, more bytes, and the cost says so
 
-`dense_id % 2^k == 0` **is** the definition of level *k*. A written `vertex/<Type>/l{k}/` is a cache
+`dense_id % 4^k == 0` **is** the definition of level *k*. A written `vertex/<Type>/l{k}/` is a cache
 of that definition and nothing else.
 
 This is the whole of the second decision. If a level file and the predicate could disagree there
@@ -102,7 +102,7 @@ else, so those far ends are not in it — and the camera keeps an edge with *one
 The number that settles it is not the induced count. `crates/fossil-layout/tests/levels.rs`,
 `a_level_induces_essentially_no_edges_which_is_why_none_are_written` measures edges with **both**
 ends in the level, which is the right question for writing an *edge* pyramid and the wrong one for
-reading a *vertex* level: the edges a coarse view draws scale with the marks, `V/2^k · degree`, not
+reading a *vertex* level: the edges a coarse view draws scale with the marks, `V/4^k · degree`, not
 with their square. Measured on the same 300,000-vertex corpus with the app's own three-pixel floor
 (`what_the_pixel_floor_leaves_of_a_coarse_view`):
 
@@ -123,7 +123,7 @@ can answer. What is *not* on the table is the level file answering a different q
 same name — see `design/discarded`, where the two alternatives and what would bring each back are
 written down.
 
-The predicate stays in the SQL either way. `pool` applies `dense_id % 2^k = 0` over a level file
+The predicate stays in the SQL either way. `pool` applies `dense_id % 4^k = 0` over a level file
 whose every row already satisfies it, which is the identity being asserted rather than assumed: a
 level file that disagreed with the predicate could change what a read **costs** and could not change
 what it **answers**.
@@ -134,7 +134,7 @@ what it **answers**.
 opening the bytes the pyramid exists to avoid. `View.matchedAt` is that level — `0` when the payload
 was strided, `level` when a written level answered.
 
-The two ways of not saying so were both worse. Reporting `matched · 2^k` invents an estimate the
+The two ways of not saying so were both worse. Reporting `matched · 4^k` invents an estimate the
 type does not admit to; letting the field mean different things depending on `cost.read` is exactly
 the two-contracts failure this page refuses everywhere else. `matched · 2^matchedAt` is the caller's
 own arithmetic if it wants an estimate, and it is an estimate: the decimation is uniform in

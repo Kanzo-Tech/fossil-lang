@@ -58,7 +58,7 @@ are that question asked over Parquet, and `rowgroups` won it by a measured 4× i
 
 **A graph has edges, and a level of the vertices is not closed.** A raster tile is drawable on its
 own: every pixel it needs is in it. A vertex level is not, because a mark's neighbour is almost
-never a mark — a level keeps one vertex in `2^k` and the far end of an edge is drawn from a
+never a mark — a level keeps one vertex in `4^k` and the far end of an edge is drawn from a
 coordinate the level does not hold. The number is measured on the 300,000-vertex bench corpus at the
 app's own three-pixel floor: of the edges a level-6 view draws, a level file can position
 **0.79%**. That single number is why the pyramid has a second half, and why it took a second
@@ -70,7 +70,7 @@ in advance. A graph has no such grid. The average of two vertices is a vertex th
 corpus, and replacing a synthetic centroid with its children moves every point on screen — which is
 the whole argument for a subset instead of a summary, made at length on
 [the corpus](/docs/design/corpus). So the nesting here is not a property of a grid; it is
-`dense_id % 2^(k+1) == 0` being a strict subset of `dense_id % 2^k == 0`, which is a fact about
+`dense_id % 4^(k+1) == 0` being a strict subset of `dense_id % 4^k == 0`, which is a fact about
 integers.
 
 The consequence is a rule the raster formats do not need and this one does: **a level shares the
@@ -121,7 +121,7 @@ asked whether refining adds, because there is no left-hand side to compare.
 [One door](/docs/design/one-door) is the argument; the camera page carries the measurement, and the
 one bug it caught, which was a rectangle moving underneath a pure function rather than the function.
 
-**3 · One contract, whether or not a level file exists.** `dense_id % 2^k == 0` **is** the
+**3 · One contract, whether or not a level file exists.** `dense_id % 4^k == 0` **is** the
 definition of level *k*; a written `l{k}/` is a cache of it. Two contracts would be strictly worse
 than no pyramid, because a reader would have to know which one it got in order to know what it was
 looking at. Held by diffing the file against the predicate in both directions, every column and not
@@ -130,11 +130,13 @@ only the id, with the row count as a separate statement:
 The reader executes the identity rather than assuming it — `pool` applies the modulo over a level
 file whose every row already satisfies it.
 
-**4 · A frame's cost is bounded by the level, not by the corpus.** The pyramid's whole cost is
-`2^LEVEL_WINDOW − 1` tiles' worth of rows whatever *V* is
-(`crates/fossil-sinks/src/manifest.rs, LEVEL_WINDOW`), so a coarse frame is a constant number of
-range requests over a corpus of any size. This is the invariant the cost model below is about, and
-it is the one that the app does not get today: at the whole extent the reader opens 245 tiles of 245.
+**4 · A frame's cost is bounded by the level, not by the corpus.** The coarsest level is *the one
+that fits a single tile* — that is its definition, not a budget — so the coarsest frame is **one
+range request over a corpus of any size** (`crates/fossil-sinks/src/manifest.rs, VertexLevels`).
+The pyramid it sits on top of costs `1/4 + 1/16 + … = 1/3` of the type, a fraction rather than a
+tile count, which is why nothing bounds it but its own geometry. This is the invariant the cost
+model below is about, and it is the one that the app does not get today: at the whole extent the
+reader opens 245 tiles of 245.
 
 **5 · Every byte the frame opened is on the ledger.** A cost a caller cannot see is a cost nobody
 optimises, and the point of reporting bytes at all is that a reader can check them against a network
@@ -213,14 +215,19 @@ row, a subset below it that nothing has measured.
 | 25% | 4 | 47 / 245 | 4,062 kB | — level 4 is not written |
 | 10% | 2 | 15 / 245 | 1,294 kB | — level 2 is not written |
 
-**The pyramid answers exactly one of these four frames**, and the reason is that the writer's window
-and the camera's demand are chosen by different rules: `VertexLevels::planned` anchors the coarsest
-level at *the one that fits a single tile* and runs `LEVEL_WINDOW` levels finer from there, while
-`levelFor` answers whatever a budget in marks asks for over the rectangle. They meet at the whole
-extent here and miss by one at 300,000 vertices, which
-`apps/playground/scripts/measure-pyramid.mjs` prints as a normal outcome rather than a failure. The
-app reads none of the four, because it asks for links at every zoom and a level answers only a view
-that does not — which is gap 4.
+**The four rows above were measured against a pyramid of five levels in halves, and that pyramid no
+longer exists.** They are kept because the strided column is what the pyramid is judged against and
+that half is unchanged; the "not written" answers are not.
+
+The reason three of the four went unanswered was that the writer's window and the camera's demand
+were chosen by different rules — a window of five levels down from the one-tile level, against
+whatever a budget in marks asked for — so they met at the whole extent and missed by one at 300,000
+vertices. **Both halves of that mismatch are gone**: the pyramid is complete from level 1 to the
+coarsest, so there is no level below the coarsest that a camera can ask for and not find. What is
+left is a ceiling rather than a gap — a frame coarser than one tile is answered by that one tile.
+
+The app still reads none of the four, because it asks for links at every zoom and a level answers
+only a view that does not — which is gap 4, and is untouched by any of this.
 
 That is defensible and it is not free. The strided rows fall steeply — 20,901 to 1,294 kB across the
 four — so the frames the pyramid cannot answer are the cheap ones, and the frame it can answer is
@@ -243,8 +250,8 @@ them costs the writer bytes.**
 | `edge/Person_knows_Person/l{k}/` | 1,332 kB | 674 kB | 342 kB | 2,348 kB *(derived)* | 17.1% *(derived)* |
 
 The edge pyramid is four times the vertex pyramid *(derived)* and the reason is legible in the
-schema rather than in the data. A vertex level keeps one row in `2^k`; an edge level keeps every edge with *either* end
-in the level, which is about two in `2^k` — and each of its rows carries four coordinates beside the
+schema rather than in the data. A vertex level keeps one row in `4^k`; an edge level keeps every edge with *either* end
+in the level, which is about two in `4^k` — and each of its rows carries four coordinates beside the
 two ids. Measured: **22.0 B a row against 7.0 B** in the adjacency it decimates, 3.1×. That is what
 a self-drawing row costs, and it is the trade the whole second artefact is: three times the bytes
 per row so that a line can be drawn without opening the payload the pyramid exists to avoid.

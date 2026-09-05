@@ -82,7 +82,7 @@ not grow with the grid the way a χ² statistic does.
 
 **The tolerance is measured, not chosen.** Any subsample of size *n* carries sampling noise, so the
 question is not "is the distance small" but "is it larger than a subsample of the same size with no
-spatial structure at all". The null is `hash(dense_id) % 2^k = 0` — the same population, drawn
+spatial structure at all". The null is `hash(dense_id) % 4^k = 0` — the same population, drawn
 pseudo-randomly instead of by the Morton stride, over the same grid.
 
 | level | drawn | TV from level 0 | random subsample of the same size | ratio |
@@ -107,8 +107,8 @@ a thousand vertices, and a binomial of that size has a relative standard error o
 `{drawn at the closer zoom} ⊇ {drawn at the farther zoom} ∩ {inside the closer window}`.
 
 This is the property that makes a zoom *refine* the picture instead of replacing it, and it is
-bought by quantising the stride **up to a power of two**: `dense_id % 2^(k+1) = 0` is a strict subset
-of `dense_id % 2^k = 0`, so a vertex drawn once stays drawn, in the same place, at every closer
+bought by quantising the stride **up to a power of two**: `dense_id % 4^(k+1) = 0` is a strict subset
+of `dense_id % 4^k = 0`, so a vertex drawn once stays drawn, in the same place, at every closer
 zoom. An arbitrary `ceil(matched / limit)` does not nest — the multiples of 37 and of 21 meet only
 at 777 — and the price of the quantisation is at most one extra halving of the sample.
 

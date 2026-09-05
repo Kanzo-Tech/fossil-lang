@@ -322,7 +322,7 @@ position, and nothing is thrown away that did not leave the frame. **That is the
 between a picture that refines and a picture that flashes**, and it is one expression.
 
 <Callout title="The levels are written, and they optimise the predicate rather than replace it">
-Level *k* selected by `dense_id % 2^k` needs no bytes on disk: it is a predicate. What a written
+Level *k* selected by `dense_id % 4^k` needs no bytes on disk: it is a predicate. What a written
 `vertex/<Type>/l{k}/` buys is that a coarse camera reads a small file instead of striding a large
 one — which is where the byte cost of a zoomed-out view lives, and the view that pays it is the
 default one: over the million-vertex bench corpus, **245 of 245 tiles and 20,901 kB to draw 15,625
@@ -359,7 +359,7 @@ Three things about the pyramid are decided, and each is spelled where it lives �
   function chooses them, and both the pass that writes the files and the caller that declares them
   call it.
 
-Addressing a level needs nothing new. Level *k*'s row *i* is the payload row with `dense_id = i·2^k`,
+Addressing a level needs nothing new. Level *k*'s row *i* is the payload row with `dense_id = i·4^k`,
 so a level tile is a contiguous run of payload tiles and the published code anchor already bounds it
 in Morton space.
 </Callout>
@@ -373,9 +373,9 @@ measured over a fixture of **27,976 edges** at mean degree 14, the three written
 **1, 0 and 0**.
 
 The set a camera draws is not that one. `view` keeps an edge with **one** end drawn and both ends
-positioned, so the edges a coarse view draws scale with the marks — `V/2^k · degree` — and not with
+positioned, so the edges a coarse view draws scale with the marks — `V/4^k · degree` — and not with
 their square. **Level *k* of a relation is therefore the edges incident to a level-*k* vertex**,
-`src_dense % 2^k = 0 OR dst_dense % 2^k = 0`, and each row carries **both endpoints' coordinates**
+`src_dense % 4^k = 0 OR dst_dense % 4^k = 0`, and each row carries **both endpoints' coordinates**
 so that the line can be drawn without opening the payload the pyramid exists to avoid. It is a
 decimation like the vertex one: every row a real edge between two real vertices at their real
 positions, nothing contracted, and it nests because its vertices do —

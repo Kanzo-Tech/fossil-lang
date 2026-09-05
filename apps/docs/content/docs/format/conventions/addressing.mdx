@@ -382,19 +382,21 @@ each level carrying its own `dense_id` space and its own Morton renumbering. Wha
 **decimation**, for the reason the design page gives at length: a synthetic centroid cannot nest, so
 replacing it with its children moves every point on screen.
 
-**Level `k` is the vertices whose `dense_id` is a multiple of `2^k`.** Over a Morton-ordered
-`dense_id` that is one vertex per quadtree cell of depth `k`. Three things follow from the definition
+**Level `k` is the vertices whose `dense_id` is a multiple of `4^k`.** Over a Morton-ordered
+`dense_id` that is one vertex per quadtree cell of depth `k`. Quarters and not halves because that
+is what a camera does: a zoom step doubles the linear scale, quadruples the area, and so quadruples
+the points, which makes one level exactly one zoom step. Three things follow from the definition
 alone, and none of them needs a byte on disk:
 
-- **It nests, by construction.** `dense_id % 2^(k+1) == 0` is a strict subset of
-  `dense_id % 2^k == 0`, so refining only ever ADDS and a vertex drawn once stays drawn at the same
+- **It nests, by construction.** `dense_id % 4^(k+1) == 0` is a strict subset of
+  `dense_id % 4^k == 0`, so refining only ever ADDS and a vertex drawn once stays drawn at the same
   position.
 - **Every row is a real vertex** at the position the payload gives it. There is no synthetic node
   anywhere in the pyramid, and `cluster_id` is a colour rather than a level of anything.
 - **There is no second `dense_id` space.** A level shares the payload's numbering, so a level tile is
-  addressed by the payload's own shift plus `k` — level `k` keeps one id in `2^k`, so its tile of
+  addressed by the payload's own shift plus `2k` — level `k` keeps one id in `4^k`, so its tile of
   `chunk_size` rows spans that many times the ids: tile `j` covers
-  `[j · chunk_size · 2^k, (j+1) · chunk_size · 2^k)`.
+  `[j · chunk_size · 4^k, (j+1) · chunk_size · 4^k)`.
 
 So it is **`k` flat tilings of one id space**, not a tree of `k` levels and not `k` id spaces.
 
