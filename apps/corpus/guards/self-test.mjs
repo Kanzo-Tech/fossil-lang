@@ -67,7 +67,7 @@ function broken(layout, mutate) {
  * means a mutation aimed at ordering or at content no longer moves a row into the wrong tile by
  * accident, and each one still fails the single guard it names.
  *
- * The container matters and it took two red mutations to notice: writing `tile{k}.parquet` into a
+ * The container matters and it took two red mutations to notice: writing `chunk{k}.parquet` into a
  * corpus whose orientation is one `tiles.parquet` leaves BOTH, which is `mixed` — `declared-tiling`
  * fires, the guard the mutation is aimed at reads the untouched copy, and the break is reported as
  * somebody else's.
@@ -87,7 +87,7 @@ function recut(dir, orientation, key, { select = "SELECT * FROM m", order } = {}
         (k) =>
           `COPY (SELECT * FROM (${select}) WHERE ${key} >= ${k * tileRows} AND ${key} < ${(k + 1) * tileRows}
                   ${sorted})
-             TO '${lit(join(into, `tile${k}.parquet`))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`,
+             TO '${lit(join(into, `chunk${k}.parquet`))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`,
       );
   execute(
     `CREATE TEMP TABLE m AS SELECT * FROM read_parquet('${lit(join(into, "*.parquet"))}');

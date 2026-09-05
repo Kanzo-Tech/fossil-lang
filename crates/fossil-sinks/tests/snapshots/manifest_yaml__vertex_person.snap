@@ -6,8 +6,10 @@ type: Person
 vertex_count: 10000
 chunk_size: 4096
 prefix: vertex/person/
-property_groups:
-- file_type: parquet
+projections:
+- path: ''
+  scale: 1
+  file_type: parquet
   properties:
   - name: id
     data_type: int64

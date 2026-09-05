@@ -109,7 +109,7 @@ const table = JSON.parse(readFileSync(pathJoin(HERE, "expected.json"), "utf8"));
  */
 function runCases(resolve) {
 /**
- * How many LEVEL addresses were composed across the whole table.
+ * How many PROJECTION addresses were composed across the whole table.
  *
  * Its own counter, and it earned one: the `levels` case was deleted from `expected.json` by a
  * `git checkout` of a file that was not yet in the index, and every level assertion in all three
@@ -209,61 +209,85 @@ for (const expected of table.cases) {
     }
   }
 
-  // The written pyramid. A type the table says nothing about must report NONE — a reader that
-  // invented a level list would compose `l6/chunk0.parquet` against a corpus that never wrote one,
-  // and 404 for a level the predicate over the payload answers perfectly well.
-  const pyramids = new Map((expected.levels ?? []).map((l) => [l.type, l]));
-  for (const type of corpus.types) {
-    const want = pyramids.get(type.type);
+  // Every projection the table declares, and NO OTHER. A type the table says nothing about must
+  // report its payload and nothing else — a reader that invented a scale would compose
+  // `l6/chunk0.parquet` against a corpus that never wrote one, and 404 for a level the predicate
+  // over the payload answers perfectly well.
+  //
+  // One loop for a vertex type and for one orientation of a relation, because there is one
+  // vocabulary: an entry keyed by `type` is a vertex, one keyed by `edge_type` and `direction` is
+  // an edge, and everything below is the same four questions.
+  const declared = expected.projections ?? [];
+  const wantedScales = (found) =>
+    declared.find((d) => (found.direction === null ? d.type === found.name : d.edge_type === found.name && d.direction === found.direction));
+  const subjects = [
+    ...corpus.types.map((t) => ({
+      name: t.type,
+      direction: null,
+      projections: t.projections,
+      projection: (scale) => t.projection(scale),
+      files: (scale) => t.projectionFiles(scale),
+    })),
+    ...corpus.edges.flatMap((e) =>
+      ["src", "dst"].map((d) => ({
+        name: e.edgeType,
+        direction: d,
+        projections: e.projections.filter((p) => p.direction === d),
+        projection: (scale) => e.projection(scale, d),
+        files: (scale) => e.projectionFiles(scale, d),
+      })),
+    ),
+  ];
+  for (const subject of subjects) {
+    const want = wantedScales(subject);
+    const label2 = subject.direction === null ? subject.name : `${subject.name}/${subject.direction}`;
     if (want === undefined) {
-      if (type.levels !== null) {
-        fail(`${label}: ${type.type} reports a pyramid its manifest does not declare`);
+      // The default the table does not spell out: a payload, or an orientation the corpus does
+      // not publish at all. Anything coarser is a scale the reader invented.
+      const scales = subject.projections.map((p) => p.scale);
+      if (scales.some((scale) => scale !== 1)) {
+        fail(`${label}: ${label2} reports scales ${scales.join(", ")} its manifest does not declare`);
       }
       continue;
     }
-    const levels = type.levels;
-    if (levels === null) {
-      fail(`${label}: ${type.type} declares levels ${want.written.join(", ")} and the reader sees none`);
-      continue;
-    }
-    same(
-      `${label}: ${type.type} levels`,
-      { written: levels.levels, chunk_size: levels.chunkSize },
-      { written: want.written, chunk_size: want.chunk_size },
-    );
+    same(`${label}: ${label2} scales`, subject.projections.map((p) => p.scale), want.scales);
     for (const size of want.sizes ?? []) {
+      const found = subject.projection(size.scale);
       same(
-        `${label}: ${type.type} level ${size.level}`,
-        { rows: String(levels.rows(size.level)), tiles: String(levels.tiles(size.level)) },
+        `${label}: ${label2} scale ${size.scale}`,
+        { rows: String(found.rows), tiles: String(found.tiles) },
         { rows: size.rows, tiles: size.tiles },
       );
     }
     for (const v of want.tile_of ?? []) {
-      const got = levels.tileOf(v.level, BigInt(v.dense_id));
+      const got = subject.projection(v.scale).tileOf(BigInt(v.dense_id));
       if (got !== BigInt(v.tile)) {
-        fail(`${label}: level ${v.level} tile_of(${v.dense_id}) = ${got}, not ${v.tile}`);
+        fail(`${label}: ${label2} scale ${v.scale} tile_of(${v.dense_id}) = ${got}, not ${v.tile}`);
       }
     }
     for (const address of want.addresses ?? []) {
-      const got = levels.tileUrl(address.level, address.tile);
+      const got = subject.projection(address.scale).tileUrl(address.tile);
       if (got !== address.path) fail(`${label}: composed ${got}, not ${address.path}`);
+      if (expected.on_disk && !existsSync(pathJoin(root, got))) {
+        fail(`${label}: ${got} composes and is not on disk`);
+      }
       checkedLevels += 1;
     }
     for (const set of want.files ?? []) {
-      same(`${label}: level ${set.level} files`, levels.files(set.level), set.paths);
+      same(`${label}: ${label2} scale ${set.scale} files`, subject.files(set.scale), set.paths);
       checkedLevels += 1;
     }
     for (const refused of want.refused ?? []) {
       let threw = null;
       try {
-        levels.files(refused.level);
+        subject.files(refused.scale);
       } catch (error) {
         threw = error.message;
       }
       if (threw === null) {
-        fail(`${label}: addressed level ${refused.level}, which this corpus does not write`);
+        fail(`${label}: addressed ${label2} at scale ${refused.scale}, which this corpus does not write`);
       } else if (!threw.includes(refused.message)) {
-        fail(`${label}: refused level ${refused.level} with "${threw}", which does not say "${refused.message}"`);
+        fail(`${label}: refused ${label2} at scale ${refused.scale} with "${threw}", which does not say "${refused.message}"`);
       }
     }
   }

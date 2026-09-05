@@ -2,18 +2,28 @@ type: Person
 vertex_count: 1000000
 chunk_size: 4096
 prefix: vertex/Person/
-property_groups:
-- file_type: parquet
+projections:
+- path: ''
+  scale: 1
+  file_type: parquet
   properties:
   - name: subject
     data_type: string
     is_primary: true
-levels:
-  prefix: l
-  levels:
-  - 1
-  - 2
-  - 3
-  - 4
-  chunk_size: 4096
+- path: l1/
+  scale: 4
+  file_type: parquet
+  properties: []
+- path: l2/
+  scale: 16
+  file_type: parquet
+  properties: []
+- path: l3/
+  scale: 64
+  file_type: parquet
+  properties: []
+- path: l4/
+  scale: 256
+  file_type: parquet
+  properties: []
 version: gar/v1

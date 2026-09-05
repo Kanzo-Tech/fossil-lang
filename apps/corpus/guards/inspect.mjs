@@ -135,6 +135,41 @@ export function rowGroups(files) {
 }
 
 /**
+ * The projections a manifest declares, resolved against the type's own prefix.
+ *
+ * **One function for a vertex type and a relation**, because there is one list. A corpus is an
+ * order, a cut and some projections of that sequence: the payload is the entry at `scale: 1`, a
+ * level is the entry at `scale: 4^k`, an adjacency is a `scale: 1` entry with an `aligned_by`, and
+ * a level of a relation is a `scale: 4^k` entry with one. The four vocabularies this replaced —
+ * `property_groups`, a vertex `levels:`, `adj_lists` and an edge `levels:` — were one rule written
+ * four times.
+ *
+ * **The scale is read and never derived.** `4 ** level` used to appear in every guard that touched
+ * a pyramid; the manifest carries the product now, so no checker here spells the exponent.
+ *
+ * An entry that names no `path` is not a projection — it declares tiles nobody can address, which
+ * `declared-tiling` reports. An entry whose files are not on disk comes back with an empty `files`,
+ * which `a-level-is-the-predicate` reports. Neither throws: an inspector that did would decide
+ * which violation a reader hears about first.
+ */
+function projectionsOf(info, root, prefix) {
+  const declared = Array.isArray(info.projections) ? info.projections : [];
+  return declared.map((entry) => {
+    const path = String(entry.path ?? "").replace(/\/+$/, "");
+    const raw = String(entry.scale ?? "").trim();
+    const at = join(root, prefix, path);
+    return {
+      path,
+      /** `null` when the entry declares no scale a shift addresses — a projection with no address. */
+      scale: /^\d+$/.test(raw) && shiftFor(BigInt(raw)) !== null ? BigInt(raw) : null,
+      alignedBy: entry.aligned_by === undefined ? null : String(entry.aligned_by),
+      prefix: path === "" ? prefix : `${prefix}/${path}`,
+      files: existsSync(at) ? payload(at) : [],
+    };
+  });
+}
+
+/**
  * Read a corpus into the shape the guards ask questions of.
  *
  * Nothing here fails on a violation — a missing file becomes an absent entry and a guard reports
@@ -189,52 +224,30 @@ export function inspect(root) {
         };
       })(),
       /**
-       * The WRITTEN levels, when the manifest declares any, or `null`.
+       * Every projection this type declares, the payload included — see {@link projectionsOf}.
        *
-       * `null` is a legal corpus on `index`'s argument and more strongly: a level
-       * is the predicate `dense_id % 4^k == 0` over the payload, so every level
-       * is answerable with or without a file, and a written one changes a byte
-       * count rather than an answer.
-       *
-       * A declared level whose files are not on disk is a different finding and
-       * comes back as an empty `files` for that level, which
-       * `a-level-is-the-predicate` reports.
+       * A type declaring only its payload is a legal corpus and the common one: a level is the
+       * predicate `dense_id % scale == 0` over the payload, so every scale is answerable with or
+       * without a file, and a written one changes a byte count rather than an answer.
        */
-      levels: (() => {
-        const declared = info.levels;
-        if (declared === undefined || declared === null || Array.isArray(declared)) return null;
-        const stem = String(declared.prefix ?? "");
-        const listed = Array.isArray(declared.levels) ? declared.levels : [];
-        if (stem === "" || listed.length === 0) {
-          return { stem, chunkSize: 0n, sets: [], error: "declares levels and no prefix or no level list" };
-        }
-        return {
-          stem,
-          chunkSize: BigInt(declared.chunk_size ?? 0),
-          error: null,
-          sets: listed.map((raw) => {
-            const level = Number(raw);
-            const at = join(root, prefix, `${stem}${level}`);
-            return { level, prefix: `${prefix}/${stem}${level}`, files: existsSync(at) ? payload(at) : [] };
-          }),
-        };
-      })(),
+      projections: projectionsOf(info, root, prefix),
     };
   });
 
   const edges = manifest.edges.map((info) => {
     const prefix = edgePrefix(info);
-    const adjLists = Array.isArray(info.adj_lists) ? info.adj_lists : [];
-    // Where an orientation's tiles are comes from the `adj_list` that declares
+    const projections = projectionsOf(info, root, prefix);
+    // Where an orientation's tiles are comes from the projection that declares
     // it, never from the convention that names them. `aligned_by` says which
-    // endpoint column addresses the tiles and `prefix` says where they are, and
+    // endpoint column addresses the tiles and `path` says where they are, and
     // between them a reader turns a `dense_id` into a URL with nothing agreed out
-    // of band. An orientation the manifest declares without a prefix has tiles
+    // of band. An orientation the manifest declares without a path has tiles
     // nobody can address, which `declared-tiling` reports; here it is simply an
     // orientation with none.
     const orientation = (alignedBy, name, column) => {
-      const declared = adjLists.find((a) => String(a.aligned_by ?? "") === alignedBy) ?? null;
-      const tilePrefix = String(declared?.prefix ?? "").replace(/\/+$/, "");
+      const declared =
+        projections.find((p) => p.scale === 1n && p.alignedBy === alignedBy) ?? null;
+      const tilePrefix = declared === null ? "" : declared.path;
       const file = join(root, prefix, `${name}.parquet`);
       const tiles = tilePrefix === "" ? [] : payload(join(root, prefix, tilePrefix));
       return {
@@ -259,35 +272,15 @@ export function inspect(root) {
       chunkSize: BigInt(info.chunk_size ?? 0),
       srcChunkSize: BigInt(info.src_chunk_size ?? 0),
       dstChunkSize: BigInt(info.dst_chunk_size ?? 0),
-      adjLists,
+      /**
+       * Every projection this relation declares — see {@link projectionsOf}. The two adjacencies
+       * are its `scale: 1` entries, and a level of it is the edges incident to a level-`scale`
+       * vertex, carrying both endpoints' coordinates so a coarse camera draws the line without
+       * opening the vertex payload.
+       */
+      projections,
       bySource: orientation("src", "by_source", "src_dense"),
       byTarget: orientation("dst", "by_target", "dst_dense"),
-      /**
-       * The WRITTEN levels of this relation, or `null`.
-       *
-       * A level of a relation is the edges incident to a level-`k` vertex, carrying both
-       * endpoints' coordinates so a coarse camera draws the line without opening the vertex
-       * payload. `null` is a corpus and not a gap, on the vertex block's argument.
-       */
-      levels: (() => {
-        const declared = info.levels;
-        if (declared === undefined || declared === null || Array.isArray(declared)) return null;
-        const stem = String(declared.prefix ?? "");
-        const listed = Array.isArray(declared.levels) ? declared.levels : [];
-        if (stem === "" || listed.length === 0) {
-          return { stem, chunkSize: 0n, sets: [], error: "declares levels and no prefix or no level list" };
-        }
-        return {
-          stem,
-          chunkSize: BigInt(declared.chunk_size ?? 0),
-          error: null,
-          sets: listed.map((raw) => {
-            const level = Number(raw);
-            const at = join(root, prefix, `${stem}${level}`);
-            return { level, prefix: `${prefix}/${stem}${level}`, files: existsSync(at) ? payload(at) : [] };
-          }),
-        };
-      })(),
     };
   });
 

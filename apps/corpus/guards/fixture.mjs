@@ -89,22 +89,24 @@ function renumber(points) {
  * arithmetic; the chords make the adjacency non-trivial across tiles.
  */
 /**
- * The `levels:` block both manifests carry, because the levels of a relation ARE its source type's.
+ * The level entries of a `projections:` list, which both manifests carry because the levels of a
+ * relation ARE its source type's.
  *
- * A sequence inside a mapping, one level deeper than this manifest had ever gone: `manifest.mjs`
- * was grown to read it, and before that it scanned to `''` and a corpus with a pyramid read
- * exactly like one without.
+ * **`scale` and not a level number**: `4 ** level` is the one place this fixture writes the
+ * pyramid's base, and it writes it here because the manifest carries the product. A reader divides
+ * a count by the scale and shifts by its trailing zeros, and never sees an exponent at all.
+ *
+ * `aligned` is the two lines an edge projection carries and a vertex one does not — which endpoint
+ * addresses the tiles, and whether they are sorted by it.
  */
-const levelBlock = (levels, tileRows) =>
-  levels.length === 0
-    ? []
-    : [
-        "levels:",
-        "  prefix: l",
-        "  levels:",
-        ...levels.map((level) => `  - ${level}`),
-        `  chunk_size: ${tileRows}`,
-      ];
+const levelProjections = (levels, aligned) =>
+  levels.flatMap((level) => [
+    `- path: l${level}/`,
+    `  scale: ${4 ** level}`,
+    ...aligned,
+    "  file_type: parquet",
+    "  properties: []",
+  ]);
 
 export function write(
   dir,
@@ -298,7 +300,7 @@ export function write(
         ];
       }
       return Array.from({ length: tiles }, (_, k) => {
-        const target = join(edgeDir, orientation, `tile${k}.parquet`);
+        const target = join(edgeDir, orientation, `chunk${k}.parquet`);
         return `COPY (SELECT * FROM e WHERE ${key} >= ${k * tileRows} AND ${key} < ${(k + 1) * tileRows}
                        ORDER BY ${key}, ${other}) TO '${lit(target)}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
       });
@@ -399,8 +401,13 @@ export function write(
       `vertex_count: ${count}`,
       `chunk_size: ${tileRows}`,
       "prefix: vertex/Person/",
-      "property_groups:",
-      "- file_type: parquet",
+      // Every artefact of this type in one list: the payload is the entry at `scale: 1`, and each
+      // level is another entry beside it. There is no key that appears when a corpus grows a
+      // pyramid, because a level was never a different kind of thing from the payload.
+      "projections:",
+      "- path: ''",
+      "  scale: 1",
+      "  file_type: parquet",
       "  properties:",
       "  - name: subject",
       "    data_type: string",
@@ -416,11 +423,14 @@ export function write(
       "  - name: postcode",
       "    data_type: string",
       "    is_primary: false",
+      ...levelProjections(levels, []),
+      // The identity index, and the ONE artefact here that is not a projection: it is a second
+      // ORDER over the same rows, so the Morton cut does not address it and it carries a
+      // `chunk_size` of its own instead of a scale.
       "index:",
       "  prefix: index/",
       "  ordered_by: subject",
       `  chunk_size: ${tileRows}`,
-      ...levelBlock(levels, tileRows),
       "version: gar/v1",
       "",
     ].join("\n"),
@@ -438,17 +448,21 @@ export function write(
       `dst_chunk_size: ${tileRows}`,
       "directed: true",
       "prefix: edge/Person_knows_Person/",
-      "adj_lists:",
-      "- ordered: true",
+      "projections:",
+      "- path: by_source/",
+      "  scale: 1",
       "  aligned_by: src",
-      "  prefix: by_source/",
+      "  ordered: true",
       "  file_type: parquet",
-      "- ordered: true",
+      "  properties: []",
+      "- path: by_target/",
+      "  scale: 1",
       "  aligned_by: dst",
-      "  prefix: by_target/",
+      "  ordered: true",
       "  file_type: parquet",
-      "property_groups: []",
-      ...levelBlock(levels, tileRows),
+      "  properties: []",
+      // A level of a relation is which vertices are in it, so it is always source-aligned.
+      ...levelProjections(levels, ["  aligned_by: src", "  ordered: true"]),
       "version: gar/v1",
       "",
     ].join("\n"),

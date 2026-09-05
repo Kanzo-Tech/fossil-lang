@@ -9,7 +9,8 @@
  * the struct that wrote it proves the struct round-trips and nothing about the artefact; pulling in
  * a YAML library would make this checker installable rather than copyable. What the manifest
  * actually uses is a flat mapping of scalars, one sequence of paths, and one sequence of small
- * mappings, and that is the grammar below.
+ * mappings — `projections:`, which is every artefact of a type at once — and that is the grammar
+ * below.
  *
  * **What it refuses rather than guesses:** anchors and aliases, flow style (`[a, b]`), multi-line
  * scalars (`|`, `>`), and any nesting deeper than one sequence of mappings. A manifest using them
@@ -49,10 +50,12 @@ const REFUSED = [
  * was not a `- ` item was skipped as "a nested collection no guard reads". A guard reads one now —
  * `index-agrees-with-the-payload` needs `index:`'s `prefix`, `ordered_by` and `chunk_size` — so the
  * shape is decided by the first child line instead of assumed: `- ` makes it a sequence, `  k: v`
- * makes it a map, and anything deeper is still skipped — with ONE exception, which arrived the same
- * way: a sequence of SCALARS nested in a mapping. `levels:` is that, its level list is what a reader
- * cannot derive (which levels a writer spent bytes on is a policy, not arithmetic), and read as a
- * scalar it came back `''` — a corpus with a pyramid reading exactly like one without.
+ * makes it a map, and anything deeper is skipped.
+ *
+ * It read one level deeper than that for a while, for a sequence of SCALARS nested in a mapping —
+ * `levels:`'s list of level numbers. There is no such shape left: a level is a `projections:` entry
+ * like the payload beside it, and its `scale` is a scalar in a mapping in a sequence, which is the
+ * grammar this had before the pyramid arrived.
  *
  * The failure this replaces was silent and worth naming: `index:` scanned to `[]`, which is truthy,
  * carries no `prefix`, and made every reader conclude the corpus declares no index. A manifest that
@@ -66,15 +69,10 @@ export function scan(path) {
   const out = {};
   let sequence = null;
   let item = null;
-  /** The nested MAPPING being continued — `index:`, `codes:`, `levels:`. Never a sequence element. */
+  /** The nested MAPPING being continued — `index:`, and nothing else so far. Never a sequence element. */
   let map = null;
   /** A key whose value was empty and whose shape the next child line decides. */
   let pending = null;
-  /**
-   * The last key ON `map` whose value was empty — the one a `- ` line under it would be an element
-   * of. `levels:` inside `levels:` is the case, and it is one level deeper than this grammar had.
-   */
-  let nested = null;
 
   const lines = text.split("\n");
   for (const [index, raw] of lines.entries()) {
@@ -90,30 +88,15 @@ export function scan(path) {
     const continuation = /^ {2}([\w]+):\s*(.*)$/.exec(line);
     if (continuation && map) {
       map[continuation[1]] = unquote(continuation[2]);
-      nested = continuation[2] === "" ? continuation[1] : null;
       continue;
     }
     if (continuation && item) {
       item[continuation[1]] = unquote(continuation[2]);
       continue;
     }
-    // An element of a sequence nested in a mapping, and ONLY when it is a scalar. serde writes such
-    // items at their key's own indentation, so this is the same two spaces a continuation has.
-    //
-    // **A `- k: v` item is left exactly where it was**, which is skipped and the key still `''`:
-    // `properties:` inside a `property_groups` element is a sequence of MAPPINGS, no guard reads a
-    // column list off it, and turning those into mangled scalars would be a scanner inventing a
-    // shape rather than growing one.
-    const nestedItem = /^ {2}- (.*)$/.exec(line);
-    if (nestedItem && map && nested !== null && !/^[\w]+:/.test(nestedItem[1])) {
-      const held = Array.isArray(map[nested]) ? map[nested] : [];
-      held.push(unquote(nestedItem[1]));
-      map[nested] = held;
-      continue;
-    }
     // The first child of a key with an empty value, and it is `k: v` rather than
     // `- `: the key is a MAP. Committed here rather than guessed at the key,
-    // because `property_groups:` and `index:` are written identically until this
+    // because `projections:` and `index:` are written identically until this
     // line arrives.
     if (continuation && pending !== null) {
       const built = {};
@@ -122,12 +105,11 @@ export function scan(path) {
       sequence = null;
       item = null;
       map = built;
-      nested = continuation[2] === "" ? continuation[1] : null;
       pending = null;
       continue;
     }
-    // Anything else indented belongs to a nested collection — a property list inside a property
-    // group — and no guard reads one. Skipped rather than refused: it is legal, it is just not
+    // Anything else indented belongs to a nested collection — a `properties:` list inside a
+    // projection — and no guard reads one. Skipped rather than refused: it is legal, it is just not
     // addressed by any convention here, and refusing it would make the checker fail on a corpus it
     // can read perfectly well.
     if (/^ {2,}/.test(line)) continue;
@@ -140,7 +122,6 @@ export function scan(path) {
     }
     if (element && sequence) {
       map = null;
-      nested = null;
       const pair = /^([\w]+):\s*(.*)$/.exec(element[1]);
       if (pair) {
         item = { [pair[1]]: unquote(pair[2]) };
@@ -156,10 +137,9 @@ export function scan(path) {
     if (!entry) throw new Error(`${path}:${index + 1} is not a key, an item or a continuation`);
     item = null;
     map = null;
-    nested = null;
     if (entry[2] === "") {
       // Shape unknown until the first child line. A key with an empty value and
-      // NO children stays a sequence, which is what `property_groups: []` and an
+      // NO children stays a sequence, which is what `projections: []` and an
       // orientation with no entries have always been.
       sequence = [];
       out[entry[1]] = sequence;

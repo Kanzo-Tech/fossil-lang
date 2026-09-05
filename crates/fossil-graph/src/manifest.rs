@@ -167,9 +167,8 @@ impl Manifest {
     pub fn vertex_fields(&self, name: &str) -> Result<Vec<String>> {
         let info = self.lookup_vertex(name)?;
         Ok(info
-            .property_groups
+            .properties()
             .iter()
-            .flat_map(|g| g.properties.iter())
             .map(|p| p.name.as_str())
             .filter(|n| !RESERVED_VERTEX_COLUMNS.contains(n))
             .map(ToString::to_string)
@@ -195,8 +194,7 @@ fn parse_yaml<T: serde::de::DeserializeOwned>(bytes: &[u8], path: &str) -> Resul
 mod tests {
     use super::*;
     use fossil_sinks::manifest::{
-        AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup,
-        VertexInfo,
+        Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
     };
 
     /// In-memory manifest source: the test analogue of httpfs/fs. Proves the
@@ -253,10 +251,7 @@ mod tests {
             3,
             DEFAULT_CHUNK_SIZE,
             format!("vertex/{name}/"),
-            vec![PropertyGroup {
-                file_type: "parquet".into(),
-                properties,
-            }],
+            vec![Projection::payload("", properties)],
         )
     }
 
@@ -272,22 +267,10 @@ mod tests {
             dst_chunk_size: DEFAULT_CHUNK_SIZE,
             directed: true,
             prefix: format!("edge/{src}_{edge}_{dst}/"),
-            adj_lists: vec![
-                AdjList {
-                    ordered: true,
-                    aligned_by: "src".into(),
-                    prefix: "by_source/".into(),
-                    file_type: "parquet".into(),
-                },
-                AdjList {
-                    ordered: true,
-                    aligned_by: "dst".into(),
-                    prefix: "by_target/".into(),
-                    file_type: "parquet".into(),
-                },
+            projections: vec![
+                Projection::payload("by_source/", vec![]).aligned_by("src", true),
+                Projection::payload("by_target/", vec![]).aligned_by("dst", true),
             ],
-            property_groups: vec![],
-            levels: None,
             version: "gar/v1".into(),
         }
     }

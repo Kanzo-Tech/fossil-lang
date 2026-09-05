@@ -1,10 +1,30 @@
 //! The corpus manifest structs + `serde_yaml_ng` emission.
 //!
-//! **The field vocabulary is `GraphAr` v1.0.0's. The conformance is not.** A
-//! fossil corpus is not a valid `GraphAr` corpus: `fossil-df` declares
-//! `dense_id` as `uint32`, and the reference C++ reader throws on it at the
-//! first property of the first vertex type. `/docs/design/corpus` has the eight
-//! divergences, what each was read out of, and what would reverse them.
+//! # A corpus is a sequence, a cut, and some projections of that sequence
+//!
+//! **An order** — Morton over the positions, and `dense_id` *is* the rank in it.
+//! **A cut** — fixed runs of `chunk_size`, and that, and only that, is a tile:
+//! arithmetic rather than an artefact. And **projections of that sequence**,
+//! each of them a [`Projection`]: a `scale` and the columns it carries. This
+//! file said the same rule four times — `property_groups`, a vertex's `levels`,
+//! `adj_lists`, and an edge's own `levels` — and says it once. **The payload is
+//! the projection at `scale: 1`, not a special case, and that is the claim.**
+//!
+//! [`VertexIndex`] is the one artefact that is NOT a projection: it is a second
+//! ORDER over the same rows, so the Morton cut does not address it.
+//!
+//! `path` and `scale` are `OME-NGFF`'s own spellings — a `multiscales` object
+//! there lists `datasets`, each with a `path` and a `coordinateTransformations`
+//! entry of `{"type": "scale", "scale": [...]}`, ordered finest first as these
+//! are. Borrowed for recognition and not for novelty.
+//!
+//! **The rest of the field vocabulary is `GraphAr` v1.0.0's. The conformance is
+//! not**, and `projections` is a divergence larger than the eight: a `GraphAr`
+//! reader looks for `property_groups` and `adj_lists` and finds neither. A
+//! fossil corpus was already not a valid `GraphAr` corpus — `fossil-df` declares
+//! `dense_id` as `uint32` and the reference C++ reader throws on it at the first
+//! property of the first vertex type. `/docs/design/corpus` has the divergences,
+//! what each was read out of, and what would reverse them.
 //!
 //! The structs are plain serializable data — no `Box<dyn Trait>`, safe to pass
 //! through Salsa queries (CLAUDE.md hard rule). `data_type` spellings come from
@@ -219,8 +239,13 @@ pub struct VertexInfo {
     pub chunk_size: u64,
     /// Output path prefix for this vertex's tiles, e.g. `"vertex/person/"`.
     pub prefix: String,
-    /// Property groups (column groupings → one file per group per chunk).
-    pub property_groups: Vec<PropertyGroup>,
+    /// **Every projection of this type's sequence**, coarsest last: the payload
+    /// at `scale: 1` and one entry per written level. See [`Projection`].
+    ///
+    /// Not `Option` and not skipped when empty: a type with no projection has no
+    /// bytes, and the difference between that and a type whose payload the
+    /// manifest forgot to name is the difference between a corpus and a 404.
+    pub projections: Vec<Projection>,
     /// **A second copy of this type, ordered by identity instead of by
     /// position** — the index that turns a lookup by subject IRI from a scan
     /// into a seek. See [`VertexIndex`].
@@ -231,21 +256,18 @@ pub struct VertexInfo {
     /// the row the index would have found, and `openCorpus` reports the cost.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<VertexIndex>,
-    /// **Which decimated levels of this type are written, and where** — the
-    /// pyramid a zoomed-out camera reads instead of striding the whole type.
-    /// See [`VertexLevels`].
-    ///
-    /// `Option` for [`Self::index`]'s reason, and more strongly: a level is an
-    /// optimisation of a predicate, so a corpus without one draws **the same
-    /// picture** off `dense_id % 4^k == 0` over the payload and only reads
-    /// more. That is what keeps this from being a second contract.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub levels: Option<VertexLevels>,
     /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
     pub version: String,
 }
 
 /// Where a vertex type's identity index lives, and what it is ordered by.
+///
+/// **This is the one artefact of a corpus that is not a [`Projection`]: it is a
+/// second ORDER over the same rows, so the Morton cut does not address it.**
+/// Everything else — payload, levels, adjacency, edge levels — is the same
+/// sequence read at some `scale`, and tile `k` of it is a `dense_id` range.
+/// Tile `k` here is the `k`th slice of the SORTED order, which is why it
+/// carries a [`Self::chunk_size`] of its own and no `scale`.
 ///
 /// The payload is in Morton order, because the spatial order IS the id space
 /// and that is what makes a window a range. A lookup by identity needs the
@@ -272,7 +294,12 @@ pub struct VertexIndex {
     pub chunk_size: u64,
 }
 
-/// Where a vertex type's **level sets** live, and which levels exist.
+/// **The pyramid a type gets** — the plan, and the one home of the exponent.
+///
+/// This is not a manifest block and does not serialise: what a manifest carries
+/// is a [`Projection`] per level, and this is what CHOOSES them. The writer
+/// calls [`Self::planned`] once and turns the answer into projections with
+/// [`Self::projections`], so the manifest cannot name a level nobody wrote.
 ///
 /// **Level `k` is the vertices whose `dense_id` is a multiple of `4^k`.** Over
 /// a Morton-ordered `dense_id` that is one vertex per quadtree cell of depth
@@ -291,42 +318,24 @@ pub struct VertexIndex {
 /// there is nothing left for a window or a floor to bound: every level from 1
 /// down to the one that fits a single tile is written.
 ///
-/// # What is declared, and what is not
-///
-/// The **numbers**, and not a path to them. A level list is
-/// `log4(V / chunk_size)` integers, so sixteen of them would take a corpus of
-/// four billion tiles to reach — there is nothing here that grows with the
-/// graph. And it is not derivable: which levels a writer chose to spend bytes
-/// on is a policy, and a reader that re-derived it from `vertex_count` and
-/// `chunk_size` would be reimplementing [`VertexLevels::planned`] and would 404
-/// the day the policy moved.
-///
-/// # Addressing a level needs nothing new
-///
-/// Level `k`'s row `i` is the payload row with `dense_id == i · 4^k`, so tile
-/// `j` of a level set covers the `dense_id` range
-/// `[j · chunk_size · 4^k, (j+1) · chunk_size · 4^k)` — a contiguous run of
-/// payload tiles. In bits, which is how a reader spends it: a level tile's
-/// address is the payload's own shift plus [`VertexLevels::stride_bits`], and
-/// no second document is written per level.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// **The exponent never leaves this type**: what a manifest carries is `4^k` as
+/// a [`Projection::scale`], and [`Projection`] is where the addressing that
+/// follows from it is written down.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VertexLevels {
-    /// Filename stem of a level set's prefix, relative to the vertex type's own
+    /// Filename stem of a level's path, relative to the vertex type's own
     /// [`VertexInfo::prefix`] — [`LEVEL_PREFIX_STEM`] as the writer spells it.
-    /// Level `k`'s prefix is `<stem>{k}/`, and inside it the corpus's
-    /// [`Container`] decides the filenames exactly as it does for the payload.
-    /// A stem plus the number is the shape `chunk{k}.parquet` and
-    /// `tile{k}.parquet` already have, so a level set introduces no naming
-    /// convention of its own.
+    /// Level `k`'s [`Projection::path`] is `<stem>{k}/`, and inside it the
+    /// corpus's [`Container`] decides the filenames exactly as it does for the
+    /// payload, because a level is not a different kind of thing from one.
     pub prefix: String,
-    /// The levels written, finest first, and **complete** — `1..=coarsest`,
+    /// The levels planned, finest first, and **complete** — `1..=coarsest`,
     /// where the coarsest is the level that fits a single tile. Level `k` holds
     /// `ceil(vertex_count / 4^k)` rows.
     pub levels: Vec<u32>,
-    /// Rows per tile within a level set. Declared rather than inherited from
-    /// [`VertexInfo::chunk_size`] because a reader turning a level tile back
-    /// into a `dense_id` range multiplies by it, and a number that has to be
-    /// assumed is one a writer can change in silence.
+    /// Rows per tile — the type's own [`VertexInfo::chunk_size`]. The cut does
+    /// not change with the scale: a projection is a run of `chunk_size` rows of
+    /// its own sequence, whatever that sequence samples.
     pub chunk_size: u64,
 }
 
@@ -417,6 +426,26 @@ impl VertexLevels {
     pub const fn rows_at(vertex_count: u64, level: u32) -> u64 {
         vertex_count.div_ceil(Self::stride(level))
     }
+
+    /// **This plan, as the projections a manifest carries** — one per level,
+    /// finest first, each at `path: <stem>{k}/` and `scale: 4^k`.
+    ///
+    /// The only bridge between the exponent and the document: a caller writes
+    /// no `4` and no shift, it writes `properties` and gets the scales back.
+    #[must_use]
+    pub fn projections(&self, file_type: &str, properties: &[Property]) -> Vec<Projection> {
+        self.levels
+            .iter()
+            .map(|&level| Projection {
+                path: self.level_prefix(level),
+                scale: Self::stride(level),
+                aligned_by: None,
+                ordered: None,
+                file_type: file_type.to_string(),
+                properties: properties.to_vec(),
+            })
+            .collect()
+    }
 }
 
 /// `GraphAr` edge-info manifest (one per `(src_type, edge_type, dst_type)` triple).
@@ -469,106 +498,17 @@ pub struct EdgeInfo {
     pub directed: bool,
     /// Output path prefix, e.g. `"edge/person_knows_person/"`.
     pub prefix: String,
-    /// Adjacency-list orderings provided for this edge.
-    pub adj_lists: Vec<AdjList>,
-    /// Property groups carried on the edge.
-    pub property_groups: Vec<PropertyGroup>,
-    /// **Which decimated levels of this relation are written, and where** — the
-    /// edges a zoomed-out camera draws without opening the vertex payload. See
-    /// [`EdgeLevels`].
+    /// **Every projection of this relation's sequence**: one per orientation at
+    /// `scale: 1` — the adjacency — and one per written level, source-aligned.
     ///
-    /// `Option` for [`VertexInfo::levels`]' reason: absent is a corpus and not a
-    /// gap. A reader without one draws the same edges out of the adjacency and
-    /// the payload, and only reads more.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub levels: Option<EdgeLevels>,
+    /// The rule [`VertexInfo::projections`] states, applied to edges. What an
+    /// edge projection has that a vertex one does not is
+    /// [`Projection::aligned_by`], which names the endpoint column that
+    /// addresses it. See [`Projection`], and its `# An edge level` section for
+    /// why a level here carries four more columns than the adjacency does.
+    pub projections: Vec<Projection>,
     /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
     pub version: String,
-}
-
-/// Where an edge type's **level sets** live, and which levels exist.
-///
-/// # What an edge level is, and why it carries positions
-///
-/// **Level `k` of a relation is the edges incident to a level-`k` vertex** — in
-/// either orientation, `src_dense % 4^k == 0 OR dst_dense % 4^k == 0` — and each
-/// row carries **both endpoints' coordinates**.
-///
-/// The positions are the whole point, and they are the reason this exists at
-/// all. A camera keeps an edge with ONE end drawn, so the other end has to be
-/// *positioned* to draw the line; a vertex level holds one row in `4^k` and the
-/// far end is almost never one of them. Measured on the bench corpus at the
-/// app's own three-pixel floor, a vertex level can position **0.79%** of the
-/// edges the same view draws — so a pyramid of vertices alone answers a view
-/// with links by opening the payload, which is the read it exists to avoid.
-/// Carrying `src_x`/`src_y`/`dst_x`/`dst_y` makes a level set **self-drawing**:
-/// the lines and their endpoints come out of one file and no vertex tile is
-/// opened for them.
-///
-/// # It is a decimation and not an aggregation
-///
-/// Every row is a **real edge between two real vertices at their real
-/// positions**. Nothing here is contracted, and that is what keeps the standing
-/// refusal intact: an edge between two survivors standing in for a path through
-/// vertices that are not drawn is a synthetic edge, and replacing it with the
-/// path when the camera zooms moves every line on screen. This set only ever
-/// *loses* edges as `k` grows, and it nests — level `k+1`'s vertices are a
-/// subset of level `k`'s, so its edges are too.
-///
-/// # Addressed by the rule the vertex levels already have
-///
-/// Tile `j` of level `k` holds the rows whose `src_dense` is in
-/// `[j · chunk_size · 4^k, (j+1) · chunk_size · 4^k)` — the source vertex
-/// level's own tile range. So a reader that can address a vertex level can
-/// address the edges beside it with no new arithmetic.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EdgeLevels {
-    /// Filename stem of a level set's prefix, relative to the edge type's own
-    /// [`EdgeInfo::prefix`] — [`LEVEL_PREFIX_STEM`], the same stem the vertex
-    /// levels use, because it is the same convention and not a second one.
-    pub prefix: String,
-    /// The levels written, finest first. The SOURCE type's levels: a level of a
-    /// relation is defined by which vertices are in it, so a relation whose
-    /// source type has no pyramid has none either.
-    pub levels: Vec<u32>,
-    /// Rows per tile of the SOURCE vertex type — the number tile `j`'s
-    /// `dense_id` range is built from, and equal to [`EdgeInfo::src_chunk_size`].
-    /// Declared for [`VertexLevels::chunk_size`]'s reason: a reader multiplies
-    /// by it, and a number that has to be assumed is one a writer can change in
-    /// silence.
-    pub chunk_size: u64,
-}
-
-impl EdgeLevels {
-    /// The pyramid a relation gets, given its SOURCE type's own plan, or `None`
-    /// where the source type gets none.
-    ///
-    /// **One plan, two artefacts.** The levels are the source type's, not a
-    /// second choice made here: a level of a relation is *which vertices are in
-    /// it*, so a relation whose source type writes 1..=4 writes 1..=4 or it
-    /// writes nothing. [`VertexLevels::planned`] stays the one place the
-    /// numbers are chosen.
-    #[must_use]
-    pub fn from_vertex(plan: Option<&VertexLevels>) -> Option<Self> {
-        plan.map(|p| Self {
-            prefix: LEVEL_PREFIX_STEM.to_string(),
-            levels: p.levels.clone(),
-            chunk_size: p.chunk_size,
-        })
-    }
-
-    /// The prefix level `k`'s tiles live under, relative to the edge type's own
-    /// [`EdgeInfo::prefix`] — `<stem>{k}/`.
-    #[must_use]
-    pub fn level_prefix(&self, level: u32) -> String {
-        format!("{}{level}/", self.prefix)
-    }
-
-    /// Whether level `k` is written.
-    #[must_use]
-    pub fn has(&self, level: u32) -> bool {
-        self.levels.contains(&level)
-    }
 }
 
 /// `GraphAr` top-level **graph info** (`<name>.graph.yml`) — the aggregate
@@ -595,7 +535,7 @@ pub struct GraphInfo {
     /// The privacy bound this corpus declares — here once, because the bound is
     /// a property of the **whole release** and not of a column, and because
     /// `packages/corpus/src/corpus.ts` takes the payload vocabulary from the
-    /// bytes rather than from `property_groups`: a field the reader never opens
+    /// bytes rather than from a projection's `properties`: a field the reader never opens
     /// is not a policy. See [`Privacy`].
     ///
     /// `#[serde(default)]` so a corpus written before this field existed still
@@ -611,13 +551,116 @@ pub struct GraphInfo {
     pub version: String,
 }
 
-/// A group of properties stored together in one file type per chunk.
+/// **One projection of a corpus's sequence: a scale, a path, and the columns.**
+///
+/// A corpus is an order (Morton over the positions, and `dense_id` is the rank
+/// in it), a cut (fixed runs of `chunk_size`), and some projections of that
+/// sequence. This is one of them, and the four artefacts of a corpus that used
+/// to be four vocabularies are four of these:
+///
+/// | artefact | is |
+/// |---|---|
+/// | payload | `scale: 1`, the drawing columns plus identity |
+/// | vertex level | `scale: 4^k`, the same columns over one row in `4^k` |
+/// | adjacency | `scale: 1`, `aligned_by` an endpoint, the endpoint columns |
+/// | edge level | `scale: 4^k`, `aligned_by: src`, both endpoints' coordinates |
+///
+/// The payload is not a special case — it is the projection whose scale is one.
+///
+/// # Addressing one needs the scale and nothing else
+///
+/// Tile `j` covers the `dense_id` range
+/// `[j · chunk_size · scale, (j+1) · chunk_size · scale)`, so a reader's shift
+/// is the type's own plus `log2(scale)` and its row count is
+/// `count.div_ceil(scale)`. **No reader needs the exponent**: `4` and `2k` live
+/// in [`VertexLevels`] on the writer's side, and what crosses into the document
+/// is the product. Under [`Container::Files`] tile `j` is
+/// `<type prefix><path>chunk{j}.parquet`, and under [`Container::RowGroups`] it
+/// is `<type prefix><path>tiles.parquet` with the footer saying which row group
+/// — the same two spellings whatever the scale, because a level is not a
+/// different kind of thing from a payload. [`VertexIndex`] is the artefact that
+/// spells its files `tile{k}` instead, and it is the one that is not a
+/// projection.
+///
+/// # An edge level
+///
+/// **Level `k` of a relation is the edges incident to a level-`k` vertex** — in
+/// either orientation, `src_dense % scale == 0 OR dst_dense % scale == 0` — and
+/// each row carries **both endpoints' coordinates**. The positions are the whole
+/// point: a camera keeps an edge with ONE end drawn, and a vertex level at the
+/// app's three-pixel floor can position **0.79%** of the edges the same view
+/// draws, so a pyramid of vertices alone answers a view with links by opening
+/// the payload. `src_x`/`src_y`/`dst_x`/`dst_y` make the projection
+/// **self-drawing** — the lines and their far ends come out of one file.
+///
+/// It decimates and never aggregates, and [`VertexLevels`] is where that
+/// argument lives.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PropertyGroup {
-    /// Storage file type for this group, e.g. `"parquet"`.
+pub struct Projection {
+    /// Where this projection's tiles are, relative to the type's own `prefix`,
+    /// with the trailing separator — `""` for the payload, `"l1/"` for a level,
+    /// `"by_source/"` for an orientation.
+    ///
+    /// `OME-NGFF`'s own spelling: a `multiscales` dataset entry carries a
+    /// `path`, and this is that field doing that job. Declared rather than
+    /// conventional because it is the one part of a tile's URL a reader cannot
+    /// compute, and there is no directory to list over HTTP.
+    pub path: String,
+    /// **How many `dense_id`s one row of this projection stands for** — `1` for
+    /// the payload and the adjacency, `4^k` for level `k`.
+    ///
+    /// `OME-NGFF` spells a resolution's downsampling factor `scale`, inside a
+    /// `coordinateTransformations` entry of type `scale`; this is the same
+    /// number doing the same job, flattened to the one axis a sequence has.
+    /// [`VertexLevels::stride`] is where it comes from and the only place the
+    /// pyramid's base is written down.
+    pub scale: u64,
+    /// Which endpoint column addresses these tiles — `"src"` or `"dst"` — on an
+    /// edge projection, and `None` on a vertex one.
+    ///
+    /// It is what makes an edge projection addressable at all: `src` means tile
+    /// `k` holds the rows whose `src_dense >> shift` is `k`, with the shift
+    /// taken from [`EdgeInfo::src_chunk_size`]; `dst` the same against
+    /// `dst_dense` and [`EdgeInfo::dst_chunk_size`]. A level of a relation is
+    /// always `src`: a level is *which vertices are in it*, and the source
+    /// type's own pyramid is what says which.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aligned_by: Option<String>,
+    /// Whether the rows are sorted by [`Self::aligned_by`]'s column. `None` on
+    /// a vertex projection, whose order is the corpus's one order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ordered: Option<bool>,
+    /// Storage file type, e.g. `"parquet"`.
     pub file_type: String,
-    /// The properties (columns) in this group.
+    /// The columns this projection carries, which is the other half of what a
+    /// projection *is*. A level of a vertex type carries the payload's columns
+    /// over a quarter of the rows; a level of a relation carries four more than
+    /// the adjacency beside it.
     pub properties: Vec<Property>,
+}
+
+impl Projection {
+    /// A projection at `scale: 1` — a payload, or one orientation's adjacency.
+    #[must_use]
+    pub fn payload(path: impl Into<String>, properties: Vec<Property>) -> Self {
+        Self {
+            path: path.into(),
+            scale: 1,
+            aligned_by: None,
+            ordered: None,
+            file_type: "parquet".to_string(),
+            properties,
+        }
+    }
+
+    /// Declare which endpoint addresses this projection, and whether its rows
+    /// are sorted by that column. Only an edge projection has one.
+    #[must_use]
+    pub fn aligned_by(mut self, endpoint: impl Into<String>, ordered: bool) -> Self {
+        self.aligned_by = Some(endpoint.into());
+        self.ordered = Some(ordered);
+        self
+    }
 }
 
 /// A single property (column) of a vertex or edge.
@@ -633,35 +676,6 @@ pub struct Property {
     /// Nullability, omitted from the YAML when `None` (`GraphAr` treats it as optional).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub is_nullable: Option<bool>,
-}
-
-/// An adjacency-list ordering descriptor for an edge.
-///
-/// The two orientations of one edge relation are two of these, and between
-/// [`Self::aligned_by`] and [`Self::prefix`] they are **the whole of a reader's
-/// hop**: `aligned_by` names the endpoint column that addresses the tiles, and
-/// `prefix` says where they are. Nothing else has to be agreed out of band.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AdjList {
-    /// Whether the adjacency list is sorted.
-    pub ordered: bool,
-    /// Which endpoint the list is aligned by, `"src"` or `"dst"`.
-    ///
-    /// Also which endpoint *addresses* it: `"src"` means tile `k` under
-    /// [`Self::prefix`] holds the rows whose `src_dense >> shift` is `k`, with
-    /// the shift taken from [`EdgeInfo::src_chunk_size`]; `"dst"` the same
-    /// against `dst_dense` and [`EdgeInfo::dst_chunk_size`].
-    pub aligned_by: String,
-    /// Where this orientation's tiles are, relative to [`EdgeInfo::prefix`] and
-    /// with the trailing separator — `"by_source/"`, `"by_target/"`.
-    ///
-    /// Declared rather than conventional because it is the one thing a reader
-    /// cannot compute: `aligned_by` gives it the arithmetic and this gives it
-    /// the URL, so `<edge prefix><adj prefix>tile{k}.parquet` is a complete
-    /// address and no directory is ever listed.
-    pub prefix: String,
-    /// Storage file type, e.g. `"parquet"`.
-    pub file_type: String,
 }
 
 /// How many bits a `dense_id` is shifted right by to name the tile holding it.
@@ -709,7 +723,7 @@ impl VertexInfo {
         vertex_count: u64,
         chunk_size: u64,
         prefix: impl Into<String>,
-        property_groups: Vec<PropertyGroup>,
+        projections: Vec<Projection>,
     ) -> Self {
         Self {
             vertex_type: vertex_type.into(),
@@ -717,14 +731,11 @@ impl VertexInfo {
             vertex_count,
             chunk_size,
             prefix: prefix.into(),
-            property_groups,
+            projections,
             // No index by default, and that is not a stub: writing one is a
             // second pass over the rows in a different order, which the caller
             // that HAS those rows decides to pay. `with_index` is how it says so.
             index: None,
-            // Nor a pyramid: the levels are files the layout pass writes, and
-            // a type without them draws the same picture off the predicate.
-            levels: None,
             version: GRAPHAR_VERSION.to_string(),
         }
     }
@@ -736,12 +747,33 @@ impl VertexInfo {
         self
     }
 
-    /// Declare which decimated levels of this type are written, and where. See
-    /// [`VertexLevels`].
+    /// Append the projections of a level plan, each carrying the payload's own
+    /// columns — which is what the layout pass writes into them.
     #[must_use]
-    pub fn with_levels(mut self, levels: VertexLevels) -> Self {
-        self.levels = Some(levels);
+    pub fn with_levels(mut self, plan: &VertexLevels) -> Self {
+        let (file_type, properties) = self.payload().map_or_else(
+            || ("parquet".to_string(), Vec::new()),
+            |p| (p.file_type.clone(), p.properties.clone()),
+        );
+        self.projections
+            .extend(plan.projections(&file_type, &properties));
         self
+    }
+
+    /// This type's payload — the projection at `scale: 1`.
+    ///
+    /// `Option` because a manifest is a document somebody else may have
+    /// written, and one that names no payload is one this cannot invent.
+    #[must_use]
+    pub fn payload(&self) -> Option<&Projection> {
+        self.projections.iter().find(|p| p.scale == 1)
+    }
+
+    /// The payload's columns, in manifest order — the field list every schema
+    /// verb reads. Empty when the manifest names no payload.
+    #[must_use]
+    pub fn properties(&self) -> &[Property] {
+        self.payload().map_or(&[], |p| p.properties.as_slice())
     }
 
     /// Serialize this vertex-info to `GraphAr` v1.0.0 YAML.
@@ -755,12 +787,31 @@ impl VertexInfo {
 }
 
 impl EdgeInfo {
-    /// Declare which decimated levels of this relation are written, and where.
-    /// See [`EdgeLevels`].
+    /// Append the projections of the SOURCE type's level plan, source-aligned
+    /// and carrying `properties` — both endpoints' ids and their coordinates.
+    ///
+    /// **One plan, two artefacts.** The levels are the source type's, not a
+    /// second choice made here: a level of a relation is *which vertices are in
+    /// it*, so a relation whose source type writes 1..=4 writes 1..=4 or it
+    /// writes nothing. [`VertexLevels::planned`] stays the one place the
+    /// numbers are chosen.
     #[must_use]
-    pub fn with_levels(mut self, levels: EdgeLevels) -> Self {
-        self.levels = Some(levels);
+    pub fn with_levels(mut self, plan: &VertexLevels, properties: &[Property]) -> Self {
+        self.projections.extend(
+            plan.projections("parquet", properties)
+                .into_iter()
+                .map(|p| p.aligned_by("src", true)),
+        );
         self
+    }
+
+    /// The adjacency for one orientation — the projection at `scale: 1` aligned
+    /// by `endpoint`. `None` when the corpus does not publish that half.
+    #[must_use]
+    pub fn adjacency(&self, endpoint: &str) -> Option<&Projection> {
+        self.projections
+            .iter()
+            .find(|p| p.scale == 1 && p.aligned_by.as_deref() == Some(endpoint))
     }
 
     /// Serialize this edge-info to `GraphAr` v1.0.0 YAML.
@@ -864,9 +915,9 @@ mod tests {
             10_000,
             DEFAULT_CHUNK_SIZE,
             "vertex/person/",
-            vec![PropertyGroup {
-                file_type: "parquet".to_string(),
-                properties: vec![
+            vec![Projection::payload(
+                "",
+                vec![
                     Property {
                         name: "id".to_string(),
                         data_type: data_type_name(&DataType::Int64),
@@ -880,7 +931,7 @@ mod tests {
                         is_nullable: None,
                     },
                 ],
-            }],
+            )],
         )
     }
 
@@ -896,24 +947,25 @@ mod tests {
             dst_chunk_size: DEFAULT_CHUNK_SIZE,
             directed: true,
             prefix: "edge/person_knows_person/".to_string(),
-            adj_lists: vec![
-                AdjList {
-                    ordered: true,
-                    aligned_by: "src".to_string(),
-                    prefix: "by_source/".to_string(),
-                    file_type: "parquet".to_string(),
-                },
-                AdjList {
-                    ordered: true,
-                    aligned_by: "dst".to_string(),
-                    prefix: "by_target/".to_string(),
-                    file_type: "parquet".to_string(),
-                },
+            projections: vec![
+                Projection::payload("by_source/", endpoint_columns()).aligned_by("src", true),
+                Projection::payload("by_target/", endpoint_columns()).aligned_by("dst", true),
             ],
-            property_groups: vec![],
-            levels: None,
             version: GRAPHAR_VERSION.to_string(),
         }
+    }
+
+    /// The two columns every adjacency tile carries — the pair that IS the edge.
+    fn endpoint_columns() -> Vec<Property> {
+        ["src_dense", "dst_dense"]
+            .into_iter()
+            .map(|name| Property {
+                name: name.to_string(),
+                data_type: "uint32".to_string(),
+                is_primary: false,
+                is_nullable: Some(false),
+            })
+            .collect()
     }
 
     /// The border vectors of [`tile_of`], which are the deliverable: a second
@@ -979,13 +1031,13 @@ mod tests {
         assert!(error.to_string().contains("vertex_count"), "{error}");
     }
 
-    /// The `adj_lists` divergence, executed rather than asserted: `GraphAr`'s
-    /// own edge-info example carries no `prefix` on any entry, and the prefix is
-    /// the one part of a tile's URL a reader cannot compute — so the field has
-    /// no `serde` default and a specification-shaped edge-info does not
-    /// deserialize.
+    /// The divergence `GraphAr`'s own edge-info example carries, executed rather
+    /// than asserted: its `adj_lists` entries name no location at all, and a
+    /// location is the one part of a tile's URL a reader cannot compute — so
+    /// [`Projection::path`] has no `serde` default and a specification-shaped
+    /// edge-info does not deserialize.
     #[test]
-    fn adj_list_without_a_prefix_is_not_an_adj_list() {
+    fn a_projection_without_a_path_is_not_a_projection() {
         let spec_shaped = "\
 src_type: person
 edge_type: knows
@@ -996,16 +1048,83 @@ src_chunk_size: 100
 dst_chunk_size: 100
 directed: false
 prefix: edge/person_knows_person/
-adj_lists:
-- ordered: true
+projections:
+- scale: 1
   aligned_by: src
+  ordered: true
   file_type: parquet
-property_groups: []
+  properties: []
 version: gar/v1
 ";
         let error = serde_yaml_ng::from_str::<EdgeInfo>(spec_shaped)
-            .expect_err("an adj_list with no prefix has no address and must not deserialize");
-        assert!(error.to_string().contains("prefix"), "{error}");
+            .expect_err("a projection with no path has no address and must not deserialize");
+        assert!(error.to_string().contains("path"), "{error}");
+    }
+
+    /// **The payload is a projection and not a special case** — the claim, as a
+    /// test. One vocabulary describes the two halves of a vertex type and the
+    /// two halves of a relation, and the only thing that separates a payload
+    /// from a level of it is a number.
+    #[test]
+    fn the_payload_is_the_projection_whose_scale_is_one() {
+        let plan = VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).expect("over one tile");
+        let vertex = person_vertex().with_levels(&plan);
+        let scales: Vec<u64> = vertex.projections.iter().map(|p| p.scale).collect();
+        assert_eq!(scales, vec![1, 4, 16, 64, 256]);
+        // Every level carries what the payload carries: the layout pass writes
+        // the payload's own schema into them, one row in `scale`.
+        let payload = vertex.payload().expect("a payload");
+        assert_eq!(payload.path, "");
+        for level in vertex.projections.iter().filter(|p| p.scale > 1) {
+            assert_eq!(level.properties, payload.properties, "{}", level.path);
+            assert_eq!(level.aligned_by, None);
+        }
+        // And on a relation the same list holds both orientations and the
+        // pyramid, told apart by `aligned_by` and by the scale.
+        let edge = knows_edge().with_levels(&plan, &endpoint_columns());
+        assert_eq!(edge.adjacency("src").expect("CSR").path, "by_source/");
+        assert_eq!(edge.adjacency("dst").expect("CSC").path, "by_target/");
+        assert_eq!(edge.adjacency("nowhere"), None);
+        let levelled: Vec<&str> = edge
+            .projections
+            .iter()
+            .filter(|p| p.scale > 1)
+            .map(|p| p.path.as_str())
+            .collect();
+        assert_eq!(levelled, vec!["l1/", "l2/", "l3/", "l4/"]);
+        // A level of a relation is which vertices are in it, so it is always
+        // source-aligned — there is no second choice made on the edge side.
+        assert!(
+            edge.projections
+                .iter()
+                .filter(|p| p.scale > 1)
+                .all(|p| p.aligned_by.as_deref() == Some("src"))
+        );
+    }
+
+    /// The scale a projection declares is `VertexLevels::stride` and never a
+    /// second spelling of it — asserted against the algebra, not a literal.
+    #[test]
+    fn a_projections_scale_is_the_strides_own_number() {
+        let plan = VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).expect("over one tile");
+        for (projection, &level) in plan
+            .projections("parquet", &[])
+            .iter()
+            .zip(plan.levels.iter())
+        {
+            assert_eq!(projection.scale, VertexLevels::stride(level));
+            assert_eq!(projection.path, plan.level_prefix(level));
+            // What a reader spends it on, without ever seeing the exponent: the
+            // rows are a division and the shift is a count of trailing zeros.
+            assert_eq!(
+                1_000_000u64.div_ceil(projection.scale),
+                VertexLevels::rows_at(1_000_000, level)
+            );
+            assert_eq!(
+                projection.scale.trailing_zeros(),
+                VertexLevels::stride_bits(level)
+            );
+        }
     }
 
     #[test]
@@ -1033,7 +1152,8 @@ version: gar/v1
             "{yaml}"
         );
         assert!(yaml.contains("prefix: vertex/person/"), "{yaml}");
-        assert!(yaml.contains("property_groups:"), "{yaml}");
+        assert!(yaml.contains("projections:"), "{yaml}");
+        assert!(!yaml.contains("property_groups"), "{yaml}");
         assert!(yaml.contains("data_type: int64"), "{yaml}");
         assert!(yaml.contains("is_primary: true"), "{yaml}");
         assert!(!yaml.contains("graphar_version"), "{yaml}");
@@ -1070,13 +1190,14 @@ version: gar/v1
         assert!(yaml.contains("dst_type: Person"), "{yaml}");
         assert!(yaml.contains("edge_type: knows"), "{yaml}");
         assert!(yaml.contains("edge_count: 19998"), "{yaml}");
-        assert!(yaml.contains("adj_lists:"), "{yaml}");
+        assert!(yaml.contains("projections:"), "{yaml}");
+        assert!(!yaml.contains("adj_lists"), "{yaml}");
         // Both orientations, each saying where its tiles are: a reader with only
         // `aligned_by` knows the arithmetic and not the address.
         assert!(yaml.contains("aligned_by: src"), "{yaml}");
-        assert!(yaml.contains("prefix: by_source/"), "{yaml}");
+        assert!(yaml.contains("path: by_source/"), "{yaml}");
         assert!(yaml.contains("aligned_by: dst"), "{yaml}");
-        assert!(yaml.contains("prefix: by_target/"), "{yaml}");
+        assert!(yaml.contains("path: by_target/"), "{yaml}");
         assert!(yaml.contains("directed: true"), "{yaml}");
         assert!(yaml.contains("version: gar/v1"), "{yaml}");
     }
@@ -1292,54 +1413,56 @@ version: gar/v1
         assert_eq!(plan.prefix, LEVEL_PREFIX_STEM);
     }
 
-    /// The manifest is silent about levels unless a type has them, so every
-    /// corpus written before the field existed serialises byte for byte as it
-    /// did — which is what keeps the conformance corpus out of this.
+    /// A type with no pyramid has one projection, and a type with one has more
+    /// — there is no key that appears and disappears, because a level was never
+    /// a different kind of thing from the payload beside it.
     #[test]
-    fn a_type_without_levels_serialises_no_key() {
-        let info = VertexInfo::new("Person", 5, DEFAULT_CHUNK_SIZE, "vertex/Person/", vec![]);
-        let yaml = info.to_yaml().expect("serialise");
-        assert!(!yaml.contains("levels"), "{yaml}");
-        let with = info.with_levels(VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).unwrap());
+    fn a_type_without_levels_is_a_type_with_one_projection() {
+        let info = person_vertex();
+        assert_eq!(info.projections.len(), 1);
+        let with = info.with_levels(&VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).unwrap());
+        assert_eq!(with.projections.len(), 5);
         let yaml = with.to_yaml().expect("serialise");
-        assert!(yaml.contains("levels:"), "{yaml}");
         let back: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("round trip");
         assert_eq!(back, with);
     }
 
-    /// **The bytes two hand-written line scanners have to read**, pinned here
+    /// **The bytes the hand-written line scanners have to read**, pinned here
     /// rather than assumed there.
     ///
-    /// `packages/corpus/src/manifest.ts` and `apps/corpus/guards/manifest.mjs`
-    /// are line scanners and not YAML parsers, deliberately and for reasons each
-    /// states. `levels:` is the first thing this manifest emits that is a
-    /// SEQUENCE INSIDE A MAPPING, which is one level deeper than the grammar
-    /// either of them had, and the shape they were grown to read is the one
-    /// below: the nested key's items at the key's OWN indentation, two spaces,
-    /// not four.
+    /// `apps/corpus/guards/manifest.mjs` is a line scanner and not a YAML
+    /// parser, deliberately and for the reason its own header states. What it
+    /// has to see is one sequence of mappings — `projections:` — each with a
+    /// nested `properties:` sequence at the item's OWN indentation, which is the
+    /// grammar `property_groups:` already had. Collapsing four blocks into this
+    /// one is what let the scanner lose a level of nesting rather than grow one.
     ///
-    /// The failure this exists to prevent is silent in the exact way that module
-    /// header warns about — a scanner that cannot see `levels:`'s list reads the
-    /// key as an empty scalar, which is indistinguishable from a corpus that
-    /// declares no pyramid. So the emitter is what is asserted, and a serde
-    /// version that re-indents sequences turns this red instead of turning two
-    /// readers blind.
+    /// The failure this exists to prevent is silent: a scanner that cannot see a
+    /// projection reads the type as having fewer, which is indistinguishable
+    /// from a corpus that wrote fewer. So the emitter is what is asserted, and a
+    /// serde version that re-indents sequences turns this red instead of turning
+    /// a reader blind.
     #[test]
-    fn the_levels_block_is_emitted_in_the_shape_the_line_scanners_read() {
-        let info = VertexInfo::new(
-            "Person",
-            1_000_000,
-            DEFAULT_CHUNK_SIZE,
-            "vertex/Person/",
-            vec![],
-        )
-        .with_levels(VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).unwrap());
-        let yaml = info.to_yaml().expect("serialise");
-        assert!(
-            yaml.contains(
-                "levels:\n  prefix: l\n  levels:\n  - 1\n  - 2\n  - 3\n  - 4\n  chunk_size: 4096\n"
-            ),
-            "{yaml}"
-        );
+    fn the_projections_block_is_emitted_in_the_shape_the_line_scanners_read() {
+        let plan = VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).unwrap();
+        let yaml = person_vertex().with_levels(&plan).to_yaml().expect("yaml");
+        let lines: Vec<&str> = yaml.lines().collect();
+        let start = lines
+            .iter()
+            .position(|l| *l == "projections:")
+            .expect("a projections block");
+        let block: Vec<&str> = lines[start + 1..]
+            .iter()
+            .take_while(|l| l.starts_with("- ") || l.starts_with("  "))
+            .copied()
+            .collect();
+        // One item per projection, each opening at column zero.
+        assert_eq!(block.iter().filter(|l| l.starts_with("- ")).count(), 5);
+        // The payload first, at scale one and no path, then the pyramid.
+        assert!(yaml.contains("- path: ''\n  scale: 1\n"), "{yaml}");
+        assert!(yaml.contains("- path: l4/\n  scale: 256\n"), "{yaml}");
+        // And the nested sequence sits at the item's own indentation — two
+        // spaces, not four, which is the whole of what the scanner assumes.
+        assert!(yaml.contains("  properties:\n  - name: id\n"), "{yaml}");
     }
 }

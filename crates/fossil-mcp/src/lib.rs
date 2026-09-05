@@ -202,19 +202,19 @@ fn register_views_sql(manifest: &Manifest, dest: &str) -> String {
         // the whole relation from; `aligned_by` is what says which prefix that
         // is, and an edge type that publishes no source-ordered adjacency gets
         // no view rather than a composed path that 404s.
-        let Some(adj) = e.adj_lists.iter().find(|a| a.aligned_by == "src") else {
+        let Some(adj) = e.adjacency("src") else {
             continue;
         };
         let prefix = format!(
             "{base}/{}{}",
             e.prefix.trim_end_matches('/').to_string() + "/",
-            adj.prefix.trim_end_matches('/')
+            adj.path.trim_end_matches('/')
         );
         let source = match container {
             Container::RowGroups => sql_str_lit(&format!("{prefix}/{TILES_FILE}")),
             // A tile with no rows is not written, so the set of tile numbers is
             // a property of the data and not of the count. Nothing composes it.
-            Container::Files => sql_str_lit(&format!("{prefix}/tile*.parquet")),
+            Container::Files => sql_str_lit(&format!("{prefix}/chunk*.parquet")),
         };
         let _ = writeln!(
             sql,
@@ -286,8 +286,7 @@ mod tests {
     fn register_views_sql_uses_writer_layout() {
         use fossil_graph::manifest::ManifestSource as _;
         use fossil_sinks::manifest::{
-            AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup,
-            VertexInfo,
+            Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
         };
 
         let mut person = VertexInfo::new(
@@ -295,9 +294,9 @@ mod tests {
             3,
             DEFAULT_CHUNK_SIZE,
             "vertex/Person/",
-            vec![PropertyGroup {
-                file_type: "parquet".into(),
-                properties: vec![Property {
+            vec![Projection::payload(
+                "",
+                vec![Property {
                     name: "dense_id".into(),
                     data_type: "uint32".into(),
                     // The address is never the primary. This fixture declares
@@ -305,7 +304,7 @@ mod tests {
                     is_primary: false,
                     is_nullable: Some(false),
                 }],
-            }],
+            )],
         );
         person.iri = "http://example.org/Person".into();
         let edge = EdgeInfo {
@@ -323,14 +322,7 @@ mod tests {
             // relation and `aligned_by` is what says which prefix that is. This
             // was `vec![]` while the path was the hard-coded `by_source.parquet`
             // — a fixture that declared no adjacency and got a view over one.
-            adj_lists: vec![AdjList {
-                ordered: true,
-                aligned_by: "src".into(),
-                prefix: "by_source/".into(),
-                file_type: "parquet".into(),
-            }],
-            property_groups: vec![],
-            levels: None,
+            projections: vec![Projection::payload("by_source/", vec![]).aligned_by("src", true)],
             version: "gar/v1".into(),
         };
         let graph = GraphInfo::new(
@@ -585,7 +577,7 @@ mod tests {
             "the fixture has one source-ordered adjacency, so it bounds the count at one; got: {files}",
         );
         assert!(
-            globs[0].contains("Person_knows_Person") && globs[0].contains("tile*.parquet"),
+            globs[0].contains("Person_knows_Person") && globs[0].contains("chunk*.parquet"),
             "the surviving wildcard is not an edge orientation; got: {}",
             globs[0],
         );

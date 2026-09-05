@@ -409,7 +409,7 @@ export const GUARDS = [
       }
       // The same rule on the edge side, where it was not being applied and where it is the only
       // place it bites: a vertex type never carries two containers, and every relation does.
-      // `by_source.parquet` beside `by_source/tile{k}.parquet` is the uncut relation shipped next
+      // `by_source.parquet` beside `by_source/chunk{k}.parquet` is the uncut relation shipped next
       // to its own cut, which is what `<Type>.parquet` beside the vertex tiles already is — and
       // that one is a violation two guards down, in as many words, "a second copy of every vertex".
       // The asymmetry was never argued; it is the difference between a staging artefact that is
@@ -460,11 +460,21 @@ export const GUARDS = [
         // adjacency list without one is tiles nobody can address.
         for (const side of [edge.bySource, edge.byTarget]) {
           if (side.declared === null) {
-            failures.push(`${edge.rel} declares no adj_list aligned_by ${side.alignedBy}`);
+            failures.push(`${edge.rel} declares no projection at scale 1 aligned_by ${side.alignedBy}`);
           } else if (side.tilePrefix === "") {
             failures.push(
-              `${edge.rel} declares an adj_list aligned_by ${side.alignedBy} with no prefix, ` +
+              `${edge.rel} declares a projection aligned_by ${side.alignedBy} with no path, ` +
                 `so its tiles have no address`,
+            );
+          }
+        }
+        // And every projection carries a scale a shift addresses. A scale that is
+        // not a power of two forces a division where the whole format is a shift,
+        // and a projection with none is one nothing can address at all.
+        for (const projection of [...edge.projections, ...(source?.projections ?? [])]) {
+          if (projection.scale === null) {
+            failures.push(
+              `${edge.rel} declares a projection at ${projection.prefix}/ with no scale a shift addresses`,
             );
           }
         }
@@ -788,11 +798,12 @@ export const GUARDS = [
     id: "a-level-is-the-predicate",
     title: "A written level holds exactly the rows the level predicate selects",
     proves:
-      "That every `vertex/<Type>/l{k}/` the manifest declares is a CACHE of `dense_id % 4^k == 0` " +
-      "over the payload and nothing else — checked as a symmetric difference over EVERY column, " +
-      "in both directions, so a level that dropped a row and a level that invented one are two " +
-      "different failures and both are caught. It also checks the tiling: a level tile is a " +
-      "`dense_id` range like any other, `[j·chunk_size·4^k, (j+1)·chunk_size·4^k)`, which is what " +
+      "That every projection the manifest declares above `scale: 1` is a CACHE of " +
+      "`dense_id % scale == 0` over the payload at scale 1 and nothing else — checked as a " +
+      "symmetric difference over EVERY column, in both directions, so a level that dropped a row " +
+      "and a level that invented one are two different failures and both are caught. It also " +
+      "checks the tiling: a projection's tile is a `dense_id` range like any other, " +
+      "`[j·chunk_size·scale, (j+1)·chunk_size·scale)`, which is what " +
       "lets a reader address a level with the shift it already has and no second document. " +
       "Nothing else can catch a divergence here: a level set is well-formed Parquet with the " +
       "payload's own schema, so a writer that wrote every 63rd row, or the right rows in the wrong " +
@@ -801,8 +812,8 @@ export const GUARDS = [
       "payload holds. There is no exception to throw; the only way to see it is to evaluate the " +
       "predicate against the payload and diff.",
     cannotProve:
-      "That a corpus SHOULD carry a pyramid. An absent `levels:` block is a legal corpus and the " +
-      "common one — a level is a predicate, so a reader answers every level with or without a " +
+      "That a corpus SHOULD carry a pyramid. A type declaring only its payload is a legal corpus " +
+      "and the common one — a level is a predicate, so a reader answers every level with or without a " +
       "file, and what a written one changes is a byte count. Nor WHICH levels a writer ought to " +
       "have written: that is a policy, and `fossil_sinks::manifest::VertexLevels::planned` is its " +
       "one implementation. A corpus is free to declare a different set as long as the files hold " +
@@ -811,18 +822,18 @@ export const GUARDS = [
       const failures = [];
       const notes = [];
       for (const type of corpus.types) {
-        if (type.levels === null) continue;
-        if (type.levels.error !== null) {
-          failures.push(`${type.name}: the manifest ${type.levels.error}`);
-          continue;
-        }
+        // The pyramid is the projections above scale one; the payload is the one AT it, and it is
+        // the same list. `scale` is read off the manifest and never derived — the exponent lives in
+        // `fossil_sinks::manifest::VertexLevels` and does not cross into a checker.
+        const levels = type.projections.filter((p) => p.scale === null || p.scale > 1n);
+        if (levels.length === 0) continue;
         if (type.files.length === 0) {
-          failures.push(`${type.name}: declares levels over a payload with no tiles`);
+          failures.push(`${type.name}: declares a level over a payload with no tiles`);
           continue;
         }
-        const chunk = type.levels.chunkSize;
+        const chunk = type.chunkSize;
         if (chunk <= 0n || (chunk & (chunk - 1n)) !== 0n) {
-          failures.push(`${type.name}: a level tile of ${chunk} rows, which no shift addresses`);
+          failures.push(`${type.name}: a tile of ${chunk} rows, which no shift addresses`);
           continue;
         }
         // Every column the payload carries, not just `dense_id`: a level that selected the right
@@ -830,13 +841,17 @@ export const GUARDS = [
         // everything is, and an id-only diff is green for it.
         const columns = [...type.columns].join(", ");
         const payload = fileList(type.files);
-        for (const set of type.levels.sets) {
+        for (const set of levels) {
+          if (set.scale === null) {
+            failures.push(`${type.name}: declares ${set.prefix}/ with no scale a shift addresses`);
+            continue;
+          }
           if (set.files.length === 0) {
-            failures.push(`${type.name}: declares level ${set.level} and ${set.prefix}/ holds no tiles`);
+            failures.push(`${type.name}: declares scale ${set.scale} and ${set.prefix}/ holds no tiles`);
             continue;
           }
           const level = fileList(set.files);
-          const step = 4 ** set.level;
+          const step = set.scale;
           const predicate = `SELECT ${columns} FROM read_parquet(${payload}) WHERE dense_id % ${step} = 0`;
           const held = `SELECT ${columns} FROM read_parquet(${level})`;
           const bad = scalar(
@@ -846,14 +861,14 @@ export const GUARDS = [
           failures.push(
             ...violations(
               bad,
-              `${type.name} level ${set.level}: the file and the predicate \`dense_id % ${step} = 0\` disagree about which rows the level holds`,
+              `${type.name} scale ${set.scale}: the file and the predicate \`dense_id % ${step} = 0\` disagree about which rows the level holds`,
             ),
           );
           // The tiling, under the container that makes a file a tile. In the row-group container a
           // level is one file and its tiles are its row groups, which `footer-is-the-index` is the
           // guard for; here a file IS tile `j` and its ids have to be inside tile `j`'s range.
           if (set.files.length > 1 || type.layout === "files") {
-            const span = BigInt(step) * chunk;
+            const span = set.scale * chunk;
             for (const [j, file] of set.files.entries()) {
               const lo = BigInt(j) * span;
               const hi = lo + span;
@@ -864,13 +879,13 @@ export const GUARDS = [
               failures.push(
                 ...violations(
                   stray,
-                  `${type.name} level ${set.level} tile ${j}: rows outside [${lo}, ${hi}), so the shift a reader already has addresses the wrong file`,
+                  `${type.name} scale ${set.scale} tile ${j}: rows outside [${lo}, ${hi}), so the shift a reader already has addresses the wrong file`,
                 ),
               );
             }
           }
           notes.push(
-            `${type.name}: level ${set.level} is ${scalar(`SELECT count(*) FROM read_parquet(${level})`)} row(s) over ${set.files.length} file(s)`,
+            `${type.name}: scale ${set.scale} is ${scalar(`SELECT count(*) FROM read_parquet(${level})`)} row(s) over ${set.files.length} file(s)`,
           );
         }
       }
@@ -880,26 +895,27 @@ export const GUARDS = [
       // right edges at the wrong places draws a picture that is wrong about where everything is,
       // and an edge-only diff is green for it — which is why the join below exists.
       for (const edge of corpus.edges) {
-        if (edge.levels === null) continue;
-        if (edge.levels.error !== null) {
-          failures.push(`${edge.rel}: the manifest ${edge.levels.error}`);
-          continue;
-        }
+        const levels = edge.projections.filter((p) => p.scale === null || p.scale > 1n);
+        if (levels.length === 0) continue;
         const source = corpus.types.find((t) => t.name === edge.srcType);
         const target = corpus.types.find((t) => t.name === edge.dstType);
         if (source === undefined || target === undefined) continue;
         const relation = edge.bySource.tiles;
         if (relation.length === 0) {
-          failures.push(`${edge.rel}: declares levels over an orientation with no tiles`);
+          failures.push(`${edge.rel}: declares a level over an orientation with no tiles`);
           continue;
         }
-        for (const set of edge.levels.sets) {
+        for (const set of levels) {
+          if (set.scale === null) {
+            failures.push(`${edge.rel}: declares ${set.prefix}/ with no scale a shift addresses`);
+            continue;
+          }
           if (set.files.length === 0) {
-            failures.push(`${edge.rel}: declares level ${set.level} and ${set.prefix}/ holds no tiles`);
+            failures.push(`${edge.rel}: declares scale ${set.scale} and ${set.prefix}/ holds no tiles`);
             continue;
           }
           const held = fileList(set.files);
-          const step = 4 ** set.level;
+          const step = set.scale;
           const predicate =
             `SELECT src_dense, dst_dense FROM read_parquet(${fileList(relation)}) ` +
             `WHERE src_dense % ${step} = 0 OR dst_dense % ${step} = 0`;
@@ -910,7 +926,7 @@ export const GUARDS = [
           failures.push(
             ...violations(
               bad,
-              `${edge.rel} level ${set.level}: the file and \`src % ${step} = 0 OR dst % ${step} = 0\` disagree about which edges the level holds`,
+              `${edge.rel} scale ${set.scale}: the file and \`src % ${step} = 0 OR dst % ${step} = 0\` disagree about which edges the level holds`,
             ),
           );
           // Both ends, against the payload each end's type carries. This is the assertion the
@@ -924,11 +940,11 @@ export const GUARDS = [
           failures.push(
             ...violations(
               misplaced,
-              `${edge.rel} level ${set.level}: edges carrying coordinates the payload disagrees with`,
+              `${edge.rel} scale ${set.scale}: edges carrying coordinates the payload disagrees with`,
             ),
           );
           notes.push(
-            `${edge.rel}: level ${set.level} is ${scalar(`SELECT count(*) FROM read_parquet(${held})`)} edge(s), both ends placed as the payload places them`,
+            `${edge.rel}: scale ${set.scale} is ${scalar(`SELECT count(*) FROM read_parquet(${held})`)} edge(s), both ends placed as the payload places them`,
           );
         }
       }
@@ -1141,7 +1157,7 @@ export const GUARDS = [
       "tile costs 1.87× the tile — 8.016 bytes per row against 9.23 for all four drawing columns " +
       "— so the measured default is that it does not, and the path a reader fetches it from " +
       "instead is an open convention, not a checked one. This guard reports its absence and does " +
-      "not fail on it. It also never opens the manifest: `property_groups` carries an " +
+      "not fail on it. It also never opens the manifest: a projection's `properties` carry an " +
       "`is_primary` per property, and a corpus that marks `dense_id` with it passes here " +
       "unremarked. That is how `crates/fossil-df` came to mark the address for months while this " +
       "sentence said it could not be one — the flag is nested a level deeper than this scanner " +

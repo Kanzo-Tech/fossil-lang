@@ -6,8 +6,7 @@
 
 use arrow_schema::DataType;
 use fossil_sinks::manifest::{
-    AdjList, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, Property, PropertyGroup, VertexInfo,
-    data_type_name,
+    DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, Projection, Property, VertexInfo, data_type_name,
 };
 
 fn person_vertex() -> VertexInfo {
@@ -16,9 +15,9 @@ fn person_vertex() -> VertexInfo {
         10_000,
         DEFAULT_CHUNK_SIZE,
         "vertex/person/",
-        vec![PropertyGroup {
-            file_type: "parquet".to_string(),
-            properties: vec![
+        vec![Projection::payload(
+            "",
+            vec![
                 Property {
                     name: "id".to_string(),
                     data_type: data_type_name(&DataType::Int64),
@@ -32,7 +31,7 @@ fn person_vertex() -> VertexInfo {
                     is_nullable: None,
                 },
             ],
-        }],
+        )],
     )
 }
 
@@ -48,24 +47,25 @@ fn knows_edge() -> EdgeInfo {
         dst_chunk_size: DEFAULT_CHUNK_SIZE,
         directed: true,
         prefix: "edge/person_knows_person/".to_string(),
-        adj_lists: vec![
-            AdjList {
-                ordered: true,
-                aligned_by: "src".to_string(),
-                prefix: "by_source/".to_string(),
-                file_type: "parquet".to_string(),
-            },
-            AdjList {
-                ordered: true,
-                aligned_by: "dst".to_string(),
-                prefix: "by_target/".to_string(),
-                file_type: "parquet".to_string(),
-            },
+        projections: vec![
+            Projection::payload("by_source/", endpoints()).aligned_by("src", true),
+            Projection::payload("by_target/", endpoints()).aligned_by("dst", true),
         ],
-        property_groups: vec![],
-        levels: None,
         version: GRAPHAR_VERSION.to_string(),
     }
+}
+
+/// The two columns every adjacency tile carries — the pair that IS the edge.
+fn endpoints() -> Vec<Property> {
+    ["src_dense", "dst_dense"]
+        .into_iter()
+        .map(|name| Property {
+            name: name.to_string(),
+            data_type: "uint32".to_string(),
+            is_primary: false,
+            is_nullable: Some(false),
+        })
+        .collect()
 }
 
 #[test]

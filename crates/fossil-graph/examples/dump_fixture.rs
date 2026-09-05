@@ -21,7 +21,7 @@
 //! ```
 
 use fossil_sinks::manifest::{
-    Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+    Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
 };
 use serde_json::{Map, Value, json};
 
@@ -31,9 +31,9 @@ fn main() {
         3,
         DEFAULT_CHUNK_SIZE,
         "vertex/Person/",
-        vec![PropertyGroup {
-            file_type: "parquet".into(),
-            properties: vec![
+        vec![Projection::payload(
+            "",
+            vec![
                 Property {
                     name: "dense_id".into(),
                     data_type: "uint32".into(),
@@ -58,7 +58,7 @@ fn main() {
                     is_nullable: None,
                 },
             ],
-        }],
+        )],
     );
     person.iri = "http://example.org/Person".into();
 
@@ -73,9 +73,7 @@ fn main() {
         dst_chunk_size: DEFAULT_CHUNK_SIZE,
         directed: true,
         prefix: "edge/Person_knows_Person/".into(),
-        adj_lists: vec![],
-        property_groups: vec![],
-        levels: None,
+        projections: vec![],
         version: "gar/v1".into(),
     };
 

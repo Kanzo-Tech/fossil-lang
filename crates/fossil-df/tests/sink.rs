@@ -95,9 +95,8 @@ async fn write_to_dir_lays_out_the_graphar_tree() {
     let info: fossil_sinks::manifest::VertexInfo =
         serde_yaml_ng::from_str(&yaml).unwrap_or_else(|e| panic!("Person.vertex.yml: {e}\n{yaml}"));
     let primary: Vec<&str> = info
-        .property_groups
+        .properties()
         .iter()
-        .flat_map(|g| &g.properties)
         .filter(|p| p.is_primary)
         .map(|p| p.name.as_str())
         .collect();

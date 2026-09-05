@@ -2,8 +2,10 @@ type: Person
 vertex_count: 300
 chunk_size: 64
 prefix: vertex/Person/
-property_groups:
-- file_type: parquet
+projections:
+- path: ''
+  scale: 1
+  file_type: parquet
   properties:
   - name: subject
     data_type: string
@@ -14,14 +16,16 @@ property_groups:
   - name: postcode
     data_type: string
     is_primary: false
+- path: l1/
+  scale: 4
+  file_type: parquet
+  properties: []
+- path: l2/
+  scale: 16
+  file_type: parquet
+  properties: []
 index:
   prefix: index/
   ordered_by: subject
-  chunk_size: 64
-levels:
-  prefix: l
-  levels:
-  - 1
-  - 2
   chunk_size: 64
 version: gar/v1

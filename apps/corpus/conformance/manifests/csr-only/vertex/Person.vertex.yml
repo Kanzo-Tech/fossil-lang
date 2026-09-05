@@ -2,8 +2,10 @@ type: Person
 vertex_count: 18432
 chunk_size: 4096
 prefix: vertex/Person/
-property_groups:
-- file_type: parquet
+projections:
+- path: ''
+  scale: 1
+  file_type: parquet
   properties:
   - name: subject
     data_type: string

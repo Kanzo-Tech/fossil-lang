@@ -90,8 +90,23 @@ export interface Property {
   is_nullable?: boolean;
 }
 
-/** A group of columns stored together, one file per group per tile. */
-export interface PropertyGroup {
+/**
+ * One projection of the corpus's sequence: a scale, a path, and the columns.
+ *
+ * The payload is the entry at `scale: 1`, a level is the entry at `scale: 4^k`, an adjacency is a
+ * `scale: 1` entry with an `aligned_by`, and a level of a relation is a coarser one with it. The
+ * four vocabularies this replaced — `property_groups`, a vertex `levels`, `adj_lists` and an edge
+ * `levels` — were one rule written four times. `path` and `scale` are OME-NGFF's own spellings.
+ */
+export interface Projection {
+  /** Relative to the type's own `prefix`, with the trailing separator: `""`, `l1/`, `by_source/`. */
+  path: string;
+  /** How many rows of the sequence one row here stands for — `1` for a payload or an adjacency. */
+  scale: number;
+  /** `src` or `dst` on an edge projection; absent on a vertex one. */
+  aligned_by?: string;
+  /** Whether the rows are sorted by `aligned_by`'s column; absent on a vertex projection. */
+  ordered?: boolean;
   file_type: string;
   properties: Property[];
 }
@@ -107,18 +122,9 @@ export interface VertexInfo {
   chunk_size: number;
   /** Where the tiles are, e.g. `vertex/Person/` — the trailing separator is part of it. */
   prefix: string;
-  property_groups: PropertyGroup[];
+  /** Every projection of this type: the payload at `scale: 1`, and one per written level. */
+  projections: Projection[];
   version: string;
-}
-
-/** One orientation of an edge's adjacency, and how it is addressed. */
-export interface AdjList {
-  ordered: boolean;
-  /** `src` or `dst` — the endpoint column whose tile addresses this half. */
-  aligned_by: string;
-  /** Relative to {@link EdgeInfo.prefix}: `by_source/`, `by_target/`. */
-  prefix: string;
-  file_type: string;
 }
 
 /** One edge type's manifest document (`edge/<dir>/<dir>.edge.yml`). */
@@ -135,8 +141,8 @@ export interface EdgeInfo {
   dst_chunk_size: number;
   directed: boolean;
   prefix: string;
-  adj_lists: AdjList[];
-  property_groups: PropertyGroup[];
+  /** One per orientation at `scale: 1` — the adjacency — and one per written level. */
+  projections: Projection[];
   version: string;
 }
 

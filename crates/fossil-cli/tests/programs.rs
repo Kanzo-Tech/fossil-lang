@@ -512,11 +512,7 @@ fn render_run(report: &fossil_df::RunReport) -> String {
         out.push_str("NO VERTEX TYPE was written\n");
     }
     for v in &report.vertices {
-        let columns: Vec<&str> = v
-            .property_groups
-            .iter()
-            .flat_map(|g| g.properties.iter().map(|p| p.name.as_str()))
-            .collect();
+        let columns: Vec<&str> = v.properties().iter().map(|p| p.name.as_str()).collect();
         let _ = writeln!(
             out,
             "vertex {} ({}) × {} — {}",

@@ -61,12 +61,12 @@
         { "kind": "vertex", "type": "Person", "tile": 2, "path": "vertex/Person/chunk2.parquet" },
         { "kind": "vertex", "type": "Person", "tile": 3, "path": "vertex/Person/chunk3.parquet" },
         { "kind": "vertex", "type": "Person", "tile": 4, "path": "vertex/Person/chunk4.parquet" },
-        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 0, "path": "edge/Person_knows_Person/by_source/tile0.parquet" },
-        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 2, "path": "edge/Person_knows_Person/by_source/tile2.parquet" },
-        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 4, "path": "edge/Person_knows_Person/by_source/tile4.parquet" },
-        { "kind": "edge", "edge_type": "knows", "direction": "dst", "tile": 0, "path": "edge/Person_knows_Person/by_target/tile0.parquet" },
-        { "kind": "edge", "edge_type": "knows", "direction": "dst", "tile": 2, "path": "edge/Person_knows_Person/by_target/tile2.parquet" },
-        { "kind": "edge", "edge_type": "knows", "direction": "dst", "tile": 4, "path": "edge/Person_knows_Person/by_target/tile4.parquet" }
+        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 0, "path": "edge/Person_knows_Person/by_source/chunk0.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 2, "path": "edge/Person_knows_Person/by_source/chunk2.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 4, "path": "edge/Person_knows_Person/by_source/chunk4.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "dst", "tile": 0, "path": "edge/Person_knows_Person/by_target/chunk0.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "dst", "tile": 2, "path": "edge/Person_knows_Person/by_target/chunk2.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "dst", "tile": 4, "path": "edge/Person_knows_Person/by_target/chunk4.parquet" }
       ],
       "windows": [
         {
@@ -76,8 +76,8 @@
           "directions": ["src"],
           "vertex_urls": ["vertex/Person/chunk1.parquet", "vertex/Person/chunk2.parquet"],
           "edge_urls": [
-            "edge/Person_knows_Person/by_source/tile1.parquet",
-            "edge/Person_knows_Person/by_source/tile2.parquet"
+            "edge/Person_knows_Person/by_source/chunk1.parquet",
+            "edge/Person_knows_Person/by_source/chunk2.parquet"
           ],
           "complete": false,
           "gaps": [{ "edge_type": "knows", "direction": "dst", "reason": "not-requested" }]
@@ -89,10 +89,10 @@
           "directions": ["src", "dst"],
           "vertex_urls": ["vertex/Person/chunk1.parquet", "vertex/Person/chunk2.parquet"],
           "edge_urls": [
-            "edge/Person_knows_Person/by_source/tile1.parquet",
-            "edge/Person_knows_Person/by_source/tile2.parquet",
-            "edge/Person_knows_Person/by_target/tile1.parquet",
-            "edge/Person_knows_Person/by_target/tile2.parquet"
+            "edge/Person_knows_Person/by_source/chunk1.parquet",
+            "edge/Person_knows_Person/by_source/chunk2.parquet",
+            "edge/Person_knows_Person/by_target/chunk1.parquet",
+            "edge/Person_knows_Person/by_target/chunk2.parquet"
           ],
           "complete": true,
           "gaps": []
@@ -104,53 +104,103 @@
           "directions": ["src", "dst"],
           "vertex_urls": ["vertex/Person/chunk4.parquet"],
           "edge_urls": [
-            "edge/Person_knows_Person/by_source/tile4.parquet",
-            "edge/Person_knows_Person/by_target/tile4.parquet"
+            "edge/Person_knows_Person/by_source/chunk4.parquet",
+            "edge/Person_knows_Person/by_target/chunk4.parquet"
           ],
           "complete": true,
           "gaps": []
         }
       ],
-      "levels": [
+      "projections": [
         {
-          "about": "The pyramid ON DISK. `rows` is `VertexLevels::rows_at(300, k)` and a level tile\u0027s address is the payload\u0027s own shift of 6 plus `VertexLevels::stride_bits(k)`, which is `2k` — so level 1 is a shift of 8 and level 2 a shift of 10, and both are wider than the payload\u0027s because a level tile stands for `4^k` times as many ids. Level 2 holding 19 rows in one tile is why `planned` stops there: one tile is already one range request.",
+          "about": "The type as its projections, ON DISK. `scale: 1` is the payload and it is in this list rather than beside it — that is the claim the whole vocabulary rests on. `rows` is `count / scale` and a projection's address is the payload's own shift of 6 plus `log2(scale)` — so scale 4 is a shift of 8 and scale 16 a shift of 10, and both are wider than the payload's because a coarser tile stands for that many times as many ids. No reader here computes an exponent: the manifest carries the product. Scale 16 holding 19 rows in one tile is why `VertexLevels::planned` stops there — one tile is already one range request.",
           "type": "Person",
-          "written": [1, 2],
-          "chunk_size": 64,
+          "scales": [1, 4, 16],
           "sizes": [
-            { "level": 1, "rows": "75", "tiles": "2" },
-            { "level": 2, "rows": "19", "tiles": "1" }
+            { "scale": 1, "rows": "300", "tiles": "5" },
+            { "scale": 4, "rows": "75", "tiles": "2" },
+            { "scale": 16, "rows": "19", "tiles": "1" }
           ],
           "tile_of": [
-            { "level": 1, "dense_id": "0", "tile": "0" },
-            { "level": 1, "dense_id": "255", "tile": "0" },
-            { "level": 1, "dense_id": "256", "tile": "1" },
-            { "level": 1, "dense_id": "299", "tile": "1" },
-            { "level": 2, "dense_id": "0", "tile": "0" },
-            { "level": 2, "dense_id": "299", "tile": "0" }
+            { "scale": 1, "dense_id": "64", "tile": "1" },
+            { "scale": 4, "dense_id": "0", "tile": "0" },
+            { "scale": 4, "dense_id": "255", "tile": "0" },
+            { "scale": 4, "dense_id": "256", "tile": "1" },
+            { "scale": 4, "dense_id": "299", "tile": "1" },
+            { "scale": 16, "dense_id": "0", "tile": "0" },
+            { "scale": 16, "dense_id": "299", "tile": "0" }
           ],
           "addresses": [
-            { "level": 1, "tile": 0, "path": "vertex/Person/l1/chunk0.parquet" },
-            { "level": 1, "tile": 1, "path": "vertex/Person/l1/chunk1.parquet" },
-            { "level": 2, "tile": 0, "path": "vertex/Person/l2/chunk0.parquet" }
+            { "scale": 1, "tile": 3, "path": "vertex/Person/chunk3.parquet" },
+            { "scale": 4, "tile": 0, "path": "vertex/Person/l1/chunk0.parquet" },
+            { "scale": 4, "tile": 1, "path": "vertex/Person/l1/chunk1.parquet" },
+            { "scale": 16, "tile": 0, "path": "vertex/Person/l2/chunk0.parquet" }
           ],
           "files": [
             {
-              "level": 1,
+              "scale": 4,
               "paths": ["vertex/Person/l1/chunk0.parquet", "vertex/Person/l1/chunk1.parquet"]
             },
-            {
-              "level": 2,
-              "paths": ["vertex/Person/l2/chunk0.parquet"]
-            }
+            { "scale": 16, "paths": ["vertex/Person/l2/chunk0.parquet"] }
           ],
           "refused": [
             {
               "about": "Coarser than anything this corpus wrote, and still answerable off the payload by the predicate — which is what the message has to say rather than 404ing a camera that asked to zoom out one more step.",
-              "level": 3,
-              "message": "writes levels 1, 2 and not 3"
+              "scale": 64,
+              "message": "at scales 1, 4, 16 and not 64"
             }
           ]
+        },
+        {
+          "about": "The relation, in the same vocabulary. The adjacency is the projection at `scale: 1` — which is why its files are `chunk{k}` like every other projection rather than a stem of their own — and a level of the relation is a coarser entry beside it, always source-aligned because a level of a relation is which vertices are in it. `rows` and `tiles` are the SOURCE type's at that scale and never `edge_count`: a tile here is a range of `src_dense`, and the relation's own row count says nothing about how many of those ranges there are.",
+          "edge_type": "knows",
+          "direction": "src",
+          "scales": [1, 4, 16],
+          "sizes": [
+            { "scale": 1, "rows": "300", "tiles": "5" },
+            { "scale": 4, "rows": "75", "tiles": "2" },
+            { "scale": 16, "rows": "19", "tiles": "1" }
+          ],
+          "tile_of": [
+            { "scale": 1, "dense_id": "64", "tile": "1" },
+            { "scale": 4, "dense_id": "256", "tile": "1" },
+            { "scale": 16, "dense_id": "299", "tile": "0" }
+          ],
+          "addresses": [
+            { "scale": 1, "tile": 2, "path": "edge/Person_knows_Person/by_source/chunk2.parquet" },
+            { "scale": 4, "tile": 1, "path": "edge/Person_knows_Person/l1/chunk1.parquet" },
+            { "scale": 16, "tile": 0, "path": "edge/Person_knows_Person/l2/chunk0.parquet" }
+          ],
+          "files": [
+            {
+              "scale": 4,
+              "paths": [
+                "edge/Person_knows_Person/l1/chunk0.parquet",
+                "edge/Person_knows_Person/l1/chunk1.parquet"
+              ]
+            },
+            { "scale": 16, "paths": ["edge/Person_knows_Person/l2/chunk0.parquet"] }
+          ],
+          "refused": [
+            {
+              "about": "The refusal names the ADJACENCY and the payload, not the vertex predicate: those are the bytes that answer an unwritten relation level, and a reader handed the wrong sentence debugs the wrong file.",
+              "scale": 64,
+              "message": "at scales 1, 4, 16 and not 64 aligned by src"
+            }
+          ]
+        },
+        {
+          "about": "The target orientation is one projection and no more: a level of a relation is source-aligned, so the CSC half stops at the adjacency. A reader that mirrored the pyramid onto it would compose `l1/` under a `by_target` that never had one.",
+          "edge_type": "knows",
+          "direction": "dst",
+          "scales": [1],
+          "sizes": [{ "scale": 1, "rows": "300", "tiles": "5" }],
+          "tile_of": [],
+          "addresses": [
+            { "scale": 1, "tile": 4, "path": "edge/Person_knows_Person/by_target/chunk4.parquet" }
+          ],
+          "files": [],
+          "refused": [{ "scale": 4, "message": "at scales 1 and not 4 aligned by dst" }]
         }
       ],
       "throws": [
@@ -165,7 +215,7 @@
       "name": "csr-only",
       "root": "manifests/csr-only",
       "on_disk": false,
-      "about": "The corpus every fossil release before the target half was tiled produced: one `adj_lists` entry, `aligned_by: src`. A reader that composes `by_target/tile{k}.parquet` from the convention rather than from the manifest gets a 404 in a browser with no type error and no failing test. This case is the one that has to refuse.",
+      "about": "The corpus every fossil release before the target half was tiled produced: one `adj_lists` entry, `aligned_by: src`. A reader that composes `by_target/chunk{k}.parquet` from the convention rather than from the manifest gets a 404 in a browser with no type error and no failing test. This case is the one that has to refuse.",
       "container": "files",
       "types": [
         { "type": "Person", "prefix": "vertex/Person/", "chunk_size": 4096, "shift": 12 }
@@ -195,7 +245,7 @@
         { "type": "Person", "dense_id": "9007199254740992", "tile": "2199023255552" }
       ],
       "addresses": [
-        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 7, "path": "edge/Person_knows_Person/by_source/tile7.parquet" }
+        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 7, "path": "edge/Person_knows_Person/by_source/chunk7.parquet" }
       ],
       "refused": [
         {
@@ -211,7 +261,7 @@
           "tiles": [0],
           "directions": ["src", "dst"],
           "vertex_urls": ["vertex/Person/chunk0.parquet"],
-          "edge_urls": ["edge/Person_knows_Person/by_source/tile0.parquet"],
+          "edge_urls": ["edge/Person_knows_Person/by_source/chunk0.parquet"],
           "complete": false,
           "gaps": [{ "edge_type": "knows", "direction": "dst", "reason": "not-declared" }]
         }
@@ -253,7 +303,7 @@
           "tiles": [2],
           "directions": ["src", "dst"],
           "vertex_urls": ["vertex/Person/chunk2.parquet"],
-          "edge_urls": ["edge/Person_knows_Person/by_source/tile2.parquet"],
+          "edge_urls": ["edge/Person_knows_Person/by_source/chunk2.parquet"],
           "complete": false,
           "gaps": [{ "edge_type": "knows", "direction": "dst", "reason": "not-declared" }]
         }
@@ -308,7 +358,7 @@
           "tiles": [1],
           "directions": ["src", "dst"],
           "vertex_urls": ["vertex/Author/chunk1.parquet"],
-          "edge_urls": ["edge/Author_authored_Paper/by_source/tile1.parquet"],
+          "edge_urls": ["edge/Author_authored_Paper/by_source/chunk1.parquet"],
           "complete": true,
           "gaps": []
         },
@@ -318,7 +368,7 @@
           "tiles": [1],
           "directions": ["src", "dst"],
           "vertex_urls": ["vertex/Paper/chunk1.parquet"],
-          "edge_urls": ["edge/Author_authored_Paper/by_target/tile1.parquet"],
+          "edge_urls": ["edge/Author_authored_Paper/by_target/chunk1.parquet"],
           "complete": true,
           "gaps": []
         },
@@ -448,47 +498,42 @@
         { "kind": "vertex", "type": "Person", "tile": 244, "path": "vertex/Person/chunk244.parquet" }
       ],
       "refused": [],
-      "levels": [
+      "projections": [
         {
-          "about": "The pyramid, as a reader must compose it. `rows` is `VertexLevels::rows_at(vertex_count, k)` — `ceil(vertex_count / 4^k)` — and `tiles` is that over the level's own `chunk_size`, which is DECLARED rather than inherited from the payload's: a reader turning a level tile back into a `dense_id` range multiplies by it, and a number that has to be assumed is one a writer can change in silence. The four levels are 62 + 16 + 4 + 1 = 83 tiles against the payload's 245, which is the series `1/4 + 1/16 + …` and is the pyramid's whole cost at any corpus size.",
+          "about": "The pyramid, as a reader must compose it — and there is no second `chunk_size` in it. The cut does not change with the scale: a projection is a run of `chunk_size` rows of its own sequence, so `rows` is `vertex_count / scale` and `tiles` is that over the type's own tile size. The four levels are 62 + 16 + 4 + 1 = 83 tiles against the payload's 245, which is the series `1/4 + 1/16 + …` and is the pyramid's whole cost at any corpus size.",
           "type": "Person",
-          "written": [1, 2, 3, 4],
-          "chunk_size": 4096,
+          "scales": [1, 4, 16, 64, 256],
           "sizes": [
-            { "level": 1, "rows": "250000", "tiles": "62" },
-            { "level": 2, "rows": "62500", "tiles": "16" },
-            { "level": 3, "rows": "15625", "tiles": "4" },
-            { "level": 4, "rows": "3907", "tiles": "1" }
+            { "scale": 1, "rows": "1000000", "tiles": "245" },
+            { "scale": 4, "rows": "250000", "tiles": "62" },
+            { "scale": 16, "rows": "62500", "tiles": "16" },
+            { "scale": 64, "rows": "15625", "tiles": "4" },
+            { "scale": 256, "rows": "3907", "tiles": "1" }
           ],
           "tile_of": [
-            { "level": 1, "dense_id": "0", "tile": "0" },
-            { "level": 1, "dense_id": "16383", "tile": "0" },
-            { "level": 1, "dense_id": "16384", "tile": "1" },
-            { "level": 1, "dense_id": "999999", "tile": "61" },
-            { "level": 2, "dense_id": "65535", "tile": "0" },
-            { "level": 2, "dense_id": "65536", "tile": "1" },
-            { "level": 3, "dense_id": "262143", "tile": "0" },
-            { "level": 3, "dense_id": "262144", "tile": "1" },
-            { "level": 3, "dense_id": "999999", "tile": "3" },
-            { "level": 4, "dense_id": "999999", "tile": "0" }
+            { "scale": 4, "dense_id": "0", "tile": "0" },
+            { "scale": 4, "dense_id": "16383", "tile": "0" },
+            { "scale": 4, "dense_id": "16384", "tile": "1" },
+            { "scale": 4, "dense_id": "999999", "tile": "61" },
+            { "scale": 16, "dense_id": "65535", "tile": "0" },
+            { "scale": 16, "dense_id": "65536", "tile": "1" },
+            { "scale": 64, "dense_id": "262143", "tile": "0" },
+            { "scale": 64, "dense_id": "262144", "tile": "1" },
+            { "scale": 64, "dense_id": "999999", "tile": "3" },
+            { "scale": 256, "dense_id": "999999", "tile": "0" }
           ],
           "addresses": [
-            { "level": 1, "tile": 0, "path": "vertex/Person/l1/chunk0.parquet" },
-            { "level": 1, "tile": 61, "path": "vertex/Person/l1/chunk61.parquet" },
-            { "level": 3, "tile": 3, "path": "vertex/Person/l3/chunk3.parquet" },
-            { "level": 4, "tile": 0, "path": "vertex/Person/l4/chunk0.parquet" }
+            { "scale": 4, "tile": 0, "path": "vertex/Person/l1/chunk0.parquet" },
+            { "scale": 4, "tile": 61, "path": "vertex/Person/l1/chunk61.parquet" },
+            { "scale": 64, "tile": 3, "path": "vertex/Person/l3/chunk3.parquet" },
+            { "scale": 256, "tile": 0, "path": "vertex/Person/l4/chunk0.parquet" }
           ],
-          "files": [
-            {
-              "level": 4,
-              "paths": ["vertex/Person/l4/chunk0.parquet"]
-            }
-          ],
+          "files": [{ "scale": 256, "paths": ["vertex/Person/l4/chunk0.parquet"] }],
           "refused": [
             {
-              "about": "A level nobody wrote is not addressable and is still ANSWERABLE — by the predicate over the payload, which is what the message has to say. A reader that composed `l5/chunk0.parquet` here would 404 against a corpus that can draw level 5 perfectly well. 5 is coarser than the coarsest level `planned` writes, which is the level a writer stops at because one tile is already one request.",
-              "level": 5,
-              "message": "writes levels 1, 2, 3, 4 and not 5"
+              "about": "A projection nobody wrote is not addressable and is still ANSWERABLE — by the predicate over the payload, which is what the message has to say. A reader that composed `l5/chunk0.parquet` here would 404 against a corpus that can draw that level perfectly well. 1024 is coarser than the coarsest level `planned` writes, which is the level a writer stops at because one tile is already one request.",
+              "scale": 1024,
+              "message": "at scales 1, 4, 16, 64, 256 and not 1024"
             }
           ]
         }

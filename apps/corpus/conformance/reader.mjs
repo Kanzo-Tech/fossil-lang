@@ -82,6 +82,96 @@ const tileUrlFor = (prefix, stem, container) => (k) => tileUrl(prefix, stem, con
 /** Distinct, in order. In the row-group container every tile of a set names the same file. */
 const distinct = (urls) => [...new Set(urls)];
 
+/** A declared row count, or `null` when the manifest carries none. */
+function optionalRows(info, key) {
+  const raw = info[key];
+  if (typeof raw !== "string" || !/^\d+$/.test(raw.trim())) return null;
+  return Number(raw.trim());
+}
+
+/**
+ * The `projections:` entries of a manifest, in order and before they are resolved. **One function
+ * for the vertex list and the edge list**, because there is one list.
+ *
+ * An entry that names no `path` is **dropped and not refused**, which is what the corpus publishing
+ * one orientation without a location needs: there is no URL for it, so there is no address. An
+ * empty `path` is the payload, at the type's own prefix, and the two must not collapse. A `scale`
+ * no shift addresses IS refused, because it would force a division where the format is a shift.
+ */
+function declaredProjections(info) {
+  const entries = Array.isArray(info.projections) ? info.projections : [];
+  const out = [];
+  for (const entry of entries) {
+    if (entry === null || typeof entry !== "object" || typeof entry.path !== "string") continue;
+    const scale = Number(entry.scale);
+    if (!Number.isInteger(scale) || scale <= 0 || shiftFor(BigInt(scale)) === null) {
+      throw new Error(
+        `${info.rel} declares a projection at scale ${entry.scale}, which no shift addresses`,
+      );
+    }
+    out.push({ path: entry.path.replace(/\/+$/, ""), scale, alignedBy: entry.aligned_by });
+  }
+  return out;
+}
+
+/**
+ * One declared projection, resolved against the cut that addresses it — and there is **no exponent
+ * in it**: the shift is the type's own plus the scale's trailing zeros, and the rows are the count
+ * divided by the scale. `4^k` lives in `fossil_sinks::manifest::VertexLevels` on the writer's side,
+ * and what crosses into the document is the product.
+ */
+function resolveProjection(entry, ctx) {
+  const shift = ctx.shift + shiftFor(BigInt(entry.scale));
+  const prefix = withSlash(rel(ctx.prefix, entry.path));
+  const url = tileUrlFor(prefix, "chunk", ctx.container);
+  const rows = ctx.count === null ? null : Math.ceil(ctx.count / entry.scale);
+  const tiles = rows === null ? null : Math.ceil(rows / ctx.chunkSize);
+  return {
+    path: entry.path,
+    scale: entry.scale,
+    direction: ctx.direction ?? null,
+    column: ctx.column,
+    prefix,
+    container: ctx.container,
+    chunkSize: ctx.chunkSize,
+    shift: Number(shift),
+    rows,
+    tiles,
+    tileOf: (denseId) => tileOf(denseId, shift),
+    tileUrl: url,
+    files: () => {
+      if (tiles === null) {
+        throw new Error(
+          `${ctx.rel}: ${prefix} is addressed by ${ctx.countedBy}, which declares no vertex_count, ` +
+            `so how many tiles it has is not derivable — tiles are addressed and never listed, and ` +
+            `HTTP gives no directory to fall back on`,
+        );
+      }
+      return distinct(Array.from({ length: tiles }, (_, k) => url(k)));
+    },
+  };
+}
+
+/** The scales a manifest wrote, for a refusal that has to name what a reader CAN ask for. */
+const writtenScales = (projections) => [...new Set(projections.map((p) => p.scale))].join(", ");
+
+/**
+ * Every projection of a VERTEX type, finest first. A vertex projection has no `aligned_by`: its
+ * address IS a `dense_id`, which is the rank in the one order a corpus has.
+ */
+function projectionsOf(info, ctx) {
+  const out = declaredProjections(info)
+    .filter((entry) => entry.alignedBy === undefined)
+    .map((entry) => resolveProjection(entry, { ...ctx, column: "dense_id", direction: null }))
+    .sort((a, b) => a.scale - b.scale);
+  if (!out.some((p) => p.scale === 1)) {
+    throw new Error(
+      `${ctx.rel} declares no projection at scale 1, so ${ctx.countedBy} has no payload to address`,
+    );
+  }
+  return out;
+}
+
 /**
  * Resolve a corpus root into the addresses a reader composes URLs from.
  *
@@ -102,6 +192,15 @@ export function resolve(root, base = "") {
       throw new Error(`${info.rel} declares a tile of ${chunkSize} rows, which no shift addresses`);
     }
     const typePrefix = withSlash(rel(prefix, need(info, "prefix")));
+    const projections = projectionsOf(info, {
+      rel: info.rel,
+      prefix: typePrefix,
+      container,
+      chunkSize,
+      shift,
+      count: optionalRows(info, "vertex_count"),
+      countedBy: need(info, "type"),
+    });
     return {
       type: need(info, "type"),
       prefix: typePrefix,
@@ -110,80 +209,40 @@ export function resolve(root, base = "") {
       shift: Number(shift),
       tileOf: (denseId) => tileOf(denseId, shift),
       tileUrl: tileUrlFor(typePrefix, "chunk", container),
+      /**
+       * **Every projection of this type**, the payload included — the entry at `scale: 1`.
+       *
+       * A level is the predicate `dense_id % scale == 0` over the payload whatever the manifest
+       * says, so a type declaring only its payload is a corpus and not a gap: what a written level
+       * changes is which bytes answer, never which rows. Which of them a writer spent bytes on is a
+       * POLICY — a reader cannot re-derive it from `vertex_count` and `chunk_size` without
+       * reimplementing the writer's plan — so it reads the list.
+       *
+       * **The exponent never crosses into this file.** `scale` is the product, so the rows are a
+       * division and the shift is the payload's plus the scale's own trailing zeros.
+       */
+      count: optionalRows(info, "vertex_count"),
+      projections,
+      projection: (scale) => projections.find((p) => p.scale === scale) ?? null,
+      projectionFiles: (scale) => {
+        const found = projections.find((p) => p.scale === scale);
+        if (found === undefined) {
+          throw new Error(
+            `${info.rel} writes ${need(info, "type")} at scales ${writtenScales(projections)} and not ` +
+              `${scale}, so its files are not addressable — the predicate over the payload is what ` +
+              `answers that scale`,
+          );
+        }
+        return found.files();
+      },
       // The identity index, or `null`. A half-declared one is refused rather than
       // ignored: ignoring it reads exactly like a corpus that declares none, and
       // guessing the sort of files whose `ordered_by` is missing returns a
       // plausible stranger instead of nothing.
-      /**
-       * The WRITTEN levels, or `null`. A level is the predicate `dense_id % 4^k == 0` over the
-       * payload whatever this says, so `null` is a corpus and not a gap — what a written level
-       * changes is which bytes answer, never which rows.
-       *
-       * A block that names a prefix and no level list is refused on the index's argument: which
-       * levels a writer spent bytes on is a POLICY, a reader cannot re-derive it from
-       * `vertex_count` and `chunk_size` without reimplementing the writer's plan, and a
-       * half-declared pyramid read as none is the difference between opening `l6/` and striding a
-       * million rows.
-       */
-      levels: (() => {
-        const declared = info.levels;
-        if (declared === undefined || declared === null || Array.isArray(declared)) return null;
-        const stem = declared.prefix;
-        if (typeof stem !== "string" || stem === "") {
-          throw new Error(`${info.rel} declares levels and no prefix, so the tiles they name cannot be composed`);
-        }
-        const listed = Array.isArray(declared.levels) ? declared.levels : [];
-        if (listed.length === 0) {
-          throw new Error(
-            `${info.rel} declares levels and no level list, so which of them is written is not ` +
-              `derivable — and it is a policy, not arithmetic a reader can redo`,
-          );
-        }
-        const written = listed.map((raw) => {
-          const level = Number(raw);
-          if (!Number.isInteger(level) || level < 0) {
-            throw new Error(`${info.rel} declares level ${raw}, which is not a level`);
-          }
-          return level;
-        });
-        const levelChunk = Number(declared.chunk_size);
-        const levelShift = Number.isInteger(levelChunk) && levelChunk > 0 ? shiftFor(BigInt(levelChunk)) : null;
-        if (levelShift === null) {
-          throw new Error(
-            `${info.rel} declares a level tile of ${declared.chunk_size} rows, which no shift addresses`,
-          );
-        }
-        const count = needRows(info, "vertex_count");
-        const levelPrefix = (level) => withSlash(rel(typePrefix, `${stem}${level}`));
-        const rows = (level) => Math.ceil(count / 4 ** level);
-        return {
-          levels: written,
-          chunkSize: levelChunk,
-          shift: Number(levelShift),
-          container,
-          has: (level) => written.includes(level),
-          prefix: levelPrefix,
-          // `2k` more bits of `dense_id` fall off than the payload's own address drops: level `k`
-          // holds one row in `4^k`, so a tile of it spans that many times the ids.
-          tileOf: (level, denseId) => tileOf(denseId, levelShift + 2n * BigInt(level)),
-          tileUrl: (level, tile) => tileUrlFor(levelPrefix(level), "chunk", container)(tile),
-          rows,
-          tiles: (level) => Math.ceil(rows(level) / levelChunk),
-          files: (level) => {
-            if (!written.includes(level)) {
-              throw new Error(
-                `${info.rel} writes levels ${written.join(", ")} and not ${level}, so its files are ` +
-                  `not addressable — the predicate over the payload is what answers that level`,
-              );
-            }
-            const urls = [];
-            for (let k = 0; k < Math.ceil(rows(level) / levelChunk); k += 1) {
-              urls.push(tileUrlFor(levelPrefix(level), "chunk", container)(k));
-            }
-            return distinct(urls);
-          },
-        };
-      })(),
+      //
+      // It is also the ONE artefact of a corpus that is not a projection: a second ORDER over the
+      // same rows, so the Morton cut does not address it — which is why it carries a `chunk_size`
+      // of its own, and why its tiles are the only ones spelled `tile{k}` rather than `chunk{k}`.
       index: (() => {
         const declared = info.index;
         if (declared === undefined || declared === null || Array.isArray(declared)) return null;
@@ -220,31 +279,55 @@ export function resolve(root, base = "") {
       }
     }
     const edgePrefix = withSlash(rel(prefix, need(info, "prefix")));
-    const declared = new Map();
-    for (const entry of Array.isArray(info.adj_lists) ? info.adj_lists : []) {
-      const direction = entry?.aligned_by;
-      if (direction !== "src" && direction !== "dst") continue;
-      const adjPrefix = String(entry.prefix ?? "").replace(/\/+$/, "");
-      if (adjPrefix === "") continue;
-      const vertex = direction === "src" ? src : dst;
-      const tilePrefix = withSlash(rel(edgePrefix, adjPrefix));
-      declared.set(direction, {
-        direction,
-        prefix: tilePrefix,
-        container,
-        column: direction === "src" ? "src_dense" : "dst_dense",
-        chunkSize: vertex.chunkSize,
-        shift: vertex.shift,
-        tileUrl: tileUrlFor(tilePrefix, "tile", container),
-      });
+    // The same list a vertex type has, told apart by `aligned_by`: the two adjacencies are its
+    // `scale: 1` entries and a level of the relation is a coarser one, always source-aligned
+    // because a level of a relation is *which vertices are in it*. An entry with no orientation
+    // names no column to filter on, so nothing addresses it and it is not here.
+    const projections = [];
+    for (const entry of declaredProjections(info)) {
+      if (entry.alignedBy !== "src" && entry.alignedBy !== "dst") continue;
+      const vertex = entry.alignedBy === "src" ? src : dst;
+      projections.push(
+        resolveProjection(entry, {
+          rel: info.rel,
+          prefix: edgePrefix,
+          container,
+          chunkSize: vertex.chunkSize,
+          shift: BigInt(vertex.shift),
+          count: vertex.count,
+          countedBy: vertex.type,
+          column: entry.alignedBy === "src" ? "src_dense" : "dst_dense",
+          direction: entry.alignedBy,
+        }),
+      );
     }
+    // Finest first and `src` before `dst`, whatever order the manifest wrote them in — the two
+    // readers this is diffed against both report the orientations in that order, and `dst` sorts
+    // before `src` as a string.
+    const order = { src: 0, dst: 1 };
+    projections.sort((a, b) => a.scale - b.scale || order[a.direction] - order[b.direction]);
+    const projection = (scale, d) => projections.find((p) => p.scale === scale && p.direction === d) ?? null;
     return {
       edgeType: need(info, "edge_type"),
       srcType: src.type,
       dstType: dst.type,
       prefix: edgePrefix,
-      directions: ["src", "dst"].filter((d) => declared.has(d)),
-      adjacency: (d) => declared.get(d) ?? null,
+      projections,
+      projection,
+      directions: ["src", "dst"].filter((d) => projection(1, d) !== null),
+      adjacency: (d) => projection(1, d),
+      projectionFiles: (scale, d) => {
+        const found = projection(scale, d);
+        if (found === null) {
+          throw new Error(
+            `${info.rel} writes ${need(info, "edge_type")} at scales ` +
+              `${writtenScales(projections.filter((p) => p.direction === d))} and not ` +
+              `${scale} aligned by ${d}, so its files are not addressable — the adjacency and the ` +
+              `payload are what answer that scale`,
+          );
+        }
+        return found.files();
+      },
     };
   });
 

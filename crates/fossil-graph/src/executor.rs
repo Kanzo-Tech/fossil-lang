@@ -194,9 +194,8 @@ impl<E: DuckExecutor> Context<'_, E> {
         let mut fields: Vec<(String, String)> = self
             .manifest
             .lookup_vertex(vertex_type)?
-            .property_groups
+            .properties()
             .iter()
-            .flat_map(|g| g.properties.iter())
             .filter(|prop| !RESERVED_VERTEX_COLUMNS.contains(&prop.name.as_str()))
             .map(|prop| (prop.name.clone(), prop.data_type.clone()))
             .collect();
@@ -454,9 +453,8 @@ impl<E: DuckExecutor> Context<'_, E> {
         let props: Vec<&str> = self
             .manifest
             .lookup_vertex(&p.vertex_type)?
-            .property_groups
+            .properties()
             .iter()
-            .flat_map(|g| g.properties.iter())
             .map(|prop| prop.name.as_str())
             .collect();
 
@@ -756,9 +754,8 @@ impl<E: DuckExecutor> Context<'_, E> {
     fn field_datatype(&self, vertex_type: &str, field: &str) -> Result<String> {
         self.manifest
             .lookup_vertex(vertex_type)?
-            .property_groups
+            .properties()
             .iter()
-            .flat_map(|g| g.properties.iter())
             .find(|prop| prop.name == field)
             .map(|prop| prop.data_type.clone())
             .ok_or_else(|| GraphError::UnknownEntity {
@@ -981,7 +978,7 @@ mod tests {
     use crate::manifest::{GRAPH_INFO_PATH, ManifestSource};
     use crate::operations::raw_sql::RawSqlAccess;
     use fossil_sinks::manifest::{
-        Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+        Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
     };
     use std::collections::HashMap;
 
@@ -1001,9 +998,9 @@ mod tests {
             3,
             DEFAULT_CHUNK_SIZE,
             "vertex/Person/",
-            vec![PropertyGroup {
-                file_type: "parquet".into(),
-                properties: vec![
+            vec![Projection::payload(
+                "",
+                vec![
                     Property {
                         name: "dense_id".into(),
                         data_type: "uint32".into(),
@@ -1025,7 +1022,7 @@ mod tests {
                         is_nullable: None,
                     },
                 ],
-            }],
+            )],
         );
         info.iri = "http://example.org/Person".into();
         info
@@ -1044,9 +1041,7 @@ mod tests {
             dst_chunk_size: DEFAULT_CHUNK_SIZE,
             directed: true,
             prefix: "edge/Person_knows_Person/".into(),
-            adj_lists: vec![],
-            property_groups: vec![],
-            levels: None,
+            projections: vec![],
             version: "gar/v1".into(),
         };
         let graph = GraphInfo::new(

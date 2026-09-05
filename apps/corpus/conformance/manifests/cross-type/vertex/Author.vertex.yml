@@ -2,8 +2,10 @@ type: Author
 vertex_count: 288
 chunk_size: 64
 prefix: vertex/Author/
-property_groups:
-- file_type: parquet
+projections:
+- path: ''
+  scale: 1
+  file_type: parquet
   properties:
   - name: subject
     data_type: string

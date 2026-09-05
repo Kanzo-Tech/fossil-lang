@@ -430,10 +430,11 @@ fn run_rdf_resolves_edges_to_a_property_less_leaf_shape() {
 /// three layout columns it appends. `RunStatus` listed only the middle group;
 /// the manifest declares all of them, and a reader gets all of them.
 fn declared_columns(vertex: &serde_json::Value) -> Vec<String> {
-    vertex["property_groups"]
+    vertex["projections"]
         .as_array()
-        .expect("property groups")
+        .expect("projections")
         .iter()
+        .filter(|p| p["scale"] == 1)
         .flat_map(|g| {
             g["properties"]
                 .as_array()

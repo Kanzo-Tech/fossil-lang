@@ -254,108 +254,165 @@ fn check_refusals(label: &str, case: &Value, corpus: &ReadPlan) -> usize {
     checked
 }
 
-/// The **written pyramid**: which levels a type has, what each holds, where its
-/// tiles are, and the level it refuses to address.
+/// **Every projection the table declares, and no other** — a vertex type's, and
+/// one orientation of a relation's.
 ///
-/// A type the table says nothing about must report NONE. A reader that invented a
-/// level list would compose `l6/chunk0.parquet` against a corpus that never wrote
-/// one — a 404 for a level the predicate over the payload answers perfectly well,
-/// which is the failure mode a pyramid is worth having only if it cannot have.
+/// One function for the two, because there is one vocabulary: an entry keyed by
+/// `type` is a vertex and one keyed by `edge_type` and `direction` is an edge,
+/// and both answer the same four questions. A subject the table says nothing
+/// about must report its payload and nothing else: a reader that invented a
+/// scale would compose `l6/chunk0.parquet` against a corpus that never wrote
+/// one, and 404 for a level the predicate over the payload answers perfectly
+/// well.
 ///
-/// Returns how many level addresses were checked, for the non-vacuity count.
-fn check_levels(label: &str, case: &Value, corpus: &ReadPlan) -> usize {
-    let declared: Vec<String> = list(case, "levels").iter().map(|l| s(l, "type")).collect();
-    for vertex in &corpus.types {
-        assert_eq!(
-            vertex.levels.is_some(),
-            declared.contains(&vertex.vertex_type),
-            "{label}: {} reports a pyramid the table does not declare, or misses one",
-            vertex.vertex_type
-        );
+/// Returns how many projection addresses were checked, for the non-vacuity count.
+fn check_projections(label: &str, case: &Value, corpus: &ReadPlan) -> usize {
+    let declared = list(case, "projections");
+    let mut checked = 0;
+
+    // The subjects, flattened: every vertex type, and every orientation of every
+    // relation. `scales` and `files` come from whichever it is, and nothing below
+    // knows which.
+    let mut subjects: Vec<(String, Option<Direction>, Vec<u64>)> = corpus
+        .types
+        .iter()
+        .map(|t| {
+            (
+                t.vertex_type.clone(),
+                None,
+                t.projections.iter().map(|p| p.scale).collect(),
+            )
+        })
+        .collect();
+    for edge in &corpus.edges {
+        for d in [Direction::Src, Direction::Dst] {
+            let scales: Vec<u64> = edge
+                .projections
+                .iter()
+                .filter(|p| p.direction == Some(d))
+                .map(|p| p.scale)
+                .collect();
+            subjects.push((edge.edge_type.clone(), Some(d), scales));
+        }
     }
 
-    let mut checked = 0;
-    for want in list(case, "levels") {
-        let vertex = corpus
-            .vertex_type(Some(&s(want, "type")))
-            .unwrap_or_else(|e| panic!("{label}: {e}"));
-        let levels = vertex.levels.as_ref().unwrap_or_else(|| {
-            panic!(
-                "{label}: {} declares levels and the reader sees none",
-                vertex.vertex_type
+    for (name, direction, scales) in &subjects {
+        let want = declared.iter().find(|d| {
+            direction.map_or_else(
+                || s(d, "type") == *name,
+                |dir| s(d, "edge_type") == *name && s(d, "direction") == dir.as_str(),
             )
         });
-
-        let written: Vec<u64> = levels.levels.iter().map(|&l| u64::from(l)).collect();
-        let wanted: Vec<u64> = list(want, "written")
+        let Some(want) = want else {
+            // The default the table does not spell out: a payload, or an
+            // orientation the corpus does not publish at all.
+            assert!(
+                scales.iter().all(|&scale| scale == 1),
+                "{label}: {name} reports scales {scales:?} the table does not declare"
+            );
+            continue;
+        };
+        let wanted: Vec<u64> = list(want, "scales")
             .iter()
-            .map(|l| l.as_u64().expect("a level"))
+            .map(|v| v.as_u64().expect("a scale"))
             .collect();
-        assert_eq!(written, wanted, "{label}: written levels");
-        assert_eq!(
-            levels.chunk_size,
-            u(want, "chunk_size"),
-            "{label}: level chunk_size"
-        );
+        assert_eq!(scales, &wanted, "{label}: {name} scales");
+
+        let projection = |scale: u64| {
+            direction
+                .map_or_else(
+                    || {
+                        corpus
+                            .vertex_type(Some(name))
+                            .expect("a declared type")
+                            .projection(scale)
+                    },
+                    |d| {
+                        corpus
+                            .edges
+                            .iter()
+                            .find(|e| e.edge_type == *name)
+                            .expect("a declared edge")
+                            .projection(scale, d)
+                    },
+                )
+                .unwrap_or_else(|| panic!("{label}: {name} writes no scale {scale}"))
+        };
+        let files = |scale: u64| {
+            direction.map_or_else(
+                || {
+                    corpus
+                        .vertex_type(Some(name))
+                        .expect("a declared type")
+                        .projection_files(scale)
+                },
+                |d| {
+                    corpus
+                        .edges
+                        .iter()
+                        .find(|e| e.edge_type == *name)
+                        .expect("a declared edge")
+                        .projection_files(scale, d)
+                },
+            )
+        };
 
         for size in list(want, "sizes") {
-            let level = u32::try_from(u(size, "level")).expect("a level");
+            let scale = u(size, "scale");
+            let found = projection(scale);
             assert_eq!(
-                levels.rows(level),
+                found.rows,
                 Some(u(size, "rows")),
-                "{label}: l{level} rows"
+                "{label}: scale {scale} rows"
             );
             assert_eq!(
-                levels.tiles(level),
+                found.tiles,
                 Some(u(size, "tiles")),
-                "{label}: l{level} tiles"
+                "{label}: scale {scale} tiles"
             );
         }
 
         for entry in list(want, "tile_of") {
-            let level = u32::try_from(u(entry, "level")).expect("a level");
+            let scale = u(entry, "scale");
             let dense_id = u(entry, "dense_id");
             assert_eq!(
-                levels.tile_of(level, dense_id),
+                projection(scale).tile_of(dense_id),
                 u(entry, "tile"),
-                "{label}: l{level} tile_of({dense_id})"
+                "{label}: scale {scale} tile_of({dense_id})"
             );
         }
 
         for address in list(want, "addresses") {
-            let level = u32::try_from(u(address, "level")).expect("a level");
+            let scale = u(address, "scale");
             assert_eq!(
-                levels.tile_url(level, u(address, "tile")),
+                projection(scale).tile_url(u(address, "tile")),
                 s(address, "path"),
-                "{label}: composed the wrong level URL"
+                "{label}: composed the wrong projection URL"
             );
             checked += 1;
         }
 
         for set in list(want, "files") {
-            let level = u32::try_from(u(set, "level")).expect("a level");
-            let got = levels
-                .files(level)
-                .unwrap_or_else(|e| panic!("{label}: l{level} files: {e}"));
+            let scale = u(set, "scale");
+            let got = files(scale).unwrap_or_else(|e| panic!("{label}: scale {scale} files: {e}"));
             assert_eq!(
                 serde_json::to_value(&got).unwrap(),
                 set["paths"],
-                "{label}: l{level} files"
+                "{label}: scale {scale} files"
             );
             checked += 1;
         }
 
         for refused in list(want, "refused") {
-            let level = u32::try_from(u(refused, "level")).expect("a level");
+            let scale = u(refused, "scale");
             let expected = s(refused, "message");
-            let error = levels
-                .files(level)
+            let error = files(scale)
                 .err()
-                .unwrap_or_else(|| panic!("{label}: addressed level {level}, which nobody wrote"));
+                .unwrap_or_else(|| panic!("{label}: addressed scale {scale}, which nobody wrote"));
             let message = error.to_string();
             assert!(
                 message.contains(&expected),
-                "{label}: refused l{level} with \"{message}\", which does not say \"{expected}\""
+                "{label}: refused scale {scale} with \"{message}\", which does not say \"{expected}\""
             );
         }
     }
@@ -412,7 +469,7 @@ fn every_address_in_the_table_reproduces() {
 
     let mut checked_addresses = 0usize;
     let mut checked_refusals = 0usize;
-    let mut checked_levels = 0usize;
+    let mut checked_projections = 0usize;
 
     for case in cases {
         let label = s(case, "name");
@@ -449,7 +506,7 @@ fn every_address_in_the_table_reproduces() {
         check_types(&label, case, &corpus);
         checked_addresses += check_addresses(&label, case, &root, &corpus);
         checked_refusals += check_refusals(&label, case, &corpus);
-        checked_levels += check_levels(&label, case, &corpus);
+        checked_projections += check_projections(&label, case, &corpus);
         check_windows(&label, case, &corpus);
     }
 
@@ -471,8 +528,9 @@ fn every_address_in_the_table_reproduces() {
     // have no pyramid. A shared non-vacuity counter is one that cannot see a
     // section of the table disappear.
     assert!(
-        checked_levels >= 5,
-        "non-vacuity: {checked_levels} level address(es) checked, so the table declares no pyramid"
+        checked_projections >= 5,
+        "non-vacuity: {checked_projections} projection address(es) checked, so the table declares \
+         no pyramid"
     );
 }
 

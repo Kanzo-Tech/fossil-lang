@@ -179,7 +179,7 @@ fn run_w0b_writes_graph_ar_under_dest() {
 ///
 /// **It is the manifest and not a second account of one.** Every key asserted
 /// below is a `fossil_sinks::manifest` field, spelled the way the YAML on disk
-/// spells it — `type`, `vertex_count`, `prefix`, `property_groups` — so a host
+/// spells it — `type`, `vertex_count`, `prefix`, `projections` — so a host
 /// that learns the format learns stdout for free, and the two cannot drift.
 #[test]
 fn run_w0b_output_json_is_parseable() {
@@ -235,10 +235,15 @@ fn run_w0b_output_json_is_parseable() {
         "hello.fossil writes 5 Persons (examples/users.csv); got: {first}"
     );
     assert!(
-        first["property_groups"][0]["properties"]
+        first["projections"][0]["properties"]
             .as_array()
             .is_some_and(|c| c.iter().any(|col| col["name"] == "name")),
-        "the property group must declare the `name` column; got: {first}"
+        "the payload projection must declare the `name` column; got: {first}"
+    );
+    assert_eq!(
+        first["projections"][0]["scale"].as_u64(),
+        Some(1),
+        "the payload is the projection at scale 1, and it comes first; got: {first}"
     );
 
     // The JSON on stdout and the YAML on disk are the same values. That is the
@@ -380,7 +385,7 @@ ex:Order {
         .iter()
         .find(|v| v["type"] == "Order")
         .expect("Order vertex in the report");
-    let cols: Vec<&str> = order_v["property_groups"][0]["properties"]
+    let cols: Vec<&str> = order_v["projections"][0]["properties"]
         .as_array()
         .expect("properties array")
         .iter()
@@ -418,7 +423,7 @@ ex:Order {
         Some("https://example.org/Person"),
         "vertex carries its full RDF type IRI; got: {person_v}"
     );
-    let name_col = person_v["property_groups"][0]["properties"]
+    let name_col = person_v["projections"][0]["properties"]
         .as_array()
         .expect("properties array")
         .iter()

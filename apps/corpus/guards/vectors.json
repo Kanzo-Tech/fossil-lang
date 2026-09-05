@@ -125,15 +125,15 @@
       {
         "container": "files",
         "prefix": "edge/Person_knows_Person/by_source/",
-        "stem": "tile",
+        "stem": "chunk",
         "tile": "3",
-        "url": "edge/Person_knows_Person/by_source/tile3.parquet",
-        "why": "an adjacency orientation, whose stem is `tile` and not `chunk`. The prefix is the one the `adj_lists` entry declares, never the convention that names it"
+        "url": "edge/Person_knows_Person/by_source/chunk3.parquet",
+        "why": "an adjacency orientation, and it spells its files the way EVERY projection does: an adjacency is the projection at `scale: 1`, not a different kind of artefact with a stem of its own. The prefix is the one the projection's `path` declares, never the convention that names it. The identity index is the only set spelled `tile{k}`, because it is the only artefact that is not a projection"
       },
       {
         "container": "rowgroups",
         "prefix": "edge/Person_knows_Person/by_source/",
-        "stem": "tile",
+        "stem": "chunk",
         "tile": "3",
         "url": "edge/Person_knows_Person/by_source/tiles.parquet",
         "why": "one file per ORIENTATION and not per corpus: `by_target` has its own, because they are one relation stored twice and a reader filtering the wrong one answers a question nobody asked"

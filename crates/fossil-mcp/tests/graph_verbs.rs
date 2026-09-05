@@ -14,7 +14,7 @@ use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
 use fossil_graph::{GraphError, Operation, RawSql, RawSqlAccess, Result, dispatch};
 use fossil_mcp::ConnectionExecutor;
 use fossil_sinks::manifest::{
-    Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+    Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
 };
 
 /// In-memory manifest source mirroring the writer's on-disk layout.
@@ -45,9 +45,9 @@ fn manifest() -> Manifest {
         3,
         DEFAULT_CHUNK_SIZE,
         "vertex/Person/",
-        vec![PropertyGroup {
-            file_type: "parquet".into(),
-            properties: vec![
+        vec![Projection::payload(
+            "",
+            vec![
                 prop("dense_id", "uint32", true),
                 prop("subject", "string", false),
                 prop("age", "int64", false),
@@ -56,7 +56,7 @@ fn manifest() -> Manifest {
                 prop("y", "float", false),
                 prop("cluster_id", "uint32", false),
             ],
-        }],
+        )],
     );
     person.iri = "http://example.org/Person".into();
     let edge = EdgeInfo {
@@ -70,9 +70,7 @@ fn manifest() -> Manifest {
         dst_chunk_size: DEFAULT_CHUNK_SIZE,
         directed: true,
         prefix: "edge/Person_knows_Person/".into(),
-        adj_lists: vec![],
-        property_groups: vec![],
-        levels: None,
+        projections: vec![],
         version: "gar/v1".into(),
     };
     let graph = GraphInfo::new(

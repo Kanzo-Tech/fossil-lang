@@ -7,20 +7,29 @@ src_chunk_size: 64
 dst_chunk_size: 64
 directed: true
 prefix: edge/Person_knows_Person/
-adj_lists:
-- ordered: true
+projections:
+- path: by_source/
+  scale: 1
   aligned_by: src
-  prefix: by_source/
+  ordered: true
   file_type: parquet
-- ordered: true
+  properties: []
+- path: by_target/
+  scale: 1
   aligned_by: dst
-  prefix: by_target/
+  ordered: true
   file_type: parquet
-property_groups: []
-levels:
-  prefix: l
-  levels:
-  - 1
-  - 2
-  chunk_size: 64
+  properties: []
+- path: l1/
+  scale: 4
+  aligned_by: src
+  ordered: true
+  file_type: parquet
+  properties: []
+- path: l2/
+  scale: 16
+  aligned_by: src
+  ordered: true
+  file_type: parquet
+  properties: []
 version: gar/v1

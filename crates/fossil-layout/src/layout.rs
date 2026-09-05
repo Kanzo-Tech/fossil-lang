@@ -196,7 +196,7 @@ use fossil_df::files::TileWriter;
 use fossil_mem_probe::Probe;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
-use fossil_sinks::manifest::{EdgeLevels, TILES_FILE, VertexLevels};
+use fossil_sinks::manifest::{TILES_FILE, VertexLevels};
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -1256,10 +1256,10 @@ pub fn enrich_layout_with(
             let src = index_of(&adjacency.src_type, aurl)?;
             let dst = index_of(&adjacency.dst_type, aurl)?;
             let source_count = placed[src].len() as u64;
+            // The SOURCE type's own plan and not a second one: a level of a
+            // relation is *which vertices are in it*. One plan, two artefacts.
             if let Some(plan) = VertexLevels::planned(source_count, endpoint.chunk_size) {
-                let levels =
-                    EdgeLevels::from_vertex(Some(&plan)).expect("a plan yields a level set");
-                write_edge_levels(io, aurl, &levels, &keys, &placed[src], &placed[dst])?;
+                write_edge_levels(io, aurl, &plan, &keys, &placed[src], &placed[dst])?;
                 probe.sample(&format!("{step}: write edge levels"));
             }
         }
@@ -1853,7 +1853,7 @@ fn unpack(
 fn write_edge_levels(
     io: &dyn LayoutIo,
     adjacency: &str,
-    plan: &EdgeLevels,
+    plan: &VertexLevels,
     keys: &[u64],
     src_placed: &[(f32, f32)],
     dst_placed: &[(f32, f32)],

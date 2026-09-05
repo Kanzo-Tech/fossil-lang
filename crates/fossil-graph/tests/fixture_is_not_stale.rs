@@ -101,9 +101,8 @@ fn the_fixture_says_how_far_it_goes() {
 fn the_fixture_does_not_mark_the_address_as_the_identity() {
     let person = vertex();
     let primary: Vec<&str> = person
-        .property_groups
+        .properties()
         .iter()
-        .flat_map(|g| g.properties.iter())
         .filter(|p| p.is_primary)
         .map(|p| p.name.as_str())
         .collect();

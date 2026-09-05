@@ -178,9 +178,10 @@ async fn execute_graph_emits_one_manifest_and_the_report_repeats_it() {
     assert_eq!(edge.prefix, "edge/Order_placedBy_Person/");
     assert_eq!(edge.edge_count, 4);
     assert_eq!(
-        edge.adj_lists
+        edge.projections
             .iter()
-            .map(|a| a.prefix.as_str())
+            .filter(|p| p.scale == 1)
+            .map(|p| p.path.as_str())
             .collect::<Vec<_>>(),
         ["by_source/", "by_target/"],
         "both orientations, each saying where its tiles are",

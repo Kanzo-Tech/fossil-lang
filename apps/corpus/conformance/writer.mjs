@@ -26,7 +26,7 @@
  * on `guards/README.md` is that the directory runs on `node` and `duckdb` alone, and it stays true.
  *
  * **What it proves.** That the four manifest fields a reader addresses with (`prefix`, `chunk_size`,
- * `aligned_by`, the adjacency `prefix`) name, in the corpus fossil actually emits, the files fossil
+ * `aligned_by`, the projection's `path`) name, in the corpus fossil actually emits, the files fossil
  * actually wrote — and that the rows inside each of those files are the `dense_id` range the shift
  * says they are. A change to fossil's tiling that both readers are ignorant of turns this red while
  * `verify.mjs` stays green.
@@ -143,7 +143,7 @@ function payloadFiles(root, at = root) {
  *
  * `fossil-df/src/lib.rs:1731` emits `edge/<dir>/by_source.parquet` and `by_target.parquet` beside
  * the tiled `by_source/tile{k}.parquet` — the same rows, in the row-group container, with the run
- * status naming them and no `adj_lists` entry pointing at them. A reader holding only the manifest
+ * status naming them and no projection pointing at them. A reader holding only the manifest
  * cannot reach them, which is why they are excluded here rather than reported as unreachable: they
  * are addressed by something that is not the manifest. The *count* is reported, because a second
  * copy of every edge is a real cost and the number is what makes it arguable.

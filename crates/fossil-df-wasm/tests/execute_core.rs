@@ -124,12 +124,9 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
         "the vertex's type IRI comes from the registered document"
     );
     assert!(
-        v.property_groups[0]
-            .properties
-            .iter()
-            .any(|p| p.name == "name"),
+        v.properties().iter().any(|p| p.name == "name"),
         "Person carries the name column: {:?}",
-        v.property_groups,
+        v.projections,
     );
 }
 
