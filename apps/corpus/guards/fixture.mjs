@@ -11,9 +11,11 @@
  * what `self-test.mjs` mutates: every guard is proved to fire by breaking exactly one convention in
  * a corpus that otherwise satisfies all of them.
  *
- * **It writes no pyramid.** Which levels exist is a policy and
- * `fossil_sinks::manifest::VertexLevels::planned` is its one implementation; a corpus without a
- * `levels:` block is legal and always was, so a second writer of them here bought only drift.
+ * **It writes the pyramid it is TOLD to, and never decides one.** Which levels exist is a policy
+ * and `fossil_sinks::manifest::VertexLevels::planned` is its one implementation; the `levels`
+ * option is a list this emits bytes for. That is the difference between a second implementation of
+ * the FORMAT, which is this file's job, and a second copy of the DECISION, which is what a
+ * `levelPlan` here was and what drifted the day levels went from halves to quarters.
  *
  * **What it is not.** It is not a benchmark and not a realistic graph — the positions come from a
  * grid of phyllotactic discs because that is a shape with real clustering and no dependencies, not
@@ -90,7 +92,33 @@ function renumber(points) {
  * chord per vertex inside its own cluster. The ring makes the whole graph statable in one line of
  * arithmetic; the chords make the adjacency non-trivial across tiles.
  */
-export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups", chunkSize } = {}) {
+/**
+ * The `levels:` block both manifests carry, because the levels of a relation ARE its source type's.
+ *
+ * A sequence inside a mapping, one level deeper than this manifest had ever gone: `manifest.mjs`
+ * was grown to read it, and before that it scanned to `''` and a corpus with a pyramid read
+ * exactly like one without.
+ */
+const levelBlock = (levels, tileRows) =>
+  levels.length === 0
+    ? []
+    : [
+        "levels:",
+        "  prefix: l",
+        "  levels:",
+        ...levels.map((level) => `  - ${level}`),
+        `  chunk_size: ${tileRows}`,
+      ];
+
+export function write(
+  dir,
+  { count = 70_000, clusters = 256, layout = "rowgroups", chunkSize, levels = [] } = {},
+) {
+  // Given, never computed — see the header. Rejected rather than coerced, because a level 0 is the
+  // payload and a fractional one is a directory name nobody reads.
+  if (!Array.isArray(levels) || levels.some((k) => !Number.isInteger(k) || k < 1)) {
+    throw new TypeError("levels is a list of whole level numbers, each 1 or greater");
+  }
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "vertex", "Person"), { recursive: true });
   mkdirSync(join(dir, "vertex", "Person", "index"), { recursive: true });
@@ -214,6 +242,36 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       : `COPY (SELECT subject, dense_id FROM v ORDER BY subject)
            TO '${lit(join(indexPrefix, "tiles.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
 
+  /**
+   * **The written pyramid** — one payload set per level in `levels`, `l{k}/` under the type's own
+   * prefix, at the same `chunk_size` and in the same container.
+   *
+   * The file is a cache of `dense_id % 4^k == 0` and nothing else, which is what keeps it from
+   * being a second contract. So the selection below is that predicate rather than a stride over the
+   * write order, which coincides with it only while the numbering is gapless.
+   */
+  const levelCopy = levels
+    .map((level) => {
+      // Made here rather than beside the others at the top: a directory for a level nobody writes
+      // is a prefix a reader can list and find empty.
+      mkdirSync(join(vertexPrefix, `l${level}`), { recursive: true });
+      const step = 4 ** level;
+      const held = Math.ceil(count / step);
+      const prefix = join(vertexPrefix, `l${level}`);
+      const rows = `SELECT * FROM v WHERE dense_id % ${step} = 0`;
+      if (layout !== "files") {
+        return `COPY (${rows} ORDER BY dense_id) TO '${lit(join(prefix, "tiles.parquet"))}'
+                  (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
+      }
+      return Array.from(
+        { length: Math.ceil(held / tileRows) },
+        (_, k) =>
+          `COPY (${rows} ORDER BY dense_id LIMIT ${tileRows} OFFSET ${k * tileRows})
+             TO '${lit(join(prefix, `chunk${k}.parquet`))}' (FORMAT PARQUET);`,
+      ).join("\n");
+    })
+    .join("\n");
+
   // Both orientations tiled, each on the column it is ordered by: the out-edges
   // of a vertex are in the `by_source` tile its id names and the in-edges in the
   // `by_target` one, and a fixture that only wrote the source half would leave
@@ -251,6 +309,40 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
     })
     .join("\n");
 
+  /**
+   * **The pyramid of EDGES** — the edges incident to a level-`k` vertex,
+   * `src % 4^k = 0 OR dst % 4^k = 0`, each row carrying BOTH endpoints' coordinates.
+   *
+   * The coordinates are the point: a camera keeps an edge with ONE end drawn, so the far end has to
+   * be positioned to draw the line, and the set comes out of one file with no vertex tile opened.
+   */
+  const edgeLevelCopy = levels
+    .map((level) => {
+      const step = 4 ** level;
+      const at = join(edgeDir, `l${level}`);
+      mkdirSync(at, { recursive: true });
+      const rows =
+        `SELECT e.src_dense, e.dst_dense, s.x AS src_x, s.y AS src_y, d.x AS dst_x, d.y AS dst_y
+           FROM e JOIN v s ON s.dense_id = e.src_dense JOIN v d ON d.dense_id = e.dst_dense
+          WHERE (e.src_dense % ${step} = 0 OR e.dst_dense % ${step} = 0)`;
+      if (layout !== "files") {
+        return `COPY (${rows} ORDER BY e.src_dense, e.dst_dense)
+                  TO '${lit(join(at, "tiles.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
+      }
+      // The range is appended with `AND`, which is why the disjunction above is PARENTHESISED:
+      // `AND` binds tighter than `OR`, so without them every tile file also held every edge whose
+      // source is in the level, unrestricted — 152 rows where the predicate has 76.
+      const span = tileRows * step;
+      return Array.from(
+        { length: Math.ceil(count / span) },
+        (_, k) =>
+          `COPY (${rows} AND e.src_dense >= ${k * span} AND e.src_dense < ${(k + 1) * span}
+                   ORDER BY e.src_dense, e.dst_dense)
+             TO '${lit(join(at, `chunk${k}.parquet`))}' (FORMAT PARQUET);`,
+      ).join("\n");
+    })
+    .join("\n");
+
   execute(`
     CREATE TEMP TABLE v AS
       SELECT dense_id::UINTEGER AS dense_id, subject::VARCHAR AS subject,
@@ -262,7 +354,9 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
         FROM read_csv('${lit(edgeCsv)}', header = true);
     ${vertexCopy}
     ${indexCopy}
+    ${levelCopy}
     ${edgeTileCopy}
+    ${edgeLevelCopy}
   `);
 
   rmSync(vertexCsv);
@@ -335,6 +429,7 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       // with the corpus, and everything that touches a corpus reads it in full.
       "codes:",
       "  path: codes.json",
+      ...levelBlock(levels, tileRows),
       "version: gar/v1",
       "",
     ].join("\n"),
@@ -397,6 +492,7 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       "  prefix: by_target/",
       "  file_type: parquet",
       "property_groups: []",
+      ...levelBlock(levels, tileRows),
       "version: gar/v1",
       "",
     ].join("\n"),
