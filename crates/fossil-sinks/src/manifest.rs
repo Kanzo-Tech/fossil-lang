@@ -250,7 +250,7 @@ pub struct VertexInfo {
     ///
     /// `Option` for [`Self::codes`]' reason, and more strongly: a level is an
     /// optimisation of a predicate, so a corpus without one draws **the same
-    /// picture** off `dense_id % 2^k == 0` over the payload and only reads
+    /// picture** off `dense_id % 4^k == 0` over the payload and only reads
     /// more. That is what keeps this from being a second contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub levels: Option<VertexLevels>,
@@ -528,12 +528,12 @@ pub struct EdgeInfo {
 /// # What an edge level is, and why it carries positions
 ///
 /// **Level `k` of a relation is the edges incident to a level-`k` vertex** — in
-/// either orientation, `src_dense % 2^k == 0 OR dst_dense % 2^k == 0` — and each
+/// either orientation, `src_dense % 4^k == 0 OR dst_dense % 4^k == 0` — and each
 /// row carries **both endpoints' coordinates**.
 ///
 /// The positions are the whole point, and they are the reason this exists at
 /// all. A camera keeps an edge with ONE end drawn, so the other end has to be
-/// *positioned* to draw the line; a vertex level holds one row in `2^k` and the
+/// *positioned* to draw the line; a vertex level holds one row in `4^k` and the
 /// far end is almost never one of them. Measured on the bench corpus at the
 /// app's own three-pixel floor, a vertex level can position **0.79%** of the
 /// edges the same view draws — so a pyramid of vertices alone answers a view
