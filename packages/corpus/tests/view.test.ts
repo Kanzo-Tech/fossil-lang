@@ -109,10 +109,12 @@ describe('levels — the multiscale metadata', () => {
     }
   });
 
-  it('reports every level as unwritten, because nothing writes one yet', () => {
-    // The day `vertex/<Type>/l{k}/` exists this flips and NO OTHER ANSWER CHANGES — which is the
-    // property that lets the pyramid be added later without becoming a second contract.
-    expect(corpus.levels().every((l) => !l.written)).toBe(true);
+  it('reports which levels are written, and the corpus writes the two it plans', () => {
+    // `VertexLevels::planned(300, 64)` answers `[1, 2]` and the conformance corpus is regenerated
+    // with exactly that. Before it had a pyramid this asserted that NOTHING was written, and said
+    // the day `l{k}/` existed it would flip and no other answer would change. It flipped; the test
+    // below is the half that says nothing else did.
+    expect(corpus.levels().filter((l) => l.written).map((l) => l.level)).toEqual([1, 2]);
   });
 });
 
@@ -207,23 +209,52 @@ describe('view — the same rectangle at the same level is the same answer', () 
     }
   });
 
-  it('counts what the rectangle holds at level 0, not what came back', async () => {
+  it('counts what the rectangle holds at the level it counted, and says which that was', async () => {
     const box = await everything();
     for (const level of [0, 1, 3, 5]) {
       const view = await corpus.view({ ...box, level });
-      expect(view.matched).toBe(VERTEX_COUNT);
       expect(view.marks).toBe(Math.ceil(VERTEX_COUNT / strideOf(level)));
+      // A read that came from `l{k}/` cannot count level 0 without opening the bytes the pyramid
+      // exists to avoid, so `matched` is counted at `matchedAt` and never silently at zero. A
+      // strided read opened the payload, so it can and does.
+      expect(view.matched).toBe(Math.ceil(VERTEX_COUNT / strideOf(view.matchedAt)));
+      expect(view.matchedAt).toBe(view.cost.read === 'level' ? level : 0);
+    }
+  });
+
+  it('draws off a written level exactly what the predicate selects from level 0', async () => {
+    // The property the whole pyramid rests on: a written `l{k}/` is a CACHE of `dense_id % 4^k`,
+    // so the corpus answers the same ids either way and a reader never has to know which artefact
+    // replied. Untestable here until the conformance corpus had a pyramid, which it now does.
+    const box = await everything();
+    const zero = drawn(await corpus.view({ ...box, level: 0 }));
+    expect(zero).toHaveLength(VERTEX_COUNT);
+    for (const level of [1, 2]) {
+      const stride = BigInt(strideOf(level));
+      const selected = zero.filter((id) => id % stride === 0n);
+      // Non-vacuity, and it is not ceremony: two empty lists are equal, and a `view` that answered
+      // nothing would satisfy the assertion below without the corpus having a pyramid at all.
+      expect(selected).toHaveLength(Math.ceil(VERTEX_COUNT / strideOf(level)));
+      expect(drawn(await corpus.view({ ...box, level }))).toEqual(selected);
     }
   });
 
   it('reports which artefact answered the level, and what the read cost', async () => {
-    const view = await corpus.view({ ...(await everything()), level: 1 });
-    // The conformance corpus writes no `l{k}/`, so the payload is opened and strided — the same
-    // rows, more bytes, and the field that says so is the only one a pyramid would flip.
-    expect(view.cost.read).toBe('strided');
-    expect(view.cost.tiles).toBeGreaterThan(0);
-    expect(view.cost.bytes).toBeGreaterThan(0);
-    expect(view.cost.runs).toBeLessThanOrEqual(view.cost.tiles);
+    const box = await everything();
+    // Level 1 is written, so `l1/` answers. Level 3 is not, so the payload is opened and strided —
+    // the same rows, more bytes. `read` is the only field that differs between the two.
+    const written = await corpus.view({ ...box, level: 1 });
+    const strided = await corpus.view({ ...box, level: 3 });
+    expect(written.cost.read).toBe('level');
+    expect(strided.cost.read).toBe('strided');
+    for (const view of [written, strided]) {
+      expect(view.cost.tiles).toBeGreaterThan(0);
+      expect(view.cost.bytes).toBeGreaterThan(0);
+      expect(view.cost.runs).toBeLessThanOrEqual(view.cost.tiles);
+    }
+    // And the point of writing it: the level read opens strictly fewer bytes than striding the
+    // payload for a level that is FINER, so the saving is not an artefact of drawing less.
+    expect(written.cost.bytes).toBeLessThan(strided.cost.bytes);
   });
 
   it('brings a pin back whatever the level, and puts its tile on the ledger', async () => {
