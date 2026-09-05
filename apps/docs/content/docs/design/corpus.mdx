@@ -384,9 +384,9 @@ without it, and until it lands links come from the payload's own `by_source` til
 
 ### Which tiles a rectangle touches is the footers' answer, and only theirs
 
-`@fossil-lang/corpus/address` is synchronous and reads no bytes, so it cannot answer a rectangle:
-`tilesFor` takes tile numbers, and the host supplies them from the per-tile `x`/`y` statistics
-Parquet writes into every footer. `openCorpus` is the layer that has an engine to read them with,
+The addressing reads no bytes, so it cannot answer a rectangle: `tilesFor` takes tile numbers, and
+the host supplies them from the per-tile `x`/`y` statistics Parquet writes into every footer.
+`openCorpus` is the layer that has an engine to read them with,
 and it buys them while the corpus is opening rather than lazily — a request between the camera
 moving and a URL being computable is the `viewport` verb this format deleted.
 
@@ -457,9 +457,10 @@ directory rename that would have been tidier happened**: `apps/corpus/` keeps it
 `apps/docs/components/{guard-index,vector-table}.tsx` read across into it at build time.
 
 <Callout type="info">
-  The three readers of `conformance/expected.json` are unchanged in number and in kind — the rename
-  moved `packages/graph/` to `packages/corpus/` and touched no arithmetic. `fossil_graph::plan`
-  is still the third one, and still spelled that way.
+  The rename touched no arithmetic. What changed the count of readers of
+  `conformance/expected.json` was the commit after it, in which `resolveCorpus` stopped being a
+  second implementation of `fossil_graph::plan` and [became a binding over
+  it](#conformance-is-a-round-trip-and-what-it-rests-on-is-not-a-headcount).
 </Callout>
 
 ```mermaid
@@ -577,7 +578,7 @@ and that it is tiled by the same shift as the vertices it addresses. There is st
 
 The verbs do not draw and the corpus is addressed rather than queried, which leaves one thing
 unstated: *something* has to put a million points on a screen, and fossil does not ship it. What
-fossil publishes is the address — `resolveCorpus`, synchronous, no engine — and what draws is
+fossil publishes is the address — `resolveCorpus`, one reader, no bytes — and what draws is
 `@kanzo-tech/graph`, a bounded WebGL canvas over cosmos.gl whose whole data contract is one method:
 
 ```ts
@@ -592,9 +593,9 @@ Both sides had already written the same sentence about the same deleted verb. `f
 the camera is addressed and not queried; that package's own reader says *what replaces `viewport` is
 a tile brought by a computed URL, which is another source*. `apps/playground/src/tiles.ts` is that
 other source, and it is a *consumer* of [the one door](/docs/design/one-door): a viewport becomes a
-finite box, `levelFor` picks the level, `view` answers it, and what is left in the file is the
-mapping between two vocabularies. Nothing in it knows how cosmos.gl holds a buffer, and nothing in
-the renderer knows what a corpus is.
+finite box, the renderer's `perPixel` becomes the canvas it is drawn into, `frame` answers, and what
+is left in the file is the mapping between two vocabularies. Nothing in it knows how cosmos.gl holds
+a buffer, and nothing in the renderer knows what a corpus is.
 
 **The division is: the renderer owns the contract and the picture, fossil owns the address.** That
 package ships a fossil reader of its own — `openCorpus`, on its `duckdb` subpath — and the
@@ -632,10 +633,10 @@ Two things that adoption does **not** buy, and one it must not cost:
   `pnpm --filter @fossil-lang/playground... build`, which is also the only build that type-checks:
   three workspace dependencies shell out to cargo, and without the recursive form a stale `dist/`
   is what fails.
-- **No engine in `@fossil-lang/corpus`.** The renderer needs bytes; the *host* reads them. The
-  addressing subpath stays synchronous, `fetch`-free and WASM-free, which
-  `packages/corpus/tests/address-standalone.test.ts` holds by importing it from a package directory
-  with no `pkg/` in it.
+- **No engine in `@fossil-lang/corpus`.** The renderer needs bytes; the *host* reads them, and the
+  package still links none. What it no longer offers is a *WASM-free* way in — the
+  `@fossil-lang/corpus/address` subpath was that, and composing a URL now loads
+  `fossil-graph-wasm`, which is what the addressing having one implementation costs.
 
 ### A palette has a capacity, and a corpus does not know it
 
@@ -670,20 +671,21 @@ graph LR
   W["writer (Rust)"] --> C[("corpus on disk")]
   R[["recipe · provenance.mjs"]] --> C
   C --> JS["reader.mjs · from the conventions alone"]
-  C --> TS["resolveCorpus · the published module"]
-  C --> RS["fossil_graph::plan · native and wasm32"]
+  C --> RS["fossil_graph::plan · native, usize 64"]
+  C --> WS["the same plan · wasm32, usize 32<br/>re-entered from JS as resolveCorpus"]
   JS --> D{"diff"}
-  TS --> D
   RS --> D
+  WS --> D
   V[["vectors.json · the borders"]] --> D
   S[["full scan · none of them wrote it"]] --> D
 ```
 
-Three readers that never read each other, and the numbers they are diffed against come from a **full
-scan** — every tile read with no addressing at all and filtered in SQL, which is a fourth thing none
-of the implementations wrote. All of them prune, and all of them have to land where an unpruned read
-already is. That is what closes GraphAr's gap: an assertion here cannot be satisfied by agreeing with
-another implementation, only by agreeing with the bytes.
+**Two implementations that never read each other, and three legs of diff over them** — the second is
+entered twice, natively and as the wasm32 build the published package binds. The numbers all three
+are diffed against come from a **full scan** — every tile read with no addressing at all and
+filtered in SQL, a third thing neither implementation wrote. All of them prune and all have to land
+where an unpruned read already is, which is what closes GraphAr's gap: an assertion here cannot be
+satisfied by agreeing with another implementation, only by agreeing with the bytes.
 
 The corpus they resolve against is itself generated, and **the parameters that generated it are
 executed rather than remembered.** They were not written down, and the cost of that was a
@@ -696,15 +698,14 @@ as text and every payload's rows in order — and *reporting* byte-identity rath
 because a writer may change an encoding without changing a row, and a check that went red on a
 DuckDB point release would teach everyone to regenerate the fixture instead of reading the diff.
 
-**There are three readers, and the third one is Rust.** This paragraph argued the opposite, and the
-argument it made was about *consumers*: one in Rust would have none, since `fossil-mcp` composes its
-own paths, keasy reads through the TypeScript, and the writer's own validator reads the artefact with
-plain SQL on purpose so that it never passes through reader code of ours. All of that is still true
-and none of it was the point. **Both existing readers were JavaScript**, and a mistake they share is
-invisible to a diff of the two — a shift taken as signed, a count that went through a `Number`, which
-are exactly the borders `vectors.json` publishes because a port can get them wrong. A third reader in
-the same language family is what is not missing; a third reader in a different one is a different
-claim.
+**This said three readers, and there are two.** The reader in Rust exists because **both readers
+used to be JavaScript**, and a mistake they share is invisible to a diff of the two — a shift taken
+as signed, a count that went through a `Number`, exactly the borders `vectors.json` publishes.
+Then the second JavaScript one went: `resolveCorpus` was a thousand lines that agreed with the Rust
+because people kept making it agree, nothing compared the two, and it is a binding over
+`fossil_graph::plan` now. So `packages/corpus/tests/conformance.test.ts` is not a second
+implementation diffed against the first — it is **the same reader re-entered at wasm32 width**.
+`apps/corpus/conformance/reader.mjs` carries the independence.
 
 `fossil_graph::plan` is that reader. It goes through no struct of the writer's — `fossil-graph`'s
 other manifest module deserialises into `fossil-sinks`' own types, which proves those types

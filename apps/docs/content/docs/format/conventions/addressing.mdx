@@ -429,12 +429,15 @@ So the composition ships as code, in `@fossil-lang/corpus`, sharing nothing with
 manifest:
 
 ```ts
+await initFossilGraphWasm({ wasmUrl });
 const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
 const { vertexUrls, edgeUrls, complete, gaps } = corpus.tilesFor({ tiles, directions: ['src'] });
 ```
 
-It is **synchronous, and that is the claim** — no `fetch`, no connection, no promise. Bytes, tile
-caches, debounce, supersede-cancellation and sampling stay in whatever draws. It refuses to compose
+**The resolution reaches no network, and the module it runs in is loaded first.** The arithmetic is
+`fossil_graph::plan` at wasm32 — one implementation, not a second written in the caller's language,
+and the awaited init is the price. Bytes, tile caches, debounce, supersede-cancellation and sampling
+stay in whatever draws. It refuses to compose
 three things the manifest does not say: an orientation the corpus does not publish (`adjacency('dst')`
 is `null`, never a string), a tile size that disagrees with the vertex type addressing it, and which
 tiles a rectangle touches, which comes from the footer boxes.

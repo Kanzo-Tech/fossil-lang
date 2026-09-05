@@ -43,9 +43,10 @@ fossil is the same in all three, and the correspondence is exact rather than rhe
 `levels:` is the declared list — finest first, and declared rather than derived for OGC's reason,
 written out at [`levels:` — which of them are
 written](/docs/format/conventions/addressing#levels-which-of-them-are-written).
-`tile = dense_id >> 12` is the arithmetic. `levelFor(rect, budget)` is the client's pick and it is
-[a separate, synchronous, pure function](/docs/design/one-door) precisely so that a camera can
-decide before it asks for anything.
+`tile = dense_id >> 12` is the arithmetic. The pick is the client's in the sense that matters: the
+canvas goes in, `frame` derives the level at one mark per pixel, and `level` names one outright for
+a caller that would rather say it. [One door](/docs/design/one-door) is why that moved inside the
+read and what it had to keep in order to.
 
 The container question has the same two answers here as everywhere else. Zarr v3's
 `sharding_indexed` codec puts many addressable chunks inside one object with an index at the end;
@@ -104,7 +105,7 @@ Each of these is a property of the *answer*, not of an implementation, and each 
 tree that goes red when it stops holding. Four hold today. The fifth does not, and it is the second
 gap below.
 
-**1 · Nesting: refining only ADDS.** `view(R, k+1) ⊆ view(R, k)` for the same rectangle. It comes
+**1 · Nesting: refining only ADDS.** `frame(R, k+1) ⊆ frame(R, k)` for the same rectangle. It comes
 free from the predicate, but a writer can still break it in the bytes, so it is checked in the
 bytes: `crates/fossil-layout/tests/levels.rs, a_coarser_level_file_is_a_subset_of_the_finer_one`
 for the vertices, and the closing half of
@@ -113,10 +114,11 @@ for the edges. End to end, over a real camera path, it is
 [monotone refinement](/docs/design/camera) carrying 100.0% of the previous picture across five zoom
 steps.
 
-**2 · Purity: `view(rect, level)` is a function of its arguments.** No cap that moves with what the
-window holds, no stride derived from a running count, no state between calls. This is the invariant
-that makes the other four *statable* — a reader that chose its own level inside the read cannot be
-asked whether refining adds, because there is no left-hand side to compare.
+**2 · Purity: `frame(rect, level)` is a function of its arguments.** No cap that moves with what the
+rectangle holds, no stride derived from a running count, no state between calls. This is the
+invariant that makes the other four *statable* — a reader with no way to name a level cannot be
+asked whether refining adds. The canvas derives one when the caller names none, which is a default
+and not a replacement: `level` given wins, and that is what keeps the left-hand side.
 [One door](/docs/design/one-door) is the argument; the camera page carries the measurement, and the
 one bug it caught, which was a rectangle moving underneath a pure function rather than the function.
 
@@ -230,9 +232,8 @@ only a view that does not — which is gap 4, and is untouched by any of this.
 
 That is defensible and it is not free. The strided rows fall steeply — 20,901 to 1,294 kB across the
 four — so the frames the pyramid cannot answer are the cheap ones, and the frame it can answer is
-the expensive one. But the fall is not proportional to area, because a layout clusters: a rectangle
-covering **9%** of the extent holds **25%** of the vertices, so an area estimate is off by 2.8× —
-a level and a half — which is why `levelFor` counts tiles rather than area.
+the expensive one. The fall is not proportional to area, and [one door](/docs/design/one-door)
+carries the measurement of by how much.
 
 What would fill the empty cells is a plan whose window follows the camera rather than the corpus.
 What argues against changing it is that the same cells are also filled by
@@ -263,7 +264,7 @@ Five, in the order of how much a reader loses.
 `crates/fossil-layout/src/layout.rs, write_edge_levels` emits the files, `apps/corpus/guards/fixture.mjs`
 writes them into the fixture and declares them in the edge manifest — and
 `packages/corpus/src/address.ts` resolves a `levels:` block for a vertex type and none for an edge
-type, so `Corpus.view` has no address to compose and no way to open one. The consequence is exact:
+type, so `Corpus.frame` has no address to compose and no way to open one. The consequence is exact:
 the app's own note in `apps/playground/src/tiles.ts` says *what would change it is a way to keep the
 far ends without opening the payload*, and that way now exists on disk and is unreachable through the
 door. Until a reader lands, row (d) of the table above is a measurement taken with a shell rather

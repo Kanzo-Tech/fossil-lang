@@ -31,7 +31,7 @@ comparison of two numbers rather than of an accumulated transform.
 </div>
 
 **Today residency and visibility are the same set, and the cost of that is measurable.** Over the
-million-vertex bench corpus, four camera rectangles, budget twenty thousand:
+million-vertex bench corpus, four camera rectangles, a canvas of twenty thousand pixels:
 
 | window | level | tiles opened | runs | bytes | drawn | matched |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -57,10 +57,6 @@ Zarr's readers call it progressive refinement and it is only expressible if "wha
 "what is loaded" are two sets. [Monotone refinement](#2-monotone-refinement) is what makes the old
 frame *correct* to leave up rather than merely better than blank: every vertex it drew is still
 drawn, in the same place, at the finer level.
-
-The interface the writer's half needs is already stated: a written level flips `cost.read` from
-`strided` to `level` and changes the byte count and nothing else. It is being implemented in
-`crates/fossil-layout` and `crates/fossil-sinks`; this side needs no change when it lands.
 
 ## The three properties
 
@@ -135,7 +131,7 @@ property suite rather than restated in it.
 
 The one that was broken, and **the cause was not where it was looked for.**
 
-`view` is a pure function of `(rect, level)` — the same rectangle at level 3 asked twice with the
+`frame` is a pure function of `(rect, level)` — the same rectangle at level 3 asked twice with the
 whole corpus queried in between returns the same 73,228 marks. So a route can only change the answer
 by changing the **rectangle**. And it did.
 
@@ -147,7 +143,7 @@ which, with the simulation off, is rescaling. So the map is rebuilt from whichev
 arrived, and the loop closes:
 
 ```
-view → answer → new map → a different rectangle for the same camera → …
+frame → answer → new map → a different rectangle for the same camera → …
 ```
 
 Measured through the library's own scale accessor, with the camera set once and never touched:

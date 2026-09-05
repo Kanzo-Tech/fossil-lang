@@ -149,7 +149,7 @@ const corpus = await openCorpus('https://cdn.example.org/kg/2026-08', { query })
 
 corpus.types                                   // what is inside
 await corpus.extent('Person')                  // where it is, in coordinates
-await corpus.window({ x, y, w, h })            // vertices + edges in a rectangle
+await corpus.rows({ x, y, w, h })              // vertices + edges in a rectangle
 await corpus.node('http://example.org/p/17')   // one vertex by identity
 await corpus.neighbours([id], { depth: 2 })    // everything within N hops
 ```
