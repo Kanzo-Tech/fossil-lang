@@ -4,15 +4,16 @@
  * **kanzo owns the contract and the renderer; fossil owns the corpus.** `@kanzo-tech/graph` says a
  * camera is *a tile brought by a computed URL, which is another source*; this is that source, and
  * what is left in it is a translation between two vocabularies: a `Viewport` that may be `±Infinity`
- * becomes a finite `Box`, a `View` becomes a `Slice`, a cost becomes the ledger beside the canvas.
+ * becomes a finite `Box`, a `Frame` becomes a `Slice`, a cost becomes the ledger beside the canvas.
  *
  * **Everything else went through the door.** Tile selection, the `dense_id` ranges, the box
  * predicate, the stride, the `held`/`pool`/`vis`/`span`/`anchor` CTEs and the row→typed-array
- * assembly were all written out here once; they are `corpus.levelFor` + `corpus.view` now, which is
- * the arithmetic `@fossil-lang/corpus` publishes so that no reader re-derives it — see
- * [`/docs/design/one-door`]. Two calls and not one, because **the level is the caller's**:
- * `levelFor` is pure and synchronous so a camera can decide before it asks for anything, and *the
- * same rectangle at the same level* has to be expressible or monotone refinement cannot be stated.
+ * assembly were all written out here once; they are `corpus.frame` now, which is the arithmetic
+ * `@fossil-lang/corpus` publishes so that no reader re-derives it — see [`/docs/design/one-door`].
+ * ONE call and not two: the door takes the canvas and derives the level, because a camera has
+ * pixels and had to invent a budget in marks to talk to the old surface. *The same rectangle at
+ * the same level* is still sayable — `level` names one outright — and that is what keeps monotone
+ * refinement statable, which is the argument the second call used to carry.
  * No registration step either: the door composes `read_parquet('<url>')` against real addresses,
  * and so does everything else this app reads with.
  *
@@ -26,7 +27,7 @@
  * invites this explicitly: «the wiring between a particular source and this contract belongs at the
  * call site.»
  */
-import type { Box, Corpus, View, ViewCost } from '@fossil-lang/corpus';
+import type { Box, Corpus, Frame } from '@fossil-lang/corpus';
 import {
   BOUNDED_DEFAULTS,
   denseOf,
@@ -39,7 +40,7 @@ import {
   type VertexId,
 } from '@kanzo-tech/graph';
 
-import { frame, levelFor } from './frame.js';
+import { frame } from './frame.js';
 import { extentOf, type Rect, type TileBox } from './stream.js';
 
 /** What one answer cost, in the terms the panel beside the canvas is already reporting. */
@@ -48,12 +49,12 @@ export interface SliceCost {
   tiles: number;
   ofTiles: number;
   /**
-   * Maximal runs of adjacent tiles, and the compressed bytes they hold.
+   * Range requests — maximal runs of adjacent tiles, one request each — and the bytes they hold.
    *
    * **Derived, and it says so.** DuckDB issues the real requests from inside its Worker, where this
    * thread cannot weigh them; the ledger above the canvas weighs its own, off the footer.
    */
-  runs: number;
+  requests: number;
   bytes: number;
   /**
    * **The rectangle this source was asked about**, in the corpus's own coordinates.
@@ -66,12 +67,11 @@ export interface SliceCost {
    */
   box: { x: number; y: number; w: number; h: number } | null;
   /**
-   * Which artefact answered the level — a written `l{k}/` (`level`) or the full tiles under the
-   * level's predicate (`strided`): **the same rows, more bytes**, and the one that says a written
-   * pyramid arrived. How the tiles were CHOSEN is no longer a question with two answers: the
-   * footers' boxes are the only index over it.
+   * The level `matched` was counted at, and therefore the one that says whether a written `l{k}/`
+   * answered: it can only exceed 0 when one did. The door used to carry a `read` field beside it
+   * saying the same thing in words, which is a field that can disagree with the number next to it.
    */
-  read: ViewCost['read'];
+  matchedAt: number;
   /** Vertices the rectangle holds at level 0, before the level decimated it, and vertices drawn. */
   matched: number;
   marks: number;
@@ -173,12 +173,12 @@ function column(fill: string | undefined): string {
 }
 
 /**
- * A `View` as the parallel arrays the renderer uploads — two conversions and one fold.
+ * A `Frame` as the parallel arrays the renderer uploads — two conversions and one fold.
  *
  * `positions` passes through untouched: the door already answers in a `Float32Array`, marks first
  * and anchors after, which is the layout a `Slice` asks for.
  */
-function sliceOf(view: View, typeIndex: number, slots: number): Slice {
+function sliceOf(view: Frame, typeIndex: number, slots: number): Slice {
   const rows = view.denseIds.length;
   const vertices = new BigUint64Array(rows);
   const categories = new Uint16Array(rows);
@@ -266,10 +266,10 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
         onCost?.({
           tiles: 0,
           ofTiles: boxes.length,
-          runs: 0,
+          requests: 0,
           bytes: 0,
           box: null,
-          read: 'strided',
+          matchedAt: 0,
           matched: 0,
           marks: 0,
           anchors: 0,
@@ -295,10 +295,17 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
           ? BOUNDED_DEFAULTS.minLinkPixels * perPixel
           : 0;
 
-      // Through `src/frame.ts`, which is the one module that names the door's drawing surface —
-      // `view()` is being renamed to `frame()` with a different cost shape, and collecting the two
-      // calls there is what keeps that a one-line change. See that file's header.
-      const level = levelFor(corpus, { ...box, type, budget: limit });
+      // **The canvas, in pixels, which is what the door now takes.** `perPixel` is the renderer's
+      // own scale — corpus units per pixel — so the rectangle's width over it IS the width in
+      // pixels of the thing being drawn into. Nothing is invented here and no constant is
+      // introduced: the door converts at one mark per pixel and the renderer already told us the
+      // scale. Where it did not, the honest fallback is the square that holds `limit` marks,
+      // because a budget in marks is the only resolution such a caller has expressed.
+      const side = Math.max(1, Math.sqrt(limit));
+      const pixels =
+        perPixel !== undefined && Number.isFinite(perPixel) && perPixel > 0
+          ? { w: Math.max(1, box.w / perPixel), h: Math.max(1, box.h / perPixel) }
+          : { w: side, h: side };
 
       /**
        * **This asked for points where the pyramid is, and the picture said no.**
@@ -321,7 +328,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
        * The anchors are not fog. They are 4× the marks, they are real vertices at real
        * coordinates, and they are what fills the frame — so dropping them turns a zoomed-out view
        * into a sparse cloud with holes in it rather than into a cheaper version of the same
-       * picture. `cost.read` reporting `strided` here is the honest outcome: this app draws the
+       * picture. `cost.matchedAt` staying at 0 here is the honest outcome: this app draws the
        * picture and pays the bytes.
        *
        * **What would change it** is a way to keep the far ends without opening the payload for
@@ -332,7 +339,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
       const answer = await frame(corpus, {
         ...box,
         type,
-        level,
+        pixels,
         fill: column(fill),
         pinned: pins,
         minLinkLength,
@@ -341,6 +348,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
       cost({
         ...answer.cost,
         box: { x: box.x, y: box.y, w: box.w, h: box.h },
+        matchedAt: answer.matchedAt,
         matched: answer.matched,
         marks: answer.marks,
         anchors: answer.positions.length / 2 - answer.marks,

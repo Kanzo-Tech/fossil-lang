@@ -1,58 +1,39 @@
 /**
- * The door, named once — **the only module in this app that spells `corpus.view`.**
+ * The door, named once — **the only module in this app that spells `corpus.frame`.**
  *
- * This file exists for a rename that has not happened yet. `Corpus.view()` becomes
- * `Corpus.frame()` in the consolidation, with a different cost shape underneath it:
- * `ViewCost.tiles`/`ofTiles`/`runs` collapse to `requests` and `bytes` with tiles demoted to a
- * detail, and `cost.read: 'strided' | 'level'` disappears entirely once the pyramid is complete
- * and level 0 is just another projection. Every one of those is a change to the two functions
- * below and to nothing else in `apps/playground/src`.
- *
- * That is not a hypothetical tidiness argument. Before this file there was one call site
- * (`src/tiles.ts`) and the crossfilter was about to add more — a chart that needs the vertex
- * relation, a client that needs the id column — and three call sites into a surface with a
- * scheduled rename is how a one-line change becomes an afternoon. So the coupling is collected
- * here while it is still one line, rather than after it is three.
+ * It was written for a rename that had not happened, and the rename has now happened: `view()`
+ * became `frame()`, `ViewCost.tiles`/`ofTiles`/`runs` became `requests` and `bytes` with the tile
+ * counts demoted to working, `cost.read` went away as exactly redundant with `matchedAt`, and
+ * `corpus.levelFor` went away because the door derives the level from the canvas. Every one of
+ * those was a change to this file and to nothing else in `apps/playground/src` — which is what the
+ * file was for, and it held. **It did not hold for `scripts/`**, which reach the corpus directly;
+ * that is the seam worth knowing about rather than the file having failed.
  *
  * **It deliberately adds no behaviour.** No caching, no defaulting, no cost translation: a
- * wrapper that quietly reinterprets what the door said is worse than the coupling it removes,
- * because then the rename is a one-line change to a function whose semantics nobody trusts.
+ * wrapper that quietly reinterprets what the door said is worse than the coupling it removes.
  * `frame()` forwards its arguments and returns what it was given. The app's own vocabulary —
  * `SliceCost` — is still assembled in `src/tiles.ts`, where the renderer's terms are.
  *
  * ## Where the payload relation comes from
  *
- * {@link vertexRelation} is the third name in this file and it is here for the same reason: the
+ * {@link vertexRelation} is the second name in this file and it is here for the same reason: the
  * crossfilter's two Mosaic clients query the vertex payload directly by SQL, and composing
  * `read_parquet('<url>')` needs the addressing rather than the drawing path. It reads
  * `corpus.addressing`, which is published for exactly this — «the addressing underneath, for a
  * caller that has outgrown this surface». One place to fix if the tiled tree is ever addressed
- * differently, and the same place the rename lands.
+ * differently, and the same place a rename lands.
  */
-import type { Box, Corpus, View, ViewParams } from '@fossil-lang/corpus';
+import type { Box, Corpus, Frame, FrameParams } from '@fossil-lang/corpus';
 
-export type { Box, Corpus, View, ViewParams };
-
-/**
- * Which level of detail a rectangle should be drawn at. **Pure, synchronous, and the caller's.**
- *
- * Separate from {@link frame} because the level is a decision a camera makes *before* it asks for
- * anything, and because «the same rectangle at the same level» has to be expressible or monotone
- * refinement cannot be stated. That is the door's argument, not this file's; this file only keeps
- * the name in one place.
- */
-export function levelFor(corpus: Corpus, params: Box & { type?: string; budget: number }): number {
-  return corpus.levelFor(params);
-}
+export type { Box, Corpus, Frame, FrameParams };
 
 /**
- * One rectangle, at one level, as the arrays a renderer uploads.
+ * One rectangle, at one resolution, as the arrays a renderer uploads.
  *
- * **This is the line that becomes `corpus.frame(params)`.** Nothing else in
- * `apps/playground/src` names the method.
+ * Nothing else in `apps/playground/src` names the method.
  */
-export function frame(corpus: Corpus, params: ViewParams): Promise<View> {
-  return corpus.view(params);
+export function frame(corpus: Corpus, params: FrameParams): Promise<Frame> {
+  return corpus.frame(params);
 }
 
 /**

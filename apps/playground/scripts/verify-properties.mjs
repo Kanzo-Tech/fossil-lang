@@ -236,7 +236,7 @@ console.log('\n2. monotone refinement — does zooming in only ADD');
   const box = { x: WHOLE.x + WHOLE.w * 0.25, y: WHOLE.y + WHOLE.h * 0.25, w: WHOLE.w * 0.4, h: WHOLE.h * 0.4 };
   let coarser = null;
   for (let level = 6; level >= 0; level -= 1) {
-    const view = await corpus.view({ ...box, level, links: false });
+    const view = await corpus.frame({ ...box, level, links: false });
     const ids = new Set();
     const at = new Map();
     for (let i = 0; i < view.marks; i += 1) {
@@ -301,8 +301,10 @@ console.log('\n3. path independence — is the same rectangle by two routes the 
     const trail = [];
     for (const rect of steps) {
       const box = asBox(toCorpus(frame, rect));
-      const level = corpus.levelFor({ ...box, budget: BUDGET });
-      const view = await corpus.view({ ...box, level, links: false });
+      const side = Math.sqrt(BUDGET);
+      const level = (await corpus.frame({ ...box, pixels: { w: side, h: side }, links: false }))
+        .level;
+      const view = await corpus.frame({ ...box, level, links: false });
       frame = mode === 'rescaled' ? rescaledFrame(view.positions, SPACE) : PINNED;
       trail.push({ box, level, marks: view.marks });
       last = { view, box, level };
@@ -362,9 +364,9 @@ console.log('\n3. path independence — is the same rectangle by two routes the 
   ok('both routes draw the same set', shared === A.size && shared === B.size, `${A.size - shared} only in A, ${B.size - shared} only in B`);
 
   // And the door's own half of it, which holds whatever the frame does: purity.
-  const once = await corpus.view({ ...asBox(target), level: 3, links: false });
-  await corpus.view({ ...WHOLE, level: 0, links: false });
-  const twice = await corpus.view({ ...asBox(target), level: 3, links: false });
+  const once = await corpus.frame({ ...asBox(target), level: 3, links: false });
+  await corpus.frame({ ...WHOLE, level: 0, links: false });
+  const twice = await corpus.frame({ ...asBox(target), level: 3, links: false });
   ok(
     'the door itself is a pure function of the rectangle and the level',
     once.marks === twice.marks && [...once.denseIds].every((id, i) => id === twice.denseIds[i]),

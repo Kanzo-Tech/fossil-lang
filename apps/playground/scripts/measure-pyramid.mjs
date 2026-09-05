@@ -15,7 +15,7 @@
  * - **with links**, the payload is opened, because a level file cannot position the far end of an
  *   edge with one end drawn (`crates/fossil-layout/tests/levels.rs` measures what that costs: 0.81%
  *   of a coarse view's edges survive in the level at the app's own three-pixel floor);
- * - **without links**, the level answers, and `cost.read` says so.
+ * - **without links**, the level answers, and `cost.matchedAt` says so by exceeding 0.
  *
  * The marks are identical in both, which is the property the whole design rests on: a written level
  * is a cache of `dense_id % 2^k == 0` and changes the byte count rather than the answer.
@@ -67,7 +67,11 @@ const box = {
 };
 
 const written = corpus.levels(type).filter((l) => l.written);
-const level = corpus.levelFor({ ...box, type, budget: BUDGET });
+// The door takes the canvas now and derives the level from it at one mark per pixel, so a
+// budget of BUDGET marks is the square that holds them. `frame.level` reports what it chose.
+const side = Math.sqrt(BUDGET);
+const pixels = { w: side, h: side };
+const level = (await corpus.frame({ ...box, type, pixels, links: false })).level;
 console.log(`\n${type} · ${count.toLocaleString('en-US')} vertices · budget ${BUDGET.toLocaleString('en-US')} marks`);
 console.log(
   `  written levels ${written.length === 0 ? 'none' : written.map((l) => l.level).join(', ')} · ` +
@@ -78,11 +82,11 @@ const kB = (bytes) => `${Math.round(bytes / 1024).toLocaleString('en-US')} kB`;
 const answers = [];
 for (const links of [true, false]) {
   const started = Date.now();
-  const view = await corpus.view({ ...box, type, level, links });
+  const view = await corpus.frame({ ...box, type, level, links });
   answers.push({ links, view, ms: Date.now() - started });
   console.log(
-    `  links ${String(links).padEnd(5)} · read ${view.cost.read.padEnd(7)} · ` +
-      `${String(view.cost.tiles).padStart(3)}/${view.cost.ofTiles} tile(s) in ${view.cost.runs} run(s) · ` +
+    `  links ${String(links).padEnd(5)} · counted at ${String(view.matchedAt).padEnd(2)} · ` +
+      `${String(view.cost.tiles).padStart(3)}/${view.cost.ofTiles} tile(s) in ${view.cost.requests} request(s) · ` +
       `${kB(view.cost.bytes).padStart(10)} · marks ${view.marks.toLocaleString('en-US')} · ` +
       `anchors ${(view.positions.length / 2 - view.marks).toLocaleString('en-US')} · ` +
       `links ${(view.links.length / 2).toLocaleString('en-US')} · ` +
@@ -95,16 +99,16 @@ for (const links of [true, false]) {
 // and opening the adjacency — the read the pyramid replaces, at the same rectangle.
 const finest = written.length === 0 ? null : Math.min(...written.map((l) => l.level));
 if (finest !== null && finest > 0) {
-  const view = await corpus.view({ ...box, type, level: finest - 1, links: true });
+  const view = await corpus.frame({ ...box, type, level: finest - 1, links: true });
   console.log(
-    `  payload  · read ${view.cost.read.padEnd(7)} · ` +
+    `  payload  · counted at ${String(view.matchedAt).padEnd(2)} · ` +
       `${String(view.cost.tiles).padStart(3)}/${view.cost.ofTiles} tile(s) · ${kB(view.cost.bytes).padStart(10)} · ` +
       `marks ${view.marks.toLocaleString('en-US')} · ` +
       `anchors ${(view.positions.length / 2 - view.marks).toLocaleString('en-US')} · ` +
       `links ${(view.links.length / 2).toLocaleString('en-US')} — level ${finest - 1}, which nobody wrote`,
   );
   const cheap = answers[0];
-  if (cheap.view.cost.read === 'level') {
+  if (cheap.view.matchedAt > 0) {
     console.log(
       `\n  ${(view.cost.bytes / Math.max(cheap.view.cost.bytes, 1)).toFixed(1)}× fewer bytes for the same ` +
         `picture — ${cheap.view.cost.tiles} tile(s) rather than ${view.cost.tiles}, ` +
@@ -114,7 +118,7 @@ if (finest !== null && finest > 0) {
 }
 
 const [, points] = answers;
-if (points.view.cost.read !== 'level') {
+if (points.view.matchedAt === 0) {
   // Not a failure and worth saying: the camera's level and the writer's window are set by
   // different rules — a budget in marks against a coarsest level that fits one tile — and they
   // meet at some corpus sizes and miss by one at others. At 300,000 vertices the budget asks for

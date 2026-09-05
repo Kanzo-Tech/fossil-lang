@@ -18,8 +18,8 @@
  *
  * It imports `strideSql` from `src/stride.ts` rather than restating it, so an edit that
  * un-quantises the stride turns this red instead of leaving a test of a copy passing. The app
- * itself no longer composes that SQL — `src/tiles.ts` goes through `corpus.levelFor` +
- * `corpus.view`, and a level IS `dense_id % 2^k = 0` — so what this measures is the property
+ * itself no longer composes that SQL — `src/tiles.ts` goes through
+ * `corpus.frame`, and a level IS `dense_id % 4^k = 0` — so what this measures is the property
  * both spellings share, over a corpus, rather than a string one of them happens to hold.
  *
  * Run: `node --experimental-strip-types scripts/verify-nesting.mjs [--vertices 1000000]`

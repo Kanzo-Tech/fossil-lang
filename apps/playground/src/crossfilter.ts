@@ -9,7 +9,7 @@
  *   an interval, `birth_year BETWEEN a AND b`, and the database can evaluate it directly.
  * - **the canvas** (`IdSetClient`, wired below) — a view whose positions are *not* in the database
  *   in any form a predicate can reach. Its `x` and `y` are columns, but what is on screen is a
- *   rectangle-and-level answer from `corpus.view`, decimated by `dense_id % 2^k` and cut off at a
+ *   rectangle-and-level answer from `corpus.frame`, decimated by `dense_id % 2^k` and cut off at a
  *   mark budget. No `WHERE` over columns describes «what this camera drew». So it goes the other
  *   way: it asks which ids survive the page's filters and fades everything else. Ids out, a mask
  *   over resident tiles. That is precisely the shape `IdSetClient` exists for, which is why it is
@@ -35,7 +35,7 @@
  * printed beside the chart rather than described, because a crossfilter that feels slow and does
  * not say why is worse than one that does.
  *
- * **What would remove it** is a filter the canvas could evaluate without asking: if `corpus.view`
+ * **What would remove it** is a filter the canvas could evaluate without asking: if `corpus.frame`
  * carried the filtered column back beside `categories`, the mask would be a comparison per drawn
  * vertex — twenty thousand, not a million — and no id would cross the boundary at all. That is a
  * change to the door and it is not made here.

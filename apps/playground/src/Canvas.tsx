@@ -600,7 +600,7 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
           <div>
             <dt>in runs</dt>
             <dd>
-              {cost.runs} <span className="str-dim">≈ {KB(cost.bytes)}</span>
+              {cost.requests} <span className="str-dim">≈ {KB(cost.bytes)}</span>
             </dd>
           </div>
           <div>
@@ -619,8 +619,8 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
             <dd>{cost.ms.toFixed(0)} ms</dd>
           </div>
           <div>
-            <dt>read</dt>
-            <dd>{cost.read}</dd>
+            <dt>counted at</dt>
+            <dd>level {cost.matchedAt}</dd>
           </div>
         </dl>
       )}

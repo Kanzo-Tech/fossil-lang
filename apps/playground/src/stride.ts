@@ -5,7 +5,7 @@
  * `scripts/verify-nesting.mjs` — can read it in Node without resolving a browser bundle.
  *
  * **The app does not build this string any more, and that is not a reason to delete it.**
- * `src/tiles.ts` is a consumer of `corpus.levelFor` + `corpus.view` now, and the decimation is
+ * `src/tiles.ts` is a consumer of `corpus.frame` now, and the decimation is
  * `dense_id % 4^level = 0` inside the door — a level per zoom step, since a step quadruples the
  * points. This stride is the FINER family, `2^k`, which is the one a strided read wants: `4^k` is
  * `2^2k`, so every level of the door is one of these and the two interleave without either

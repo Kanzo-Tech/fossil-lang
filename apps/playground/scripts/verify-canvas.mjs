@@ -2,7 +2,7 @@
  * Check the canvas's SOURCE against the corpus, in Node, with no browser and no GPU.
  *
  * `src/tiles.ts` is the half of the canvas that is fossil's, and it is a CONSUMER now: a viewport
- * becomes a finite box, `corpus.levelFor` picks the level, `corpus.view` answers it, and a `View`
+ * becomes a finite box, `corpus.frame` picks the level from the canvas and answers it, and a `View`
  * becomes the parallel typed arrays `@kanzo-tech/graph` uploads. The addressing, the sampling and
  * the SQL are `@fossil-lang/corpus`'s — see `/docs/design/one-door`. The other half — cosmos.gl's
  * lifetime, the query loop, the buffers — is kanzo's, and is tested next door. What this script
