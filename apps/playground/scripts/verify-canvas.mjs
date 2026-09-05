@@ -258,7 +258,36 @@ async function window(fraction, { limit = BOUNDED_DEFAULTS.limit } = {}) {
     if (x < rect.xlo || x > rect.xhi || y < rect.ylo || y > rect.yhi) anchorsOutside++;
   }
   ok('every anchor is an end some link needs', anchorUnused === 0, `${anchorUnused} unreferenced`);
-  ok('every anchor is free — a tile already read', anchorUnopened === 0, `${anchorUnopened} would need a fetch`);
+
+  // **An anchor is REAL, which is the assertion worth making.**
+  //
+  // This used to ask whether the anchor's `dense_id` fell in a payload tile the runs named, and
+  // that stopped being the question once edge levels are written: a level of a relation carries
+  // BOTH endpoints' coordinates, so a far end arrives in the edge file rather than in a vertex
+  // tile — free, in the sense that matters, without being in `opened`. Measured on this corpus at
+  // the 10% window: 60,136 anchors, of which 14,176 are in no opened payload tile.
+  //
+  // So the check moved from where a coordinate came from to whether it is TRUE. Every anchor is
+  // looked up in the payload by id and its position compared to the corpus's own. Nothing here is
+  // contracted, interpolated or invented: an anchor that is not a real vertex at its real place is
+  // a line drawn to somewhere that does not exist, and no count elsewhere would show it.
+  const anchorRows = [];
+  for (let i = marks; i < rows; i++) {
+    anchorRows.push(`(${denseOf(slice.vertices[i])}, ${slice.positions[i * 2]}, ${slice.positions[i * 2 + 1]})`);
+  }
+  if (anchorRows.length > 0) {
+    const truth = duckQuery(
+      `WITH a(dense_id, ax, ay) AS (VALUES ${anchorRows.join(',')})
+       SELECT count(*) FILTER (WHERE p.dense_id IS NULL) AS missing,
+              count(*) FILTER (WHERE abs(p.x - a.ax) > 0.001 OR abs(p.y - a.ay) > 0.001) AS moved
+       FROM a LEFT JOIN read_parquet('${type.tileUrl(0)}') p USING (dense_id)`,
+    )[0];
+    ok(
+      'every anchor is a real vertex at its real position',
+      num(truth.missing) === 0 && num(truth.moved) === 0,
+      `${anchorRows.length} checked · ${num(truth.missing)} missing · ${num(truth.moved)} moved`,
+    );
+  }
   if (anchors > 0) note(`${anchorsOutside} of ${anchors} anchors are outside the rectangle; the rest are held but unsampled`);
 
   // 4. identities are this type's, and distinct.
@@ -284,13 +313,22 @@ async function window(fraction, { limit = BOUNDED_DEFAULTS.limit } = {}) {
   ok('every link has at least one drawn end', noMark === 0, `${noMark} between two anchors`);
 
   // 6. `n` is what the window held, checked independently.
+  // `n` is the rectangle's population AT THE LEVEL IT WAS COUNTED, so the predicate goes into the
+  // count. A level read cannot report the level-0 population without opening the bytes the pyramid
+  // exists to avoid, and `cost.matchedAt` is the field that says which level answered.
+  const stride = 4 ** (lastCost?.matchedAt ?? 0);
   const held = num(
     duckQuery(
       `SELECT count(*) AS c FROM read_parquet('${type.tileUrl(0)}')
-       WHERE x >= ${rect.xlo} AND x <= ${rect.xhi} AND y >= ${rect.ylo} AND y <= ${rect.yhi}`,
+       WHERE x >= ${rect.xlo} AND x <= ${rect.xhi} AND y >= ${rect.ylo} AND y <= ${rect.yhi}
+         AND dense_id % ${stride} = 0`,
     )[0].c,
   );
-  ok('n is what the window held, not what came back', slice.n === held, `${slice.n} vs ${held}`);
+  ok(
+    'n is what the window held at the level it counted, not what came back',
+    slice.n === held,
+    `${slice.n} vs ${held} at level ${lastCost?.matchedAt ?? 0}`,
+  );
   ok('marks never exceed the limit', marks <= limit, `${marks} ≤ ${limit}`);
   // The ledger is the DOOR's tile count, and the door addresses by the published code anchor where
   // one exists — a code range is a tighter description of a tile than the rectangular hull of an
@@ -351,6 +389,12 @@ console.log('\npinned');
   let found = false;
   for (let i = 0; i < slice.marks; i++) if (denseOf(slice.vertices[i]) === far) found = true;
   ok('a pinned vertex outside the window is returned', found, `dense_id ${far}`);
+  // **A pin costs TWO tiles, not one, and this is the open question rather than a stale check.**
+  // Measured both ways on this corpus: without links it is still 2, and a pin that IS in the level
+  // (dense 999996, a multiple of 4 at level 1) costs 2 exactly like one that is not (999999, odd,
+  // in no level above 0). So it is not the payload being opened beside the level. The pin comes
+  // back and it is on the ledger -- this is a cost defect, not a correctness one -- but one of the
+  // two tiles has not been accounted for.
   ok('its tile is on the ledger, not hidden in it', lastCost.tiles === bare + 1, `${lastCost.tiles} vs ${bare} without it`);
   const other = await source.slice({ view, limit: BOUNDED_DEFAULTS.limit, pinned: [vertexId(9, far)], fill: 'cluster_id' });
   let leaked = false;
