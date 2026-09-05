@@ -53,7 +53,6 @@ export type { QueryFn, QueryRow } from './query.js';
 // already using the verbs and want both halves from one specifier.
 export {
   resolveCorpus,
-  levelFor,
   strideBits,
   strideOf,
   shiftFor,
@@ -76,7 +75,6 @@ export type {
   CorpusAddressing,
   VertexAddress,
   AddressedTiles,
-  LevelQuery,
 } from './address.js';
 
 // The door. It had a subpath of its own — `@fossil-lang/corpus/corpus` — whose one justification
@@ -96,17 +94,17 @@ export type {
   PlacedVertex,
   CorpusVertexType,
   Extent,
-  LevelBudget,
+  Frame,
+  FrameCost,
+  FrameParams,
   LevelInfo,
   Neighbourhood,
   NeighboursParams,
   NodeParams,
   OpenCorpusOptions,
-  View,
-  ViewCost,
-  ViewParams,
-  WindowAnswer,
-  WindowParams,
+  Pixels,
+  RowsAnswer,
+  RowsParams,
 } from './corpus.js';
 
 // The codegen'd wire types (params + results + the Operation envelope). Re-exported

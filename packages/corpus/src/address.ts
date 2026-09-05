@@ -112,8 +112,8 @@ export const strideBits = (level: number): number =>
  *
  * - **It nests.** A multiple of `strideOf(k+1)` is a multiple of `strideOf(k)`, so refining only
  *   ever ADDS, and a vertex drawn once stays drawn at the same position.
- * - **It is a function of the level and nothing else.** No `matched`, no `limit`, no camera. Which
- *   is what makes {@link levelFor} a *separate* function rather than a step inside the read.
+ * - **It is a function of the level and nothing else.** No `matched`, no `limit`, no camera, and
+ *   nothing this module has to be told.
  */
 export const strideOf = (level: number): number => 2 ** strideBits(level);
 
@@ -463,7 +463,7 @@ export interface CorpusAddressing {
    * set of drawn vertices has in-edges it did not ask for. Pass `['src', 'dst']` for the incident
    * set.
    *
-   * **It was `window`, and that name belonged to the other layer.** {@link Corpus.window} takes a
+   * **It was `window`, and that name belonged to the other layer.** `Corpus.rows` takes a
    * rectangle in the corpus's own coordinates and answers with vertices and edges; this takes tile
    * numbers and answers with URLs. One noun for a camera and a URL builder is how a caller ends up
    * passing a box to the one that wants tiles. This layer returns addresses, so it is named for
@@ -632,8 +632,8 @@ function indexAddress(
  * **Level `k` is `dense_id % strideOf(k) == 0`, whatever this says.** A level is a predicate over
  * the payload, and a written `l{k}/` is a cache of it — so a corpus declaring none draws the
  * identical picture and only reads more, and that is what keeps the pyramid from being a second
- * contract. What this block changes is a byte count, and `ViewCost.read` in `./corpus.ts` is where
- * the difference is reported.
+ * contract. What this block changes is a byte count, and `Frame.matchedAt` in `./corpus.ts` is
+ * where the difference is visible.
  *
  * **The numbers are declared and not derived**, unlike everything else here, and the manifest side
  * argues why: a level list is `log4(V / chunk_size)` integers whatever the corpus is, and *which*
@@ -1055,52 +1055,4 @@ export function resolveCorpus(options: ResolveCorpusOptions): CorpusAddressing {
     incident,
     tilesFor,
   };
-}
-
-// ---------------------------------------------------------------------------
-// The other half of a camera's question: which LEVEL, and how coarse that is
-// ---------------------------------------------------------------------------
-
-/** What {@link levelFor} takes: how much the rectangle holds, and what it may cost. */
-export interface LevelQuery {
-  /**
-   * How many of the type's tiles the caller's rectangle touches.
-   *
-   * **The caller's number, because this module has no rectangle** — see the header. A host with a
-   * Parquet reader intersects the per-tile `x`/`y` boxes in the footers and passes the count; a
-   * host without one passes the type's whole tile count, which is the conservative answer and gives
-   * back the level the whole type needs.
-   */
-  tiles: number;
-  /** Rows per tile — the type's own `chunk_size`. */
-  chunkSize: number;
-  /** The type's `vertex_count`, when known — the ceiling on any estimate. */
-  count?: number;
-  /**
-   * How many vertices the caller is willing to be handed. **A budget, not a cap** — the answer is
-   * a level, and a level's population is whatever the rectangle holds at that level.
-   */
-  budget: number;
-}
-
-/**
- * The coarsest level whose population fits a budget — **pure, synchronous, and nobody's session.**
- *
- * Not a step inside the read, and the three arguments for that are in `/docs/design/one-door`
- * under *The level is the caller's*: Zarr picks on the client, monotone refinement cannot be
- * stated unless "the same rectangle at the same level" is expressible, and a budget is made of
- * pixels, which stop at this argument list.
- *
- * **The estimate is the tiles, not the area**, and the measurements that decided it are on the
- * same page. `count` caps it, because a rectangle covering the corpus cannot hold more than the
- * corpus.
- *
- * The logarithm is in the pyramid's own base and reaches it through {@link strideBits}, because a
- * level drops `strideOf(k)` of the population and not `2^k`: dividing by the wrong base answers
- * with twice the level, which is the picture the whole corpus zoomed out by two steps.
- */
-export function levelFor({ tiles, chunkSize, count, budget }: LevelQuery): number {
-  const estimate = Math.min(tiles * chunkSize || 0, count ?? Number.POSITIVE_INFINITY);
-  if (!(budget > 0) || !(estimate > budget)) return 0;
-  return Math.ceil(Math.log2(estimate / budget) / strideBits(1));
 }

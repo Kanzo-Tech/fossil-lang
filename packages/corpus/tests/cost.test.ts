@@ -138,9 +138,9 @@ async function windowed(entry: (typeof corpora)[number]) {
     h: (extent.maxY - extent.minY) * 0.25,
     type,
   };
-  await entry.corpus.window(box); // the first window of a corpus also pays for the footer sweep
+  await entry.corpus.rows(box); // the first read of a corpus also pays for the footer sweep
   entry.reset();
-  const answer = await entry.corpus.window(box);
+  const answer = await entry.corpus.rows(box);
   return { answer, bill: entry.bill() };
 }
 

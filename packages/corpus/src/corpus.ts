@@ -8,7 +8,7 @@
  * `/docs/design/one-door` has what the removal settled, and why the camera grew this object rather
  * than opening a fourth beside it.
  *
- * **The object has two halves and the line between them is not a spelling.** `extent`, `window`,
+ * **The object has two halves and the line between them is not a spelling.** `extent`, `rows`,
  * `node` and `neighbours` compute which FILES to open and open those; `schema`, `read`, `expand`,
  * `path`, `aggregate` and `executeSql` name a relation and let the engine decide. The camera is
  * addressed, not queried — an LOD is a different relation and not a filter — and `fossil-graph`'s
@@ -24,7 +24,7 @@
  * ```ts
  * const corpus = await openCorpus(url, { query, wasmUrl });
  * corpus.types                                  // what is inside
- * await corpus.window({ x, y, w, h })           // vertices + edges, and whether that is all of them
+ * await corpus.rows({ x, y, w, h })             // vertices + edges, and whether that is all of them
  * await corpus.node(iri)
  * await corpus.neighbours([iri], { depth: 2 })
  * await corpus.schema({ vertex_type: 'Person' })
@@ -54,7 +54,7 @@
  *   that decided it.
  * - **The `x`/`y` boxes** — from the Parquet footers, as {@link Corpus.extent}, which is a fifth
  *   member on a surface that names four because without it a caller holding only a URL has no
- *   coordinates to put in a window.
+ *   coordinates to put in a rectangle.
  * - **Corpus identity** — the subject IRI, and this was the one with no owner. See
  *   {@link Corpus.node}: what it costs, what the tree contradicts itself about, and what would
  *   change it.
@@ -62,7 +62,7 @@
  *   directory to list. Both are read; neither is globbed. See {@link openCorpus}.
  *
  * And one shape of corpus it refuses rather than guesses at: **an edge label incident twice to one
- * vertex type**, which the addressing's `tilesFor` cannot name unambiguously. See {@link Corpus.window}.
+ * vertex type**, which the addressing's `tilesFor` cannot name unambiguously. See {@link Corpus.rows}.
  */
 
 import {
@@ -72,7 +72,6 @@ import {
   type EdgeTiles,
   type Gap,
   GRAPH_INFO_PATH,
-  levelFor as levelForTiles,
   resolveCorpus,
   strideBits,
   strideOf,
@@ -233,8 +232,8 @@ export interface Box {
   readonly h: number;
 }
 
-/** What {@link Corpus.window} takes. */
-export interface WindowParams extends Box {
+/** What {@link Corpus.rows} takes. */
+export interface RowsParams extends Box {
   /** The vertex type, defaulting to the first the index names. */
   type?: string;
   /**
@@ -264,8 +263,8 @@ export interface Answer {
   readonly gaps: readonly Gap[];
 }
 
-/** What a window read. */
-export interface WindowAnswer extends Answer {
+/** What a rectangle read, entire. */
+export interface RowsAnswer extends Answer {
   readonly type: string;
   readonly box: Box;
   /** The tiles the answer's vertices turned out to live in. Reported, never asked for. */
@@ -277,9 +276,9 @@ export interface WindowAnswer extends Answer {
 /**
  * One level of the pyramid — Zarr's `multiscales` entry, spelled for this corpus.
  *
- * A reader asks the store which levels exist and then decides; it does not hand a budget over and
- * hope. {@link Corpus.levels} is the list, {@link Corpus.levelFor} is the arithmetic that turns a
- * budget into one of these, and {@link Corpus.view} answers for the one it is given.
+ * A reader asks the store which levels exist and then decides. {@link Corpus.levels} is the list,
+ * and {@link Corpus.frame} draws one of them — the one a canvas of the given size can show, or the
+ * one the caller names.
  */
 export interface LevelInfo {
   /** *k*. Level 0 is every vertex. */
@@ -292,126 +291,137 @@ export interface LevelInfo {
    * Whether a written `vertex/<Type>/l{k}/` answers this level, or the full tiles are strided.
    *
    * **The two select the same rows** — `dense_id % strideOf(k) == 0` is the definition and a level file is
-   * a cache of it. What a written level changes is the byte count; see {@link ViewCost.read} and
+   * a cache of it. What a written level changes is the byte count; see {@link Frame.matchedAt} and
    * `/docs/design/one-door` for why that is a cost and not a second contract.
    */
   readonly written: boolean;
 }
 
-/** What {@link Corpus.levelFor} takes: a rectangle and what it may cost. */
-export interface LevelBudget extends Box {
-  type?: string;
-  /** How many vertices the caller is willing to be handed. */
-  budget: number;
+/**
+ * The canvas a frame is drawn into. **A number a caller already has** — this was a budget in
+ * marks, which is a number nothing outside this package produces and every host invented
+ * differently out of the same two facts: how big the canvas is and how big a mark is.
+ */
+export interface Pixels {
+  readonly w: number;
+  readonly h: number;
 }
 
-/** What {@link Corpus.view} takes — a rectangle, a level, and nothing about the session. */
-export interface ViewParams extends Box {
+/** What {@link Corpus.frame} takes — a rectangle, a resolution, and nothing about the session. */
+export interface FrameParams extends Box {
   /** The vertex type, defaulting to the first the index names. */
   type?: string;
   /**
-   * Which level of detail. **The caller's, always** — see {@link Corpus.levelFor} for why this is
-   * not derived here.
+   * How big the picture is, which is what decides the level. **One mark per pixel**, and that is
+   * the whole conversion — a factor below it would be a constant this package invented about
+   * somebody else's renderer. Marks four pixels wide: pass the canvas divided by four.
+   *
+   * Required unless {@link FrameParams.level} names a level outright.
    */
-  level: number;
+  pixels?: Pixels;
+  /**
+   * A level, named rather than derived — **manual mode, and it is not a fallback.** *«The same
+   * rectangle at the same level»* has to stay sayable or monotone refinement cannot be stated at
+   * all, and a derived level is derived from a number a caller would have to invert to say it.
+   * Given here it wins and `pixels` is not consulted.
+   */
+  level?: number;
   /** Which column carries the categorical the caller will colour by. Defaults to `cluster_id`. */
   fill?: string;
   /**
    * Addresses that ride whatever the rectangle and the level select — a pinned vertex.
    *
    * They are exempt from the level, because a pin is one `dense_id` and an odd one is a multiple of
-   * no stride above 1. Their tiles are counted on {@link ViewCost.tiles}, so a pin's fetch is on the
-   * ledger rather than hidden in it.
+   * no stride above 1. Their tiles are counted on {@link FrameCost.tiles}, so a pin's fetch is on
+   * the ledger rather than hidden in it.
    */
   pinned?: readonly (number | bigint)[];
   /** Whether to answer with the edges among the drawn set. Defaults to `true`. */
   links?: boolean;
   /**
-   * The shortest edge worth a row, **in the corpus's own units**.
-   *
-   * A pixel floor is the caller's, and it converts: a renderer with `p` corpus units per pixel and a
-   * three-pixel floor passes `3p`. Nothing here knows what a pixel is.
+   * The shortest edge worth a row, **in the corpus's own units and never in pixels** — which
+   * {@link FrameParams.pixels} is, and the two do not meet: a canvas sizes the decimation, a
+   * length floor measures the corpus. A renderer with `p` corpus units per pixel and a
+   * three-pixel floor passes `3p`.
    */
   minLinkLength?: number;
 }
 
-/** What one answer cost, in the terms a reader can check against a network tab. */
-export interface ViewCost {
-  /** Tiles the rectangle and the pins selected. */
-  readonly tiles: number;
-  /** Tiles the type has. */
-  readonly ofTiles: number;
-  /** Maximal runs of adjacent tiles — what those tiles cost in `Range` requests. */
-  readonly runs: number;
-  /** Compressed bytes those runs hold, from the Parquet footer. */
+/**
+ * What one answer cost, in the terms a reader can check against a network tab.
+ *
+ * **Requests and bytes are the answer; tiles are how it was arrived at.** And there is no field
+ * saying which artefact replied: the pyramid is complete, so the level that answered is
+ * {@link Frame.matchedAt} and whether it was written is `levels()` — a field restating a
+ * derivation is a field that can disagree with it.
+ */
+export interface FrameCost {
+  /** `Range` requests — maximal runs of tiles whose bytes abut, which is what a run costs. */
+  readonly requests: number;
+  /** Compressed bytes those requests hold, from the Parquet footers. */
   readonly bytes: number;
-  /**
-   * Which artefact answered the level: `strided` means the full tiles were opened and the
-   * predicate strided them — **the same rows, more bytes** — and `level` means a written `l{k}/`
-   * answered. A caller watching this is watching the pyramid arrive without the contract changing;
-   * `/docs/design/one-door` is why that is reported here rather than being a second call.
-   */
-  readonly read: 'strided' | 'level';
   /** Wall clock for the queries this answer issued. */
   readonly ms: number;
+  /** The working: tiles the rectangle and the pins selected. */
+  readonly tiles: number;
+  /** The working: tiles the artefact that answered has in total. */
+  readonly ofTiles: number;
 }
 
 /**
- * A rectangle at a level, drawn — **and it is a function of its arguments and nothing else.**
+ * One picture at one resolution — **and it is a function of its arguments and nothing else.**
  *
- * No cap that moves with what the window holds, no stride derived from a count, no state between
- * calls. `/docs/design/one-door` argues why that purity is the specification rather than a
+ * No cap that moves with what the rectangle holds, no stride derived from a count, no state
+ * between calls. `/docs/design/one-door` argues why that purity is the specification rather than a
  * property this happens to have, and `/docs/design/camera` measures what it buys.
  *
  * Parallel arrays rather than objects, because the consumer is a renderer that uploads them: at
  * twenty thousand marks a `PlacedVertex[]` is twenty thousand objects built to be read four fields
- * at a time and thrown away. {@link Corpus.window} is the one that answers with rows.
+ * at a time and thrown away. {@link Corpus.rows} is the one that answers with rows.
  */
-export interface View {
+export interface Frame {
   readonly type: string;
   readonly box: Box;
   readonly level: number;
   /** `strideOf(level)`. */
   readonly stride: number;
   /**
-   * How many vertices the rectangle holds **at {@link View.matchedAt}** — the denominator, and the
-   * one number that says whether a coarse view is a picture of the whole rectangle or of part of
-   * it.
+   * How many vertices the rectangle holds **at {@link Frame.matchedAt}** — the denominator, and
+   * the one number that says whether a coarse frame is a picture of the whole rectangle or of part
+   * of it.
    */
   readonly matched: number;
   /**
-   * The level {@link View.matched} counts at: `0` when the payload was strided, and
-   * {@link View.level} when a written level answered.
+   * The level {@link Frame.matched} counts at: `0` when the payload was strided, and
+   * {@link Frame.level} when a written level answered — **which is also how a caller learns which
+   * artefact replied**, since only a written `l{k}/` can report a level above zero.
    *
    * **A field rather than a footnote, because the honest answer is not always level 0.** `matched`
-   * is `count(*)` over the rows that were read, and a level file holds one row in `strideOf(k)` — so a
-   * read of `l{k}/` cannot count level 0 without opening the very bytes the pyramid exists to
-   * avoid. The two ways of not saying so were both worse: reporting `matched · strideOf(k)` invents an
-   * estimate the type does not admit to, and letting the field mean different things depending on
-   * `cost.read` is the two-contracts failure the pyramid was designed to refuse.
-   *
-   * `matched · strideOf(matchedAt)` is the caller's own arithmetic if it wants an estimate, and it is an
-   * estimate — the decimation is uniform in `dense_id`, not in the rectangle.
+   * is `count(*)` over the rows that were read, and a level file holds one row in `strideOf(k)`, so
+   * a read of `l{k}/` cannot count level 0 without opening the very bytes the pyramid exists to
+   * avoid. Reporting `matched · strideOf(k)` instead would invent an estimate the type does not
+   * admit to — that arithmetic is the caller's, and it is an estimate: the decimation is uniform
+   * in `dense_id`, not in the rectangle.
    */
   readonly matchedAt: number;
   /**
    * `dense_id`s, marks first and then anchors. In this type's own numbering: a `dense_id` is unique
    * within one vertex type and repeats across a union of two, so a caller drawing more than one
-   * type pairs these with {@link View.type} itself.
+   * type pairs these with {@link Frame.type} itself.
    */
   readonly denseIds: BigUint64Array;
   /** `x, y` per row, marks first and then anchors. */
   readonly positions: Float32Array;
-  /** The `fill` column per row, as written. Only the first {@link View.marks} are meaningful. */
+  /** The `fill` column per row, as written. Only the first {@link Frame.marks} are meaningful. */
   readonly categories: Uint32Array;
   /**
    * How many of the rows are **drawn**. A prefix length rather than a count: the rows past it are
    * anchors — far ends the links need, at their real positions, out of tiles already opened.
    */
   readonly marks: number;
-  /** Pairs of row indices into {@link View.positions}. At least one end of each is a mark. */
+  /** Pairs of row indices into {@link Frame.positions}. At least one end of each is a mark. */
   readonly links: Uint32Array;
-  readonly cost: ViewCost;
+  readonly cost: FrameCost;
 }
 
 /** What {@link Corpus.neighbours} took and what it reached. */
@@ -490,12 +500,12 @@ export interface Corpus {
    * loses vertices, and only re-reading every page tells them apart. Cached after the first call.
    *
    * It is a fifth member on a specification that names four, and it is here because without it
-   * {@link Corpus.window} cannot be called: a caller with a URL and nothing else has no coordinates
+   * {@link Corpus.rows} cannot be called: a caller with a URL and nothing else has no coordinates
    * to put in the box.
    */
   extent(type?: string): Promise<Extent | null>;
-  /** The vertices in a rectangle and the edges among them. */
-  window(params: WindowParams): Promise<WindowAnswer>;
+  /** The vertices in a rectangle and the edges among them, entire. */
+  rows(params: RowsParams): Promise<RowsAnswer>;
   /**
    * Which levels of detail exist — the multiscale metadata, and the first half of the Zarr shape.
    *
@@ -506,23 +516,21 @@ export interface Corpus {
    */
   levels(type?: string): readonly LevelInfo[];
   /**
-   * The coarsest level whose population fits a budget — **pure, synchronous, and separate.**
+   * A rectangle at a resolution, ready to draw — **the door a camera goes through.**
    *
-   * A second function rather than an argument to {@link Corpus.view}; `levelFor` in `./address.ts`
-   * is the arithmetic, and `/docs/design/one-door` is why the level is the caller's.
-   */
-  levelFor(params: LevelBudget): number;
-  /**
-   * A rectangle at a level of detail, ready to draw — **the door a camera goes through.**
-   *
-   * **This and {@link Corpus.window} both take a rectangle and they are not the same question.**
-   * `window` answers *what is here*: every row, every column, complete for incidence, no bound.
-   * This answers *what to draw at this resolution*: a decimation, positions and one categorical,
+   * **This and {@link Corpus.rows} both take a rectangle and they are not the same question.**
+   * `rows` answers *what is here*: every row, every column, complete for incidence, no bound. This
+   * answers *what do I draw at this resolution*: a decimation, positions and one categorical,
    * bounded by the level rather than by a cap. What keeps them one contract rather than two is
-   * that **`view` at level 0 selects the same vertices `window` does over the same rectangle**,
-   * which `tests/view.test.ts` asserts against the fixture.
+   * that **a frame at level 0 selects the same vertices `rows` does over the same rectangle**,
+   * which `tests/frame.test.ts` asserts against the fixture.
+   *
+   * **Two names rather than one call whose return type moved with a flag**, which is what these
+   * two were. The level comes from {@link FrameParams.pixels} — the pyramid is complete, from
+   * level 1 to the level that fits one tile, so the derived level is always answerable and the
+   * second call that used to name it is gone. {@link FrameParams.level} still says one outright.
    */
-  view(params: ViewParams): Promise<View>;
+  frame(params: FrameParams): Promise<Frame>;
   /** One vertex by identity, or `null`. */
   node(id: string, params?: NodeParams): Promise<PlacedVertex | null>;
   /**
@@ -561,7 +569,7 @@ export interface Corpus {
   //
   // **They read a relation, where everything above reads tiles**, and that is the line between
   // the two halves of this object rather than a spelling difference. A verb's SQL names a table
-  // and lets the engine decide which bytes to open; `window`, `extent` and `neighbours` compute
+  // and lets the engine decide which bytes to open; `rows`, `extent` and `neighbours` compute
   // which files to open and open those. `crates/fossil-graph/src/lib.rs` states the same rule
   // from the other side — *pruning is which bytes are read, and that is the tiles' job, not a
   // verb's*.
@@ -620,7 +628,7 @@ export interface OpenCorpusOptions {
   /**
    * Where `fossil_graph_wasm_bg.wasm` is, for the verbs.
    *
-   * Optional, and only the verbs need it: `types`, `extent`, `window`, `node` and `neighbours`
+   * Optional, and only the verbs need it: `types`, `extent`, `rows`, `node` and `neighbours`
    * write their own SQL and load nothing. Given, it is booted on the first verb call and not at
    * open — a caller that only draws never instantiates it. Omitted, the caller is taken to have
    * called `initFossilGraphWasm` itself, which is the same memoised boot; a verb called before
@@ -920,7 +928,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
      * Where the tile's bytes begin in its file, and how far they run.
      *
      * Off the same footer read as the box, because it is the same row of `parquet_metadata` — and
-     * needed for the same reason the box is: {@link Corpus.view} reports what an answer cost, and a
+     * needed for the same reason the box is: {@link Corpus.frame} reports what an answer cost, and a
      * cost report whose byte figure is a guess is not one. `min(coalesce(dictionary_page_offset,
      * data_page_offset))` is where a row group starts — the dictionary page comes first when there
      * is one, and `file_offset` is not reliably populated by every writer.
@@ -934,7 +942,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   /**
    * @param level When given, the footers of that WRITTEN level's tiles rather than the payload's.
    *   One `parquet_metadata` read over a handful of files, cached beside the payload's under its
-   *   own key — and it is what keeps `ViewCost.bytes` a measurement under a level read instead of
+   *   own key — and it is what keeps `FrameCost.bytes` a measurement under a level read instead of
    *   the payload's number wearing a level's label.
    */
   const tileBoxes = (type: string, level?: number): Promise<readonly TileBox[]> => {
@@ -1003,8 +1011,8 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   /**
    * The payload boxes of every type that has geometry, resolved **while the corpus is opening.**
    *
-   * It is not lazy, and the reason is {@link Corpus.levelFor}: a camera asks which level to draw
-   * before it asks for anything, and a level that arrived as a promise would be a request between
+   * It is not lazy, and the reason is {@link Corpus.frame}: it derives the level from the canvas
+   * before it opens anything, and a level that arrived as a promise would be a request between
    * the camera moving and a URL being computable, which is the `viewport` verb this format deleted.
    * So the footers are bought with the manifests.
    *
@@ -1025,7 +1033,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   /**
    * **What a set of files weighs**, from the same footers the boxes come from, read once per set.
    *
-   * `ViewCost.bytes` counted the vertex tiles and nothing else, while `view` was also opening the
+   * `FrameCost.bytes` counted the vertex tiles and nothing else, while `frame` was also opening the
    * adjacency for every answer that asked for links: at a million vertices that is 13 MB of
    * `by_source` against a 21 MB report, so the ledger was short by 38% of what it read. A cost
    * report that omits a file it opened is worse than no cost report, because it is believed.
@@ -1073,6 +1081,42 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     return (BigInt(all.length) === type.tiles ? intersecting(all, box) : all).map((b) =>
       Number(b.tile),
     );
+  };
+
+  /**
+   * **Which level a canvas of this size can show** — the derivation that used to be a second call.
+   *
+   * `w · h` marks, because a pixel is the finest thing a canvas tells apart. What the rectangle
+   * holds is estimated as the TILES it touches times `chunk_size`, capped by the type's own count
+   * (`/docs/design/camera` measures why tiles and not area); a type with no geometry falls back to
+   * its whole tile count, which the ceiling turns into the level the whole type needs. The
+   * logarithm is in the pyramid's base through {@link strideBits}, because a level drops
+   * `strideOf(k)` and not `2^k`. Synchronous over footers `openCorpus` already bought.
+   *
+   * **This is why the level stopped being the caller's**, reversing `/docs/design/one-door`: that
+   * argument rested on a partial pyramid, where a derived level could name an artefact nobody
+   * wrote. It is complete now, so every derived level is answerable — and what the reversal owed
+   * the argument is {@link FrameParams.level}, which keeps refinement sayable.
+   */
+  const levelForCanvas = (type: VertexAddress, box: Box, pixels: Pixels | undefined): number => {
+    if (pixels === undefined) {
+      throw new CorpusReadError(
+        'a frame needs a resolution: pass `pixels` for the canvas it is drawn into, or `level` to name one',
+      );
+    }
+    const marks = pixels.w * pixels.h;
+    if (!(marks > 0)) {
+      throw new CorpusReadError(
+        `a canvas is positive in both directions; got ${String(pixels.w)}×${String(pixels.h)}`,
+      );
+    }
+    const tiles = footers.has(type.type)
+      ? selectedTiles(type, box).length
+      : Number(type.tiles ?? 0n);
+    const ceiling = type.count === null ? Number.POSITIVE_INFINITY : Number(type.count);
+    const estimate = Math.min(tiles * type.chunkSize || 0, ceiling);
+    if (!(estimate > marks)) return 0;
+    return Math.ceil(Math.log2(estimate / marks) / strideBits(1));
   };
 
   /**
@@ -1442,7 +1486,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     },
 
     /**
-     * The vertices in a rectangle and the edges among them.
+     * The vertices in a rectangle and the edges among them, entire.
      *
      * **Vertices are pruned by the engine and edges by the address, and the asymmetry is the whole
      * design.** A box over `x`/`y` is one conjunctive range, which is precisely what a Parquet
@@ -1469,7 +1513,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
      * and a box over a dense region returns everything in it. A caller that needs a bound puts it
      * in the box.
      */
-    async window(params) {
+    async rows(params) {
       const { type, directions = ['src', 'dst'], ...box } = params;
       const address = vertexType(type);
       if (!has(address.type, 'x') || !has(address.type, 'y')) {
@@ -1496,7 +1540,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const tiles = [...new Set(vertices.map((v) => address.tileOf(v.denseId)))].sort(ascending);
 
       // The addressing decides which orientations apply and why one is missing; this only fetches.
-      // Reproducing that rule here is how the two halves of a window drift apart.
+      // Reproducing that rule here is how the two halves of a rectangle read drift apart.
       const plan = addressing.tilesFor({ type: address.type, tiles, directions });
       const edges =
         tiles.length === 0
@@ -1538,28 +1582,12 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       }
     },
 
-    levelFor({ type, budget, ...box }) {
-      const address = vertexType(type);
-      // Synchronous, over footers already read: `openCorpus` bought them, so a camera deciding
-      // which level to draw before it asks for anything gets an answer and not a promise. A type
-      // with no geometry has no boxes and falls back to its whole tile count, which the `count`
-      // ceiling turns into the level the whole type needs — too coarse, never too fine.
-      const tiles = footers.has(address.type)
-        ? selectedTiles(address, box).length
-        : Number(address.tiles ?? 0n);
-      return levelForTiles({
-        tiles,
-        chunkSize: address.chunkSize,
-        count: address.count === null ? undefined : Number(address.count),
-        budget,
-      });
-    },
-
-    async view(params) {
+    async frame(params) {
       const started = Date.now();
       const {
         type,
-        level,
+        level: named,
+        pixels,
         fill = 'cluster_id',
         pinned = [],
         links: wantLinks = true,
@@ -1573,15 +1601,16 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
             `${fieldsOf(address.type).map((f) => f.name).join(', ') || 'empty'}`,
         );
       }
-      if (!Number.isInteger(level) || level < 0) {
-        throw new CorpusReadError(`a level is a non-negative integer; got ${String(level)}`);
+      if (named !== undefined && (!Number.isInteger(named) || named < 0)) {
+        throw new CorpusReadError(`a level is a non-negative integer; got ${String(named)}`);
       }
+      const level = named ?? levelForCanvas(address, box, pixels);
       const stride = strideOf(level);
       const chunk = BigInt(address.chunkSize);
       const pins = [...new Set(pinned.map((id) => BigInt(id)))].sort(ascending);
 
       // Which tiles: the per-tile `x`/`y` boxes in the Parquet footers, which is the ONE index
-      // over that question — `footer-is-the-index`. It is the same array `levelFor` answered from
+      // over that question — `footer-is-the-index`. It is the same array the level came out of
       // and `openCorpus` already read; awaited here for the type that has no geometry cached.
       const all = await tileBoxes(address.type);
       /**
@@ -1597,16 +1626,16 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
        * said the day a level exists nothing else changes. It was written before that was measured.
        *
        * The rule that keeps one contract is therefore: **the pyramid answers when the answer is
-       * points.** A caller that asks for links opens the payload and `cost.read` says `strided`.
+       * points.** A caller that asks for links opens the payload, and `matchedAt` says `0`.
        */
       const levelSet = address.levels;
       /**
        * The relations whose own level `k` is written, when every incident one is.
        *
-       * **All or none, deliberately.** A view drawing the edges of two relations out of one and
+       * **All or none, deliberately.** A frame drawing the edges of two relations out of one and
        * the payload out of the other would be reading level `k` and level 0 in the same answer and
        * reporting one number for it. Where any incident relation is missing its level set, the
-       * read is the payload's and `cost.read` says `strided`.
+       * read is the payload's and `matchedAt` says `0`.
        */
       const edgeLevels = (() => {
         const incident = addressing.edges.filter(
@@ -1672,7 +1701,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
       // A pin is one `dense_id` and an odd one is a multiple of no stride above 1, so the level
       // file does not carry it. Its PAYLOAD tile is opened for it — which is what
-      // `ViewCost.tiles` counting a pin's tile has always meant, now with the bytes to match.
+      // `FrameCost.tiles` counting a pin's tile has always meant, now with the bytes to match.
       const pinUrls = viaLevel ? distinct(pins.map((id) => address.tileUrl(address.tileOf(id)))) : [];
       const urls = distinct(
         viaLevel ? held.map((tile) => levelSet!.tileUrl(level, tile)) : held.map((tile) => address.tileUrl(tile)),
@@ -1683,7 +1712,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const readUrls = distinct([...urls, ...pinUrls]);
       const bytes = await bytesOf(readUrls, drawnColumns);
 
-      const empty: View = {
+      const empty: Frame = {
         type: address.type,
         box,
         level,
@@ -1695,14 +1724,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         marks: 0,
         matchedAt: viaLevel ? level : 0,
         links: new Uint32Array(0),
-        cost: {
-          tiles: 0,
-          ofTiles: source.all.length,
-          runs: 0,
-          bytes: 0,
-          read: viaLevel ? 'level' : 'strided',
-          ms: 0,
-        },
+        cost: { requests: 0, bytes: 0, ms: 0, tiles: 0, ofTiles: source.all.length },
       };
       if (urls.length === 0) return empty;
 
@@ -1897,12 +1919,11 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         marks,
         links: edges,
         cost: {
+          requests: runs.length + pinRuns.length,
+          bytes: bytes + edgeBytes,
+          ms: Date.now() - started,
           tiles: held.length + pinTiles.length,
           ofTiles: source.all.length,
-          runs: runs.length + pinRuns.length,
-          bytes: bytes + edgeBytes,
-          read: viaLevel ? 'level' : 'strided',
-          ms: Date.now() - started,
         },
       };
     },

@@ -141,8 +141,8 @@ describe.skipIf(!hasDuckdb)('one corpus, two containers', () => {
   it.each([['src'], ['src', 'dst']] as const)(
     'answers the same window for %s',
     async (...directions) => {
-      const files = await opened.files.corpus.window({ ...BOX, directions });
-      const rowgroups = await opened.rowgroups.corpus.window({ ...BOX, directions });
+      const files = await opened.files.corpus.rows({ ...BOX, directions });
+      const rowgroups = await opened.rowgroups.corpus.rows({ ...BOX, directions });
       // Non-vacuity, and it is not a formality: two windows that selected nothing are identical,
       // and a box wrong by a factor of a hundred is how this file comes to pass on air.
       expect(files.vertices.length).toBeGreaterThan(0);
@@ -181,9 +181,9 @@ describe.skipIf(!hasDuckdb)('one corpus, two containers', () => {
   it('names strictly fewer files for the same window', async () => {
     const cost: Record<string, number> = {};
     for (const layout of ['files', 'rowgroups'] as const) {
-      await opened[layout].corpus.window(BOX); // the first window also pays for the footer sweep
+      await opened[layout].corpus.rows(BOX); // the first read also pays for the footer sweep
       opened[layout].reset();
-      await opened[layout].corpus.window(BOX);
+      await opened[layout].corpus.rows(BOX);
       cost[layout] = opened[layout].bill();
     }
     // The measured claim, in the only currency a local file has. Over HTTP the same shape is 22.3

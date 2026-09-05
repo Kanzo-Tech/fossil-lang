@@ -7,7 +7,7 @@ manifest with no rule for choosing between them; two of them took the same two
 arguments and answered overlapping questions in two languages.
 
 - **`@fossil-lang/corpus`** — `openCorpus(url, { query, wasmUrl })`. Discovery,
-  the camera (`extent`, `levelFor`, `view`, `window`, `node`, `neighbours`) and the six verbs
+  the camera (`extent`, `frame`, `rows`, `node`, `neighbours`) and the six verbs
   (`read`, `expand`, `path`, `aggregate`, `schema`, `executeSql`) on one object.
   **Start here.** No tiles, no `dense_id`, no Morton, no `by_source`, no
   prefixes, no footers.
@@ -63,16 +63,16 @@ const corpus = await openCorpus('https://data.example/graph', {
 });
 
 corpus.types;                              // vertex types with counts and columns, edge types
-const box = await corpus.extent();         // the coordinates a window is expressed in
-const rows = await corpus.window({ x: box.minX, y: box.minY, w: 100, h: 100 });
+const box = await corpus.extent();         // the coordinates a rectangle is expressed in
+const here = await corpus.rows({ x: box.minX, y: box.minY, w: 100, h: 100 });
 
-// The camera. `levelFor` is a SEPARATE pure function, so the level is the
-// caller's: `view(rect, level)` is the same answer however the camera got there.
+// The camera. Two questions, two names: `rows` is what is here, entire, and
+// `frame` is what to draw at this resolution. The level comes from the canvas.
 const rect = { x: box.minX, y: box.minY, w: 1000, h: 1000 };
-const level = corpus.levelFor({ ...rect, budget: 20_000 }); // pixels are the host's
-const frame = await corpus.view({ ...rect, level });        // typed arrays, not rows
-frame.marks;      // a prefix length — everything past it is an anchor
-frame.cost.read;  // 'strided' or 'level': which artefact answered, same rows either way
+const frame = await corpus.frame({ ...rect, pixels: { w: 1200, h: 800 } });
+frame.level;         // which level the canvas could show — `level:` names one by hand
+frame.marks;         // a prefix length — everything past it is an anchor
+frame.cost.requests; // and `.bytes`: what it spent, in the terms a network tab has
 
 const one = await corpus.node('https://example.org/person/15');
 const hood = await corpus.neighbours([one.id], { depth: 2 });
@@ -90,7 +90,7 @@ const hist = await corpus.aggregate({
 `query` callback — DuckDB-WASM in a browser, a native `duckdb::Connection` on a
 server — and this package keeps its zero runtime dependencies. Three of the four
 members have to decode Parquet, and an engine also does the footer pruning a
-window would otherwise re-derive by hand. `read_text`, `read_parquet` and
+rectangle read would otherwise re-derive by hand. `read_text`, `read_parquet` and
 `parquet_metadata` are the whole of what it is asked for.
 
 **`id` is the subject IRI, never the `dense_id`.** Redoing the layout renumbers

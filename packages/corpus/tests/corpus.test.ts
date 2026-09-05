@@ -200,7 +200,7 @@ describe('extent — the box a caller has no other way to know', () => {
   });
 });
 
-describe('window — the vertices in a rectangle and the edges among them', () => {
+describe('rows — the vertices in a rectangle and the edges among them', () => {
   /** A rectangle that covers everything, so the answer's size is the corpus's own numbers. */
   const everything = async () => {
     const box = (await corpus.extent())!;
@@ -213,14 +213,14 @@ describe('window — the vertices in a rectangle and the edges among them', () =
   };
 
   it('returns every vertex when the box is the extent, and reports every tile', async () => {
-    const answer = await corpus.window(await everything());
+    const answer = await corpus.rows(await everything());
     expect(answer.vertices).toHaveLength(Number(VERTEX_COUNT));
     expect(answer.tiles).toEqual([0n, 1n, 2n, 3n, 4n]);
     expect(answer.vertices.every((v) => typeof v.id === 'string')).toBe(true);
   });
 
   it('counts each edge once when both orientations are read', async () => {
-    const answer = await corpus.window(await everything());
+    const answer = await corpus.rows(await everything());
     // 596 is the manifest's `edge_count`, and it covers the pair: the same relation is in
     // `by_source` and in `by_target`. Reading both and concatenating returns each edge twice.
     expect(answer.edges).toHaveLength(Number(EDGE_COUNT));
@@ -232,8 +232,8 @@ describe('window — the vertices in a rectangle and the edges among them', () =
 
   it('is complete for incidence with both orientations, and says which is missing with one', async () => {
     const box = await everything();
-    expect(await corpus.window(box)).toMatchObject({ complete: true, gaps: [] });
-    const drawing = await corpus.window({ ...box, directions: ['src'] });
+    expect(await corpus.rows(box)).toMatchObject({ complete: true, gaps: [] });
+    const drawing = await corpus.rows({ ...box, directions: ['src'] });
     expect(drawing.complete).toBe(false);
     expect(drawing.gaps).toEqual([{ edgeType: 'knows', direction: 'dst', reason: 'not-requested' }]);
   });
@@ -246,7 +246,7 @@ describe('window — the vertices in a rectangle and the edges among them', () =
       w: (full.maxX - full.minX) / 3,
       h: (full.maxY - full.minY) / 3,
     };
-    const answer = await corpus.window(box);
+    const answer = await corpus.rows(box);
     const where = `x >= ${box.x} AND x < ${box.x + box.w} AND y >= ${box.y} AND y < ${box.y + box.h}`;
     expect(answer.vertices.length).toBe(
       Number(await scalar(`SELECT count(*) FROM read_parquet(${vertexTiles()}) WHERE ${where}`)),
@@ -268,7 +268,7 @@ describe('window — the vertices in a rectangle and the edges among them', () =
       w: (full.maxX - full.minX) / 3,
       h: (full.maxY - full.minY) / 3,
     };
-    const answer = await corpus.window(box);
+    const answer = await corpus.rows(box);
     const inside = new Set(answer.vertices.map((v) => v.denseId));
     expect(answer.edges.every((e) => inside.has(e.src) || inside.has(e.dst))).toBe(true);
 
@@ -287,7 +287,7 @@ describe('window — the vertices in a rectangle and the edges among them', () =
 
   it('answers an empty box as complete rather than as a failure', async () => {
     const full = (await corpus.extent())!;
-    const answer = await corpus.window({ x: full.maxX + 10, y: full.maxY + 10, w: 1, h: 1 });
+    const answer = await corpus.rows({ x: full.maxX + 10, y: full.maxY + 10, w: 1, h: 1 });
     expect(answer.vertices).toEqual([]);
     expect(answer.edges).toEqual([]);
     expect(answer.tiles).toEqual([]);
@@ -320,7 +320,7 @@ describe('node — the identity, and what it refuses to be', () => {
 
   it('round-trips every id it hands out', async () => {
     const full = (await corpus.extent())!;
-    const answer = await corpus.window({ x: full.minX, y: full.minY, w: 1e-3, h: 1e30 });
+    const answer = await corpus.rows({ x: full.minX, y: full.minY, w: 1e-3, h: 1e30 });
     expect(answer.vertices.length).toBeGreaterThan(0);
     for (const vertex of answer.vertices.slice(0, 5)) {
       expect((await corpus.node(vertex.id!))!.denseId).toBe(vertex.denseId);
@@ -594,7 +594,7 @@ describe('the verbs, through the same door', () => {
 
   it('boots no WASM for a caller that only draws', async () => {
     // The verbs are the only half that needs the module, so the module is instantiated on the
-    // first verb call. A window and an extent must not reach for it — this is asserted as the
+    // first verb call. A rectangle read and an extent must not reach for it — this is asserted as
     // absence of a `CREATE ... VIEW`, which is the observable half of that boot.
     const statements: string[] = [];
     const drawing = await openCorpus(CORPUS, {
@@ -605,7 +605,7 @@ describe('the verbs, through the same door', () => {
     });
     statements.length = 0;
     const box = (await drawing.extent())!;
-    await drawing.window({ x: box.minX, y: box.minY, w: 1, h: 1 });
+    await drawing.rows({ x: box.minX, y: box.minY, w: 1, h: 1 });
     expect(statements.some((sql) => sql.includes('VIEW'))).toBe(false);
   }, 30_000);
 });
@@ -717,7 +717,7 @@ describe('the conformance table, executed against the published API', () => {
   it.each(table.answers.window)(
     'window $box.x,$box.y over $directions',
     async ({ box, directions, vertices, tiles, edges, complete, gaps }) => {
-      const got = await corpus.window({ ...box, directions });
+      const got = await corpus.rows({ ...box, directions });
       expect(got.vertices.length).toBe(vertices);
       expect(got.tiles.map(Number)).toEqual(tiles);
       expect(got.edges.length).toBe(edges);

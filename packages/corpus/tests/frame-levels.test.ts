@@ -21,7 +21,7 @@ import { write } from '../../../apps/corpus/guards/fixture.mjs';
 /**
  * **The read side of the pyramid**, against a corpus that has one.
  *
- * `view.test.ts` cannot ask any of this: the conformance corpus is 300 vertices in 5 tiles and
+ * `frame.test.ts` cannot ask any of this: the conformance corpus is 300 vertices in 5 tiles and
  * writes no `l{k}/`, deliberately, because giving it one would mean growing the artefact every
  * implementation of this format is checked against.
  *
@@ -39,7 +39,7 @@ import { write } from '../../../apps/corpus/guards/fixture.mjs';
  * **What is asserted is the one property the pyramid is not allowed to break.** A level file is a
  * cache of `dense_id % strideOf(k) == 0` over the payload and nothing else, so for every written
  * level the rows a level read answers with are exactly the rows the predicate selects out of
- * `window` — same ids, same positions, same order. If those two can disagree there are two
+ * `rows` — same ids, same positions, same order. If those two can disagree there are two
  * contracts, and a reader would have to know which artefact answered in order to know what it was
  * looking at.
  *
@@ -158,24 +158,25 @@ describe.skipIf(!hasDuckdb)('a corpus that declares a pyramid', () => {
 describe.skipIf(!hasDuckdb)('a level read answers with what the predicate selects', () => {
   it('is the same rows as striding the payload, at every written level', async () => {
     const box = await everything();
-    const rows = await corpus.window({ ...box });
+    const entire = await corpus.rows({ ...box });
     for (const level of LEVELS) {
       const step = BigInt(strideOf(level));
-      const expected = rows.vertices
+      const expected = entire.vertices
         .map((v) => v.denseId)
         .filter((id) => id % step === 0n)
         .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-      const view = await corpus.view({ ...box, level, links: false });
-      expect(view.cost.read).toBe('level');
-      expect([...view.denseIds.slice(0, view.marks)]).toEqual(expected);
+      const frame = await corpus.frame({ ...box, level, links: false });
+      // `matchedAt` at the level asked for is what says `l{k}/` replied — there is no second field.
+      expect(frame.matchedAt).toBe(level);
+      expect([...frame.denseIds.slice(0, frame.marks)]).toEqual(expected);
       // The positions come out of a different FILE and have to be the same numbers: a level that
       // carried the right ids at the wrong coordinates draws a picture that is wrong about where
       // everything is, and an id-only assertion is green for it.
-      for (let i = 0; i < view.marks; i += 1) {
-        const id = view.denseIds[i]!;
-        const row = rows.vertices.find((v) => v.denseId === id)!;
-        expect(view.positions[i * 2]).toBeCloseTo(row.x, 5);
-        expect(view.positions[i * 2 + 1]).toBeCloseTo(row.y, 5);
+      for (let i = 0; i < frame.marks; i += 1) {
+        const id = frame.denseIds[i]!;
+        const row = entire.vertices.find((v) => v.denseId === id)!;
+        expect(frame.positions[i * 2]).toBeCloseTo(row.x, 5);
+        expect(frame.positions[i * 2 + 1]).toBeCloseTo(row.y, 5);
       }
     }
   });
@@ -183,12 +184,12 @@ describe.skipIf(!hasDuckdb)('a level read answers with what the predicate select
   it('opens strictly fewer bytes than the same corpus without a pyramid', async () => {
     const box = await everything();
     const level = LEVELS[0]!;
-    const cheap = await corpus.view({ ...box, level, links: false });
-    const dear = await flat.view({ ...box, level, links: false });
-    expect(cheap.cost.read).toBe('level');
+    const cheap = await corpus.frame({ ...box, level, links: false });
+    const dear = await flat.frame({ ...box, level, links: false });
+    expect(cheap.matchedAt).toBe(level);
     // Same rectangle, same level, same rows — and the control has to stride the payload for them,
     // because it has no `l{k}/` to read them out of.
-    expect(dear.cost.read).toBe('strided');
+    expect(dear.matchedAt).toBe(0);
     expect([...cheap.denseIds.slice(0, cheap.marks)]).toEqual([
       ...dear.denseIds.slice(0, dear.marks),
     ]);
@@ -200,19 +201,19 @@ describe.skipIf(!hasDuckdb)('a level read answers with what the predicate select
     // A level file of a RELATION carries both endpoints' coordinates, so a view that asked for
     // links is still answerable off the pyramid — which is the whole reason the edge levels exist.
     // Where any incident relation is missing its level set the read falls back to the payload, and
-    // `cost.read` is where that is reported rather than in a second contract.
+    // `matchedAt` is where that is visible rather than in a second contract.
     const box = await everything();
     const level = LEVELS[0]!;
-    const linked = await corpus.view({ ...box, level, links: true });
-    expect(linked.cost.read).toBe('level');
-    expect(await flat.view({ ...box, level, links: true }).then((v) => v.cost.read)).toBe('strided');
+    const linked = await corpus.frame({ ...box, level, links: true });
+    expect(linked.matchedAt).toBe(level);
+    expect(await flat.frame({ ...box, level, links: true }).then((f) => f.matchedAt)).toBe(0);
   });
 
   it('counts `matched` at the level it read, and says which level that is', async () => {
     const box = await everything();
     const level = LEVELS[1]!;
-    const cheap = await corpus.view({ ...box, level, links: false });
-    const strided = await flat.view({ ...box, level, links: false });
+    const cheap = await corpus.frame({ ...box, level, links: false });
+    const strided = await flat.frame({ ...box, level, links: false });
     expect(cheap.matchedAt).toBe(level);
     expect(cheap.matched).toBe(Math.ceil(ROWS / strideOf(level)));
     // The payload read still counts level 0, because it read level 0's bytes.
@@ -224,18 +225,17 @@ describe.skipIf(!hasDuckdb)('a level read answers with what the predicate select
     const box = await everything();
     const level = LEVELS[LEVELS.length - 1]! + 1;
     expect(corpus.levels('Person').find((l) => l.level === level)?.written).toBe(false);
-    const view = await corpus.view({ ...box, level, links: false });
-    expect(view.cost.read).toBe('strided');
-    expect(view.matchedAt).toBe(0);
-    expect(view.marks).toBe(Math.ceil(ROWS / strideOf(level)));
+    const frame = await corpus.frame({ ...box, level, links: false });
+    expect(frame.matchedAt).toBe(0);
+    expect(frame.marks).toBe(Math.ceil(ROWS / strideOf(level)));
   });
 
   it('brings a pin back off the payload, because no level carries an odd id', async () => {
     const box = await everything();
     const level = LEVELS[0]!;
-    const bare = await corpus.view({ ...box, level, links: false });
-    const pinned = await corpus.view({ ...box, level, links: false, pinned: [7] });
-    expect(pinned.cost.read).toBe('level');
+    const bare = await corpus.frame({ ...box, level, links: false });
+    const pinned = await corpus.frame({ ...box, level, links: false, pinned: [7] });
+    expect(pinned.matchedAt).toBe(level);
     expect([...pinned.denseIds.slice(0, pinned.marks)]).toContain(7n);
     expect(pinned.marks).toBe(bare.marks + 1);
     // The pin's PAYLOAD tile was opened for it, and a fetch that happened is a fetch on the ledger.
