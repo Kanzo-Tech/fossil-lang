@@ -1,4 +1,4 @@
-//! The address of a corpus, resolved from its manifest — the Rust reader.
+//! The plan for reading a corpus, resolved from its manifest — the Rust reader.
 //!
 //! A tile is a fixed range of `dense_id` and its address is a shift, so a reader
 //! computes every URL it wants before it emits the first request. Two readers
@@ -6,6 +6,15 @@
 //! `apps/corpus/conformance/reader.mjs` (written from the conventions and from
 //! nothing else). This is the third, and it is the one that reaches a browser
 //! through `fossil-graph-wasm`.
+//!
+//! **An address is the smallest thing here, not the subject.** The types named
+//! `…Address` each turn an id into a URL and a tile number, and that is exactly
+//! what they are. What the module does with them is larger: it validates that a
+//! manifest can address itself at all, refuses the ones that cannot, and turns a
+//! question — this vertex type, these tiles, these orientations — into the set of
+//! files that answers it and an honest account of what that set is *not* complete
+//! for. [`resolve`] hands back a [`ReadPlan`], and a plan for reading is what a
+//! caller holds.
 //!
 //! **It does not go through the writer's structs, and that is the whole point.**
 //! [`crate::manifest`] deserialises into [`fossil_sinks::manifest`] — the very
@@ -649,9 +658,11 @@ pub struct Window {
     pub gaps: Vec<Gap>,
 }
 
-/// A corpus resolved to addresses. Every method is pure and synchronous.
+/// A corpus resolved into what a reader needs to read it: the addresses, and the
+/// methods that turn a question into the files that answer it. Every one of them
+/// is pure and synchronous.
 #[derive(Debug, Clone, Serialize)]
-pub struct ResolvedCorpus {
+pub struct ReadPlan {
     /// Where the corpus lives; prepended to every URL and nothing else.
     pub base: String,
     /// Which container the corpus declares. One answer for every payload set in it.
@@ -662,7 +673,7 @@ pub struct ResolvedCorpus {
     pub edges: Vec<EdgeAddress>,
 }
 
-impl ResolvedCorpus {
+impl ReadPlan {
     /// One vertex type by name, or the first the index names when no name is given.
     pub fn vertex_type(&self, name: Option<&str>) -> Result<&VertexAddress> {
         let Some(name) = name else {
@@ -766,7 +777,7 @@ impl ResolvedCorpus {
     }
 }
 
-/// Resolve a corpus's manifest set into the addresses a reader composes URLs from.
+/// Resolve a corpus's manifest set into the [`ReadPlan`] a reader composes URLs from.
 ///
 /// `manifest_files` is keyed by dataset-relative path — the same shape a host that
 /// pre-fetched them holds. `base` is where the corpus lives, without a trailing
@@ -783,7 +794,7 @@ impl ResolvedCorpus {
 pub fn resolve<S: AsRef<str>>(
     manifest_files: &BTreeMap<String, S>,
     base: &str,
-) -> Result<ResolvedCorpus> {
+) -> Result<ReadPlan> {
     let read = |path: &str| -> Result<Value> {
         let text = manifest_files.get(path).ok_or_else(|| {
             invalid(format!(
@@ -820,7 +831,7 @@ pub fn resolve<S: AsRef<str>>(
         )?);
     }
 
-    Ok(ResolvedCorpus {
+    Ok(ReadPlan {
         base: base.to_string(),
         container,
         types,

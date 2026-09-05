@@ -54,8 +54,8 @@
 //! `dense_id % fossil_sinks::manifest::VertexLevels::stride(k) == 0`, every row
 //! a real vertex sharing the payload's own numbering, because a synthetic
 //! centroid cannot nest. What makes it a different relation is still the point —
-//! the rows live in [`address::LevelAddress`]'s own tiles, and the relation's in
-//! [`address::EdgeLevelAddress`]'s — and what makes it addressable is that the
+//! the rows live in [`plan::LevelAddress`]'s own tiles, and the relation's in
+//! [`plan::EdgeLevelAddress`]'s — and what makes it addressable is that the
 //! numbering is shared: a level tile is the payload's shift plus
 //! `VertexLevels::stride_bits(k)`, which is the one place that base is spelled. The
 //! camera computes a level and tile addresses and asks for bytes; no bbox, no
@@ -88,13 +88,13 @@
 //! whole file. **Pruning is which bytes are read, and that is the tiles' job,
 //! not a verb's.**
 
-pub mod address;
 pub mod error;
 pub mod executor;
 pub mod manifest;
 pub mod operations;
+pub mod plan;
 
-pub use address::{Container, Direction, ResolvedCorpus, resolve as resolve_corpus};
 pub use error::{GraphError, Result};
 pub use executor::{DuckExecutor, QueryResult, dispatch};
 pub use operations::{Operation, RawSql, RawSqlAccess, Verb};
+pub use plan::{Container, Direction, ReadPlan, resolve as resolve_corpus};

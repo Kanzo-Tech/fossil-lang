@@ -25,7 +25,7 @@
 //! not here: `apps/corpus/conformance/expected.json` is a table of addresses
 //! executed by three readers that none of them wrote — plain Node
 //! (`conformance/reader.mjs`), the published TypeScript (`resolveCorpus`), and
-//! `fossil_graph::address`, natively in `crates/fossil-graph/tests/conformance.rs`
+//! `fossil_graph::plan`, natively in `crates/fossil-graph/tests/conformance.rs`
 //! and as wasm32 through `conformance/wasm-reader.mjs`. This paragraph said two
 //! of those three lived in another repository. All three are in this one.
 //!

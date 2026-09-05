@@ -7,7 +7,7 @@
 //!
 //! | reader | executed by | what it is |
 //! | --- | --- | --- |
-//! | [`fossil_graph::address`] | this file, and `verify.mjs`'s wasm leg | the Rust one, and the one that reaches a browser through `fossil-graph-wasm` |
+//! | [`fossil_graph::plan`] | this file, and `verify.mjs`'s wasm leg | the Rust one, and the one that reaches a browser through `fossil-graph-wasm` |
 //! | `apps/corpus/conformance/reader.mjs` | `apps/corpus/conformance/verify.mjs` | plain Node, written from the conventions and from nothing else |
 //! | `packages/corpus/src/address.ts` | `packages/corpus/tests/conformance.test.ts` | the published module |
 //!
@@ -27,7 +27,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use fossil_graph::address::{Direction, ResolvedCorpus, resolve};
+use fossil_graph::plan::{Direction, ReadPlan, resolve};
 use serde_json::Value;
 
 /// Where the shared table and its case roots live. Not a copy: the same bytes
@@ -88,14 +88,14 @@ fn direction(value: &str) -> Direction {
 }
 
 /// One case's corpus, resolved, or the refusal it is expected to be.
-fn resolved(root: &Path) -> fossil_graph::Result<ResolvedCorpus> {
+fn resolved(root: &Path) -> fossil_graph::Result<ReadPlan> {
     resolve(&manifest_files(root), "")
 }
 
 /// The vertex and edge types the table declares, with their prefixes, tile sizes
 /// and shifts. A type the reader found and the table does not name is as much a
 /// disagreement as one it missed.
-fn check_types(label: &str, case: &Value, corpus: &ResolvedCorpus) {
+fn check_types(label: &str, case: &Value, corpus: &ReadPlan) {
     for want in list(case, "types") {
         let got = corpus
             .vertex_type(Some(&s(want, "type")))
@@ -168,7 +168,7 @@ fn check_types(label: &str, case: &Value, corpus: &ResolvedCorpus) {
 /// `dense_id >> shift`, at the borders the table names, and the URLs those tiles
 /// compose to. Returns how many addresses were checked, because a table whose keys
 /// were renamed would leave the loop running zero times with the test green.
-fn check_addresses(label: &str, case: &Value, root: &Path, corpus: &ResolvedCorpus) -> usize {
+fn check_addresses(label: &str, case: &Value, root: &Path, corpus: &ReadPlan) -> usize {
     for want in list(case, "tile_of") {
         let vertex = corpus
             .vertex_type(Some(&s(want, "type")))
@@ -220,7 +220,7 @@ fn check_addresses(label: &str, case: &Value, root: &Path, corpus: &ResolvedCorp
 
 /// An orientation the corpus does not publish, and a vertex type it does not
 /// carry. Neither is ever a string that 404s. Returns how many refusals were checked.
-fn check_refusals(label: &str, case: &Value, corpus: &ResolvedCorpus) -> usize {
+fn check_refusals(label: &str, case: &Value, corpus: &ReadPlan) -> usize {
     let mut checked = 0;
     for refused in list(case, "refused") {
         let edge_type = s(refused, "edge_type");
@@ -263,7 +263,7 @@ fn check_refusals(label: &str, case: &Value, corpus: &ResolvedCorpus) -> usize {
 /// which is the failure mode a pyramid is worth having only if it cannot have.
 ///
 /// Returns how many level addresses were checked, for the non-vacuity count.
-fn check_levels(label: &str, case: &Value, corpus: &ResolvedCorpus) -> usize {
+fn check_levels(label: &str, case: &Value, corpus: &ReadPlan) -> usize {
     let declared: Vec<String> = list(case, "levels").iter().map(|l| s(l, "type")).collect();
     for vertex in &corpus.types {
         assert_eq!(
@@ -363,7 +363,7 @@ fn check_levels(label: &str, case: &Value, corpus: &ResolvedCorpus) -> usize {
 }
 
 /// The URLs a set of vertex tiles addresses, and what that set is complete for.
-fn check_windows(label: &str, case: &Value, corpus: &ResolvedCorpus) {
+fn check_windows(label: &str, case: &Value, corpus: &ReadPlan) {
     for (i, want) in list(case, "windows").iter().enumerate() {
         let vertex_type = want.get("type").and_then(Value::as_str);
         let tiles: Vec<u64> = list(want, "tiles")

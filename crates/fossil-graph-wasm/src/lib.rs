@@ -129,15 +129,15 @@ pub async fn dispatch_graph(
 // leg that makes the conformance diff three-sided.
 // `apps/corpus/conformance/expected.json` is executed by plain Node
 // (`conformance/verify.mjs`), by the published TypeScript
-// (`packages/corpus/tests/conformance.test.ts`) and by [`fossil_graph::address`] —
+// (`packages/corpus/tests/conformance.test.ts`) and by [`fossil_graph::plan`] —
 // natively in `crates/fossil-graph/tests/conformance.rs` and, through this
 // binding, as the wasm32 build that actually ships. The native run and the wasm
 // run are not the same claim: `usize` is 64 bits there and 32 here, and 2^53 is
 // where a port that went through a double stops being exact.
 
-use fossil_graph::address::{Direction, ResolvedCorpus, resolve};
+use fossil_graph::plan::{Direction, ReadPlan, resolve};
 
-/// A corpus resolved to addresses — synchronous, and it opens no byte.
+/// A corpus resolved into a [`ReadPlan`] — synchronous, and it opens no byte.
 ///
 /// The counterpart of `resolveCorpus` in `@fossil-lang/corpus/address`, and the
 /// same arithmetic the native reader runs. A host holds one of these for as long
@@ -145,7 +145,7 @@ use fossil_graph::address::{Direction, ResolvedCorpus, resolve};
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Corpus {
-    inner: ResolvedCorpus,
+    inner: ReadPlan,
 }
 
 // `wasm_bindgen` owns every argument that crosses the boundary — `Option<&String>`

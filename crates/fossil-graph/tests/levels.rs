@@ -16,13 +16,13 @@
 
 use std::collections::BTreeMap;
 
-use fossil_graph::address::{ResolvedCorpus, resolve};
+use fossil_graph::plan::{ReadPlan, resolve};
 use fossil_sinks::manifest::VertexLevels;
 
 /// A corpus of one type and one self-relation, both declaring the pyramid the
 /// writer would plan for them. `vertex_count` and the `levels:` list are the
 /// knobs; everything else is the smallest manifest that addresses itself.
-fn corpus(vertex_count: Option<u64>, levels: Option<&[u32]>, edge_levels: bool) -> ResolvedCorpus {
+fn corpus(vertex_count: Option<u64>, levels: Option<&[u32]>, edge_levels: bool) -> ReadPlan {
     let count = vertex_count.map_or(String::new(), |c| format!("vertex_count: {c}\n"));
     let block = |list: &[u32]| {
         let written = list.iter().fold(String::new(), |mut acc, k| {
