@@ -670,6 +670,33 @@ async fn execute_edge(
         )?
         .select(vec![col("src_dense"), col("dst_dense")])?;
 
+    // **An edge set is a set**, and until here it was whatever the input
+    // relation's row count happened to be. A mapping whose source is a JOIN
+    // repeats its subject once per matching row, so every OTHER edge the
+    // mapping writes is repeated with it: a six-type program producing `Person`
+    // from `People.join(Interests, …)` wrote `Person_isLocatedIn_Place` **1,256
+    // times for 50 distinct pairs** — 1,206 duplicates in a `{1,1}` edge.
+    //
+    // Nothing caught it and nothing could. `exactly-once` asks whether the
+    // tiles hold exactly the relation they cut, and a duplicate is *in* the
+    // relation; `one-relation-twice` compares the two orientations, and both
+    // carry it. The only visible trace was an `edge_count` too large, which is
+    // the same shape as a corpus that legitimately has more edges.
+    //
+    // `EmitVertex` has carried `dedup: true` for exactly this reason since the
+    // first join landed. This is that decision applied where it was missing,
+    // and [`Cardinality::Single`]'s own doc — *"a materializer dedups by key"* —
+    // is the sentence it makes true.
+    //
+    // **It is unconditional, and the reason is the schema rather than the
+    // cardinality**: an adjacency tile carries `src_dense` and `dst_dense` and
+    // nothing else, so two identical rows are not two edges a reader could tell
+    // apart — they are one edge stored twice. There is nowhere for a multiplicity
+    // to live. The day an edge carries a property, this becomes a decision with
+    // two answers and the `Multi` arm is the one that changes.
+    let matched = resolved.clone().count().await? as u64;
+    let resolved = resolved.distinct()?;
+
     let by_source = resolved
         .clone()
         .sort(vec![
@@ -691,7 +718,14 @@ async fn execute_edge(
     // two rows with the same `subject`, and then one candidate resolves to two
     // edges. That corpus already violates `identity-is-the-subject`
     // (`apps/corpus/guards/guards.mjs`), which is the guard that catches it.
-    let dropped = candidates.saturating_sub(count_rows(&by_source));
+    //
+    // **Against `matched` and not against what was written**, because the two
+    // stopped being the same number when the dedup above landed. `dropped` says
+    // *an endpoint named a subject no vertex carries*, which is a defect in the
+    // program or the data; a row removed as a duplicate is neither, and folding
+    // the two together would report a clean six-type program as dropping 96% of
+    // its edges.
+    let dropped = candidates.saturating_sub(matched);
 
     Ok(EdgeTable {
         label: label.to_string(),
