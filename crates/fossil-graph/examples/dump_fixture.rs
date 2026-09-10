@@ -25,7 +25,7 @@
 //!   > packages/corpus/tests/fixtures/manifest.json
 //! ```
 
-use fossil_sinks::manifest::{
+use fossil_sinks::manifest::{Cardinality, 
     Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
 };
 use serde_json::{Map, Value, json};
@@ -49,18 +49,21 @@ fn main() {
                     // without failing on.
                     is_primary: false,
                     is_nullable: Some(false),
+                    cardinality: Some(Cardinality::Single),
                 },
                 Property {
                     name: "age".into(),
                     data_type: "int64".into(),
                     is_primary: false,
                     is_nullable: None,
+                    cardinality: None,
                 },
                 Property {
                     name: "name".into(),
                     data_type: "string".into(),
                     is_primary: false,
                     is_nullable: None,
+                    cardinality: None,
                 },
             ],
         )],
@@ -80,6 +83,7 @@ fn main() {
         prefix: "edge/Person_knows_Person/".into(),
         projections: vec![],
         version: "gar/v1".into(),
+        cardinality: None,
     };
 
     let graph = GraphInfo::new(

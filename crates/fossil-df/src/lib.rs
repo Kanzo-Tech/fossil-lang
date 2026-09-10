@@ -1934,12 +1934,14 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
         data_type: "uint32".to_string(),
         is_primary: false,
         is_nullable: Some(false),
+        cardinality: Some(Cardinality::Single),
     });
     properties.push(Property {
         name: "subject".to_string(),
         data_type: data_type_name(&DataType::Utf8),
         is_primary: true,
         is_nullable: Some(false),
+        cardinality: Some(Cardinality::Single),
     });
     for p in &node.properties {
         properties.push(Property {
@@ -1947,6 +1949,10 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
             data_type: graphar_spelling(p.datatype),
             is_primary: false,
             is_nullable: None,
+            // What the shape said, which is the whole point of the field: the
+            // manifest took `NodeType` and dropped this, so a `?` property and
+            // a `*` property produced byte-identical manifests.
+            cardinality: Some(p.cardinality),
         });
     }
     for layout_col in ["x", "y"] {
@@ -1955,6 +1961,7 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
             data_type: data_type_name(&DataType::Float32),
             is_primary: false,
             is_nullable: Some(false),
+            cardinality: Some(Cardinality::Single),
         });
     }
     properties.push(Property {
@@ -1962,6 +1969,7 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
         data_type: "uint32".to_string(),
         is_primary: false,
         is_nullable: Some(false),
+        cardinality: Some(Cardinality::Single),
     });
 
     let mut info = VertexInfo::new(
@@ -2020,6 +2028,7 @@ fn endpoint_columns() -> Vec<Property> {
             data_type: "uint32".to_string(),
             is_primary: false,
             is_nullable: Some(false),
+            cardinality: Some(Cardinality::Single),
         })
         .collect()
 }
@@ -2035,6 +2044,7 @@ fn edge_level_columns() -> Vec<Property> {
             data_type: data_type_name(&DataType::Float32),
             is_primary: false,
             is_nullable: Some(false),
+            cardinality: Some(Cardinality::Single),
         });
     }
     properties
@@ -2053,6 +2063,14 @@ fn edge_info(edge: &GraphEdge, rows: u64, source_rows: u64) -> EdgeInfo {
         edge_type: edge.label.clone(),
         iri: edge.iri.clone().unwrap_or_default(),
         dst_type: edge.destination.clone(),
+        // The one line this function was missing. It has taken the whole
+        // `EdgeType` since it was written and read every field of it but this
+        // one, so a `{1,1}` edge and a `*` edge produced byte-identical
+        // manifests and every reader downstream had to re-derive from the data
+        // what the shape had already said -- when it can be re-derived at all,
+        // which it cannot: an edge type whose every source happens to have one
+        // destination today is not a functional relation.
+        cardinality: Some(edge.cardinality),
         edge_count: rows,
         chunk_size: DEFAULT_CHUNK_SIZE,
         src_chunk_size: DEFAULT_CHUNK_SIZE,

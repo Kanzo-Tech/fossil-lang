@@ -5,6 +5,7 @@ expression: "knows_edge().to_yaml().expect(\"edge serialization\")"
 src_type: Person
 edge_type: knows
 dst_type: Person
+cardinality: multi
 edge_count: 19998
 chunk_size: 4096
 src_chunk_size: 4096
@@ -22,10 +23,12 @@ projections:
     data_type: uint32
     is_primary: false
     is_nullable: false
+    cardinality: single
   - name: dst_dense
     data_type: uint32
     is_primary: false
     is_nullable: false
+    cardinality: single
 - path: by_target/
   scale: 1
   aligned_by: dst
@@ -36,8 +39,10 @@ projections:
     data_type: uint32
     is_primary: false
     is_nullable: false
+    cardinality: single
   - name: dst_dense
     data_type: uint32
     is_primary: false
     is_nullable: false
+    cardinality: single
 version: gar/v1

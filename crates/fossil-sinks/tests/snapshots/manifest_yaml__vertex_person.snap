@@ -15,6 +15,7 @@ projections:
     data_type: int64
     is_primary: true
     is_nullable: false
+    cardinality: single
   - name: name
     data_type: string
     is_primary: false

@@ -19,6 +19,15 @@ workspace = true
 # policy check, so it names policy vocabulary, and `fossil-policy` names nothing
 # — it is a serde/serde_json/thiserror leaf and knows nothing about GraphAr.
 fossil-policy = { path = "../fossil-policy" }
+# `Cardinality` alone, and the dependency runs THIS WAY for the same reason
+# `fossil-policy` does: a manifest records what a compiler decided, so it names
+# the substrate contract, and `fossil-graph-schema` names nothing — it is a
+# serde leaf. This is NOT the objection the `arrow-schema` note below raises:
+# that one is against taking a TYPE SYSTEM (`fossil-hir::Primitive`) into the
+# manifest layer. A cardinality is not a type, it is the shape a predicate was
+# declared with, and dropping it here is what made an edge's `{1,1}` a fact the
+# corpus could not state.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 # A plan + manifest generator, NOT an I/O library: it declares the tiling and never
 # byte-writes Parquet, so the only emission here is YAML.
 serde = { workspace = true }

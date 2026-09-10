@@ -13,7 +13,7 @@ use fossil_graph::operations::discovery::{
 use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
 use fossil_graph::{GraphError, Operation, RawSql, RawSqlAccess, Result, dispatch};
 use fossil_mcp::ConnectionExecutor;
-use fossil_sinks::manifest::{
+use fossil_sinks::manifest::{Cardinality, 
     Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
 };
 
@@ -34,6 +34,7 @@ fn prop(name: &str, ty: &str, primary: bool) -> Property {
         data_type: ty.to_string(),
         is_primary: primary,
         is_nullable: Some(false),
+        cardinality: Some(Cardinality::Single),
     }
 }
 
@@ -72,6 +73,7 @@ fn manifest() -> Manifest {
         prefix: "edge/Person_knows_Person/".into(),
         projections: vec![],
         version: "gar/v1".into(),
+        cardinality: None,
     };
     let graph = GraphInfo::new(
         "graph",

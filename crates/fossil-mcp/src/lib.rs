@@ -286,7 +286,8 @@ mod tests {
     fn register_views_sql_uses_writer_layout() {
         use fossil_graph::manifest::ManifestSource as _;
         use fossil_sinks::manifest::{
-            Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
+            Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
+            VertexInfo,
         };
 
         let mut person = VertexInfo::new(
@@ -303,6 +304,7 @@ mod tests {
                     // no identity column, so it declares no primary either.
                     is_primary: false,
                     is_nullable: Some(false),
+                    cardinality: Some(Cardinality::Single),
                 }],
             )],
         );
@@ -324,6 +326,7 @@ mod tests {
             // — a fixture that declared no adjacency and got a view over one.
             projections: vec![Projection::payload("by_source/", vec![]).aligned_by("src", true)],
             version: "gar/v1".into(),
+            cardinality: None,
         };
         let graph = GraphInfo::new(
             "graph",

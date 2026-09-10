@@ -37,6 +37,7 @@
 //! `fossil-cli/tests/conformance.rs`, not agreed by convention.
 
 use arrow_schema::DataType;
+pub use fossil_graph_schema::Cardinality;
 use serde::{Deserialize, Serialize};
 
 /// The `GraphAr` manifest format version string. Emitted as `version: gar/v1`.
@@ -461,6 +462,27 @@ pub struct EdgeInfo {
     pub iri: String,
     /// Destination vertex type label.
     pub dst_type: String,
+    /// **How many of these edges one source vertex may have**, or `None` where
+    /// nothing declared it.
+    ///
+    /// [`Cardinality::Single`] is the interesting one, and it is a fact about
+    /// the relation that no count can stand in for: an edge type whose every
+    /// source happens to have one destination *today* is not a functional
+    /// relation, and a reader may not treat it as one. A shape saying `{1,1}`
+    /// is what makes it safe to.
+    ///
+    /// It is written here because the compiler knew it and the corpus did not.
+    /// `fossil_graph_schema::EdgeType` has carried the field since the shape
+    /// reader was written, `Occurs::collapse` is the only way into it, and
+    /// `edge_info` took the whole `EdgeType` and never read it — so a `{1,1}`
+    /// edge and a `*` edge produced byte-identical manifests, and every
+    /// consumer downstream had to re-derive from the data what the shape had
+    /// already said.
+    ///
+    /// **`directed` is not this.** That says whether the relation has an
+    /// orientation; this says how many times it may fire from one end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cardinality: Option<Cardinality>,
     /// **How many edges this relation has** — the rows of one orientation, not
     /// of both. The two orientations are one relation stored twice, so a single
     /// number covers them and each of them separately has to add up to it.
@@ -676,6 +698,21 @@ pub struct Property {
     /// Nullability, omitted from the YAML when `None` (`GraphAr` treats it as optional).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub is_nullable: Option<bool>,
+    /// **How many values the shape declared this predicate may carry**, or
+    /// `None` where nothing declared it.
+    ///
+    /// `is_nullable` is the neighbouring fact and not this one: it answers
+    /// whether a value may be absent, and this answers whether there may be
+    /// more than one. `?` is nullable and single; `+` is non-nullable and
+    /// multi; the two axes are independent and the manifest carried only one.
+    ///
+    /// **`None` is a statement about the writer, not about the data.** A corpus
+    /// whose types were inferred rather than declared has no cardinality to
+    /// record, and so does one written before this field existed; both read
+    /// back as "not declared" rather than as "single", which is the answer a
+    /// default would have invented.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub cardinality: Option<Cardinality>,
 }
 
 /// How many bits a `dense_id` is shifted right by to name the tile holding it.
@@ -923,12 +960,14 @@ mod tests {
                         data_type: data_type_name(&DataType::Int64),
                         is_primary: true,
                         is_nullable: Some(false),
+                        cardinality: Some(Cardinality::Single),
                     },
                     Property {
                         name: "name".to_string(),
                         data_type: data_type_name(&DataType::Utf8),
                         is_primary: false,
                         is_nullable: None,
+                        cardinality: None,
                     },
                 ],
             )],
@@ -941,6 +980,7 @@ mod tests {
             edge_type: "knows".to_string(),
             iri: String::new(),
             dst_type: "Person".to_string(),
+            cardinality: Some(Cardinality::Multi),
             edge_count: 19_998,
             chunk_size: DEFAULT_CHUNK_SIZE,
             src_chunk_size: DEFAULT_CHUNK_SIZE,
@@ -964,6 +1004,7 @@ mod tests {
                 data_type: "uint32".to_string(),
                 is_primary: false,
                 is_nullable: Some(false),
+                cardinality: Some(Cardinality::Single),
             })
             .collect()
     }

@@ -194,7 +194,8 @@ fn parse_yaml<T: serde::de::DeserializeOwned>(bytes: &[u8], path: &str) -> Resul
 mod tests {
     use super::*;
     use fossil_sinks::manifest::{
-        Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
+        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
+        VertexInfo,
     };
 
     /// In-memory manifest source: the test analogue of httpfs/fs. Proves the
@@ -219,6 +220,7 @@ mod tests {
                 // pass reranks by Morton code and gives this number away.
                 is_primary: false,
                 is_nullable: Some(false),
+                cardinality: Some(Cardinality::Single),
             },
             Property {
                 name: "subject".into(),
@@ -228,6 +230,7 @@ mod tests {
                 // spelled it the other way round until 2026-08-25.
                 is_primary: true,
                 is_nullable: Some(false),
+                cardinality: Some(Cardinality::Single),
             },
         ];
         for f in user_fields {
@@ -236,6 +239,7 @@ mod tests {
                 data_type: "string".into(),
                 is_primary: false,
                 is_nullable: None,
+                cardinality: None,
             });
         }
         for layout in ["x", "y", "cluster_id"] {
@@ -244,6 +248,7 @@ mod tests {
                 data_type: "uint32".into(),
                 is_primary: false,
                 is_nullable: Some(false),
+                cardinality: Some(Cardinality::Single),
             });
         }
         VertexInfo::new(
@@ -261,6 +266,10 @@ mod tests {
             edge_type: edge.into(),
             iri: String::new(),
             dst_type: dst.into(),
+            // `None` on purpose: this fixture is the corpus that declares no
+            // cardinality -- one written by another writer, or before the field
+            // existed -- and the reader has to stay correct over it.
+            cardinality: None,
             edge_count: 2,
             chunk_size: DEFAULT_CHUNK_SIZE,
             src_chunk_size: DEFAULT_CHUNK_SIZE,

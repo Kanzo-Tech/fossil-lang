@@ -6,7 +6,8 @@
 
 use arrow_schema::DataType;
 use fossil_sinks::manifest::{
-    DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, Projection, Property, VertexInfo, data_type_name,
+    Cardinality, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, Projection, Property, VertexInfo,
+    data_type_name,
 };
 
 fn person_vertex() -> VertexInfo {
@@ -23,12 +24,14 @@ fn person_vertex() -> VertexInfo {
                     data_type: data_type_name(&DataType::Int64),
                     is_primary: true,
                     is_nullable: Some(false),
+                    cardinality: Some(Cardinality::Single),
                 },
                 Property {
                     name: "name".to_string(),
                     data_type: data_type_name(&DataType::Utf8),
                     is_primary: false,
                     is_nullable: None,
+                    cardinality: None,
                 },
             ],
         )],
@@ -41,6 +44,7 @@ fn knows_edge() -> EdgeInfo {
         edge_type: "knows".to_string(),
         iri: String::new(),
         dst_type: "Person".to_string(),
+        cardinality: Some(Cardinality::Multi),
         edge_count: 19_998,
         chunk_size: DEFAULT_CHUNK_SIZE,
         src_chunk_size: DEFAULT_CHUNK_SIZE,
@@ -64,6 +68,7 @@ fn endpoints() -> Vec<Property> {
             data_type: "uint32".to_string(),
             is_primary: false,
             is_nullable: Some(false),
+            cardinality: Some(Cardinality::Single),
         })
         .collect()
 }
