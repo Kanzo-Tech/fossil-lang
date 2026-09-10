@@ -609,10 +609,33 @@ async fn execute_edge(
     // object); UNNEST expands it to one (src, dst) row per element — the
     // DataFusion-native counterpart of the writer's `UNNEST(list(...))`. A
     // single-valued edge's `dst_iri` is already scalar.
-    let edge_src = if single_valued {
-        edge_src
-    } else {
+    //
+    // **The condition is the column's TYPE, not the declared cardinality**, and
+    // the difference is a whole class of source. `single_valued` comes from the
+    // shape (`Occurs::collapse`), and a shape says how many values a predicate
+    // MAY carry — not how the source spells them. The RDF pivot spells `*` as a
+    // `List`; a relational source spells it as REPEATED ROWS, which is already
+    // the shape UNNEST produces and must not be unnested a second time.
+    //
+    // Reading the cardinality instead cost every `*` and `+` edge over a CSV:
+    // `unnest_columns` on a `Utf8` is `"trying to unnest on invalid data type"`,
+    // a DataFusion internal error at run time with no diagnostic in front of it.
+    // That is 8 of LDBC-SNB's 21 relationships — `knows`, `likes`, `hasMember`,
+    // `hasTag`, `hasInterest`, `studyAt`, `workAt` — and it is why
+    // `apps/playground/bench/dblp/dblp.shex` carries a comment calling its own
+    // `;` a defect rather than a modelling choice.
+    let dst_is_list = matches!(
+        edge_src.schema().field_with_unqualified_name("dst_iri")?.data_type(),
+        DataType::List(_) | DataType::LargeList(_) | DataType::FixedSizeList(_, _)
+    );
+    debug_assert!(
+        !(single_valued && dst_is_list),
+        "a Single edge produced a list-typed `dst_iri`, which no source should do"
+    );
+    let edge_src = if dst_is_list {
         edge_src.unnest_columns(&["dst_iri"])?
+    } else {
+        edge_src
     };
     // Pre-project each vertex table to (subject, dense) with disjoint names so
     // the two joins never collide on `subject`/`dense_id`.
