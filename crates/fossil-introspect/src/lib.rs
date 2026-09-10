@@ -91,8 +91,17 @@ fn duckdb_type_to_fossil_primitive(t: &str) -> Primitive {
         t if t.starts_with("DECIMAL") => Primitive::Float,
         "BOOLEAN" | "BOOL" => Primitive::Bool,
         "DATE" => Primitive::Date,
-        "TIMESTAMP" | "DATETIME" => Primitive::DateTime,
-        "TIME" => Primitive::Time,
+        // Every spelling DuckDB has for an instant, because the arm was a list
+        // of two and DuckDB has seven. `TIMESTAMP WITH TIME ZONE` is what
+        // `read_csv_auto` infers for an ISO-8601 string carrying an offset —
+        // which is how LDBC-SNB dates every row it ships — and it fell to the
+        // `_` arm and came back `String`. The consequence is not a slow path:
+        // the checker compares this against the shape's declared `Primitive`,
+        // so `xsd:dateTime` over such a column is a hard type error and the
+        // column is unwritable as anything but `xsd:string`.
+        t if t.starts_with("TIMESTAMP") => Primitive::DateTime,
+        "DATETIME" => Primitive::DateTime,
+        t if t.starts_with("TIME") => Primitive::Time,
         _ => Primitive::String,
     }
 }
@@ -414,6 +423,49 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    /// Every spelling DuckDB has for an instant maps to an instant.
+    ///
+    /// **The table is derived from DuckDB and not from memory**: the arms are
+    /// asserted against the `DESCRIBE` of a value DuckDB itself typed, so a
+    /// version that renames a type fails here rather than silently widening a
+    /// column to `String`. That widening is what this test exists for — the arm
+    /// was `"TIMESTAMP" | "DATETIME"`, `read_csv_auto` infers `TIMESTAMP WITH
+    /// TIME ZONE` for any ISO-8601 string carrying an offset, and the checker
+    /// compares this answer against the shape's declared `Primitive`. So the
+    /// gap was not a slow path: it made `xsd:dateTime` a hard type error over
+    /// every offset-bearing column, which is how LDBC-SNB dates every row.
+    #[test]
+    fn every_duckdb_instant_is_an_instant() {
+        for (sql, expected) in [
+            ("TIMESTAMP '2012-01-01 00:00:00'", Primitive::DateTime),
+            ("TIMESTAMPTZ '2012-01-01 00:00:00+01'", Primitive::DateTime),
+            ("CAST('2012-01-01T00:00:00.000+00:00' AS TIMESTAMP WITH TIME ZONE)", Primitive::DateTime),
+            ("DATE '2012-01-01'", Primitive::Date),
+            ("TIME '12:00:00'", Primitive::Time),
+            ("CAST(1 AS BIGINT)", Primitive::Integer),
+            ("CAST(1.5 AS DOUBLE)", Primitive::Float),
+            ("CAST(1.5 AS DECIMAL(38,18))", Primitive::Float),
+            ("true", Primitive::Bool),
+            ("'x'", Primitive::String),
+        ] {
+            let conn = duckdb::Connection::open_in_memory().expect("in-memory duckdb");
+            let mut stmt = conn
+                .prepare(&format!("DESCRIBE SELECT {sql} AS v"))
+                .expect("describe prepares");
+            let declared: String = stmt
+                .query_map([], |row| row.get::<_, String>(1))
+                .expect("describe runs")
+                .next()
+                .expect("one column")
+                .expect("one row");
+            assert_eq!(
+                duckdb_type_to_fossil_primitive(&declared),
+                expected,
+                "DuckDB types `{sql}` as `{declared}`, which must not widen to String"
+            );
+        }
     }
 
     /// The `@conn` cases this file used to assert against its own resolver
