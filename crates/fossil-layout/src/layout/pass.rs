@@ -496,7 +496,7 @@ pub const fn estimated_peak_bytes(
 ///
 /// Vertices first, all of them, because an adjacency spans two types and cannot
 /// be rewritten until both mappings exist. Per type: count vertices, read
-/// self-edges, run [`community_hierarchy`] + [`cluster_layout`], derive the
+/// self-edges, run [`super::community::community_hierarchy`] + [`cluster_layout`], derive the
 /// Morton rank of each vertex, and keep `dense_id → (new_dense_id, x, y,
 /// cluster_id)` as four arrays. The enriched vertices are then emitted **as tiles** under
 /// [`VertexLayoutTarget::chunk_prefix`] — one Parquet whose `k`th row group is

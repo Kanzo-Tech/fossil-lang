@@ -36,7 +36,7 @@ const INTRA_CLUSTER_RADIUS: f32 = 12.0;
 const TYPE_GUTTER: f32 = CLUSTER_SPACING * 2.0;
 
 /// Deterministic 2-D positions from a per-vertex `cluster_id` list (as produced
-/// by [`community_hierarchy`], `flatten_to_budget` and `order_by_hierarchy`).
+/// by [`super::community::community_hierarchy`], `flatten_to_budget` and `order_by_hierarchy`).
 /// Clusters occupy the cells of a Z-order grid; within a cell, the `k`-th vertex
 /// is placed at golden-angle phyllotaxis radius `R·√k`. Same-cluster vertices
 /// cluster visually; the mapping is a pure function of the input (stable across
