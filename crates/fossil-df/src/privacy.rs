@@ -30,7 +30,7 @@
 //! 1. **Nulls.** SQL groups every `NULL` together; statistical disclosure
 //!    control treats an absent quasi-identifier as a wildcard matching every
 //!    value. Both readings are defensible and they disagree, so the reading is a
-//!    **declared parameter** — [`AbsentQuasiIdentifier`] — and never a default
+//!    **declared parameter** — [`fossil_policy::AbsentQuasiIdentifier`] — and never a default
 //!    this module picked.
 //! 2. **Suppression.** k-anonymity in practice is generalisation *plus* a
 //!    suppression limit. A verification that does not account for suppressed

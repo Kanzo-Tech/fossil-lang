@@ -14,13 +14,13 @@
 //!
 //! **The catalogue IS a file the compiler reads.** `catalogue.bnf` carries every
 //! row — both halves of it, the `io.` constructors and the stdlib — and
-//! `cargo xtask catalogue` generates [`generated`] from it. `grammar.bnf` says
+//! `cargo xtask catalogue` generates `generated` from it. `grammar.bnf` says
 //! the SHAPE of a program and `catalogue.bnf` says WHICH NAMES EXIST: two data
 //! files and a compiler. Adding `str.slugify` over `regexp_replace` is a line in
 //! the file and touches no Rust.
 //!
 //! What is left in THIS module is the vocabulary the file is written in — the
-//! receiver, the signature, the arities, the lowering kinds and [`PlanOp`] —
+//! receiver, the signature, the arities, the lowering kinds and [`crate::stdlib::PlanOp`] —
 //! plus the queries the checker and the IDE ask of the assembled table. A type
 //! cannot live in the file; the rows cannot live anywhere else.
 //!
@@ -53,9 +53,9 @@
 //!
 //! There is one border and it is semantic: `LoweringKind::Expr` is a scalar
 //! SQL expression and `LoweringKind::Op` names an operator of the algebra, a
-//! closed set — [`PlanOp`], and the size of it is not written here or anywhere
+//! closed set — [`crate::stdlib::PlanOp`], and the size of it is not written here or anywhere
 //! else: the enum is the one place that cannot be wrong about how many variants
-//! it has. `Udf` is gone — see [`LoweringKind::Expr`] for what that cost and
+//! it has. `Udf` is gone — see [`crate::stdlib::LoweringKind::Expr`] for what that cost and
 //! bought.
 //!
 //! ## `WasmClass` is gone as a CONCEPT

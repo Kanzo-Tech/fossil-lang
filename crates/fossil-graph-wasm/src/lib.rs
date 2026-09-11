@@ -175,8 +175,9 @@ pub fn stride_bits(level: u32) -> u32 {
 /// How many rows level `k` of a type of `count` rows holds — `ceil(count / 4^k)`.
 ///
 /// A level is a predicate, so this answers for every `k` and not only for the
-/// ones a writer spent bytes on. [`Corpus::level_rows`] is the same number for a
-/// level the manifest declares.
+/// ones a writer spent bytes on. [`ProjectionAddress::rows`] is the same number
+/// for a level the manifest declares — it is a field there, computed once at
+/// resolve time, and not a question asked again per call.
 #[must_use]
 // `wasm_bindgen` cannot generate glue for a `const fn`, so this cannot be one.
 #[allow(clippy::missing_const_for_fn)]
@@ -256,8 +257,8 @@ impl Corpus {
     /// declare, or an edge whose declared tile size disagrees with the vertex
     /// type that addresses it. **Not** for an orientation the corpus does not
     /// publish — that is a legitimate corpus, reported by
-    /// [`Corpus::adjacency_tile_url`] as an address that does not exist rather
-    /// than one that 404s.
+    /// [`Corpus::edge_projection_tile_url`] as an address that does not exist
+    /// rather than one that 404s.
     #[wasm_bindgen(constructor)]
     pub fn new(manifest_files: JsValue, base: Option<String>) -> Result<Self, JsError> {
         let files: std::collections::BTreeMap<String, String> =

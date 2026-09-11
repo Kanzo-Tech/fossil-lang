@@ -28,8 +28,8 @@
 //! could actually do — a tool cannot be half-registered. With six, hiding it
 //! means not registering it, and [`SqlPolicy`] is where that is decided.
 //!
-//! **It is one field, and it has two consequences on purpose.** [`Self::tools`]
-//! drops `execute_sql` from the list, and [`Self::operation`] passes no
+//! **It is one field, and it has two consequences on purpose.** [`crate::tools::VerbSurface::tools`]
+//! drops `execute_sql` from the list, and [`crate::tools::VerbSurface::operation`] passes no
 //! [`RawSqlAccess`] — which is what closes `read`'s `where`, because that field
 //! carries the same authority (`fossil_graph::operations::raw_sql`). There is
 //! no second knob to set inconsistently: a surface that lists the hatch admits

@@ -25,7 +25,7 @@
 //! It is a **separate module and a separate call**, and that is not tidiness.
 //! `privacy.rs` says, in as many words, that a verifier that also repairs is a
 //! verifier whose failures nobody ever sees. That property is kept literally:
-//! [`apply`] mutates the corpus and returns no measurement, [`crate::privacy::verify`]
+//! [`crate::generalize::apply`] mutates the corpus and returns no measurement, [`crate::privacy::verify`]
 //! measures the corpus and performs no repair, and neither one is reachable from
 //! the other.
 //!
@@ -41,9 +41,9 @@
 //! exact-match tabulation; and once by [`crate::privacy::verify`], over the
 //! written Arrow columns, by a DataFusion aggregate that knows nothing about
 //! this module and is handed nothing by it. The second one is the one the
-//! manifest records. Nothing flows from [`apply`] into `verify` — not the
+//! manifest records. Nothing flows from [`crate::generalize::apply`] into `verify` — not the
 //! achieved k, not the class count, not the column list, not a hint that
-//! derivation happened at all — and [`Derived`] carries only the strings the
+//! derivation happened at all — and [`crate::generalize::Derived`] carries only the strings the
 //! manifest prints, which no check consults. **If those two ever agreed by
 //! construction rather than by measurement, the guarantee would be circular**,
 //! and the shape of the call in `run_to_dir` is what stops it.
@@ -68,11 +68,11 @@
 //! it does instead is three things, none of them a defence and all of them
 //! visible:
 //!
-//! 1. **It refuses [`NumericPresentation::ObservedRange`].** Mondrian's own
+//! 1. **It refuses [`fossil_kanon::NumericPresentation::ObservedRange`].** Mondrian's own
 //!    numeric output is `[min, max]` over the partition, and both endpoints are
 //!    values a specific record actually holds — two attributes released in full,
 //!    in a column whose whole purpose was to be generalised. Only
-//!    [`NumericPresentation::EnclosingBucket`] is accepted here, so every
+//!    [`fossil_kanon::NumericPresentation::EnclosingBucket`] is accepted here, so every
 //!    published cell in the corpus is a node of a **declared** hierarchy.
 //! 2. That has a real effect on this attack, and it is worth being precise
 //!    about how much. A declared bucket is a function of the hierarchy and not
