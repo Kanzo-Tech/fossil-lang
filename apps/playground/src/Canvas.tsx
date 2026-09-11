@@ -79,13 +79,19 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
         streaming: {
           // Cumulative: the windowed path pays again on every move, so a per-frame figure would
           // flatter it against a baseline that pays once.
-          bytes: was.bytes + next.bytes,
+          //
+          // **Except when it did not pay.** A rectangle residency had already answered reached no
+          // engine, so charging it again would make the comparison an argument about a read that
+          // did not happen — which is the whole point of separating what is loaded from what is
+          // drawn. `reads` is documented as *answers that reached DuckDB at all* and now means it;
+          // `moves` counts every answer, resident or not, because a camera move is a camera move.
+          bytes: was.bytes + (next.resident ? 0 : next.bytes),
           rows: next.marks + next.anchors,
           links: next.links,
           firstMs: was.reads === 0 ? next.ms : was.firstMs,
           lastMs: next.ms,
-          moves: was.reads,
-          reads: was.reads + 1,
+          moves: was.reads === 0 ? 0 : was.moves + 1,
+          reads: was.reads + (next.resident ? 0 : 1),
           failure: null,
         },
       };

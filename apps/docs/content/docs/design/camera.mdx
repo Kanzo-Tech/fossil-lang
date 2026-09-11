@@ -66,10 +66,20 @@ Nothing in this tree settles that, because no instrument here weighs a request. 
 it is one measurement of the same rectangle asked twice with the network observed — which is the
 only reading that can tell a cache hit from a re-fetch.
 
-**The separation survives the doubt; its justification changes.** What is NOT in question is the
-paragraph below: a read that is answered from cache still costs a round trip through the Worker
-before anything reaches the screen, and that interval is blank today whatever the bytes did. The
-case for residency is *latency*, and it stands on its own.
+**The separation survives the doubt; its justification changes.** What is NOT in question is that a
+read answered from cache still costs a round trip through the Worker before anything reaches the
+screen. The case for residency is *latency*, and it stands on its own.
+
+**Building it settled the rest, and against this page.** *A cache over tiles, the only part that
+touches the network* — the way residency is described below — **is not buildable at this seam at
+all.** DuckDB issues `read_parquet` from inside its Worker; the thread that holds a `BoundedSource`
+never sees a tile's bytes and has nothing to cache. So the 3.3× is not this layer's to bank: it is
+the engine's, which is precisely what `directIO = false` is there for.
+
+What this thread can hold is **answers** — a rectangle already asked about, and the rows that came
+back. That is what `apps/playground/src/residency.ts` holds, and the measured win is the one
+latency predicted rather than the one bytes did: a rectangle already held settles in 3 ms against
+175, and the frames in between get an interim in 8 to 18 ms.
 </Callout>
 
 A reader without the separation re-issues the read, and the interval between the camera moving and
@@ -87,13 +97,32 @@ drawn, in the same place, at the finer level.
 something now, and something better shortly*. It has one: `watch`, whose own contract is **a whole
 slice rather than a nudge to ask again**. It was added so a source inside a crossfilter could be
 told by the coordinator instead of re-asked, and the shape it needed for that is exactly the shape
-progressive refinement needs. So the coarse frame can be the return and the refined one can arrive
-through `watch`, with no change to the renderer and no second method.
+progressive refinement needs — with no change to the renderer and no second method.
 
-What that arrangement must not do is change what a rectangle *finally* answers. `slice` is a pure
-function of `(rect, level)` and [path independence](#3-path-independence) is measured; an interim
-frame is a different set by construction, so it has to be superseded rather than merged, and the
-measurement has to keep being taken against the settled answer.
+**Which way round, though, is decided by what reads the return value, and this page had it
+backwards.** It said the coarse frame could be the return and the refined one arrive through
+`watch`. It cannot: `slice` is a pure function of `(rect, level)`, [path
+independence](#3-path-independence) is measured against its RETURN, and
+`apps/playground/scripts/verify-properties.mjs` and `measure-frame.mjs` both read that return as
+the answer. So **`slice` returns the settled answer and `watch` carries the interim** — which lands
+on screen exactly like a returned one, because `useQueryLoop` registers its own setter as the
+callback, and is superseded rather than merged.
+
+Measured over the bench corpus with residency in front: an interim lands in **8 to 18 ms** where
+the settled answer takes 56 to 244, and a rectangle already held — the same one the path opened on
+— settles in **3 ms against 175**.
+
+<Callout type="warn">
+**And the blank interval this page describes is not what the app does.** It said the wait between
+a camera moving and an answer arriving is *an interval with nothing on screen*. `useQueryLoop`
+uploads only when the slice state changes, so the previous frame stays up, correctly placed —
+positions are corpus coordinates and `PinFrame` stops the renderer rescaling them. What is actually
+blank is the region newly in frame, which is the part the camera just uncovered.
+
+The latency argument survives and the sentence overstated it. It also decides a design question:
+an interim carrying points alone would *remove* the links already on screen, so an interim carries
+its edges.
+</Callout>
 
 ## The three properties
 

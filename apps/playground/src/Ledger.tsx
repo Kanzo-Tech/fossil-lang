@@ -197,11 +197,26 @@ export function StreamingDetail({ cost }: { cost: SliceCost }) {
         </div>
         <div>
           <dt>answered in</dt>
-          <dd>{cost.ms.toFixed(0)} ms</dd>
+          <dd>
+            {cost.ms.toFixed(0)} ms{' '}
+            <span className="str-dim">{cost.resident ? 'out of residency' : 'through the door'}</span>
+          </dd>
         </div>
         <div>
           <dt>counted at</dt>
           <dd>level {cost.matchedAt}</dd>
+        </div>
+        {/*
+          What is LOADED, beside what is drawn — the two numbers `/docs/design/camera` asks to be
+          kept apart. `drawn` above is the answer on screen; this is every row held from every
+          rectangle this camera has already visited, which is what an interim frame is assembled out
+          of while the next answer is in flight.
+        */}
+        <div>
+          <dt>held</dt>
+          <dd>
+            {n(cost.held)} <span className="str-dim">rows, across the rectangles already asked</span>
+          </dd>
         </div>
       </dl>
   );

@@ -17,6 +17,23 @@
  * No registration step either: the door composes `read_parquet('<url>')` against real addresses,
  * and so does everything else this app reads with.
  *
+ * ## Residency is NOT here, and that is the point of it
+ *
+ * What is loaded and what is drawn used to be the same set: this file called the door on every
+ * camera move and held nothing between them. They are two things now — `src/residency.ts` holds
+ * what has been answered and assembles an interim picture out of it, knowing nothing about a
+ * camera and issuing no query; this file is the only part that asks the door. So three answers are
+ * possible where there was one, and the middle one is new:
+ *
+ *   1. the rectangle is held → the door is not asked at all, and `SliceCost.resident` says so;
+ *   2. it is not → an interim out of what IS held goes out through `watch` immediately, and the
+ *      door's answer supersedes it when it lands;
+ *   3. nothing is held that is in frame → exactly what this file did before.
+ *
+ * **`slice` still returns the door's answer and only the door's answer**, which is what keeps the
+ * property `scripts/verify-properties.mjs` measures — path independence — a statement about this
+ * method. `/docs/design/camera` is the argument.
+ *
  * ## Why no Mosaic
  *
  * `duckBoundedSource` is a client of a Mosaic `Coordinator`, which is how a graph ends up inside the
@@ -41,6 +58,7 @@ import {
 } from '@kanzo-tech/graph';
 
 import { frame } from './frame.js';
+import { residency } from './residency.js';
 import { extentOf, type Rect, type TileBox } from './stream.js';
 
 /** What one answer cost, in the terms the panel beside the canvas is already reporting. */
@@ -84,6 +102,19 @@ export interface SliceCost {
    */
   anchors: number;
   links: number;
+  /**
+   * **Whether this answer came out of residency rather than out of the door.**
+   *
+   * The columns above it do not move when it is `true`, and that is deliberate rather than an
+   * oversight: `tiles`, `requests` and `bytes` are footer arithmetic about the RECTANGLE — what the
+   * tiles it selects weigh — and a rectangle weighs the same whoever answers it. What changes is
+   * `ms`, which is measured, and this flag, which is what says the read did not happen. The
+   * cumulative ledger in `src/Canvas.tsx` reads it and stops charging for a re-read that was not
+   * issued.
+   */
+  resident: boolean;
+  /** Rows residency is holding after this answer — what is loaded, as against what is drawn. */
+  held: number;
   /** Wall clock for the answer. */
   ms: number;
 }
@@ -173,12 +204,21 @@ function column(fill: string | undefined): string {
 }
 
 /**
- * A `Frame` as the parallel arrays the renderer uploads — two conversions and one fold.
+ * What this file can turn into a `Slice` — a settled `Frame` from the door, or the interim
+ * `Visible` residency assembles out of what it holds. **One conversion and not two**, which is why
+ * `src/residency.ts` answers in the door's own field names: the two differ in where they came from
+ * and in nothing the renderer can see.
+ */
+type Drawable = Pick<Frame, 'categories' | 'denseIds' | 'links' | 'marks' | 'matched' | 'positions'>;
+
+/**
+ * A `Drawable` as the parallel arrays the renderer uploads — two conversions and one fold.
  *
  * `positions` passes through untouched: the door already answers in a `Float32Array`, marks first
  * and anchors after, which is the layout a `Slice` asks for.
  */
-function sliceOf(view: Frame, typeIndex: number, slots: number): Slice {
+
+function sliceOf(view: Drawable, typeIndex: number, slots: number): Slice {
   const rows = view.denseIds.length;
   const vertices = new BigUint64Array(rows);
   const categories = new Uint16Array(rows);
@@ -213,6 +253,69 @@ function sliceOf(view: Frame, typeIndex: number, slots: number): Slice {
 export function corpusSource(options: CorpusSourceOptions): BoundedSource {
   const { boxes, onCost, slots = 8, vertexType } = options;
   const extent = extentOf(boxes);
+
+  /**
+   * **What is loaded**, held apart from what is drawn — see `src/residency.ts` and
+   * `/docs/design/camera`.
+   *
+   * It is consulted twice per camera move and for two different questions. A rectangle it has
+   * already answered comes straight back out of it, which is a camera move that costs no round trip
+   * at all. A rectangle it has not is answered by the door as before, with an INTERIM picture
+   * assembled out of what is held pushed through {@link BoundedSource.watch} first, so the frame on
+   * screen is a coarse version of where the camera now IS rather than a correct picture of where it
+   * was.
+   */
+  const held = residency();
+
+  /**
+   * Whoever is listening for a frame that arrives for a reason the camera cannot see.
+   *
+   * `useQueryLoop` registers `setSlice` here and holds the returned release for the source's
+   * lifetime, so what this pushes lands on screen exactly like a returned answer. **It is not how
+   * the settled answer travels** — that is still `slice`'s own promise, because
+   * `scripts/verify-properties.mjs` measures path independence over what `slice` RETURNS and an
+   * interim is a different set by construction.
+   */
+  let listening: ((slice: Slice) => void) | null = null;
+  /**
+   * Which request is current, so a push from a superseded one is dropped rather than drawn.
+   *
+   * `slice` is asynchronous and a camera generates them faster than a database answers them; the
+   * query loop settles that for the RETURN with an `AbortController` it owns, and a `watch` push
+   * goes around that controller by design. This is the same guard on this side of the seam.
+   */
+  let generation = 0;
+
+  /**
+   * The question, canonically — everything the door's answer is a function of, and nothing else.
+   *
+   * **Every argument of `frame` is in here**, which is what makes a hit byte-identical rather than
+   * similar: the rectangle, the type, the canvas the level is derived from, the colour column, the
+   * pins and the link floor. `pinned` is sorted because a pin set is a set and two orderings of one
+   * are the same question — and `verify-canvas` asks the same rectangle with and without a pin
+   * expecting two different answers, which only works if the pins are in the key at all.
+   */
+  const keyOf = (
+    params: Box & {
+      type: string;
+      pixels: { w: number; h: number };
+      fill: string;
+      pinned: readonly number[];
+      minLinkLength: number;
+    },
+  ): string =>
+    JSON.stringify([
+      params.x,
+      params.y,
+      params.w,
+      params.h,
+      params.type,
+      params.pixels.w,
+      params.pixels.h,
+      params.fill,
+      [...params.pinned].sort((a, b) => a - b),
+      params.minLinkLength,
+    ]);
 
   /**
    * The corpus and the three facts read off it, awaited once.
@@ -259,6 +362,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
     async slice(request: SliceRequest): Promise<Slice> {
       const { fill, limit = BOUNDED_DEFAULTS.limit, perPixel, pinned, view } = request;
       const started = performance.now();
+      const mine = (generation += 1);
       const { corpus, type, typeIndex } = await open();
 
       const box = boxFor(view, extent);
@@ -274,6 +378,8 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
           marks: 0,
           anchors: 0,
           links: 0,
+          resident: false,
+          held: held.points,
           ...over,
           ms: performance.now() - started,
         });
@@ -312,6 +418,65 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
       const side = Math.max(1, Math.sqrt(limit));
       const pixels = { w: side, h: side };
 
+      const params = { ...box, type, pixels, fill: column(fill), pinned: pins, minLinkLength };
+      const key = keyOf(params);
+
+      /**
+       * The answer, reported and converted — **one path for a hit and a miss**, so the two cannot
+       * diverge into two pictures of one rectangle.
+       *
+       * `sliceOf` is re-run on a hit rather than a `Slice` being cached beside the `Frame` — it is
+       * the fold into the palette's slots and the `(type_idx, dense_id)` pairing, and both are
+       * cheap. `positions` still passes through as the door's own array, which means two answers to
+       * one question share it: measured rather than assumed, nothing in this tree writes to a
+       * `Slice` — `Mask.tsx` colours through the renderer and never touches the buffer — and two
+       * answers to one question hold the same numbers anyway.
+       */
+      const settle = (answer: Frame, resident: boolean): Slice => {
+        cost({
+          ...answer.cost,
+          box: { x: box.x, y: box.y, w: box.w, h: box.h },
+          matchedAt: answer.matchedAt,
+          matched: answer.matched,
+          marks: answer.marks,
+          anchors: answer.positions.length / 2 - answer.marks,
+          links: answer.links.length / 2,
+          resident,
+          held: held.points,
+        });
+        return sliceOf(answer, typeIndex, slots);
+      };
+
+      /**
+       * **A rectangle already answered is not asked again**, which is the whole of what residency
+       * buys a camera that comes back.
+       *
+       * Sound because `Corpus.frame` says so of itself — «a function of its arguments and nothing
+       * else… no state between calls» — and every one of those arguments is in `key`. So this is a
+       * memo on a pure function, and the answer it returns is the SAME object the door returned,
+       * which is a stronger statement of path independence than the one being measured rather than
+       * a weaker one.
+       */
+      const already = held.held(key);
+      if (already !== undefined) return settle(already, true);
+
+      /**
+       * **Visibility, pushed while the door is still reading.** The interim picture out of what is
+       * held — a rectangle, a stride, and a predicate over bytes already in hand.
+       *
+       * It goes through `watch` and not through this promise. `watch`'s own contract is *a whole
+       * slice rather than a nudge to ask again*, which is the shape progressive refinement needs
+       * and is the reason no second method had to be invented for it. What comes back from `slice`
+       * is the door's answer and only ever the door's answer.
+       *
+       * Skipped when nothing is held or nothing held is in frame: the honest picture there is the
+       * one already on screen, and pushing an empty slice would clear it.
+       */
+      if (listening !== null && held.points > 0) {
+        const interim = held.visible(box, limit);
+        if (interim !== null && mine === generation) listening(sliceOf(interim, typeIndex, slots));
+      }
+
       /**
        * **The pyramid answers this, and the condition that used to stop it has been met.**
        *
@@ -344,25 +509,37 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
        * stale, and nothing in this file would have shown it: `matchedAt` is reported onto a ledger
        * and never read back.
        */
-      const answer = await frame(corpus, {
-        ...box,
-        type,
-        pixels,
-        fill: column(fill),
-        pinned: pins,
-        minLinkLength,
-      });
+      const answer = await frame(corpus, params);
+      held.hold(key, answer);
+      return settle(answer, false);
+    },
 
-      cost({
-        ...answer.cost,
-        box: { x: box.x, y: box.y, w: box.w, h: box.h },
-        matchedAt: answer.matchedAt,
-        matched: answer.matched,
-        marks: answer.marks,
-        anchors: answer.positions.length / 2 - answer.marks,
-        links: answer.links.length / 2,
-      });
-      return sliceOf(answer, typeIndex, slots);
+    /**
+     * Told when a frame arrives for a reason the camera cannot see — **and the release.**
+     *
+     * The refinement travels the other way round from the obvious reading: `slice` returns the
+     * SETTLED answer and this carries the INTERIM, because the settled one has a measured property
+     * attached to what `slice` returns and the interim would break it. The effect on screen is the
+     * one `/docs/design/camera` asks for either way — a coarse picture of where the camera is,
+     * superseded by the fine one when it lands.
+     *
+     * The returned function is the release the contract names, and what this source holds is the
+     * residency, so that is what it lets go of.
+     *
+     * **It is therefore also how a caller asks for a cold cache**, which an instrument needs and a
+     * camera does not: `const cold = source.watch(() => {}); cold();` nulls the listener on its
+     * first call — so no interim is ever assembled and nothing pays the visibility scan — and
+     * every later `cold()` empties residency again. A bench that wants to keep measuring what an
+     * UNCACHED frame costs calls it before each timed frame; one that wants to measure what
+     * residency buys does not. No option on this source says which, deliberately: the two answers
+     * are a property of the run and not of the corpus.
+     */
+    watch(answered: (slice: Slice) => void): () => void {
+      listening = answered;
+      return () => {
+        if (listening === answered) listening = null;
+        held.release();
+      };
     },
   };
 }

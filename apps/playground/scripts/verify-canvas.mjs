@@ -337,7 +337,9 @@ async function window(fraction, { limit = BOUNDED_DEFAULTS.limit } = {}) {
   ok(
     'the ledger counts no more tiles than the footer would have',
     lastCost.tiles > 0 && lastCost.tiles <= chosen.length,
-    `${lastCost.tiles} by ${lastCost.addressed} vs ${chosen.length} by footer box`,
+    // `addressed` was a field of the anchor era and went with it; naming a field that does not
+    // exist printed `undefined` here for as long as nobody read the line.
+    `${lastCost.tiles} by the door vs ${chosen.length} by footer box`,
   );
 
   return { slice, rect, marks, held, chosen, runs, bytes, payload };
