@@ -48,10 +48,10 @@ above**. The same 183 kB over derived positions is a beautifully compressed pict
 
 ## The defect, stated plainly
 
-`crates/fossil-layout/src/layout.rs, enrich_layout` computes positions **unconditionally**. It runs
-`crates/fossil-layout/src/layout.rs, community_hierarchy` over the adjacency, partitions by the
+`crates/fossil-layout/src/layout/pass.rs, enrich_layout` computes positions **unconditionally**. It runs
+`crates/fossil-layout/src/layout/community.rs, community_hierarchy` over the adjacency, partitions by the
 finest level, places each community with
-`crates/fossil-layout/src/layout.rs, cluster_layout`, and writes `x` and `y`.
+`crates/fossil-layout/src/layout/place.rs, cluster_layout`, and writes `x` and `y`.
 
 A corpus that arrived carrying coordinates gets them overwritten, and no reader is told. The
 manifest has no field in which the difference could be recorded even if the pass were willing to

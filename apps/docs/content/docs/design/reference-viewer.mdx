@@ -261,7 +261,7 @@ per row so that a line can be drawn without opening the payload the pyramid exis
 Five, in the order of how much a reader loses.
 
 **1 · The edge levels are written and nothing reads them.** `EdgeLevels` is in the manifest model,
-`crates/fossil-layout/src/layout.rs, write_edge_levels` emits the files, `apps/corpus/guards/fixture.mjs`
+`crates/fossil-layout/src/layout/pass.rs, write_edge_levels` emits the files, `apps/corpus/guards/fixture.mjs`
 writes them into the fixture and declares them in the edge manifest — and
 `packages/corpus/src/address.ts` resolves a `levels:` block for a vertex type and none for an edge
 type, so `Corpus.frame` has no address to compose and no way to open one. The consequence is exact:

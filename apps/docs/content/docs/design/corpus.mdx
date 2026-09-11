@@ -196,7 +196,8 @@ stops a corpus. Nothing in this repository has produced a corpus within two orde
 the ceiling, and the thing that would have to change first is not the manifest.
 
 It is also 32-bit *by construction* rather than by choice of spelling. `weakly_connected_components`,
-`community_hierarchy` and the Morton ranks in `crates/fossil-layout/src/layout.rs` are `u32`
+`crates/fossil-layout/src/layout/community.rs, community_hierarchy` and the Morton ranks in
+`crates/fossil-layout/src/layout/morton.rs, morton_ranks` are `u32`
 throughout — the sentinel there is documented as safe precisely because "the count is a `u32` and
 the last one is `u32::MAX - 1` at worst". Widening the column without widening the pass would
 declare a range nothing in the writer can number. And the ecosystem is at the same place, which is
@@ -339,7 +340,7 @@ by one level fails exactly that test and leaves the others green.
 
 Two things about the pyramid are decided, and each is spelled where it lives —
 `crates/fossil-sinks/src/manifest.rs, VertexLevels` and
-`crates/fossil-layout/src/layout.rs, write_levels`.
+`crates/fossil-layout/src/layout/pass.rs, write_levels`.
 
 - **Quarters, and the pyramid is complete.** A zoom step doubles the linear scale, which quadruples
   the area and so the points, so a level per quarter is a level per zoom step — in halves one step

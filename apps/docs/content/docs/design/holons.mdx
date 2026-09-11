@@ -110,8 +110,8 @@ Claimed in comments, never run. Measured 2026-09-11, two processes per row:
 
 | what | over | result |
 | --- | --- | --- |
-| `crates/fossil-layout/src/layout.rs, community_hierarchy` | com-DBLP, 5 levels | every level's membership **and** quotient byte-identical |
-| `crates/fossil-layout/src/layout.rs, enrich_layout`, the whole pass | 200,000 vertices, 999,079 edges, via `crates/fossil-layout/examples/enrich_memory.rs, planted` | the entire written tree byte-identical — Morton-permuted payload, both adjacency orientations, identity index, tiles and level directories |
+| `crates/fossil-layout/src/layout/community.rs, community_hierarchy` | com-DBLP, 5 levels | every level's membership **and** quotient byte-identical |
+| `crates/fossil-layout/src/layout/pass.rs, enrich_layout`, the whole pass | 200,000 vertices, 999,079 edges, via `crates/fossil-layout/examples/enrich_memory.rs, planted` | the entire written tree byte-identical — Morton-permuted payload, both adjacency orientations, identity index, tiles and level directories |
 
 **The property holds.** What it does not have is a test that keeps it holding, and that is this
 direction's first debt. Had it come out red, the two properties below would not be worth stating.
@@ -127,7 +127,7 @@ Then the number of levels is `log₄(V/chunk)`, every level is addressed with th
 branching factor is about four everywhere — against the 1.2× to 6.0× of the measured table, with
 group sizes inside a level running from one to thirty thousand.
 
-`crates/fossil-layout/src/layout.rs, flatten_to_budget` is the existing half of this: it walks the
+`crates/fossil-layout/src/layout/community.rs, flatten_to_budget` is the existing half of this: it walks the
 hierarchy and picks **one** level that fits a budget. This is the same walk choosing a **sequence**.
 
 ### 3 · A holon is defined against the level below, so it is checkable
