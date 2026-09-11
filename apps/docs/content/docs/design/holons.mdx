@@ -123,9 +123,35 @@ Rather than publishing the levels Louvain emitted, cut the dendrogram at **chose
 exponent in one place and says why a second spelling of it is the bug the constant exists to
 prevent; a holon tree on the same octave inherits that arithmetic instead of inventing one.
 
-Then the number of levels is `log₄(V/chunk)`, every level is addressed with the same shift, and the
-branching factor is about four everywhere — against the 1.2× to 6.0× of the measured table, with
-group sizes inside a level running from one to thirty thousand.
+<Callout type="warn">
+**The declared factor is a floor, not a target, and that was measured rather than intended.** This
+paragraph said the branching factor would then be *about four everywhere*. It is not, and it cannot
+be: a cut chooses out of the partitions the dendrogram already holds, and Louvain's own steps on
+com-DBLP are 5.7×, 6.0× and 5.5×. There is no level near 79,270 or 13,928 to take, so the rule that
+survives is **every published step contracts by at least four** — which is what removes the 2.5×
+and 1.2× rungs, and is the whole of what was wrong with the emitted levels.
+
+Getting nearer to four would need levels *between* Louvain's — undoing part of a pass's merges —
+and that needs a merge ordering `community_hierarchy` does not emit. It is not a tuning knob.
+
+`log₄(V/chunk)` is likewise an **upper bound** and not the level count: with steps of at least four
+you get at most that many rungs. On com-DBLP it is tight by accident — three rungs against
+`log₄(317,080/4,096) ≈ 3.1` — and nothing guarantees that on another graph.
+</Callout>
+
+What the cut does deliver is the removal of the useless rungs. Measured on com-DBLP at a chunk of
+4,096, `crates/fossil-layout/src/layout/community.rs, Cut` keeps three of the five levels:
+
+| rung | groups | ceiling it had to clear | contraction |
+| --- | --- | --- | --- |
+| 1 | 55,712 | 79,270 | 5.69× |
+| 2 | 9,248 | 13,928 | 6.02× |
+| 3 | 1,696 | 2,312 | 5.45× |
+
+Levels 4 and 5 are dropped because neither is a quarter of the one above it — which is exactly the
+1.2× step that moved modularity by 0.0001. **The tree has no root**, and the cut does not invent
+one: it ends where the dendrogram stops delivering, and whether a holon tree gets a synthetic root
+above 1,696 groups is a decision for whatever writes one.
 
 `crates/fossil-layout/src/layout/community.rs, flatten_to_budget` is the existing half of this: it walks the
 hierarchy and picks **one** level that fits a budget. This is the same walk choosing a **sequence**.

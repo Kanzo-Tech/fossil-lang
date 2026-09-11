@@ -9,6 +9,8 @@
 //! `/docs/design/holons` is the page that depends on it and carries the
 //! measurement.
 
+use fossil_sinks::manifest::VertexLevels;
+
 /// Assign each vertex `0..vertex_count` a dense, contiguous `cluster_id` via
 /// weakly-connected components (union-find with path halving).
 ///
@@ -721,6 +723,345 @@ fn densify(community: &mut [u32]) {
     }
 }
 
+/// **The dendrogram, addressable.**
+///
+/// [`community_hierarchy`] hands back the levels Louvain happened to stop at,
+/// and the write path reads exactly two of them — the finest as the placement,
+/// and the one [`flatten_to_budget`] picks as `cluster_id` — freeing everything
+/// between. That is why a caller wanting to cut the tree at chosen sizes, which
+/// is what `/docs/design/holons` asks for, had nowhere to reach: the levels are
+/// a `Vec<Vec<u32>>` with the arithmetic for walking them living in whichever
+/// function needed it.
+///
+/// This owns the levels and answers the three questions that walk is for: how
+/// many groups a level has ([`Self::group_counts`]), which group a vertex is in
+/// at that level ([`Self::membership`]), and which group of a coarser level is
+/// a group's parent ([`Self::parents`]). [`Self::cut`] is the one that chooses.
+///
+/// # Determinism
+///
+/// Nothing here decides anything Louvain did not already decide. Every method
+/// is a lookup walk — `c ← levels[l][c]`, over `Vec`s, in `0..n` index order —
+/// so the reproducibility `local_moving` and [`Weighted::contract`] argue for is
+/// inherited whole: no hash iteration in any output path, no floating point at
+/// all outside [`Cut::contractions`], which only reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dendrogram {
+    vertex_count: u32,
+    levels: Vec<Vec<u32>>,
+    /// Groups per level — `max + 1`, in the same order as `levels`. Computed
+    /// once at construction because [`Self::cut`] asks for it per rung and a
+    /// level is up to `vertex_count` entries long.
+    counts: Vec<u32>,
+}
+
+/// What stops a `Vec<Vec<u32>>` from being a dendrogram.
+///
+/// One variant, because one property is enough: level `l + 1` is **indexed by**
+/// level `l`'s group ids, so if the widths stack then every composition walk in
+/// [`Dendrogram`] is in range, and if they do not then the first one panics. A
+/// public constructor that takes levels from outside checks this rather than
+/// indexing on trust.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum DendrogramError {
+    /// A level is not indexed by the one below it.
+    #[error(
+        "level {level} is indexed by {found} nodes, but the level below it has {expected} groups"
+    )]
+    Unstacked {
+        /// The offending level's index in the hierarchy, `0` being the finest.
+        level: usize,
+        /// How many entries that level actually has.
+        found: usize,
+        /// How many it must have: the group count of the level below, or the
+        /// vertex count at level `0`.
+        expected: usize,
+    },
+}
+
+impl Dendrogram {
+    /// Run Louvain over an edge list and keep the whole hierarchy.
+    ///
+    /// The same call as [`community_hierarchy`], which stays and stays the
+    /// shape it is — the levels themselves are still what the write path wants.
+    #[must_use]
+    pub fn of(vertex_count: u32, edges: &[(u32, u32)]) -> Self {
+        Self::trusted(vertex_count, community_hierarchy(vertex_count, edges))
+    }
+
+    /// Adopt levels that already exist — a hierarchy read back from a corpus, a
+    /// partition produced by something other than Louvain, or a stated one in a
+    /// test.
+    ///
+    /// Checks only that the levels stack, which is the property every walk here
+    /// indexes on.
+    pub fn new(vertex_count: u32, levels: Vec<Vec<u32>>) -> Result<Self, DendrogramError> {
+        let mut expected = vertex_count as usize;
+        for (level, members) in levels.iter().enumerate() {
+            if members.len() != expected {
+                return Err(DendrogramError::Unstacked {
+                    level,
+                    found: members.len(),
+                    expected,
+                });
+            }
+            expected = group_count(members) as usize;
+        }
+        Ok(Self::trusted(vertex_count, levels))
+    }
+
+    /// Levels this module produced itself, whose stacking is
+    /// [`hierarchy`]'s own invariant.
+    fn trusted(vertex_count: u32, levels: Vec<Vec<u32>>) -> Self {
+        let counts = levels.iter().map(|l| group_count(l)).collect();
+        Self {
+            vertex_count,
+            levels,
+            counts,
+        }
+    }
+
+    /// How many levels there are. `0` for a graph where nothing merged.
+    #[must_use]
+    pub const fn depth(&self) -> usize {
+        self.levels.len()
+    }
+
+    /// The vertices the finest level partitions.
+    #[must_use]
+    pub const fn vertex_count(&self) -> u32 {
+        self.vertex_count
+    }
+
+    /// Groups per level, finest first — the sequence a cut chooses out of.
+    #[must_use]
+    pub fn group_counts(&self) -> &[u32] {
+        &self.counts
+    }
+
+    /// The levels themselves, for a caller that wants the raw walk — notably
+    /// [`order_by_hierarchy`], whose parameter is this and not a [`Dendrogram`].
+    #[must_use]
+    pub fn levels(&self) -> &[Vec<u32>] {
+        &self.levels
+    }
+
+    /// Give the levels up, so adopting a hierarchy and handing it on costs no
+    /// copy of it.
+    #[must_use]
+    pub fn into_levels(self) -> Vec<Vec<u32>> {
+        self.levels
+    }
+
+    /// One group id per **original vertex** at `level`, or `None` if there is no
+    /// such level.
+    ///
+    /// The levels compose by lookup rather than recomputation, which is the
+    /// reason the hierarchy is cheap to carry: this is `levels[0..=level]`
+    /// applied in order, each one indexed by the last one's output.
+    #[must_use]
+    pub fn membership(&self, level: usize) -> Option<Vec<u32>> {
+        let levels = self.levels.get(..=level)?;
+        let mut label: Vec<u32> = (0..self.vertex_count).collect();
+        for level in levels {
+            for l in &mut label {
+                *l = level[*l as usize];
+            }
+        }
+        Some(label)
+    }
+
+    /// Which group of level `to` each group of level `from` belongs to — the
+    /// parent column a holon row carries.
+    ///
+    /// `from` is strictly finer than `to`; `None` if either level is absent or
+    /// they are the wrong way round. The walk is the same lookup composition as
+    /// [`Self::membership`], started from `from`'s group ids instead of from the
+    /// vertices.
+    #[must_use]
+    pub fn parents(&self, from: usize, to: usize) -> Option<Vec<u32>> {
+        if from >= to {
+            return None;
+        }
+        let levels = self.levels.get(from + 1..=to)?;
+        let mut label: Vec<u32> = (0..*self.counts.get(from)?).collect();
+        for level in levels {
+            for l in &mut label {
+                *l = level[*l as usize];
+            }
+        }
+        Some(label)
+    }
+
+    /// **The declared cut**: the sequence of levels whose group counts fall by
+    /// at least the pyramid's own branching factor at every step, stopping at
+    /// the first rung that fits `chunk`.
+    ///
+    /// [`flatten_to_budget`] is the existing half of this — it walks the
+    /// hierarchy and picks **one** level that fits a budget. This is the same
+    /// walk choosing a **sequence**, and it exists because the levels Louvain
+    /// emits are not a holarchy. Measured over com-DBLP by
+    /// `crates/fossil-layout/examples/hierarchy_stats.rs` they contract 5.7×,
+    /// 6.0×, 5.5×, then **2.5×** and **1.2×**: the last two steps change almost
+    /// nothing on screen, and a reader ascending them takes a step that buys
+    /// nothing. A cut states what a step must be worth and takes the levels that
+    /// clear it.
+    ///
+    /// # Where the factor comes from, and why there is no `4` here
+    ///
+    /// The tile pyramid already fixes the octave —
+    /// `crates/fossil-sinks/src/manifest.rs, VertexLevels` says a second
+    /// spelling of that exponent is the bug its constant exists to prevent — so
+    /// a rung's ceiling is `VertexLevels::rows_at(current, 1)`, which is level
+    /// one of the tile pyramid over `current` rows. Same arithmetic, same
+    /// integer, in every language that reads this corpus.
+    ///
+    /// # What it does NOT do
+    ///
+    /// It does not invent a level. A cut can only choose out of the partitions
+    /// the dendrogram holds, so where Louvain's coarsening stalls the cut stops
+    /// rather than publishing the stall: over com-DBLP it ends at 1,696 groups
+    /// and the 690- and 595-group levels are dropped, because neither is a
+    /// quarter of what stands above it. Whether the tree then gets a root is the
+    /// caller's ruling, not this function's.
+    ///
+    /// An empty cut means there was nothing to choose: no hierarchy, a
+    /// `chunk` of zero, a graph that already fits one chunk, or a first level
+    /// too coarse to be a quarter of the graph.
+    #[must_use]
+    pub fn cut(&self, chunk: u64) -> Cut {
+        let mut rungs: Vec<Rung> = Vec::new();
+        let mut current = u64::from(self.vertex_count);
+        let mut from = 0usize;
+        while chunk > 0 && current > chunk {
+            // `rows_at(.., 1)` is `ceil(current / 4)`: one level of the tile
+            // pyramid, over this many rows instead of over the whole type.
+            let ceiling = VertexLevels::rows_at(current, 1);
+            // The FINEST level that fits under the ceiling, which is the one
+            // that gives up least detail while still being worth a step. Levels
+            // are scanned in index order from wherever the last rung landed, so
+            // the answer is a pure function of the counts.
+            let Some(level) =
+                (from..self.counts.len()).find(|&l| u64::from(self.counts[l]) <= ceiling)
+            else {
+                break;
+            };
+            let groups = self.counts[level];
+            rungs.push(Rung {
+                level,
+                groups,
+                ceiling,
+            });
+            current = u64::from(groups);
+            from = level + 1;
+        }
+        Cut {
+            leaves: self.vertex_count,
+            rungs,
+        }
+    }
+}
+
+/// A chosen sequence of levels, finest first.
+///
+/// The rungs are the levels a holon tree would publish; everything the
+/// dendrogram holds between them is what the cut refused.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Cut {
+    /// What the finest rung contracts *from* — [`Dendrogram::vertex_count`], so
+    /// the first contraction ratio is against the graph itself.
+    leaves: u32,
+    rungs: Vec<Rung>,
+}
+
+/// One level of a [`Cut`], and what it was chosen against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rung {
+    level: usize,
+    groups: u32,
+    ceiling: u64,
+}
+
+impl Rung {
+    /// Its index in the dendrogram — what [`Dendrogram::membership`] and
+    /// [`Dendrogram::parents`] take.
+    #[must_use]
+    pub const fn level(self) -> usize {
+        self.level
+    }
+
+    /// How many groups it has.
+    #[must_use]
+    pub const fn groups(self) -> u32 {
+        self.groups
+    }
+
+    /// The most groups it was allowed to have: a quarter of the rung below,
+    /// rounded up. A rung is usually well under its ceiling, because a cut
+    /// chooses out of what a dendrogram happens to hold.
+    #[must_use]
+    pub const fn ceiling(self) -> u64 {
+        self.ceiling
+    }
+}
+
+impl Cut {
+    /// **The branching factor, as the pyramid declares it.**
+    ///
+    /// `VertexLevels::stride(1)` and not a literal: the exponent lives in
+    /// `crates/fossil-sinks/src/manifest.rs, VertexLevels` and a holon tree on
+    /// the same octave inherits that arithmetic instead of inventing one.
+    #[must_use]
+    pub const fn declared_branching() -> u64 {
+        VertexLevels::stride(1)
+    }
+
+    /// The rungs, finest first.
+    #[must_use]
+    pub fn rungs(&self) -> &[Rung] {
+        &self.rungs
+    }
+
+    /// How many levels the cut publishes. At most `log₄(V / chunk)`, since every
+    /// rung is at least a quarter-step and the walk stops at `chunk`.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.rungs.len()
+    }
+
+    /// Whether the cut chose nothing at all.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.rungs.is_empty()
+    }
+
+    /// What each rung contracts by, against the one below it — the first
+    /// against the vertex count itself.
+    ///
+    /// Reporting only, which is why it is the one place in this type that
+    /// touches `f64`: the guarantee is the integer one [`Rung::ceiling`]
+    /// carries, and nothing branches on these.
+    #[must_use]
+    pub fn contractions(&self) -> Vec<f64> {
+        let mut below = f64::from(self.leaves);
+        self.rungs
+            .iter()
+            .map(|rung| {
+                let ratio = below / f64::from(rung.groups.max(1));
+                below = f64::from(rung.groups);
+                ratio
+            })
+            .collect()
+    }
+}
+
+/// How many groups a level names — `max + 1`, which for a level this module
+/// produced is also its count of distinct ids, because [`densify`] relabels
+/// them to `0..k`.
+fn group_count(level: &[u32]) -> u32 {
+    level.iter().copied().max().map_or(0, |m| m + 1)
+}
+
 #[cfg(test)]
 mod component_tests {
     use super::*;
@@ -994,5 +1335,195 @@ mod hierarchy_tests {
             community_hierarchy(5, &[]).is_empty(),
             "with no edges nothing merges, so there is no level to record"
         );
+    }
+}
+
+#[cfg(test)]
+mod dendrogram_tests {
+    use super::*;
+
+    /// A level mapping `n` nodes onto `k` groups, contiguously and densely —
+    /// stated rather than computed, so these tests are about the **choosing**
+    /// and not about Louvain.
+    fn level(n: u32, k: u32) -> Vec<u32> {
+        // In `u64`: the products here are a vertex count times a group count,
+        // which at com-DBLP's scale is well past `u32`.
+        let (n64, k64) = (u64::from(n), u64::from(k));
+        (0..n)
+            .map(|i| ((u64::from(i) * k64) / n64) as u32)
+            .collect()
+    }
+
+    /// The counts a dendrogram of these widths has, which is what a cut chooses
+    /// out of.
+    fn of_counts(counts: &[u32], vertex_count: u32) -> Dendrogram {
+        let mut levels = Vec::with_capacity(counts.len());
+        let mut below = vertex_count;
+        for &k in counts {
+            levels.push(level(below, k));
+            below = k;
+        }
+        Dendrogram::new(vertex_count, levels).expect("stated levels stack")
+    }
+
+    #[test]
+    fn a_stated_hierarchy_reports_its_own_widths() {
+        let d = of_counts(&[40, 16, 4], 64);
+        assert_eq!(d.depth(), 3);
+        assert_eq!(d.vertex_count(), 64);
+        assert_eq!(d.group_counts(), &[40, 16, 4]);
+    }
+
+    #[test]
+    fn levels_that_do_not_stack_are_refused_rather_than_indexed() {
+        assert_eq!(
+            Dendrogram::new(6, vec![vec![0, 0, 1, 1, 2, 2], vec![0, 0]]),
+            Err(DendrogramError::Unstacked {
+                level: 1,
+                found: 2,
+                expected: 3,
+            }),
+            "level 1 is indexed by level 0's three groups, not by two",
+        );
+        assert_eq!(
+            Dendrogram::new(5, vec![vec![0, 0, 1]]),
+            Err(DendrogramError::Unstacked {
+                level: 0,
+                found: 3,
+                expected: 5,
+            }),
+            "the finest level is indexed by the vertices",
+        );
+    }
+
+    #[test]
+    fn membership_and_parents_are_the_same_lookup_walk() {
+        // Six vertices → three pairs → one group.
+        let d =
+            Dendrogram::new(6, vec![vec![0, 0, 1, 1, 2, 2], vec![0, 0, 0]]).expect("levels stack");
+
+        assert_eq!(d.membership(0), Some(vec![0, 0, 1, 1, 2, 2]));
+        assert_eq!(d.membership(1), Some(vec![0, 0, 0, 0, 0, 0]));
+        assert_eq!(d.membership(2), None, "there is no third level");
+
+        assert_eq!(
+            d.parents(0, 1),
+            Some(vec![0, 0, 0]),
+            "three groups, one parent"
+        );
+        assert_eq!(d.parents(1, 1), None, "a level is not its own parent");
+        assert_eq!(d.parents(1, 0), None, "parents are coarser, never finer");
+        assert_eq!(d.parents(0, 2), None, "there is no third level");
+    }
+
+    /// The whole of B2.2: a rung is worth taking only if it contracts by the
+    /// factor the tile pyramid declares.
+    #[test]
+    fn every_rung_contracts_by_at_least_the_declared_factor() {
+        let d = of_counts(&[40, 16, 15, 4], 64);
+        let cut = d.cut(1);
+
+        // 64 → ceiling 16 skips the 40, which is not a quarter of the graph;
+        // 16 → ceiling 4 skips the 15, which is not a quarter of the 16.
+        let levels: Vec<usize> = cut.rungs().iter().map(|r| r.level()).collect();
+        assert_eq!(levels, vec![1, 3], "the levels that buy a step: {cut:?}");
+        assert_eq!(
+            cut.rungs().iter().map(|r| r.groups()).collect::<Vec<_>>(),
+            vec![16, 4],
+        );
+
+        let mut below = u64::from(d.vertex_count());
+        for rung in cut.rungs() {
+            assert!(
+                u64::from(rung.groups()) * Cut::declared_branching() <= below,
+                "rung {rung:?} does not contract by {}× from {below}",
+                Cut::declared_branching(),
+            );
+            below = u64::from(rung.groups());
+        }
+    }
+
+    /// Where the coarsening stalls, the cut stops rather than publishing the
+    /// stall — com-DBLP's 690 and 595 are the measured case.
+    #[test]
+    fn a_dendrogram_that_stalls_is_cut_short_of_its_top() {
+        let d = of_counts(&[55_712, 9_248, 1_696, 690, 595], 317_080);
+        let cut = d.cut(1);
+
+        assert_eq!(
+            cut.rungs().iter().map(|r| r.groups()).collect::<Vec<_>>(),
+            vec![55_712, 9_248, 1_696],
+            "690 is not a quarter of 1,696 and 595 is not a quarter of 690",
+        );
+        assert!(
+            cut.contractions().iter().all(|&r| r >= 4.0),
+            "measured contractions: {:?}",
+            cut.contractions(),
+        );
+    }
+
+    #[test]
+    fn the_walk_stops_at_the_chunk_that_already_fits() {
+        let d = of_counts(&[40, 16, 4, 1], 64);
+        assert_eq!(d.cut(16).len(), 1, "16 groups already fit a chunk of 16");
+        assert_eq!(d.cut(4).len(), 2);
+        assert_eq!(d.cut(1).len(), 3);
+    }
+
+    #[test]
+    fn nothing_to_choose_from_cuts_to_nothing() {
+        let d = of_counts(&[40, 16, 4], 64);
+        assert!(d.cut(0).is_empty(), "a chunk of zero is not a budget");
+        assert!(
+            d.cut(64).is_empty(),
+            "a graph that fits one chunk has no tree"
+        );
+        assert!(
+            Dendrogram::of(5, &[]).cut(1).is_empty(),
+            "no hierarchy, nothing to cut",
+        );
+        assert!(
+            of_counts(&[40], 64).cut(1).is_empty(),
+            "a first level that is not a quarter of the graph is not a rung",
+        );
+    }
+
+    /// Determinism is the property `/docs/design/holons` puts first, and a cut
+    /// must not be where it is lost: every walk above is over `Vec`s in index
+    /// order, so the same levels give the same rungs.
+    #[test]
+    fn the_same_hierarchy_gives_the_same_cut() {
+        let edges: Vec<(u32, u32)> = (0..400u32).map(|i| (i % 100, (i * 7) % 100)).collect();
+        let a = Dendrogram::of(100, &edges);
+        let b = Dendrogram::of(100, &edges);
+        assert_eq!(a, b);
+        assert_eq!(a.cut(4), b.cut(4));
+        assert_eq!(a.membership(0), b.membership(0));
+    }
+
+    /// The dendrogram is the levels and nothing else: adopting what
+    /// [`community_hierarchy`] returned and giving it back is the identity.
+    #[test]
+    fn adopting_the_hierarchy_changes_nothing_about_it() {
+        let mut edges = Vec::new();
+        for c in 0..4u32 {
+            let base = c * 4;
+            for a in 0..4u32 {
+                for b in (a + 1)..4 {
+                    edges.push((base + a, base + b));
+                }
+            }
+            if c > 0 {
+                edges.push((base, base - 4));
+            }
+        }
+        let levels = community_hierarchy(16, &edges);
+        assert_eq!(
+            Dendrogram::new(16, levels.clone())
+                .expect("Louvain's levels stack")
+                .into_levels(),
+            levels,
+        );
+        assert_eq!(Dendrogram::of(16, &edges).levels(), levels);
     }
 }

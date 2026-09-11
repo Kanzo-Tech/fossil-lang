@@ -39,14 +39,22 @@
 //!
 //! With `out-dir`, every level's membership and quotient edge list is written
 //! there as CSV, so a layout can be tried on a chosen level without running
-//! this again.
+//! this again. A third argument sets the chunk the cut below stops at.
+//!
+//! **And then it cuts.** The table above is what Louvain emitted; the table at
+//! the end is what `Dendrogram::cut` publishes out of it — the levels whose
+//! group counts fall by at least the factor the tile pyramid declares, which is
+//! the whole of `/docs/design/holons`'s second property. The two tables side by
+//! side are the argument: the levels the cut refuses are exactly the ones whose
+//! contraction had collapsed.
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write as _;
 use std::path::PathBuf;
 
-use fossil_layout::layout::community_hierarchy;
+use fossil_layout::layout::community::{Cut, Dendrogram};
+use fossil_sinks::manifest::DEFAULT_CHUNK_SIZE;
 
 /// One community's aggregate over the ORIGINAL graph, which is what modularity
 /// is defined against — a level's quality is a statement about the graph it
@@ -104,21 +112,6 @@ fn read_edges(path: &str) -> (u32, Vec<(u32, u32)>) {
     )
 }
 
-/// Fold a membership at level `l` down to one label per ORIGINAL vertex.
-///
-/// The levels compose by lookup rather than recomputation — level `l` is indexed
-/// by level `l-1`'s community ids — which is the same walk `order_by_hierarchy`
-/// does and the reason the hierarchy is cheap to carry.
-fn flatten(levels: &[Vec<u32>], upto: usize, vertex_count: u32) -> Vec<u32> {
-    let mut label: Vec<u32> = (0..vertex_count).collect();
-    for level in levels.iter().take(upto + 1) {
-        for l in &mut label {
-            *l = level[*l as usize];
-        }
-    }
-    label
-}
-
 /// Counts as `f64`, via `u32`.
 ///
 /// These are community and edge counts, not addresses: a corpus with more than
@@ -148,6 +141,9 @@ fn main() {
         .next()
         .unwrap_or_else(|| "apps/playground/bench/dblp/data/links.csv".to_string());
     let out: Option<PathBuf> = args.next().map(PathBuf::from);
+    let chunk: u64 = args
+        .next()
+        .map_or(DEFAULT_CHUNK_SIZE, |a| a.parse().expect("chunk size"));
 
     let (vertex_count, edges) = read_edges(&path);
     println!(
@@ -162,16 +158,18 @@ fn main() {
     }
     let two_m = degree.iter().sum::<f64>();
 
-    let levels = community_hierarchy(vertex_count, &edges);
-    println!("la jerarquía tiene {} niveles\n", levels.len());
+    // The dendrogram, adopted whole: the level table below reads it by the same
+    // lookup walk the cut does, rather than by a second copy of that walk.
+    let tree = Dendrogram::of(vertex_count, &edges);
+    println!("la jerarquía tiene {} niveles\n", tree.depth());
 
     println!(
         "{:>5} {:>10} {:>8} {:>8} {:>8} {:>8} {:>11} {:>9} {:>12}",
         "nivel", "comunid.", "p50", "p90", "máx", "%<=3", "modularidad", "q-aristas", "q-grado med"
     );
 
-    for l in 0..levels.len() {
-        let label = flatten(&levels, l, vertex_count);
+    for l in 0..tree.depth() {
+        let label = tree.membership(l).expect("a level of this hierarchy");
         let n = label.iter().copied().max().map_or(0, |m| m + 1);
 
         let mut comms = vec![Community::default(); n as usize];
@@ -239,6 +237,37 @@ fn main() {
                 writeln!(g, "{a},{b},{w}").unwrap();
             }
         }
+    }
+
+    // El corte declarado: de todos esos niveles, los que valen un paso.
+    let cut = tree.cut(chunk);
+    println!(
+        "\ncorte declarado (factor {}, chunk {chunk}): {} de {} niveles",
+        Cut::declared_branching(),
+        cut.len(),
+        tree.depth(),
+    );
+    println!(
+        "{:>5} {:>10} {:>10} {:>13}",
+        "nivel", "grupos", "techo", "contracción"
+    );
+    for (rung, ratio) in cut.rungs().iter().zip(cut.contractions()) {
+        println!(
+            "{:>5} {:>10} {:>10} {:>12.2}x",
+            rung.level() + 1,
+            rung.groups(),
+            rung.ceiling(),
+            ratio,
+        );
+    }
+    let dropped: Vec<usize> = (0..tree.depth())
+        .filter(|l| !cut.rungs().iter().any(|r| r.level() == *l))
+        .map(|l| l + 1)
+        .collect();
+    if dropped.is_empty() {
+        println!("ningún nivel se descarta");
+    } else {
+        println!("niveles descartados: {dropped:?} — ninguno es un cuarto del que tiene encima");
     }
 
     if let Some(dir) = &out {
