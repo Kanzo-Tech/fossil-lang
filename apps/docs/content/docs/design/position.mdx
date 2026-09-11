@@ -1,8 +1,8 @@
 ---
 title: Where x and y come from
-description: A far view of a graph is worth looking at or worth nothing depending on one fact — whether the positions are data or were invented by an algorithm — and the corpus does not currently record which.
+description: A far view of a graph is worth looking at or worth nothing depending on one fact — whether the positions are data or were invented by an algorithm — so a vertex type declares every coordinate system it carries and where each one came from.
 direction:
-  summary: A vertex type declares every coordinate system it carries and where each one came from, and the layout pass never overwrites a system it did not derive; today `enrich_layout` computes `x`/`y` unconditionally and the manifest has no field that could say so.
+  summary: The layout pass never overwrites a coordinate system it did not derive — today it computes `x`/`y` unconditionally, and the half that has landed is the declaration rather than the refusal.
 ---
 
 Zoom far enough out of a million-vertex graph and the individual vertices stop being visible. What
@@ -54,12 +54,30 @@ finest level, places each community with
 `crates/fossil-layout/src/layout/place.rs, cluster_layout`, and writes `x` and `y`.
 
 A corpus that arrived carrying coordinates gets them overwritten, and no reader is told. The
-manifest has no field in which the difference could be recorded even if the pass were willing to
-record it: `crates/fossil-sinks/src/manifest.rs, VertexInfo` declares a list of properties, and a
-property is a name and a type.
+manifest had no field in which the difference could be recorded even if the pass were willing to
+record it: `crates/fossil-sinks/src/manifest.rs, VertexInfo` declared a list of properties, and a
+property is a name and a type — `x` and `y` are two `float32` whether they are a latitude or a
+phyllotaxis angle.
 
-So the corpus cannot answer the only question that decides whether its own geometry is worth
-drawing far away. That is the whole of the finding.
+So the corpus could not answer the only question that decides whether its own geometry is worth
+drawing far away. That is the whole of the finding, and the half of it that has landed is below.
+
+<Callout type="info">
+**The declaration is in; the refusal is not.** `VertexInfo` carries
+`crates/fossil-sinks/src/manifest.rs, CoordinateSystem` now, and every corpus fossil writes
+declares one: `name: layout`, over `x`/`y`, `provenance: derived`, `derived_by:
+louvain+phyllotaxis`. It is declared in `crates/fossil-df/src/lib.rs, vertex_info` beside the
+properties that make it possible — the same place and the same rule the identity index and the
+pyramid are declared under, *the manifest is the plan and the pass is what fills it*.
+
+What has **not** landed is the pass refusing to overwrite, and the reason is deliberate. Telling
+`crates/fossil-layout/src/layout/pass.rs, enrich_layout` to leave a measured system alone means a
+parameter on `VertexLayoutTarget`, and **nothing can set it**: no fossil program can supply its own
+`x`, so the only corpus with a measured system is one some other writer made. Building the
+parameter now would be [the error this project has made at nine
+scales](/docs/design/discarded) — an extension point with one implementation and no second caller.
+The condition is a producer, and it is a language question before it is a pass question.
+</Callout>
 
 ## This is a defect with a precedent, and the precedent is the design
 
@@ -78,12 +96,13 @@ field whose absence is honest:
 >
 > — `crates/fossil-sinks/src/manifest.rs, Property`
 
-Position has the same shape of defect and takes the same shape of repair. A reader today invents
-*derived*, because derived is the common case. A corpus that arrived with latitudes reads back
-identically to one the layout pass invented. And the honest third state — **not declared** — has
-nowhere to live.
+Position had the same shape of defect and takes the same shape of repair — the same `Option`, the
+same `skip_serializing_if`, the same rule about what absence means. Before it, a reader had to
+invent *derived*, because derived is the common case; a corpus that arrived with latitudes read
+back identically to one the layout pass invented; and the honest third state — **not declared** —
+had nowhere to live.
 
-## The direction: `coordinates:` as a list of systems with provenance
+## `coordinates:` — a list of systems, each with a provenance
 
 A vertex type declares the coordinate systems it carries. Each names its two columns, and each
 names **where it came from**:

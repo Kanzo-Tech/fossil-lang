@@ -6,8 +6,8 @@
 
 use arrow_schema::DataType;
 use fossil_sinks::manifest::{
-    Cardinality, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, Projection, Property, VertexInfo,
-    data_type_name,
+    Cardinality, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, Projection,
+    Property, Provenance, VertexInfo, data_type_name,
 };
 
 fn person_vertex() -> VertexInfo {
@@ -36,6 +36,13 @@ fn person_vertex() -> VertexInfo {
             ],
         )],
     )
+    // Two systems, which is what the field is a list FOR, and the pair locks
+    // both halves of its spelling: a measured one that writes no `derived_by`,
+    // and a derived one that does. A single-system fixture would freeze half.
+    .with_coordinates(vec![
+        CoordinateSystem::measured("geo", "lon", "lat", Provenance::Geographic),
+        CoordinateSystem::derived("layout", "x", "y", "louvain+phyllotaxis"),
+    ])
 }
 
 fn knows_edge() -> EdgeInfo {

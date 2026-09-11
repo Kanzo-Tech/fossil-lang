@@ -19,4 +19,14 @@ projections:
   - name: name
     data_type: string
     is_primary: false
+coordinates:
+- name: geo
+  x: lon
+  y: lat
+  provenance: geographic
+- name: layout
+  x: x
+  y: y
+  provenance: derived
+  derived_by: louvain+phyllotaxis
 version: gar/v1

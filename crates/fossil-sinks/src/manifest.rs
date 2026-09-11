@@ -257,8 +257,126 @@ pub struct VertexInfo {
     /// the row the index would have found, and `openCorpus` reports the cost.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<VertexIndex>,
+    /// **Which coordinate systems this type's rows carry, and where each one
+    /// came from.** See [`CoordinateSystem`].
+    ///
+    /// A far view of a graph is worth looking at or worth nothing depending on
+    /// this and nothing else: if a position is a latitude or a learned
+    /// embedding then the plane is a space and its density is information; if a
+    /// drawing algorithm chose it because a picture needed coordinates, the
+    /// density is about the algorithm. Both are two `float32` columns, so
+    /// nothing but a declaration can tell them apart.
+    ///
+    /// **A list, not a value**, and not for symmetry: a corpus can legitimately
+    /// carry a measured position *and* a derived one, and which of them gets
+    /// drawn is a reader's question rather than a writer's. It is the shape
+    /// OME-NGFF and `SpatialData` reached for the same reason.
+    ///
+    /// **`None` is a statement about the writer, not about the data** — the
+    /// same rule [`Property::cardinality`] is written under, and for the same
+    /// reason. A corpus written before this field existed has no declaration to
+    /// record, and it reads back as "not declared" rather than as "derived",
+    /// which is the answer a default would have invented. `/docs/design/position`
+    /// is the argument.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinates: Option<Vec<CoordinateSystem>>,
     /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
     pub version: String,
+}
+
+/// One coordinate system over a vertex type's rows: which two columns hold it,
+/// and **where the numbers in them came from**.
+///
+/// The cost of carrying a second system is a permutation of 4 bytes per row per
+/// axis — a column, not a corpus — which is what makes declaring both of them
+/// cheaper than making a reader guess between them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CoordinateSystem {
+    /// What this system is called, so a reader can ask for one by name — `geo`,
+    /// `layout`. Names are the writer's; nothing here reserves any.
+    pub name: String,
+    /// The column holding the first axis.
+    pub x: String,
+    /// The column holding the second axis.
+    pub y: String,
+    /// Where the positions came from. See [`Provenance`].
+    pub provenance: Provenance,
+    /// What derived them, for a [`Provenance::Derived`] system — a free string,
+    /// because the set of things that can lay out a graph is not closed.
+    ///
+    /// `None` on a derived system says the writer did not record it, and that
+    /// is weaker than a name rather than equivalent to one: re-deriving a
+    /// position is how a reader checks that a holon's referent has not moved,
+    /// and it cannot re-run what nothing names. It is `None` rather than
+    /// required because a measured system has nothing to put here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived_by: Option<String>,
+}
+
+/// Where a coordinate system's numbers came from — the one fact that decides
+/// whether a far view of this type means anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Provenance {
+    /// A coordinate reference system outside the corpus — a latitude and
+    /// longitude, a projected CRS. The plane is the world and its density is
+    /// information about the world.
+    Geographic,
+    /// A learned or fitted space — an embedding, an MDS solution. The plane is
+    /// a space and its density is information about that space.
+    Embedded,
+    /// A drawing algorithm chose it because a picture needed coordinates.
+    /// **The density is about the algorithm**, and a heat map of it is a
+    /// picture of the layout's own regularities.
+    Derived,
+}
+
+impl CoordinateSystem {
+    /// A system whose positions a drawing algorithm chose, naming what chose
+    /// them.
+    #[must_use]
+    pub fn derived(
+        name: impl Into<String>,
+        x: impl Into<String>,
+        y: impl Into<String>,
+        derived_by: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            x: x.into(),
+            y: y.into(),
+            provenance: Provenance::Derived,
+            derived_by: Some(derived_by.into()),
+        }
+    }
+
+    /// A system whose positions are data — measured or fitted outside the
+    /// renderer. `derived_by` is `None` because there is nothing to re-run.
+    #[must_use]
+    pub fn measured(
+        name: impl Into<String>,
+        x: impl Into<String>,
+        y: impl Into<String>,
+        provenance: Provenance,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            x: x.into(),
+            y: y.into(),
+            provenance,
+            derived_by: None,
+        }
+    }
+
+    /// Whether this system's density is information about something other than
+    /// the algorithm that drew it — which is the question a far view turns on.
+    #[must_use]
+    pub const fn is_data(&self) -> bool {
+        matches!(
+            self.provenance,
+            Provenance::Geographic | Provenance::Embedded
+        )
+    }
 }
 
 /// Where a vertex type's identity index lives, and what it is ordered by.
@@ -773,6 +891,11 @@ impl VertexInfo {
             // second pass over the rows in a different order, which the caller
             // that HAS those rows decides to pay. `with_index` is how it says so.
             index: None,
+            // Not declared, which is neither "derived" nor "none". A writer that
+            // knows where its positions came from says so with
+            // `with_coordinates`; a writer that does not must not be made to
+            // look as though it did.
+            coordinates: None,
             version: GRAPHAR_VERSION.to_string(),
         }
     }
@@ -782,6 +905,33 @@ impl VertexInfo {
     pub fn with_index(mut self, index: VertexIndex) -> Self {
         self.index = Some(index);
         self
+    }
+
+    /// Declare the coordinate systems this type carries. See
+    /// [`CoordinateSystem`].
+    ///
+    /// Replaces rather than appends: the list **is** the declaration, and a
+    /// writer that would rather add one reads the current list and hands back a
+    /// longer one. An empty `systems` declares that the type carries none,
+    /// which is a different answer from not calling this at all.
+    #[must_use]
+    pub fn with_coordinates(mut self, systems: Vec<CoordinateSystem>) -> Self {
+        self.coordinates = Some(systems);
+        self
+    }
+
+    /// The declared systems whose positions are data rather than a drawing
+    /// algorithm's choice — empty where none are, and empty where nothing was
+    /// declared, which a caller that needs to tell those apart separates with
+    /// [`Self::coordinates`] itself.
+    #[must_use]
+    pub fn measured_coordinates(&self) -> Vec<&CoordinateSystem> {
+        self.coordinates
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .filter(|system| system.is_data())
+            .collect()
     }
 
     /// Append the projections of a level plan, each carrying the payload's own
@@ -1222,6 +1372,96 @@ version: gar/v1
         let yaml = original.to_yaml().expect("serialize");
         let parsed: EdgeInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
         assert_eq!(original, parsed);
+    }
+
+    /// The property the whole field is written under: a corpus from before it
+    /// existed reads back as **not declared**, never as `derived`. A default
+    /// here would invent the answer for every corpus already on disk, and
+    /// `derived` is the answer a reader would then act on — which is the defect
+    /// the field exists to remove rather than relocate.
+    #[test]
+    fn a_vertex_written_before_the_field_existed_declares_nothing() {
+        let old = "type: Person\nvertex_count: 5\nchunk_size: 4096\n\
+                   prefix: vertex/Person/\nprojections: []\nversion: gar/v1\n";
+        let parsed: VertexInfo = serde_yaml_ng::from_str(old).expect("deserialize");
+        assert_eq!(parsed.coordinates, None);
+        assert!(parsed.measured_coordinates().is_empty());
+    }
+
+    /// Undeclared is absent, not `coordinates: null` — the same shape
+    /// `is_nullable` and `cardinality` keep, so a corpus that declares nothing
+    /// is byte-for-byte the corpus it was before the field landed.
+    #[test]
+    fn an_undeclared_system_is_absent_from_the_yaml() {
+        let yaml = person_vertex().to_yaml().expect("serialize");
+        assert!(!yaml.contains("coordinates"), "{yaml}");
+    }
+
+    /// Declaring an empty list says «this type carries no coordinate system»,
+    /// which is an answer. Not calling `with_coordinates` says nothing. The two
+    /// must not collapse, because only the first licenses a reader to conclude.
+    #[test]
+    fn declaring_no_systems_is_not_declaring_nothing() {
+        let silent = person_vertex();
+        let explicit = person_vertex().with_coordinates(Vec::new());
+        assert_eq!(silent.coordinates, None);
+        assert_eq!(explicit.coordinates, Some(Vec::new()));
+        assert_ne!(silent, explicit);
+
+        let yaml = explicit.to_yaml().expect("serialize");
+        let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        assert_eq!(parsed.coordinates, Some(Vec::new()));
+    }
+
+    /// Two systems over one type, which is the case the field is a LIST for:
+    /// authors have affiliations with real locations *and* a community layout,
+    /// and which one is drawn is the reader's question.
+    #[test]
+    fn two_systems_round_trip_with_their_provenance() {
+        let original = person_vertex().with_coordinates(vec![
+            CoordinateSystem::measured("geo", "lon", "lat", Provenance::Geographic),
+            CoordinateSystem::derived("layout", "x", "y", "louvain+phyllotaxis"),
+        ]);
+        let yaml = original.to_yaml().expect("serialize");
+        assert!(yaml.contains("provenance: geographic"), "{yaml}");
+        assert!(yaml.contains("provenance: derived"), "{yaml}");
+        assert!(yaml.contains("derived_by: louvain+phyllotaxis"), "{yaml}");
+
+        let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        assert_eq!(original, parsed);
+    }
+
+    /// A measured system carries no `derived_by` and the key stays out of the
+    /// document, rather than appearing as a null a reader has to interpret.
+    #[test]
+    fn a_measured_system_writes_no_deriver() {
+        let yaml = person_vertex()
+            .with_coordinates(vec![CoordinateSystem::measured(
+                "geo",
+                "lon",
+                "lat",
+                Provenance::Geographic,
+            )])
+            .to_yaml()
+            .expect("serialize");
+        assert!(!yaml.contains("derived_by"), "{yaml}");
+    }
+
+    /// The one question a far view turns on, as a predicate: a position an
+    /// algorithm chose is not data, and the other two are.
+    #[test]
+    fn only_a_derived_position_fails_to_be_data() {
+        let info = person_vertex().with_coordinates(vec![
+            CoordinateSystem::measured("geo", "lon", "lat", Provenance::Geographic),
+            CoordinateSystem::measured("umap", "u0", "u1", Provenance::Embedded),
+            CoordinateSystem::derived("layout", "x", "y", "louvain+phyllotaxis"),
+        ]);
+        let measured: Vec<&str> = info
+            .measured_coordinates()
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(measured, ["geo", "umap"]);
     }
 
     #[test]

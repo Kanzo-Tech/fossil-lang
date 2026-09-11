@@ -81,8 +81,8 @@ use fossil_locator::SourceAnchor;
 use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
-    Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Privacy, Projection,
-    Property, VertexIndex, VertexInfo, VertexLevels, data_type_name,
+    Container, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Privacy,
+    Projection, Property, VertexIndex, VertexInfo, VertexLevels, data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -2014,6 +2014,35 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
     if let Some(plan) = VertexLevels::planned(rows, DEFAULT_CHUNK_SIZE) {
         info = info.with_levels(&plan);
     }
+    // **And where `x`/`y` came from**, which the two `Property` rows above
+    // cannot say: they give the columns a name and a `float32`, and a latitude
+    // and a phyllotaxis angle are the same two `float32`.
+    //
+    // The difference is the whole of whether a far view of this corpus means
+    // anything. A position that is DATA makes the plane a space, so its density
+    // is information; a position a drawing algorithm chose makes the density a
+    // statement about the algorithm, and a reader zooming out learns about
+    // `cluster_layout` rather than about the graph. Undeclared, a reader has to
+    // guess, and the guess that costs least to make is the wrong one.
+    //
+    // Declared here for the reason the index and the pyramid above are: the
+    // manifest is the plan and the layout pass is what fills it. And declared
+    // `derived` unconditionally because that is what this writer produces —
+    // every `x` in a corpus fossil writes is `fossil-layout`'s, and there is no
+    // surface in the language through which a program could supply its own.
+    // The day there is one, this stops being a constant and starts being a
+    // question about the mapping; `/docs/design/position` is where that is
+    // written down.
+    //
+    // No version in the deriver, and that is not an oversight — the argument
+    // for and against one is on that page, unsettled, and a version string
+    // invented here would settle it by accident.
+    info = info.with_coordinates(vec![CoordinateSystem::derived(
+        "layout",
+        "x",
+        "y",
+        "louvain+phyllotaxis",
+    )]);
     info
 }
 
