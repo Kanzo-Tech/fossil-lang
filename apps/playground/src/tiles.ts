@@ -313,33 +313,36 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
       const pixels = { w: side, h: side };
 
       /**
-       * **This asked for points where the pyramid is, and the picture said no.**
+       * **The pyramid answers this, and the condition that used to stop it has been met.**
        *
-       * The library will read a written `l{k}/` only for a view that asked for no links, and the
-       * bytes are real: at a million vertices the whole extent is 4 tiles and 335 kB against 245
-       * tiles and 20,901 kB — 62.4×, measured by `scripts/measure-pyramid.mjs`.
-       *
-       * It was taken here, on the argument that the edge layer at that zoom is a layer this
-       * renderer already calls illegible — `BOUNDED_DEFAULTS` sets 20,000 marks because «above
-       * about 50,000 points a live layout stops being comfortable and the edge layer is already fog
-       * well before that». **That argument was wrong about what is on screen, and the screen is
-       * what settles it.** The same rectangle:
+       * What stood here was an argument that it could not. The library would read a written
+       * `l{k}/` only for a view that asked for no links, so a frame that wanted lines opened the
+       * payload and `cost.matchedAt` stayed at `0`. Dropping the links to get the cheap read was
+       * tried and rejected on the screen rather than on the ledger, and that half still holds — the
+       * same rectangle, the two ways:
        *
        * | | marks | anchors | links | points drawn |
        * | --- | --- | --- | --- | --- |
-       * | strided | 15,625 | 60,136 | 62,024 | **75,761** |
-       * | level | 15,625 | 0 | 0 | **15,625** |
+       * | vertex level alone | 15,625 | 0 | 0 | **15,625** |
+       * | the picture | 15,625 | 60,136 | 62,024 | **75,761** |
        *
-       * The anchors are not fog. They are 4× the marks, they are real vertices at real
-       * coordinates, and they are what fills the frame — so dropping them turns a zoomed-out view
-       * into a sparse cloud with holes in it rather than into a cheaper version of the same
-       * picture. `cost.matchedAt` staying at 0 here is the honest outcome: this app draws the
-       * picture and pays the bytes.
+       * The anchors are not fog. They are 4× the marks, real vertices at real coordinates, and
+       * they are what fills the frame; a view without them is a sparse cloud with holes rather
+       * than a cheaper version of the same picture.
        *
-       * **What would change it** is a way to keep the far ends without opening the payload for
-       * them — an edge representation a level can carry that is not a synthetic edge, which the
-       * design refuses for a measured reason of its own. Until then the pyramid is read by a
-       * caller that wants a point cloud, and this is not one.
+       * **That paragraph named its own reversal condition and the condition arrived.** It said:
+       * *what would change it is a way to keep the far ends without opening the payload for them —
+       * an edge representation a level can carry that is not a synthetic edge.* A level row of a
+       * RELATION carries both endpoints' coordinates
+       * (`crates/fossil-sinks/src/manifest.rs, Projection`), which is exactly that and is not
+       * synthetic: the far end is the vertex, at the position the payload gives it. `Corpus.frame`
+       * reads it, and `matchedAt` reports the level.
+       *
+       * Measured over the bench corpus by `scripts/measure-frame.mjs`, ten camera rectangles:
+       * **every frame came back at level 1, 2 or 3, and every one of them asked for links** — 322
+       * to 62,024 of them. Not one at level 0. The claim that used to be here was two commits
+       * stale, and nothing in this file would have shown it: `matchedAt` is reported onto a ledger
+       * and never read back.
        */
       const answer = await frame(corpus, {
         ...box,

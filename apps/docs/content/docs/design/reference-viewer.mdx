@@ -2,7 +2,7 @@
 title: The reference viewer
 description: What a corpus is supposed to be read as at every zoom — the three parts every multiscale reader has, the five invariants one owes, what a frame costs in bytes for each of four strategies, and the list of places the tree does not yet meet the model.
 direction:
-  summary: A frame reads the coarsest artefact that can answer it and reports every byte it opened — today the reader opens the vertex pyramid only, the edge pyramid beside it has no reader, and `ViewCost.bytes` leaves the adjacency off the ledger.
+  summary: A frame reads the coarsest artefact that can answer it and reports every byte it opened — the door reads both pyramids now, and what is left is the ledger, which weighs the two halves of a frame by rules that are not the same one.
 ---
 
 Every piece of a multiscale viewer is in this tree and none of them was built from a model. The
@@ -13,8 +13,8 @@ supposed to do with a corpus at every zoom, what it may cost, and what it owes t
 the picture.
 
 This is that model, stated as the reference the implementation is held against. The last section is
-the list of places where the tree does not meet it — including a pyramid that is already on
-disk and unreachable through the door.
+the list of places where the tree does not meet it — including the ledger that tells a caller what a
+frame cost, which is the one invariant of the five that does not hold.
 
 ## What a reference multiscale viewer is
 
@@ -165,9 +165,9 @@ graph LR
   R --> V["vertex/Person/tiles.parquet<br/>245 of 245 tiles · <b>12,653 kB</b> projected"]
   R --> L["vertex/Person/l6/<br/>4 tiles · <b>201 kB</b> projected"]
   V --> A["by_source/tiles.parquet<br/>the whole relation · <b>13,706 kB</b><br/>read, and on no ledger"]
-  L -.-> E["edge/Person_knows_Person/l6/<br/><b>1,332 kB</b> · written, no reader"]
+  L --> E["edge/Person_knows_Person/l6/<br/><b>1,332 kB</b> · written, and read"]
   A --> P["15,625 marks · 60,136 anchors · 62,024 links"]
-  E -.-> P
+  E --> P
   L --> Q["15,625 marks · no anchors · no links"]
 ```
 
@@ -178,7 +178,7 @@ graph LR
 | **a · load everything**, once | 12,653 + 13,706 = **26,359 kB** | not on this ledger | 1,000,000 marks · 1,999,993 links |
 | **b · tiles + strided payload**, per frame — what the app does | 12,653 + 13,706 = **26,359 kB** | 20,901 kB | 15,625 · 60,136 anchors · 62,024 links |
 | **c · + vertex levels**, `links: false` | **201 kB** · 4 tiles | 335 kB | 15,625 · no anchors · no links |
-| **d · + edge levels** | 201 + 1,332 = **1,533 kB** | nothing reads it | 15,625 · 60,136 · 62,024 |
+| **d · + edge levels** | 201 + 1,332 = **1,533 kB** | reported, by gap 2's arithmetic | 15,625 · 60,136 · 62,024 |
 
 **Rows (a) and (b) read the identical bytes, and that is the finding.** At the whole extent every
 tile intersects the rectangle and both paths project the same columns out of the same two files, so
@@ -195,7 +195,8 @@ zoomed-out view into a sparse cloud with holes rather than a cheaper version of 
 `apps/playground/src/tiles.ts` records that correction against its own earlier decision, and it is
 why the app pays for row (b).
 
-Row (d) is the one the model wants and no reader can produce. The edge level at *k*=6 holds
+Row (d) is the one the model wants, and it is the one `Corpus.frame` produces for a caller that asks
+for links at a level both pyramids are written at. The edge level at *k*=6 holds
 **62,024 rows** — exactly the links row (b) draws — and the far ends it positions are exactly the
 **60,136** anchors row (b) returns, because a level of a relation is the edges incident to a
 level-*k* vertex and every row carries both endpoints' coordinates
@@ -227,8 +228,9 @@ vertices. **Both halves of that mismatch are gone**: the pyramid is complete fro
 coarsest, so there is no level below the coarsest that a camera can ask for and not find. What is
 left is a ceiling rather than a gap — a frame coarser than one tile is answered by that one tile.
 
-The app still reads none of the four, because it asks for links at every zoom and a level answers
-only a view that does not — which is gap 4, and is untouched by any of this.
+Whether a frame reads any of the four is a question about which levels the corpus writes and no
+longer one about links: a view that asks for links is answerable off the pyramid wherever the
+relation's own level is written beside the type's, which is the correction in gap 1 below.
 
 That is defensible and it is not free. The strided rows fall steeply — 20,901 to 1,294 kB across the
 four — so the frames the pyramid cannot answer are the cheap ones, and the frame it can answer is
@@ -258,17 +260,40 @@ per row so that a line can be drawn without opening the payload the pyramid exis
 
 ## What is missing to be that reference
 
-Five, in the order of how much a reader loses.
+Five, in the order they were written. The first is the one that closed; what is left of it is stated
+with the four that did not.
 
-**1 · The edge levels are written and nothing reads them.** `EdgeLevels` is in the manifest model,
-`crates/fossil-layout/src/layout/pass.rs, write_edge_levels` emits the files, `apps/corpus/guards/fixture.mjs`
-writes them into the fixture and declares them in the edge manifest — and
-`packages/corpus/src/address.ts` resolves a `levels:` block for a vertex type and none for an edge
-type, so `Corpus.frame` has no address to compose and no way to open one. The consequence is exact:
-the app's own note in `apps/playground/src/tiles.ts` says *what would change it is a way to keep the
-far ends without opening the payload*, and that way now exists on disk and is unreachable through the
-door. Until a reader lands, row (d) of the table above is a measurement taken with a shell rather
-than an instrument, which is the honest status of it.
+**1 · The edge levels are read, and what is left is which question the pyramid may be asked.** This
+item said nothing read them, and it named a `levels:` block and an `EdgeLevels` that the tree no
+longer spells. A relation's levels are `projections:` entries beside its adjacency, declared by
+`crates/fossil-sinks/src/manifest.rs, EdgeInfo`, emitted by
+`crates/fossil-layout/src/layout/pass.rs, write_edge_levels`, written into the fixture by
+`apps/corpus/guards/fixture.mjs`, and addressed by `crates/fossil-graph/src/plan.rs, EdgeAddress` —
+one projection per orientation at `scale: 1` and one per written level, source-aligned, each counted
+against the SOURCE type's `vertex_count` and never against `edge_count`.
+`packages/corpus/src/address.ts` is the binding over that reader rather than a second one, and
+`Corpus.frame` in `packages/corpus/src/corpus.ts` composes the read: where every relation a frame
+draws has its level *k* written, the lines and the far ends they need come out of the relation's own
+level file — which carries both endpoints' coordinates, so no vertex tile is opened to place
+them — and `Frame.matchedAt` reports *k* rather than `0`. Where any of them is missing it, the read
+is the payload's, all or none, because a frame drawing one relation off level *k* and another off
+the payload would be two reads reported as one number.
+`packages/corpus/tests/frame-levels.test.ts` holds it against a fixture corpus with a pyramid and
+the identical corpus without one.
+
+What is left of this item is not a byte the writer owes; it is what a caller may ask for.
+
+- **A frame draws the relations its type is the source of**, at every scale. A level of a relation is
+  source-aligned, so the in-edges of a coarse view are no more answerable off the pyramid than they
+  are off the one adjacency a window opens — the same incidence gap the addressing layer already
+  reports as `AddressedTiles.complete`, inherited rather than introduced. What would close it is a
+  destination-aligned level set, which is a second artefact and which nothing has asked for.
+- **Nothing says in advance whether a frame that asks for links will be answered off the pyramid.**
+  `Corpus.levels` reports `written` for `vertex/<Type>/l{k}/` and says nothing about the relations,
+  so a caller budgeting a read learns which artefact answered from `Frame.matchedAt` after it has
+  paid. What would close it is one more field; what argues against it is that every level is
+  answerable either way, so the number that matters is the one the read reports rather than the one
+  a caller predicted.
 
 **2 · `ViewCost.bytes` is wrong in both directions, and the two errors nearly cancel.** At the whole
 extent it reports **20,901 kB** for a frame that reads **26,359 kB**. It counts 8,248 kB of columns
@@ -295,21 +320,23 @@ nothing about how it degrades under a budget. That is a design question and not 
 what would settle it is one measurement of a prefix query over the index at three corpus sizes.
 
 **4 · The rule that decides when the pyramid may answer is stated too narrowly.**
-[One door](/docs/design/one-door) says *the pyramid answers when the answer is points*, and that is
-true of the reader today for the reason gap 1 names rather than for a reason about levels. The rule
-that survives a reader is the general one: **the pyramid answers when the level set carries what the
-answer needs** — for points that is the vertex level, for lines it is the pair. It stays as written
-until the reader exists, because a rule stated in the future tense on this site is a rule nothing
-holds. [The corpus](/docs/design/corpus) carried the same claim as a statement of fact — a callout
+[One door](/docs/design/one-door) says *the pyramid answers when the answer is points*, and the
+reader stopped obeying that rule the day it learned to draw lines off a relation's level set:
+`Corpus.frame` reads the pair where the pair is written, and opens the payload only where it is not.
+The rule that survives a reader is the general one: **the pyramid answers when the level set carries
+what the answer needs** — for points that is the vertex level, for lines it is the pair. That
+sentence is in `packages/corpus/src/corpus.ts` beside the decision it governs and not yet on the page
+that states the rule, which is the whole of this item. [The corpus](/docs/design/corpus) carried the
+same claim as a statement of fact — a callout
 titled *the edges get no pyramid* — and that one was corrected rather than left, because it was
 measuring the induced set to answer a question about the incident one.
 
 **5 · The instrument measures half of it.** `apps/playground/scripts/measure-pyramid.mjs` asks one
 rectangle twice, with links and without, and reports the byte ratio between them — which is the
-whole of row (c) and none of row (d). It cannot be extended before gap 1 is closed, because it
-measures through the door on purpose: an instrument that read the level files directly would be a
-second reader, and the ratio it printed would be a property of the instrument rather than of the
-corpus.
+whole of row (c) and none of row (d). The door it measures through now answers row (d) as well, so
+what stopped it is gone — and it must keep measuring through the door, because an instrument that
+read the level files directly would be a second reader, and the ratio it printed would be a property
+of the instrument rather than of the corpus.
 
 ## What would reverse the model
 

@@ -1639,32 +1639,41 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
        * the 300,000-vertex bench corpus with the app's own three-pixel floor
        * (`crates/fossil-layout/tests/levels.rs`, `what_the_pixel_floor_leaves_of_a_coarse_view`):
        * a coarse view draws 51,254 edges and 46,571 far ends, of which a VERTEX level can position
-       * **405 — 0.79%**. So reading `l{k}/` for a view that asked for links would not be
-       * the same answer more cheaply; it would be a different picture, and `/docs/design/one-door`
-       * said the day a level exists nothing else changes. It was written before that was measured.
+       * **405 — 0.79%**. So reading the VERTEX level alone for a view that asked for links would
+       * not be the same answer more cheaply; it would be a different picture.
        *
-       * The rule that keeps one contract is therefore: **the pyramid answers when the answer is
-       * points.** A caller that asks for links opens the payload, and `matchedAt` says `0`.
+       * The rule that keeps one contract is therefore: **the pyramid answers when the level set
+       * carries what the answer needs** — for points that is the vertex level, for lines it is the
+       * pair, because a level row of a RELATION carries both endpoints' coordinates and places the
+       * far end without a vertex tile. A caller that asks for links against a relation whose level
+       * nobody wrote opens the payload, and `matchedAt` says `0`.
        */
       // The projection this level reads out of, and `null` at level 0 — whose projection IS the
       // payload, which is the claim the vocabulary rests on and still not a coarser read.
       const levelSet = level === 0 ? null : address.projection(stride);
       /**
-       * The relations whose own level `k` is written, when every incident one is.
+       * The relations whose own level `k` is written, when every relation this frame draws is.
        *
        * **All or none, deliberately.** A frame drawing the edges of two relations out of one and
        * the payload out of the other would be reading level `k` and level 0 in the same answer and
-       * reporting one number for it. Where any incident relation is missing its level set, the
+       * reporting one number for it. Where any relation it draws is missing its level set, the
        * read is the payload's and `matchedAt` says `0`.
+       *
+       * **The relations a frame draws are the ones its type is the SOURCE of**, and that is the
+       * payload path's own rule rather than a second one: it asks `tilesFor` for `['src']`, and
+       * `crates/fossil-graph/src/plan.rs, ReadPlan::window` drops an orientation whose `dense_id`
+       * space is not the window's. A level of a relation is source-aligned, so a relation this
+       * type is only the DESTINATION of is tiled by ranges of ANOTHER type's `dense_id`: the tile
+       * numbers this frame holds name different vertices there, and two `dense_id` spaces compare
+       * without complaint, so reading it would draw lines between vertices that are not related
+       * rather than fail. A type that is the source of nothing draws no lines on either path, so
+       * an empty set is a level read and not a fallback.
        */
       const edgeLevels = (() => {
-        const incident = addressing.edges.filter(
-          (e) => e.srcType === address.type || e.dstType === address.type,
-        );
-        if (incident.length === 0) return null;
+        const drawn = addressing.edges.filter((e) => e.srcType === address.type);
         // Source-aligned, always: a level of a relation is *which vertices are in it*, and the
         // source type's own pyramid is what says which.
-        const sets = incident.map((e) => e.projection(stride, 'src'));
+        const sets = drawn.map((e) => e.projection(stride, 'src'));
         return sets.every((s) => s !== null)
           ? (sets as NonNullable<(typeof sets)[number]>[])
           : null;
