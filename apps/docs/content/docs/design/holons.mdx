@@ -1,0 +1,172 @@
+---
+title: Holons
+description: The second reader — a tree of aggregates for the corpus that does not fit on the GPU; why a holon is a summary row rather than an entity, why it is a third artefact rather than a level, and the three properties that separate a holarchy from a dump of whatever Louvain emitted.
+direction:
+  summary: A corpus too large to draw carries a tree of summary rows whose branching factor is declared rather than inherited, every aggregate verifiable against the level below by symmetric difference, and only the position declared rather than derived.
+---
+
+There are two ways to read a graph you cannot see all of, and the decision here is to build both and
+**never cross them**.
+
+| | what it is | when |
+| --- | --- | --- |
+| **cosmos.gl** | the whole graph on the GPU, pan and zoom freely | it fits |
+| **holons** | a tree of aggregates, you descend and ascend | it does not |
+
+A mode that switches between the two as the camera zooms was built far enough to be rejected, and
+[what was discarded](/docs/design/discarded) carries why. The short form: the zoom level at which
+the reader is most lost is the one where the interaction changes under them.
+
+The corpus serves both without knowing about either — cosmos.gl reads the payload,
+a holon reader reads the tree. This page is the second one.
+
+## A holon is a summary row, not an entity
+
+The attractive version of this gives each community a type and an IRI — `Person@l1`, addressable,
+shaped, a first-class subject. It is rejected, and the reason is identity rather than cost.
+
+**A community does not exist in the source.** It is what a partitioning algorithm returned on one
+run over one graph. Minting an IRI for it fabricates identity for something derived: the obvious
+scheme — hash the member set — changes the moment one author joins, so the "same" community is a
+different subject after an incremental write, and every reference to it dangles. The alternative
+schemes are worse in the ordinary way (a counter is not stable across reorderings) rather than in
+an interesting one.
+
+What survives is the small version, and it is enough: **a row** carrying a group, its position, how
+many members it has, and its parent. No IRI, no shape, no new vertex type, nothing that pretends to
+be a thing in the world. [Identity](/docs/design/identity) is the page that says what a subject is
+here, and a holon is deliberately not one.
+
+## It is a third artefact, and the tree already ruled on that
+
+The obvious home for a holon tree is `levels:` — the pyramid is already a hierarchy, the addressing
+is already arithmetic, and a holon level looks like a coarse level. It cannot go there, and the
+ruling is not made on this page. [The reference viewer](/docs/design/reference-viewer) states the
+model's one load-bearing decision and what contradicts it:
+
+> The model is one decision deep, and it is the decision to make a level a **subset of real rows**
+> rather than a summary. […] That would be a **third** artefact and not a replacement — a level that
+> answers a different question under a different name, which is the one thing the one-contract
+> invariant forbids doing under the same one.
+
+A level in `crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex whose `dense_id` is a
+multiple of `4^k`. Every row is a real vertex at the position the payload gives it; nothing is
+synthesised. A holon is a synthetic row by construction. Putting one in a `Projection` would make
+`scale:` mean two different things in the same document, which is exactly the failure the
+one-contract rule exists to prevent.
+
+So: its own block, its own prefix, its own name.
+
+## What Louvain actually emits is not a holarchy
+
+The tempting shortcut is to publish the levels the community detection already found. Measured over
+com-DBLP — 317,080 authors, 1,049,866 undirected co-authorship edges — those levels are:
+
+| level | communities | contraction vs. below | p50 | p90 | max | modularity | quotient mean degree |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 55,712 | 5.7× | 3 | 8 | 20,459 | 0.6356 | 5.7 |
+| 2 | 9,248 | 6.0× | 13 | 45 | 29,720 | 0.7782 | 11.6 |
+| 3 | 1,696 | 5.5× | 36 | 231 | 30,700 | 0.8057 | 23.5 |
+| 4 | 690 | 2.5× | 12 | 910 | 30,722 | 0.8091 | 26.0 |
+| 5 | 595 | **1.2×** | 10 | 1,355 | 30,722 | 0.8092 | 23.2 |
+
+Three things in that table disqualify it as a navigable tree, and none of them is a flaw in Louvain
+— it was not solving this problem.
+
+**The contraction collapses.** 5.7×, 6.0×, 5.5×, then 2.5×, then 1.2×. The last level buys almost
+nothing: 690 groups become 595, and modularity moves by 0.0001. A reader ascending that tree takes a
+step that changes nothing on screen.
+
+**The levels are wildly unbalanced within themselves.** At level 5, the median group has 10 members
+and the largest has **30,722** — 9.7% of the entire graph in one node, beside groups of ten. That
+is not a level of detail; it is a level of detail for some of the graph and the raw graph for the
+rest.
+
+**The finest level is very nearly the graph itself.** 55,712 groups over 317,080 vertices, median
+size 3, and **53.5% of them have three members or fewer**. Nothing is summarised.
+
+Where the structure genuinely is: modularity climbs from 0.6356 to 0.8092 and the levels whose
+quotient is still sparse enough to lay out are **2 and 3** — 9,248 and 1,696 groups at mean quotient
+degree 11.6 and 23.5. That is the measurement `crates/fossil-layout/examples/hierarchy_stats.rs, read_edges`
+exists to produce, and it says the hierarchy is real and its published levels are an accident of
+where the algorithm's sweeps happened to stop.
+
+## Three properties, in this order
+
+### 1 · Deterministic — and this one is measured
+
+Same corpus, same holons, bit for bit. A holon whose referent moves between writes is not
+navigable: a reader who descends, pans and ascends must arrive back where they were, and a bookmark
+must still resolve tomorrow.
+
+It is the standard the tree already holds itself to elsewhere —
+`crates/fossil-layout/tests/levels.rs, a_level_file_holds_exactly_what_the_level_predicate_selects`
+compares written artefacts against a predicate rather than trusting the writer — and the code
+already claimed it in comments: `local_moving` walks `0..n` and breaks ties strictly so the lower
+community id survives, and `Weighted::contract` carries a section arguing its counting sort makes
+the output bit-identical.
+
+Claimed in comments, never run. Measured 2026-09-11, two processes per row:
+
+| what | over | result |
+| --- | --- | --- |
+| `crates/fossil-layout/src/layout.rs, community_hierarchy` | com-DBLP, 5 levels | every level's membership **and** quotient byte-identical |
+| `crates/fossil-layout/src/layout.rs, enrich_layout`, the whole pass | 200,000 vertices, 999,079 edges, via `crates/fossil-layout/examples/enrich_memory.rs, planted` | the entire written tree byte-identical — Morton-permuted payload, both adjacency orientations, identity index, tiles and level directories |
+
+**The property holds.** What it does not have is a test that keeps it holding, and that is this
+direction's first debt. Had it come out red, the two properties below would not be worth stating.
+
+### 2 · The branching factor is declared, not inherited
+
+Rather than publishing the levels Louvain emitted, cut the dendrogram at **chosen** sizes — roughly
+4× per level, which is the same octave the tile pyramid already uses. `VertexLevels` fixes that
+exponent in one place and says why a second spelling of it is the bug the constant exists to
+prevent; a holon tree on the same octave inherits that arithmetic instead of inventing one.
+
+Then the number of levels is `log₄(V/chunk)`, every level is addressed with the same shift, and the
+branching factor is about four everywhere — against the 1.2× to 6.0× of the measured table, with
+group sizes inside a level running from one to thirty thousand.
+
+`crates/fossil-layout/src/layout.rs, flatten_to_budget` is the existing half of this: it walks the
+hierarchy and picks **one** level that fits a budget. This is the same walk choosing a **sequence**.
+
+### 3 · A holon is defined against the level below, so it is checkable
+
+The bar is the one `levels.rs` already clears — evaluate the definition against the data and diff,
+rather than trusting the writer. For a holon there are three obligations and all three are
+falsifiable by symmetric difference:
+
+<div className="fd-steps">
+
+**Membership.** The members of a holon are *exactly* the children that name it as parent. Not a
+superset, not what the writer recorded separately.
+
+**Count.** Its member count is the sum of its children's counts.
+
+**Edges.** Its edges are the aggregation of its children's edges.
+
+</div>
+
+## And the one thing that is not an exact aggregate
+
+Counts sum. Edges sum. **Where a holon goes on the plane is a choice** — a centroid weighted
+somehow, or something else — and no amount of checking makes a choice correct.
+
+So it is declared rather than derived in silence, exactly as a vertex's position is:
+[where x and y come from](/docs/design/position) is the field, and a holon's position carries a
+provenance in it like any other. Everything else here is verified; this one is declared.
+
+## What this does not settle
+
+**Which level a reader opens on.** The tree makes every level addressable and says nothing about
+where a reader starts.
+
+**Whether the aggregated edge set is worth writing at every level.** A quotient at level 1 over
+com-DBLP has 159,413 edges against the graph's 1,049,866 — a real saving — but by level 5 it is
+6,905 edges between 595 nodes at mean degree 23.2, which is dense enough that drawing it is a
+hairball rather than a picture. A force layout over that quotient was tried and is in
+[what was discarded](/docs/design/discarded). What would settle it is a reader that renders a level
+and is looked at.
+
+**How a holon tree is written incrementally.** Everything above assumes one pass over a finished
+corpus.

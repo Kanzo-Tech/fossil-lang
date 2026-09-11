@@ -1,0 +1,147 @@
+---
+title: Where x and y come from
+description: A far view of a graph is worth looking at or worth nothing depending on one fact — whether the positions are data or were invented by an algorithm — and the corpus does not currently record which.
+direction:
+  summary: A vertex type declares every coordinate system it carries and where each one came from, and the layout pass never overwrites a system it did not derive; today `enrich_layout` computes `x`/`y` unconditionally and the manifest has no field that could say so.
+---
+
+Zoom far enough out of a million-vertex graph and the individual vertices stop being visible. What
+is left is a distribution — dense here, empty there — and the question this page exists to answer is
+whether that distribution is **about the graph** or about the program that drew it.
+
+It is the second one more often than anybody admits, and nothing on the screen says which.
+
+## The question, and the one fact it turns on
+
+**Does a far view of a graph mean anything?** It depends on one thing and only one: where `x` and
+`y` came from.
+
+<div className="fd-steps">
+
+**If the position is data** — a latitude and a longitude, a coordinate a model learned, anything
+measured or fitted outside the renderer — then the plane is the world. Density is information.
+Two vertices near each other are near each other in whatever space the data is about, a heat map of
+where the vertices are is a statement about the domain, and a reader who zooms out learns something
+true.
+
+**If the position was invented by the layout** — phyllotaxis inside a grid cell, a force
+simulation, anything a drawing algorithm chose because a picture needed coordinates — then the
+density is about the algorithm. The plane is not a space; it is an arrangement. Zooming out
+produces a picture of the arrangement's own regularities, and reading structure into it is reading
+the output of the thing you were trying to see through.
+
+</div>
+
+The distinction is not subtle in its consequences and it is invisible in the artefact. Both cases
+are two `float32` columns called `x` and `y`.
+
+## What it was worth measuring
+
+The far view is not hypothetical, and the case where it works was built and measured rather than
+argued. Over com-DBLP — 317,080 authors, 1,049,866 undirected co-authorship edges — a complete
+pyramid of density rasters is **183 kB across eleven levels**, exact at every level, and opens in
+napari without a line of napari being written.
+
+That is a real answer to a real question, and it is a correct one **only under the first case
+above**. The same 183 kB over derived positions is a beautifully compressed picture of
+`cluster_layout`'s grid.
+
+## The defect, stated plainly
+
+`crates/fossil-layout/src/layout.rs, enrich_layout` computes positions **unconditionally**. It runs
+`crates/fossil-layout/src/layout.rs, community_hierarchy` over the adjacency, partitions by the
+finest level, places each community with
+`crates/fossil-layout/src/layout.rs, cluster_layout`, and writes `x` and `y`.
+
+A corpus that arrived carrying coordinates gets them overwritten, and no reader is told. The
+manifest has no field in which the difference could be recorded even if the pass were willing to
+record it: `crates/fossil-sinks/src/manifest.rs, VertexInfo` declares a list of properties, and a
+property is a name and a type.
+
+So the corpus cannot answer the only question that decides whether its own geometry is worth
+drawing far away. That is the whole of the finding.
+
+## This is a defect with a precedent, and the precedent is the design
+
+The repair is not novel here, because the identical defect was found and fixed one field over.
+
+`crates/fossil-sinks/src/manifest.rs, Property` used to carry `is_nullable` and nothing about how
+*many* values a predicate admits. A reader needing that answer invented one — *single*, because
+single is the common case — and a corpus written from a shape declaring `+` read back as a
+corpus declaring nothing, which read as a corpus declaring `1..1`. The fix was a declarative
+field whose absence is honest:
+
+> **`None` is a statement about the writer, not about the data.** A corpus whose types were
+> inferred rather than declared has no cardinality to record, and so does one written before this
+> field existed; both read back as "not declared" rather than as "single", which is the answer a
+> default would have invented.
+>
+> — `crates/fossil-sinks/src/manifest.rs, Property`
+
+Position has the same shape of defect and takes the same shape of repair. A reader today invents
+*derived*, because derived is the common case. A corpus that arrived with latitudes reads back
+identically to one the layout pass invented. And the honest third state — **not declared** — has
+nowhere to live.
+
+## The direction: `coordinates:` as a list of systems with provenance
+
+A vertex type declares the coordinate systems it carries. Each names its two columns, and each
+names **where it came from**:
+
+| provenance | what it means | is the density information? |
+| --- | --- | --- |
+| `geographic` | A coordinate reference system outside the corpus — latitude/longitude, a projected CRS | yes |
+| `embedded` | A learned or fitted space — an embedding, an MDS solution, a UMAP | yes, about the embedding |
+| `derived` | A drawing algorithm chose it because a picture needed coordinates | **no** |
+
+**A list rather than a field**, and the reason is not symmetry. A corpus can legitimately carry
+both: authors have affiliations with real locations *and* a community layout, and which one a
+reader draws is the reader's business rather than the writer's. OME-NGFF reached the same shape for
+the same reason — its `multiscales` entry carries `coordinateTransformations` as a list because one
+array can sit in more than one space — and [prior art](/docs/design/prior-art) names it.
+
+The cost is a permutation of **4 bytes per row per extra system**, which is a column and not a
+corpus. Against it: the alternative is a corpus that silently answers a question it does not know
+the answer to.
+
+## What `derived` obliges, and the measurement that discharges it
+
+A provenance of `derived` names an algorithm, and naming an algorithm is only worth anything if the
+algorithm can be re-run. A position labelled *derived by X* that X does not reproduce is a label
+with nothing behind it — and downstream, a holon whose referent moves between writes is not
+navigable, which is why [holons](/docs/design/holons) treats this as its first property rather than
+its last.
+
+The reasoning was already in the code and had never been run as an experiment. `local_moving`
+walks `0..n` in order and breaks ties with a strict `>` so the lower community id survives;
+`Weighted::contract` carries a section titled *Why the output is bit-identical* explaining that its
+counting sort is stable by construction; `densify` numbers communities by order of first
+appearance. Every one of those is a comment asserting reproducibility, and none of them is a test.
+
+Measured, 2026-09-11, two processes each, same binary:
+
+| what was run | over | result |
+| --- | --- | --- |
+| `community_hierarchy`, via `crates/fossil-layout/examples/hierarchy_stats.rs, read_edges` | com-DBLP, 317,080 vertices / 1,049,866 edges, 5 levels | all five levels' membership **and** quotient outputs byte-identical |
+| the whole pass — `enrich_layout` — via `crates/fossil-layout/examples/enrich_memory.rs, planted` | 200,000 vertices at mean degree 10, 999,079 edges | the entire written tree byte-identical: the Morton-permuted payload, both adjacency orientations, the identity index, all five tiles and all three level directories |
+
+Two graph shapes — a real co-authorship network and a planted partition — and both halves of the
+pass. **The property holds.** What it does not yet have is a test that keeps it holding, and that is
+the first thing this direction owes.
+
+## What this does not settle
+
+**Which system a reader draws when a type declares two.** The list makes the choice expressible and
+does not make it. A default ("the first") is a writer deciding a reader's question, which is the
+mistake this page is about; naming one in the manifest is a third thing again.
+
+**Whether `derived` should name a version.** *Derived by Louvain and phyllotaxis* is not
+reproducible across a change to either. A version string is the obvious answer and it is not
+obviously the right one: it goes stale in the opposite direction, marking a corpus as
+irreproducible when nothing that mattered changed. What would settle it is one instance of a
+layout change that moved positions, with somebody needing to know.
+
+**Whether the far view gets a third artefact.** A density raster is not a subset of rows, so it is
+not a level — [the reference viewer](/docs/design/reference-viewer) sets out why a level is a
+decimation and what a summary would have to be instead. The 183 kB above was measured outside the
+corpus, and bringing it inside is a separate decision from this one.
