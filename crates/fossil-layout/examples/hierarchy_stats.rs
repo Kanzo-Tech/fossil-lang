@@ -6,11 +6,19 @@
 //! and the quotient graph each was found on, is freed.
 //!
 //! That is what makes the question unanswerable from outside: on com-DBLP the
-//! finest level is 98,505 communities of mean size 3.2 -- not a structure, very
-//! nearly the graph itself -- and the coarsest is 1,229 whose quotient has a
-//! mean degree of 80, which is dense enough that a force layout over it is a
+//! finest level is 55,712 communities of median size 3, 53.5% of them holding
+//! three members or fewer -- not a structure, very nearly the graph itself --
+//! and the coarsest is 595 whose quotient has a mean degree of 23.2, which over
+//! 595 nodes is 3.9% density and dense enough that a force layout over it is a
 //! hairball. Neither is a level a picture can be built on, and whether a middle
 //! one exists is a property of the DATA that no amount of reasoning settles.
+//!
+//! (Those four numbers are what THIS program prints, re-measured 2026-09-11.
+//! They read 98,505 / mean 3.2 / 1,229 / 80 until then, which is a partition
+//! this example cannot produce from this input -- it reports 317,080 vertices
+//! and 1,049,866 edges, which are com-DBLP's own figures. The most likely
+//! reading is that they predate `read_edges` densifying, and they are replaced
+//! rather than annotated because the program is the reference.)
 //!
 //! So this measures it, per level:
 //!
@@ -59,9 +67,12 @@ struct Community {
 /// com-DBLP the SNAP ids run to 425,957 for 317,080 real authors, so taking the
 /// maximum conjures 108,877 vertices with no edges, each of which is its own
 /// community at every level and can never merge. Measured both ways: it moved
-/// "communities of size <= 3" from 83.1% to 99.7% and stalled the coarsening
+/// "communities of size <= 3" from 53.5% to 99.7% and stalled the coarsening
 /// dead, which would have read as "this graph has no hierarchy" when what it
 /// had was a counting error.
+///
+/// The 53.5% is what this program prints (re-measured 2026-09-11); it read
+/// 83.1% and that figure is reproducible from no run of this file.
 ///
 /// The corpus does not have this problem -- `dense_id` is gapless by
 /// construction -- so this is a property of reading the raw file.
