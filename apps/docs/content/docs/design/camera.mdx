@@ -45,11 +45,35 @@ bug in the addressing: at the whole extent every tile *does* intersect the recta
 predicate `dense_id % 64 = 0` is spread across all of them. It is the absence of a level artefact
 crossed with the absence of a residency notion, and the two fixes are independent.
 
-The second row is the argument for the separation, in one number: **every one of the 145 tiles the
-50% view opens was already among the 245 the whole-extent view opened.** A reader with residency
-draws that frame from bytes it holds, and the network cost of that zoom step is zero. A reader
-without it re-issues the read, and the interval between the camera moving and the answer arriving is
-an interval with nothing on screen.
+The second row looks like the argument for the separation, in one number: **every one of the 145
+tiles the 50% view opens was already among the 245 the whole-extent view opened.** A reader with
+residency draws that frame from what it holds, and re-reads nothing.
+
+<Callout type="warn">
+**That is a claim about bytes and the bytes here are not weighed.** Every figure in the `bytes`
+column is footer arithmetic — the size of the tiles the rectangle selected — and
+`apps/playground/src/tiles.ts` says why it can be nothing else: DuckDB issues the real requests from
+inside its Worker, where the calling thread cannot see them. So the column says what those tiles
+*weigh*, never what crossed the wire.
+
+And the engine already caches. `apps/playground/src/duckdb.ts, registerUrl` passes `directIO =
+false` with the reason written beside it — *DuckDB caches what it has already read, which is what
+makes the footer bought-once rather than bought-per-query*. If that cache also spans the payload
+reads the canvas issues, the 12,805,975 of row two was **banked before residency existed**, and
+building a cache in front of it buys nothing it does not already have.
+
+Nothing in this tree settles that, because no instrument here weighs a request. What would settle
+it is one measurement of the same rectangle asked twice with the network observed — which is the
+only reading that can tell a cache hit from a re-fetch.
+
+**The separation survives the doubt; its justification changes.** What is NOT in question is the
+paragraph below: a read that is answered from cache still costs a round trip through the Worker
+before anything reaches the screen, and that interval is blank today whatever the bytes did. The
+case for residency is *latency*, and it stands on its own.
+</Callout>
+
+A reader without the separation re-issues the read, and the interval between the camera moving and
+the answer arriving is an interval with nothing on screen.
 
 That interval is what the separation buys, and it is the same trick as not clearing the previous
 frame until the next one is ready: **the coarse level stays on screen while the fine one arrives.**
@@ -57,6 +81,19 @@ Zarr's readers call it progressive refinement and it is only expressible if "wha
 "what is loaded" are two sets. [Monotone refinement](#2-monotone-refinement) is what makes the old
 frame *correct* to leave up rather than merely better than blank: every vertex it drew is still
 drawn, in the same place, at the finer level.
+
+**And the seam already carries it, which was not obvious.** `BoundedSource` looks one-shot —
+`slice(request)` returns one `Slice` and a caller awaits it — so a source has no way to say *here is
+something now, and something better shortly*. It has one: `watch`, whose own contract is **a whole
+slice rather than a nudge to ask again**. It was added so a source inside a crossfilter could be
+told by the coordinator instead of re-asked, and the shape it needed for that is exactly the shape
+progressive refinement needs. So the coarse frame can be the return and the refined one can arrive
+through `watch`, with no change to the renderer and no second method.
+
+What that arrangement must not do is change what a rectangle *finally* answers. `slice` is a pure
+function of `(rect, level)` and [path independence](#3-path-independence) is measured; an interim
+frame is a different set by construction, so it has to be superseded rather than merged, and the
+measurement has to keep being taken against the settled answer.
 
 ## The three properties
 
