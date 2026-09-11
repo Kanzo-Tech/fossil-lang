@@ -38,14 +38,14 @@
  * coordinate system of the positions the renderer is holding, and that system is rebuilt from
  * whichever answer arrived last. `frame.mjs` is that map, transcribed from cosmos.gl and checked
  * against it in a browser; `--frame rescaled` is the app before the fix and `--frame pinned` is the
- * app after it. The default is neither: it is read out of `src/Canvas.tsx`, so this reports what
- * the app IS rather than what a flag says.
+ * app after it. The default is neither: it is read out of the app's own sources, so this reports
+ * what the app IS rather than what a flag says.
  *
  * Run: `node --experimental-strip-types scripts/verify-properties.mjs [--frame rescaled|pinned]`
  * Requires `scripts/bench-corpus.mjs` to have run, and the `duckdb` binary on PATH.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -74,12 +74,23 @@ const root = resolve(app, 'public/bench', String(count));
 /**
  * Which frame the app is wired for, read out of the app rather than declared here.
  *
- * A flag that says what the code does is a second copy of the fact. `Canvas.tsx` either pins the
+ * A flag that says what the code does is a second copy of the fact. The app either pins the
  * renderer's rescale or it does not, and the string it pins it with is the derivation.
+ *
+ * **Every source file, not one named file.** This read `src/Canvas.tsx` alone, and the day the
+ * pin moved into a component of its own the grep found nothing, this reported `rescaled`, and the
+ * suite measured an app that does not exist: two of its three properties failed, with route B
+ * asking about `x[-3333, -944]` and drawing zero — which is the unpinned failure the pin was
+ * added to remove, reproduced faithfully against an app that had already removed it. The file
+ * name was the second copy of the fact this function exists to avoid, one level up. A directory
+ * cannot be moved out from under it the way a file can.
  */
 function wiredFrame() {
-  const source = readFileSync(resolve(app, 'src/Canvas.tsx'), 'utf8');
-  return /rescalePositions:\s*false/.test(source) ? 'pinned' : 'rescaled';
+  const dir = resolve(app, 'src');
+  const pinned = readdirSync(dir)
+    .filter((name) => name.endsWith('.ts') || name.endsWith('.tsx'))
+    .some((name) => /rescalePositions:\s*false/.test(readFileSync(resolve(dir, name), 'utf8')));
+  return pinned ? 'pinned' : 'rescaled';
 }
 
 const mode = flag('frame', wiredFrame());

@@ -22,15 +22,19 @@
  * geometry: if a placement is wrong it is wrong upstream, and it is fixed by recompiling.
  */
 import { openCorpus } from '@fossil-lang/corpus';
-import { GraphCanvas, useGraphContext, type BoundedSource } from '@kanzo-tech/graph';
+import { GraphCanvas, type BoundedSource } from '@kanzo-tech/graph';
 import { categoricalCapacity } from '@kanzo-tech/ui';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Bench } from './bench.js';
-import { openCrossfilter, paintMask, type Crossfilter, type CrossfilterCost } from './crossfilter.js';
+import { openCrossfilter, type Crossfilter, type CrossfilterCost } from './crossfilter.js';
 import * as duck from './duckdb.js';
+import { n } from './format.js';
 import Histogram from './Histogram.js';
+import { ModeComparison, START, StreamingDetail, WholeDetail, type Mode, type ModeLedger } from './Ledger.js';
+import Mask from './Mask.js';
 import { coordinatorFor } from './mosaic.js';
+import PinFrame from './PinFrame.js';
 import { CORPUS_WASM_URL } from './corpus.js';
 import type { TileBox } from './stream.js';
 import { corpusSource, type SliceCost } from './tiles.js';
@@ -38,174 +42,11 @@ import { wholeSource, type WholeCost } from './whole.js';
 
 import './canvas.css';
 
-const KB = (bytes: number) => `${(bytes / 1024).toFixed(0)} kB`;
-const MB = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-const n = (value: number) => value.toLocaleString();
 
 export interface CanvasProps {
   bench: Bench;
   /** The footer, already bought. The source answers `extent` and picks tiles out of these. */
   boxes: readonly TileBox[];
-}
-
-/** Which of the two paths is mounted. */
-type Mode = 'streaming' | 'whole';
-
-/**
- * The four numbers the two modes are compared on, and nothing that only one of them has.
- *
- * A tiled viewer is judged against *just load the array*, and it is judged on these: what it read,
- * what it is holding, how long until there was a picture, and what a camera move costs. Both
- * ledgers below fold into this so the comparison is one table rather than two panels a reader has
- * to hold in their head — and both keep their own detail underneath, because the interesting
- * numbers are not the same on the two sides.
- *
- * **`bytes` is cumulative and `rows` is not**, which is the asymmetry the whole comparison turns
- * on. The windowed path reads again on every move, so its byte figure only means anything summed;
- * it holds one window, so its row figure only means anything per frame. The baseline reads once
- * and holds everything, so both of its numbers are the same number for the rest of the session.
- */
-interface ModeLedger {
-  bytes: number;
-  rows: number;
-  links: number;
-  firstMs: number;
-  lastMs: number;
-  moves: number;
-  /**
-   * Answers that reached DuckDB at all.
-   *
-   * Not a count of SQL statements — the two modes issue different numbers of those for one answer,
-   * and adding them up would compare nothing. This is the number that separates the paths: the
-   * windowed one is every answer, the baseline is one and then never again.
-   */
-  reads: number;
-  failure: string | null;
-}
-
-/** The empty ledger, so a mode that has answered nothing yet is a shape rather than a `null`. */
-const START: ModeLedger = {
-  bytes: 0,
-  rows: 0,
-  links: 0,
-  firstMs: 0,
-  lastMs: 0,
-  moves: 0,
-  reads: 0,
-  failure: null,
-};
-
-/**
- * **Pin the frame**, which is the one line between a camera that refines and one that breaks.
- *
- * cosmos.gl rescales the positions it is handed to fill its space, deriving the map from the extent
- * of *that upload*. With the simulation off — the correct default here — `rescalePositions` resolves
- * to on, and `setPointPositions` is called with no second argument. So every answer rebuilds the map
- * from itself, and `screenToSpacePosition`, which the query loop reads the camera with, starts
- * speaking a coordinate system the corpus never wrote. The rectangle the source is asked about is
- * then a function of the PREVIOUS answer.
- *
- * Measured over the bench corpus, two routes to the same camera rectangle: straight in, the source
- * is asked about x[−981, 347] and draws 8,395; wandering in and out and back, it is asked about
- * x[−3719, −1022], which is off the corpus, and draws **nothing**. Pinned, both ask x[−253, 1355]
- * and draw the same 18,308. `scripts/verify-properties.mjs` is that measurement and
- * `/frame-probe.html` is where the arithmetic was checked against the library's own `getScaleX()`.
- *
- * A component rather than a prop because `@kanzo-tech/graph` publishes no passthrough for cosmos.gl
- * config — `useGraphContext` is the seam it does publish, and a child of `GraphCanvas` is where it
- * can be read. **The fix belongs upstream**: a renderer whose source hands back the coordinates its
- * next query is expressed in must not move them, and the day `GraphCanvas` says so this goes.
- */
-function PinFrame() {
-  const { getGraph } = useGraphContext();
-  useEffect(() => {
-    let live = true;
-    // The renderer is built in an effect of its own and there is no ready signal to await from out
-    // here, so this waits for the instance rather than assuming it. A macrotask and not a frame:
-    // `requestAnimationFrame` does not fire in a tab that is not visible, and this must not depend
-    // on being watched.
-    const pin = () => {
-      if (!live) return;
-      const graph = getGraph();
-      if (graph === null) {
-        setTimeout(pin, 16);
-        return;
-      }
-      graph.setConfigPartial({ rescalePositions: false });
-    };
-    pin();
-    return () => {
-      live = false;
-    };
-  }, [getGraph]);
-  return null;
-}
-
-/**
- * How much alpha an excluded vertex keeps. Low enough to read as context, high enough that the
- * shape of what was filtered out is still visible — a crossfilter whose excluded rows vanish is a
- * filter, and the thing worth seeing is *where in the picture* the brushed range lives.
- */
-const DIM = 0.07;
-
-/**
- * The crossfilter's other end: the mask, painted onto whatever is drawn right now.
- *
- * A child of `GraphCanvas` for the same reason `PinFrame` is one — `useGraphContext` is the seam
- * `@kanzo-tech/graph` publishes, and the graph instance is built in an effect inside that element.
- *
- * **Two things move independently and this has to survive both.** The mask changes when the reader
- * brushes; the resident set changes when the camera moves, and a camera move re-uploads colours
- * from the source, discarding the fade. So the effect depends on both, and it re-captures the
- * baseline whenever the slice identity changes: the undimmed upload is what a fade is computed
- * from, and reading back an already-faded buffer to fade it again compounds — four brush moves
- * would take a live vertex to invisible.
- *
- * The retry loop is not defensive padding. `slice` becomes the new answer before cosmos.gl has been
- * handed the buffers for it, so for a frame or two `getPointColors()` is the previous answer's
- * array while `resident` is the new one's map. Painting then would fade whichever vertices happen
- * to sit at those indices now, which is exactly the buffer-index-is-not-an-identity failure
- * `resident.ts` exists to prevent. `paintMask` reports the mismatch and this waits a macrotask —
- * not a frame: `requestAnimationFrame` does not fire in a tab that is not visible, and the panel's
- * own verifier drives it in one that is not.
- */
-function Mask({ mask }: { mask: Uint8Array | null }) {
-  const { getGraph, getResident, slice } = useGraphContext();
-  const baseline = useRef<{ for: unknown; colors: Float32Array } | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    const paint = () => {
-      if (!live) return;
-      const graph = getGraph();
-      if (graph === null) {
-        setTimeout(paint, 16);
-        return;
-      }
-      // A new answer invalidates the baseline: different vertices, different order, different
-      // length. Captured before anything here has touched the buffer, so it is kanzo's colouring.
-      if (baseline.current === null || baseline.current.for !== slice) {
-        const colors = graph.getPointColors();
-        if (colors.length === 0) {
-          setTimeout(paint, 16);
-          return;
-        }
-        baseline.current = { for: slice, colors: new Float32Array(colors) };
-      }
-      if (!paintMask(graph, getResident(), baseline.current.colors, mask, DIM)) {
-        // The renderer has not caught up with this answer yet. Drop the stale baseline so the
-        // retry captures the right one rather than fading the previous frame's colours.
-        baseline.current = null;
-        setTimeout(paint, 16);
-      }
-    };
-    paint();
-    return () => {
-      live = false;
-    };
-  }, [getGraph, getResident, mask, slice]);
-
-  return null;
 }
 
 /**
@@ -483,60 +324,7 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
         artefact of the divisor.
       </p>
 
-      <table className="can-compare">
-        <caption>
-          the same corpus, both ways — the mode in bold is the one on screen, and a column with no
-          numbers is a mode nobody has asked for yet
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col"> </th>
-            <th scope="col" className={mode === 'streaming' ? 'on' : undefined}>
-              streaming
-            </th>
-            <th scope="col" className={mode === 'whole' ? 'on' : undefined}>
-              load everything
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th scope="row">bytes read</th>
-            <td>
-              {MB(ledgers.streaming.bytes)}{' '}
-              <span className="str-dim">over {n(ledgers.streaming.reads)}</span>
-            </td>
-            <td>
-              {MB(ledgers.whole.bytes)} <span className="str-dim">once</span>
-            </td>
-          </tr>
-          <tr>
-            <th scope="row">rows held</th>
-            <td>
-              {n(ledgers.streaming.rows)} <span className="str-dim">+{n(ledgers.streaming.links)} links</span>
-            </td>
-            <td>
-              {n(ledgers.whole.rows)} <span className="str-dim">+{n(ledgers.whole.links)} links</span>
-            </td>
-          </tr>
-          <tr>
-            <th scope="row">first paint</th>
-            <td>{ledgers.streaming.firstMs.toFixed(0)} ms</td>
-            <td>{ledgers.whole.firstMs.toFixed(0)} ms</td>
-          </tr>
-          <tr>
-            <th scope="row">per camera move</th>
-            <td>
-              {ledgers.streaming.lastMs.toFixed(0)} ms{' '}
-              <span className="str-dim">last of {n(ledgers.streaming.moves)}</span>
-            </td>
-            <td>
-              {ledgers.whole.lastMs.toFixed(1)} ms{' '}
-              <span className="str-dim">last of {n(ledgers.whole.moves)}</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <ModeComparison mode={mode} ledgers={ledgers} />
 
       {ledgers.whole.failure && (
         <p className="str-bad">
@@ -544,87 +332,9 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
         </p>
       )}
 
-      {mode === 'whole' && whole && (
-        <dl className="str-ledger">
-          <div>
-            <dt>held in this tab</dt>
-            <dd>{MB(whole.held)}</dd>
-          </div>
-          <div>
-            <dt>columns read</dt>
-            <dd>
-              {MB(whole.bytes)} <span className="str-dim">dense_id x y cluster_id · src dst</span>
-            </dd>
-          </div>
-          <div>
-            <dt>queries the load issued</dt>
-            <dd>
-              {n(whole.queries)} <span className="str-dim">and no more</span>
-            </dd>
-          </div>
-          <div>
-            <dt>drawn</dt>
-            <dd>
-              {n(whole.rows)} <span className="str-dim">every one a mark, no anchors</span>
-            </dd>
-          </div>
-          <div>
-            <dt>links</dt>
-            <dd>{n(whole.links)}</dd>
-          </div>
-          <div>
-            <dt>this move</dt>
-            <dd>
-              {whole.ms.toFixed(1)} ms <span className="str-dim">move {n(whole.moves)}</span>
-            </dd>
-          </div>
-        </dl>
-      )}
+      {mode === 'whole' && whole && <WholeDetail whole={whole} />}
 
-      {mode === 'streaming' && cost && (
-        <dl className="str-ledger">
-          {cost.box && (
-            <div>
-              <dt>asked about</dt>
-              <dd>
-                x[{Math.round(cost.box.x)}, {Math.round(cost.box.x + cost.box.w)}] y[
-                {Math.round(cost.box.y)}, {Math.round(cost.box.y + cost.box.h)}]
-              </dd>
-            </div>
-          )}
-          <div>
-            <dt>tiles this frame</dt>
-            <dd>
-              {cost.tiles} of {cost.ofTiles}
-            </dd>
-          </div>
-          <div>
-            <dt>in runs</dt>
-            <dd>
-              {cost.requests} <span className="str-dim">≈ {KB(cost.bytes)}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>drawn</dt>
-            <dd>
-              {n(cost.marks)} of {n(cost.matched)}
-              {cost.anchors > 0 && <span className="str-dim"> +{n(cost.anchors)} anchors</span>}
-            </dd>
-          </div>
-          <div>
-            <dt>links</dt>
-            <dd>{n(cost.links)}</dd>
-          </div>
-          <div>
-            <dt>answered in</dt>
-            <dd>{cost.ms.toFixed(0)} ms</dd>
-          </div>
-          <div>
-            <dt>counted at</dt>
-            <dd>level {cost.matchedAt}</dd>
-          </div>
-        </dl>
-      )}
+      {mode === 'streaming' && cost && <StreamingDetail cost={cost} />}
 
       <p className="str-note">
         <strong>
