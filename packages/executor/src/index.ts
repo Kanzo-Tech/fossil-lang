@@ -124,8 +124,49 @@ export interface VertexInfo {
   prefix: string;
   /** Every projection of this type: the payload at `scale: 1`, and one per written level. */
   projections: Projection[];
+  /**
+   * The identity index — a second copy of the type ordered by subject instead of by position.
+   * Absent where the writer wrote none; a lookup then scans instead of seeking.
+   */
+  index?: VertexIndex;
+  /**
+   * Which coordinate systems this type's rows carry, and where each one came from.
+   *
+   * Absent means **not declared**, which is neither "none" nor "derived" — a corpus written
+   * before the field existed reads back this way, and inventing a default here is the defect the
+   * field exists to remove. An empty array is the third state: the type carries no system.
+   */
+  coordinates?: CoordinateSystem[];
   version: string;
 }
+
+/** Where a vertex type's identity index lives, and what it is ordered by. */
+export interface VertexIndex {
+  prefix: string;
+  ordered_by: string;
+  chunk_size: number;
+}
+
+/**
+ * One coordinate system over a vertex type's rows: the two columns holding it, and **where the
+ * numbers in them came from** — which is the one fact that decides whether a far view of this
+ * type means anything.
+ */
+export interface CoordinateSystem {
+  name: string;
+  x: string;
+  y: string;
+  provenance: Provenance;
+  /** What derived them, for a `derived` system. Absent where nothing recorded it. */
+  derived_by?: string;
+}
+
+/**
+ * `geographic` and `embedded` are data — the plane is a space and its density is information
+ * about that space. `derived` is a drawing algorithm's choice, and its density is a statement
+ * about the algorithm rather than about the graph.
+ */
+export type Provenance = 'geographic' | 'embedded' | 'derived';
 
 /** One edge type's manifest document (`edge/<dir>/<dir>.edge.yml`). */
 export interface EdgeInfo {

@@ -767,8 +767,10 @@ function text(row: QueryRow, column: string): string {
  * 3. One `DESCRIBE` per vertex type gives the payload vocabulary.
  *
  * **Why step 3 is not read off the manifest.** The payload projection's `properties` carry names
- * *and* types, so this looked free. It is not: on the conformance corpus the manifest declares **one** property
- * (`subject`) against **five** columns on disk (`dense_id`, `subject`, `x`, `y`, `cluster_id`), and
+ * *and* types, so this looked free. It is not: on the conformance corpus the manifest declares
+ * **three** properties (`subject`, `birth_year`, `postcode`) against **seven** columns on disk —
+ * those three plus `dense_id`, `x`, `y` and `cluster_id`, the four the writer puts there and the
+ * vocabulary does not name — and
  * `packages/corpus`'s own test fixture declares three of which one is `dense_id`. The manifest's
  * property list is a promise; the payload is the artefact, and this reads the artefact. The cost is
  * one round trip per vertex type at open.
