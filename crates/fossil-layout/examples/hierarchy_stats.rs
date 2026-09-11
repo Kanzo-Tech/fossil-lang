@@ -81,13 +81,16 @@ fn read_edges(path: &str) -> (u32, Vec<(u32, u32)>) {
         if a >= b {
             continue;
         }
-        let next = dense.len() as u32;
+        let next = u32::try_from(dense.len()).expect("more than u32::MAX vertices");
         let da = *dense.entry(a).or_insert(next);
-        let next = dense.len() as u32;
+        let next = u32::try_from(dense.len()).expect("more than u32::MAX vertices");
         let db = *dense.entry(b).or_insert(next);
         edges.push((da, db));
     }
-    (dense.len() as u32, edges)
+    (
+        u32::try_from(dense.len()).expect("more than u32::MAX vertices"),
+        edges,
+    )
 }
 
 /// Fold a membership at level `l` down to one label per ORIGINAL vertex.
@@ -105,12 +108,27 @@ fn flatten(levels: &[Vec<u32>], upto: usize, vertex_count: u32) -> Vec<u32> {
     label
 }
 
-fn percentile(sorted: &[u64], p: f64) -> u64 {
+/// Counts as `f64`, via `u32`.
+///
+/// These are community and edge counts, not addresses: a corpus with more than
+/// `u32::MAX` of either is one `dense_id` cannot address anyway. Going through
+/// `u32` makes that explicit instead of leaving a `usize as f64` the lint has to
+/// warn about on the general case.
+fn ratio(n: usize) -> f64 {
+    f64::from(u32::try_from(n).unwrap_or(u32::MAX))
+}
+
+/// Nearest-rank percentile, `permille` in thousandths.
+///
+/// Integer arithmetic on purpose: a percentile of a length is a fraction of a
+/// count, and rounding an `f64` back into an index is the one step that can be
+/// off by one at the ends.
+fn percentile(sorted: &[u64], permille: usize) -> u64 {
     if sorted.is_empty() {
         return 0;
     }
-    let idx = ((sorted.len() - 1) as f64 * p).round() as usize;
-    sorted[idx]
+    let last = sorted.len() - 1;
+    sorted[((last * permille) / 1000).min(last)]
 }
 
 fn main() {
@@ -167,7 +185,7 @@ fn main() {
         let m = two_m / 2.0;
         let modularity: f64 = comms
             .iter()
-            .map(|c| c.internal / m - (c.degree / two_m).powi(2))
+            .map(|c| (c.degree / two_m).mul_add(-(c.degree / two_m), c.internal / m))
             .sum();
 
         let mut sizes: Vec<u64> = comms.iter().map(|c| c.members).filter(|&s| s > 0).collect();
@@ -175,7 +193,7 @@ fn main() {
         let small = sizes.iter().filter(|&&s| s <= 3).count();
         let q_edges = quotient.len();
         let q_degree = if n > 0 {
-            2.0 * q_edges as f64 / f64::from(n)
+            2.0 * ratio(q_edges) / f64::from(n)
         } else {
             0.0
         };
@@ -184,10 +202,10 @@ fn main() {
             "{:>5} {:>10} {:>8} {:>8} {:>8} {:>7.1}% {:>11.4} {:>9} {:>12.1}",
             l + 1,
             n,
-            percentile(&sizes, 0.5),
-            percentile(&sizes, 0.9),
+            percentile(&sizes, 500),
+            percentile(&sizes, 900),
             sizes.last().copied().unwrap_or(0),
-            100.0 * small as f64 / sizes.len().max(1) as f64,
+            100.0 * ratio(small) / ratio(sizes.len().max(1)),
             modularity,
             q_edges,
             q_degree,
