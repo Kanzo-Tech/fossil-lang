@@ -29,4 +29,101 @@ coordinates:
   y: y
   provenance: derived
   derived_by: louvain+phyllotaxis
+holons:
+  prefix: holon/
+  chunk_size: 4096
+  relations:
+  - knows
+  coordinates:
+  - name: holon
+    x: x
+    y: y
+    provenance: derived
+    derived_by: louvain-cut+member-centroid
+  rungs:
+  - path: r1/
+    holon_count: 1744
+    properties:
+    - name: holon_id
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: x
+      data_type: float
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: y
+      data_type: float
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: member_count
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: parent
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: internal_weight
+      data_type: int64
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    quotient:
+      path: quotient/
+      edge_count: 5012
+      properties:
+      - name: src_holon
+        data_type: uint32
+        is_primary: false
+        is_nullable: false
+        cardinality: single
+      - name: dst_holon
+        data_type: uint32
+        is_primary: false
+        is_nullable: false
+        cardinality: single
+      - name: weight
+        data_type: int64
+        is_primary: false
+        is_nullable: false
+        cardinality: single
+  - path: r2/
+    holon_count: 301
+    properties:
+    - name: holon_id
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: x
+      data_type: float
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: y
+      data_type: float
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: member_count
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: parent
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: internal_weight
+      data_type: int64
+      is_primary: false
+      is_nullable: false
+      cardinality: single
 version: gar/v1

@@ -37,6 +37,12 @@ many members it has, and its parent. No IRI, no shape, no new vertex type, nothi
 be a thing in the world. [Identity](/docs/design/identity) is the page that says what a subject is
 here, and a holon is deliberately not one.
 
+The row's columns are declared per rung, in `crates/fossil-sinks/src/manifest.rs, HolonRung`, and
+**the model reserves no spelling for any of them**. A payload property is carried through opaquely,
+so a reader never has to know its name; these are roles a reader acts on — descend by the parent,
+size a mark by the member count, check mass with the internal weight — and what says which is the
+declared list rather than a convention a second writer could spell differently.
+
 ## It is a third artefact, and the tree already ruled on that
 
 The obvious home for a holon tree is `levels:` — the pyramid is already a hierarchy, the addressing
@@ -55,7 +61,27 @@ synthesised. A holon is a synthetic row by construction. Putting one in a `Proje
 `scale:` mean two different things in the same document, which is exactly the failure the
 one-contract rule exists to prevent.
 
-So: its own block, its own prefix, its own name.
+So: its own block, its own prefix, its own name. It is
+`crates/fossil-sinks/src/manifest.rs, HolonTree`, and it hangs off a vertex type beside `index:` and
+`coordinates:` rather than inside `projections:`. A type declares one with
+`crates/fossil-sinks/src/manifest.rs, with_holons`, and **nothing writes one yet**, which is the
+same order the index and the pyramid were declared in: the manifest is the plan, the pass is what
+fills it.
+
+| the block declares | because |
+| --- | --- |
+| a `prefix`, and a `path` per rung | a tile's URL is the one part a reader cannot compute, and there is no listing over HTTP |
+| a `chunk_size` of its own | tile `k` of a rung is the `k`th run of **holon** rows, and a holon id is not a `dense_id` — `crates/fossil-sinks/src/manifest.rs, VertexIndex`'s argument against reusing the payload's number, one artefact along |
+| a `holon_count` per rung | the sibling of `vertex_count`: a hole in the middle is caught by the addressing and a missing tail is caught by nothing |
+| the `relations` it was computed over | mass conservation has no population without them, and a type may be the source of several |
+| `properties` per rung | a group id, a position, a member count, a parent and an internal weight are columns that exist nowhere else in the corpus |
+| `coordinates` | the one thing on a holon that is chosen rather than aggregated |
+
+**And no `scale`, which is the difference doing work rather than a field left out.** A projection's
+scale is arithmetic a reader spends — rows are `count.div_ceil(scale)` and a tile address is a shift
+by `log2(scale)`. A rung's contraction is none of that: it is measured after the fact, it is 5.69×
+where the exponent says 4, and nothing addresses anything with it. So a rung declares **how many
+holons it has** and a reader divides if it wants a ratio.
 
 ## What Louvain actually emits is not a holarchy
 
@@ -161,6 +187,13 @@ above 1,696 groups is a decision for whatever writes one.
 `crates/fossil-layout/src/layout/community.rs, flatten_to_budget` is the existing half of this: it walks the
 hierarchy and picks **one** level that fits a budget. This is the same walk choosing a **sequence**.
 
+**And the floor is checkable from the document alone.** Because a rung declares a count rather than
+a scale, `crates/fossil-sinks/src/manifest.rs, contracts_by_at_least` evaluates the whole rule over
+the manifest — every rung against the one below it, the finest against the type's own
+`vertex_count` — without opening a file. The factor it compares with is `VertexLevels::stride` at
+one and never a literal four, so the octave keeps the single spelling that constant exists to
+enforce. A reader weighing a descent finds out it is not worth taking before it pays for the rung.
+
 ### 3 · A holon is defined against the level below, so it is checkable
 
 The bar is the one `levels.rs` already clears — evaluate the definition against the data and diff,
@@ -206,6 +239,15 @@ vertices and its relations as separate artefacts rather than as one wide table. 
 row as *a group, its position, how many members it has, and its parent*, with no edges on it, and
 then made an obligation out of edges; the two only fit together this way.
 
+In the manifest it is `crates/fossil-sinks/src/manifest.rs, HolonQuotient`, under the rung's own
+path, declaring its edge count for the reason a relation declares one — a tile with no rows is not
+written, so a 404 reads as *no edges here* and as *never uploaded* alike. It is **optional per
+rung**, because whether the aggregated edge set is worth writing at every rung is the question this
+page ends on and a writer answers it rung by rung; an absent quotient says none was written, not
+that there are none. What is deliberately *not* in the manifest is a summed weight: mass
+conservation is a property of the bytes, and a total recorded here would be a third place to
+disagree rather than a fourth thing to check.
+
 ## And the one thing that is not an exact aggregate
 
 Counts sum. Edges sum. **Where a holon goes on the plane is a choice** — a centroid weighted
@@ -214,6 +256,15 @@ somehow, or something else — and no amount of checking makes a choice correct.
 So it is declared rather than derived in silence, exactly as a vertex's position is:
 [where x and y come from](/docs/design/position) is the field, and a holon's position carries a
 provenance in it like any other. Everything else here is verified; this one is declared.
+
+It is the same type and not a second one — `crates/fossil-sinks/src/manifest.rs, CoordinateSystem`
+on the tree, with `crates/fossil-sinks/src/manifest.rs, Provenance`'s three answers available — and
+it does a second job while it is there: it names *which columns* hold the position. A holon's is
+`derived` by construction, which makes the deriver the part that earns its keep, because re-deriving
+is how a reader checks that a holon's referent has not moved and nothing can re-run what nothing
+names. A tree whose writer recorded none reads back as **not declared**, which is weaker than
+`derived` rather than equivalent to it — the rule a corpus written before the block existed is
+already held under, and the reason the whole block is optional rather than defaulted.
 
 ## What this does not settle
 
@@ -229,3 +280,12 @@ and is looked at.
 
 **How a holon tree is written incrementally.** Everything above assumes one pass over a finished
 corpus.
+
+**Which relation a tree is over when a type has several.** The block names them and the writer
+chooses them; nothing here says what a reader should do with two trees over the same type, and
+`relations` is a list because refusing to answer that is cheaper than answering it wrongly.
+
+**What a guard would have to grow to read a rung.** `apps/corpus/guards/manifest.mjs` is a line
+scanner that reads a nested mapping one level deep and skips what is deeper, so it sees the tree's
+`prefix` and `chunk_size` and not its rungs — the same wall `index:` hit, and the same fix.
+Nothing reads a rung today, which is why it is a design question and not a gap.

@@ -10,8 +10,12 @@
 //! `adj_lists`, and an edge's own `levels` — and says it once. **The payload is
 //! the projection at `scale: 1`, not a special case, and that is the claim.**
 //!
-//! [`VertexIndex`] is the one artefact that is NOT a projection: it is a second
-//! ORDER over the same rows, so the Morton cut does not address it.
+//! **Two artefacts are NOT projections**, and each of them says why in its own
+//! doc: [`VertexIndex`] is a second ORDER over the same rows, so the Morton cut
+//! does not address it, and [`HolonTree`] is a tree of SYNTHETIC rows, so no
+//! `scale` describes what one of them stands for. Everything else — payload,
+//! vertex levels, adjacency, edge levels — is the one sequence read at some
+//! scale.
 //!
 //! `path` and `scale` are `OME-NGFF`'s own spellings — a `multiscales` object
 //! there lists `datasets`, each with a `path` and a `coordinateTransformations`
@@ -280,6 +284,22 @@ pub struct VertexInfo {
     /// is the argument.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coordinates: Option<Vec<CoordinateSystem>>,
+    /// **The tree of summary rows over this type** — the corpus's third
+    /// artefact, for the graph that does not fit on the GPU. See [`HolonTree`].
+    ///
+    /// Not a [`Self::projections`] entry and that is the load-bearing part: a
+    /// projection is a subset of real rows at a `scale`, and a holon is a
+    /// synthetic row that no scale describes. `/docs/design/reference-viewer`
+    /// makes the ruling and `/docs/design/holons` carries it.
+    ///
+    /// `Option`, and **`None` is a statement about the writer**: a corpus with
+    /// no tree reads back as "not declared", never as "none". The same rule
+    /// [`Self::coordinates`] and [`Property::cardinality`] are written under,
+    /// and here it is load-bearing twice over — every corpus already on disk was
+    /// written before this field existed, and a default would have told every
+    /// one of their readers something about a partition nobody computed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holons: Option<HolonTree>,
     /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
     pub version: String,
 }
@@ -564,6 +584,303 @@ impl VertexLevels {
                 properties: properties.to_vec(),
             })
             .collect()
+    }
+}
+
+/// The prefix a holon tree lives under, relative to the vertex type's own
+/// [`VertexInfo::prefix`]. See [`HolonTree`].
+pub const HOLON_PREFIX: &str = "holon/";
+
+/// The filename stem of one **rung**, under a tree's own
+/// [`HolonTree::prefix`]: rung `k` lives under `<prefix>r{k}/`, and inside it
+/// the container rules apply unchanged. See [`HolonRung`].
+pub const RUNG_PREFIX_STEM: &str = "r";
+
+/// Where a rung's quotient lives, under the rung's own [`HolonRung::path`].
+/// A second artefact beside the rows and not a column on one, because a row is
+/// one holon and a quotient edge is a pair of them. See [`HolonQuotient`].
+pub const QUOTIENT_PREFIX: &str = "quotient/";
+
+/// **The tree of summary rows a type carries — the corpus's third artefact.**
+///
+/// A [`Projection`] is the same sequence at some scale and a [`VertexIndex`] is
+/// the same rows in another order; both are the corpus's real vertices. **A
+/// holon is a synthetic row by construction** — a group a partitioning
+/// algorithm returned, which exists nowhere in the source — so it is neither.
+/// `/docs/design/reference-viewer` is where that ruling is made and
+/// `/docs/design/holons` is what it decides here: a holon tree could not be an
+/// entry in [`VertexLevels`] without making `scale` mean two different things
+/// in one document, which is the failure the one-contract rule exists to
+/// prevent. Its own block, its own prefix, its own name.
+///
+/// **It carries no `scale`, and that is the difference doing work rather than a
+/// field left out.** A projection's scale is arithmetic a reader spends: rows
+/// are `count.div_ceil(scale)` and a tile address is a shift by `log2(scale)`.
+/// A rung's contraction is not any of that — it is measured after the fact, and
+/// on com-DBLP the published rungs contract by 5.69×, 6.02× and 5.45× against a
+/// declared floor of four, because a cut chooses out of the partitions a
+/// dendrogram already holds. So a rung declares **how many holons it has** and a
+/// reader divides if it wants a ratio; see [`HolonRung::holon_count`] and
+/// [`Self::contracts_by_at_least`].
+///
+/// **One tree per vertex type, because the partition is.** The layout pass runs
+/// community detection per type over that type's own self-relations, so a
+/// holon's members are `dense_id`s of one type and a quotient edge joins two
+/// holons of one tree. [`Self::relations`] names which edges it was computed
+/// over, without which the mass a rung conserves is not a defined quantity.
+///
+/// **Nothing writes one yet, and this is still the plan and not a stub** — the
+/// rule [`VertexIndex`] and [`VertexLevels`] are both declared under, stated at
+/// `crates/fossil-df/src/lib.rs, vertex_info`: the manifest is the plan, the
+/// pass is what fills it, and a guard is what goes red if the pass does not
+/// deliver it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HolonTree {
+    /// Path prefix for the whole tree, e.g. `"holon/"`, relative to the vertex
+    /// type's own [`VertexInfo::prefix`] and with the trailing separator.
+    /// Declared rather than conventional for [`Projection::path`]'s reason: it
+    /// is the one part of a tile's URL a reader cannot compute, and there is no
+    /// directory to list over HTTP.
+    pub prefix: String,
+    /// Rows per tile of a rung.
+    ///
+    /// Its own, and never read off the payload, for exactly
+    /// [`VertexIndex::chunk_size`]'s reason: tile `k` of a rung holds the `k`th
+    /// run of **holon** rows, and a holon id is not a `dense_id`. Reusing the
+    /// type's number would read as an alignment that does not exist. One per
+    /// tree and not one per rung, because the cut does not change with the rung
+    /// — a rung is a run of `chunk_size` rows of its own sequence, whatever that
+    /// sequence summarises.
+    pub chunk_size: u64,
+    /// **Which relations the partition was computed over, by
+    /// [`EdgeInfo::edge_type`] label** — both of whose endpoints are this vertex
+    /// type, which is why a label alone names one.
+    ///
+    /// The field the mass conservation check cannot be stated without. Every
+    /// edge of these relations is somewhere in every rung — as a quotient edge,
+    /// or absorbed into the internal weight of the holon holding both its ends —
+    /// so *cross weight plus internal weight equals the edge count below, at
+    /// every rung* is a property a stranger can evaluate. Without the list there
+    /// is no population to conserve: a type may be the source of several
+    /// relations, and a tree over a different one is a different tree that opens,
+    /// addresses and draws exactly the same.
+    ///
+    /// No `serde` default: a tree that names no relation summarises an edge set
+    /// nobody can name, and it does not deserialise rather than deserialising to
+    /// «all of them».
+    pub relations: Vec<String>,
+    /// **Where a holon's position came from, and which columns hold it.**
+    ///
+    /// Counts sum and edges sum; where a holon goes on the plane is a *choice* —
+    /// a centroid weighted somehow, or something else — and no amount of
+    /// checking makes a choice correct. So it is declared exactly as a vertex's
+    /// is, in the same type and with the same three answers available: see
+    /// [`CoordinateSystem`] and [`Provenance`]. A holon's is [`Provenance::Derived`]
+    /// by construction, which makes [`CoordinateSystem::derived_by`] the part
+    /// that earns its keep — re-deriving is how a reader checks that a holon's
+    /// referent has not moved, and nothing can re-run what nothing names.
+    ///
+    /// A list and not a value, for [`VertexInfo::coordinates`]'s reason: a type
+    /// whose rows carry a measured position *and* a derived one can be summarised
+    /// in both, and which is drawn is a reader's question.
+    ///
+    /// **`None` is a statement about the writer, not about the data** — the rule
+    /// [`Property::cardinality`] and [`VertexInfo::coordinates`] are both written
+    /// under. A tree written by a writer that recorded no provenance reads back
+    /// as "not declared" rather than as "derived".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinates: Option<Vec<CoordinateSystem>>,
+    /// **The rungs, finest first** — the same order [`VertexInfo::projections`]
+    /// is in and `OME-NGFF` fixes for its own `datasets`.
+    ///
+    /// Not `Option` and not skipped when empty, for [`VertexInfo::projections`]'s
+    /// reason: a tree with no rungs has no bytes, and the difference between that
+    /// and a tree whose rungs the manifest forgot to name is the difference
+    /// between a corpus and a 404.
+    ///
+    /// **There is no root.** The cut ends where the dendrogram stops delivering
+    /// a quarter-step, not at one group, so the coarsest rung is whatever
+    /// survived — `crates/fossil-layout/src/layout/community.rs, Cut` keeps three
+    /// of Louvain's five levels on com-DBLP and invents nothing above them.
+    pub rungs: Vec<HolonRung>,
+}
+
+/// **One rung: a path, how many holons it has, what a row of it carries, and
+/// the quotient beside it.**
+///
+/// A rung is *not* a level of [`VertexLevels`] under another name. A level is
+/// every vertex whose `dense_id` is a multiple of `4^k` — real rows, a predicate
+/// a reader can evaluate, nothing synthesised. A rung is a partition's groups,
+/// and the only thing that relates it to the rung below is an **aggregation**,
+/// which is why the three obligations of `/docs/design/holons` are checks
+/// against that level rather than against a predicate over ids.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HolonRung {
+    /// Where this rung's tiles are, relative to the tree's own
+    /// [`HolonTree::prefix`] and with the trailing separator — `"r1/"` for the
+    /// finest. Inside it the corpus's [`Container`] decides the filenames
+    /// exactly as it does for a payload, because a rung is tiled and is not a
+    /// different kind of thing from anything else that is.
+    pub path: String,
+    /// **How many holons this rung has** — every row of every tile under
+    /// [`Self::path`], summed.
+    ///
+    /// The sibling of [`VertexInfo::vertex_count`] and required for its reason:
+    /// a hole in the middle is caught by the addressing and a missing tail is
+    /// caught by nothing, so `tiles = holon_count.div_ceil(chunk_size)` is what
+    /// tells a truncated rung from a short one. It is also the number the
+    /// declared branching floor is checked with — see
+    /// [`HolonTree::contracts_by_at_least`] — which no ratio field could be,
+    /// because a ratio recorded beside the rows is a second statement of what
+    /// the rows already say.
+    pub holon_count: u64,
+    /// The columns a holon row carries: its group id, its position, its member
+    /// count, its parent, and the internal weight that absorbed the edges
+    /// between its own children.
+    ///
+    /// Declared per rung and not inherited, which is where this differs from
+    /// [`VertexIndex`]: an index is a second copy of the payload's rows and its
+    /// schema is the payload's, while **no column here exists anywhere else in
+    /// the corpus**. A reader that cannot see the list cannot open the file.
+    ///
+    /// The member count is a recorded column rather than something derived from
+    /// the members, and that is what makes obligation 2 an obligation at all:
+    /// fold the count into the member set and the check becomes a tautology no
+    /// corruption can fail.
+    pub properties: Vec<Property>,
+    /// **The quotient beside this rung's rows** — the edges between its holons,
+    /// or `None` where this rung publishes none.
+    ///
+    /// `Option` and per rung, because whether the aggregated edge set is worth
+    /// writing at every rung is the open question `/docs/design/holons` ends on:
+    /// a quotient at the finest rung of com-DBLP is 159,413 edges against the
+    /// graph's 1,049,866 — a real saving — while a coarse one is dense enough
+    /// that drawing it is a hairball. A writer answers that rung by rung, and
+    /// `None` says it wrote none rather than that there are none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quotient: Option<HolonQuotient>,
+}
+
+/// The edges between one rung's holons — **a separate artefact, and that is the
+/// arity argument rather than a preference.**
+///
+/// A holon row is one holon; a quotient edge is a pair of them. The same reason
+/// a corpus writes its vertices and its relations as separate artefacts rather
+/// than as one wide table, and the reason a holon row carries an internal weight
+/// instead of a self-loop: **an edge whose two ends share a parent is not an
+/// edge of that parent**, it is absorbed. On the planted fixture
+/// `crates/fossil-layout/tests/holons.rs` evaluates, 1,088 of 1,095 edges are
+/// absorbed and the aggregate quotient has seven — so a writer that relabels the
+/// children's edge set and keeps it is not wrong in an edge case, it is wrong
+/// about the overwhelming majority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HolonQuotient {
+    /// Where the quotient's tiles are, relative to the rung's own
+    /// [`HolonRung::path`] and with the trailing separator — [`QUOTIENT_PREFIX`]
+    /// as the writer spells it.
+    pub path: String,
+    /// **How many quotient edges this rung has** — the rows, not their summed
+    /// weight.
+    ///
+    /// [`EdgeInfo::edge_count`]'s field for [`EdgeInfo::edge_count`]'s reason: a
+    /// tile with no rows is not written, so a 404 reads as "no edges here" and
+    /// as "never uploaded" alike, and summing what a reader found against this
+    /// number tells them apart.
+    ///
+    /// **The summed weight is deliberately not here.** Mass conservation is a
+    /// property of the *bytes* — cross weight plus internal weight against the
+    /// edge count below — and a total recorded in the manifest would be a third
+    /// place to disagree rather than a fourth thing to check.
+    pub edge_count: u64,
+    /// The columns a quotient edge carries: the two holons it joins and its
+    /// weight. Declared for [`HolonRung::properties`]'s reason — these columns
+    /// exist nowhere else in the corpus, and a reader that cannot see the list
+    /// cannot open the file.
+    pub properties: Vec<Property>,
+}
+
+impl HolonRung {
+    /// The `k`th rung, finest first, at its canonical path `r{k}/` — the shape
+    /// `l{k}/` already has, and the one place the spelling is written down.
+    #[must_use]
+    pub fn at(rung: u32, holon_count: u64, properties: Vec<Property>) -> Self {
+        Self {
+            path: format!("{RUNG_PREFIX_STEM}{rung}/"),
+            holon_count,
+            properties,
+            // No quotient, and that is an answer rather than a stub: writing one
+            // is a second artefact over a different arity, which the caller that
+            // decides it is worth the bytes says so with `with_quotient`.
+            quotient: None,
+        }
+    }
+
+    /// Declare that this rung publishes a quotient, at [`QUOTIENT_PREFIX`].
+    #[must_use]
+    pub fn with_quotient(mut self, edge_count: u64, properties: Vec<Property>) -> Self {
+        self.quotient = Some(HolonQuotient {
+            path: QUOTIENT_PREFIX.to_string(),
+            edge_count,
+            properties,
+        });
+        self
+    }
+}
+
+impl HolonTree {
+    /// A tree over `relations`, tiled at `chunk_size`, publishing `rungs`.
+    ///
+    /// `relations` is an argument and not a setter because a tree that does not
+    /// name its edge population conserves nothing measurable; see
+    /// [`Self::relations`].
+    #[must_use]
+    pub fn new(chunk_size: u64, relations: Vec<String>, rungs: Vec<HolonRung>) -> Self {
+        Self {
+            prefix: HOLON_PREFIX.to_string(),
+            chunk_size,
+            relations,
+            // Not declared, which is neither "derived" nor "none". A writer that
+            // knows where it put its holons says so with `with_coordinates`; one
+            // that does not must not be made to look as though it did.
+            coordinates: None,
+            rungs,
+        }
+    }
+
+    /// Declare where this tree's positions came from. See [`Self::coordinates`],
+    /// and [`VertexInfo::with_coordinates`] for why an empty list is an answer
+    /// and not calling this at all is not.
+    #[must_use]
+    pub fn with_coordinates(mut self, systems: Vec<CoordinateSystem>) -> Self {
+        self.coordinates = Some(systems);
+        self
+    }
+
+    /// **Whether every published rung clears the declared branching floor**,
+    /// counting from `leaves` — the type's own [`VertexInfo::vertex_count`],
+    /// because the finest rung contracts against the graph itself.
+    ///
+    /// The floor is [`VertexLevels::stride`] at one and never a literal four:
+    /// the octave is the tile pyramid's, written down in exactly one place, and
+    /// a holon tree on it inherits that arithmetic instead of inventing one.
+    ///
+    /// **A floor and not a target.** It is what removes Louvain's 2.5× and 1.2×
+    /// rungs — 690 groups becoming 595 while modularity moves by 0.0001 — and
+    /// getting *nearer* to four would need levels between the ones a dendrogram
+    /// holds. A rung of no holons fails it: a tree cannot contract to nothing.
+    ///
+    /// It is checkable from the document alone, which is the whole reason
+    /// [`HolonRung::holon_count`] is a declared field: a reader weighing a
+    /// descent does not open a rung to find out it was not worth opening.
+    #[must_use]
+    pub fn contracts_by_at_least(&self, leaves: u64) -> bool {
+        let factor = VertexLevels::stride(1);
+        let mut below = leaves;
+        self.rungs.iter().all(|rung| {
+            let clears = rung.holon_count > 0 && rung.holon_count.saturating_mul(factor) <= below;
+            below = rung.holon_count;
+            clears
+        })
     }
 }
 
@@ -896,6 +1213,11 @@ impl VertexInfo {
             // `with_coordinates`; a writer that does not must not be made to
             // look as though it did.
             coordinates: None,
+            // No holon tree, and for `index`'s reason rather than
+            // `coordinates`': writing one is a partition of the type plus a
+            // quotient per rung, which the caller that decides to pay for it
+            // declares with `with_holons`.
+            holons: None,
             version: GRAPHAR_VERSION.to_string(),
         }
     }
@@ -917,6 +1239,17 @@ impl VertexInfo {
     #[must_use]
     pub fn with_coordinates(mut self, systems: Vec<CoordinateSystem>) -> Self {
         self.coordinates = Some(systems);
+        self
+    }
+
+    /// Declare that this type carries a holon tree. See [`HolonTree`].
+    ///
+    /// A separate method and not a `new` parameter, for [`Self::with_index`]'s
+    /// reason: a tree is a second pass over the rows producing rows that are not
+    /// in them, and the caller that has the partition is the one that can say so.
+    #[must_use]
+    pub fn with_holons(mut self, holons: HolonTree) -> Self {
+        self.holons = Some(holons);
         self
     }
 
@@ -1745,5 +2078,252 @@ version: gar/v1
         // And the nested sequence sits at the item's own indentation — two
         // spaces, not four, which is the whole of what the scanner assumes.
         assert!(yaml.contains("  properties:\n  - name: id\n"), "{yaml}");
+    }
+
+    /// A column of a holon row or of a quotient edge. The names are the
+    /// fixture's and the model reserves none: what a rung carries is the list
+    /// it declares, which is the whole reason [`HolonRung::properties`] is a
+    /// field.
+    fn column(name: &str, data_type: &str) -> Property {
+        Property {
+            name: name.to_string(),
+            data_type: data_type.to_string(),
+            is_primary: false,
+            is_nullable: Some(false),
+            cardinality: Some(Cardinality::Single),
+        }
+    }
+
+    /// What a holon row holds, from `/docs/design/holons`: a group, its
+    /// position, how many members it has, its parent — and the internal weight
+    /// the edges between its own children were absorbed into.
+    fn holon_columns() -> Vec<Property> {
+        vec![
+            column("holon_id", "uint32"),
+            column("x", "float"),
+            column("y", "float"),
+            column("member_count", "uint32"),
+            column("parent", "uint32"),
+            column("internal_weight", "int64"),
+        ]
+    }
+
+    /// A quotient edge: the pair and its weight. A different arity from a holon
+    /// row, which is why it is a different artefact.
+    fn quotient_columns() -> Vec<Property> {
+        vec![
+            column("src_holon", "uint32"),
+            column("dst_holon", "uint32"),
+            column("weight", "int64"),
+        ]
+    }
+
+    /// The com-DBLP tree as `crates/fossil-layout/src/layout/community.rs, Cut`
+    /// measured it: three rungs of Louvain's five, 55,712 / 9,248 / 1,696
+    /// groups over 317,080 authors.
+    fn dblp_tree() -> HolonTree {
+        HolonTree::new(
+            DEFAULT_CHUNK_SIZE,
+            vec!["coauthored".to_string()],
+            vec![
+                // The quotient at the finest rung is the one measured saving:
+                // 159,413 edges against the graph's 1,049,866.
+                HolonRung::at(1, 55_712, holon_columns())
+                    .with_quotient(159_413, quotient_columns()),
+                HolonRung::at(2, 9_248, holon_columns()),
+                HolonRung::at(3, 1_696, holon_columns()),
+            ],
+        )
+        .with_coordinates(vec![CoordinateSystem::derived(
+            "holon",
+            "x",
+            "y",
+            "louvain-cut+member-centroid",
+        )])
+    }
+
+    const DBLP_AUTHORS: u64 = 317_080;
+
+    /// **The ruling, as a test.** A holon tree adds no projection and no scale:
+    /// it is a third artefact, and `scale:` keeps meaning exactly one thing in
+    /// the document — how many `dense_id`s one row of a projection stands for.
+    /// A tree admitted as a projection would answer a different question under
+    /// the same name, which is what the one-contract invariant forbids.
+    #[test]
+    fn a_holon_tree_is_not_a_projection() {
+        let plan = VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).expect("over one tile");
+        let bare = person_vertex().with_levels(&plan);
+        let with = bare.clone().with_holons(dblp_tree());
+
+        assert_eq!(with.projections, bare.projections);
+        assert_eq!(with.payload(), bare.payload());
+        let scales: Vec<u64> = with.projections.iter().map(|p| p.scale).collect();
+        assert_eq!(scales, vec![1, 4, 16, 64, 256]);
+
+        // And in the bytes: the block sits outside `projections:`, so a reader
+        // walking the projection list never meets a synthetic row.
+        let yaml = with.to_yaml().expect("serialise");
+        let lines: Vec<&str> = yaml.lines().collect();
+        let start = lines
+            .iter()
+            .position(|l| *l == "projections:")
+            .expect("a projections block");
+        let block: Vec<&str> = lines[start + 1..]
+            .iter()
+            .take_while(|l| l.starts_with("- ") || l.starts_with("  "))
+            .copied()
+            .collect();
+        assert!(!block.iter().any(|l| l.contains("holon")), "{yaml}");
+        assert!(yaml.contains("\nholons:\n"), "{yaml}");
+    }
+
+    /// **A rung declares a count because a contraction is not a scale.** The
+    /// published rungs contract by 5.69×, 6.02× and 5.45× — nowhere near four,
+    /// and no arithmetic a reader could do with a declared `4` would address
+    /// anything. What the declared exponent buys is the floor, and the floor is
+    /// `VertexLevels::stride(1)` rather than a second spelling of it.
+    #[test]
+    fn a_rung_declares_a_count_and_clears_the_floor_without_meeting_it() {
+        let tree = dblp_tree();
+        let counts: Vec<u64> = tree.rungs.iter().map(|r| r.holon_count).collect();
+        assert_eq!(counts, vec![55_712, 9_248, 1_696]);
+        assert!(tree.contracts_by_at_least(DBLP_AUTHORS));
+
+        // A floor, not a target: every step is well over four, because a cut
+        // chooses out of the partitions a dendrogram already holds.
+        let mut below = DBLP_AUTHORS;
+        for &count in &counts {
+            assert!(count * VertexLevels::stride(1) <= below);
+            assert!(count * 5 <= below, "{count} against {below}");
+            below = count;
+        }
+    }
+
+    /// The rungs Louvain emitted and the cut refused: 690 groups becoming 595
+    /// is a 1.2× step that moved modularity by 0.0001, and a reader ascending it
+    /// takes a step that changes nothing on screen. The manifest is where that
+    /// is catchable without opening a file.
+    #[test]
+    fn the_declared_floor_rejects_the_levels_the_cut_dropped() {
+        let emitted = HolonTree::new(
+            DEFAULT_CHUNK_SIZE,
+            vec!["coauthored".to_string()],
+            [55_712u64, 9_248, 1_696, 690, 595]
+                .into_iter()
+                .enumerate()
+                .map(|(i, groups)| {
+                    HolonRung::at(
+                        u32::try_from(i).expect("five rungs") + 1,
+                        groups,
+                        Vec::new(),
+                    )
+                })
+                .collect(),
+        );
+        assert!(!emitted.contracts_by_at_least(DBLP_AUTHORS));
+        // And a rung of no holons is not a contraction to nothing.
+        let empty = HolonTree::new(
+            DEFAULT_CHUNK_SIZE,
+            vec!["coauthored".to_string()],
+            vec![HolonRung::at(1, 0, Vec::new())],
+        );
+        assert!(!empty.contracts_by_at_least(DBLP_AUTHORS));
+    }
+
+    /// The property the whole block is written under, and the one that cannot
+    /// be re-decided later: every corpus already on disk was written before this
+    /// field existed, and it declares **nothing** rather than declaring that it
+    /// has no tree. The pattern `coordinates` is held to, one artefact along.
+    #[test]
+    fn a_vertex_written_before_the_holon_block_existed_declares_nothing() {
+        let old = "type: Person\nvertex_count: 5\nchunk_size: 4096\n\
+                   prefix: vertex/Person/\nprojections: []\nversion: gar/v1\n";
+        let parsed: VertexInfo = serde_yaml_ng::from_str(old).expect("deserialize");
+        assert_eq!(parsed.holons, None);
+    }
+
+    /// Undeclared is absent, not `holons: null` — so a corpus that declares no
+    /// tree is byte-for-byte the corpus it was before the block landed.
+    #[test]
+    fn an_undeclared_tree_is_absent_from_the_yaml() {
+        let yaml = person_vertex().to_yaml().expect("serialize");
+        assert!(!yaml.contains("holons"), "{yaml}");
+    }
+
+    #[test]
+    fn a_holon_tree_round_trips_through_yaml() {
+        let original = person_vertex().with_holons(dblp_tree());
+        let yaml = original.to_yaml().expect("serialize");
+        assert!(yaml.contains("prefix: holon/"), "{yaml}");
+        assert!(yaml.contains("- path: r1/"), "{yaml}");
+        assert!(yaml.contains("path: quotient/"), "{yaml}");
+        assert!(yaml.contains("holon_count: 55712"), "{yaml}");
+        assert!(yaml.contains("edge_count: 159413"), "{yaml}");
+        let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        assert_eq!(original, parsed);
+    }
+
+    /// **A tree that names no relation conserves nothing measurable.** Mass
+    /// conservation per rung — cross weight plus internal weight against the
+    /// edge count below — has no population without the list, and a type may be
+    /// the source of several relations. So the key is required, and a manifest
+    /// without it does not deserialise rather than deserialising to «all of
+    /// them»: the `relations`-not-`Option` decision, as a test.
+    #[test]
+    fn a_tree_that_names_no_relation_is_not_a_tree() {
+        let yaml = person_vertex()
+            .with_holons(dblp_tree())
+            .to_yaml()
+            .expect("serialize");
+        assert!(yaml.contains("  relations:\n  - coauthored\n"), "{yaml}");
+        let without = yaml
+            .lines()
+            .filter(|line| !line.starts_with("  relations:") && *line != "  - coauthored")
+            .collect::<Vec<_>>()
+            .join("\n");
+        let error = serde_yaml_ng::from_str::<VertexInfo>(&without)
+            .expect_err("a tree with no edge population must not deserialize");
+        assert!(error.to_string().contains("relations"), "{error}");
+    }
+
+    /// Whether a quotient is worth writing is answered rung by rung, so the key
+    /// is absent on a rung that publishes none — not an empty artefact a reader
+    /// would open to find nothing in.
+    #[test]
+    fn a_rung_without_a_quotient_writes_no_quotient_key() {
+        let tree = dblp_tree();
+        assert!(tree.rungs[0].quotient.is_some());
+        assert_eq!(tree.rungs[1].quotient, None);
+        let yaml = person_vertex()
+            .with_holons(tree)
+            .to_yaml()
+            .expect("serialize");
+        assert_eq!(yaml.matches("quotient:").count(), 1, "{yaml}");
+    }
+
+    /// Counts sum and edges sum; a position is a **choice**, and the obligation
+    /// on it is that it is declared in the same field a vertex's is — with the
+    /// deriver named, because re-deriving is how a reader checks that a holon's
+    /// referent has not moved and nothing can re-run what nothing names.
+    #[test]
+    fn a_holons_position_is_declared_rather_than_derived_in_silence() {
+        let declared = dblp_tree().coordinates.expect("a declared system");
+        assert_eq!(declared.len(), 1);
+        assert_eq!(declared[0].provenance, Provenance::Derived);
+        assert_eq!(
+            declared[0].derived_by.as_deref(),
+            Some("louvain-cut+member-centroid")
+        );
+        assert!(!declared[0].is_data());
+
+        // And a tree whose writer recorded no provenance says nothing, which is
+        // weaker than saying `derived` rather than equivalent to it.
+        let silent = HolonTree::new(
+            DEFAULT_CHUNK_SIZE,
+            vec!["coauthored".to_string()],
+            Vec::new(),
+        );
+        assert_eq!(silent.coordinates, None);
+        assert_ne!(silent, silent.clone().with_coordinates(Vec::new()));
     }
 }

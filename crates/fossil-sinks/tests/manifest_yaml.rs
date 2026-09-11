@@ -6,8 +6,8 @@
 
 use arrow_schema::DataType;
 use fossil_sinks::manifest::{
-    Cardinality, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, Projection,
-    Property, Provenance, VertexInfo, data_type_name,
+    Cardinality, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, HolonRung,
+    HolonTree, Projection, Property, Provenance, VertexInfo, data_type_name,
 };
 
 fn person_vertex() -> VertexInfo {
@@ -43,6 +43,72 @@ fn person_vertex() -> VertexInfo {
         CoordinateSystem::measured("geo", "lon", "lat", Provenance::Geographic),
         CoordinateSystem::derived("layout", "x", "y", "louvain+phyllotaxis"),
     ])
+    // The third artefact, and the fixture carries BOTH of its shapes: a rung
+    // that publishes a quotient and one that does not. A single-rung fixture
+    // would freeze the block without freezing the choice the block exists to
+    // leave open.
+    .with_holons(holon_tree())
+}
+
+/// Two rungs over the same type, finest first — the shape a holon block is
+/// emitted in, which is what the snapshot beside this is a lock on. The line
+/// scanners over this document read a nested mapping one level deep and skip
+/// what is deeper, so the rungs have to nest where they nest and nowhere else.
+fn holon_tree() -> HolonTree {
+    HolonTree::new(
+        DEFAULT_CHUNK_SIZE,
+        vec!["knows".to_string()],
+        vec![
+            HolonRung::at(1, 1_744, holon_columns()).with_quotient(5_012, quotient_columns()),
+            HolonRung::at(2, 301, holon_columns()),
+        ],
+    )
+    .with_coordinates(vec![CoordinateSystem::derived(
+        "holon",
+        "x",
+        "y",
+        "louvain-cut+member-centroid",
+    )])
+}
+
+/// A group, its position, its member count, its parent — and the internal
+/// weight the edges between its own children were absorbed into. The names are
+/// this fixture's; the model reserves none.
+fn holon_columns() -> Vec<Property> {
+    [
+        "holon_id",
+        "x",
+        "y",
+        "member_count",
+        "parent",
+        "internal_weight",
+    ]
+    .into_iter()
+    .zip(["uint32", "float", "float", "uint32", "uint32", "int64"])
+    .map(|(name, data_type)| Property {
+        name: name.to_string(),
+        data_type: data_type.to_string(),
+        is_primary: false,
+        is_nullable: Some(false),
+        cardinality: Some(Cardinality::Single),
+    })
+    .collect()
+}
+
+/// The pair and its weight — a different arity from a holon row, which is the
+/// whole reason it is a different artefact.
+fn quotient_columns() -> Vec<Property> {
+    ["src_holon", "dst_holon", "weight"]
+        .into_iter()
+        .zip(["uint32", "uint32", "int64"])
+        .map(|(name, data_type)| Property {
+            name: name.to_string(),
+            data_type: data_type.to_string(),
+            is_primary: false,
+            is_nullable: Some(false),
+            cardinality: Some(Cardinality::Single),
+        })
+        .collect()
 }
 
 fn knows_edge() -> EdgeInfo {
