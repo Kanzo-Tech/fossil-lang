@@ -433,7 +433,11 @@ fn build_descriptor(
 /// today is what would make the literal correct by coincidence.
 fn format_kind(f: &SourceFormat) -> &str {
     match f {
-        SourceFormat::Csv => "csv",
+        // `{ .. }` because `Csv` carries the `delimiter =` the program wrote.
+        // It is not in the wire string on purpose: this names the FETCH
+        // STRATEGY the host has to stage bytes for, and the delimiter is read
+        // by `fossil_df::read_source` off the MIR the executor already holds.
+        SourceFormat::Csv { .. } => "csv",
         SourceFormat::Json => "json",
         SourceFormat::Parquet => "parquet",
         SourceFormat::Provider { name } => name.as_str(),

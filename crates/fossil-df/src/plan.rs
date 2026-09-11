@@ -556,7 +556,7 @@ mod tests {
     ) -> Op<'db> {
         Op::Source {
             uri: SmolStr::from(uri),
-            format: SourceFormat::Csv,
+            format: SourceFormat::Csv { delimiter: None },
             row_type: row(db, cols),
             binding: SmolStr::from(binding),
         }

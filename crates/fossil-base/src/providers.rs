@@ -152,6 +152,23 @@ pub struct Provider {
     /// row checks its own ([`Self::accepts`]); nothing dispatches on these, and
     /// nothing here words the refusal — `fossil_hir::refusals` does.
     pub extensions: &'static [&'static str],
+    /// The READER OPTIONS this row takes — the named, optional positions of its
+    /// `catalogue.bnf` signature, in file order. `["delimiter"]` for `io.csv`
+    /// and empty for every other row.
+    ///
+    /// Here rather than derived at each reader because the two readers that
+    /// need it cannot both reach the signature: `fossil-hir` links the stdlib
+    /// registry and `fossil-introspect` does not, and the browser's introspector
+    /// is TypeScript. The name a PROGRAM writes is catalogue data like a row's
+    /// extensions, so it travels with the row.
+    ///
+    /// **What is NOT here is any engine's spelling of the option, or any
+    /// default.** `delim=` is `DuckDB`'s keyword and `.delimiter(b'|')` is
+    /// `DataFusion`'s method; each adapter speaks its own engine, exactly as
+    /// each one already does for the reader itself. And absent is absent: the
+    /// two readers answer it differently, so there is no default a row could
+    /// state truthfully.
+    pub options: &'static [&'static str],
     /// The `read rows` capability, or `None` when the row does not have it.
     pub reads_rows: Option<RowReader>,
     /// The `read types` capability, or `None` when the row does not have it.
@@ -355,6 +372,7 @@ mod tests {
     static SHEX: Provider = Provider {
         name: "shex",
         extensions: &["shex", "shexj", "shexc"],
+        options: &[],
         reads_rows: None,
         reads_types: Some(decode_nothing),
     };
@@ -362,6 +380,7 @@ mod tests {
     static SHACL: Provider = Provider {
         name: "shacl",
         extensions: &["ttl", "shacl"],
+        options: &[],
         reads_rows: None,
         reads_types: Some(decode_nothing),
     };

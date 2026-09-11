@@ -209,7 +209,11 @@ impl Corpus {
     /// One projection of a vertex type, or `None` when the manifest writes none
     /// at that scale — which is a cost and not a refusal, the predicate over the
     /// payload answering every scale a writer skipped.
-    fn projection(&self, name: Option<&str>, scale: u64) -> Result<Option<&ProjectionAddress>, JsError> {
+    fn projection(
+        &self,
+        name: Option<&str>,
+        scale: u64,
+    ) -> Result<Option<&ProjectionAddress>, JsError> {
         Ok(self.vertex(name)?.projection(scale))
     }
 

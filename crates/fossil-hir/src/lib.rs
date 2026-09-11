@@ -88,7 +88,7 @@ pub mod ty;
 pub use ast_id::{AstIdEntry, AstIdMap, FileAstId, MappingNode, SourceDefNode};
 pub use body::{ExprId, HirBody};
 pub use check::{Checker, TypeckOutput, compatible, render_split_suggestion, typecheck_mapping};
-pub use def_map::{DefMap, MappingLoc, SourceLoc};
+pub use def_map::{DefMap, MappingLoc, SourceCall, SourceLoc};
 pub use didyoumean::did_you_mean;
 pub use item_tree::{ItemHeader, ItemTree, MappingHeader};
 pub use lower::{BinOp, FloatBits, HirExpr, HirFile, HirMapping, HirProperty, PropertyKey, UnOp};

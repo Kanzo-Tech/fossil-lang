@@ -19,6 +19,7 @@ use super::{decode_shacl, decode_shex};
 pub static SHEX: Provider = Provider {
     name: "shex",
     extensions: &["shex", "shexj", "shexc"],
+    options: &[],
     reads_rows: None,
     reads_types: Some(decode_shex),
 };
@@ -27,6 +28,7 @@ pub static SHEX: Provider = Provider {
 pub static SHACL: Provider = Provider {
     name: "shacl",
     extensions: &["ttl", "shacl"],
+    options: &[],
     reads_rows: None,
     reads_types: Some(decode_shacl),
 };

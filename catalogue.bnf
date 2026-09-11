@@ -70,10 +70,40 @@
    spelling for one. Writing `-> Rows` for them to fill the column would be the
    mistake this fold exists to undo, one level along — three constructors of
    relations once declared that they returned a string, because the helper that
-   built them took a scalar type and nobody noticed the row was lying. *)
+   built them took a scalar type and nobody noticed the row was lying.
+
+   # `csv`'s `delimiter`, and the absence of a default
+
+   `delimiter = String?` is the first OPTIONAL position in the file, and the
+   notation for one was already here — `=` says the call site writes the name
+   (`grammar.bnf`, NamedArg) and `?` says zero-or-one. What it needed was a
+   checker that counts a signature's REQUIRED positions rather than all of them;
+   see `fossil_hir::check`, where `args.len() != params.len()` refused
+   `io.csv("u.csv")` the moment this row grew a second parameter.
+
+   **No default is written here, and none is written anywhere else either.** The
+   value is `Option<SmolStr>` from the header scan through the MIR to both
+   engines, and ABSENT means each reader's own answer: `read_csv_auto` sniffs,
+   `DataFusion`'s `CsvReadOptions` assumes a comma. Writing `","` in this file
+   would be stating a default the two readers do not share, in the one place
+   that cannot tell whether it is true — and it would have to be restated at
+   every reader anyway, which is the drift this file exists to end.
+
+   That the two readers disagree when the option is ABSENT is a real and
+   PRE-EXISTING divergence: a pipe file introspects to three columns through
+   `read_csv_auto`'s sniffer and executes as one through `DataFusion`. Naming
+   the delimiter is what makes them agree, which is the whole point of the row
+   having one; it is not a claim that the absent case was ever sound.
+
+   The DuckDB keyword (`delim=`) and the `DataFusion` one (`.delimiter(b'|')`)
+   are NOT here, for the reason `read_csv_auto` is here and `ctx.read_csv` is
+   not: an engine's spelling belongs to the adapter that speaks to it, and these
+   two are not even the same KIND of thing — one is a SQL named parameter, the
+   other a Rust method taking a byte. `catalogue.bnf` names the position the
+   PROGRAM writes. *)
 
 row csv     = extensions "csv"                    ; reads native read_csv_auto
-            ; signature (uri: String) -> Rows ; op Source .
+            ; signature (uri: String, delimiter = String?) -> Rows ; op Source .
 row json    = extensions "json"                   ; reads native read_json_auto
             ; signature (uri: String) -> Rows ; op Source .
 row parquet = extensions "parquet"                ; reads native read_parquet

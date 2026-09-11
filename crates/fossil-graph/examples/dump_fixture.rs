@@ -25,8 +25,9 @@
 //!   > packages/corpus/tests/fixtures/manifest.json
 //! ```
 
-use fossil_sinks::manifest::{Cardinality, 
-    Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
+use fossil_sinks::manifest::{
+    Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
+    VertexInfo,
 };
 use serde_json::{Map, Value, json};
 

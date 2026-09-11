@@ -764,7 +764,18 @@ fn resolve_source<'db>(
     binding: &SmolStr,
     span: fossil_base::Span,
 ) -> Result<(SmolStr, SourceFormat), fossil_base::ErrorGuaranteed> {
-    let (constructor, uri) = dm.lookup_source_call(db, binding).unwrap_or((None, None));
+    let call = dm
+        .lookup_source_call(db, binding)
+        .unwrap_or(fossil_hir::SourceCall {
+            constructor: None,
+            uri: None,
+            delimiter: None,
+        });
+    let fossil_hir::SourceCall {
+        constructor,
+        uri,
+        delimiter,
+    } = call;
     let Some(uri) = uri else {
         return Err(fossil_base::delay_span_bug(
             db,
@@ -783,7 +794,7 @@ fn resolve_source<'db>(
     let format = match constructor.as_deref() {
         Some(c) => match fossil_base::provider(fossil_base::providers::installed(db), c) {
             Some(row) => match row.reads_rows {
-                Some(fossil_base::RowReader::Native(r)) => native_reader_format(r),
+                Some(fossil_base::RowReader::Native(r)) => native_reader_format(r, delimiter),
                 // Materialised outside the reader (`io.rdf`), or a row that does
                 // not read rows at all (`from` a `io.shex` binding) — both are
                 // `Provider { name }` here. The second is already a diagnostic
@@ -820,9 +831,16 @@ fn resolve_source<'db>(
 /// Exhaustive [`NativeReader`](fossil_base::NativeReader) → [`SourceFormat`]
 /// map. A new native reader is a compile error here until handled (source
 /// dispatch can't silently forget a format).
-const fn native_reader_format(r: fossil_base::NativeReader) -> SourceFormat {
+///
+/// `delimiter` is the READER OPTION the binding wrote, and it reaches exactly
+/// the one reader whose catalogue row declares it. The other two arms drop it
+/// on purpose and cannot do otherwise — `fossil_hir::lower::check_reader_option`
+/// has already refused a `delimiter =` written on a row that has none, so an
+/// option arriving here for `read_json_auto` is not a program the checker let
+/// through.
+fn native_reader_format(r: fossil_base::NativeReader, delimiter: Option<SmolStr>) -> SourceFormat {
     match r {
-        fossil_base::NativeReader::CsvAuto => SourceFormat::Csv,
+        fossil_base::NativeReader::CsvAuto => SourceFormat::Csv { delimiter },
         fossil_base::NativeReader::JsonAuto => SourceFormat::Json,
         fossil_base::NativeReader::Parquet => SourceFormat::Parquet,
     }
@@ -1667,6 +1685,45 @@ People : Person from Rows
         let (uri, format) = lower_source_for(src);
         assert_eq!(uri.as_str(), "a.json");
         assert_eq!(format, SourceFormat::Json);
+    }
+
+    /// **The delimiter survives the lowering, and its absence survives it too.**
+    ///
+    /// The two assertions are one claim: `Csv { delimiter: None }` is what
+    /// every program written before this parameter existed lowers to, and it is
+    /// what each reader answers for itself. A `Csv` carrying `Some(",")` for a
+    /// program that wrote nothing would be this layer inventing a default — and
+    /// it would be the wrong one for `read_csv_auto`, which sniffs.
+    #[test]
+    fn lower_to_mir_carries_the_delimiter_a_csv_source_wrote() {
+        let src = "\
+Rows := io.csv(\"a.csv\", delimiter = \"|\")
+
+People : Person from Rows
+    @subject = \"https://example.org/user/{Rows.id}\"
+    name = Rows.name
+";
+        let (uri, format) = lower_source_for(src);
+        assert_eq!(uri.as_str(), "a.csv");
+        assert_eq!(
+            format,
+            SourceFormat::Csv {
+                delimiter: Some("|".into())
+            }
+        );
+    }
+
+    #[test]
+    fn a_csv_source_that_names_no_delimiter_carries_none() {
+        let src = "\
+Rows := io.csv(\"a.csv\")
+
+People : Person from Rows
+    @subject = \"https://example.org/user/{Rows.id}\"
+    name = Rows.name
+";
+        let (_, format) = lower_source_for(src);
+        assert_eq!(format, SourceFormat::Csv { delimiter: None });
     }
 
     #[test]

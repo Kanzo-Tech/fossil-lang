@@ -40,6 +40,7 @@ impl NativeReader {
 pub static CSV: Provider = Provider {
     name: "csv",
     extensions: &["csv"],
+    options: &["delimiter"],
     reads_rows: Some(RowReader::Native(NativeReader::CsvAuto)),
     reads_types: None,
 };
@@ -48,6 +49,7 @@ pub static CSV: Provider = Provider {
 pub static JSON: Provider = Provider {
     name: "json",
     extensions: &["json"],
+    options: &[],
     reads_rows: Some(RowReader::Native(NativeReader::JsonAuto)),
     reads_types: None,
 };
@@ -56,6 +58,7 @@ pub static JSON: Provider = Provider {
 pub static PARQUET: Provider = Provider {
     name: "parquet",
     extensions: &["parquet"],
+    options: &[],
     reads_rows: Some(RowReader::Native(NativeReader::Parquet)),
     reads_types: None,
 };
@@ -64,6 +67,7 @@ pub static PARQUET: Provider = Provider {
 pub static RDF: Provider = Provider {
     name: "rdf",
     extensions: &["ttl", "nt", "n3", "rdf"],
+    options: &[],
     reads_rows: Some(RowReader::Materialised),
     reads_types: None,
 };

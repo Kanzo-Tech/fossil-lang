@@ -13,8 +13,9 @@ use fossil_graph::operations::discovery::{
 use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
 use fossil_graph::{GraphError, Operation, RawSql, RawSqlAccess, Result, dispatch};
 use fossil_mcp::ConnectionExecutor;
-use fossil_sinks::manifest::{Cardinality, 
-    Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
+use fossil_sinks::manifest::{
+    Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
+    VertexInfo,
 };
 
 /// In-memory manifest source mirroring the writer's on-disk layout.

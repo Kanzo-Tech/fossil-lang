@@ -773,6 +773,92 @@ fn check_provider(
     {
         diagnose_item(db, node, crate::refusals::decline_extension(row, &uri));
     }
+    check_reader_option(db, node, &constructor);
+}
+
+/// **The reader option a source header wrote, checked against the row that has
+/// to honour it.**
+///
+/// Three ways to write one nobody can act on, and each gets a message rather
+/// than the silence it used to get:
+///
+/// 1. **The row declares no such position.** `io.json("x", delimiter = "|")` —
+///    only `io.csv`'s row has a `delimiter`, so on any other row the argument
+///    is read by nothing and changes nothing. That is the shape of defect this
+///    whole thread exists to end: a delimiter execution ignores is worse than
+///    no delimiter.
+/// 2. **The value is not a string literal.** The scanner reads `IDENT` `=`
+///    `STRING`, so anything else arrives as no value at all.
+/// 3. **The value is not one ASCII character.** `DataFusion`'s
+///    `CsvReadOptions` takes a BYTE, so `delimiter = "||"` cannot be passed on
+///    — it would be truncated to `|` by whichever engine got there first while
+///    the other refused it — and neither can a multi-byte character, which is
+///    one `char` and two bytes. One byte is the only width both readers can
+///    promise, and the refusal is here, at the line the author wrote, rather
+///    than in an execution error with no span.
+///
+/// It reports on the `SOURCE_DEF` header only. A constructor written in a value
+/// position goes through [`place_args`] and `crate::check`, which already
+/// resolve a named argument against the signature.
+fn check_reader_option(
+    db: &dyn fossil_base::Db,
+    node: &fossil_syntax::SyntaxNode,
+    constructor: &SmolStr,
+) {
+    // The row HAS an option and the header wrote it: check the value.
+    if let Some(arg) = crate::def_map::parse_reader_option(node, Some(constructor)) {
+        let Some(value) = arg.value else {
+            emit_item(
+                db,
+                arg.span,
+                format!(
+                    "`{}` in `{constructor}` is written `{} = \"<one character>\"`, and this \
+                     is not a string.",
+                    arg.name, arg.name
+                ),
+            );
+            return;
+        };
+        if value.len() != 1 {
+            emit_item(
+                db,
+                arg.span,
+                format!(
+                    "`{}` in `{constructor}` is one ASCII character, and `\"{value}\"` is {}. \
+                     Both readers a corpus is written through take a single BYTE, so a wider \
+                     one would mean something different to each.",
+                    arg.name,
+                    if value.is_empty() {
+                        "empty".to_owned()
+                    } else {
+                        format!("{} bytes", value.len())
+                    }
+                ),
+            );
+        }
+        return;
+    }
+    // The row has NO option. An argument named as one belongs to a DIFFERENT
+    // row, and saying which is the whole value of the message.
+    let toks: Vec<_> = node
+        .descendants_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .collect();
+    for (name, owner) in crate::def_map::reader_option_names() {
+        if let Some(t) = toks
+            .iter()
+            .find(|t| t.kind() == fossil_syntax::SyntaxKind::IDENT && t.text() == name.as_str())
+        {
+            emit_item(
+                db,
+                Span::new(t.text_range().start().into(), t.text_range().end().into()),
+                format!(
+                    "`{constructor}` has no `{name}`. `{owner}` does — a reader option belongs \
+                     to the row that reads, and this one would be read by nothing."
+                ),
+            );
+        }
+    }
 }
 
 /// **Does this host answer questions about `wanted` at all?**

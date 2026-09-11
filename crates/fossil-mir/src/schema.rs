@@ -225,7 +225,7 @@ mod tests {
         let ops = vec![
             Op::Source {
                 uri: SmolStr::new_static("users.csv"),
-                format: SourceFormat::Csv,
+                format: SourceFormat::Csv { delimiter: None },
                 row_type,
                 binding: SmolStr::new_static("users"),
             },
@@ -291,7 +291,7 @@ mod tests {
         let ops = vec![
             Op::Source {
                 uri: SmolStr::new_static("u.csv"),
-                format: SourceFormat::Csv,
+                format: SourceFormat::Csv { delimiter: None },
                 row_type,
                 binding: SmolStr::new_static("u"),
             },

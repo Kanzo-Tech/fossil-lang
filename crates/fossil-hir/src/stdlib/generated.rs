@@ -597,12 +597,20 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
         ),
         RegistryEntry::new(
             "io.csv",
-            vec![ParamSpec {
-                name: SmolStr::new("uri"),
-                ty: SigTy::Scalar(ScalarTy::String),
-                arity: Arity::One,
-                named: false,
-            }],
+            vec![
+                ParamSpec {
+                    name: SmolStr::new("uri"),
+                    ty: SigTy::Scalar(ScalarTy::String),
+                    arity: Arity::One,
+                    named: false,
+                },
+                ParamSpec {
+                    name: SmolStr::new("delimiter"),
+                    ty: SigTy::Scalar(ScalarTy::String),
+                    arity: Arity::Optional,
+                    named: true,
+                },
+            ],
             SigTy::Rows,
             LoweringKind::Op(PlanOp::Source),
         ),

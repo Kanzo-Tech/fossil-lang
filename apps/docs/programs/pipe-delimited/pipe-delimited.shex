@@ -1,0 +1,8 @@
+PREFIX snb: <https://ldbc.example/voc#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+snb:Person {
+  snb:firstName xsd:string ;
+  snb:lastName  xsd:string ;
+  snb:city      xsd:string
+}

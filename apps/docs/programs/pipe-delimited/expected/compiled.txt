@@ -1,0 +1,16 @@
+── type bindings ──
+Person ← pipe-delimited.shex = https://ldbc.example/voc#Person
+
+── source bindings ──
+PersonRow := io.csv(data/person.csv)
+
+── mappings ──
+People: 4 written, 4 lowered
+    @subject
+    firstName
+    lastName
+    city
+
+── run ──
+vertex Person (https://ldbc.example/voc#Person) × 4 — dense_id, subject, firstName, lastName, city, x, y, cluster_id
+NO EDGE TYPE was written

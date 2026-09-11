@@ -93,8 +93,8 @@ fn lookup_inferred<'db>(
     dm: crate::def_map::DefMap<'db>,
     source_name: &str,
 ) -> Option<InferredDescriptor> {
-    let (_ctor, uri) = dm.lookup_source_call(db, source_name)?;
-    db.system().descriptors()?.get(uri?.as_str())
+    let call = dm.lookup_source_call(db, source_name)?;
+    db.system().descriptors()?.get(call.uri?.as_str())
 }
 
 /// Map one [`InferredColumn`] to a [`RecordField`] — the column→field lowering

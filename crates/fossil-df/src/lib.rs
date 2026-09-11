@@ -625,7 +625,10 @@ async fn execute_edge(
     // `apps/playground/bench/dblp/dblp.shex` carries a comment calling its own
     // `;` a defect rather than a modelling choice.
     let dst_is_list = matches!(
-        edge_src.schema().field_with_unqualified_name("dst_iri")?.data_type(),
+        edge_src
+            .schema()
+            .field_with_unqualified_name("dst_iri")?
+            .data_type(),
         DataType::List(_) | DataType::LargeList(_) | DataType::FixedSizeList(_, _)
     );
     debug_assert!(
@@ -794,7 +797,9 @@ pub(crate) async fn read_source(
     binding: &str,
 ) -> datafusion::error::Result<DataFrame> {
     match format {
-        SourceFormat::Csv => ctx.read_csv(uri, csv_options()).await,
+        SourceFormat::Csv { delimiter } => {
+            ctx.read_csv(uri, csv_options(delimiter.as_deref())).await
+        }
         SourceFormat::Json => read_json_source(ctx, uri).await,
         SourceFormat::Parquet => ctx.read_parquet(uri, ParquetReadOptions::default()).await,
         SourceFormat::Provider { name } => {
@@ -898,8 +903,37 @@ async fn fetch_bytes(ctx: &SessionContext, uri: &str) -> datafusion::error::Resu
 /// thus the manifest's `data_type`s) match the writer. Trade-off: inference
 /// reads the file once before execution reads it again; acceptable for parity,
 /// revisit if it bites large remote sources.
-fn csv_options<'a>() -> CsvReadOptions<'a> {
-    CsvReadOptions::new().schema_infer_max_records(usize::MAX)
+///
+/// # The delimiter
+///
+/// `delimiter` is what the program wrote (`io.csv("u.csv", delimiter = "|")`)
+/// and `None` is ABSENT — so this leaves `CsvReadOptions`' own answer alone
+/// rather than substituting a comma of its own. That distinction is not
+/// cosmetic: `read_csv_auto`, which `fossil-introspect` DESCRIBES the same file
+/// through, SNIFFS the delimiter, so «absent» is two different answers on the
+/// two readers and only a named delimiter makes them one. `catalogue.bnf`
+/// states no default for that reason and neither does this.
+///
+/// The option is one BYTE here and one SQL keyword there (`delim=`), which is
+/// why the catalogue names neither: it names the position the program writes.
+/// `fossil_hir::lower::check_reader_option` has already refused anything that
+/// is not a single BYTE — which is why the rule there is stated in bytes and
+/// not in `char`s, a two-byte character being one `char` this reader cannot
+/// take. So the match below is total for every delimiter a checked program can
+/// produce, and anything that somehow reached here unchecked falls back to the
+/// reader's own default rather than to a silent truncation.
+fn csv_options(delimiter: Option<&str>) -> CsvReadOptions<'_> {
+    let opts = CsvReadOptions::new().schema_infer_max_records(usize::MAX);
+    match delimiter.and_then(|d| {
+        let mut bytes = d.bytes();
+        match (bytes.next(), bytes.next()) {
+            (Some(b), None) => Some(b),
+            _ => None,
+        }
+    }) {
+        Some(b) => opts.delimiter(b),
+        None => opts,
+    }
 }
 
 // ── Host input seam: provider (RDF) sources ─────────────────────────────────

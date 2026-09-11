@@ -1831,13 +1831,36 @@ impl<'db> Expr<'db> {
         };
 
         let params = &entry.sig.params;
-        if args.len() != params.len() {
+        // **A signature's REQUIRED positions are the ones a call has to fill**,
+        // and they are not all of them: an [`Arity::Optional`] parameter may be
+        // left off entirely. This read `args.len() != params.len()`, which was
+        // exactly right while no row in `catalogue.bnf` had an optional
+        // position — and refused `io.csv("u.csv")` the day one did.
+        //
+        // `args` is a PREFIX of `params` by construction, so comparing lengths
+        // is enough to say which positions are missing: `crate::lower::place_args`
+        // writes a named argument into its declared slot and reports a HOLE
+        // between two filled positions rather than closing it, so the only
+        // positions a short vector can be missing are the trailing ones.
+        // `assert_optional_positions_are_last` is what holds that true of the
+        // catalogue rather than of this call.
+        let required = params
+            .iter()
+            .filter(|p| p.arity != crate::stdlib::Arity::Optional)
+            .count();
+        if args.len() < required || args.len() > params.len() {
+            let takes = if required == params.len() {
+                format!(
+                    "{required} argument{}",
+                    if required == 1 { "" } else { "s" }
+                )
+            } else {
+                format!("{required} to {} arguments", params.len())
+            };
             let eg = self.error_at(
                 expr_id,
                 format!(
-                    "`{func}` takes {} argument{}, but {} {} given",
-                    params.len(),
-                    if params.len() == 1 { "" } else { "s" },
+                    "`{func}` takes {takes}, but {} {} given",
                     args.len(),
                     if args.len() == 1 { "was" } else { "were" },
                 ),

@@ -129,3 +129,62 @@ async fn reads_an_ndjson_source() {
     let values: Vec<&str> = (0..name.len()).map(|i| name.value(i)).collect();
     assert_eq!(values, ["Alice", "Bob", "Carol"]);
 }
+
+/// A pipe-delimited source, executed with the delimiter the program named.
+///
+/// `users-pipe.csv` carries a COMMA INSIDE a field (`Alice, of Kent`), which is
+/// what makes the two readings different answers rather than the same answer
+/// spelled twice: read with a comma the header is one column called `id|name`
+/// and row 2 has two fields where the header had one, which `arrow-csv` refuses
+/// outright. So this test cannot pass by accident — a `read_csv` that ignored
+/// the option would not produce the wrong value, it would fail to read the file
+/// at all.
+const PIPE_PROGRAM: &str = "\
+type { Person } := io.shex(\"person.shex\")
+
+users := io.csv(\"tests/fixtures/users-pipe.csv\", delimiter = \"|\")
+
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    name = users.name
+";
+
+#[tokio::test]
+async fn reads_a_pipe_delimited_csv_source() {
+    let (db, file) =
+        support::db_with_shapes(PIPE_PROGRAM, "pipe.fossil", &[("person.shex", PERSON_SHEX)]);
+    let mapping = *fossil_hir::def_map::def_map(&db, file)
+        .mappings(&db)
+        .first()
+        .expect("one mapping");
+
+    let ctx = SessionContext::new();
+    let (vertex, node) = fossil_df::execute_vertex(
+        &ctx,
+        &db,
+        mapping,
+        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        panic!(
+            "io.csv reads the delimiter the binding named: {e}; {:#?}",
+            support::diagnostics(&db, file)
+        )
+    });
+
+    assert_eq!(node.label, "Person");
+    let batch = vertex.batches.first().expect("one batch");
+    let name = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("name col");
+    let values: Vec<&str> = (0..name.len()).map(|i| name.value(i)).collect();
+    assert_eq!(
+        values,
+        ["Alice, of Kent", "Bob", "Carol"],
+        "the field keeps the comma it contains, which a comma-delimited read could not"
+    );
+}

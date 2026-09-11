@@ -341,8 +341,21 @@ pub struct VProp<'db> {
 /// provider name makes this non-`Copy`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum SourceFormat {
-    /// `io.csv(...)`.
-    Csv,
+    /// `io.csv(...)`, and the `delimiter = "…"` the program wrote for it.
+    ///
+    /// **`None` is absent and not a default.** A default written here would be
+    /// one this enum cannot make true: `read_csv_auto` — the reader
+    /// `fossil-introspect` DESCRIBES through — SNIFFS the delimiter, and
+    /// `DataFusion`'s `CsvReadOptions` assumes a comma without looking, so the
+    /// two readers have different answers for absent and only the same answer
+    /// for a delimiter the program names. `catalogue.bnf` declares the position
+    /// and states no default for exactly this reason.
+    ///
+    /// It was a unit variant, which is why a pipe-delimited source had to be
+    /// converted to commas before `fossil run` would read it — the surface
+    /// could say `delimiter = "|"` (`grammar.bnf`, `NamedArg`) and the algebra
+    /// had nowhere to put it.
+    Csv { delimiter: Option<SmolStr> },
     /// `io.json(...)`.
     Json,
     /// `io.parquet(...)`.

@@ -977,8 +977,9 @@ mod tests {
     use super::*;
     use crate::manifest::{GRAPH_INFO_PATH, ManifestSource};
     use crate::operations::raw_sql::RawSqlAccess;
-    use fossil_sinks::manifest::{Cardinality, 
-        Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property, VertexInfo,
+    use fossil_sinks::manifest::{
+        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
+        VertexInfo,
     };
     use std::collections::HashMap;
 

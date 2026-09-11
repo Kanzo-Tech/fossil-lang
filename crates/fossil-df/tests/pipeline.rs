@@ -62,7 +62,7 @@ fn row<'db>(db: &'db dyn fossil_base::Db, names: &[&str]) -> Ty<'db> {
 fn source<'db>(db: &'db dyn fossil_base::Db, file: &str, binding: &str, cols: &[&str]) -> Op<'db> {
     Op::Source {
         uri: SmolStr::from(format!("tests/fixtures/{file}")),
-        format: SourceFormat::Csv,
+        format: SourceFormat::Csv { delimiter: None },
         row_type: row(db, cols),
         binding: SmolStr::from(binding),
     }

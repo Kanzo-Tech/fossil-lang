@@ -377,6 +377,45 @@ pub enum Arity {
     Optional,
 }
 
+/// **Every [`Arity::Optional`] position comes after every position that is
+/// not.** The rule a caller depends on, and the reason it is asserted here
+/// rather than reasoned about there.
+///
+/// `crate::check`'s call-arity check compares two LENGTHS — how many arguments
+/// were written against how many the row requires — and that comparison is only
+/// a statement about WHICH positions are missing while the optional ones are the
+/// trailing ones. With a leading optional, a one-argument call and a
+/// two-parameter row would type the written argument against the wrong
+/// parameter, silently.
+///
+/// The other half of that argument is `crate::lower::place_args`, which reports
+/// a hole between two filled positions rather than closing it — so a short
+/// argument vector is a PREFIX of the declared parameters. This assertion is
+/// what makes «prefix» and «the trailing optionals» the same set.
+///
+/// # Panics
+///
+/// If a row declares a required position after an optional one.
+fn assert_optional_positions_are_last(row: &RegistryEntry) {
+    let mut seen_optional: Option<&SmolStr> = None;
+    for p in &row.sig.params {
+        match p.arity {
+            Arity::Optional => seen_optional = Some(&p.name),
+            _ => {
+                assert!(
+                    seen_optional.is_none(),
+                    "`{}` declares the required parameter `{}` after the optional `{}` — \
+                     a call that leaves the optional off would then be checked against \
+                     the wrong position",
+                    row.name,
+                    p.name,
+                    seen_optional.expect("the arm that runs when one was seen")
+                );
+            }
+        }
+    }
+}
+
 /// **Among the positions filled POSITIONALLY, at most one repeats, and it is the
 /// last of them.** See [`Arity`] for why the rule is about positional arguments
 /// and not about all of them.
@@ -741,6 +780,7 @@ impl FunctionRegistry {
         }
         for row in entries.values() {
             assert_repetition_is_last_and_positional(row);
+            assert_optional_positions_are_last(row);
         }
         Self { entries }
     }

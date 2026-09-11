@@ -85,6 +85,23 @@ pub enum ShapeBindError {
     },
 }
 
+/// What a source binding's right-hand side says: which constructor, over which
+/// document, with which reader option.
+///
+/// One value and not three lookups, because the three are only meaningful
+/// together — a `delimiter` belongs to the row `constructor` names, and a URI
+/// read without the constructor is the defect `check_provider` exists to stop.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SourceCall {
+    /// The dotted constructor — `io.csv`. See [`SourceEntry::constructor`].
+    pub constructor: Option<SmolStr>,
+    /// The first positional string — the source URI. See [`SourceEntry::uri`].
+    pub uri: Option<SmolStr>,
+    /// The reader option the row declares, if the header wrote one. See
+    /// [`SourceEntry::delimiter`].
+    pub delimiter: Option<SmolStr>,
+}
+
 /// One entry in the source-binding table (`users := io.csv(...)`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct SourceEntry<'db> {
@@ -130,6 +147,24 @@ pub struct SourceEntry<'db> {
     /// `fossil-mir::lower` into `Op::Source.uri`, replacing the Phase-1
     /// hardcoded `examples/users.csv`. Signature-only (Phase 5 STDL-06).
     pub uri: Option<SmolStr>,
+    /// The READER OPTION the constructor's row declares — `io.csv("u.csv",
+    /// delimiter = "|")` → `|`.
+    ///
+    /// **`None` means absent and never a default.** Every reader downstream
+    /// receives `Option` and supplies its own answer for `None`
+    /// (`read_csv_auto` sniffs, `DataFusion` assumes a comma), which is what
+    /// keeps `catalogue.bnf` from having to state a default the two engines do
+    /// not share.
+    ///
+    /// **Which rows accept one, and what it is called, are the CATALOGUE's** —
+    /// `reader_option_of` reads them off the row's signature rather than
+    /// spelling `delimiter` here. A `delimiter =` written on `io.json`, whose
+    /// row declares no such position, is therefore not read at all rather than
+    /// read and dropped somewhere further down.
+    ///
+    /// Signature-only, like [`Self::uri`]: it comes off the `SOURCE_DEF` header
+    /// tokens and widens no per-mapping fan-out.
+    pub delimiter: Option<SmolStr>,
     /// The whole `User := io.csv("users.csv")` item, FILE-ABSOLUTE — where to
     /// point when a diagnostic is about the row this binding introduced rather
     /// than about the line that read it.
@@ -302,22 +337,31 @@ impl<'db> DefMap<'db> {
             .and_then(|e| e.shape_error.clone())
     }
 
-    /// Look up the `(constructor, uri)` pair bound to a source name (e.g.
-    /// `users` → `("io.csv", "examples/users.csv")`). Used by Phase 5
-    /// `fossil-mir::lower` (STDL-06) to resolve `Op::Source`'s format + URI
-    /// from the real binding instead of the Phase-1 hardcode. Either component
-    /// is `None` when the `SOURCE_DEF` RHS is not a recognisable
-    /// `io.*("...")` call.
+    /// Look up the constructor call bound to a source name (e.g. `users` →
+    /// `io.csv("examples/users.csv")`). Used by Phase 5 `fossil-mir::lower`
+    /// (STDL-06) to resolve `Op::Source`'s format + URI from the real binding
+    /// instead of the Phase-1 hardcode. Any component is `None` when the
+    /// `SOURCE_DEF` RHS is not a recognisable `io.*("...")` call.
+    ///
+    /// It gave back a `(constructor, uri)` PAIR and gives back a [`SourceCall`]
+    /// now, for the reason [`Self::lookup_source_schema_binding`] is a pair
+    /// rather than two lookups: the delimiter is meaningless without the
+    /// constructor that declares it, and a caller handed them separately is a
+    /// caller who can read one and forget the other.
     #[must_use]
     pub fn lookup_source_call(
         self,
         db: &'db dyn fossil_base::Db,
         name: &str,
-    ) -> Option<(Option<SmolStr>, Option<SmolStr>)> {
+    ) -> Option<SourceCall> {
         self.sources(db)
             .iter()
             .find(|e| e.name.as_str() == name)
-            .map(|e| (e.constructor.clone(), e.uri.clone()))
+            .map(|e| SourceCall {
+                constructor: e.constructor.clone(),
+                uri: e.uri.clone(),
+                delimiter: e.delimiter.clone(),
+            })
     }
 
     /// The shape IRI a `type { … } := io.shex(…)` name binds.
@@ -497,6 +541,8 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 if let Some(name) = parse_source_name(&item) {
                     let schema = parse_schema_arg(&item);
                     let (constructor, uri) = parse_source_call(&item);
+                    let delimiter =
+                        parse_reader_option(&item, constructor.as_ref()).and_then(|o| o.value);
                     sources.push(SourceEntry {
                         name,
                         loc: SourceLoc::new(db, file, source_idx),
@@ -508,6 +554,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         shape_error: None,
                         constructor,
                         uri,
+                        delimiter,
                         span: item_span(&item),
                     });
                     source_idx += 1;
@@ -567,6 +614,8 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 let schema_arg = schema.as_ref().and_then(|s| s.document.clone());
                 let schema_provider = schema.as_ref().and_then(|s| s.provider.clone());
                 let (constructor, uri) = parse_source_call(&item);
+                let delimiter =
+                    parse_reader_option(&item, constructor.as_ref()).and_then(|o| o.value);
                 // The PROVIDER the argument names, which is what selects the row
                 // that reads the document. `None` is a program that wrote a bare
                 // string, and it is an error rather than a fallback to the
@@ -588,6 +637,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         shape_error,
                         constructor: constructor.clone(),
                         uri: uri.clone(),
+                        delimiter: delimiter.clone(),
                         // Every member of `{ A, B } := io.rdf(…)` shares the
                         // binding's span, because they share the binding. A
                         // per-member range would need the brace list's tokens
@@ -785,6 +835,133 @@ pub(crate) fn parse_source_call(
     node: &fossil_syntax::SyntaxNode,
 ) -> (Option<SmolStr>, Option<SmolStr>) {
     parse_call_after(node, fossil_syntax::SyntaxKind::DEFINE)
+}
+
+/// The name of the READER OPTION `constructor`'s catalogue row declares, if it
+/// declares one.
+///
+/// **The name is the catalogue's and is not spelled here.** `catalogue.bnf`
+/// writes `io.csv`'s second position as `delimiter = String?` — named, because
+/// the call site writes its name, and optional, because absent is a legal
+/// program — and this reads that word back off the registry the file generates.
+/// Spelling `"delimiter"` in this module would be the same row stated twice, in
+/// the one place nothing would compare them.
+///
+/// `None` for every row that declares no optional position, which is every row
+/// but `io.csv`. That is what keeps `io.json("x", delimiter = "|")` from being
+/// read at all: a row that has no such parameter has no such argument, and the
+/// alternative — reading it and dropping it later — is a silently ignored
+/// argument, which is worse than an unread one.
+pub(crate) fn reader_option_of(constructor: &str) -> Option<&'static SmolStr> {
+    crate::stdlib::stdlib()
+        .lookup(constructor)?
+        .sig
+        .params
+        .iter()
+        .find(|p| p.named && p.arity == crate::stdlib::Arity::Optional)
+        .map(|p| &p.name)
+}
+
+/// Every name that IS a reader option of some `io.` row — the set a header's
+/// named argument is measured against when the row it was written on declares
+/// none of them.
+///
+/// It exists for one diagnostic: `io.json("x", delimiter = "|")` writes a
+/// position `io.json` does not have, and the alternative to naming it is
+/// silence. The set is the catalogue's, so a row that grows an option joins it
+/// with no edit here.
+pub(crate) fn reader_option_names() -> Vec<(&'static SmolStr, &'static SmolStr)> {
+    crate::stdlib::stdlib()
+        .iter()
+        .filter(|e| e.name.starts_with("io."))
+        .filter_map(|e| {
+            e.sig
+                .params
+                .iter()
+                .find(|p| p.named && p.arity == crate::stdlib::Arity::Optional)
+                .map(|p| (&p.name, &e.name))
+        })
+        .collect()
+}
+
+/// One reader option written in a source header: what it was called, the string
+/// it was given, and where it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReaderOptionArg {
+    /// The name the row declares — `delimiter`.
+    pub name: &'static SmolStr,
+    /// The literal's contents, or `None` when the value is not a string
+    /// literal. `crate::lower::check_reader_option` is what reports the second.
+    pub value: Option<SmolStr>,
+    /// The value's extent, for the diagnostic. The NAME's extent when there is
+    /// no value token at all, so the caret lands on what the author wrote.
+    pub span: Span,
+}
+
+/// Read the reader option a `SOURCE_DEF` / `MULTI_SOURCE_DEF` header wrote,
+/// under the name the CONSTRUCTOR's row declares.
+///
+/// The same heuristic token scan as [`parse_schema_arg`] and for the same
+/// reason — the parser's `NAMED_ARG` surface is not yet a stable structured
+/// node — narrowed to the one shape a reader option has: `IDENT` `=` `STRING`.
+///
+/// `None` means the row declares no option, or the header wrote none. A row
+/// that declares one and a header that wrote it with a value that is not a
+/// string literal gives `Some` with `value: None`, which is a thing to report
+/// rather than a thing to skip.
+///
+/// Signature-only: it reads the header tokens and never a mapping body, so it
+/// does not widen the per-mapping `body()` fan-out.
+pub(crate) fn parse_reader_option(
+    node: &fossil_syntax::SyntaxNode,
+    constructor: Option<&SmolStr>,
+) -> Option<ReaderOptionArg> {
+    use fossil_syntax::SyntaxKind;
+    let name = reader_option_of(constructor?)?;
+    let toks = non_trivia_tokens(node);
+    let at = toks
+        .iter()
+        .position(|t| t.kind() == SyntaxKind::IDENT && t.text() == name.as_str())?;
+    let ident = &toks[at];
+    let ident_span = Span::new(
+        ident.text_range().start().into(),
+        ident.text_range().end().into(),
+    );
+    if !toks
+        .get(at + 1)
+        .is_some_and(|t| matches!(t.kind(), SyntaxKind::ASSIGN | SyntaxKind::EQ))
+    {
+        return Some(ReaderOptionArg {
+            name,
+            value: None,
+            span: ident_span,
+        });
+    }
+    let Some(value) = toks.get(at + 2) else {
+        return Some(ReaderOptionArg {
+            name,
+            value: None,
+            span: ident_span,
+        });
+    };
+    let span = Span::new(
+        value.text_range().start().into(),
+        value.text_range().end().into(),
+    );
+    if value.kind() != SyntaxKind::STRING {
+        return Some(ReaderOptionArg {
+            name,
+            value: None,
+            span,
+        });
+    }
+    Some(ReaderOptionArg {
+        name,
+        value: Some(SmolStr::from(
+            value.text().trim_start_matches('"').trim_end_matches('"'),
+        )),
+        span,
+    })
 }
 
 /// [`parse_source_call`] with the binder spelled out.
@@ -1172,9 +1349,10 @@ Users : Person from User
     fn def_map_resolves_source_constructor_and_uri() {
         let (db, file) = db_with_hello();
         let dm = def_map(&db, file);
-        let (ctor, uri) = dm.lookup_source_call(&db, "User").expect("User is bound");
-        assert_eq!(ctor.as_deref(), Some("io.csv"));
-        assert_eq!(uri.as_deref(), Some("examples/users.csv"));
+        let call = dm.lookup_source_call(&db, "User").expect("User is bound");
+        assert_eq!(call.constructor.as_deref(), Some("io.csv"));
+        assert_eq!(call.uri.as_deref(), Some("examples/users.csv"));
+        assert_eq!(call.delimiter, None);
     }
 
     #[test]
@@ -1188,11 +1366,19 @@ b := io.parquet(\"b.parquet\")
         let dm = def_map(&db, file);
         assert_eq!(
             dm.lookup_source_call(&db, "a"),
-            Some((Some("io.json".into()), Some("a.json".into())))
+            Some(SourceCall {
+                constructor: Some("io.json".into()),
+                uri: Some("a.json".into()),
+                delimiter: None,
+            })
         );
         assert_eq!(
             dm.lookup_source_call(&db, "b"),
-            Some((Some("io.parquet".into()), Some("b.parquet".into())))
+            Some(SourceCall {
+                constructor: Some("io.parquet".into()),
+                uri: Some("b.parquet".into()),
+                delimiter: None,
+            })
         );
     }
 
@@ -1204,10 +1390,66 @@ b := io.parquet(\"b.parquet\")
         let db = new_db();
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         let dm = def_map(&db, file);
-        let (ctor, uri) = dm.lookup_source_call(&db, "u").unwrap();
-        assert_eq!(ctor.as_deref(), Some("io.csv"));
-        assert_eq!(uri.as_deref(), Some("u.csv"));
+        let call = dm.lookup_source_call(&db, "u").unwrap();
+        assert_eq!(call.constructor.as_deref(), Some("io.csv"));
+        assert_eq!(call.uri.as_deref(), Some("u.csv"));
         assert_eq!(dm.lookup_source_schema(&db, "u").as_deref(), Some("u.shex"));
+    }
+
+    /// **The delimiter reaches the `DefMap`, and only on the row that declares
+    /// one.**
+    ///
+    /// The second half is the part worth a test: `io.json`'s row has no
+    /// optional named position, so `delimiter =` written there is not read. An
+    /// argument that is read and then dropped somewhere downstream is the
+    /// silent defect this whole thread exists to avoid; an argument that is
+    /// never read is one `check_reader_option` can report at the node.
+    #[test]
+    fn the_delimiter_is_read_for_the_row_that_declares_one() {
+        let src = "u := io.csv(\"u.csv\", delimiter = \"|\")\n\
+                   j := io.json(\"j.json\", delimiter = \"|\")\n\
+                   p := io.csv(\"p.csv\")\n";
+        let db = new_db();
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+
+        let u = dm.lookup_source_call(&db, "u").expect("`u` is bound");
+        assert_eq!(
+            u.uri.as_deref(),
+            Some("u.csv"),
+            "the URI is still positional"
+        );
+        assert_eq!(u.delimiter.as_deref(), Some("|"));
+
+        assert_eq!(
+            dm.lookup_source_call(&db, "j").unwrap().delimiter,
+            None,
+            "`io.json`'s catalogue row declares no reader option, so it has no such argument"
+        );
+        assert_eq!(
+            dm.lookup_source_call(&db, "p").unwrap().delimiter,
+            None,
+            "absent is absent — there is no default in this layer or any other"
+        );
+    }
+
+    /// The name the scanner reads is the name `catalogue.bnf` declares.
+    ///
+    /// [`reader_option_of`] derives it from the registry, so this cannot fail
+    /// by drift — what it holds is that the derivation FINDS something, which a
+    /// `find` returning `None` would not. Without it, renaming the parameter in
+    /// the `.bnf` would make every `delimiter =` silently unread and every test
+    /// above would still have to be edited to notice.
+    #[test]
+    fn the_option_the_scanner_reads_is_the_one_the_catalogue_declares() {
+        assert_eq!(
+            reader_option_of("io.csv").map(SmolStr::as_str),
+            Some("delimiter"),
+            "`io.csv`'s row must declare exactly one optional named position"
+        );
+        assert_eq!(reader_option_of("io.json"), None);
+        assert_eq!(reader_option_of("io.parquet"), None);
+        assert_eq!(reader_option_of("io.rdf"), None);
     }
 
     /// **`schema =` names a provider.** The argument carries the row that reads
@@ -1421,7 +1663,11 @@ b := io.parquet(\"b.parquet\")
         );
         assert_eq!(
             dm.lookup_source_call(&db, "type"),
-            Some((Some("io.csv".into()), Some("type.csv".into()))),
+            Some(SourceCall {
+                constructor: Some("io.csv".into()),
+                uri: Some("type.csv".into()),
+                delimiter: None,
+            }),
             "`type` is contextual, so it is still a binding name"
         );
     }

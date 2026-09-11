@@ -120,6 +120,26 @@ fn native_rows() -> impl Iterator<Item = &'static fossil_base::Provider> {
         .filter(|p| matches!(p.reads_rows, Some(fossil_base::RowReader::Native(_))))
 }
 
+/// One source binding, as the scrape sees it.
+struct ScrapedRef {
+    /// The bound name — `User`.
+    source_name: SmolStr,
+    /// The row written after `io.` — `csv`.
+    constructor: SmolStr,
+    /// The positional URI, as the program wrote it.
+    raw_uri: String,
+    /// The reader option, if the binding named one — `io.csv("u.csv",
+    /// delimiter = "|")` → `|`.
+    ///
+    /// **The introspecting DESCRIBE has to carry it or it describes a different
+    /// file than the run reads.** A pipe-delimited CSV read with a comma is one
+    /// column called `id|name|birthday`, so an introspection that dropped the
+    /// option would type the source's columns out of a schema the executor
+    /// never produces — and the mapping would be refused for naming columns
+    /// that are, in fact, there.
+    option: Option<String>,
+}
+
 /// Scrape source-binding RHS source URLs from a `.fossil` file's text. It is a
 /// regex placeholder for an AST walk, and it is wrong on any binding the regex
 /// cannot see.
@@ -130,28 +150,57 @@ fn native_rows() -> impl Iterator<Item = &'static fossil_base::Provider> {
 /// `cargo xtask catalogue` writes from the same file. A constructor added to
 /// `catalogue.bnf` reaches both scrapers at once.
 ///
-/// What is still written twice is the pattern AROUND the alternation, in two
-/// regex dialects, and `packages/introspect/tests/rust-parity.test.ts` reads
+/// **The reader option is the second interpolation and arrives the same way.**
+/// The word a program writes for it (`delimiter`) is
+/// `fossil_base::Provider::options`, generated from the same rows, so neither
+/// this pattern nor the TypeScript one spells it. The alternation is over every
+/// option any native row declares — one today — because the scrape runs before
+/// the constructor is known and `fossil_hir::lower::check_reader_option` is
+/// what refuses an option written on the wrong row.
+///
+/// What is still written twice is the pattern AROUND the two interpolations, in
+/// two regex dialects, and `packages/introspect/tests/rust-parity.test.ts` reads
 /// this file for it. It is a `pnpm` test, so `cargo test` will not tell you.
-fn extract_source_refs(text: &str) -> Vec<(SmolStr, SmolStr, String)> {
+fn extract_source_refs(text: &str) -> Vec<ScrapedRef> {
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
         let alternation = native_rows().map(|p| p.name).collect::<Vec<_>>().join("|");
+        let options = native_rows()
+            .flat_map(|p| p.options.iter().copied())
+            .collect::<Vec<_>>()
+            .join("|");
         regex::Regex::new(&format!(
-            r#"(\w[\w\d_]*)\s*:=\s*io\.({alternation})\(\s*['"]([^'"]+)['"]"#
+            r#"(\w[\w\d_]*)\s*:=\s*io\.({alternation})\(\s*['"]([^'"]+)['"](?:\s*,\s*(?:{options})\s*=\s*['"]([^'"]*)['"])?"#
         ))
-        .expect("the catalogue's constructor names are regex-safe")
+        .expect("the catalogue's constructor and option names are regex-safe")
     });
     re.captures_iter(text)
-        .map(|c| {
-            (
-                SmolStr::from(c.get(1).unwrap().as_str()),
-                SmolStr::from(c.get(2).unwrap().as_str()),
-                c.get(3).unwrap().as_str().to_string(),
-            )
+        .map(|c| ScrapedRef {
+            source_name: SmolStr::from(c.get(1).unwrap().as_str()),
+            constructor: SmolStr::from(c.get(2).unwrap().as_str()),
+            raw_uri: c.get(3).unwrap().as_str().to_string(),
+            option: c.get(4).map(|m| m.as_str().to_string()),
         })
         .collect()
+}
+
+/// The `DuckDB` named parameter a native reader's option is spelled with.
+///
+/// **This is the ENGINE's vocabulary and belongs here**, beside the SQL it goes
+/// into — exactly as `read_csv_auto` is the catalogue's word and
+/// `CsvReadOptions::delimiter` is `DataFusion`'s. `catalogue.bnf` names the
+/// position the PROGRAM writes (`delimiter`), and the two engines spell it
+/// differently enough that no one token could serve both: `delim=` is a SQL
+/// named argument and the other is a Rust method taking a byte.
+///
+/// Exhaustive, so a new native reader is a compile error here until somebody
+/// decides whether it has options and what `DuckDB` calls them.
+const fn duckdb_option_keyword(r: fossil_base::NativeReader) -> Option<&'static str> {
+    match r {
+        fossil_base::NativeReader::CsvAuto => Some("delim"),
+        fossil_base::NativeReader::JsonAuto | fossil_base::NativeReader::Parquet => None,
+    }
 }
 
 /// The token that decides whether a cached descriptor still describes its
@@ -257,7 +306,13 @@ pub fn pre_introspect_and_register(
     // fresh must do no DuckDB work at all, and opening a connection is work.
     let mut conn: Option<duckdb::Connection> = None;
 
-    for (source_name, constructor, raw_uri) in extract_source_refs(source_text) {
+    for ScrapedRef {
+        source_name,
+        constructor,
+        raw_uri,
+        option,
+    } in extract_source_refs(source_text)
+    {
         let token = freshness_token(&anchor.locator(&raw_uri));
         // An empty token means this host could not `stat` the locator — a
         // scheme it does not own, or a path that is not there. Under
@@ -311,10 +366,10 @@ pub fn pre_introspect_and_register(
         // exactly the constructors this match named. Both are the catalogue's
         // answer now, and a row the table does not know is skipped loudly
         // rather than read as CSV.
-        let Some(reader) = native_rows()
+        let Some(native) = native_rows()
             .find(|p| p.name == constructor.as_str())
             .and_then(|p| match p.reads_rows {
-                Some(fossil_base::RowReader::Native(r)) => Some(r.table_function()),
+                Some(fossil_base::RowReader::Native(r)) => Some(r),
                 _ => None,
             })
         else {
@@ -324,7 +379,21 @@ pub fn pre_introspect_and_register(
             );
             continue;
         };
-        let sql = format!("DESCRIBE SELECT * FROM {reader}('{escaped_path}')");
+        let reader = native.table_function();
+        // **The option the binding wrote, in DuckDB's spelling, or nothing.**
+        // Nothing is the whole of the absent case: `read_csv_auto` sniffs, and
+        // substituting a comma here would make this DESCRIBE describe a file
+        // the executor does not read — the divergence naming a delimiter exists
+        // to close. `fossil_hir::lower::check_reader_option` has already refused
+        // a value that is not one character and one written on a row that takes
+        // none, so what arrives here is either absent or usable.
+        let args = match (option.as_deref(), duckdb_option_keyword(native)) {
+            (Some(value), Some(keyword)) => {
+                format!(", {keyword}='{}'", value.replace('\'', "''"))
+            }
+            _ => String::new(),
+        };
+        let sql = format!("DESCRIBE SELECT * FROM {reader}('{escaped_path}'{args})");
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(e) => {
@@ -425,10 +494,10 @@ mod tests {
             .collect()
     }
 
-    /// Every spelling DuckDB has for an instant maps to an instant.
+    /// Every spelling `DuckDB` has for an instant maps to an instant.
     ///
-    /// **The table is derived from DuckDB and not from memory**: the arms are
-    /// asserted against the `DESCRIBE` of a value DuckDB itself typed, so a
+    /// **The table is derived from `DuckDB` and not from memory**: the arms are
+    /// asserted against the `DESCRIBE` of a value `DuckDB` itself typed, so a
     /// version that renames a type fails here rather than silently widening a
     /// column to `String`. That widening is what this test exists for — the arm
     /// was `"TIMESTAMP" | "DATETIME"`, `read_csv_auto` infers `TIMESTAMP WITH
@@ -441,7 +510,10 @@ mod tests {
         for (sql, expected) in [
             ("TIMESTAMP '2012-01-01 00:00:00'", Primitive::DateTime),
             ("TIMESTAMPTZ '2012-01-01 00:00:00+01'", Primitive::DateTime),
-            ("CAST('2012-01-01T00:00:00.000+00:00' AS TIMESTAMP WITH TIME ZONE)", Primitive::DateTime),
+            (
+                "CAST('2012-01-01T00:00:00.000+00:00' AS TIMESTAMP WITH TIME ZONE)",
+                Primitive::DateTime,
+            ),
             ("DATE '2012-01-01'", Primitive::Date),
             ("TIME '12:00:00'", Primitive::Time),
             ("CAST(1 AS BIGINT)", Primitive::Integer),
@@ -466,6 +538,94 @@ mod tests {
                 "DuckDB types `{sql}` as `{declared}`, which must not widen to String"
             );
         }
+    }
+
+    /// **The scrape reads the reader option, and reads it only where the
+    /// program wrote one.**
+    ///
+    /// The word it looks for is `fossil_base::Provider::options`, generated
+    /// from `catalogue.bnf`, so this asserts the SCAFFOLD around it and not the
+    /// word: the URI stays positional, the option is optional, and a binding
+    /// with neither reads exactly as it always did.
+    #[test]
+    fn the_scrape_reads_the_option_a_binding_wrote() {
+        let text = "\
+A := io.csv(\"a.csv\", delimiter = \"|\")
+B := io.csv(\"b.csv\")
+C := io.parquet(\"c.parquet\")
+";
+        let got: Vec<(String, String, String, Option<String>)> = extract_source_refs(text)
+            .into_iter()
+            .map(|r| {
+                (
+                    r.source_name.to_string(),
+                    r.constructor.to_string(),
+                    r.raw_uri,
+                    r.option,
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "A".to_string(),
+                    "csv".to_string(),
+                    "a.csv".to_string(),
+                    Some("|".to_string())
+                ),
+                (
+                    "B".to_string(),
+                    "csv".to_string(),
+                    "b.csv".to_string(),
+                    None
+                ),
+                (
+                    "C".to_string(),
+                    "parquet".to_string(),
+                    "c.parquet".to_string(),
+                    None
+                ),
+            ]
+        );
+    }
+
+    /// **Introspection reads the same file the run reads.**
+    ///
+    /// This is the whole reason `io.csv` grew a delimiter rather than a
+    /// conversion step. The `DESCRIBE` runs BEFORE the compile and is what
+    /// types every column the checker sees, so a `DESCRIBE` that used a
+    /// different delimiter than execution would infer a schema the executor
+    /// never produces — here, one column called `id|name|city` where the run
+    /// yields three. That is not a slow path: the mapping's `User.name` would
+    /// be refused as an unknown column, with a did-you-mean offering
+    /// `id|name|city`.
+    ///
+    /// It asserts the COLUMNS and not the SQL, because the SQL is a rendering
+    /// and the columns are the claim.
+    #[test]
+    fn a_pipe_delimited_source_introspects_to_the_columns_it_has() {
+        let dir = tempfile::tempdir().expect("a tempdir");
+        let csv = dir.path().join("people.csv");
+        std::fs::write(&csv, "id|name|city\n1|Ada|Kent\n2|Bo|Arles\n").expect("write the fixture");
+
+        let system = NativeSystem::default();
+        let text = format!("User := io.csv(\"{}\", delimiter = \"|\")\n", csv.display());
+        let urls = HashMap::new();
+        let anchor = SourceAnchor::new(dir.path(), &urls);
+        pre_introspect_and_register(&system, &text, anchor, &HashMap::new(), Reach::Anywhere);
+
+        let descriptor = system
+            .descriptors()
+            .expect("NativeSystem keeps a cache")
+            .get(&csv.display().to_string())
+            .expect("the source was introspected");
+        let names: Vec<&str> = descriptor.columns.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["id", "name", "city"],
+            "the DESCRIBE must use the delimiter the binding wrote"
+        );
     }
 
     /// The `@conn` cases this file used to assert against its own resolver

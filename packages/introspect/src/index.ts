@@ -29,7 +29,12 @@
  * projection of the same rows for the same reason.
  */
 
-import { NATIVE_READERS, NATIVE_ROWS, type NativeRow } from "./catalogue.generated.js";
+import {
+  NATIVE_READERS,
+  NATIVE_ROWS,
+  READER_OPTIONS,
+  type NativeRow,
+} from "./catalogue.generated.js";
 
 /**
  * The Fossil primitive lattice (mirror `@fossil-lang/wasm`'s
@@ -90,6 +95,20 @@ export interface SourceRef {
   /** Which `io.` constructor wrote it — it chooses the DuckDB reader. */
   format: SourceFormat;
   url: string;
+  /**
+   * The reader option the binding named — `io.csv("u.csv", delimiter = "|")`.
+   *
+   * **The DESCRIBE has to carry it or it describes a different file than the
+   * run reads.** A pipe-delimited CSV read with a comma is ONE column called
+   * `id|name|city`, so a descriptor built without the option types the source
+   * out of a schema the executor never produces, and the mapping is refused
+   * for naming columns that are in fact there.
+   *
+   * Which rows take one and what it is called are `catalogue.bnf`'s, through
+   * `READER_OPTIONS`; what DuckDB calls it (`delim`) is this file's, because
+   * that is the engine this package talks to.
+   */
+  option?: string;
 }
 
 /** A single row from DuckDB's `DESCRIBE SELECT * FROM <reader>(...)`. */
@@ -115,11 +134,48 @@ export function duckdbTypeToFossilPrimitive(t: string): InferredPrimitive {
   if (upper.startsWith("DECIMAL")) return "float";
   if (upper === "BOOLEAN" || upper === "BOOL") return "bool";
   if (upper === "DATE") return "date";
-  if (upper === "TIMESTAMP" || upper === "DATETIME") return "date_time";
-  if (upper === "TIME") return "time";
+  // Prefix arms, mirroring `crates/fossil-introspect/src/lib.rs` — DuckDB has
+  // seven spellings for an instant and this had the two that are bare names.
+  // `TIMESTAMP WITH TIME ZONE` is what `read_csv_auto` infers for an ISO-8601
+  // string carrying an offset, which is how LDBC-SNB dates every row it ships,
+  // and it fell through to `string` here after the Rust stopped letting it.
+  //
+  // **`TIMESTAMP` before `TIME`, and that is the whole reason these two lines
+  // are in this order**: a prefix test for `TIME` swallows every `TIMESTAMP`
+  // spelling, which is the Rust's arm order for the same reason.
+  if (upper.startsWith("TIMESTAMP") || upper === "DATETIME") return "date_time";
+  if (upper.startsWith("TIME")) return "time";
   // VARCHAR / TEXT / STRING + any unrecognised type fall back to string.
   return "string";
 }
+
+/**
+ * Every name that is a reader option of some native row, in catalogue order —
+ * the scrape's second alternation.
+ *
+ * `["delimiter"]` today. It is not written here for the reason the constructor
+ * list is not: `catalogue.bnf` declares `io.csv`'s second position as
+ * `delimiter = String?` and `cargo xtask catalogue` projects it into
+ * `READER_OPTIONS`, so the word a program writes is the same word on both
+ * sides of the seam.
+ */
+const READER_OPTION_NAMES: readonly string[] = Object.values(
+  READER_OPTIONS,
+).flat();
+
+/**
+ * What DuckDB calls each row's reader option.
+ *
+ * **This is the ENGINE's vocabulary, and that is why it is written here rather
+ * than generated.** `catalogue.bnf` names the position the PROGRAM writes;
+ * `delim=` is a DuckDB named argument and `CsvReadOptions::delimiter` is a Rust
+ * method taking a byte, so no one token could serve both readers. The native
+ * sibling is `fossil_introspect::duckdb_option_keyword`, and it is the same
+ * table for the same reason — each half speaks to its own DuckDB.
+ */
+const DUCKDB_OPTION_KEYWORD: Partial<Record<SourceFormat, string>> = {
+  csv: "delim",
+};
 
 /**
  * The source-binding pattern. Exported because it is the thing the parity
@@ -130,7 +186,7 @@ export function duckdbTypeToFossilPrimitive(t: string): InferredPrimitive {
  * reused across calls skips matches.
  */
 export const SOURCE_REF_PATTERN =
-  `(\\w[\\w\\d_]*)\\s*:=\\s*io\\.(${NATIVE_ROWS.join("|")})\\(\\s*['"]([^'"]+)['"]`;
+  `(\\w[\\w\\d_]*)\\s*:=\\s*io\\.(${NATIVE_ROWS.join("|")})\\(\\s*['"]([^'"]+)['"](?:\\s*,\\s*(?:${READER_OPTION_NAMES.join("|")})\\s*=\\s*['"]([^'"]*)['"])?`;
 
 /**
  * Scrape source-binding RHS URLs from a `.fossil` text.
@@ -145,7 +201,12 @@ export function extractSourceRefs(text: string): SourceRef[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m[1] && m[2] && m[3]) {
-      out.push({ sourceName: m[1], format: m[2] as SourceFormat, url: m[3] });
+      out.push({
+        sourceName: m[1],
+        format: m[2] as SourceFormat,
+        url: m[3],
+        option: m[4],
+      });
     }
   }
   return out;
@@ -173,9 +234,18 @@ const READERS: Record<SourceFormat, string> = NATIVE_READERS;
  * default, because a defaulted reader is how a `.parquet` source ends up read
  * as CSV.
  */
-export function describeSql(url: string, format: SourceFormat): string {
+export function describeSql(
+  url: string,
+  format: SourceFormat,
+  option?: string,
+): string {
   const escaped = url.replace(/'/g, "''");
-  return `DESCRIBE SELECT * FROM ${READERS[format]}('${escaped}')`;
+  const keyword = DUCKDB_OPTION_KEYWORD[format];
+  const args =
+    option !== undefined && keyword !== undefined
+      ? `, ${keyword}='${option.replace(/'/g, "''")}'`
+      : "";
+  return `DESCRIBE SELECT * FROM ${READERS[format]}('${escaped}'${args})`;
 }
 
 /**
@@ -247,7 +317,7 @@ export async function introspect(
   for (const ref of extractSourceRefs(mappingText)) {
     try {
       const url = await io.resolve(ref);
-      const rows = await io.query(describeSql(url, ref.format));
+      const rows = await io.query(describeSql(url, ref.format, ref.option));
       out.push(buildDescriptor(ref.url, rows, await io.freshness?.(ref, url)));
     } catch (err) {
       warn(

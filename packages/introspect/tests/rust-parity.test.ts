@@ -63,7 +63,7 @@ import {
   type InferredPrimitive,
   type SourceFormat,
 } from "../src/index.js";
-import { NATIVE_ROWS } from "../src/catalogue.generated.js";
+import { NATIVE_ROWS, READER_OPTIONS } from "../src/catalogue.generated.js";
 
 // It was `crates/fossil-engine/src/lib.rs`. The scrape moved with the code:
 // introspection is the HOST's job and lives in `fossil-introspect` now, which
@@ -115,13 +115,17 @@ function rustPattern(): string {
     "`extract_source_refs`'s pattern literal",
   );
   const literal = fn[1]!;
-  if (!literal.includes("{alternation}")) {
-    throw new Error(
-      "parity guard: the Rust pattern no longer interpolates `{alternation}`; " +
-        "if it went back to a literal list, this guard must compare it to the catalogue",
-    );
+  for (const hole of ["{alternation}", "{options}"]) {
+    if (!literal.includes(hole)) {
+      throw new Error(
+        `parity guard: the Rust pattern no longer interpolates \`${hole}\`; ` +
+          "if it went back to a literal list, this guard must compare it to the catalogue",
+      );
+    }
   }
-  return literal.replace("{alternation}", NATIVE_ROWS.join("|"));
+  return literal
+    .replace("{alternation}", NATIVE_ROWS.join("|"))
+    .replace("{options}", Object.values(READER_OPTIONS).flat().join("|"));
 }
 
 /** The generated Rust catalogue, the counterpart of `catalogue.generated.ts`. */

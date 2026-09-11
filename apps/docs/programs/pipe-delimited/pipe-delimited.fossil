@@ -1,0 +1,26 @@
+// A pipe-delimited source, read as it ships.
+//
+// LDBC-SNB writes every CSV with `|`, and until `io.csv` had a delimiter the
+// only way to compile this file was to convert it to commas first — which is
+// to say the corpus this project measures itself against did not reproduce
+// from its own sources.
+//
+// `city` carries a comma INSIDE a field, which is what makes the two readings
+// different answers rather than the same answer spelled twice: read with a
+// comma the file is one column called `id|firstName|lastName|city`, and read
+// with `|` it is four. Both halves of the compile have to agree about which —
+// `fossil-introspect` DESCRIBEs this file before the check and `fossil-df`
+// reads it during the run, and an empty `expected/diagnostic.txt` beside a
+// four-row vertex table is the two of them saying the same thing.
+
+type { Person } := io.shex("pipe-delimited.shex")
+
+// #region source
+PersonRow := io.csv("data/person.csv", delimiter = "|")
+// #endregion source
+
+People : Person from PersonRow
+    @subject  = "https://ldbc.example/person/{PersonRow.id}"
+    firstName = PersonRow.firstName
+    lastName  = PersonRow.lastName
+    city      = PersonRow.city
