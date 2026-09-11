@@ -113,8 +113,13 @@ Claimed in comments, never run. Measured 2026-09-11, two processes per row:
 | `crates/fossil-layout/src/layout/community.rs, community_hierarchy` | com-DBLP, 5 levels | every level's membership **and** quotient byte-identical |
 | `crates/fossil-layout/src/layout/pass.rs, enrich_layout`, the whole pass | 200,000 vertices, 999,079 edges, via `crates/fossil-layout/examples/enrich_memory.rs, planted` | the entire written tree byte-identical — Morton-permuted payload, both adjacency orientations, identity index, tiles and level directories |
 
-**The property holds.** What it does not have is a test that keeps it holding, and that is this
-direction's first debt. Had it come out red, the two properties below would not be worth stating.
+**The property holds.** Had it come out red, the two properties below would not be worth stating.
+
+What it still does not have is a test that keeps *the pass* holding.
+`crates/fossil-layout/tests/holons.rs, the_same_graph_gives_the_same_holon_rows_twice` keeps the
+**holon rows** reproducible, which is a narrower claim one artefact along: the rows come out of
+`Dendrogram` in memory, and the measurement above was of `enrich_layout` writing Parquet across two
+processes. The bytes are the thing nothing guards, and that is this direction's first debt.
 
 ### 2 · The branching factor is declared, not inherited
 
@@ -167,11 +172,39 @@ falsifiable by symmetric difference:
 **Membership.** The members of a holon are *exactly* the children that name it as parent. Not a
 superset, not what the writer recorded separately.
 
-**Count.** Its member count is the sum of its children's counts.
+**Count.** Its member count is the sum of its children's counts — and this is an obligation on the
+**row** rather than on the data. It only has content because the count is recorded beside the
+members: derive it from the member set and the check is a tautology no corruption can fail.
 
-**Edges.** Its edges are the aggregation of its children's edges.
+**Edges.** A child edge whose two ends have **different** parents sums into an edge between those
+parents. A child edge whose two ends have the **same** parent is not an edge of that parent at all
+— it is absorbed into the parent's internal weight.
 
 </div>
+
+<Callout type="warn">
+**That third bullet said "its edges are the aggregation of its children's edges", and that is
+false as a union.** It reads as *relabel the endpoints and keep the set*, which emits self-loops
+where a quotient has none — and on a graph with any community structure it is not an edge case but
+the overwhelming majority. Measured on the planted fixture
+`crates/fossil-layout/tests/holons.rs` uses — 256 vertices, 1,095 edges — **1,088 of the 1,095 are
+absorbed** and the aggregate quotient has **seven**.
+
+The check that catches both mistakes is **mass conservation per rung**: cross weight plus internal
+weight equals the edge count of the level below, at every rung. A writer that drops sibling edges
+and one that keeps them as self-loops both fail it, and no count of holons notices either.
+</Callout>
+
+**The base case has to be stated or the chain does not reach the graph.** *Defined against the
+level below* bottoms out at the finest rung, whose children are the vertices themselves and whose
+quotient is the raw edge list. Without that, the obligations relate each published level to another
+published level and nothing anchors the sequence to the corpus.
+
+**And the quotient is an artefact beside the rows, not a column on one.** A holon row is one holon;
+a quotient edge is a pair of them, which is a different arity — the same reason a corpus writes its
+vertices and its relations as separate artefacts rather than as one wide table. This page listed a
+row as *a group, its position, how many members it has, and its parent*, with no edges on it, and
+then made an obligation out of edges; the two only fit together this way.
 
 ## And the one thing that is not an exact aggregate
 
