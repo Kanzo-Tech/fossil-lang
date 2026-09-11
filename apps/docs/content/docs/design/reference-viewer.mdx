@@ -2,7 +2,7 @@
 title: The reference viewer
 description: What a corpus is supposed to be read as at every zoom — the three parts every multiscale reader has, the five invariants one owes, what a frame costs in bytes for each of four strategies, and the list of places the tree does not yet meet the model.
 direction:
-  summary: A frame reads the coarsest artefact that can answer it and reports every byte it opened — the door reads both pyramids now, and what is left is the ledger, which weighs the two halves of a frame by rules that are not the same one.
+  summary: A frame reads the coarsest artefact that can answer it and reports every byte it opened — the door reads both pyramids and the ledger now falls with the selection, and what is left is the rule that says when the pyramid may answer, stated where a reader can be held to it.
 ---
 
 Every piece of a multiscale viewer is in this tree and none of them was built from a model. The
@@ -13,8 +13,9 @@ supposed to do with a corpus at every zoom, what it may cost, and what it owes t
 the picture.
 
 This is that model, stated as the reference the implementation is held against. The last section is
-the list of places where the tree does not meet it — including the ledger that tells a caller what a
-frame cost, which is the one invariant of the five that does not hold.
+the list of places where the tree does not meet it. The ledger that tells a caller what a frame cost
+was the one invariant of the five that did not hold; it holds now, and what is left of it is stated
+there with the items that are still open.
 
 ## What a reference multiscale viewer is
 
@@ -102,8 +103,8 @@ reason it is not taken is a property (nesting) rather than a benchmark.
 ## The five invariants a viewer owes
 
 Each of these is a property of the *answer*, not of an implementation, and each has something in the
-tree that goes red when it stops holding. Four hold today. The fifth does not, and it is the second
-gap below.
+tree that goes red when it stops holding. All five hold today. The fifth was the last to, and what
+is left of it is the second item below.
 
 **1 · Nesting: refining only ADDS.** `frame(R, k+1) ⊆ frame(R, k)` for the same rectangle. It comes
 free from the predicate, but a writer can still break it in the bytes, so it is checked in the
@@ -141,31 +142,36 @@ reader opens 245 tiles of 245.
 
 **5 · Every byte the frame opened is on the ledger.** A cost a caller cannot see is a cost nobody
 optimises, and the point of reporting bytes at all is that a reader can check them against a network
-tab. `ViewCost` reports `tiles`, `runs`, `bytes` and `read` — and `bytes` counts whole vertex tiles
-and no adjacency at all. **This invariant is false in both directions at once**, which
-the table below is arranged to show.
+tab. `FrameCost` reports `requests`, `bytes`, `ms`, `tiles` and `ofTiles`, and `bytes` is the
+compressed weight of the columns the query projects, over the row groups the read selected, across
+**both** halves of a frame — the vertex artefact that answered and the relation's. What shows it
+holds is that the number *moves with the selection*: a frame reading 3 tiles of 62 reported
+21.76 MB, more than the entire 21.40 MB payload it had not opened; it reports **1.21 MB**.
+`apps/playground/scripts/measure-frame.mjs` is the measurement, and the second item below is what
+is left of this one.
 
 ## What a frame costs
 
 The frame is the whole extent of the million-vertex corpus `apps/corpus/guards/fixture.mjs` writes,
-at a budget of 20,000 marks — `BOUNDED_DEFAULTS.limit` in the renderer, which `levelFor` answers
-**6** for. Every byte is `total_compressed_size` out of the Parquet footer, because DuckDB issues
-its reads from inside a Worker where no thread here can weigh them; anything derived rather than
-measured says so in the cell.
+at a budget of 20,000 marks — `BOUNDED_DEFAULTS.limit` in the renderer, which the door answers
+level **3** for over the four levels this corpus writes. Every byte is `total_compressed_size` out
+of the Parquet footer, because DuckDB issues its reads from inside a Worker where no thread here
+can weigh them; anything derived rather than measured says so in the cell.
 
-**Two conventions exist in this tree and they must not be added up.** `ViewCost.bytes` sums whole
-vertex tiles — every column, `subject` included, which is the widest and is never drawn — and counts
-no adjacency file. `apps/playground/src/whole.ts` sums the columns a query actually projects, across
-both the payload and the adjacency. The second is what a frame *reads*; the first is what a caller
-is *told*, and the gap between the columns is the second half of the table.
+**One convention now, and there were two.** `FrameCost.bytes` and `apps/playground/src/whole.ts`
+weigh a read by the same rule — `total_compressed_size` over the columns the query projects, across
+both the vertex artefact and the relation's. What differs between them is the scope and not the
+rule: `whole.ts` weighs every row group because it loads every row, and the door weighs the row
+groups the rectangle selected. So the columns below may be compared, which is what the third one is
+for.
 
 ```mermaid
 graph LR
-  R["rectangle + budget 20,000<br/>levelFor → level 6"]
+  R["rectangle + budget 20,000<br/>the door derives level 3"]
   R --> V["vertex/Person/tiles.parquet<br/>245 of 245 tiles · <b>12,653 kB</b> projected"]
-  R --> L["vertex/Person/l6/<br/>4 tiles · <b>201 kB</b> projected"]
-  V --> A["by_source/tiles.parquet<br/>the whole relation · <b>13,706 kB</b><br/>read, and on no ledger"]
-  L --> E["edge/Person_knows_Person/l6/<br/><b>1,332 kB</b> · written, and read"]
+  R --> L["vertex/Person/l3/<br/>4 tiles · <b>201 kB</b> · on the ledger"]
+  V --> A["by_source/tiles.parquet<br/>the whole relation · <b>13,706 kB</b><br/>read, and on the ledger"]
+  L --> E["edge/Person_knows_Person/l3/<br/><b>1,332 kB</b> · written, read, on the ledger"]
   A --> P["15,625 marks · 60,136 anchors · 62,024 links"]
   E --> P
   L --> Q["15,625 marks · no anchors · no links"]
@@ -173,16 +179,24 @@ graph LR
 
 ### One frame, four strategies
 
-| | what it reads | what `ViewCost` says | what it draws |
+| | what it reads | what `FrameCost` says | what it draws |
 | --- | --- | --- | --- |
 | **a · load everything**, once | 12,653 + 13,706 = **26,359 kB** | not on this ledger | 1,000,000 marks · 1,999,993 links |
-| **b · tiles + strided payload**, per frame — what the app does | 12,653 + 13,706 = **26,359 kB** | 20,901 kB | 15,625 · 60,136 anchors · 62,024 links |
-| **c · + vertex levels**, `links: false` | **201 kB** · 4 tiles | 335 kB | 15,625 · no anchors · no links |
-| **d · + edge levels** | 201 + 1,332 = **1,533 kB** | reported, by gap 2's arithmetic | 15,625 · 60,136 · 62,024 |
+| **b · tiles + strided payload**, per frame | 12,653 + 13,706 = **26,359 kB** | — not measured | 15,625 · 60,136 anchors · 62,024 links |
+| **c · + vertex levels**, `links: false` | **201 kB** · 4 tiles | **201 kB** | 15,625 · no anchors · no links |
+| **d · + edge levels** — what the app does | 201 + 1,332 = **1,533 kB** | **1,533 kB** | 15,625 · 60,136 · 62,024 |
+
+**The third column is a measurement of rows (c) and (d) and of nothing else.** Those two are what
+the door answers this frame with, and it reports for them exactly what the first column says they
+read — which is the whole of what invariant 5 asks and is why the two columns now agree rather than
+straddle. Row (b)'s cell is empty because there is no longer a way to get the number honestly: this
+corpus writes the pyramid, so the door answers off it and never takes the strided-payload path at
+this rectangle. The figure that stood here was measured against a ledger that weighed whole tiles
+and no adjacency at all, and it is deleted rather than carried forward.
 
 **Rows (a) and (b) read the identical bytes, and that is the finding.** At the whole extent every
 tile intersects the rectangle and both paths project the same columns out of the same two files, so
-the addressing prunes nothing whatsoever on the frame the app opens on. What separates them is not
+the addressing prunes nothing whatsoever at the outermost frame. What separates them is not
 bytes but *when*: the baseline pays 26,359 kB once and every camera move afterwards reaches no
 engine, where the windowed path pays it again per frame — measured in a browser over the same
 corpus, six answers cost the windowed path **36,311 kB cumulative** against the baseline's 26,359 kB.
@@ -193,10 +207,12 @@ Rows (c) and (d) are the same picture at two prices, and (c) is **not** that pic
 are four times its marks and they are real vertices at real coordinates, so dropping them turns a
 zoomed-out view into a sparse cloud with holes rather than a cheaper version of what was there.
 `apps/playground/src/tiles.ts` records that correction against its own earlier decision, and it is
-why the app pays for row (b).
+why the app asks for links at all. What it pays for them is row (d): the same picture off both
+pyramids, one range request and 1,533 kB, which is what
+`apps/playground/scripts/measure-frame.mjs` reports for the frame the app opens on.
 
 Row (d) is the one the model wants, and it is the one `Corpus.frame` produces for a caller that asks
-for links at a level both pyramids are written at. The edge level at *k*=6 holds
+for links at a level both pyramids are written at. The edge level at *k*=3 holds
 **62,024 rows** — exactly the links row (b) draws — and the far ends it positions are exactly the
 **60,136** anchors row (b) returns, because a level of a relation is the edges incident to a
 level-*k* vertex and every row carries both endpoints' coordinates
@@ -206,11 +222,12 @@ level-*k* vertex and every row carries both endpoints' coordinates
 ### The same frame, as the camera zooms
 
 Four rectangles over the same corpus, from [the camera](/docs/design/camera), against the levels
-this corpus actually writes. **This table is on the ledger's convention**, because that is what was
-measured: each row also reads adjacency the ledger does not report — the whole relation on the top
-row, a subset below it that nothing has measured.
+this corpus actually writes. **This table is on the ledger's OLD convention** — whole vertex tiles,
+every column, and no adjacency — which is what was measured at the time and is not what
+`FrameCost.bytes` reports now. It is kept as the strided baseline the pyramid is judged against,
+and it is not a reading of today's ledger.
 
-| window | `levelFor` | tiles | **b** · strided, as reported | **c/d** · off the pyramid |
+| window | `levelFor` | tiles | **b** · strided, whole tiles | **c/d** · off the pyramid |
 | --- | --- | --- | --- | --- |
 | whole extent | 6 | 245 / 245 | 20,901 kB | 335 kB, or 1,332 kB more with the edges |
 | 50% | 5 | 145 / 245 | 12,506 kB | — level 5 is not written |
@@ -246,6 +263,11 @@ them costs the writer bytes.**
 
 ### What the pyramid costs the writer
 
+**These two tables and the four rows above name their levels in the numbering of the pyramid that no
+longer exists**, which this corpus writes as `l1` through `l4` — the door answers the whole extent
+at level 3, and the `335 kB` and `1,332 kB` below are the artefacts it reads there. The bytes are
+what was measured; only the index on them moved.
+
 | set | level 6 | level 7 | level 8 | all three | of the set it decimates |
 | --- | --- | --- | --- | --- | --- |
 | `vertex/Person/l{k}/` | 335 kB | 168 kB | 84 kB | 587 kB *(derived)* | 2.8% *(derived)* |
@@ -260,8 +282,8 @@ per row so that a line can be drawn without opening the payload the pyramid exis
 
 ## What is missing to be that reference
 
-Five, in the order they were written. The first is the one that closed; what is left of it is stated
-with the four that did not.
+Five, in the order they were written. The first two are closed; what is left of each is stated with
+the three that are not.
 
 **1 · The edge levels are read, and what is left is which question the pyramid may be asked.** This
 item said nothing read them, and it named a `levels:` block and an `EdgeLevels` that the tree no
@@ -295,17 +317,40 @@ What is left of this item is not a byte the writer owes; it is what a caller may
   answerable either way, so the number that matters is the one the read reports rather than the one
   a caller predicted.
 
-**2 · `ViewCost.bytes` is wrong in both directions, and the two errors nearly cancel.** At the whole
-extent it reports **20,901 kB** for a frame that reads **26,359 kB**. It counts 8,248 kB of columns
-the query never projects — `subject`, `birth_year` and `postcode`, which are in the tiles and are
-never drawn — and it omits all 13,706 kB of `by_source` that the same frame opens to find the links.
-Neither is an approximation. The first is a unit error (whole tiles where the read is columnar), the
-second a category left out (the edge runs are never weighed against their own footers the way the
-vertex runs are), and a caller watching one number would have seen the pyramid arrive and the
-adjacency stay invisible. One summed number would not fix it either: the two reads are avoided by
-different decisions, and a frame that flips to `read: level` drops one to zero while the other
-stays. What would close it is a second pair of fields weighed the same way, and the projection the
-query already knows.
+**2 · The byte ledger is a measurement, and what is left is that it and `requests` weigh different
+things.** This item said `bytes` was wrong in both directions at once, and it named both: whole
+tiles where the read is columnar, and no adjacency at all. Both are closed, and they closed
+separately.
+
+The columnar half went in `e7bd99e`, which made the weighing `total_compressed_size` over the
+columns the query projects and added the edge half to the same call. The half that survived it is
+one the item never named, and it is the one that made the number useless in practice: **under
+`rowgroups` every tile of a set names the same URL**, so a sum over `parquet_metadata(urls)` weighed
+the whole *file* rather than the row groups the rectangle selected. The vertex half only looked
+selected because a level read names a small file; the edge half named the entire relation. The
+symptom is one column of `apps/playground/scripts/measure-frame.mjs`: **`bytes` did not fall with
+`tiles`.** A frame reading 3 tiles of 62 reported 21.76 MB — more than the whole 21.40 MB payload it
+had not opened — and a camera closing in reported the same figure four moves running.
+
+The fix took nothing new. The per-row-group extents were already read and already used:
+`FrameCost.requests` collapses the selection into maximal runs off `TileBox.start` and
+`TileBox.bytes`, so the intervals the read is bounded by were in hand and the sum was taken over the
+wrong set. `bytesOf` in `packages/corpus/src/corpus.ts` is now bounded by those same intervals,
+matched against each row group's own statistics on the column they are stated over — `dense_id` for
+the vertex half, `src_dense` for the relation's, which is the only thing that locates an adjacency
+row group under either container. A row group whose footer declares no statistics is counted, which
+is the conservative answer and the one the tile boxes already make. Measured over the same ten-frame
+camera path: the 3-of-62 frame is **1.21 MB**, and every frame that opens part of an artefact now
+reports a fraction of it.
+
+What is left is not a direction, it is a caveat a caller has to be told rather than left to infer.
+**`bytes` and `requests` weigh the same read under different rules.** A request is a `Range` over a
+maximal run of abutting row groups, and a range is not columnar: it carries `subject` along with the
+four columns a view draws with. So `bytes / requests` is not the size of a request, and a reader
+checking the ledger against a network tab will find the responses larger than the bytes — by whatever
+share of a row group the projection leaves out, which on this corpus's payload is most of it. What
+would close it is a third field weighing the runs whole; what argues against it is that nothing has
+yet asked how large the responses are, only how much of the corpus a frame had to touch.
 
 **3 · There is no level of detail for the identity index, and no statement of whether it needs one.**
 The index is [not a projection](/docs/format/conventions/identity), so it carries a prefix, an

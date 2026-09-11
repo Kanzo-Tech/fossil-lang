@@ -1057,18 +1057,69 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
    * ever paints. A ledger that charged a frame for it would be as wrong as one that omitted the
    * adjacency, in the other direction, and the two errors nearly cancelling is worse than either.
    *
-   * Keyed on the URL list and the column list, because a set read two ways is two reads.
+   * **The ROW GROUPS the read selected, not the whole file.** Under `rowgroups` every tile of a
+   * set names one URL, so a sum over `parquet_metadata(urls)` weighs the whole FILE: a frame
+   * reading three tiles of sixty-two was charged for all sixty-two, and the byte column did not
+   * fall as the camera closed in — measured on the bench corpus, 21.76 MB reported against a
+   * 21.40 MB payload the frame did not read. So the weighing is bounded the same way the READ is,
+   * by the `dense_id` intervals {@link TileRun} already names, matched against each row group's
+   * own statistics on the column those intervals are stated over. A row group whose footer
+   * declares none is counted — the conservative answer, and the one {@link tileBoxes} makes for a
+   * tile with no box.
+   *
+   * Under `files` the URL list already names the selected tiles and every interval intersects, so
+   * the bound is a no-op there rather than a second convention.
+   *
+   * Keyed on the URL list, the column list AND the bound, because a set read two ways is two reads.
    */
   const weights = new Map<string, Promise<number>>();
-  const bytesOf = (urls: readonly string[], columns: readonly string[]): Promise<number> => {
+  /** The intervals a read is bounded by, over the column they are stated in. */
+  interface ByteBound {
+    readonly column: string;
+    readonly runs: readonly TileRun[];
+    /** How many ids a tile of the artefact being weighed spans — the read's own `span`. */
+    readonly span: bigint;
+  }
+  const bytesOf = (
+    urls: readonly string[],
+    columns: readonly string[],
+    within?: ByteBound,
+  ): Promise<number> => {
     if (urls.length === 0) return Promise.resolve(0);
-    const key = `${columns.join(',')}\u0000${urls.join('\u0000')}`;
+    if (within !== undefined && within.runs.length === 0) return Promise.resolve(0);
+    const bound =
+      within === undefined
+        ? ''
+        : `${within.column}:${String(within.span)}:` +
+          within.runs.map((r) => `${r.first}-${r.last}`).join(',');
+    const key = `${columns.join(',')}\u0000${bound}\u0000${urls.join('\u0000')}`;
     const cached = weights.get(key);
     if (cached) return cached;
-    const loading = query(
-      `SELECT sum(total_compressed_size) AS bytes FROM parquet_metadata(${list([...urls])}) ` +
-        `WHERE path_in_schema IN (${columns.map((c) => `'${c.replace(/'/g, "''")}'`).join(', ')})`,
-    ).then((rows) => Number(rows[0]?.['bytes'] ?? 0));
+    const wanted = `path_in_schema IN (${columns.map((c) => lit(c)).join(', ')})`;
+    const stat = (fn: string, field: string): string =>
+      `${fn}(CASE WHEN path_in_schema = ${lit(within!.column)} THEN ` +
+      `TRY_CAST(coalesce(stats_${field}_value, stats_${field}) AS DOUBLE) END)`;
+    const sql =
+      within === undefined
+        ? `SELECT sum(total_compressed_size) AS bytes FROM parquet_metadata(${list([...urls])}) ` +
+          `WHERE ${wanted}`
+        : // One footer read, grouped per row group: the projected columns' bytes beside that
+          // group's own bounds on the range column. `TRY_CAST` because the statistics arrive as
+          // the writer wrote them and a group that declares none must be kept rather than throw.
+          `SELECT sum(bytes) AS bytes FROM (\n` +
+          `  SELECT sum(CASE WHEN ${wanted} THEN total_compressed_size ELSE 0 END) AS bytes,\n` +
+          `         ${stat('min', 'min')} AS lo, ${stat('max', 'max')} AS hi\n` +
+          `  FROM parquet_metadata(${list([...urls])}) GROUP BY file_name, row_group_id\n` +
+          `) WHERE lo IS NULL OR hi IS NULL OR (` +
+          within.runs
+            .map(
+              (run) =>
+                `lo <= ${BigInt(run.last + 1) * within.span - 1n} ` +
+                `AND hi >= ${BigInt(run.first) * within.span}`,
+            )
+            .join(' OR ') +
+          `)`;
+    const loading = query(sql).then((rows) => Number(rows[0]?.['bytes'] ?? 0));
     weights.set(key, loading);
     return loading;
   };
@@ -1737,9 +1788,19 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       );
       // The vertex half, weighed over the four columns a view draws with rather than over the
       // whole tile — `runs` carries the tile's total and that total includes `subject`.
+      //
+      // Two calls and not one over the union, because the two sets are bounded by different
+      // intervals: the selection's runs at whatever `span` the artefact that answered uses, and
+      // the pins' own payload tiles at the payload's `chunk`. One call could only be bounded by
+      // one of them, and under `rowgroups` an unbounded call weighs the file.
       const drawnColumns = distinct(['dense_id', 'x', 'y', fill]);
-      const readUrls = distinct([...urls, ...pinUrls]);
-      const bytes = await bytesOf(readUrls, drawnColumns);
+      const bytes =
+        (await bytesOf(urls, drawnColumns, { column: 'dense_id', runs, span })) +
+        (await bytesOf(pinUrls, drawnColumns, {
+          column: 'dense_id',
+          runs: pinRuns,
+          span: chunk,
+        }));
 
       const empty: Frame = {
         type: address.type,
@@ -1906,11 +1967,17 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
       // What the lines cost, on the ledger rather than beside it. Under a level read this is the
       // relation's own level set; under a payload read it is the adjacency tiles the plan named.
+      //
+      // Bounded by the SAME intervals the edge query is — `ranges('src_dense')` — because both
+      // sides of a relation's file are addressed by the source's `dense_id` and neither container
+      // gives an adjacency tile a row-group ordinal of its own: what locates it is the footer's
+      // box on `src_dense`, which is what this weighs against.
       const edgeBytes = await bytesOf(
         edgeUrls,
         viaLevel
           ? ['src_dense', 'dst_dense', 'src_x', 'src_y', 'dst_x', 'dst_y']
           : ['src_dense', 'dst_dense'],
+        { column: 'src_dense', runs, span },
       );
       const rows = points.length;
       const denseIds = new BigUint64Array(rows);
