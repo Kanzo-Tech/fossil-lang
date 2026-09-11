@@ -24,11 +24,12 @@ graph LR
   M -->|24| L
   M -->|9| C
   C -->|1| M
+  C -->|1| L
   M -->|1| X
   C -->|1| X
 ```
 
-**55 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
+**56 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -50,8 +51,17 @@ The mutual arrow is `engine ↔ corpus`, and one edge holds it:
 | engine → corpus | `fossil-introspect → fossil-resolver` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
 
 `fossil-sinks` and `fossil-resolver` are filed by subject and not by history, and that is the whole
-of the change: neither crate has a fossil dependency of its own, so a leaf changed groups and no
-code moved. It **cost** an edge rather than saving one — `fossil-df → fossil-sinks`,
+of the change: neither crate had a fossil dependency of its own when it was filed, so a leaf changed
+groups and no code moved.
+
+**`fossil-sinks` is not a leaf any more, and that is the whole of the `corpus → language` arrow.**
+It grew two: `fossil-policy`, which is inside `corpus` and so invisible here, and
+`fossil-graph-schema`, which is not — a manifest records what a compiler decided, so it names the
+substrate contract, and `crates/fossil-graph-schema/src/lib.rs, Cardinality` is what made an edge's
+`{1,1}` a fact the corpus could state rather than one a reader defaulted. The direction runs this
+way for the same reason `fossil-policy` does, and it is **not** the objection that keeps
+`fossil-hir::Primitive` out of the manifest layer: a cardinality is not a type, it is the shape a
+predicate was declared with. `fossil-resolver` is still a leaf. It **cost** an edge rather than saving one — `fossil-df → fossil-sinks`,
 `fossil-cli → fossil-sinks` and `fossil-introspect → fossil-resolver` used to be internal to the
 engine, three that started crossing against two that stopped — and it bought the cycle:
 `fossil-graph → fossil-sinks` and `fossil-mcp → fossil-resolver` are now inside `corpus`, so the
