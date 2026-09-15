@@ -75,6 +75,15 @@
    coordinate   the plane. Declared as a pair, drawn as a pair.
    categorical  an ordinal the writer computed, for a reader to colour by.
    endpoint     one end of a relation, in the aligned type's `dense_id` space.
+   tally        how many rows of the level below a summary row stands for.
+   weight       a summed edge weight.
+   mode         the majority value of a categorical over the rows summarised.
+   purity       what fraction of those rows carry the mode.
+   incident     one end of a quotient edge, in its own rung's cell space. NOT an
+                `endpoint`: an endpoint indexes a vertex type's `dense_id`, and
+                these index the rung's own cells, which is a different space with
+                a different width at every rung. Sharing the role would have
+                given the quotient an `aligns` it has no use for.
 
    `declared` marks a column that also appears in the manifest's `properties:`.
    Exactly one does. That asymmetry is the whole of the manifest-versus-bytes
@@ -101,3 +110,44 @@ col cluster_id = in payload ; type uint32  ; role categorical .
 
 col src_dense = in adjacency ; type uint32 ; role endpoint ; aligns src .
 col dst_dense = in adjacency ; type uint32 ; role endpoint ; aligns dst .
+
+(* ------------------------------------------------------------- the pyramid *)
+(* A cell row is one texel: a region of the plane, summarised. One rung of the
+   pyramid is a set of them, and `/docs/design/holons` is the argument for why it
+   is a third artefact and not a coarse `Projection`.
+
+   Two columns of the payload are NOT here and their absence is the design:
+
+   - no `parent`. A cell of rung `k` covers exactly `[r·4^k, (r+1)·4^k)` of the
+     `dense_id` axis, so the parent of cell `r` is `r >> 2` and the id carries
+     it. A stored parent would be a second statement of a shift.
+   - no `subject`. A cell is not an entity and no bookmark keys on one; the same
+     argument that keeps it out of `properties:` keeps it out of here.
+
+   `x` and `y` are deliberately the payload's own names. A reader drawing a cell
+   draws it exactly as it draws a vertex, and a second spelling would make the
+   camera ask which artefact it is holding. *)
+
+col cell_id  = in cell ; type uint32  ; role address .
+col x        = in cell ; type float32 ; role coordinate .
+col y        = in cell ; type float32 ; role coordinate .
+col count    = in cell ; type uint32  ; role tally .
+col internal = in cell ; type uint64  ; role weight .
+col mode     = in cell ; type uint32  ; role mode .
+col purity   = in cell ; type float32 ; role purity .
+
+(* ------------------------------------------------------------- the quotient *)
+(* The edges between one rung's cells, beside that rung's rows. A separate
+   artefact because of arity and not preference: a cell row is one cell and a
+   quotient edge is a pair of them, which is the same reason a corpus writes its
+   vertices and its relations apart.
+
+   An edge whose two ends share a cell is NOT an edge of that cell — it is
+   absorbed into the cell's `internal`. On the planted fixture
+   `crates/fossil-layout/tests/holons.rs` evaluates, 1,088 of 1,095 edges are
+   absorbed and the quotient has seven, so a writer that relabels the endpoints
+   and keeps the set is not wrong in an edge case. *)
+
+col src_cell = in quotient ; type uint32 ; role incident .
+col dst_cell = in quotient ; type uint32 ; role incident .
+col weight   = in quotient ; type uint64 ; role weight .

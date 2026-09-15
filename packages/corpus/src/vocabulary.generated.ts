@@ -19,6 +19,16 @@ export type ColumnRole =
   | 'categorical'
   /** One end of a relation, in the aligned type's `dense_id` space. */
   | 'endpoint'
+  /** How many rows of the level below this one summarises. */
+  | 'tally'
+  /** A summed edge weight. */
+  | 'weight'
+  /** The majority value of a categorical over the rows summarised. */
+  | 'mode'
+  /** What fraction of the rows summarised carry the mode. */
+  | 'purity'
+  /** One end of a quotient edge, in its own rung's cell space. */
+  | 'incident'
 ;
 
 /** One column the writer emits. */
@@ -66,6 +76,54 @@ export const ADJACENCY_NAMES: readonly string[] = ['src_dense', 'dst_dense'];
 
 /** The endpoint column(s) of an adjacency row, in either orientation — one end of a relation, in the aligned type's `dense_id` space. */
 export const ADJACENCY_ENDPOINTS: readonly string[] = ['src_dense', 'dst_dense'];
+
+/** Every column of a cell row of one rung of the pyramid, in writer order. */
+export const CELL_COLUMNS: readonly WriterColumn[] = [
+  { name: 'cell_id', dataType: 'uint32', role: 'address', declared: false },
+  { name: 'x', dataType: 'float32', role: 'coordinate', declared: false },
+  { name: 'y', dataType: 'float32', role: 'coordinate', declared: false },
+  { name: 'count', dataType: 'uint32', role: 'tally', declared: false },
+  { name: 'internal', dataType: 'uint64', role: 'weight', declared: false },
+  { name: 'mode', dataType: 'uint32', role: 'mode', declared: false },
+  { name: 'purity', dataType: 'float32', role: 'purity', declared: false },
+];
+
+/** The names of a cell row of one rung of the pyramid, in writer order. */
+export const CELL_NAMES: readonly string[] = ['cell_id', 'x', 'y', 'count', 'internal', 'mode', 'purity'];
+
+/** The address column(s) of a cell row of one rung of the pyramid — the row's rank in the ordering, which a re-layout renumbers. */
+export const CELL_ADDRESS: readonly string[] = ['cell_id'];
+
+/** The coordinate column(s) of a cell row of one rung of the pyramid — one axis of the plane. */
+export const CELL_COORDINATES: readonly string[] = ['x', 'y'];
+
+/** The tally column(s) of a cell row of one rung of the pyramid — how many rows of the level below this one summarises. */
+export const CELL_TALLY: readonly string[] = ['count'];
+
+/** The weight column(s) of a cell row of one rung of the pyramid — a summed edge weight. */
+export const CELL_WEIGHT: readonly string[] = ['internal'];
+
+/** The mode column(s) of a cell row of one rung of the pyramid — the majority value of a categorical over the rows summarised. */
+export const CELL_MODE: readonly string[] = ['mode'];
+
+/** The purity column(s) of a cell row of one rung of the pyramid — what fraction of the rows summarised carry the mode. */
+export const CELL_PURITY: readonly string[] = ['purity'];
+
+/** Every column of a quotient edge between two cells of one rung, in writer order. */
+export const QUOTIENT_COLUMNS: readonly WriterColumn[] = [
+  { name: 'src_cell', dataType: 'uint32', role: 'incident', declared: false },
+  { name: 'dst_cell', dataType: 'uint32', role: 'incident', declared: false },
+  { name: 'weight', dataType: 'uint64', role: 'weight', declared: false },
+];
+
+/** The names of a quotient edge between two cells of one rung, in writer order. */
+export const QUOTIENT_NAMES: readonly string[] = ['src_cell', 'dst_cell', 'weight'];
+
+/** The weight column(s) of a quotient edge between two cells of one rung — a summed edge weight. */
+export const QUOTIENT_WEIGHT: readonly string[] = ['weight'];
+
+/** The incident column(s) of a quotient edge between two cells of one rung — one end of a quotient edge, in its own rung's cell space. */
+export const QUOTIENT_INCIDENTS: readonly string[] = ['src_cell', 'dst_cell'];
 
 /**
  * The payload columns the manifest's `properties:` also declares.
