@@ -53,8 +53,10 @@ use std::fs;
 use std::io::Write as _;
 use std::path::PathBuf;
 
-use fossil_layout::layout::community::{Cut, Dendrogram};
-use fossil_sinks::manifest::DEFAULT_CHUNK_SIZE;
+use fossil_layout::layout::cluster_layout;
+use fossil_layout::layout::community::{Cut, Dendrogram, order_by_hierarchy};
+use fossil_layout::layout::morton::{morton_codes, morton_ranks};
+use fossil_sinks::manifest::{DEFAULT_CHUNK_SIZE, DEFAULT_VERTICES_PER_CELL, HolonTree};
 
 /// One community's aggregate over the ORIGINAL graph, which is what modularity
 /// is defined against — a level's quality is a statement about the graph it
@@ -133,6 +135,248 @@ fn percentile(sorted: &[u64], permille: usize) -> u64 {
     }
     let last = sorted.len() - 1;
     sorted[((last * permille) / 1000).min(last)]
+}
+
+// ─────────────────────────────────────────────────────── and then it places ──
+//
+// The finest level is the placement partition, and the plane it is placed on is
+// the second half of the same question: a level worth drawing still has to be
+// drawn somewhere. What follows is the baseline this repository replaced and the
+// rule that replaced it, side by side over the same partition.
+
+/// Phyllotaxis packing radius, and the golden angle that spaces it — the two
+/// constants both placements share.
+const INTRA_CLUSTER_RADIUS: f32 = 12.0;
+const GOLDEN_ANGLE: f32 = 2.399_963_2;
+/// The constant gap the uniform pitch added to the largest disc's diameter.
+const CLUSTER_SPACING: f32 = 100.0;
+
+// Deliberate numeric code, and scoped to the two functions that need it rather
+// than to the file: a placement is `f32` geometry over `u32` counts and this
+// prints areas as integers. The `ratio` helper above keeps the level table free
+// of it, which is why the allow is not at the top.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+/// **The placement this measurement is the baseline for**: one grid, one pitch,
+/// and the pitch is the largest group's disc plus a constant.
+///
+/// A copy, deliberately, and it is the only honest way to print two rows of one
+/// table — `fossil_layout::layout::cluster_layout` is the row underneath and
+/// there is no version of the crate that holds both. What keeps the copy true is
+/// that the numbers it produces here are the ones `/docs/design/position`
+/// already published from the corpus itself: an extent of 560,176 and an
+/// occupancy of 0.046% over com-DBLP.
+fn uniform_pitch_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
+    let num_clusters = cluster_ids.iter().copied().max().map_or(0, |m| m + 1);
+    if num_clusters == 0 {
+        return Vec::new();
+    }
+    let mut sizes = vec![0u32; num_clusters as usize];
+    for &c in cluster_ids {
+        sizes[c as usize] += 1;
+    }
+    let largest = sizes.iter().copied().max().unwrap_or(0);
+    let pitch = 2.0f32.mul_add(
+        INTRA_CLUSTER_RADIUS * f64::from(largest).sqrt() as f32,
+        CLUSTER_SPACING,
+    );
+    let mut seen = vec![0u32; num_clusters as usize];
+    let mut out = Vec::with_capacity(cluster_ids.len());
+    for &c in cluster_ids {
+        let (col, row) = morton_decode(c);
+        let k = seen[c as usize];
+        seen[c as usize] += 1;
+        let angle = k as f32 * GOLDEN_ANGLE;
+        let radius = INTRA_CLUSTER_RADIUS * ((k as f32) + 1.0).sqrt();
+        out.push((
+            radius.mul_add(angle.cos(), col as f32 * pitch),
+            radius.mul_add(angle.sin(), row as f32 * pitch),
+        ));
+    }
+    out
+}
+
+/// The grid cell a cluster id occupies, for [`uniform_pitch_layout`] only — the
+/// placement under test addresses by a frontier and needs no inverse.
+const fn morton_decode(code: u32) -> (u32, u32) {
+    const fn compact(mut n: u32) -> u32 {
+        n &= 0x5555_5555;
+        n = (n | (n >> 1)) & 0x3333_3333;
+        n = (n | (n >> 2)) & 0x0f0f_0f0f;
+        n = (n | (n >> 4)) & 0x00ff_00ff;
+        n = (n | (n >> 8)) & 0x0000_ffff;
+        n
+    }
+    (compact(code), compact(code >> 1))
+}
+
+/// A box, as the four numbers a bounding box is.
+#[derive(Clone, Copy)]
+struct Bbox {
+    xlo: f64,
+    ylo: f64,
+    xhi: f64,
+    yhi: f64,
+}
+
+impl Bbox {
+    const EMPTY: Self = Self {
+        xlo: f64::MAX,
+        ylo: f64::MAX,
+        xhi: f64::MIN,
+        yhi: f64::MIN,
+    };
+    fn see(&mut self, (x, y): (f32, f32)) {
+        self.xlo = self.xlo.min(f64::from(x));
+        self.ylo = self.ylo.min(f64::from(y));
+        self.xhi = self.xhi.max(f64::from(x));
+        self.yhi = self.yhi.max(f64::from(y));
+    }
+    fn area(self) -> f64 {
+        if self.xhi < self.xlo {
+            return 0.0;
+        }
+        (self.xhi - self.xlo) * (self.yhi - self.ylo)
+    }
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+/// **What one placement costs the plane and the id axis**, printed as two rows
+/// of the same table.
+///
+/// `label` names the placement, `positions` is what it returned and `placement`
+/// the per-vertex group it was given. Everything below is derived from those
+/// three and from the addressing rule the corpus publishes, so the numbers are
+/// the corpus's own rather than the placement's opinion of itself.
+fn plane_report(label: &str, positions: &[(f32, f32)], placement: &[u32]) {
+    let groups = placement.iter().copied().max().map_or(0, |m| m + 1) as usize;
+    let mut sizes = vec![0u64; groups];
+    for &c in placement {
+        sizes[c as usize] += 1;
+    }
+
+    let mut whole = Bbox::EMPTY;
+    for &p in positions {
+        whole.see(p);
+    }
+    // What the members themselves cover: one phyllotaxis disc per group, at the
+    // radius the last member reached. Discs do not overlap in either placement,
+    // so the sum is the occupied area and not an upper bound on it.
+    let discs: f64 = sizes
+        .iter()
+        .map(|&m| {
+            std::f64::consts::PI * (f64::from(INTRA_CLUSTER_RADIUS) * (m as f64).sqrt()).powi(2)
+        })
+        .sum();
+
+    // The addressing, exactly as a reader would recompute it.
+    let codes = morton_codes(positions);
+    let (rank, order) = morton_ranks(&codes);
+
+    // Is a group one run of `dense_id`, or several? The placement claims one:
+    // a group is one aligned block of the quaternary, and the frontier hands
+    // blocks out in id order.
+    let mut runs = vec![0u64; groups];
+    let mut previous: Option<u32> = None;
+    for &old in &order {
+        let c = placement[old as usize];
+        if previous != Some(c) {
+            runs[c as usize] += 1;
+        }
+        previous = Some(c);
+    }
+    let mut run_counts: Vec<u64> = runs.clone();
+    run_counts.sort_unstable();
+    let one_run = runs.iter().filter(|&&r| r == 1).count();
+
+    // And is the id axis the group order? Every union of consecutive groups —
+    // which is every coarser level of the dendrogram — is an interval of
+    // `dense_id` exactly when it is.
+    let mut monotone = true;
+    let mut highest = 0u32;
+    for &old in &order {
+        let c = placement[old as usize];
+        if c < highest {
+            monotone = false;
+            break;
+        }
+        highest = c;
+    }
+
+    println!("\n── {label}");
+    println!(
+        "  extensión {:>10.0} x {:<10.0} ocupación {:>7.3}%   discos {:>12.0}",
+        whole.xhi - whole.xlo,
+        whole.yhi - whole.ylo,
+        100.0 * discs / whole.area(),
+        discs,
+    );
+    println!(
+        "  tiradas por grupo: p50 {}, p90 {}, máx {} — {one_run} de {groups} en una sola",
+        percentile(&run_counts, 500),
+        percentile(&run_counts, 900),
+        run_counts.last().copied().unwrap_or(0),
+    );
+    println!(
+        "  el eje de ids sigue el orden de grupo: {}",
+        if monotone { "sí" } else { "NO" },
+    );
+
+    // The pyramid's own question: is a rung's cell a fixed area, or only a fixed
+    // count? `dense_id >> shift` is the cell, exactly as the writer cuts it.
+    let vertex_count = positions.len() as u64;
+    println!(
+        "  {:>5} {:>9} {:>12} {:>12} {:>12} {:>12} {:>11}",
+        "rung", "celdas", "área mín", "área p50", "área p99", "área máx", "máx/mín"
+    );
+    for rung in 1u32..=6 {
+        let Some(shift) = HolonTree::shift_at(DEFAULT_VERTICES_PER_CELL, rung) else {
+            break;
+        };
+        let Some(cells) = HolonTree::holons_at(vertex_count, DEFAULT_VERTICES_PER_CELL, rung)
+        else {
+            break;
+        };
+        let mut boxes = vec![Bbox::EMPTY; cells as usize];
+        for (v, &r) in rank.iter().enumerate() {
+            boxes[(r >> shift) as usize].see(positions[v]);
+        }
+        // Cells the numbering leaves short — the last one, and any the tail of a
+        // group left with a single member — carry a degenerate box that is not a
+        // statement about the placement, so the range is taken over the full
+        // ones only.
+        let mut areas: Vec<u64> = boxes
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| (*i as u64 + 1) << shift <= vertex_count)
+            .map(|(_, b)| b.area() as u64)
+            .collect();
+        areas.sort_unstable();
+        let (lo, hi) = (
+            areas.first().copied().unwrap_or(0),
+            areas.last().copied().unwrap_or(0),
+        );
+        println!(
+            "  {rung:>5} {cells:>9} {lo:>12} {:>12} {:>12} {hi:>12} {:>10.0}x",
+            percentile(&areas, 500),
+            percentile(&areas, 990),
+            if lo == 0 {
+                f64::INFINITY
+            } else {
+                hi as f64 / lo as f64
+            },
+        );
+        if cells <= 1 {
+            break;
+        }
+    }
 }
 
 fn main() {
@@ -269,6 +513,27 @@ fn main() {
     } else {
         println!("niveles descartados: {dropped:?} — ninguno es un cuarto del que tiene encima");
     }
+
+    // El plano: la partición más fina es la que coloca, y las dos reglas que la
+    // han colocado, una debajo de la otra.
+    let mut placement = tree
+        .membership(0)
+        .unwrap_or_else(|| (0..vertex_count).collect());
+    order_by_hierarchy(tree.levels(), 0, &mut placement);
+    let groups = placement.iter().copied().max().map_or(0, |m| m + 1);
+    println!(
+        "\nel plano, sobre la partición que coloca: {groups} grupos, base {DEFAULT_VERTICES_PER_CELL} vértices/celda"
+    );
+    plane_report(
+        "paso uniforme por el grupo máximo",
+        &uniform_pitch_layout(&placement),
+        &placement,
+    );
+    plane_report(
+        "una celda por grupo",
+        &cluster_layout(&placement),
+        &placement,
+    );
 
     if let Some(dir) = &out {
         println!("\nniveles volcados en {}", dir.display());

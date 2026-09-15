@@ -85,20 +85,24 @@ always — but the **area** that run covers is whatever the placement put there,
 today is `crates/fossil-layout/src/layout/place.rs, cluster_layout` on a grid whose pitch is fixed
 by the largest group.
 
-Measured over com-DBLP, that costs the analogy its subject. Sixteen consecutive ids inside the
-20,459-member group are sixteen members of one phyllotaxis disc, a patch about 85 units across;
-sixteen consecutive ids out at the median group are five whole groups in five whole grid cells,
-better than 7,000 units across. **Same rung, same count, four orders of magnitude of area.** A
-mipmap level whose texels differ in area by four orders of magnitude is not a mipmap level, and
-`corpus.bnf` has been calling a cell row *one texel: a region of the plane, summarised* on the
+Measured over com-DBLP, that cost the analogy its subject. At the declared base of sixteen vertices
+per cell, a rung-1 cell ran from 4,676 square units to 4,764,880,428 — **1,019,008×, at one rung, at
+one count** — because sixteen consecutive ids inside the 20,459-member group are sixteen members of
+one phyllotaxis disc and sixteen out where the median group is are five whole groups in five whole
+grid cells. A mipmap level whose texels differ in area by six orders of magnitude is not a mipmap
+level, and `corpus.bnf` was calling a cell row *one texel: a region of the plane, summarised* on the
 strength of an addressing argument that never reached the plane.
 
-What repairs it is a change to the placement and to nothing here:
+What repaired it is a change to the placement and to nothing here:
 [a cell per group](/docs/design/position) gives every group a block of its own size, which makes the
-density uniform, which makes a rank interval an area interval. **The pyramid does not change shape**
-— same base, same `ceil(V / 4^k)` per rung, same files, same columns, and the same `dense_id >>
-shift` computing a cell id. It changes what one of its rows is about, which is the only part of it a
-reader was ever going to see.
+density uniform, which makes a rank interval an area interval. The same rung now runs 4,911 to
+34,618,064 — **7,049×** — and the coarse rungs, where a mark actually stands for a region, land at
+302× by rung 3 and 11× by rung 6. What is left is bounded and named over there: a power-of-four
+rounding, and the Z-curve's own jumps.
+
+**The pyramid does not change shape.** Same base, same `ceil(V / 4^k)` per rung, same files, same
+columns, and the same `dense_id >> shift` computing a cell id. It changes what one of its rows is
+about, which is the only part of it a reader was ever going to see.
 
 And the pyramid is already the other half of a mipmap. A level in
 `crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex whose `dense_id` is a multiple of

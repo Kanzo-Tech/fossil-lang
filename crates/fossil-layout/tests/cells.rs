@@ -465,6 +465,83 @@ fn every_rung_says_what_the_level_below_it_says() {
     fs::remove_dir_all(&root).ok();
 }
 
+/// **The partition the manifest publishes is an interval of `dense_id`**, which
+/// is what makes it locatable by the same arithmetic everything else here is.
+///
+/// It is not a property of the pyramid and it is the pyramid's precondition. A
+/// cell is `dense_id >> shift`, so a rung means something about the plane only
+/// if the id axis follows the plane — and `cluster_id`, which is the one
+/// partition a reader colours by, is the coarsest thing that has to survive the
+/// trip. It does because of how the vertices were placed: `order_by_hierarchy`
+/// makes a run of consecutive placement groups a subtree, and
+/// `fossil_layout::layout::cluster_layout` gives each group one aligned block of
+/// the quaternary off a frontier that never goes back, so a subtree is a run of
+/// adjacent blocks and a run of adjacent blocks is a run of ids.
+///
+/// **What this goes red for** is every way of breaking that chain: a buddy
+/// allocation that reuses the holes its alignment leaves, a placement that
+/// ignores the hierarchy's order, and a grid whose cells are not powers of four
+/// of each other. Each produces a corpus that opens, draws and answers, with a
+/// reader colouring scattered packets and nothing saying so — which is the
+/// defect `/docs/design/position` measured before the placement was changed:
+/// 1,229 published groups against 55,712 that drew, and no way to tell.
+///
+/// # Why this is a budget and not a zero
+///
+/// The chain has one link the placement does not own. `morton_codes` quantises
+/// each axis over the extent the positions turned out to have, independently —
+/// so the blocks map onto the addressing's own grid exactly when the placement
+/// filled a square, and the placement fills its square to within the margins of
+/// the two groups at its corners. Measured: this fixture and com-DBLP both come
+/// out at zero foreign ids, and a variant whose extent was 0.13% off square put
+/// thirteen of 1,603 groups into two runs apiece. So what is asserted is the
+/// mass — how much of the corpus falls inside a group's id range without
+/// belonging to that group — against a budget a rounding does not reach and the
+/// defect does: taking `order_by_hierarchy` out of the pass puts 853 ids on the
+/// wrong side of it against a budget of forty, which is the same corpus and the
+/// same placement with only the group numbering changed.
+///
+/// What would make it a zero is a published quantisation box, and that is a
+/// change to the format rather than to the placement — `/docs/design/discarded`
+/// carries it with what would bring it back.
+#[test]
+fn a_cluster_is_one_run_of_dense_id() {
+    let root = dir("runs");
+    let edges = planted(ROWS);
+    let c = corpus(ROWS, &edges);
+    let (v, a) = targets(&c, &root);
+    enrich_layout(&v, &a).expect("the layout pass");
+
+    let db = Connection::open_in_memory().expect("duckdb");
+    let payload = lit(&root.join("payload").join("tiles.parquet"));
+
+    // More than one group, or the property is vacuous: a partition of one is an
+    // interval whatever the placement did.
+    let groups = scalar(
+        &db,
+        &format!("SELECT count(DISTINCT cluster_id) FROM read_parquet('{payload}')"),
+    );
+    assert!(groups > 1, "one group is not a partition to check");
+
+    // Every id inside a group's range that is not the group's own. Zero when
+    // every group is one interval, and `rows × groups` in the limit where the
+    // partition is scattered evenly over the whole axis.
+    let foreign = scalar(
+        &db,
+        &format!(
+            "SELECT coalesce(sum(hi - lo + 1 - n), 0) FROM (                SELECT count(*) AS n, min(dense_id) AS lo, max(dense_id) AS hi                FROM read_parquet('{payload}') GROUP BY cluster_id              )"
+        ),
+    );
+    let budget = i64::from(ROWS) / 100;
+    assert!(
+        foreign <= budget,
+        "{foreign} ids fall inside a group's range without belonging to it, over {groups} groups —          the budget is {budget}, and a partition scattered across the axis reaches {}",
+        i64::from(ROWS) * groups,
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
 /// **A type no bigger than one cell gets no pyramid**, and the report says so by
 /// omission rather than by an empty tree.
 ///

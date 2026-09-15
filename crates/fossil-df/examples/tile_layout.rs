@@ -146,17 +146,25 @@ struct Corpus {
     full: bool,
 }
 
-/// Golden angle, cluster spacing and packing radius — copied from
-/// `fossil_layout::layout`, which depends on this crate and so cannot be
+/// Golden angle, packing radius and the margin around a group's disc — copied
+/// from `fossil_layout::layout`, which depends on this crate and so cannot be
 /// depended on from here. If those constants move, this example measures a
 /// corpus the writer no longer produces.
 const GOLDEN_ANGLE: f32 = 2.399_963_2;
-const CLUSTER_SPACING: f32 = 100.0;
 const INTRA_CLUSTER_RADIUS: f32 = 12.0;
+const CLUSTER_MARGIN_RATIO: f32 = 0.25;
+/// The side of the block a group of one member gets, and the unit the rest are
+/// powers of two of.
+const CELL_UNIT: f32 = 2.0 * INTRA_CLUSTER_RADIUS * (1.0 + CLUSTER_MARGIN_RATIO);
 
-/// `fossil_layout::layout::cluster_layout`, verbatim in behaviour: clusters on
-/// a Z-order grid, phyllotaxis within the cell, uniform pitch sized by the
-/// largest disc.
+/// `fossil_layout::layout::cluster_layout`, verbatim in behaviour: every group
+/// an aligned square of the quaternary sized to its own membership, handed out
+/// by bumping a Z-order frontier over the whole root square, phyllotaxis inside.
+///
+/// The clusters this example builds are all the same size, so the only part of
+/// that rule it exercises is the block size — which is exactly what it needs:
+/// what is being measured is how a tile's rows sit in a Parquet row group, and a
+/// tile is a run of `dense_id` whatever the plane looks like.
 fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     let num_clusters = cluster_ids.iter().copied().max().map_or(0, |m| m + 1);
     if num_clusters == 0 {
@@ -166,25 +174,59 @@ fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     for &c in cluster_ids {
         sizes[c as usize] += 1;
     }
-    let largest = sizes.iter().copied().max().unwrap_or(0);
-    let pitch = 2.0f32.mul_add(
-        INTRA_CLUSTER_RADIUS * (largest as f32).sqrt(),
-        CLUSTER_SPACING,
-    );
+
+    let demand: u64 = sizes
+        .iter()
+        .map(|&m| next_power_of_four(u64::from(m)))
+        .sum();
+    let root = next_power_of_four(demand);
+    let mut centre = vec![(0.0f32, 0.0f32); num_clusters as usize];
+    let (mut next, mut asked) = (0u64, 0u64);
+    for (c, &members) in sizes.iter().enumerate() {
+        if members == 0 {
+            continue;
+        }
+        let blocks = next_power_of_four(u64::from(members));
+        let spread = if demand == 0 {
+            0
+        } else {
+            asked * root / demand
+        };
+        asked += blocks;
+        let start = next.max(spread).div_ceil(blocks) * blocks;
+        next = start + blocks;
+
+        let (col, row) = morton_decode(u32::try_from(start).unwrap_or(u32::MAX));
+        let half = (blocks as f32).sqrt() * (CELL_UNIT / 2.0);
+        centre[c] = (
+            (col as f32).mul_add(CELL_UNIT, half),
+            (row as f32).mul_add(CELL_UNIT, half),
+        );
+    }
+
     let mut seen = vec![0u32; num_clusters as usize];
     let mut out = Vec::with_capacity(cluster_ids.len());
     for &c in cluster_ids {
-        let (col, row) = morton_decode(c);
         let k = seen[c as usize];
         seen[c as usize] += 1;
         let angle = k as f32 * GOLDEN_ANGLE;
         let radius = INTRA_CLUSTER_RADIUS * ((k as f32) + 1.0).sqrt();
+        let (cx, cy) = centre[c as usize];
         out.push((
-            radius.mul_add(angle.cos(), col as f32 * pitch),
-            radius.mul_add(angle.sin(), row as f32 * pitch),
+            radius.mul_add(angle.cos(), cx),
+            radius.mul_add(angle.sin(), cy),
         ));
     }
     out
+}
+
+/// The smallest power of four that is at least `n`, and one for zero.
+fn next_power_of_four(n: u64) -> u64 {
+    let mut blocks = 1u64;
+    while blocks < n {
+        blocks *= 4;
+    }
+    blocks
 }
 
 /// Inverse of [`morton2`] — the grid cell a cluster id occupies.

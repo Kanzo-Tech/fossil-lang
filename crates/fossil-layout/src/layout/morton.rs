@@ -17,7 +17,13 @@
 /// input yields the same numbering on every run. Two vertices sharing a code is
 /// the common case rather than an edge case: the codes quantise to 16 bits per
 /// axis, and a community packs many vertices into far less than one bucket.
-pub(super) fn morton_ranks(morton: &[u32]) -> (Vec<u32>, Vec<u32>) {
+///
+/// **Public because the rule it implements is published.**
+/// `/docs/format/conventions/addressing` states that `dense_id` is the Morton
+/// rank of a position, and a crate that publishes the rule and keeps the
+/// function private makes every second reader write it again — which has already
+/// happened once, in `crates/fossil-df/examples/tile_layout.rs`.
+pub fn morton_ranks(morton: &[u32]) -> (Vec<u32>, Vec<u32>) {
     let mut order: Vec<u32> = (0..morton.len() as u32).collect();
     order.sort_unstable_by_key(|&i| (morton[i as usize], i));
     let mut rank = vec![0u32; morton.len()];
@@ -120,8 +126,11 @@ fn morton_codes_within(positions: &[(f32, f32)], extent: Extent) -> Vec<u32> {
 /// Morton codes for a position list — quantises each coordinate to `u16` over
 /// the list's bounding box (a degenerate axis maps to 0). Index-aligned with
 /// `positions`.
+///
+/// Public for [`morton_ranks`]'s reason: the pair of them IS the published
+/// addressing rule, and the box is the one `/docs/format` names.
 #[must_use]
-pub(super) fn morton_codes(positions: &[(f32, f32)]) -> Vec<u32> {
+pub fn morton_codes(positions: &[(f32, f32)]) -> Vec<u32> {
     match extent_of(positions) {
         None => Vec::new(),
         Some(extent) => morton_codes_within(positions, extent),

@@ -193,7 +193,13 @@ pub(super) fn flatten_to_budget(
 /// This orders the communities. It does not lay out each level's quotient graph
 /// — a community's *position among its siblings* is still its id and not its
 /// connections, so this buys locality between subtrees, not within one.
-pub(super) fn order_by_hierarchy(levels: &[Vec<u32>], chosen: usize, membership: &mut [u32]) {
+///
+/// **Public because [`super::place::cluster_layout`] is.** The placement is a
+/// function of the ids it is handed, and a run of consecutive ids being a
+/// subtree is a precondition of what that function does with them — the buddy
+/// frontier turns it into a contiguous interval of `dense_id`. Exporting the
+/// placement without the renumbering it assumes exports half a contract.
+pub fn order_by_hierarchy(levels: &[Vec<u32>], chosen: usize, membership: &mut [u32]) {
     let cluster_count = membership.iter().copied().max().map_or(0, |m| m + 1);
     if cluster_count == 0 {
         return;

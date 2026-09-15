@@ -133,6 +133,14 @@ col dst_dense = in adjacency ; type uint32 ; role endpoint ; aligns dst .
    pyramid is a set of them, and `/docs/design/holons` is the argument for why it
    is a third artefact and not a coarse `Projection`.
 
+   «A region of the plane» is a claim about the PLACEMENT and not about anything
+   below. A cell is cut by count — `dense_id >> shift`, a fixed number of
+   consecutive ranks — and that is an area only because every group is placed in
+   a block sized to its own membership, so the plane carries one vertex per unit
+   of area wherever it is sampled. Measured over com-DBLP, a rung-1 cell ran
+   1,019,008x from the smallest to the largest before that placement and 7,049x
+   after; `/docs/design/position` is where the rule and the residue live.
+
    Two columns of the payload are NOT here and their absence is the design:
 
    - no `parent`. A cell of rung `k` covers exactly `[r·4^k, (r+1)·4^k)` of the
