@@ -241,9 +241,124 @@ of roughly 45 placement groups scattered across the plane, and nothing in the ar
 discarded](/docs/design/discarded) asks for a slot per community, and a slot per community solves
 the other half — running out of colours — while leaving this one exactly where it was.
 
-And the repair is one repair, not two. The placement partition **is** the base rung of the cell
-pyramid: publishing what drew the picture and publishing the mipmap are the same change, which is
-why it is argued on [holons](/docs/design/holons) rather than here.
+And the repair is one rule, not two — but it is not the rule this page used to name. *The placement
+partition **is** the base rung of the cell pyramid* was written before the pyramid was, and the
+pyramid that got written partitions the `dense_id` axis at a declared base of sixteen vertices per
+cell — `crates/fossil-sinks/src/manifest.rs, HolonTree` — which over com-DBLP is 19,818 cells
+against the placement's 55,712 groups. They are not the same partition, and neither bends into the
+other without giving up the gapless numbering or the arithmetic addressing. So the repair is not a
+second artefact at all: it is a change to where the groups go, and it is the section below.
+
+## The repair both findings have, and it is one rule
+
+**Every group gets a cell of its own size.** A group of `m` members is given an aligned square of
+the quaternary whose side is the next power of two above its own packing disc, and the squares are
+handed out by bumping a Z-order frontier — a buddy allocator's addressing, over the allocation order
+the hierarchy has already fixed.
+
+`crates/fossil-layout/src/layout/place.rs, cluster_layout` keeps its signature and its purity. The
+sizes a per-group cell needs are the ones it already counts in order to find `largest`, so the
+placement stays a function of `cluster_ids` and of nothing else — which is what the objection in the
+code was protecting, and it survives intact:
+
+| | as placed | with a cell per group |
+| --- | --- | --- |
+| a group's cell | one of a uniform grid, pitch `2·12·√20,459 + 100` | an aligned square, side `2·12·√m` plus a proportional margin, rounded up to a power of two |
+| where that cell is | `morton_decode(id)` — the id **is** the address | the Z-order frontier, bumped once per group in id order |
+| the gap between two groups | 100 units, whatever the two groups are | a fraction of the disc it surrounds |
+| what finds a group's cell | its id alone | its size, which the placement already counts |
+
+Three decisions sit inside that, and each one is load-bearing.
+
+### The area is the membership, because that is what makes the id axis mean something
+
+A phyllotaxis disc of `m` members has an area proportional to `m`, so a cell sized to its own disc
+puts the same number of vertices under every unit of plane. And `dense_id` is the **rank** of a
+vertex in the Morton order of its position — `crates/fossil-layout/src/layout/morton.rs,
+morton_ranks` — so a rank axis over a plane of uniform density *is* an area axis: an interval of `n`
+ids covers `n/δ` of plane wherever on the plane it is taken.
+
+Under the uniform pitch it covers whatever the emptiness there happens to be. Sixteen consecutive
+ids inside the 20,459-member group are sixteen members of one phyllotaxis disc, a patch about 85
+units across; sixteen consecutive ids out at the median are five whole groups in five whole grid
+cells, better than 7,000 units across. **Same rung, same count, four orders of magnitude of area** —
+which is the whole of why [a cell is claimed to be a region of the plane](/docs/design/holons) and
+is not one yet.
+
+<Callout type="warn" title="This is the idea that was discarded, and the difference is which layer it is applied at">
+*Area proportional to population* is [a rejected row](/docs/design/discarded), and the evidence
+against it is not retracted: allocating area by count produces a uniform field, which deletes
+exactly the signal a far view is looked at for — where the graph is dense.
+
+It does not bite here, and the reason is the first paragraph of this page. **There is no density
+signal in a derived plane to delete.** Inside a group the members are already packed at one fixed
+density — `INTRA_CLUSTER_RADIUS` is a constant, so a disc's area is already proportional to its
+membership — and outside them the plane is empty margin sized by the largest group. Today's far view
+is a regular lattice of dots on a field that is 99.95% nothing; it encodes population as dot size
+and encodes the graph nowhere. What the packing trades is not signal for uniformity. It is
+**emptiness** for uniformity.
+
+The rejected row is about *encoding*: choosing area to mean population in a picture where area could
+have meant something a layout found. This is about *packing*, and the signal the coarse view carries
+is unchanged either way — a cell's `count` is `4^k` by construction at every rung and always was, so
+what a mark says is its mode and its purity, which is what [holons](/docs/design/holons) already
+argues it says.
+
+The row comes back the day a placement exists whose extent means something — a force layout over a
+level's quotient, say, where a community's spread is a fact about the graph. Packing that into
+buddy blocks would be the discarded idea, and this page would be the one that was wrong.
+</Callout>
+
+### The margin is a ratio, not a constant
+
+`crates/fossil-layout/src/layout/place.rs, CLUSTER_SPACING` is 100 units of a plane whose unit means
+nothing — every coordinate here is `derived`, which is the whole of this page — and a constant added
+to a side that scales as `√m` is a margin that eats the small end. A per-group cell with the
+constant kept spends **93% of its area on margin at the median group and 26% at the largest**: the
+same defect as the uniform pitch in a smaller denomination, an 11× density difference between the
+two ends of the partition. A ratio spends the same fraction at both ends, and that is what makes the
+rank axis flat rather than nearly flat.
+
+### The frontier never goes back
+
+A buddy allocator normally reuses the holes its alignment leaves, and that is refused here.
+`crates/fossil-layout/src/layout/community.rs, order_by_hierarchy` numbers the placement groups by a
+depth-first walk of the dendrogram, so **a run of consecutive group ids is a subtree**; a monotone
+frontier turns that into a run of consecutive blocks, hence a run of consecutive Morton codes, hence
+a contiguous interval of `dense_id`. Reusing a hole behind the frontier puts a later group in front
+of an earlier one and breaks exactly that. The price is alignment fragmentation, and it is paid out
+of a plane that is 99.95% empty.
+
+### What it makes true
+
+**Every partition in the artefact becomes an interval of `dense_id`.** A group is a contiguous
+interval because its members share a block; a `cluster_id` is a contiguous interval because it is a
+union of consecutive groups; every level of the dendrogram between them is one for the same reason.
+That is the corpus's own addressing rule — `/docs/format` has no listings and no discovery because
+an address is arithmetic — reaching the one partition that was outside it.
+
+It is also the second finding's repair, **and it publishes nothing new to get there**. A reader
+colouring by `cluster_id` was colouring 45 placement groups scattered over a 158×158 grid of nearly
+empty cells. It will be colouring one region. The colour becomes what is on the screen, which is
+what that finding said it was not, and the partition doing it is the one that was in the manifest
+all along.
+
+### What the implementation owes
+
+Four things, and none of them optional:
+
+- **The plane, re-measured.** The simulation above priced a cell per group at 8.8× the extent and
+  76× the occupancy, and it did not pay alignment fragmentation. The implementation's own figures
+  replace those rather than confirming them.
+- **The spread of a cell's area, per rung.** This is the claim, and it is the number that can
+  falsify it: a texel is an area, so a rung whose cells still differ in area by orders of magnitude
+  is a rung of something other than texels.
+- **The base rung's cost, which must not move.** The pyramid is `ceil(V / 16)` cells whatever the
+  placement does. A repair that made it cheaper would have repaired something else.
+- **A guard that a stranger can evaluate**: every `cluster_id` is a contiguous interval of
+  `dense_id` — `max − min + 1 = count`, per group, over the written payload. It goes red for a
+  hole-reusing allocator and for a placement that ignores the hierarchy's order, which are the two
+  ways this gets got wrong.
 
 ## What this does not settle
 

@@ -66,10 +66,39 @@ What the analogy then demands is a distinction the page did not have a word for:
 | **texel** | a summary of a region | **area** | the camera — one mark per texel |
 | **tile** | the rows themselves | **count** | the transport — one range request per tile |
 
-Both are intervals of the same `dense_id` axis, and **neither nests inside the other**: a tile
-boundary falls at every 4,096th vertex, wherever the population puts that on the plane, and a cell
-boundary falls where the grid puts it, holding however many vertices are there. A reader that
-conflates them gets a mark whose size means nothing.
+Both are intervals of the same `dense_id` axis, and as the writer cuts them **they nest**: a cell id
+is `dense_id >> shift` and nothing else — `crates/fossil-layout/src/layout/cells.rs, Pyramid` — so a
+cell boundary falls at every `4^k`-th vertex and a tile boundary at every 4,096th, which is `4^6` of
+the same axis. The page said neither nested inside the other, and the tree says otherwise.
+
+Which puts the weight of the table on one word. **A cell is cut by count; what has to make it an
+area is the placement.** Nothing in this pyramid measures a region of the plane — it takes a fixed
+number of consecutive ranks and summarises them — and that is a texel only if the plane those ranks
+came from was filled at one density. A reader that conflates the two rows above gets a mark whose
+size means nothing; a *writer* that fills the plane unevenly gets the same thing, one layer earlier.
+
+## What makes a cell a region of the plane, and it is not this page
+
+The addressing above is exact and the geometry under it is borrowed. `dense_id` is a rank in the
+Morton order of a position, so an interval of ids is an interval of the Z-curve — a compact run,
+always — but the **area** that run covers is whatever the placement put there, and the placement
+today is `crates/fossil-layout/src/layout/place.rs, cluster_layout` on a grid whose pitch is fixed
+by the largest group.
+
+Measured over com-DBLP, that costs the analogy its subject. Sixteen consecutive ids inside the
+20,459-member group are sixteen members of one phyllotaxis disc, a patch about 85 units across;
+sixteen consecutive ids out at the median group are five whole groups in five whole grid cells,
+better than 7,000 units across. **Same rung, same count, four orders of magnitude of area.** A
+mipmap level whose texels differ in area by four orders of magnitude is not a mipmap level, and
+`corpus.bnf` has been calling a cell row *one texel: a region of the plane, summarised* on the
+strength of an addressing argument that never reached the plane.
+
+What repairs it is a change to the placement and to nothing here:
+[a cell per group](/docs/design/position) gives every group a block of its own size, which makes the
+density uniform, which makes a rank interval an area interval. **The pyramid does not change shape**
+— same base, same `ceil(V / 4^k)` per rung, same files, same columns, and the same `dense_id >>
+shift` computing a cell id. It changes what one of its rows is about, which is the only part of it a
+reader was ever going to see.
 
 And the pyramid is already the other half of a mipmap. A level in
 `crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex whose `dense_id` is a multiple of
