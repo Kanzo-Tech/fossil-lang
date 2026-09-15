@@ -29,7 +29,7 @@ use std::path::Path;
 use common::{dir, fixture};
 use duckdb::Connection;
 use fossil_layout::layout::enrich_layout;
-use fossil_sinks::manifest::VertexLevels;
+use fossil_sinks::manifest::{HOLON_PREFIX, LEVEL_PREFIX_STEM, VertexLevels};
 
 /// Rows in the fixture, and a tile size that buys a five-level pyramid without
 /// making the test a benchmark. A type earns levels the moment it is over one
@@ -230,28 +230,56 @@ fn the_levels_on_disk_are_the_levels_the_plan_names() {
     }
 }
 
-/// **A type that fits one tile gets no pyramid, and that is not a regression.**
+/// **A type that fits one tile gets no levels, and that is not a regression.**
 ///
 /// `fossil run examples/hello.fossil` writes five `Person` vertices and the
-/// walking skeleton asserts them by content; a corpus that grew a directory here
-/// would be a corpus paying for a view one range request already serves. The
-/// predicate still answers over the payload, which is what makes the one
-/// exclusion safe.
+/// walking skeleton asserts them by content; a corpus that grew a level
+/// directory here would be a corpus paying for a view one range request already
+/// serves. The predicate still answers over the payload, which is what makes the
+/// one exclusion safe.
+///
+/// **The cell pyramid is not held to the same floor, and the difference is
+/// argued rather than accidental.** This test used to assert that no directory
+/// but `index` appeared at all, and `fossil_sinks::manifest::HolonTree` made it
+/// red by writing a `holon/` beside it: a level is a transport optimisation, so
+/// one tile is already one range request and coarser buys nothing, while a rung
+/// is a *picture* and a reader zoomed all the way out wants four marks rather
+/// than two hundred. The two floors differ on purpose — `HolonTree::planned`
+/// says so in its own doc — so this asserts the level rule and lets the rung
+/// rule state itself.
 #[test]
 fn a_small_type_writes_no_levels_at_all() {
     let f = fixture(dir("levels_one_tile"), 200, 14);
     assert!(VertexLevels::planned(200, f.chunk_size).is_none());
     enrich_layout(&f.targets(), &f.adjacencies()).expect("the layout pass");
 
-    let strays: Vec<String> = fs::read_dir(f.root.join("chunks"))
+    let dirs: Vec<String> = fs::read_dir(f.root.join("chunks"))
         .expect("the tile directory")
         .filter_map(|entry| {
             let entry = entry.ok()?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            (entry.path().is_dir() && name != "index").then_some(name)
+            entry
+                .path()
+                .is_dir()
+                .then(|| entry.file_name().to_string_lossy().into_owned())
         })
         .collect();
-    assert!(strays.is_empty(), "a type inside one tile grew {strays:?}");
+
+    let levels: Vec<&String> = dirs
+        .iter()
+        .filter(|name| {
+            name.strip_prefix(LEVEL_PREFIX_STEM)
+                .is_some_and(|k| !k.is_empty() && k.chars().all(|c| c.is_ascii_digit()))
+        })
+        .collect();
+    assert!(levels.is_empty(), "a type inside one tile grew {levels:?}");
+
+    // And the rung pyramid IS there, at the floor that is its own: 200 rows over
+    // a base of sixteen is a tree, where 200 rows in one tile is not a pyramid.
+    let holon = HOLON_PREFIX.trim_end_matches('/');
+    assert!(
+        dirs.iter().any(|name| name == holon),
+        "the cell pyramid a type of 200 earns is not there: {dirs:?}",
+    );
 }
 
 /// **What the default view costs, measured** — an instrument rather than a
