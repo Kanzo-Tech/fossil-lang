@@ -111,12 +111,36 @@ right one — marks, edges past the app's three-pixel floor, anchors, and the sh
 position. **The table that stood here is deleted rather than adjusted**: its rows were read off a
 pyramid whose strides were halves, and that pyramid is gone.
 
-**The rule that keeps one contract is therefore: the pyramid answers when the answer is points.**
-`links: false` reads the level; asking for links opens the payload and `matchedAt` says `0`.
-Nobody loses a drawing they have today, and a caller takes the bytes by asking for something a level
-can answer. What is *not* on the table is the level file answering a different question under the
-same name — see `design/discarded`, where the two alternatives and what would bring each back are
-written down.
+**The rule that keeps one contract is: the pyramid answers when the level set carries what the
+answer needs** — for points that is the vertex level, and for lines it is the pair.
+
+<Callout type="warn">
+**This said *the pyramid answers when the answer is points*, and that was the narrow form of the
+rule rather than the rule.** It was true of the reader, and true for a reason about the READER: a
+frame that asked for links had to open the payload, because a vertex level holds the level's rows
+and nothing else, so the far end of an edge leaving it was not there. `matchedAt` said `0` and
+this page said why.
+
+It stopped being true when a relation grew a pyramid of its own. A level row of a RELATION carries
+**both endpoints' coordinates** (`crates/fossil-sinks/src/manifest.rs, Projection`), which places
+the far end without opening a vertex tile for it — and that is not a synthetic edge, which is the
+thing the design refuses: the far end is the vertex, where the payload puts it. `Corpus.frame`
+reads it, and [the reference viewer](/docs/design/reference-viewer) says so as the general rule
+this one is a special case of.
+
+Measured rather than argued: `apps/playground/scripts/measure-frame.mjs` puts every one of ten
+camera rectangles at level 1, 2 or 3 **with links asked for** — 322 to 62,024 of them. Not one at
+level 0.
+
+The page held the narrow form deliberately, on the grounds that *a rule stated in the future tense
+on this site is a rule nothing holds*. The reader exists now, so the general form is what is
+written.
+</Callout>
+
+Nobody loses a drawing they have today, and a caller takes the bytes by asking for something a
+level can answer. What is *not* on the table is the level file answering a different question under
+the same name — see `design/discarded`, where the two alternatives and what would bring each back
+are written down.
 
 The predicate stays in the SQL either way. `pool` applies `dense_id % strideOf(k) = 0` over a level file
 whose every row already satisfies it, which is the identity being asserted rather than assumed: a
