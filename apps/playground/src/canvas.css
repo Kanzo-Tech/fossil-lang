@@ -48,6 +48,20 @@
   touch-action: none;
 }
 
+/*
+ * What stands in the surface while the encoding is being read off the corpus.
+ *
+ * Inside `.can-surface` rather than replacing it, so the panel does not change height when the
+ * renderer arrives — the surface names its own 26rem for the reason at the top of this file, and a
+ * placeholder that let it collapse would reflow everything below it a second later.
+ */
+.can-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
 
 /*
  * The comparison table: two modes, four rows, and the active column marked.

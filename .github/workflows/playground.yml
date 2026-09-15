@@ -133,5 +133,5 @@ jobs:
       # Absent a corpus every verifier exits 2 and `test` reports a SKIP and stays green,
       # which is right on a laptop and would be a silent pass here. The step above is what
       # makes this one an assertion.
-      - name: Verify (tile arithmetic, the canvas source, nesting, the three properties)
+      - name: Verify (tile arithmetic, the canvas source, nesting, the three properties, the encoding)
         run: pnpm --filter "@fossil-lang/playground" test

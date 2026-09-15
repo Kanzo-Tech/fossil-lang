@@ -27,8 +27,10 @@ import { categoricalCapacity } from '@kanzo-tech/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Bench } from './bench.js';
+import { readDeclaration } from './bound.js';
 import { openCrossfilter, type Crossfilter, type CrossfilterCost } from './crossfilter.js';
 import * as duck from './duckdb.js';
+import { encodingFor, type Encoding } from './encoding.js';
 import { n } from './format.js';
 import Histogram from './Histogram.js';
 import { ModeComparison, START, StreamingDetail, WholeDetail, type Mode, type ModeLedger } from './Ledger.js';
@@ -162,6 +164,41 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
   const source = mode === 'whole' ? baseline : streaming;
 
   /**
+   * **What this corpus is drawn with**, read off it rather than written down here.
+   *
+   * Three string literals used to stand where this does — `fill="cluster_id"` on the renderer,
+   * `field="birth_year"` on the chart, and the crossfilter view's four columns — each of them a
+   * fact about the bench corpus inside a component that claims to read any corpus. `encoding.ts`
+   * carries the derivation and the argument for which half of the artefact answers which question;
+   * what is left here is the wiring.
+   *
+   * State and not a `useMemo`, because both inputs arrive late: the payload's vocabulary is one
+   * `DESCRIBE` per type inside `openCorpus`, so it is behind the same promise the sources await.
+   * The declaration is not — `bench.indexText` is the manifest as it was served — and it is read
+   * here anyway, in the same effect, so there is one place where the two halves meet.
+   */
+  const [encoding, setEncoding] = useState<Encoding | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const open = await corpus;
+      if (!live) return;
+      const declaration = readDeclaration(bench.indexText);
+      setEncoding(
+        encodingFor({
+          types: open.types,
+          quasiIdentifiers:
+            declaration.state === 'declared' ? declaration.bound.quasiIdentifiers : [],
+        }),
+      );
+    })();
+    return () => {
+      live = false;
+    };
+  }, [bench, corpus]);
+
+  /**
    * The crossfilter, opened once the corpus is — one coordinator, over the engine already booted.
    *
    * `null` until the view exists, which is what `Histogram`'s `ready` gates on: a client connected
@@ -176,17 +213,18 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
   const [xfCost, setXfCost] = useState<CrossfilterCost | null>(null);
 
   useEffect(() => {
+    if (encoding === null) return;
     let live = true;
     let opened: Crossfilter | null = null;
     void (async () => {
       const open = await corpus;
-      const declared = open.types.vertices[0];
-      if (!live || declared === undefined) return;
+      if (!live) return;
       opened = await openCrossfilter({
         coordinator: coordinatorFor(),
         corpus: open,
-        type: declared.type,
-        count: Number(declared.count ?? 0n),
+        type: encoding.type,
+        count: encoding.count,
+        columns: encoding.columns,
         onMask: (next, cost) => {
           if (!live) return;
           setMask(next);
@@ -205,7 +243,7 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
       setCrossfilter(null);
       setMask(null);
     };
-  }, [corpus]);
+  }, [corpus, encoding]);
 
   return (
     <div className="can">
@@ -214,7 +252,10 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
         Drag to pan, scroll to zoom. Every camera move asks the source for the tiles the new
         rectangle touches and for nothing else — the same footer boxes the ledger above is reading,
         with a camera on them instead of a slider. Position is <code>x</code>/<code>y</code> and
-        colour is <code>cluster_id</code>, both written by the layout pass. The colour is{' '}
+        colour is the categorical this corpus carries — <code>{encoding?.fill ?? '…'}</code>,{' '}
+        <em>read off the payload</em> rather than named here, because a manifest declares a
+        property&apos;s name and its type and nothing about what to draw with it. Both are written
+        by the layout pass. The colour is{' '}
         <em>folded</em>: this corpus has 128 communities and the palette has {slots} slots, so two
         communities can share one — which is what a categorical palette is. Unfolded they do not
         share a colour, they share <em>the</em> colour: everything past the last slot resolves to
@@ -239,24 +280,53 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
         </span>
       </div>
 
+      {/*
+        * The renderer is not mounted before the encoding is known, and the wait costs nothing.
+        *
+        * `fill` is a property of the REQUEST in `@kanzo-tech/graph`'s contract — *a source says
+        * where the bytes are; a request says what I want to draw* — so the query loop puts whatever
+        * this prop holds into every slice it asks for. Mounted first and told afterwards, the
+        * opening rectangle would be asked for twice: once with no column and once with one, which
+        * is two different residency keys for one camera position and two `reads` on the ledger
+        * beside it for a corpus that was read once. Nothing can be answered before the corpus
+        * opens anyway — every `slice` awaits it inside the source — so gating here delays no query.
+        */}
       <div className="can-surface">
-        <GraphCanvas source={source} fill="cluster_id" onFailure={onFailure}>
-          <PinFrame />
-          <Mask mask={mask} />
-        </GraphCanvas>
+        {encoding === null ? (
+          <div className="can-waiting">
+            <p className="str-dim">reading what this corpus is drawn with…</p>
+          </div>
+        ) : (
+          <GraphCanvas source={source} fill={encoding.fill ?? undefined} onFailure={onFailure}>
+            <PinFrame />
+            <Mask mask={mask} />
+          </GraphCanvas>
+        )}
       </div>
 
       {failure && <p className="str-bad">{failure}</p>}
 
       <div className="xf">
-        {crossfilter === null ? (
+        {crossfilter === null || encoding === null ? (
           <div className="xf-chart xf-waiting">
             <p className="str-dim">opening the crossfilter over this corpus…</p>
+          </div>
+        ) : encoding.brush === null ? (
+          /*
+           * A corpus whose payload carries no numeric column outside the address, the position and
+           * the colour. The canvas still draws and the crossfilter still exists; what is absent is
+           * the second client, and saying so is more honest than binning `dense_id`.
+           */
+          <div className="xf-chart xf-waiting">
+            <p className="str-dim">
+              this corpus carries no numeric column a histogram is the right form for, so there is
+              one client on the coordinator and nothing to cross
+            </p>
           </div>
         ) : (
           <Histogram
             coordinator={coordinatorFor()}
-            field="birth_year"
+            field={encoding.brush}
             filter={crossfilter.filter}
             ready
           />
@@ -299,10 +369,14 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
 
       <p className="str-note">
         <strong>What the crossfilter actually crosses.</strong> The chart brushes{' '}
-        <code>birth_year</code> — the corpus&apos;s only numeric non-positional column, and one of
-        the two <code>graph.graph.yml</code> declares as a <em>quasi-identifier</em> under its
-        declared k-anonymity bound. So the distribution on screen is the generalised one: the writer
-        refused to seal a manifest whose data did not reach the bound, and this is what reached it.
+        <code>{encoding?.brush ?? '…'}</code>, and which column that is <em>is derived rather than
+        chosen</em>: the payload says which of its columns a binned histogram is the right form for
+        — numeric, and not the address, the position, the identity or the colour — and{' '}
+        <code>graph.graph.yml</code> says which of those is interesting, by naming it a{' '}
+        <em>quasi-identifier</em> under the declared k-anonymity bound. The bytes decide the set and
+        the declaration orders it; neither half is asked the other&apos;s question. So the
+        distribution on screen is the generalised one: the writer refused to seal a manifest whose
+        data did not reach the bound, and this is what reached it.
         The two clients are different <em>kinds</em> on purpose.
         The chart&apos;s <code>x</code> is a column, so its brush publishes an interval the database
         evaluates directly. The canvas&apos;s is not: what is drawn is a rectangle-and-level answer

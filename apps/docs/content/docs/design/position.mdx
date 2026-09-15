@@ -154,6 +154,33 @@ the first thing this direction owes.
 does not make it. A default ("the first") is a writer deciding a reader's question, which is the
 mistake this page is about; naming one in the manifest is a third thing again.
 
+**What a reader colours by, sizes by, or labels with.** The same observation this page opens with
+— *a property is a name and a type* — is true of every channel and not only of the plane.
+`crates/fossil-sinks/src/manifest.rs, Property` carries a name, a `data_type` and `is_primary`, so
+there is no field in which a writer could say *this column is the community*, and the argument above
+says it should not grow one: a default is a writer deciding a reader's question, and which column
+means something to look at is the reader's question twice over.
+
+So a reader decides, and the one reader in this repository decides in
+`apps/playground/src/encoding.ts, encodingFor` — out loud, in one module, rather than as string
+literals at three call sites, which is what it was. The rule it uses splits along the same seam
+`openCorpus` already draws between the manifest's vocabulary and the payload's. **The bytes say what
+is drawable:** the layout pass's `cluster_id` is declared by no `properties:` entry, so a derivation
+that believed the manifest would find no column to colour a corpus that has one. **The manifest says
+which is interesting:** of the columns a binned histogram is the right form for, the one
+`quasi_identifiers` names is the one whose distribution the corpus itself says is worth a reader's
+attention. Neither half is asked the other's question, and
+`apps/playground/scripts/verify-encoding.mjs` holds both against the bench corpus — including that
+the derived colour and `FrameParams.fill`'s own default answer one rectangle with identical
+categories.
+
+What is *not* decided by a reader is size, and that is a limit of the door rather than of the
+artefact: `Corpus.frame` carries one categorical per row and no measure, so the streaming path has
+nothing to spend a radius ramp on and the baseline beside it would be the only half of a comparison
+that had one. Every level file already carries every column, so what would change it is a second
+column on `FrameParams` and a second array on `Frame` — a projection, not an artefact — and nothing
+has asked for one.
+
 **Whether `derived` should name a version.** *Derived by Louvain and phyllotaxis* is not
 reproducible across a change to either. A version string is the obvious answer and it is not
 obviously the right one: it goes stale in the opposite direction, marking a corpus as

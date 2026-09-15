@@ -1,5 +1,5 @@
 /**
- * `pnpm --filter @fossil-lang/playground test` — the four verifiers, plus the typecheck.
+ * `pnpm --filter @fossil-lang/playground test` — the five verifiers, plus the typecheck.
  *
  * ## Why this file exists at all
  *
@@ -46,6 +46,7 @@ const steps = [
   { name: 'verify-canvas', argv: ['scripts/verify-canvas.mjs'] },
   { name: 'verify-nesting', argv: ['scripts/verify-nesting.mjs'] },
   { name: 'verify-properties', argv: ['scripts/verify-properties.mjs'] },
+  { name: 'verify-encoding', argv: ['scripts/verify-encoding.mjs'] },
 ];
 
 let failed = 0;

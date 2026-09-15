@@ -67,6 +67,17 @@ export interface CrossfilterOptions {
   corpus: Corpus;
   /** Which vertex type. The crossfilter is over one type, like everything else the canvas draws. */
   type?: string;
+  /**
+   * The view's projection — `src/encoding.ts`'s `Encoding.columns`, and not a list written
+   * here.
+   *
+   * It was `dense_id, birth_year, postcode, cluster_id`: three facts about the bench corpus in a
+   * module that opens any corpus, and a `CREATE VIEW` that fails on the first one whose payload is
+   * shaped differently. The encoding derives it — the address, the colour, and the declared
+   * quasi-identifiers the payload actually carries — so this takes the answer rather than restating
+   * it.
+   */
+  columns: readonly string[];
   /** How many vertices the type has — the mask's length, off the manifest. */
   count: number;
   /** A new mask is ready. `null` means «no filter is active», which is not the same as «none
@@ -101,15 +112,16 @@ export interface Crossfilter {
  * the brush.
  */
 export async function openCrossfilter(options: CrossfilterOptions): Promise<Crossfilter> {
-  const { coordinator, corpus, count, onMask, type } = options;
+  const { columns, coordinator, corpus, count, onMask, type } = options;
 
   const relation = vertexRelation(corpus, type);
-  // Only the columns the crossfilter reads. `subject` is the widest column in the corpus and
-  // nothing here filters or draws by it, so projecting it into the view would put it in the way of
-  // every scan the two clients make.
+  // Only the columns the crossfilter reads — which is what `Encoding.columns` answers, and why the
+  // identity is not among them: `subject` is the widest column in the corpus and nothing here
+  // filters or draws by it, so projecting it into the view would put it in the way of every scan
+  // the two clients make.
+  const projection = columns.map((c) => `"${c.replace(/"/g, '""')}"`).join(', ');
   await coordinator.exec(
-    `CREATE OR REPLACE VIEW ${XF_VIEW} AS ` +
-      `SELECT dense_id, birth_year, postcode, cluster_id FROM ${relation}`,
+    `CREATE OR REPLACE VIEW ${XF_VIEW} AS SELECT ${projection} FROM ${relation}`,
   );
 
   const filter = Selection.crossfilter();

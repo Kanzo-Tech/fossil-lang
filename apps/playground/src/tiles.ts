@@ -57,6 +57,7 @@ import {
   type VertexId,
 } from '@kanzo-tech/graph';
 
+import { categoricalOf } from './encoding.js';
 import { frame } from './frame.js';
 import { residency } from './residency.js';
 import { extentOf, type Rect, type TileBox } from './stream.js';
@@ -196,11 +197,17 @@ function boxFor(view: Viewport, extent: Rect | null): Box | null {
  * Which column colours a point — the request's, never the source's.
  *
  * A `fill` starting with `var(` or `#` is a COLOUR handed through the same field, and naming it as a
- * column asks DuckDB for `"#4c78a8"`. Omitted or a colour, `cluster_id`: the layout pass writes it
- * into every corpus, so it is the one column this reader can promise exists.
+ * column asks DuckDB for `"#4c78a8"`. Omitted or a colour, the one the CORPUS carries: this said
+ * `cluster_id`, which is the right column and the wrong place to write it down — see
+ * `src/encoding.ts`, which derives it from the payload's own vocabulary and is the only module in
+ * this app that names it.
+ *
+ * `undefined` where the corpus carries no categorical at all, which hands the question to the
+ * door's own `FrameParams.fill` default rather than inventing a second answer to it here.
  */
-function column(fill: string | undefined): string {
-  return fill && !fill.startsWith('var(') && !fill.startsWith('#') ? fill : 'cluster_id';
+function column(fill: string | undefined, carried: string | null): string | undefined {
+  if (fill && !fill.startsWith('var(') && !fill.startsWith('#')) return fill;
+  return carried ?? undefined;
 }
 
 /**
@@ -299,7 +306,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
     params: Box & {
       type: string;
       pixels: { w: number; h: number };
-      fill: string;
+      fill: string | undefined;
       pinned: readonly number[];
       minLinkLength: number;
     },
@@ -325,7 +332,13 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
    * it is first rather than because zero is a default. `count` is off `Corpus.types`, which is a
    * property and not a call: it was read while the corpus was opening.
    */
-  let opened: Promise<{ corpus: Corpus; type: string; typeIndex: number; count: number }> | null = null;
+  let opened: Promise<{
+    corpus: Corpus;
+    type: string;
+    typeIndex: number;
+    count: number;
+    fill: string | null;
+  }> | null = null;
   const open = () => {
     opened ??= (async () => {
       const corpus = await options.corpus;
@@ -336,6 +349,10 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
         type: address.type,
         typeIndex: Math.max(0, corpus.addressing.types.indexOf(address)),
         count: Number(declared?.count ?? address.count ?? 0n),
+        // The colour this corpus carries, for a request that names a CSS colour instead of a
+        // column. Derived here rather than taken as an option because a `BoundedSource` is built
+        // before the corpus resolves, and this is the first moment the payload's vocabulary exists.
+        fill: declared === undefined ? null : categoricalOf(declared),
       };
     })();
     return opened;
@@ -363,7 +380,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
       const { fill, limit = BOUNDED_DEFAULTS.limit, perPixel, pinned, view } = request;
       const started = performance.now();
       const mine = (generation += 1);
-      const { corpus, type, typeIndex } = await open();
+      const { corpus, type, typeIndex, fill: carried } = await open();
 
       const box = boxFor(view, extent);
       const cost = (over: Partial<SliceCost>): void =>
@@ -418,7 +435,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
       const side = Math.max(1, Math.sqrt(limit));
       const pixels = { w: side, h: side };
 
-      const params = { ...box, type, pixels, fill: column(fill), pinned: pins, minLinkLength };
+      const params = { ...box, type, pixels, fill: column(fill, carried), pinned: pins, minLinkLength };
       const key = keyOf(params);
 
       /**

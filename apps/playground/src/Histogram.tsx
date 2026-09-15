@@ -1,20 +1,26 @@
 /**
  * The chart beside the canvas — the second client, without which none of this is a crossfilter.
  *
- * ## Why `birth_year`, and why it is not an arbitrary choice of column
+ * ## Which column it brushes, and why this file does not decide
  *
- * The bench corpus's `Person.vertex.yml` declares exactly three properties — `subject` (string,
- * primary), `birth_year` (int32) and `postcode` (string) — beside the four the layout pass writes
- * (`dense_id`, `x`, `y`, `cluster_id`). Of those, `birth_year` is the only *numeric,
- * non-positional, non-identity* column in the corpus, which is to say the only one a binned
- * histogram is the right form for. `postcode` is high-cardinality categorical and `cluster_id` is
- * already the canvas's colour channel, so brushing it would be brushing the legend.
+ * `field` is a prop, and what fills it is `src/encoding.ts` reading the corpus — this header used
+ * to carry the reasoning as prose about `birth_year` and the bench corpus, which is an argument
+ * performed once by a person and then true of one artefact. The rule it argued is the rule that is
+ * now executed, in two halves that are asked different questions:
  *
- * It also happens to be the more interesting one: `graph.graph.yml` declares
- * `quasi_identifiers: Person.birth_year Person.postcode` under a `k-anonymity` bound of 5. So the
- * column this chart brushes is a column the corpus says is a re-identification risk, and the chart
- * shows the k-anonymised distribution — the generalisation is already in the bytes, because the
- * writer refused to seal a manifest whose data did not reach the bound.
+ * - **the payload** says which columns a binned histogram is the right form for — *numeric, and
+ *   not the address, the position, the identity, or the colour*, the last because brushing the
+ *   colour is brushing the legend;
+ * - **`graph.graph.yml`** says which of those is interesting, by declaring it a quasi-identifier
+ *   under the corpus's k-anonymity bound.
+ *
+ * On the bench corpus the two land on `birth_year`, which is what this header used to name: its
+ * payload's other columns are the four the layout pass writes plus `subject` and a
+ * high-cardinality `postcode`, and `quasi_identifiers: Person.birth_year Person.postcode` is
+ * declared under a `k` of 5. So the column this chart brushes is one the corpus says is a
+ * re-identification risk, and the chart shows the k-anonymised distribution — the generalisation is
+ * already in the bytes, because the writer refused to seal a manifest whose data did not reach the
+ * bound.
  *
  * ## No plotting dependency, deliberately
  *
@@ -28,7 +34,7 @@
  *
  * ## What it publishes
  *
- * A `clauseInterval` over `birth_year` — an interval in *data space*, because unlike the canvas
+ * A `clauseInterval` over `field` — an interval in *data space*, because unlike the canvas
  * this client's `x` really is a column. That is the asymmetry `IdSetClient`'s header describes from
  * the other side, and having both on one coordinator is what makes this a crossfilter rather than
  * a filter: the histogram narrows the canvas, and the canvas's own selection (were it to publish
@@ -190,7 +196,10 @@ export interface HistogramProps {
   coordinator: { connect(client: MosaicClient): void; disconnect(client: MosaicClient): void };
   /** What the brush publishes into — the same `Selection` the canvas client is filtered by. */
   filter: Selection;
-  /** Which column. `birth_year` here; a parameter so the choice stays visible at the call site. */
+  /**
+   * Which column. Derived from the corpus by `src/encoding.ts` and passed in, so that the one
+   * module that decides what this app draws with decides this too.
+   */
   field: string;
   /** Whether the relation is ready. The client is not connected before it is. */
   ready: boolean;

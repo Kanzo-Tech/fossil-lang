@@ -49,6 +49,7 @@ import type { BoundedSource, Slice, SliceRequest, Viewport } from '@kanzo-tech/g
 import { vertexId } from '@kanzo-tech/graph';
 
 import type { QueryFn } from './duckdb.js';
+import { categoricalOf } from './encoding.js';
 import { extentOf, type Rect, type TileBox } from './stream.js';
 
 /**
@@ -140,9 +141,17 @@ const lit = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 /** A list of them, for `read_parquet([…])` and `parquet_metadata([…])`. */
 const list = (values: readonly string[]): string => `[${values.map(lit).join(', ')}]`;
 
-/** Same rule as `tiles.ts`: a `fill` that is a colour is not a column name. */
-function column(fill: string | undefined): string {
-  return fill && !fill.startsWith('var(') && !fill.startsWith('#') ? fill : 'cluster_id';
+/**
+ * Same rule as `tiles.ts`: a `fill` that is a colour is not a column name.
+ *
+ * And the same fallback, which is no longer a constant: the column the CORPUS carries, derived by
+ * `src/encoding.ts` from the payload's own vocabulary. `null` where it carries none — this source
+ * composes its own SQL rather than going through the door, so it has no default to defer to and
+ * draws one colour instead of naming a column that is not there.
+ */
+function column(fill: string | undefined, carried: string | null): string | null {
+  if (fill && !fill.startsWith('var(') && !fill.startsWith('#')) return fill;
+  return carried;
 }
 
 /**
@@ -165,6 +174,8 @@ interface Plan {
   typeIndex: number;
   count: number;
   edgeCount: number;
+  /** The categorical the payload carries, or `null`. See {@link column}. */
+  carries: string | null;
   vertexFiles: string[];
   edgeFiles: string[];
 }
@@ -246,6 +257,9 @@ export function wholeSource(options: WholeSourceOptions): BoundedSource {
       typeIndex: Math.max(0, corpus.addressing.types.indexOf(address)),
       count,
       edgeCount,
+      // The colour this corpus carries, for a request that names a CSS colour instead of a column.
+      // Read where the payload's vocabulary first exists, which is the same moment the file list does.
+      carries: declared === undefined ? null : categoricalOf(declared),
       vertexFiles: filesOf(address.tiles, (k) => address.tileUrl(k)),
       edgeFiles: [...new Set(edgeFiles)],
     };
@@ -270,10 +284,13 @@ export function wholeSource(options: WholeSourceOptions): BoundedSource {
    * `[0, count)` and it IS the row index of the answer. A sort over a million rows to recover a
    * number the rows already carry would be the load's largest cost and buy nothing.
    */
-  async function load(fill: string): Promise<void> {
+  async function load(requested: string | undefined): Promise<void> {
     const started = performance.now();
     const shape = await plan();
     const { count, edgeCount } = shape;
+    // Not before `plan()`: the column this falls back to is the corpus's own, and the corpus is
+    // what `plan()` opened.
+    const fill = column(requested, shape.carries);
 
     if (count === 0) {
       failure = 'the manifest declares no vertex count, so there is no whole to load';
@@ -295,7 +312,7 @@ export function wholeSource(options: WholeSourceOptions): BoundedSource {
     }
 
     bytes =
-      (await weigh(shape.vertexFiles, ['dense_id', 'x', 'y', fill])) +
+      (await weigh(shape.vertexFiles, fill === null ? ['dense_id', 'x', 'y'] : ['dense_id', 'x', 'y', fill])) +
       (await weigh(shape.edgeFiles, ['src_dense', 'dst_dense']));
 
     const positions = new Float32Array(count * 2);
@@ -312,7 +329,9 @@ export function wholeSource(options: WholeSourceOptions): BoundedSource {
     for (let lo = 0; lo < count; lo += batch) {
       const hi = Math.min(count, lo + batch);
       const rows = await ask(
-        `SELECT dense_id, x, y, "${fill.replace(/"/g, '""')}" AS cat ` +
+        // A corpus with no categorical is drawn in one colour, which is the honest picture of a
+        // corpus that carries no community: the alternative is naming a column that is not there.
+        `SELECT dense_id, x, y, ${fill === null ? '0' : `"${fill.replace(/"/g, '""')}"`} AS cat ` +
           `FROM read_parquet(${list(shape.vertexFiles)}) ` +
           `WHERE dense_id >= ${lo} AND dense_id < ${hi}`,
       );
@@ -406,8 +425,7 @@ export function wholeSource(options: WholeSourceOptions): BoundedSource {
         // The one thing a request decides here, and only the FIRST one decides it: which column is
         // held as the categorical. Recolouring would be a second load of the whole corpus, so a
         // later request naming another column is answered with the one in hand rather than paid for.
-        const fill = column(request.fill);
-        loading = load(fill).catch((cause: unknown) => {
+        loading = load(request.fill).catch((cause: unknown) => {
           // An allocation the tab cannot serve, or a query that died. It is reported on the ledger
           // rather than rethrown: `onFailure` paints the canvas over with a message, and "this
           // corpus does not fit" is a result of the comparison rather than a broken component.
