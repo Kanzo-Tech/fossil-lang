@@ -16,12 +16,16 @@
 //! and `fossil-layout` links no `DuckDB`. The reason was written as one of those
 //! twice and neither survived; do not write it a third time.
 //!
-//! What is left is [`host::run`], and it is the FILESYSTEM. `fossil_df::run_to_dir`
-//! is itself `cfg(not(wasm32))` because it writes a `GraphAr` tree to a local
-//! directory, which a browser has no concept of — measured by building for the
-//! target, and it is the only remaining error. That does not contradict «fossil
-//! is a compiler consumed as a WASM library»: writing files to a disk is what a
-//! native host DOES, and the browser's host writes bytes back over its own seam.
+//! What is left is [`host::run`], and it is the FILESYSTEM. It writes a
+//! `GraphAr` tree to a local directory — the layout pass through
+//! `fossil_layout::io::LocalFs`, then `GraphArData::write_manifests` over it —
+//! and a browser has no concept of one. `fossil_df::materialise`, which the run
+//! calls first, is `cfg(not(wasm32))` for a **different** reason worth keeping
+//! straight: it blocks on a private `tokio` runtime. It used to be gated for the
+//! filesystem too, because it ended by writing the manifests; it writes nothing
+//! now. That does not contradict «fossil is a compiler consumed as a WASM
+//! library»: writing files to a disk is what a native host DOES, and the
+//! browser's host writes bytes back over its own seam.
 //!
 //! So [`host::check`] is wasm-capable and [`host::run`] is not, in one crate.
 //! Splitting them is a decision and not a cleanup; `/docs/design/one-engine`
@@ -35,8 +39,8 @@
 #[cfg(target_arch = "wasm32")]
 compile_error!(
     "fossil-cli is native-only: `run` writes a GraphAr tree to a local \
-     directory through `fossil_df::run_to_dir`, which is itself wasm-gated. \
-     Do not add it to the WASM CI gate."
+     directory, and calls `fossil_df::materialise`, which blocks on a private \
+     tokio runtime and is itself wasm-gated. Do not add it to the WASM CI gate."
 );
 
 mod documents;

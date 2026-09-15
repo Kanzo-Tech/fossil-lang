@@ -523,11 +523,10 @@ pub fn run(
         let locator = anchor.locator(uri);
         std::fs::read_to_string(&locator).map_err(|e| format!("read source `{locator}`: {e}"))
     };
-    let graph = fossil_df::run_to_dir(
+    let graph = fossil_df::materialise(
         &db,
         file,
         &descriptor,
-        &dest_dir,
         connections,
         read_uri,
         memory_bytes,
@@ -535,33 +534,41 @@ pub fn run(
     )
     .map_err(|e| miette::miette!("execute: {e}"))?;
 
-    // W3.1b layout post-pass, and the only thing that writes the corpus's
-    // payload: a community partition, a deterministic placement, and `dense_id`
-    // renumbered into Morton order, emitted as tiles under the prefixes
-    // `run_to_dir` has just declared in the manifests.
+    // **The write, in the order a corpus is true in.** The payload first, out of
+    // the batches `graph` holds — a community partition, a deterministic
+    // placement, and `dense_id` renumbered into Morton order, emitted as tiles.
+    // Then the manifests, describing what is on disk.
     //
-    // **There is nothing to repoint any more, and that is the change.** A
-    // `RunStatus` was built here BEFORE the pass and patched BY it, because it
-    // named `vertex/<Type>.parquet` — a staged file whose deletion used to be
-    // the pass's last act — and `fossil run --output-json` was handing keasy a
-    // path to a file that had just stopped existing. The report is the manifest,
-    // and the manifest has always declared the chunk prefix the pass writes
-    // into, so the order of these two lines is no longer load-bearing.
+    // That order is the whole of `materialise` no longer taking a destination.
+    // The manifests went first for as long as the payload was staged Parquet the
+    // pass rewrote, and a document written before the bytes can only *promise*
+    // them — which is the right shape for a count that is arithmetic and the
+    // wrong one for a measured number.
+    //
+    // **There is nothing to repoint any more.** A `RunStatus` was built here
+    // BEFORE the pass and patched BY it, because it named
+    // `vertex/<Type>.parquet` — a staged file whose deletion used to be the
+    // pass's last act — and `fossil run --output-json` was handing keasy a path
+    // to a file that had just stopped existing. The report is the manifest.
     enrich_written_layout(&graph, &dest_dir, memory_bytes)?;
+    graph
+        .write_manifests(&dest_dir)
+        .map_err(|e| miette::miette!("write manifests: {e}"))?;
 
     Ok(RunReport::of(dest_url, &graph))
 }
 
-/// Run the W3 layout enrichment over the just-written `GraphAr` manifests: for
-/// each vertex type, hand the pass the batches `execute_graph` materialised and
-/// the prefixes the manifest declares, and let it emit the payload with real
-/// `x`/`y`/`cluster_id` and `dense_id` in Morton order. Local-filesystem paths
-/// (the `run_to_dir` dest is a local dir).
+/// Run the W3 layout enrichment: for each vertex type, hand the pass the batches
+/// [`fossil_df::materialise`] returned and the prefixes the manifests will
+/// declare, and let it emit the payload with real `x`/`y`/`cluster_id` and
+/// `dense_id` in Morton order. Local-filesystem paths (`dest_dir` is a local
+/// directory).
 ///
 /// # It writes the payload, it no longer rewrites one
 ///
-/// `run_to_dir` staged every vertex type and every orientation as Parquet, this
-/// function pointed the pass at those files, and then it **deleted them** — two
+/// `materialise` was `run_to_dir` and staged every vertex type and every
+/// orientation as Parquet; this function pointed the pass at those files, and
+/// then it **deleted them** — two
 /// loops of `remove_file` at the bottom, one per kind. Both are gone with the
 /// thing they cleaned up after: 43.3 MB of the 115.9 MB a com-DBLP run wrote
 /// existed only to be read back and unlinked.

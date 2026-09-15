@@ -26,7 +26,7 @@ prose.
 | --- | --- | --- | --- |
 | `fossil-introspect` | **directly** | no | the `DESCRIBE`, and the credentials that reach a cloud source |
 | `fossil-mcp` | **directly** | no | the native binding for the corpus verbs |
-| `fossil-cli` | via `fossil-introspect` | no — `run_to_dir` writes a directory | **the** native host: it introspects, compiles, runs, and is the binary over all three |
+| `fossil-cli` | via `fossil-introspect` | no — `run` writes a directory | **the** native host: it introspects, compiles, runs, and is the binary over all three |
 | `fossil-lsp` | via `fossil-introspect` | no | a host, for the reason `fossil check` is one |
 | `fossil-layout` | dev-dependency only | **yes** | the post-pass, over Parquet through `arrow-rs` |
 
@@ -38,7 +38,10 @@ not the same claim — what it takes from there is one Arrow → Parquet encoder
 In the native host the reason changed rather than the fact: `pre_introspect` and the credentials
 went to `fossil-introspect`, a crate a **host** takes, and `run` takes a map of connection URLs
 rather than a `RunCreds`, so the compiler cannot see a secret. One wasm32 error is left and it is
-the filesystem — `fossil_df::run_to_dir` writes a corpus to a local directory. **`check` is
+the filesystem — `run` writes a corpus to a local directory, through the layout pass and then
+`GraphArData::write_manifests` over it. (`fossil_df::materialise`, which it calls first, is wasm-gated
+too and for another reason: it blocks on a private `tokio` runtime. It wrote the manifests once and
+writes nothing now.) **`check` is
 wasm-capable and `run` is not, in one crate**, and that does not contradict the sentence the project
 is built on the way bundling a database did, because writing files to a disk is what a native host
 does. None of it is the DataFusion rewrite either: **DuckDB is still the engine that `DESCRIBE`s, on

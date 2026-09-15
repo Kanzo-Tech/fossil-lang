@@ -7,7 +7,7 @@
 //! existence.
 //!
 //! It did not. `run` used to build a `RunStatus` from the executor's own view
-//! (`vertex/<Type>.parquet` — what `run_to_dir` writes) and then run the W3
+//! (`vertex/<Type>.parquet` — what the writer used to stage) and then run the W3
 //! layout pass, whose LAST act is to delete exactly those files after tiling
 //! them into `vertex/<Type>/`. Nothing failed: the deletion succeeded, the
 //! status serialised, the CLI's own assertion

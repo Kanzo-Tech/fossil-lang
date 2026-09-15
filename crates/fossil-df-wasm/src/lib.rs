@@ -42,6 +42,7 @@ use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_df::RunReport;
 use fossil_df::SourceFormat;
 use fossil_df::files::GraphArFile;
+use fossil_layout::io::MemoryFs;
 use fossil_shex::ShExDescriptor;
 use object_store::memory::InMemory;
 use object_store::path::Path as ObjPath;
@@ -188,13 +189,28 @@ pub async fn execute_core(
         .await
         .map_err(|e| format!("execute_graph: {e}"))?;
 
-    let manifests = graph.manifest_files().map_err(|e| format!("encode: {e}"))?;
+    // **The payload first, then the manifests over it** — the order `fossil run`
+    // writes in, and for the same reason: a document written before the bytes
+    // can only promise them. `enrich_layout_in_memory` hands back the filesystem
+    // it wrote into, and the manifests go in on top.
     let report = RunReport::of(dest, &graph);
-    let files = enrich_layout_in_memory(&graph, manifests)?;
+    let fs = enrich_layout_in_memory(&graph)?;
+    for file in graph.manifest_files().map_err(|e| format!("encode: {e}"))? {
+        fs.insert(file.rel_path, file.bytes);
+    }
+    let files = fs
+        .drain()
+        .into_iter()
+        .map(|(rel_path, bytes)| GraphArFile {
+            rel_path,
+            bytes: bytes.to_vec(),
+        })
+        .collect();
     Ok(ExecOutput { files, report })
 }
 
-/// Run the real layout pass, in memory, and get the whole corpus back.
+/// Run the real layout pass, in memory, and hand back the filesystem it wrote
+/// the payload into.
 ///
 /// This is `fossil_cli::host::enrich_written_layout` with a different
 /// filesystem under it, and the two are deliberately the same shape: the same
@@ -202,8 +218,8 @@ pub async fn execute_core(
 /// to be what `fossil run` writes**, and the only way to be sure of that is for
 /// the browser to run the pass rather than to approximate it.
 ///
-/// It is not optional, and it is not a rewrite: `fossil-df` emits the manifests
-/// and `x`/`y`/`cluster_id` as zeroed placeholders in batches nobody has written
+/// It is not optional, and it is not a rewrite: `fossil-df` produces
+/// `x`/`y`/`cluster_id` as zeroed placeholders in batches nobody has written
 /// yet, so this pass is what puts the payload in the map at all. A browser that
 /// skipped it would publish manifests over an empty tree.
 ///
@@ -218,21 +234,12 @@ pub async fn execute_core(
 /// Arrow, the staged Parquet this function inserted into the map, and the copy
 /// the pass decoded back out of it. Two of the three were there so that a pass
 /// in the same process could read what the same process had just encoded.
-fn enrich_layout_in_memory(
-    graph: &fossil_df::GraphArData,
-    manifests: Vec<GraphArFile>,
-) -> Result<Vec<GraphArFile>, String> {
-    use fossil_layout::io::MemoryFs;
+fn enrich_layout_in_memory(graph: &fossil_df::GraphArData) -> Result<MemoryFs, String> {
     use fossil_layout::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget};
 
-    // The manifests go in so that they come back out with the payload, in one
-    // list for JS. No `dest` prefix: the native host joins one because it writes
-    // into a directory, and this writes into a map whose keys are what JS
-    // receives.
+    // No `dest` prefix: the native host joins one because it writes into a
+    // directory, and this writes into a map whose keys are what JS receives.
     let fs = MemoryFs::new();
-    for file in manifests {
-        fs.insert(file.rel_path, file.bytes);
-    }
 
     let relation =
         |e: &fossil_df::EdgeTable| format!("edge/{}_{}_{}/", e.src_type, e.label, e.dst_type);
@@ -281,14 +288,7 @@ fn enrich_layout_in_memory(
     fossil_layout::layout::enrich_layout_with(&fs, &targets, &adjacencies)
         .map_err(|e| format!("layout: {e}"))?;
 
-    Ok(fs
-        .drain()
-        .into_iter()
-        .map(|(rel_path, bytes)| GraphArFile {
-            rel_path,
-            bytes: bytes.to_vec(),
-        })
-        .collect())
+    Ok(fs)
 }
 
 /// Enumerate the program's sources as `(uri, row-name)` — the target-agnostic

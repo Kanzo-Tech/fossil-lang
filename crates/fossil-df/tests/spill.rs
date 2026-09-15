@@ -110,18 +110,24 @@ fn a_ridiculous_budget_spills_and_writes_the_same_corpus() {
     );
 }
 
-/// One `run_to_dir` over `program` — local CSV sources, no RDF seam.
+/// One `materialise` over `program` — local CSV sources, no RDF seam — and the
+/// manifests it no longer writes, written here.
+///
+/// `materialise` writes nothing now, so what this compares is the manifests
+/// against the manifests. That is still the assertion this suite wants: what the
+/// budget must not change is the *document*, and the payload is the layout
+/// pass's, which has a budget and an identity test of its own
+/// (`crates/fossil-layout/tests/budget.rs`).
 fn run(program: &str, dest: &Path, memory_bytes: Option<u64>) {
     let (db, file) =
         support::db_with_shapes(program, "spill.fossil", &[("spill.shex", SPILL_SHEX)]);
     let descriptor = fossil_df::OutputDescriptorKind::ShEx(
         fossil_shex::ShExDescriptor::from_shex_source(SPILL_SHEX).expect("parse spill.shex"),
     );
-    fossil_df::run_to_dir(
+    let graph = fossil_df::materialise(
         &db,
         file,
         &descriptor,
-        dest,
         &std::collections::HashMap::new(),
         |uri| Err(format!("no RDF source expected: {uri}")),
         memory_bytes,
@@ -129,7 +135,10 @@ fn run(program: &str, dest: &Path, memory_bytes: Option<u64>) {
         // policy seals `privacy: undeclared` rather than refusing.
         None,
     )
-    .unwrap_or_else(|e| panic!("run_to_dir: {e}; {:#?}", support::diagnostics(&db, file)));
+    .unwrap_or_else(|e| panic!("materialise: {e}; {:#?}", support::diagnostics(&db, file)));
+    graph
+        .write_manifests(dest)
+        .unwrap_or_else(|e| panic!("write_manifests: {e}"));
 }
 
 /// `PEOPLE` people and `ORDERS` orders, each order pointing at a person — two

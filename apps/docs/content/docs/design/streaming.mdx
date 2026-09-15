@@ -239,11 +239,18 @@ total be fitted again is a measurement whose process did not build the fixture: 
 handed a corpus already on disk. That is the next thing this calibration is owed.
 </Callout>
 
-There is also a floor now, `LAYOUT_BASE_BYTES`, 16 MiB. Three proportional terms make a small enough
-corpus cost nothing, and the reader's batches and the writer's row-group buffers are the size they
-are: a ten-thousand-vertex corpus holds 6.21 MB against 4.00 MB of linear terms. Without it the
-guard that samples the bound was admitting a sixty-thousand-vertex run on 22.8 MB and watching it
-hold 30.1.
+There is also a floor now, `LAYOUT_BASE_BYTES`, **32 MiB**. Three proportional terms make a small
+enough corpus cost nothing, and the writer's row-group buffers are the size they are: a
+ten-thousand-vertex corpus holds 6.21 MB against 4.00 MB of linear terms. Without it the guard that
+samples the bound was admitting a sixty-thousand-vertex run on 22.8 MB and watching it hold 30.1.
+
+It was 16 MiB, and what re-fitted it is the pass taking Arrow instead of opening Parquet — **not a
+change in what the pass holds.** The fixture used to write its corpus to disk and drop the arrays, so
+the guard's baseline was taken with those pages freed and the pass reused them; the batches are live
+now, as they are in a real run, and `peak − baseline` stopped being biased low. Seven debug runs at
+sixty thousand vertices put the constant term at 12.5–16.5 MB alone and **19.9 MB in a loaded
+batch**, which is how CI runs it, so the old floor sat below the worst observation and flaked instead
+of failing.
 
 ### The ceiling is the remap, and the remap is the sort
 

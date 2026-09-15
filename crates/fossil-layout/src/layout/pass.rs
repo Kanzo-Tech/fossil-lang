@@ -442,16 +442,40 @@ const ADJACENCY_ROW_BYTES: u64 = 8;
 /// against 4.00 MB of linear terms, and a sixty-thousand-vertex one holds 25.89
 /// against 23.94, which puts the floor between two and five megabytes.
 ///
-/// Sixteen mebibytes rather than five, and the reason is where the number is
+/// Thirty-two mebibytes rather than five, and the reason is where the number is
 /// used rather than where it was measured. At the small end this term **is** the
 /// answer, and the run-to-run spread is a larger fraction of it than of anything
 /// else here: the same sixty-thousand-vertex corpus holds 25.89 MB in a release
 /// build and 30.10 in the debug build `cargo test` produces. A floor fitted to
 /// the optimised build is a floor that fails on the guard.
 ///
+/// # It was 16 MiB, and the fixture had been subsidising the measurement
+///
+/// `crates/fossil-layout/tests/budget_bound.rs` samples the resident set across
+/// the pass and asserts `held <= declared`. It went red at sixty thousand, and
+/// the cause is the input becoming Arrow rather than anything in the pass: the
+/// fixture used to write Parquet and **drop** its arrays, so the baseline was
+/// taken with those pages already freed and the pass reused them. The batches
+/// are live now — which is what a real run looks like, where `execute_graph`
+/// still holds them — so the pass has to ask for pages of its own, and
+/// `peak − baseline` stopped being biased low.
+///
+/// Measured after the change, debug build, seven runs at sixty thousand
+/// vertices and mean degree fourteen — `held` minus the three linear terms:
+///
+/// | | MB |
+/// | --- | --- |
+/// | six runs alone | 12.48 · 14.53 · 14.69 · 15.28 · 15.81 · 16.46 |
+/// | one run **in a loaded batch**, which is how CI runs it | **19.9** |
+///
+/// So the old floor sat *below* the worst observation, which is why it flaked
+/// rather than failed. This clears 19.9 MB by 68%, and the loaded run is the one
+/// it is fitted to: `cargo test` runs test binaries in parallel and a bound that
+/// only holds on an idle machine is a bound that goes red on somebody else's.
+///
 /// Nothing at the sizes the rest of this file is calibrated on notices: it is
-/// 0.4% of the ten-million estimate.
-const LAYOUT_BASE_BYTES: u64 = 16 * 1024 * 1024;
+/// 0.9% of the ten-million estimate, where 16 MiB was 0.4%.
+const LAYOUT_BASE_BYTES: u64 = 32 * 1024 * 1024;
 
 /// What one byte of the vertex payload costs while the pass runs, in
 /// thousandths.

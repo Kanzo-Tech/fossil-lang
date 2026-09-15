@@ -14,7 +14,7 @@
 //! # Where it runs, and why it is not inside the verifier
 //!
 //! Immediately before [`crate::privacy::verify`], over the same in-memory Arrow
-//! batches, in [`crate::run_to_dir`] — so the order is
+//! batches, in [`crate::materialise`] — so the order is
 //! `execute_graph` → **derive** → `verify` → `write_manifests`. That seam is forced
 //! by the same argument that put verification there: a corpus is files and files
 //! have no chokepoint, so every control has to act before a byte reaches a disk.
@@ -46,7 +46,7 @@
 //! derivation happened at all — and [`crate::generalize::Derived`] carries only the strings the
 //! manifest prints, which no check consults. **If those two ever agreed by
 //! construction rather than by measurement, the guarantee would be circular**,
-//! and the shape of the call in `run_to_dir` is what stops it.
+//! and the shape of the call in `materialise` is what stops it.
 //!
 //! A consequence worth stating plainly: this module is allowed to fail at its
 //! job. A derivation that does not reach the bound produces a refusal from the

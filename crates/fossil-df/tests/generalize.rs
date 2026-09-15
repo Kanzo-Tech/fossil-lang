@@ -184,7 +184,7 @@ fn corpus(batches: usize, null_postcodes: usize) -> GraphArData {
     }
 }
 
-/// Derive, then verify — the order and the independence of `run_to_dir`.
+/// Derive, then verify — the order and the independence of `materialise`.
 fn derive_and_verify(
     policy: &PrivacyPolicy,
     graph: &mut GraphArData,

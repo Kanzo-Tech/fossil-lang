@@ -1181,11 +1181,26 @@ fn bounded_context(memory_bytes: Option<u64>) -> datafusion::error::Result<Sessi
     Ok(SessionContext::new_with_config_rt(config, runtime))
 }
 
+/// **Materialise a whole program into a corpus value, writing nothing.**
+///
 /// Native one-call orchestration the host (CLI/engine) drives: register every
 /// provider (RDF) source from host-read bytes, execute the whole program on
-/// DataFusion, and write the GraphAr tree under `dest_dir`. Returns the
-/// [`GraphArData`] so the caller can build a [`RunReport`] and run any post-pass
-/// (e.g. the layout enrichment).
+/// DataFusion, measure the privacy bound, and return the [`GraphArData`].
+///
+/// # It wrote a directory, and the directory is now the caller's
+///
+/// This was `run_to_dir`, and `dest_dir` was its only reason to know what a
+/// filesystem is: it ended with `write_manifests(dest_dir)`. The manifests are
+/// emitted **after** the payload now — by whoever ran the layout pass, with
+/// the counts the pass measured in them — so this function has nothing to write
+/// and no destination to be told.
+///
+/// What that buys is the invariant the manifest could not hold while it went
+/// first: **a manifest describes bytes that exist.** It used to promise them and
+/// a guard checked the promise, which is the right order only for a number that
+/// is arithmetic. A measured one — a rung's quotient edge count is the case that
+/// forced this — cannot be planned, so a document written first either omits it
+/// or guesses.
 ///
 /// `connections` is the name→base-URL ref-map: `@conn/path` source aliases
 /// resolve through it for BOTH object-store reads (csv/json/parquet → the
@@ -1206,19 +1221,18 @@ fn bounded_context(memory_bytes: Option<u64>) -> datafusion::error::Result<Sessi
 ///
 /// # Errors
 /// Host read errors (surfaced from `read_uri`), decode/registration failures,
-/// DataFusion execution errors, or Parquet/manifest write failures.
+/// DataFusion execution errors, or a privacy bound that could not be measured.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn run_to_dir(
+pub fn materialise(
     db: &dyn fossil_base::Db,
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
-    dest_dir: &std::path::Path,
     connections: &HashMap<String, String>,
     read_uri: impl Fn(&str) -> Result<String, String>,
     memory_bytes: Option<u64>,
     policy: Option<&fossil_policy::PrivacyPolicy>,
 ) -> datafusion::error::Result<GraphArData> {
-    let mut probe = Probe::new("run_to_dir");
+    let mut probe = Probe::new("materialise");
     let ctx = bounded_context(memory_bytes)?;
     for binding in provider_bindings(db, file, descriptor, connections) {
         let bytes = read_uri(&binding.uri).map_err(DataFusionError::Execution)?;
@@ -1270,13 +1284,6 @@ pub fn run_to_dir(
         probe.mark("verify privacy bound");
     }
 
-    // The manifests, and only the manifests. The payload they describe is
-    // written by `fossil_layout`'s pass out of the batches `graph` still holds
-    // — which is why this function returns `graph` rather than consuming it.
-    graph
-        .write_manifests(dest_dir)
-        .map_err(|e| DataFusionError::Execution(format!("write GraphAr: {e}")))?;
-    probe.mark("write_manifests");
     probe.finish();
     Ok(graph)
 }
