@@ -15,7 +15,7 @@
 //!
 //! Immediately before [`crate::privacy::verify`], over the same in-memory Arrow
 //! batches, in [`crate::run_to_dir`] — so the order is
-//! `execute_graph` → **derive** → `verify` → `write_to_dir`. That seam is forced
+//! `execute_graph` → **derive** → `verify` → `write_manifests`. That seam is forced
 //! by the same argument that put verification there: a corpus is files and files
 //! have no chokepoint, so every control has to act before a byte reaches a disk.
 //! Deriving after the write would mean rewriting a corpus that had already

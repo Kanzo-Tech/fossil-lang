@@ -34,23 +34,22 @@
 //!
 //! - **Not the executor.** `execute_graph` is the other 2.21 G under a 2 GiB
 //!   cap and is not in this process at all.
-//! - **Not larger-than-RAM.** It writes the fixture with one `ArrowWriter` pass
-//!   and the generator's own arrays are live while it does, so the peak reported
-//!   for `start` is the fixture's, not the pass's. Read the DELTAS.
+//! - **Not larger-than-RAM.** The fixture IS the pass's input now — the batches
+//!   are live throughout, because that is what a real run hands over — so the
+//!   peak reported for `start` is the fixture's, not the pass's. Read the DELTAS.
 //! - **Not throughput.** Release build, but the seconds column is there to say a
 //!   phase ran, not what it costs.
 
-use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Float32Array, RecordBatch, StringArray, UInt32Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use fossil_layout::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget};
-use parquet::arrow::ArrowWriter;
 
-/// Rows per `RecordBatch` handed to the writer — the fixture is streamed in
-/// these so building it does not dominate the peak it is there to measure.
+/// Rows per `RecordBatch`. The executor's own batch size, so the fixture arrives
+/// in the shape a real run's does — and [`locate`](fossil_layout) is exercised
+/// across boundaries rather than inside one batch.
 const WRITE_BATCH: u32 = 65_536;
 
 // The report prints human-readable MB and bytes-per-row; the 53rd significant
@@ -90,50 +89,50 @@ fn main() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("chunks")).expect("create the fixture directory");
 
-    let vertices = root.join("Node.parquet");
-    let by_source = root.join("by_source.parquet");
-    let by_target = root.join("by_target.parquet");
-
     eprintln!("building a {rows}-vertex fixture at mean degree {degree}…");
-    write_vertices(&vertices, rows);
+    let vertices = vertex_batches(rows);
     let edges = planted(rows, degree);
     eprintln!("  {} edges", edges.len());
-    write_adjacency(&by_source, &edges, Endpoint::Src);
-    write_adjacency(&by_target, &edges, Endpoint::Dst);
+    let by_source = adjacency_batches(&edges, Endpoint::Src);
+    let by_target = adjacency_batches(&edges, Endpoint::Dst);
     drop(edges);
 
+    // **The number `tests/budget.rs` asks for.** Its calibration table records a
+    // Parquet size scaled by the decode factor the payload term used to carry,
+    // because these five runs measured a file; this prints the thing the term is
+    // now per byte of, so a re-run replaces the scaling with a measurement.
+    let payload = arrow_bytes(&vertices);
     eprintln!(
-        "  vertex file {:.2} MB ({:.0} bytes/row), adjacency {:.2} MB",
-        mb(&vertices),
-        bytes(&vertices) as f64 / f64::from(rows),
-        mb(&by_source)
+        "  vertex payload {:.2} MB of Arrow ({:.0} bytes/row), adjacency {:.2} MB",
+        mb(payload),
+        payload as f64 / f64::from(rows),
+        mb(arrow_bytes(&by_source))
     );
 
+    let chunk_prefix = format!(
+        "{}{}",
+        path(&root.join("chunks")),
+        std::path::MAIN_SEPARATOR
+    );
     let target = VertexLayoutTarget {
         type_name: "Node".to_string(),
-        vertex_parquet: path(&vertices),
-        chunk_prefix: format!(
-            "{}{}",
-            path(&root.join("chunks")),
-            std::path::MAIN_SEPARATOR
-        ),
+        batches: &vertices,
+        chunk_prefix: chunk_prefix.clone(),
         chunk_size: 4_096,
-        self_edge_csr: vec![path(&by_source)],
     };
     let adjacencies = [
-        AdjacencyTarget {
-            parquet: path(&by_source),
-            src_type: "Node".to_string(),
-            dst_type: "Node".to_string(),
-            ordered_by: Endpoint::Src,
-        },
-        AdjacencyTarget {
-            parquet: path(&by_target),
-            src_type: "Node".to_string(),
-            dst_type: "Node".to_string(),
-            ordered_by: Endpoint::Dst,
-        },
-    ];
+        ("by_source", Endpoint::Src, &by_source),
+        ("by_target", Endpoint::Dst, &by_target),
+    ]
+    .map(|(dir, ordered_by, batches)| AdjacencyTarget {
+        src_type: "Node".to_string(),
+        label: "edge".to_string(),
+        dst_type: "Node".to_string(),
+        ordered_by,
+        batches,
+        tile_prefix: format!("{}{}", path(&root.join(dir)), std::path::MAIN_SEPARATOR),
+        levels_prefix: format!("{}{}", path(&root), std::path::MAIN_SEPARATOR),
+    });
 
     fossil_layout::layout::enrich_layout(std::slice::from_ref(&target), &adjacencies)
         .expect("enrich_layout runs on its own fixture");
@@ -141,21 +140,25 @@ fn main() {
     let chunks = std::fs::read_dir(root.join("chunks"))
         .expect("read the chunk directory")
         .count();
-    eprintln!("wrote {chunks} vertex tiles under {}", target.chunk_prefix);
+    eprintln!("wrote {chunks} vertex tiles under {chunk_prefix}");
 }
 
 fn path(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-fn bytes(p: &Path) -> u64 {
-    std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+/// What a batch set occupies, which is the payload term's own unit.
+fn arrow_bytes(batches: &[RecordBatch]) -> u64 {
+    batches
+        .iter()
+        .map(|b| b.get_array_memory_size() as u64)
+        .sum()
 }
 
 // A human-readable megabyte figure for a report; the 53rd bit is noise here.
 #[allow(clippy::cast_precision_loss)]
-fn mb(p: &Path) -> f64 {
-    bytes(p) as f64 / (1024.0 * 1024.0)
+fn mb(bytes: u64) -> f64 {
+    bytes as f64 / (1024.0 * 1024.0)
 }
 
 /// The vertex schema a W0b corpus has: the four columns the pass replaces, plus
@@ -172,16 +175,11 @@ fn vertex_schema() -> Arc<Schema> {
     ]))
 }
 
-/// Write the vertex fixture in [`WRITE_BATCH`]-row batches, so the generator's
-/// own arrays never hold the whole file.
-fn write_vertices(at: &Path, rows: u32) {
+/// The vertex fixture in [`WRITE_BATCH`]-row batches — the shape the executor
+/// hands the pass.
+fn vertex_batches(rows: u32) -> Vec<RecordBatch> {
     let schema = vertex_schema();
-    let mut writer = ArrowWriter::try_new(
-        File::create(at).expect("create the vertex fixture"),
-        Arc::clone(&schema),
-        None,
-    )
-    .expect("open an ArrowWriter");
+    let mut batches = Vec::new();
 
     let mut start = 0u32;
     while start < rows {
@@ -209,16 +207,16 @@ fn write_vertices(at: &Path, rows: u32) {
             ],
         )
         .expect("the fixture batch matches its schema");
-        writer.write(&batch).expect("write a vertex batch");
+        batches.push(batch);
         start += len;
     }
-    writer.close().expect("close the vertex fixture");
+    batches
 }
 
-/// Write one adjacency orientation, sorted by the endpoint it is aligned by —
-/// which is what the manifest's `ordered: true` claims and what the pass
-/// re-establishes after renumbering.
-fn write_adjacency(at: &Path, edges: &[(u32, u32)], ordered_by: Endpoint) {
+/// One adjacency orientation, sorted by the endpoint it is aligned by — which is
+/// what the manifest's `ordered: true` claims and what the pass re-establishes
+/// after renumbering.
+fn adjacency_batches(edges: &[(u32, u32)], ordered_by: Endpoint) -> Vec<RecordBatch> {
     let mut sorted = edges.to_vec();
     match ordered_by {
         Endpoint::Src => sorted.sort_unstable(),
@@ -228,28 +226,23 @@ fn write_adjacency(at: &Path, edges: &[(u32, u32)], ordered_by: Endpoint) {
         Field::new("src_dense", DataType::UInt32, false),
         Field::new("dst_dense", DataType::UInt32, false),
     ]));
-    let mut writer = ArrowWriter::try_new(
-        File::create(at).expect("create the adjacency fixture"),
-        Arc::clone(&schema),
-        None,
-    )
-    .expect("open an ArrowWriter");
-    for chunk in sorted.chunks(WRITE_BATCH as usize) {
-        let batch = RecordBatch::try_new(
-            Arc::clone(&schema),
-            vec![
-                Arc::new(UInt32Array::from(
-                    chunk.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
-                )) as ArrayRef,
-                Arc::new(UInt32Array::from(
-                    chunk.iter().map(|&(_, d)| d).collect::<Vec<_>>(),
-                )),
-            ],
-        )
-        .expect("the adjacency batch matches its schema");
-        writer.write(&batch).expect("write an adjacency batch");
-    }
-    writer.close().expect("close the adjacency fixture");
+    sorted
+        .chunks(WRITE_BATCH as usize)
+        .map(|chunk| {
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::new(UInt32Array::from(
+                        chunk.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
+                    )) as ArrayRef,
+                    Arc::new(UInt32Array::from(
+                        chunk.iter().map(|&(_, d)| d).collect::<Vec<_>>(),
+                    )),
+                ],
+            )
+            .expect("the adjacency batch matches its schema")
+        })
+        .collect()
 }
 
 /// A graph with communities in it, so the Morton renumbering is a real

@@ -7,16 +7,24 @@
 //! answers queries and means something else. Nothing throws. The only way to
 //! catch it is to state the invariants and check them.
 //!
-//! **The fixtures and the assertions are `DuckDB`; the pass under test is not.**
-//! `enrich_layout` reads and writes Parquet through `arrow-rs`, and what is on
-//! either side of it here is a second engine reading those bytes back. That is
-//! worth keeping rather than porting: a corpus only one writer can read is a
-//! corpus, and the assertions below are the only place anything checks that what
-//! this pass emits is Parquet in the sense the rest of the world means.
+//! **The assertions are `DuckDB`; the pass under test is not.** `enrich_layout`
+//! writes Parquet through `arrow-rs`, and what reads those bytes back here is a
+//! second engine. That is worth keeping rather than porting: a corpus only one
+//! writer can read is not a corpus, and the assertions below are the only place
+//! anything checks that what this pass emits is Parquet in the sense the rest of
+//! the world means.
+//!
+//! The **fixture** was `DuckDB` too — three `COPY … TO … (FORMAT PARQUET)`
+//! statements, because the pass opened files. It takes `RecordBatch`es now, so
+//! the input is built in Arrow and `DuckDB` is on one side of the pass instead of
+//! both.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use arrow::array::{ArrayRef, Float32Array, RecordBatch, StringArray, UInt32Array};
+use arrow::datatypes::{DataType, Field, Schema};
 use duckdb::Connection;
 use fossil_layout::layout::{AdjacencyTarget, Endpoint, LayoutError, VertexLayoutTarget};
 
@@ -61,68 +69,117 @@ fn lit(path: &Path) -> String {
     path.to_string_lossy().replace('\'', "''")
 }
 
-/// Write the three Parquets a single-type corpus consists of, with `dense_id`
-/// in IRI order and the placeholder layout columns the W0b writer emits.
-fn write_corpus(
-    conn: &Connection,
-    root: &Path,
-    edges: &[(u32, u32)],
-) -> (PathBuf, PathBuf, PathBuf) {
-    let vertices = root.join("Node.parquet");
-    let by_source = root.join("by_source.parquet");
-    let by_target = root.join("by_target.parquet");
-
-    let rows: Vec<String> = (0..6).map(|i| format!("({i}, 's{i}')")).collect();
-    conn.execute_batch(&format!(
-        "COPY (SELECT c0::UINTEGER AS dense_id, c1::VARCHAR AS subject, \
-         0.0::REAL AS x, 0.0::REAL AS y, 0::UINTEGER AS cluster_id \
-         FROM (VALUES {}) t(c0, c1) ORDER BY c0) TO '{}' (FORMAT PARQUET)",
-        rows.join(", "),
-        lit(&vertices)
-    ))
-    .expect("write vertices");
-
-    let pairs: Vec<String> = edges.iter().map(|(a, b)| format!("({a}, {b})")).collect();
-    for (path, order) in [(&by_source, "c0, c1"), (&by_target, "c1, c0")] {
-        conn.execute_batch(&format!(
-            "COPY (SELECT c0::UINTEGER AS src_dense, c1::UINTEGER AS dst_dense \
-             FROM (VALUES {}) t(c0, c1) ORDER BY {order}) TO '{}' (FORMAT PARQUET)",
-            pairs.join(", "),
-            lit(path)
-        ))
-        .expect("write adjacency");
-    }
-    (vertices, by_source, by_target)
+/// The input a single-type corpus consists of, as the executor would hand it
+/// over: `dense_id` in IRI order, subjects `s0`…`s5`, and the placeholder layout
+/// columns the writer emits.
+///
+/// Held by the caller and borrowed by [`targets`], because a struct carrying a
+/// target beside the batches it points at is self-referential.
+struct Corpus {
+    vertices: Vec<RecordBatch>,
+    by_source: Vec<RecordBatch>,
+    by_target: Vec<RecordBatch>,
 }
 
-fn targets(
-    vertices: &Path,
-    by_source: &Path,
-    by_target: &Path,
+fn corpus(edges: &[(u32, u32)]) -> Corpus {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("dense_id", DataType::UInt32, false),
+        Field::new("subject", DataType::Utf8, false),
+        Field::new("x", DataType::Float32, false),
+        Field::new("y", DataType::Float32, false),
+        Field::new("cluster_id", DataType::UInt32, false),
+    ]));
+    let subjects: Vec<String> = (0..6).map(|i| format!("s{i}")).collect();
+    let columns: Vec<ArrayRef> = vec![
+        Arc::new(UInt32Array::from((0..6u32).collect::<Vec<_>>())),
+        Arc::new(StringArray::from(subjects)),
+        Arc::new(Float32Array::from(vec![0.0f32; 6])),
+        Arc::new(Float32Array::from(vec![0.0f32; 6])),
+        Arc::new(UInt32Array::from(vec![0u32; 6])),
+    ];
+    Corpus {
+        vertices: vec![RecordBatch::try_new(schema, columns).expect("the vertex batch")],
+        by_source: orientation(edges, Endpoint::Src),
+        by_target: orientation(edges, Endpoint::Dst),
+    }
+}
+
+/// One orientation, ordered by the endpoint it declares — which is what the
+/// manifest's `ordered: true` claims and what `LayoutError::Disordered` refuses
+/// it for otherwise.
+fn orientation(edges: &[(u32, u32)], ordered_by: Endpoint) -> Vec<RecordBatch> {
+    let mut rows = edges.to_vec();
+    match ordered_by {
+        Endpoint::Src => rows.sort_unstable_by_key(|&(s, d)| (s, d)),
+        Endpoint::Dst => rows.sort_unstable_by_key(|&(s, d)| (d, s)),
+    }
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("src_dense", DataType::UInt32, false),
+        Field::new("dst_dense", DataType::UInt32, false),
+    ]));
+    let columns: Vec<ArrayRef> = vec![
+        Arc::new(UInt32Array::from(
+            rows.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
+        )),
+        Arc::new(UInt32Array::from(
+            rows.iter().map(|&(_, d)| d).collect::<Vec<_>>(),
+        )),
+    ];
+    vec![RecordBatch::try_new(schema, columns).expect("the adjacency batch")]
+}
+
+/// Where the pass is to write: the payload under `chunks/`, each orientation's
+/// tiles under a directory named after it, and the relation's level sets at the
+/// root.
+///
+/// The two prefixes are passed in where they used to be derived by stripping
+/// `.parquet` off the input's URL — the input has no URL.
+fn targets<'a>(
+    c: &'a Corpus,
+    root: &Path,
     chunks: &Path,
-) -> (Vec<VertexLayoutTarget>, Vec<AdjacencyTarget>) {
-    let adjacency = |p: &Path, ordered_by| AdjacencyTarget {
-        parquet: p.to_string_lossy().into_owned(),
+) -> (Vec<VertexLayoutTarget<'a>>, Vec<AdjacencyTarget<'a>>) {
+    let prefix = |p: &Path| format!("{}{}", p.to_string_lossy(), std::path::MAIN_SEPARATOR);
+    let adjacency = |dir: &str, ordered_by, batches: &'a Vec<RecordBatch>| AdjacencyTarget {
         src_type: "Node".to_string(),
+        label: "edge".to_string(),
         dst_type: "Node".to_string(),
         ordered_by,
+        batches,
+        tile_prefix: prefix(&root.join(dir)),
+        levels_prefix: prefix(root),
     };
     (
         vec![VertexLayoutTarget {
             type_name: "Node".to_string(),
-            vertex_parquet: vertices.to_string_lossy().into_owned(),
-            chunk_prefix: format!("{}{}", chunks.to_string_lossy(), std::path::MAIN_SEPARATOR),
+            batches: &c.vertices,
+            chunk_prefix: prefix(chunks),
             // Two rows per chunk over six vertices, so the emission is exercised
             // as three chunks and a boundary rather than as one file wearing a
             // chunk's name.
             chunk_size: 2,
-            self_edge_csr: vec![by_source.to_string_lossy().into_owned()],
         }],
         vec![
-            adjacency(by_source, Endpoint::Src),
-            adjacency(by_target, Endpoint::Dst),
+            adjacency("by_source", Endpoint::Src, &c.by_source),
+            adjacency("by_target", Endpoint::Dst, &c.by_target),
         ],
     )
+}
+
+/// The graph the fixture states, as pairs of subjects — the one description of
+/// it that renumbering is not allowed to change.
+///
+/// Stated rather than derived. This used to be a `DuckDB` join over the staged
+/// vertex and adjacency Parquet, described in place as «the only point at which
+/// that file is the source of truth»; with no file, the source of truth is the
+/// constant at the top of this file.
+fn expected_edges(edges: &[(u32, u32)]) -> Vec<(String, String)> {
+    let mut pairs: Vec<(String, String)> = edges
+        .iter()
+        .map(|&(a, b)| (format!("s{a}"), format!("s{b}")))
+        .collect();
+    pairs.sort();
+    pairs
 }
 
 /// One payload set as one relation — what a `GraphAr` reader sees.
@@ -159,20 +216,18 @@ fn scalar(conn: &Connection, sql: &str) -> i64 {
 fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     let root = dir("renumber");
     let conn = Connection::open_in_memory().expect("duckdb");
-    let (vertices, by_source, by_target) = write_corpus(&conn, &root, &EDGES);
+    let c = corpus(&EDGES);
     let chunks = root.join("chunks");
     fs::create_dir_all(&chunks).expect("chunk dir");
 
-    // The graph as it stands before the layout touches it, read off the writer's
-    // single file — the only point at which that file is the source of truth.
-    let before = edges_by_subject(&conn, &lit(&vertices), &lit(&by_source));
-    let (v, a) = targets(&vertices, &by_source, &by_target, &chunks);
+    // The graph as it stands before the layout touches it.
+    let before = expected_edges(&EDGES);
+    let (v, a) = targets(&c, &root, &chunks);
     fossil_layout::layout::enrich_layout(&v, &a).expect("enrich_layout");
 
-    // Where each orientation's tiles went: `by_source.parquet` → `by_source/`.
-    // The pass no longer writes the remapped relation back over its input, so
-    // the two `.parquet` files above still hold the PRE-renumbering ids and
-    // reading them here would compare the corpus against its own staging.
+    // Where each orientation's tiles went — the `tile_prefix` the targets above
+    // declared. Nothing else is in this tree: the pass is the only thing that
+    // wrote into it.
     let src_tiles = root.join("by_source");
     let dst_tiles = root.join("by_target");
 
@@ -323,14 +378,13 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
 #[test]
 fn a_dangling_endpoint_is_an_error_and_not_a_missing_row() {
     let root = dir("dangling");
-    let conn = Connection::open_in_memory().expect("duckdb");
     let mut edges = EDGES.to_vec();
     edges.push((0, 99)); // no such vertex
-    let (vertices, by_source, by_target) = write_corpus(&conn, &root, &edges);
+    let c = corpus(&edges);
     let chunks = root.join("chunks");
     fs::create_dir_all(&chunks).expect("chunk dir");
 
-    let (v, a) = targets(&vertices, &by_source, &by_target, &chunks);
+    let (v, a) = targets(&c, &root, &chunks);
     let err = fossil_layout::layout::enrich_layout(&v, &a)
         .expect_err("a dangling endpoint must not pass silently");
     assert!(
@@ -346,17 +400,54 @@ fn a_dangling_endpoint_is_an_error_and_not_a_missing_row() {
 #[test]
 fn an_unknown_vertex_type_is_refused() {
     let root = dir("unknown_type");
-    let conn = Connection::open_in_memory().expect("duckdb");
-    let (vertices, by_source, by_target) = write_corpus(&conn, &root, &EDGES);
+    let c = corpus(&EDGES);
     let chunks = root.join("chunks");
     fs::create_dir_all(&chunks).expect("chunk dir");
 
-    let (v, mut a) = targets(&vertices, &by_source, &by_target, &chunks);
-    a[0].dst_type = "Nowhere".to_string();
+    let (v, mut a) = targets(&c, &root, &chunks);
+    // Retyped on BOTH orientations, so the relation is still one relation and
+    // what is wrong with it is the type it names. Changing one would make the
+    // two halves different relations and the failure would be the missing
+    // counterpart instead.
+    for target in &mut a {
+        target.dst_type = "Nowhere".to_string();
+    }
     let err = fossil_layout::layout::enrich_layout(&v, &a).expect_err("unknown type");
     assert!(
         matches!(err, LayoutError::UnknownVertexType { ref vertex_type, .. } if vertex_type == "Nowhere"),
         "expected the unknown type to be named, got {err:?}",
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+/// **The two orientations of a relation are matched on its key.**
+///
+/// A self-relation handed over source-ordered with no target-ordered half cannot
+/// be laid out: the placement is undirected and reads each vertex's in-edges out
+/// of the half that groups them by destination. Refusing is the only honest
+/// answer — deriving the missing half would be a sort of the whole relation to
+/// recover rows the writer already has.
+///
+/// The pairing used to compare the DIRECTORY of two Parquet URLs, which is a
+/// property of a naming convention rather than of the relation. This is the test
+/// that says it is the `(src_type, label, dst_type)` key: the surviving half here
+/// keeps its directory and the error still fires, because what is missing is a
+/// counterpart to a key.
+#[test]
+fn a_relation_with_one_orientation_is_refused() {
+    let root = dir("one_orientation");
+    let c = corpus(&EDGES);
+    let chunks = root.join("chunks");
+    fs::create_dir_all(&chunks).expect("chunk dir");
+
+    let (v, mut a) = targets(&c, &root, &chunks);
+    a.retain(|target| target.ordered_by == Endpoint::Src);
+    let err = fossil_layout::layout::enrich_layout(&v, &a)
+        .expect_err("a relation with no target-ordered half must not pass silently");
+    assert!(
+        matches!(err, LayoutError::MissingOrientation { ref target } if target == "Node_edge_Node"),
+        "expected the RELATION to be named, got {err:?}",
     );
 
     fs::remove_dir_all(&root).ok();

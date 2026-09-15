@@ -82,8 +82,10 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
 
     // The TILED tree, which is the one `fossil run` writes: the tiles under the
     // declared prefix, the identity index beside them, and the staged
-    // single-file payload GONE — left in, it is a second, stale copy of every
-    // vertex and `apps/corpus`'s `exactly-once` fails a corpus for it.
+    // single-file payload GONE — it is never written now, where it used to be
+    // written, read by the pass and removed from the map. Left in, it is a
+    // second, stale copy of every vertex and `apps/corpus`'s `exactly-once`
+    // fails a corpus for it.
     let paths: Vec<&str> = out.files.iter().map(|f| f.rel_path.as_str()).collect();
     assert!(
         paths.contains(&"vertex/Person/tiles.parquet"),
@@ -95,7 +97,7 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
     );
     assert!(
         !paths.contains(&"vertex/Person.parquet"),
-        "the staged vertex Parquet is the pass's INPUT and must not be published: {paths:?}"
+        "nothing stages a single-file vertex payload; the tiles are the first write: {paths:?}"
     );
     assert!(paths.contains(&"graph.graph.yml"));
     assert!(paths.contains(&"vertex/Person.vertex.yml"));

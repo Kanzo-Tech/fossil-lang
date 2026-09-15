@@ -1,6 +1,13 @@
-//! Native sink (fase 1): `execute_graph` → `write_to_dir` lays the W0b GraphAr
-//! tree on disk (vertex/edge Parquet + a manifest YAML per type plus the graph
-//! index), and the Parquet reads back with the rows the executor produced.
+//! Native sink: `execute_graph` → `write_manifests` lays the dataset's manifests
+//! on disk — a YAML per vertex type, one per edge directory, and the graph index
+//! — describing the rows the executor materialised.
+//!
+//! **It writes no Parquet, and this asserts that too.** The sink emitted one per
+//! vertex type and a pair per edge, `fossil_layout`'s pass read every one of
+//! them back, rewrote it as tiles and unlinked it. The payload is now written
+//! once, by the pass, out of the same batches; what tests THAT is
+//! `fossil-layout`'s own suites and `fossil-cli`'s `walking_skeleton` /
+//! `conformance`, which read a finished corpus.
 
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -8,7 +15,6 @@
 use std::fs;
 
 use datafusion::prelude::SessionContext;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 mod support;
 
@@ -36,7 +42,7 @@ Order : Order from orders
 const GRAPH_SHEX: &str = include_str!("fixtures/graph.shex");
 
 #[tokio::test]
-async fn write_to_dir_lays_out_the_graphar_tree() {
+async fn write_manifests_lays_out_the_graphar_manifests_and_no_payload() {
     let (db, file) =
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
     let descriptor = fossil_df::OutputDescriptorKind::ShEx(
@@ -55,24 +61,48 @@ async fn write_to_dir_lays_out_the_graphar_tree() {
     .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     let dir = tempfile::tempdir().expect("tempdir");
-    graph.write_to_dir(dir.path()).expect("write_to_dir");
+    graph.write_manifests(dir.path()).expect("write_manifests");
 
-    // The full W0b tree exists.
+    // Every manifest of the tree exists.
     for rel in [
         "graph.graph.yml",
-        "vertex/Person.parquet",
         "vertex/Person.vertex.yml",
-        "vertex/Order.parquet",
         "vertex/Order.vertex.yml",
-        "edge/Order_placedBy_Person/by_source.parquet",
-        "edge/Order_placedBy_Person/by_target.parquet",
         "edge/Order_placedBy_Person/Order_placedBy_Person.edge.yml",
     ] {
         assert!(dir.path().join(rel).exists(), "missing {rel}");
     }
 
-    // The vertex Parquet reads back with the right rows + W0b columns.
-    let rows = read_parquet_rows(&dir.path().join("vertex/Person.parquet"));
+    // **And no payload, which is the phase order made assertable.** A staged
+    // vertex Parquet beside the tiles that replace it is two containers for one
+    // set of rows, which is what `apps/corpus`'s `exactly-once` and
+    // `declared-tiling` fail a corpus for. It used to be deleted by whoever ran
+    // the layout afterwards; it is not written.
+    for rel in [
+        "vertex/Person.parquet",
+        "vertex/Order.parquet",
+        "edge/Order_placedBy_Person/by_source.parquet",
+        "edge/Order_placedBy_Person/by_target.parquet",
+    ] {
+        assert!(
+            !dir.path().join(rel).exists(),
+            "{rel} was staged; the payload is the layout pass's to write"
+        );
+    }
+
+    // The rows the manifests describe are in hand, which is how the pass gets
+    // them. Counted off the batches because that is where they are — this used
+    // to read the staged Parquet back, and the staged Parquet was these batches
+    // encoded.
+    let rows: usize = graph
+        .vertices
+        .iter()
+        .find(|v| v.label == "Person")
+        .expect("a Person table")
+        .batches
+        .iter()
+        .map(datafusion::arrow::record_batch::RecordBatch::num_rows)
+        .sum();
     assert_eq!(rows, 3, "users.csv → 3 Person vertices");
 
     let yaml = fs::read_to_string(dir.path().join("vertex/Person.vertex.yml")).unwrap();
@@ -106,19 +136,20 @@ async fn write_to_dir_lays_out_the_graphar_tree() {
         "the identity is the subject IRI; dense_id is an address a re-layout gives away\n{yaml}"
     );
 
-    // Edges round-trip: 4 orders → 4 CSR rows.
-    let edges = read_parquet_rows(
-        &dir.path()
-            .join("edge/Order_placedBy_Person/by_source.parquet"),
-    );
-    assert_eq!(edges, 4);
-}
-
-fn read_parquet_rows(path: &std::path::Path) -> usize {
-    let file = fs::File::open(path).expect("open parquet");
-    let reader = ParquetRecordBatchReaderBuilder::try_new(file)
-        .expect("parquet reader")
-        .build()
-        .expect("build reader");
-    reader.map(|b| b.expect("batch").num_rows()).sum()
+    // Edges: 4 orders → 4 CSR rows, in both orientations.
+    let edge = graph
+        .edges
+        .iter()
+        .find(|e| e.label == "placedBy")
+        .expect("a placedBy relation");
+    for (orientation, batches) in [
+        ("by_source", &edge.by_source),
+        ("by_target", &edge.by_target),
+    ] {
+        let rows: usize = batches
+            .iter()
+            .map(datafusion::arrow::record_batch::RecordBatch::num_rows)
+            .sum();
+        assert_eq!(rows, 4, "{orientation}");
+    }
 }

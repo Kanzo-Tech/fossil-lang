@@ -34,6 +34,7 @@ mod common;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use arrow::array::RecordBatch;
 use common::{dir, fixture};
 use fossil_layout::layout::{enrich_layout_within, estimated_peak_bytes};
 
@@ -84,18 +85,29 @@ fn gib(bytes: u64) -> f64 {
 fn a_run_the_budget_admits_stays_inside_the_budget() {
     let f = fixture(dir("bound"), VERTICES, MEAN_DEGREE);
 
-    // The corpus's own shape, from the same footers the check reads. Computing
+    // The corpus's own shape, from the same numbers the check reads. Computing
     // the budget rather than writing a constant is what keeps this a statement
     // about the pass instead of about this fixture's size.
-    let payload = std::fs::metadata(&f.targets[0].vertex_parquet)
-        .expect("the staged vertex parquet")
-        .len();
+    //
+    // `get_array_memory_size` where this read the staged Parquet's file length:
+    // the payload term used to be per uncompressed Parquet byte and is now per
+    // resident Arrow byte, because that is what the pass is handed. See
+    // `VERTEX_PAYLOAD_PERMILLE`.
+    let targets = f.targets();
+    let adjacencies = f.adjacencies();
+    let payload: u64 = targets[0]
+        .batches
+        .iter()
+        .map(|b| RecordBatch::get_array_memory_size(b) as u64)
+        .sum();
     let adjacency_rows = u64::from(VERTICES) * u64::from(MEAN_DEGREE / 2) * 2;
     let declared = estimated_peak_bytes(u64::from(VERTICES), adjacency_rows, payload);
 
     // Everything the fixture allocated is resident and none of it is the pass's,
-    // so the baseline is taken here — after the corpus is on disk and before the
-    // first footer is read.
+    // so the baseline is taken here — after the corpus is a value and before the
+    // pass is entered. The batches ARE that resident set now, which is why the
+    // payload term above is charged to the pass and measured outside it: see
+    // `VERTEX_PAYLOAD_PERMILLE` for why the over-count is the safe direction.
     let baseline = rss_bytes();
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -113,8 +125,8 @@ fn a_run_the_budget_admits_stays_inside_the_budget() {
 
     enrich_layout_within(
         &fossil_layout::io::LocalFs,
-        &f.targets,
-        &f.adjacencies,
+        &targets,
+        &adjacencies,
         Some(declared),
     )
     .expect("the pass is admitted by a budget computed from its own corpus");

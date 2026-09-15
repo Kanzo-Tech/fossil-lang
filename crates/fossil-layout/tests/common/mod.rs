@@ -2,7 +2,7 @@
 //!
 //! `budget.rs` asserts the refusal's contract; `budget_bound.rs` measures a
 //! resident set and therefore has to be the only test in its process. They need
-//! the same staged corpus, and a corpus generator copied into two files is two
+//! the same input corpus, and a corpus generator copied into two files is two
 //! generators the moment one of them is edited.
 //!
 //! `dead_code` is allowed because this module is compiled into BOTH targets and
@@ -23,7 +23,6 @@ use std::sync::Arc;
 use arrow::array::{ArrayRef, Float32Array, RecordBatch, StringArray, UInt32Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use fossil_layout::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget};
-use parquet::arrow::ArrowWriter;
 
 /// A fresh, empty directory under `std::env::temp_dir()`.
 ///
@@ -39,6 +38,12 @@ pub(crate) fn dir(name: &str) -> PathBuf {
 
 fn url(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+/// A prefix the pass can write into: a URL with the platform's separator on the
+/// end, which is what both filesystems require of one.
+fn prefix(path: &Path) -> String {
+    format!("{}{}", url(path), std::path::MAIN_SEPARATOR)
 }
 
 /// A planted-partition graph, the same shape `examples/enrich_memory` measures
@@ -73,9 +78,9 @@ fn planted(n: u32, mean_degree: u32) -> Vec<(u32, u32)> {
     edges
 }
 
-/// The vertex schema a staged corpus has: the four columns the pass replaces,
-/// plus a subject IRI wide enough that the vertex file is a real term in the
-/// budget rather than four integer columns.
+/// The vertex schema the writer produces: the four columns the pass replaces,
+/// plus a subject IRI wide enough that the payload is a real term in the budget
+/// rather than four integer columns.
 fn vertex_schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("dense_id", DataType::UInt32, false),
@@ -86,10 +91,11 @@ fn vertex_schema() -> Arc<Schema> {
     ]))
 }
 
-fn write_vertices(at: &Path, rows: u32) {
+/// The vertices as the executor hands them over: one batch, the four columns
+/// the pass replaces, and a subject IRI wide enough that the payload is a real
+/// term in the budget.
+fn vertices(rows: u32) -> Vec<RecordBatch> {
     let schema = vertex_schema();
-    let file = fs::File::create(at).expect("create the vertex parquet");
-    let mut writer = ArrowWriter::try_new(file, Arc::clone(&schema), None).expect("a writer");
     let ids: Vec<u32> = (0..rows).collect();
     let subjects: Vec<String> = (0..rows)
         .map(|i| format!("https://example.org/dataset/entity/{i:012}"))
@@ -101,15 +107,12 @@ fn write_vertices(at: &Path, rows: u32) {
         Arc::new(Float32Array::from(vec![0.0f32; rows as usize])),
         Arc::new(UInt32Array::from(vec![0u32; rows as usize])),
     ];
-    writer
-        .write(&RecordBatch::try_new(schema, columns).expect("a batch"))
-        .expect("write the vertices");
-    writer.close().expect("close the vertex parquet");
+    vec![RecordBatch::try_new(schema, columns).expect("a batch")]
 }
 
 /// One orientation, sorted by the endpoint it is ordered on — which is what the
 /// pass reads it as, and what `LayoutError::Disordered` refuses it for otherwise.
-fn write_adjacency(at: &Path, edges: &[(u32, u32)], by: Endpoint) {
+fn adjacency(edges: &[(u32, u32)], by: Endpoint) -> Vec<RecordBatch> {
     let mut rows: Vec<(u32, u32)> = edges.to_vec();
     match by {
         Endpoint::Src => rows.sort_unstable_by_key(|&(s, d)| (s, d)),
@@ -119,8 +122,6 @@ fn write_adjacency(at: &Path, edges: &[(u32, u32)], by: Endpoint) {
         Field::new("src_dense", DataType::UInt32, false),
         Field::new("dst_dense", DataType::UInt32, false),
     ]));
-    let file = fs::File::create(at).expect("create the adjacency parquet");
-    let mut writer = ArrowWriter::try_new(file, Arc::clone(&schema), None).expect("a writer");
     let columns: Vec<ArrayRef> = vec![
         Arc::new(UInt32Array::from(
             rows.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
@@ -129,54 +130,70 @@ fn write_adjacency(at: &Path, edges: &[(u32, u32)], by: Endpoint) {
             rows.iter().map(|&(_, d)| d).collect::<Vec<_>>(),
         )),
     ];
-    writer
-        .write(&RecordBatch::try_new(schema, columns).expect("a batch"))
-        .expect("write the adjacency");
-    writer.close().expect("close the adjacency parquet");
+    vec![RecordBatch::try_new(schema, columns).expect("a batch")]
 }
 
-/// A whole staged corpus in `root`, plus the targets that name it.
+/// A corpus's worth of INPUT — the batches an `execute_graph` would have
+/// returned — plus the directory the pass is to write into.
+///
+/// It holds the batches and hands out the targets that borrow them, rather than
+/// holding both: a struct carrying a `VertexLayoutTarget<'_>` beside the
+/// `Vec<RecordBatch>` it points at is self-referential and does not compile. The
+/// two methods are also the honest shape, because the targets are cheap and the
+/// batches are the corpus.
+///
+/// **Nothing here is on disk any more.** This used to write a vertex Parquet and
+/// two adjacency Parquet under `root` and point the targets at them, because the
+/// pass opened files; `root` now starts empty and only ever holds output.
 pub(crate) struct Fixture {
     pub(crate) root: PathBuf,
-    pub(crate) targets: Vec<VertexLayoutTarget>,
-    pub(crate) adjacencies: Vec<AdjacencyTarget>,
+    /// Rows per tile, which `levels.rs` turns down so that four thousand rows
+    /// span a five-level pyramid instead of four million.
+    pub(crate) chunk_size: u64,
+    vertices: Vec<RecordBatch>,
+    by_source: Vec<RecordBatch>,
+    by_target: Vec<RecordBatch>,
+}
+
+impl Fixture {
+    /// The one vertex type, writing its tiles under `root/chunks/`.
+    pub(crate) fn targets(&self) -> Vec<VertexLayoutTarget<'_>> {
+        vec![VertexLayoutTarget {
+            type_name: "Node".to_string(),
+            batches: &self.vertices,
+            chunk_prefix: prefix(&self.root.join("chunks")),
+            chunk_size: self.chunk_size,
+        }]
+    }
+
+    /// Both orientations of the one self-relation, `Node_edge_Node`.
+    pub(crate) fn adjacencies(&self) -> Vec<AdjacencyTarget<'_>> {
+        [
+            ("by_source", Endpoint::Src, &self.by_source),
+            ("by_target", Endpoint::Dst, &self.by_target),
+        ]
+        .into_iter()
+        .map(|(dir, ordered_by, batches)| AdjacencyTarget {
+            src_type: "Node".to_string(),
+            label: "edge".to_string(),
+            dst_type: "Node".to_string(),
+            ordered_by,
+            batches,
+            tile_prefix: prefix(&self.root.join(dir)),
+            levels_prefix: prefix(&self.root),
+        })
+        .collect()
+    }
 }
 
 pub(crate) fn fixture(root: PathBuf, rows: u32, mean_degree: u32) -> Fixture {
     fs::create_dir_all(root.join("chunks")).expect("create the tile directory");
-    let vertices = root.join("Node.parquet");
-    let by_source = root.join("by_source.parquet");
-    let by_target = root.join("by_target.parquet");
-
-    write_vertices(&vertices, rows);
     let edges = planted(rows, mean_degree);
-    write_adjacency(&by_source, &edges, Endpoint::Src);
-    write_adjacency(&by_target, &edges, Endpoint::Dst);
-
-    let targets = vec![VertexLayoutTarget {
-        type_name: "Node".to_string(),
-        vertex_parquet: url(&vertices),
-        chunk_prefix: format!("{}{}", url(&root.join("chunks")), std::path::MAIN_SEPARATOR),
-        chunk_size: 4_096,
-        self_edge_csr: vec![url(&by_source)],
-    }];
-    let adjacencies = vec![
-        AdjacencyTarget {
-            parquet: url(&by_source),
-            src_type: "Node".to_string(),
-            dst_type: "Node".to_string(),
-            ordered_by: Endpoint::Src,
-        },
-        AdjacencyTarget {
-            parquet: url(&by_target),
-            src_type: "Node".to_string(),
-            dst_type: "Node".to_string(),
-            ordered_by: Endpoint::Dst,
-        },
-    ];
     Fixture {
+        chunk_size: 4_096,
+        vertices: vertices(rows),
+        by_source: adjacency(&edges, Endpoint::Src),
+        by_target: adjacency(&edges, Endpoint::Dst),
         root,
-        targets,
-        adjacencies,
     }
 }

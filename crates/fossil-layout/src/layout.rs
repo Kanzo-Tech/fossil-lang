@@ -31,8 +31,8 @@
 //!   reachability it is contrasted against.
 //! - [`place`] — where a vertex goes on the plane, given its community.
 //! - [`morton`] — Z-order codes and the quantisation into one.
-//! - [`pass`] — [`enrich_layout`], which reads and writes Parquet through
-//!   `parquet-rs` and `arrow-rs` and through the one encoder the writer itself
+//! - [`pass`] — [`enrich_layout`], which takes the executor's `RecordBatch`es
+//!   and writes Parquet through `arrow-rs` and the one encoder the writer itself
 //!   uses. There is no database here: see `docs/design/one-engine.mdx`.
 //!
 //! **The public API is unchanged**: every name below was `layout::<name>` before

@@ -61,20 +61,26 @@ fn tree(root: &Path) -> Vec<(String, Vec<u8>)> {
 /// **The refusal, and that it happens first.**
 ///
 /// One byte is a budget no corpus fits in, so what this pins is not the
-/// arithmetic — that is the third test — but the *order*: the pass reads three
-/// Parquet footers, decides, and returns without having decoded a column chunk
-/// or created a tile. A refusal at second zero is a different thing to offer a
-/// caller than an out-of-memory at second two hundred, and the corpus it leaves
-/// behind is the one the writer staged rather than half of a rewritten one.
+/// arithmetic — that is the third test — but the *order*: the pass counts three
+/// numbers off the batches it was handed, decides, and returns without having
+/// gathered a tile. A refusal at second zero is a different thing to offer a
+/// caller than an out-of-memory at second two hundred, and it leaves **nothing**
+/// behind — where it used to leave the corpus the writer had staged, because
+/// there was one.
 #[test]
 fn a_budget_the_corpus_cannot_fit_is_refused_before_anything_is_written() {
     let f = fixture(dir("refused"), 20_000, 14);
     let before = tree(&f.root);
+    assert!(
+        before.is_empty(),
+        "the pass is handed Arrow, so nothing is on disk before it runs: {:?}",
+        before.iter().map(|(p, _)| p).collect::<Vec<_>>()
+    );
 
     let err = enrich_layout_within(
         &fossil_layout::io::LocalFs,
-        &f.targets,
-        &f.adjacencies,
+        &f.targets(),
+        &f.adjacencies(),
         Some(1),
     )
     .expect_err("one byte is not a budget any corpus fits in");
@@ -86,7 +92,7 @@ fn a_budget_the_corpus_cannot_fit_is_refused_before_anything_is_written() {
             needed_bytes,
             declared_bytes,
         } => {
-            assert_eq!(vertex_count, 20_000, "the footers were read");
+            assert_eq!(vertex_count, 20_000, "the batches were counted");
             assert!(adjacency_rows > 0, "both orientations were counted");
             assert!(
                 needed_bytes > declared_bytes,
@@ -96,11 +102,7 @@ fn a_budget_the_corpus_cannot_fit_is_refused_before_anything_is_written() {
         other => panic!("expected OverBudget, got {other:?}"),
     }
 
-    assert_eq!(
-        tree(&f.root),
-        before,
-        "a refusal must leave the staged corpus exactly as it found it"
-    );
+    assert_eq!(tree(&f.root), before, "a refusal must write nothing at all");
 }
 
 /// **The budget decides whether the pass runs, never what it writes.**
@@ -112,7 +114,7 @@ fn a_budget_the_corpus_cannot_fit_is_refused_before_anything_is_written() {
 /// one of them has a `--memory-gib`. A budget that changed the output would
 /// break that identity precisely when someone declared one.
 ///
-/// So: two identical staged corpora, one run unbounded and one under a budget it
+/// So: two identical input corpora, one run unbounded and one under a budget it
 /// fits in, and every byte of every file has to match.
 #[test]
 fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
@@ -121,8 +123,8 @@ fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
 
     enrich_layout_within(
         &fossil_layout::io::LocalFs,
-        &unbounded.targets,
-        &unbounded.adjacencies,
+        &unbounded.targets(),
+        &unbounded.adjacencies(),
         None,
     )
     .expect("the unbounded control");
@@ -131,8 +133,8 @@ fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
     // nothing, not where the threshold is.
     enrich_layout_within(
         &fossil_layout::io::LocalFs,
-        &bounded.targets,
-        &bounded.adjacencies,
+        &bounded.targets(),
+        &bounded.adjacencies(),
         Some(64 << 30),
     )
     .expect("a budget this corpus fits inside");
@@ -171,6 +173,21 @@ fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
 /// | 4,000,000 | 28 | 473.84 MB | 2.18 GiB | 1.01 GiB | 1.17 GiB |
 /// | 10,000,000 | 14 | 1,187.75 MB | 3.94 GiB | 1.23 GiB | 2.71 GiB |
 ///
+/// # The payload column changed units, and not value
+///
+/// Those runs measured a **Parquet** file, because that is what the pass opened.
+/// [`estimated_peak_bytes`]'s payload term is now per resident *Arrow* byte —
+/// the pass is handed batches — and the factor between the two was exactly the
+/// 1.30 the constant used to carry. So the figures below are these, scaled by
+/// it: the product each row contributes to the estimate is unchanged, and this
+/// table's margins are the margins that were measured.
+///
+/// **What would replace them** is a re-run of `examples/enrich_memory`, which
+/// now prints the Arrow footprint of the corpus it built. A directly measured
+/// column would retire the scaling; nothing here waits on it, because a scaled
+/// figure and a measured one differ in how they were obtained and not in what
+/// the assertion below does with them.
+///
 /// **The three middle rows are the ones that were owed.** Every point behind the
 /// original calibration shared mean degree fourteen, where V and E are
 /// proportional and a per-row term and a per-vertex term fit the same line;
@@ -206,14 +223,17 @@ fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
 /// the measurements that refuse them.
 #[test]
 fn the_estimate_over_estimates_the_runs_it_is_calibrated_on() {
-    // (vertices, adjacency rows over both orientations, vertex Parquet bytes,
-    //  what the pass itself added)
+    // (vertices, adjacency rows over both orientations, vertex payload as
+    //  resident Arrow bytes, what the pass itself added)
+    //
+    // The third column is the measured Parquet size × 1.30 — see the doc above
+    // for why that is a change of units rather than of calibration.
     const MEASURED: [(u64, u64, u64, u64); 5] = [
-        (2_000_000, 27_974_508, 235_870_000, 644_245_094), // 0.60 GiB
-        (4_000_000, 23_978_362, 473_840_000, 1_148_903_751), // 1.07 GiB, degree 6
-        (4_000_000, 55_949_862, 473_840_000, 1_320_702_443), // 1.23 GiB, degree 14
-        (4_000_000, 111_899_830, 473_840_000, 1_256_277_606), // 1.17 GiB, degree 28
-        (10_000_000, 139_874_560, 1_187_750_000, 2_909_844_700), // 2.71 GiB
+        (2_000_000, 27_974_508, 306_631_000, 644_245_094), // 0.60 GiB
+        (4_000_000, 23_978_362, 615_992_000, 1_148_903_751), // 1.07 GiB, degree 6
+        (4_000_000, 55_949_862, 615_992_000, 1_320_702_443), // 1.23 GiB, degree 14
+        (4_000_000, 111_899_830, 615_992_000, 1_256_277_606), // 1.17 GiB, degree 28
+        (10_000_000, 139_874_560, 1_544_075_000, 2_909_844_700), // 2.71 GiB
     ];
 
     for (vertices, rows, payload, measured) in MEASURED {

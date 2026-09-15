@@ -17,9 +17,7 @@ use super::place::{CLUSTER_BUDGET, cluster_layout, place_after};
 
 use std::sync::Arc;
 
-use arrow::array::{
-    Array, ArrayRef, Float32Array, RecordBatch, RecordBatchReader, StringArray, UInt32Array,
-};
+use arrow::array::{Array, ArrayRef, Float32Array, RecordBatch, StringArray, UInt32Array};
 use arrow::compute::{cast, interleave_record_batch};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::error::ArrowError;
@@ -28,15 +26,6 @@ use fossil_mem_probe::Probe;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
 use fossil_sinks::manifest::{TILES_FILE, VertexLevels};
-use parquet::arrow::ProjectionMask;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-
-/// Rows per Arrow batch when scanning a Parquet column chunk. `parquet`'s own
-/// default is 1,024, which at seventy million edges is seventy thousand trips
-/// through the decoder for two `u32` columns; this is the same figure the
-/// executor's default batch size uses and nothing here is sensitive to it
-/// beyond that.
-const SCAN_BATCH_ROWS: usize = 8_192;
 
 /// `row_of_dense[d]` when no row of the vertex file carries `dense_id` `d`.
 ///
@@ -46,38 +35,51 @@ const SCAN_BATCH_ROWS: usize = 8_192;
 /// `dense_id`: the count is a `u32` and the last one is `u32::MAX - 1` at worst.
 const NO_ROW: u32 = u32::MAX;
 
-/// One vertex type's layout target: its vertex Parquet URL plus the CSR Parquet
-/// URLs of its **self-edges** (`src_type == dst_type == this type`), whose
-/// `src_dense`/`dst_dense` live in this type's `dense_id` space. Cross-type
-/// edges are excluded here — a global cross-type layout is a later slice.
+/// One vertex type's layout target: **the rows the executor materialised**, and
+/// where this pass is to put them.
 ///
-/// URLs (not paths), and **local ones only**. The type is a URL because the
-/// callers hold URLs and because the destination side of the language is
-/// specified in them; what dereferences one here is `std::fs`, so a plain path
-/// and `file://` are the two forms that resolve and anything with another scheme
-/// is [`LayoutError::Remote`].
+/// The self-edges are not here and are not a field: an adjacency knows its own
+/// `(src_type, label, dst_type)`, so the ones whose two endpoint columns live in
+/// this type's `dense_id` space are the adjacencies naming it twice. Cross-type
+/// edges still take no part in the placement — a global cross-type layout is a
+/// later slice — but which edges those are is now read off the relation key
+/// rather than enumerated by a caller. Both hosts computed the same filter, and
+/// a filter stated twice is a filter that can disagree.
 ///
-/// That is narrower than it reads, and it is narrower than the sentence this
-/// comment replaced: the previous pass handed the URL verbatim to `read_parquet`
-/// / `COPY … TO` and let an embedded engine's httpfs extension dereference it,
-/// which described a cloud capability **no caller could reach** — the only
-/// caller refuses a non-local destination several frames earlier. Reaching an
-/// object store from here is registering one, not passing a string along, and it
-/// is a decision rather than a translation.
+/// # The rows arrive as Arrow, and that is the change
+///
+/// This was `vertex_parquet: String`, a URL naming the file the writer had
+/// staged, and the pass opened it. The writer's rows were **already** Arrow at
+/// that moment — `execute_graph` returns `Vec<RecordBatch>` per type and holds
+/// them across the whole write — so the corpus made the trip Arrow → Parquet →
+/// Arrow to reach a pass that ran in the same process. Measured on com-DBLP:
+/// 115.9 MB written, 72.6 MB of final corpus, **43.3 MB staged and then deleted
+/// — 37.4%, a write amplification of 1.60×**. In a browser the same trip is
+/// three resident copies of every file.
+///
+/// So the payload is emitted **once**, here, under [`Self::chunk_prefix`], and
+/// there is nothing left for the caller to delete afterwards.
 #[derive(Debug, Clone)]
-pub struct VertexLayoutTarget {
+pub struct VertexLayoutTarget<'a> {
     /// Schema label, e.g. `"Person"` — what an [`AdjacencyTarget`] names to say
     /// which `dense_id` space each of its two endpoint columns lives in.
     pub type_name: String,
-    /// Vertex Parquet URL (e.g. `file://…/vertex/Person.parquet`, `s3://…`).
+    /// This type's rows, in the order the executor produced them.
     ///
-    /// This is the writer's staged output and is **read, not written**: the
-    /// enriched vertices are emitted under [`Self::chunk_prefix`], and the
-    /// caller deletes this afterwards.
-    pub vertex_parquet: String,
+    /// Borrowed and not owned, which is the whole point: these are the batches
+    /// the caller is already holding, and the pass gathers tiles out of them
+    /// rather than decoding a second copy. The batch boundaries are the
+    /// executor's and nothing here depends on them being equal — see [`locate`].
+    pub batches: &'a [RecordBatch],
     /// Where the tiles go — the manifest's `prefix`, e.g. `…/vertex/Person/`,
     /// trailing separator included. The set is one Parquet there, named by
     /// `TILES_FILE`, and its row groups are the tiles.
+    ///
+    /// A URL, and a **local** one: what dereferences it is `std::fs` on the
+    /// native host and a map in the browser, so a plain path and `file://` are
+    /// the two forms that resolve and anything carrying another scheme is
+    /// [`LayoutError::Remote`]. Reaching an object store from here is
+    /// registering one, not passing a string along.
     pub chunk_prefix: String,
     /// Rows per tile — the manifest's `chunk_size`. The manifest and the files
     /// have to agree, so this comes from whoever wrote the manifest rather than
@@ -90,8 +92,6 @@ pub struct VertexLayoutTarget {
     /// still *emits* correctly and quietly costs every reader that arithmetic,
     /// which is why it is an error here rather than a rounding.
     pub chunk_size: u64,
-    /// This type's self-edge CSR Parquet URLs.
-    pub self_edge_csr: Vec<String>,
 }
 
 /// Which endpoint column an adjacency list is sorted by — `GraphAr`'s
@@ -104,40 +104,98 @@ pub enum Endpoint {
     Dst,
 }
 
-/// One adjacency-list Parquet, and everything needed to rewrite it when the
-/// `dense_id` numbering underneath it changes.
+/// One orientation of one relation, and everything needed to rewrite it when
+/// the `dense_id` numbering underneath it changes.
 ///
-/// **Every** file referencing a renumbered vertex type has to be listed, on
-/// either endpoint and in both orientations. The layout used to take only the
-/// same-type `by_source` files, which was enough while it read edges and wrote
+/// **Every** orientation referencing a renumbered vertex type has to be listed,
+/// on either endpoint and in both directions. The layout used to take only the
+/// same-type `by_source` rows, which was enough while it read edges and wrote
 /// nothing back to them; the moment `dense_id` values change it is not, because
-/// a `by_target` file and a cross-type file hold the same ids and would be left
+/// a target-ordered set and a cross-type one hold the same ids and would be left
 /// pointing at whoever inherited their numbers. Nothing would fail — the column
-/// is still a valid `UINTEGER` — so the corruption is silent, which is why the
-/// caller is made to enumerate rather than the layout to guess.
+/// is still a valid `u32` — so the corruption is silent, which is why the caller
+/// is made to enumerate rather than the layout to guess.
+///
+/// # Three fields where there was one string
+///
+/// The Parquet URL this replaces did **three** jobs, and only the first of them
+/// went away when the rows became Arrow:
+///
+/// 1. *where the bytes come from* — opened and streamed batch by batch. That is
+///    [`Self::batches`] now.
+/// 2. *where the tiles go* — the directory was derived by stripping `.parquet`
+///    off the URL. That is [`Self::tile_prefix`], passed in, because the caller
+///    is the side that owns the corpus's addressing.
+/// 3. *which two orientations are one relation* — paired by comparing the
+///    *directory* of two URLs. That is the `(src_type, label, dst_type)` key
+///    below, which is what a relation is identified by everywhere else.
+///
+/// Finding a relation by string surgery over a path worked for exactly as long
+/// as the path existed, and it said the pairing rule in a place nothing else
+/// could see.
 #[derive(Debug, Clone)]
-pub struct AdjacencyTarget {
-    /// The adjacency Parquet URL.
-    pub parquet: String,
+pub struct AdjacencyTarget<'a> {
     /// Schema label of the type `src_dense` indexes.
     pub src_type: String,
+    /// The relation's label — the `authored` of `Author authored Paper`.
+    ///
+    /// Not used to address anything: it is here to complete the key, because
+    /// two relations can share both endpoint types and differ only in this.
+    pub label: String,
     /// Schema label of the type `dst_dense` indexes.
     pub dst_type: String,
     /// The manifest declares `ordered: true`, so this says ordered by *what*.
     pub ordered_by: Endpoint,
+    /// This orientation's rows, ordered by the endpoint [`Self::ordered_by`]
+    /// names — which is what [`LayoutError::Disordered`] refuses them for
+    /// otherwise.
+    pub batches: &'a [RecordBatch],
+    /// Where **this orientation's** tiles go — e.g. `…/edge/A_b_A/by_source/`,
+    /// trailing separator included.
+    pub tile_prefix: String,
+    /// Where the **relation's** level sets go — e.g. `…/edge/A_b_A/`, trailing
+    /// separator included.
+    ///
+    /// The relation's directory and not the orientation's, because a level of a
+    /// relation is one artefact and not one per direction; it is written from
+    /// the source-ordered half, which already holds every edge. Passed in beside
+    /// [`Self::tile_prefix`] rather than derived as its parent: the two happen to
+    /// nest in the tree the writer lays out, and "the level sets are one
+    /// directory up from the tiles" is a claim about addressing that this pass is
+    /// not the place to make.
+    pub levels_prefix: String,
+}
+
+impl AdjacencyTarget<'_> {
+    /// The relation this is one orientation of — `Author_authored_Paper`.
+    ///
+    /// What names it in an error and in a memory report, and what pairs the two
+    /// orientations. Built rather than stored because it is the key spelled out,
+    /// and a stored spelling is a second thing that can disagree with the fields
+    /// it was built from.
+    fn relation(&self) -> String {
+        format!("{}_{}_{}", self.src_type, self.label, self.dst_type)
+    }
+
+    /// The same, plus which orientation — `Author_authored_Paper[src]`.
+    ///
+    /// Two orientations of one relation are two iterations of one loop, and a
+    /// report that labelled both of them the same would be a report that could
+    /// not be read. Deliberately **not** spelled as a path: the directory an
+    /// orientation lives in is [`Self::tile_prefix`], and a label that looked
+    /// like one would be a second answer to where the tiles are.
+    fn oriented(&self) -> String {
+        let orientation = match self.ordered_by {
+            Endpoint::Src => "src",
+            Endpoint::Dst => "dst",
+        };
+        format!("{}[{orientation}]", self.relation())
+    }
 }
 
 /// Failure modes of [`enrich_layout`].
 #[derive(Debug, thiserror::Error)]
 pub enum LayoutError {
-    /// Decoding a Parquet the pass reads — a vertex file, an adjacency, or one
-    /// of the two orientations of a CSR.
-    #[error("layout read of `{target}` failed: {source}")]
-    Read {
-        target: String,
-        #[source]
-        source: parquet::errors::ParquetError,
-    },
     /// Encoding a Parquet the pass writes — a vertex tile, a rewritten
     /// adjacency, or an edge tile.
     #[error("layout write of `{target}` failed: {source}")]
@@ -146,7 +204,7 @@ pub enum LayoutError {
         #[source]
         source: parquet::errors::ParquetError,
     },
-    /// Opening a file to read it, or putting the encoded bytes back.
+    /// Putting the encoded bytes of a tile back.
     #[error("layout io on `{target}` failed: {source}")]
     Io {
         target: String,
@@ -163,16 +221,20 @@ pub enum LayoutError {
         source: ArrowError,
     },
     /// A URL naming a scheme this pass does not dereference. See
-    /// [`VertexLayoutTarget::vertex_parquet`]: local paths and `file://` are
-    /// what `std::fs` resolves, and an object store is a registration rather
-    /// than a string.
-    #[error("layout reads and writes local paths; `{url}` names a scheme it cannot dereference")]
+    /// [`VertexLayoutTarget::chunk_prefix`]: local paths and `file://` are what
+    /// `std::fs` resolves, and an object store is a registration rather than a
+    /// string.
+    ///
+    /// **A destination only.** It was reachable from either side while the pass
+    /// opened the writer's staged Parquet; the rows arrive as Arrow now, so the
+    /// only URL the pass dereferences is one it is about to write into.
+    #[error("layout writes local paths; `{url}` names a scheme it cannot dereference")]
     Remote { url: String },
-    /// A Parquet missing a column the rewrite replaces (`dense_id`, `x`, `y`,
+    /// A batch set missing a column the rewrite replaces (`dense_id`, `x`, `y`,
     /// `cluster_id` on a vertex; `src_dense` / `dst_dense` on an adjacency).
     ///
     /// Its own variant rather than an Arrow error because it is a statement
-    /// about the *corpus*: the file is well-formed Parquet and is not a
+    /// about the *corpus*: the rows are a well-formed relation and are not a
     /// `GraphAr` vertex or adjacency, which is a different thing to be told.
     #[error("`{target}` has no `{column}` column, so the layout has nothing to replace")]
     MissingColumn { target: String, column: String },
@@ -192,9 +254,16 @@ pub enum LayoutError {
         before: u64,
         dropped: u64,
     },
-    /// A self-edge CSR was listed with no target-ordered counterpart among the
-    /// adjacencies, so the reverse edges have nowhere to be read from in order.
-    #[error("adjacency `{target}` has no target-ordered counterpart beside it")]
+    /// A self-edge relation was handed in source-ordered form with no
+    /// target-ordered counterpart, so its reverse edges have nowhere to be read
+    /// from in order.
+    ///
+    /// The layout is undirected — a vertex's neighbourhood is its out-edges and
+    /// its in-edges concatenated — and neither orientation is derived from the
+    /// other here: both already exist, so transforming one would be doing work
+    /// the writer has done. `{target}` names the relation, which is what the two
+    /// orientations are matched on.
+    #[error("relation `{target}` was given source-ordered with no target-ordered counterpart")]
     MissingOrientation { target: String },
     /// A tile size that is not a power of two, so `dense_id >> shift` does not
     /// name a tile.
@@ -215,8 +284,8 @@ pub enum LayoutError {
     /// materialises it as a `RecordBatch`, which is what took the phase from
     /// +1.95 GiB to +0.55 at ten million — and a packed pair has nowhere to put
     /// a third column. The writer emits exactly `src_dense` and `dst_dense`
-    /// (`fossil_df`'s `write_to_dir`) and the format says so, so this is a file
-    /// that came from somewhere else; refusing it is the honest answer, where
+    /// (`fossil_df`'s `execute_graph`) and the format says so, so these are rows
+    /// that came from somewhere else; refusing them is the honest answer, where
     /// the alternative is dropping columns nobody declared and writing the
     /// result as if it were the same relation.
     #[error(
@@ -266,9 +335,9 @@ pub enum LayoutError {
         .declared_bytes / (1 << 30)
     )]
     OverBudget {
-        /// Rows across every vertex Parquet the pass was handed.
+        /// Rows across every vertex batch set the pass was handed.
         vertex_count: u64,
-        /// Rows across every adjacency Parquet, both orientations.
+        /// Rows across every adjacency batch set, both orientations.
         adjacency_rows: u64,
         /// What [`estimated_peak_bytes`] says this corpus costs.
         needed_bytes: u64,
@@ -384,31 +453,49 @@ const ADJACENCY_ROW_BYTES: u64 = 8;
 /// 0.4% of the ten-million estimate.
 const LAYOUT_BASE_BYTES: u64 = 16 * 1024 * 1024;
 
-/// What one uncompressed byte of a vertex Parquet costs once it is Arrow, in
+/// What one byte of the vertex payload costs while the pass runs, in
 /// thousandths.
 ///
-/// The vertex file is the one input whose cost is **not** a function of the row
+/// The payload is the one input whose cost is **not** a function of the row
 /// count: a row is a subject IRI and every property the mapping emitted, and a
 /// corpus of four integer columns and a corpus of a dozen strings have the same
-/// V. So this term reads the footer's `total_byte_size` — the uncompressed size
-/// the file declares, free with the metadata — rather than pretending a row has
-/// a width.
+/// V. So this term measures the payload rather than pretending a row has a
+/// width.
 ///
-/// 1.30: at ten million the fixture's vertex Parquet declares 1,006 MiB
-/// uncompressed and `read vertices` billed +1.28 GiB decoded.
-const VERTEX_PAYLOAD_PERMILLE: u64 = 1_300;
+/// # It is 1.00 now, and that is the same measurement
+///
+/// It was 1.30 per **uncompressed Parquet byte**, the footer's
+/// `total_byte_size`, and the 1.30 was the decode: at ten million the fixture's
+/// vertex Parquet declared 1,006 MiB and `read vertices` billed +1.28 GiB
+/// decoded. There is no footer to read any more and no decode to pay — the
+/// batches arrive as Arrow — so the input to this term is
+/// `get_array_memory_size`, which is the 1.28 GiB directly. The conversion
+/// factor and the thing it converted between both went away in one step; the
+/// number of bytes being bounded did not change.
+///
+/// # And it is an over-count on purpose
+///
+/// These batches are the **caller's**, alive whether the pass runs or not, and
+/// the pass borrows rather than copying them. Charging them to the pass is
+/// therefore deliberately pessimistic, which is the direction
+/// [`estimated_peak_bytes`] is calibrated in: the budget bounds each stage of
+/// the write path rather than their sum, and on the browser path the tab has no
+/// second stage to charge them to.
+const VERTEX_PAYLOAD_PERMILLE: u64 = 1_000;
 
 /// What [`enrich_layout_within`] will hold, in bytes, for a corpus of this
 /// shape — the terms above, summed: a floor the corpus does not change, one per
 /// vertex, one per adjacency row, and one per uncompressed byte of the vertex
 /// file.
 ///
-/// **Every input is a footer read.** `vertex_count` and `adjacency_rows` are
-/// `num_rows`, `vertex_payload_bytes` is the sum of the row groups'
-/// `total_byte_size`, and all three are in the metadata a Parquet reader parses
-/// before it decodes a single page. That is what makes a budget check something
-/// the pass can afford to do *first*, at second zero, rather than discovering at
-/// second two hundred that the machine cannot finish.
+/// **Every input is already in hand.** `vertex_count` and `adjacency_rows` are
+/// sums of `RecordBatch::num_rows`, `vertex_payload_bytes` a sum of
+/// `get_array_memory_size`, and all three are properties of the batches the
+/// caller passed in — no file is opened to learn any of them. That is what makes
+/// a budget check something the pass can afford to do *first*, at second zero,
+/// rather than discovering at second two hundred that the machine cannot finish.
+/// It used to be three Parquet footer reads, which was already cheap; it is now
+/// arithmetic over metadata that is in memory.
 ///
 /// **Calibrated to over-estimate, on purpose.** An estimate that is a little too
 /// large refuses a run that would have fitted, and the person who declared the
@@ -471,18 +558,26 @@ pub const fn estimated_peak_bytes(
 ///
 /// The obvious reading is that this means moving the layout ahead of the edge
 /// phase. It
-/// does not: this pass already runs last, with every adjacency already written
-/// as Parquet. Renumbering after the fact is a gather through a mapping array,
+/// does not: this pass already runs last, with every adjacency already
+/// materialised. Renumbering after the fact is a gather through a mapping array,
 /// which is strictly less invasive than reordering the phases.
+///
+/// # Nothing is read, and that is the phase order
+///
+/// The pass is handed the executor's own `RecordBatch`es and writes the corpus
+/// once. It used to open the Parquet the writer had staged, rewrite it, and
+/// leave the caller to delete it — and the rows it opened were the rows the
+/// caller was still holding, because `execute_graph` returns them and the write
+/// happens in the same process. See [`VertexLayoutTarget`] for what that trip
+/// cost.
 ///
 /// # No engine
 ///
-/// Everything below is `arrow-rs` and `parquet-rs`: the files are read with
-/// `ParquetRecordBatchReaderBuilder` and written through
-/// [`fossil_df::files::TileWriter`], the row-group container in the same module
-/// as `batches_to_parquet`, which wrote the staged files being read. There was a
-/// `DuckDB` connection here, and what it was used for was `COPY` — see
-/// `docs/design/one-engine.mdx`.
+/// Everything below is `arrow-rs` and `parquet-rs`: the arithmetic is Arrow
+/// kernels and the tiles go out through [`fossil_df::files::TileWriter`], the
+/// row-group container that is now the *only* Parquet writer on the corpus's
+/// payload. There was a `DuckDB` connection here, and what it was used for was
+/// `COPY` — see `docs/design/one-engine.mdx`.
 ///
 /// The reason the substitution is small is that the relational work was never
 /// relational. `dense_id` is a gapless `0..n`, so the join against the mapping
@@ -490,27 +585,27 @@ pub const fn estimated_peak_bytes(
 /// that sorts by it is that permutation applied as a gather; and a tile is a
 /// contiguous range of the result, so the per-tile `WHERE` is a slice. One real
 /// sort survives — the adjacency re-sort, which is a `sort_unstable` over one
-/// packed `u64` per row; see [`read_adjacency`].
+/// packed `u64` per row; see [`remap_adjacency`].
 ///
 /// # What it does
 ///
 /// Vertices first, all of them, because an adjacency spans two types and cannot
-/// be rewritten until both mappings exist. Per type: count vertices, read
+/// be rewritten until both mappings exist. Per type: count vertices, walk the
 /// self-edges, run [`super::community::community_hierarchy`] + [`cluster_layout`], derive the
 /// Morton rank of each vertex, and keep `dense_id → (new_dense_id, x, y,
 /// cluster_id)` as four arrays. The enriched vertices are then emitted **as tiles** under
 /// [`VertexLayoutTarget::chunk_prefix`] — one Parquet whose `k`th row group is
-/// tile `k`, `chunk_size` rows each. The writer's staged output is the input to
-/// this, is not written back, and is deleted by the caller.
+/// tile `k`, `chunk_size` rows each. That emission is the **only** time the
+/// payload is written.
 ///
 /// Then every adjacency: both endpoints remapped through their own type's
 /// mapping, and **re-sorted**, because the manifest declares `ordered: true` and
 /// a CSR sorted on `src_dense` stops being sorted the moment those values change.
 ///
-/// And finally every adjacency is emitted as tiles too, under
-/// `by_source/tile{k}.parquet` and `by_target/tile{k}.parquet`, **keyed by the
+/// And finally every adjacency is emitted as tiles too, under each
+/// orientation's [`AdjacencyTarget::tile_prefix`], **keyed by the
 /// same range as the vertices**: an edge lives in the tile of the endpoint its
-/// file is ordered by, so `by_source` tile `k` holds every edge whose `src_dense`
+/// orientation is ordered by, so `by_source` tile `k` holds every edge whose `src_dense`
 /// is in vertex tile `k` of the source type, and `by_target` tile `k` every edge
 /// whose `dst_dense` is in vertex tile `k` of the *destination* type. On a
 /// cross-type edge those are two different `dense_id` spaces.
@@ -532,12 +627,12 @@ pub const fn estimated_peak_bytes(
 ///
 /// # Errors
 ///
-/// Returns [`LayoutError`] on the first failing read or write, on a URL naming a
+/// Returns [`LayoutError`] on the first failing write, on a prefix naming a
 /// scheme this pass cannot dereference, on an adjacency naming an unknown vertex
 /// type, or on a renumbering that dropped rows.
 pub fn enrich_layout(
-    targets: &[VertexLayoutTarget],
-    adjacencies: &[AdjacencyTarget],
+    targets: &[VertexLayoutTarget<'_>],
+    adjacencies: &[AdjacencyTarget<'_>],
 ) -> Result<(), LayoutError> {
     enrich_layout_with(&LocalFs, targets, adjacencies)
 }
@@ -549,12 +644,12 @@ pub fn enrich_layout(
 /// the browser passes still, because a tab has no flag to declare one with.
 ///
 /// **The budget decides whether the pass runs, never what it writes.** It is
-/// checked once, before the first column chunk is decoded, against
-/// [`estimated_peak_bytes`] over three numbers that come out of the Parquet
-/// footers; over budget is [`LayoutError::OverBudget`] and the corpus is left
-/// exactly as the writer staged it. Under budget the pass proceeds and emits
-/// the tree it would have emitted unbounded, byte for byte — see
-/// [`LayoutError::OverBudget`] for why degrading was not on the table.
+/// checked once, before the first tile is gathered, against
+/// [`estimated_peak_bytes`] over three numbers the batches already carry; over
+/// budget is [`LayoutError::OverBudget`] and nothing is written at all. Under
+/// budget the pass proceeds and emits the tree it would have emitted unbounded,
+/// byte for byte — see [`LayoutError::OverBudget`] for why degrading was not on
+/// the table.
 ///
 /// This is a *declaration* honoured by refusing, not a pool honoured by
 /// spilling. `fossil-df`'s half of the write path has a `FairSpillPool` and a
@@ -567,21 +662,21 @@ pub fn enrich_layout(
 /// As [`enrich_layout`], plus [`LayoutError::OverBudget`].
 pub fn enrich_layout_within(
     io: &dyn LayoutIo,
-    targets: &[VertexLayoutTarget],
-    adjacencies: &[AdjacencyTarget],
+    targets: &[VertexLayoutTarget<'_>],
+    adjacencies: &[AdjacencyTarget<'_>],
     memory_bytes: Option<u64>,
 ) -> Result<(), LayoutError> {
     if let Some(declared) = memory_bytes {
         let mut vertex_count = 0u64;
         let mut vertex_payload_bytes = 0u64;
         for target in targets {
-            let (rows, bytes) = footprint(io, &target.vertex_parquet)?;
+            let (rows, bytes) = footprint(target.batches);
             vertex_count = vertex_count.saturating_add(rows);
             vertex_payload_bytes = vertex_payload_bytes.saturating_add(bytes);
         }
         let mut adjacency_rows = 0u64;
         for adjacency in adjacencies {
-            let (rows, _) = footprint(io, &adjacency.parquet)?;
+            let (rows, _) = footprint(adjacency.batches);
             adjacency_rows = adjacency_rows.saturating_add(rows);
         }
         let needed_bytes = estimated_peak_bytes(vertex_count, adjacency_rows, vertex_payload_bytes);
@@ -597,21 +692,25 @@ pub fn enrich_layout_within(
     enrich_layout_with(io, targets, adjacencies)
 }
 
-/// Row count and uncompressed byte size of a Parquet, **from its footer alone**.
+/// Row count and resident byte size of a batch set.
 ///
-/// Both are in the metadata the reader parses before it touches a page, which is
-/// what makes the budget check affordable at the top of the pass: a refusal
-/// costs one footer per file and not one column chunk.
-fn footprint(io: &dyn LayoutIo, url: &str) -> Result<(u64, u64), LayoutError> {
-    let builder = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?).map_err(read_err(url))?;
-    let metadata = builder.metadata();
-    let rows = metadata.file_metadata().num_rows().max(0) as u64;
-    let bytes = metadata
-        .row_groups()
+/// Infallible, where this was a Parquet footer read per file: both numbers are
+/// properties of Arrow arrays already in memory, so the budget check at the top
+/// of the pass now costs no I/O at all.
+///
+/// `get_array_memory_size` and not a row width. It is what the arrays' buffers
+/// actually occupy — variable-width columns included, which is the whole reason
+/// this term is not a function of the row count — and it counts a buffer once
+/// per array even where two arrays share one, so a sliced batch set is
+/// over-counted rather than under-counted. See [`VERTEX_PAYLOAD_PERMILLE`] for
+/// why that is the direction to err in.
+fn footprint(batches: &[RecordBatch]) -> (u64, u64) {
+    let rows = batches.iter().map(|b| b.num_rows() as u64).sum();
+    let bytes = batches
         .iter()
-        .map(|group| group.total_byte_size().max(0) as u64)
+        .map(|b| b.get_array_memory_size() as u64)
         .sum();
-    Ok((rows, bytes))
+    (rows, bytes)
 }
 
 /// [`enrich_layout`], against a filesystem the caller chooses.
@@ -620,9 +719,9 @@ fn footprint(io: &dyn LayoutIo, url: &str) -> Result<(u64, u64), LayoutError> {
 /// ever about files. This is that seam made a parameter, and the whole reason it
 /// exists is that **a browser has no filesystem**: `fossil-df-wasm` hands the
 /// corpus to JS as `{rel_path, bytes}` pairs, so the pass runs against
-/// [`MemoryFs`](crate::io::MemoryFs) with the staged Parquet already in it and
-/// the tiles coming back out the same way. `fossil run` and the tab then write
-/// the same tree, rather than the same manifest over two different ones.
+/// [`MemoryFs`](crate::io::MemoryFs) and the tiles come back out of it. `fossil
+/// run` and the tab then write the same tree, rather than the same manifest over
+/// two different ones.
 ///
 /// [`enrich_layout`] is this with [`LocalFs`], and is what every native caller
 /// still calls.
@@ -632,8 +731,8 @@ fn footprint(io: &dyn LayoutIo, url: &str) -> Result<(u64, u64), LayoutError> {
 /// As [`enrich_layout`].
 pub fn enrich_layout_with(
     io: &dyn LayoutIo,
-    targets: &[VertexLayoutTarget],
-    adjacencies: &[AdjacencyTarget],
+    targets: &[VertexLayoutTarget<'_>],
+    adjacencies: &[AdjacencyTarget<'_>],
 ) -> Result<(), LayoutError> {
     // Where the next vertex type's grid starts, so the types do not stack. Each
     // is laid out independently and `cluster_layout` always begins at the
@@ -668,7 +767,11 @@ pub fn enrich_layout_with(
     let mut placed: Vec<Vec<(f32, f32)>> = vec![Vec::new(); targets.len()];
 
     for (index, target) in targets.iter().enumerate() {
-        let vurl = target.vertex_parquet.as_str();
+        // What names this type in an error and in the memory report. It was the
+        // vertex Parquet's URL, which was a fine label right up until there was
+        // no file: a type is identified by its schema label everywhere else in
+        // the corpus, so that is what a message about it says.
+        let vlabel = target.type_name.as_str();
         // Checked before anything is written, so a bad tile size is a refusal
         // rather than a corpus that has to be thrown away.
         let shift = shift_for(target.chunk_size).ok_or_else(|| LayoutError::TileSize {
@@ -677,52 +780,74 @@ pub fn enrich_layout_with(
         })?;
         io.ensure_prefix(&target.chunk_prefix)?;
 
-        // The `dense_id` column on its own, in file order, and two facts come
+        // The `dense_id` column on its own, in row order, and two facts come
         // out of it that used to be two queries. The vertex count is `max + 1`
         // and not the row count — a corpus with a gap in its numbering must not
         // be told it has one fewer vertex than it numbers — and the position of
         // each id is what the join on `dense_id` was for.
-        let dense_of_row = read_u32_column(io, vurl, "dense_id")?;
+        let dense_of_row = u32_values(target.batches, vlabel, "dense_id")?;
         let vertex_count = dense_of_row
             .iter()
             .copied()
             .max()
             .map_or(0, |m| m.saturating_add(1));
+        // A type with no rows is skipped, and it used to be a **failed run**: the
+        // writer emitted no Parquet for a zero-row type — nothing to declare a
+        // schema from — and this pass then opened the file it had not written and
+        // returned `LayoutError::Io`. Reachable from an ordinary program, because
+        // a `where` that matches nothing is a mapping that emits nothing. The
+        // input being a batch set is what closes it: no rows is a value here,
+        // where before it was a missing file.
         if vertex_count == 0 {
             continue;
         }
 
-        // The artefact is already the CSR this needs — `by_source.parquet` has
-        // zero disorders by `src_dense` over 71M rows and `by_target.parquet`
-        // zero by `dst_dense`, and both have since the writer emitted them. What
-        // used to stand here read the pairs into a `Vec<(u32, u32)>` (568 MB at
-        // ten million), counted degrees in a second pass and scattered through a
+        // The relations whose BOTH endpoint columns live in this type's
+        // `dense_id` space — which is what the placement can use, because a
+        // cross-type edge joins two numberings and a global cross-type layout is
+        // a later slice. Read off the relation key rather than taken as a field:
+        // both hosts computed this same filter, and the layout is the one place
+        // that can state it once.
+        let self_edges: Vec<&AdjacencyTarget<'_>> = adjacencies
+            .iter()
+            .filter(|a| {
+                a.ordered_by == Endpoint::Src
+                    && a.src_type == target.type_name
+                    && a.dst_type == target.type_name
+            })
+            .collect();
+
+        // The rows are already the CSR this needs — `by_source` has zero
+        // disorders by `src_dense` over 71M rows and `by_target` zero by
+        // `dst_dense`, and both have since the writer emitted them. What used to
+        // stand here read the pairs into a `Vec<(u32, u32)>` (568 MB at ten
+        // million), counted degrees in a second pass and scattered through a
         // cloned cursor (80 MB) doing random writes over the 568. None of the
         // three is asked for by the algorithm; all three exist because the
         // parameter was an unordered bag.
         //
-        // Both orientations, because the layout is undirected: the file grouped
+        // Both orientations, because the layout is undirected: the set grouped
         // by source holds each vertex's out-neighbours and the one grouped by
         // target its in-neighbours, and a vertex's neighbourhood is the two
         // concatenated. Neither is transformed to get there.
-        let mut sides = Vec::with_capacity(target.self_edge_csr.len() * 2);
+        let mut sides = Vec::with_capacity(self_edges.len() * 2);
         let mut self_loops = vec![0.0f64; vertex_count as usize];
-        for csr in &target.self_edge_csr {
+        for csr in self_edges {
             let csc =
-                csc_beside(adjacencies, csr).ok_or_else(|| LayoutError::MissingOrientation {
-                    target: csr.clone(),
+                counterpart(adjacencies, csr).ok_or_else(|| LayoutError::MissingOrientation {
+                    target: csr.relation(),
                 })?;
-            sides.push(read_orientation(
-                io,
-                csr,
+            sides.push(walk_orientation(
+                csr.batches,
+                &csr.oriented(),
                 "src_dense",
                 "dst_dense",
                 vertex_count,
                 &mut self_loops,
             )?);
-            sides.push(read_orientation(
-                io,
-                csc,
+            sides.push(walk_orientation(
+                csc.batches,
+                &csc.oriented(),
                 "dst_dense",
                 "src_dense",
                 vertex_count,
@@ -806,31 +931,26 @@ pub fn enrich_layout_with(
         }
         drop(row_of_dense);
 
-        // The vertices, every column, in file order — the read the staging table
-        // used to be. It is the largest allocation this pass makes and it is
-        // made *after* the community detection rather than before, which is the
-        // order the staging did too: nothing about the partition needs a subject
-        // IRI or a property, and holding the whole type through Louvain would
-        // put the corpus beside the graph.
+        // The vertices, every column, in row order. There is nothing to read:
+        // these are the caller's batches, and the largest allocation this pass
+        // used to make was the decoded copy of them.
         //
-        // **The batches are kept AS batches.** `concat_batches` into one
-        // `RecordBatch` stood here, and it is a second full copy of the file
-        // alive beside the first — and then `take_record_batch` over the whole
-        // relation was a third. Measured on a one-million-vertex fixture
+        // **They are kept AS batches.** `concat_batches` into one `RecordBatch`
+        // stood here, and it was a second full copy of the relation alive beside
+        // the first — and then `take_record_batch` over the whole relation was a
+        // third. Measured on a one-million-vertex fixture
         // (`examples/enrich_memory`), that was `read vertices` +0.21 G and
         // `gather + replace` +0.11 G against a 117 MB file. Nothing needed the
         // relation to be contiguous: what follows wants ONE TILE at a time, and
         // `interleave_record_batch` gathers across batches, so the copy that was
         // made to enable a gather can be the tile the gather produces.
-        let (_schema, batches) = read_parquet(io, vurl)?;
-        let batch_refs: Vec<&RecordBatch> = batches.iter().collect();
-        // Where each batch starts in file-row space, so a global row index —
+        let batch_refs: Vec<&RecordBatch> = target.batches.iter().collect();
+        // Where each batch starts in relation-row space, so a global row index —
         // which is what `gather` holds — becomes the `(batch, offset)` pair
-        // `interleave` takes. `read_parquet` reads at a fixed batch size, but
-        // this is computed rather than divided: the last batch is short, and a
-        // reader that returns a different size is then a slower pass and not a
-        // wrong one.
-        let starts: Vec<u32> = batches
+        // `interleave` takes. Computed and never divided: the executor's batch
+        // boundaries are its own, and the last one is short.
+        let starts: Vec<u32> = target
+            .batches
             .iter()
             .scan(0u32, |acc, b| {
                 let start = *acc;
@@ -838,7 +958,6 @@ pub fn enrich_layout_with(
                 Some(start)
             })
             .collect();
-        probe.mark("read vertices");
 
         // One row group per tile in ONE Parquet, which is the whole point: a
         // tile's address is `dense_id >> shift` — no index, no listing, no
@@ -866,10 +985,10 @@ pub fn enrich_layout_with(
                 .iter()
                 .map(|&row| locate(&starts, row))
                 .collect();
-            let tile = interleave_record_batch(&batch_refs, &picks).map_err(arrow_err(vurl))?;
+            let tile = interleave_record_batch(&batch_refs, &picks).map_err(arrow_err(vlabel))?;
             let enriched = replace_columns(
                 &tile,
-                vurl,
+                vlabel,
                 &[
                     (
                         "dense_id",
@@ -937,7 +1056,7 @@ pub fn enrich_layout_with(
         //
         // Rewritten in full on every relayout, which is affordable for exactly
         // the reason it is necessary: this pass already rewrites every tile.
-        if let Some(subjects) = subject_pairs(&batch_refs, &starts, &gather, &new_dense, vurl)? {
+        if let Some(subjects) = subject_pairs(&batch_refs, &starts, &gather, &new_dense, vlabel)? {
             write_identity_index(io, &subjects, target)?;
             probe.mark("write identity index");
         }
@@ -985,24 +1104,29 @@ pub fn enrich_layout_with(
     // relation, and on 6.9M edges one hop from one seed had not returned after 45
     // seconds; it took the reader's connection with it.
     //
-    // The remap and the tiling are ONE pass over each file, where they used to be
-    // two loops over all of them. Two loops meant the tiling re-read from disk
-    // the file the remap had just written — defensible when the alternative was a
-    // second copy of the adjacency inside the engine, and pointless now that the
-    // sorted relation is a value in hand. What it costs is that a failure leaves
-    // some adjacencies fully rewritten and tiled and others untouched, where it
-    // used to leave all of them rewritten and some tiled. Neither is a state
-    // anything reads: the caller repoints the manifest only on success.
+    // The remap and the tiling are ONE pass over each orientation, where they
+    // used to be two loops over all of them. Two loops meant the tiling re-read
+    // from disk what the remap had just written — defensible when the
+    // alternative was a second copy of the adjacency inside the engine, and
+    // pointless now that the sorted relation is a value in hand. What it costs
+    // is that a failure leaves some orientations fully tiled and others
+    // untouched, where it used to leave all of them rewritten and some tiled.
+    // Neither is a state anything reads: the caller repoints the manifest only
+    // on success.
     for adjacency in adjacencies {
-        let aurl = adjacency.parquet.as_str();
-        let src_map = &maps[index_of(&adjacency.src_type, aurl)?];
-        let dst_map = &maps[index_of(&adjacency.dst_type, aurl)?];
+        // What names this orientation in an error and in the memory report. It
+        // was the Parquet's URL; it is the relation key now, which is the same
+        // thing every other part of the corpus calls this relation.
+        let alabel = adjacency.oriented();
+        let alabel = alabel.as_str();
+        let src_map = &maps[index_of(&adjacency.src_type, alabel)?];
+        let dst_map = &maps[index_of(&adjacency.dst_type, alabel)?];
 
         // Sampled step by step, not at the phase boundary. This loop is the pass's
         // high-water mark, and a single delta across the `for` cannot say which
         // line of it is the peak — the last time that distinction was skipped the
         // wrong phase was blamed for two sessions. See `Probe::sample`.
-        let step = short_name(aurl);
+        let step = alabel;
 
         // **One `Vec<u64>`, and that is the whole orientation.** This used to be
         // five allocations of it — the reader's batches, `concat_batches` into
@@ -1020,33 +1144,38 @@ pub fn enrich_layout_with(
         // and the other into the low, and `sort_unstable` is the same order for
         // no bytes at all. Ties are pairs equal in both columns, which is the
         // whole row, so an unstable sort is not an unstable result.
-        let (schema, mut keys) = read_adjacency(io, aurl, src_map, dst_map, adjacency.ordered_by)?;
+        let (schema, mut keys) = remap_adjacency(
+            adjacency.batches,
+            alabel,
+            src_map,
+            dst_map,
+            adjacency.ordered_by,
+        )?;
         probe.sample(&format!("{step}: read + remap"));
 
         keys.sort_unstable();
         probe.sample(&format!("{step}: sort"));
 
-        // The remapped relation is NOT written back over its input: publishing
-        // the uncut relation beside its own cut is two containers for one set of
-        // rows, which is what `apps/corpus`'s `declared-tiling` fires on. The
-        // input is a staging artefact and the caller deletes it, exactly as it
-        // deletes the staged vertex Parquet.
+        // The relation goes out CUT and only cut: publishing the uncut relation
+        // beside its own tiles is two containers for one set of rows, which is
+        // what `apps/corpus`'s `declared-tiling` fires on. There is no longer a
+        // staged copy for anyone to publish by accident — the rows reached this
+        // pass as Arrow and the tiles below are the first time they are written.
 
-        // Which endpoint addresses this file is which endpoint it is ordered by.
-        // The tile space is that endpoint's type's, and the two are different
-        // spaces on a cross-type edge: `by_target` of `Author authored Paper` is
-        // cut on `Paper`'s ranges, not on `Author`'s.
+        // Which endpoint addresses this orientation is which endpoint it is
+        // ordered by. The tile space is that endpoint's type's, and the two are
+        // different spaces on a cross-type edge: `by_target` of `Author authored
+        // Paper` is cut on `Paper`'s ranges, not on `Author`'s.
         let endpoint_type = match adjacency.ordered_by {
             Endpoint::Src => &adjacency.src_type,
             Endpoint::Dst => &adjacency.dst_type,
         };
-        let endpoint = &targets[index_of(endpoint_type, aurl)?];
+        let endpoint = &targets[index_of(endpoint_type, alabel)?];
         let tile_shift = shift_for(endpoint.chunk_size).ok_or_else(|| LayoutError::TileSize {
             vertex_type: endpoint.type_name.clone(),
             rows: endpoint.chunk_size,
         })?;
-        let prefix = tile_prefix(aurl);
-        io.ensure_prefix(&prefix)?;
+        io.ensure_prefix(&adjacency.tile_prefix)?;
 
         // Which tiles exist, read off the order the relation is already in rather
         // than asked for with a `DISTINCT`: it was just sorted on this very
@@ -1064,7 +1193,7 @@ pub fn enrich_layout_with(
         // A run is unpacked into two `u32` arrays as it is written, so the only
         // Arrow this loop holds is one tile — tens of thousands of rows against
         // the seventy million the relation is.
-        let payload = format!("{prefix}{TILES_FILE}");
+        let payload = format!("{}{TILES_FILE}", adjacency.tile_prefix);
         let mut writer = open_tiles(io, &payload, Arc::clone(&schema))?;
         let mut start = 0usize;
         while start < keys.len() {
@@ -1073,7 +1202,7 @@ pub fn enrich_layout_with(
             while end < keys.len() && (keys[end] >> 32) >> tile_shift == tile {
                 end += 1;
             }
-            let batch = unpack(&schema, aurl, &keys[start..end], adjacency.ordered_by)?;
+            let batch = unpack(&schema, alabel, &keys[start..end], adjacency.ordered_by)?;
             writer.tile(&batch).map_err(write_err(&payload))?;
             start = end;
         }
@@ -1084,13 +1213,20 @@ pub fn enrich_layout_with(
         // source-ordered half — the two orientations are one relation stored
         // twice, and `keys` here is already every edge of it, sorted by source.
         if adjacency.ordered_by == Endpoint::Src {
-            let src = index_of(&adjacency.src_type, aurl)?;
-            let dst = index_of(&adjacency.dst_type, aurl)?;
+            let src = index_of(&adjacency.src_type, alabel)?;
+            let dst = index_of(&adjacency.dst_type, alabel)?;
             let source_count = placed[src].len() as u64;
             // The SOURCE type's own plan and not a second one: a level of a
             // relation is *which vertices are in it*. One plan, two artefacts.
             if let Some(plan) = VertexLevels::planned(source_count, endpoint.chunk_size) {
-                write_edge_levels(io, aurl, &plan, &keys, &placed[src], &placed[dst])?;
+                write_edge_levels(
+                    io,
+                    &adjacency.levels_prefix,
+                    &plan,
+                    &keys,
+                    &placed[src],
+                    &placed[dst],
+                )?;
                 probe.sample(&format!("{step}: write edge levels"));
             }
         }
@@ -1180,7 +1316,7 @@ fn subject_pairs(
 fn write_identity_index(
     io: &dyn LayoutIo,
     pairs: &[(String, u32)],
-    target: &VertexLayoutTarget,
+    target: &VertexLayoutTarget<'_>,
 ) -> Result<(), LayoutError> {
     let prefix = format!("{}index/", target.chunk_prefix);
     io.ensure_prefix(&prefix)?;
@@ -1214,14 +1350,6 @@ fn write_identity_index(
     Ok(())
 }
 
-/// `parquet` errors from `url`, as a [`LayoutError::Read`].
-fn read_err(url: &str) -> impl Fn(parquet::errors::ParquetError) -> LayoutError + '_ {
-    move |source| LayoutError::Read {
-        target: url.to_string(),
-        source,
-    }
-}
-
 /// Arrow-kernel errors on `url`, as a [`LayoutError::Arrow`].
 fn arrow_err(url: &str) -> impl Fn(ArrowError) -> LayoutError + '_ {
     move |source| LayoutError::Arrow {
@@ -1233,12 +1361,11 @@ fn arrow_err(url: &str) -> impl Fn(ArrowError) -> LayoutError + '_ {
 /// The `(batch, offset)` pair a file-row index names, given where each batch
 /// starts.
 ///
-/// A binary search and not a division: `read_parquet` asks for a fixed batch
-/// size and the last batch is short, and nothing in the Parquet reader's
-/// contract promises the others are not. Dividing would be right today and
-/// silently wrong the day a reader splits on a row group instead — and wrong
-/// here means a vertex tile holding the wrong rows, which is a well-formed
-/// corpus that means something else.
+/// A binary search and not a division: the batch boundaries are the executor's,
+/// so the last one is short and nothing promises the others are equal. Dividing
+/// would be right for one producer's batch size and silently wrong for the next
+/// — and wrong here means a vertex tile holding the wrong rows, which is a
+/// well-formed corpus that means something else.
 fn locate(starts: &[u32], row: u32) -> (usize, usize) {
     let batch = match starts.binary_search(&row) {
         Ok(exact) => exact,
@@ -1248,59 +1375,32 @@ fn locate(starts: &[u32], row: u32) -> (usize, usize) {
     (batch, (row - starts[batch]) as usize)
 }
 
-/// Every `RecordBatch` of a Parquet, plus the schema they share.
-fn read_parquet(
-    io: &dyn LayoutIo,
-    url: &str,
-) -> Result<(SchemaRef, Vec<RecordBatch>), LayoutError> {
-    let reader = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?)
-        .map_err(read_err(url))?
-        .with_batch_size(SCAN_BATCH_ROWS)
-        .build()
-        .map_err(read_err(url))?;
-    let schema = reader.schema();
-    let batches = reader
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(arrow_err(url))?;
-    Ok((schema, batches))
-}
-
-/// One `u32` column of a Parquet, read on its own.
+/// One `u32` column of a batch set, flattened into one `Vec`.
 ///
-/// Projected, so the other columns are never decoded: the vertex file carries
-/// the subject IRI and every property, and what this asks for is `dense_id`.
-fn read_u32_column(io: &dyn LayoutIo, url: &str, name: &str) -> Result<Vec<u32>, LayoutError> {
-    let builder = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?).map_err(read_err(url))?;
-    // Reserved exactly, from the footer rather than by doubling.
-    let rows = builder.metadata().file_metadata().num_rows().max(0) as usize;
-    if builder.schema().index_of(name).is_err() {
-        return Err(LayoutError::MissingColumn {
-            target: url.to_string(),
-            column: name.to_string(),
-        });
-    }
-    let mask = ProjectionMask::columns(builder.parquet_schema(), [name]);
-    let reader = builder
-        .with_projection(mask)
-        .with_batch_size(SCAN_BATCH_ROWS)
-        .build()
-        .map_err(read_err(url))?;
-
+/// The only column this is asked for is `dense_id`, and the reason it is copied
+/// out rather than read in place is that what follows indexes it by row across
+/// batch boundaries. Four bytes per vertex; see [`VERTEX_ARRAY_BYTES`].
+///
+/// This was a *projected* Parquet read — the file carried the subject IRI and
+/// every property, and a projection meant the other columns were never decoded.
+/// There is nothing to decode now, so the saving the projection bought is
+/// structural rather than earned.
+fn u32_values(batches: &[RecordBatch], label: &str, name: &str) -> Result<Vec<u32>, LayoutError> {
+    let rows = batches.iter().map(RecordBatch::num_rows).sum();
     let mut out = Vec::with_capacity(rows);
-    for batch in reader {
-        let batch = batch.map_err(arrow_err(url))?;
-        out.extend_from_slice(u32_column(&batch, url, name)?.values());
+    for batch in batches {
+        out.extend_from_slice(u32_column(batch, label, name)?.values());
     }
     Ok(out)
 }
 
-/// One column of a batch as a `UInt32Array`, cast if the file declares another
-/// numeric type — the `::UINTEGER` the projection used to carry.
+/// One column of a batch as a `UInt32Array`, cast if the relation declares
+/// another numeric type — the `::UINTEGER` the projection used to carry.
 ///
-/// **By name, never by position.** A projection does not reorder a file: asking
-/// for `dst_dense, src_dense` yields the two columns in the order the *file*
-/// declares them, so an orientation read positionally gets its endpoints
-/// swapped, silently, in exactly one of the two orientations.
+/// **By name, never by position.** The two orientations of a relation declare
+/// their columns in the same order and are *ordered* by different ones, so an
+/// orientation read positionally gets its endpoints swapped, silently, in
+/// exactly one of the two.
 fn u32_column(batch: &RecordBatch, url: &str, name: &str) -> Result<UInt32Array, LayoutError> {
     let index = batch
         .schema()
@@ -1396,7 +1496,7 @@ struct Enriched<'a> {
 /// `[j·chunk·4^k, (j+1)·chunk·4^k)`.
 fn write_levels(
     io: &dyn LayoutIo,
-    target: &VertexLayoutTarget,
+    target: &VertexLayoutTarget<'_>,
     plan: &VertexLevels,
     batch_refs: &[&RecordBatch],
     starts: &[u32],
@@ -1467,12 +1567,11 @@ fn write_levels(
 /// Through [`TileWriter`] and not through a writer of its own, because one row
 /// group per tile is a property of the format rather than of this pass — the
 /// reader's index is the footer, and one box per tile is what makes it one.
-/// Uncompressed, which is what that encoder does: the same encoder wrote the
-/// file being read here.
+/// Uncompressed, which is what that encoder does.
 ///
 /// The bytes go straight to the [`Sink`]. Encoding to a `Vec` first would put
 /// the whole encoded type beside the type — 75 MB at five million, for nothing —
-/// which is the same argument `try_for_each_file` makes on the sink side. On
+/// which is the same argument `try_for_each_manifest` makes on the sink side. On
 /// [`LocalFs`] that means the peak is one row group; on
 /// [`MemoryFs`](crate::io::MemoryFs) the `Vec` is unavoidable and is the sink
 /// itself, because a browser has nowhere else to put it.
@@ -1559,34 +1658,36 @@ fn adjacency_columns(schema: &SchemaRef, url: &str) -> Result<(usize, usize), La
 ///
 /// # Errors
 ///
-/// [`LayoutError::AdjacencyShape`] if the file is not two `u32` columns,
+/// [`LayoutError::AdjacencyShape`] if the rows are not two `u32` columns,
 /// [`LayoutError::DanglingEndpoint`] if any row names a dense id outside its
-/// type's mapping — counted over the whole file and reported before anything is
-/// written, so the file it would have corrupted is still the file it was.
-fn read_adjacency(
-    io: &dyn LayoutIo,
-    url: &str,
+/// type's mapping — counted over the whole orientation and reported before
+/// anything is written, so a corpus that would have been corrupted is a corpus
+/// that was never written.
+fn remap_adjacency(
+    batches: &[RecordBatch],
+    label: &str,
     src_map: &[u32],
     dst_map: &[u32],
     ordered_by: Endpoint,
 ) -> Result<(SchemaRef, Vec<u64>), LayoutError> {
-    let builder = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?).map_err(read_err(url))?;
-    let rows = builder.metadata().file_metadata().num_rows().max(0) as usize;
-    let reader = builder
-        .with_batch_size(SCAN_BATCH_ROWS)
-        .build()
-        .map_err(read_err(url))?;
-    let schema = reader.schema();
-    adjacency_columns(&schema, url)?;
+    // An orientation with no rows has no schema to write tiles under, and an
+    // empty relation is a legal corpus: the writer emits no batches for a
+    // zero-row edge. Answered here rather than at the call site so that the
+    // caller's loop is one shape.
+    let Some(first) = batches.first() else {
+        return Ok((Arc::new(Schema::empty()), Vec::new()));
+    };
+    let rows = batches.iter().map(RecordBatch::num_rows).sum();
+    let schema = first.schema();
+    adjacency_columns(&schema, label)?;
 
     let mut keys = Vec::with_capacity(rows);
     let mut before = 0u64;
     let mut dropped = 0u64;
-    for batch in reader {
-        let batch = batch.map_err(arrow_err(url))?;
+    for batch in batches {
         before += batch.num_rows() as u64;
-        let src = u32_column(&batch, url, "src_dense")?;
-        let dst = u32_column(&batch, url, "dst_dense")?;
+        let src = u32_column(batch, label, "src_dense")?;
+        let dst = u32_column(batch, label, "dst_dense")?;
         for (&s, &d) in src.values().iter().zip(dst.values()) {
             let (Some(&s), Some(&d)) = (src_map.get(s as usize), dst_map.get(d as usize)) else {
                 // Counted rather than returned on, so the message names how many
@@ -1605,7 +1706,7 @@ fn read_adjacency(
     }
     if dropped > 0 {
         return Err(LayoutError::DanglingEndpoint {
-            target: url.to_string(),
+            target: label.to_string(),
             before,
             dropped,
         });
@@ -1615,17 +1716,17 @@ fn read_adjacency(
 
 /// One tile's worth of packed rows, back as the `RecordBatch` the writer takes.
 ///
-/// The inverse of the packing in [`read_adjacency`], and the only Arrow the
+/// The inverse of the packing in [`remap_adjacency`], and the only Arrow the
 /// remap holds: a run of the sorted slice, tens of thousands of rows against the
 /// seventy million the relation is at ten million vertices.
 ///
 /// The columns go back in the schema's own order, which is why the indices are
-/// looked up rather than assumed — `by_target` is ordered by `dst_dense` and the
-/// file still declares `src_dense` first.
+/// looked up rather than assumed — `by_target` is ordered by `dst_dense` and
+/// still declares `src_dense` first.
 ///
 /// # Errors
 ///
-/// [`LayoutError::AdjacencyShape`] as [`read_adjacency`], and
+/// [`LayoutError::AdjacencyShape`] as [`remap_adjacency`], and
 /// [`LayoutError::Arrow`] if the batch does not match the schema it is built
 /// against.
 fn unpack(
@@ -1683,21 +1784,12 @@ fn unpack(
 /// every one of them.
 fn write_edge_levels(
     io: &dyn LayoutIo,
-    adjacency: &str,
+    relation: &str,
     plan: &VertexLevels,
     keys: &[u64],
     src_placed: &[(f32, f32)],
     dst_placed: &[(f32, f32)],
 ) -> Result<(), LayoutError> {
-    // The relation's own directory, which is the parent of the orientation's:
-    // `…/edge/A_b_A/by_source.parquet` → `…/edge/A_b_A/`. The level sets belong
-    // to the relation and not to one half of it.
-    let orientation = tile_prefix(adjacency);
-    let relation = orientation
-        .trim_end_matches('/')
-        .rsplit_once('/')
-        .map_or_else(|| orientation.clone(), |(head, _)| format!("{head}/"));
-
     let schema = Arc::new(Schema::new(vec![
         Field::new("src_dense", DataType::UInt32, false),
         Field::new("dst_dense", DataType::UInt32, false),
@@ -1777,101 +1869,63 @@ fn write_edge_levels(
     Ok(())
 }
 
-/// The last path component of an adjacency URL, without its extension —
-/// `…/by_source.parquet` → `by_source`.
+/// The target-ordered half of the relation a source-ordered one belongs to —
+/// where the reverse edges are already grouped by the endpoint the layout needs
+/// them under.
 ///
-/// Only ever a label in a memory report, which is why it is total rather than
-/// fallible: a URL with no separator and no dot is its own short name. Two
-/// orientations of one edge type are two iterations of the same loop, and a
-/// report that labelled both of them `remap` would be a report that could not be
-/// read.
-fn short_name(url: &str) -> &str {
-    let tail = url.rsplit(['/', '\\']).next().unwrap_or(url);
-    tail.rsplit_once('.').map_or(tail, |(stem, _)| stem)
+/// Not a new input, and deliberately not a field on [`VertexLayoutTarget`]: the
+/// caller already enumerates every orientation with the endpoint it is ordered
+/// by, because renumbering rewrites both.
+///
+/// **Matched on the relation key, and that is the fix.** This compared the
+/// *directory* of two Parquet URLs — which was correct exactly as long as the
+/// corpus kept both orientations of a relation in one directory and nothing but
+/// a naming convention said it would. `(src_type, label, dst_type)` is what a
+/// relation is identified by in the schema, in the manifest and in the error
+/// messages here, so it is what pairs the halves.
+fn counterpart<'a, 'b>(
+    adjacencies: &'a [AdjacencyTarget<'b>],
+    csr: &AdjacencyTarget<'b>,
+) -> Option<&'a AdjacencyTarget<'b>> {
+    adjacencies.iter().find(|a| {
+        a.ordered_by == Endpoint::Dst
+            && a.src_type == csr.src_type
+            && a.label == csr.label
+            && a.dst_type == csr.dst_type
+    })
 }
 
-/// Where one adjacency's tiles go, from where the adjacency itself is:
-/// `…/by_source.parquet` → `…/by_source/`.
+/// Walk one orientation as the CSR it already is.
 ///
-/// Derived and not passed in, because the caller has nothing to say about it: the
-/// tiles are the same relation cut on the same ranges, and a second path to
-/// configure is a second path to get wrong. A URL that is not a `.parquet` gets
-/// the separator appended, which cannot happen from the writer and is not worth
-/// an error variant nobody can reach.
-fn tile_prefix(adjacency: &str) -> String {
-    format!(
-        "{}/",
-        adjacency.strip_suffix(".parquet").unwrap_or(adjacency)
-    )
-}
-
-/// The target-ordered file sitting beside a source-ordered one — the same edge
-/// table's other orientation, where the reverse edges are already grouped by the
-/// endpoint the layout needs them under.
+/// Batch by batch and never collected: the whole point is that the two columns
+/// arrive as the `u32` slices [`CsrBuilder`] wants and no row is ever a Rust
+/// tuple. The first attempt at this materialised the result set instead, and the
+/// process peak went 17.0 → 24.4 GiB while the three parity tests stayed green.
 ///
-/// Not a new input, and deliberately not a new field on [`VertexLayoutTarget`]:
-/// the caller already enumerates every adjacency file with the endpoint it is
-/// ordered by, because renumbering rewrites both. The two orientations of one
-/// edge table share a directory, which is what pairs them.
-fn csc_beside<'a>(adjacencies: &'a [AdjacencyTarget], csr: &str) -> Option<&'a str> {
-    fn dir(url: &str) -> &str {
-        url.rsplit_once('/').map_or("", |(d, _)| d)
-    }
-    adjacencies
-        .iter()
-        .find(|a| a.ordered_by == Endpoint::Dst && dir(&a.parquet) == dir(csr))
-        .map(|a| a.parquet.as_str())
-}
-
-/// Read one adjacency Parquet as the CSR it already is.
+/// Both columns by NAME — see [`u32_column`]. The two orientations declare their
+/// columns in the same order and differ in which one they are *ordered* by, so
+/// `by_target`, which wants `dst_dense` as its key, still finds it second.
 ///
-/// Streamed batch by batch and never collected: the whole point is that the two
-/// columns arrive as the `u32` slices [`CsrBuilder`] wants and no row is ever a
-/// Rust tuple. The first attempt at this materialised the result set instead,
-/// and the process peak went 17.0 → 24.4 GiB while the three parity tests stayed
-/// green.
-///
-/// The projection is by NAME on the way in and read back by name on the way out
-/// — see [`u32_column`]. A projection is a filter over the file's columns and
-/// not a reordering of them, so `by_target`, which asks for `dst_dense` first,
-/// gets `src_dense` first anyway.
-fn read_orientation(
-    io: &dyn LayoutIo,
-    url: &str,
+/// The `edges` reservation is exact rather than grown into: the targets array is
+/// the one large allocation left, and doubling into it would put a copy of it
+/// beside itself. It was a Parquet footer field, and before that a `SELECT
+/// count(*)` that read the file to answer.
+fn walk_orientation(
+    batches: &[RecordBatch],
+    label: &str,
     key: &str,
     value: &str,
     vertex_count: u32,
     self_loops: &mut [f64],
 ) -> Result<Csr, LayoutError> {
-    let builder = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?).map_err(read_err(url))?;
-    // Reserved exactly, from the Parquet footer rather than by doubling: the
-    // targets array is the one large allocation left and growing into it would
-    // put a copy of it beside itself. The count is a field of the footer now,
-    // where it used to be a `SELECT count(*)` that read one.
-    let edges = builder.metadata().file_metadata().num_rows().max(0) as usize;
-    for column in [key, value] {
-        if builder.schema().index_of(column).is_err() {
-            return Err(LayoutError::MissingColumn {
-                target: url.to_string(),
-                column: column.to_string(),
-            });
-        }
-    }
-    let mask = ProjectionMask::columns(builder.parquet_schema(), [key, value]);
-    let reader = builder
-        .with_projection(mask)
-        .with_batch_size(SCAN_BATCH_ROWS)
-        .build()
-        .map_err(read_err(url))?;
-
+    let edges = batches.iter().map(RecordBatch::num_rows).sum();
     let mut csr = CsrBuilder::new(vertex_count as usize, edges);
-    for batch in reader {
-        let batch = batch.map_err(arrow_err(url))?;
-        let keys = u32_column(&batch, url, key)?;
-        let values = u32_column(&batch, url, value)?;
+    for batch in batches {
+        let keys = u32_column(batch, label, key)?;
+        let values = u32_column(batch, label, value)?;
         if !csr.push(keys.values(), values.values(), self_loops) {
             return Err(LayoutError::Disordered {
-                target: url.to_string(),
+                target: label.to_string(),
                 column: key.to_string(),
             });
         }
@@ -1925,6 +1979,35 @@ mod tests {
         assert_eq!(locate(&starts, 7), (0, 7));
     }
 
+    /// **A vertex type with no rows is laid out as nothing, not as a failure.**
+    ///
+    /// It was a failure. The writer declares no schema for a zero-row type and so
+    /// emitted no Parquet for it; this pass opened `vertex/<Type>.parquet` anyway
+    /// and returned `LayoutError::Io`. A `where` that matches no rows is an
+    /// ordinary program, so the path was reachable — and the run died after the
+    /// manifests were on disk.
+    ///
+    /// Asserted through the whole pass rather than on the `continue` inside it,
+    /// because what is under test is that the caller gets `Ok` and an empty
+    /// prefix: a type that contributes nothing contributes no files either.
+    #[test]
+    fn a_vertex_type_with_no_rows_writes_nothing_and_does_not_fail() {
+        let fs = crate::io::MemoryFs::new();
+        let empty: Vec<RecordBatch> = Vec::new();
+        let targets = [VertexLayoutTarget {
+            type_name: "Nobody".to_string(),
+            batches: &empty,
+            chunk_prefix: "vertex/Nobody/".to_string(),
+            chunk_size: 4_096,
+        }];
+
+        enrich_layout_with(&fs, &targets, &[]).expect("a type with no rows is not an error");
+        assert!(
+            fs.drain().is_empty(),
+            "nothing to lay out is nothing to write"
+        );
+    }
+
     #[test]
     fn shift_for_accepts_only_powers_of_two() {
         // The default tile, and the shift a reader addresses it with.
@@ -1935,15 +2018,6 @@ mod tests {
         // works and silently costs every reader a division and a table.
         assert_eq!(shift_for(122_880), None);
         assert_eq!(shift_for(0), None);
-    }
-
-    #[test]
-    fn tile_prefix_is_the_adjacency_without_its_extension() {
-        assert_eq!(
-            tile_prefix("file:///c/edge/A_b_A/by_source.parquet"),
-            "file:///c/edge/A_b_A/by_source/"
-        );
-        assert_eq!(tile_prefix("s3://b/by_source.parquet"), "s3://b/by_source/");
     }
 
     /// **The packing IS the ordering**, which is the whole claim the remap rests

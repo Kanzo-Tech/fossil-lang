@@ -1270,10 +1270,13 @@ pub fn run_to_dir(
         probe.mark("verify privacy bound");
     }
 
+    // The manifests, and only the manifests. The payload they describe is
+    // written by `fossil_layout`'s pass out of the batches `graph` still holds
+    // — which is why this function returns `graph` rather than consuming it.
     graph
-        .write_to_dir(dest_dir)
+        .write_manifests(dest_dir)
         .map_err(|e| DataFusionError::Execution(format!("write GraphAr: {e}")))?;
-    probe.mark("write_to_dir");
+    probe.mark("write_manifests");
     probe.finish();
     Ok(graph)
 }

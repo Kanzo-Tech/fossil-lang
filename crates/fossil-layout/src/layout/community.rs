@@ -1249,7 +1249,7 @@ mod hierarchy_tests {
     }
 
     /// One orientation of `edges` as the writer emits it — keyed, sorted, then
-    /// pushed through the very builder `read_orientation` feeds from Arrow.
+    /// pushed through the very builder `walk_orientation` feeds from Arrow.
     fn side(
         n: u32,
         edges: &[(u32, u32)],

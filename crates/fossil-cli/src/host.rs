@@ -29,10 +29,15 @@
 //! # What is not a host job, and is still here
 //!
 //! [`run`]'s layout post-pass re-derives `fossil-df`'s on-disk path convention
-//! (`vertex/<T>.parquet`, `vertex/<T>/`, `edge/<s>_<l>_<d>/by_{source,target}`)
-//! in order to find files `fossil-df` wrote and delete them. That is behavioural
+//! (`vertex/<T>/`, `edge/<s>_<l>_<d>/by_{source,target}/`) in order to tell the
+//! layout pass where the manifests say the payload goes. That is behavioural
 //! coupling with no compiler-visible signature, and it has already shipped one
 //! defect — see [`enrich_written_layout`].
+//!
+//! It is **half** the coupling it was: the convention used to be re-derived to
+//! find files `fossil-df` had written and unlink them, so this function had to
+//! agree with the writer about where an input was as well as where an output
+//! goes. Nothing is staged now, so only the destinations are shared.
 //!
 //! # What left, and why
 //!
@@ -530,98 +535,104 @@ pub fn run(
     )
     .map_err(|e| miette::miette!("execute: {e}"))?;
 
-    // W3.1b layout post-pass: replace the placeholder x/y/cluster_id with a real
-    // WCC partition + deterministic placement, rewriting each vertex Parquet in
-    // place.
+    // W3.1b layout post-pass, and the only thing that writes the corpus's
+    // payload: a community partition, a deterministic placement, and `dense_id`
+    // renumbered into Morton order, emitted as tiles under the prefixes
+    // `run_to_dir` has just declared in the manifests.
     //
     // **There is nothing to repoint any more, and that is the change.** A
     // `RunStatus` was built here BEFORE the pass and patched BY it, because it
-    // named `vertex/<Type>.parquet` — the staged file whose deletion is the
-    // pass's last act — and `fossil run --output-json` was handing keasy a path
-    // to a file that had just stopped existing. The report is the manifest, and
-    // the manifest has always declared the chunk prefix the pass writes into, so
-    // the order of these two lines is no longer load-bearing.
+    // named `vertex/<Type>.parquet` — a staged file whose deletion used to be
+    // the pass's last act — and `fossil run --output-json` was handing keasy a
+    // path to a file that had just stopped existing. The report is the manifest,
+    // and the manifest has always declared the chunk prefix the pass writes
+    // into, so the order of these two lines is no longer load-bearing.
     enrich_written_layout(&graph, &dest_dir, memory_bytes)?;
 
     Ok(RunReport::of(dest_url, &graph))
 }
 
-/// Run the W3 layout enrichment over the just-written `GraphAr` tree: for each
-/// vertex type, point the pass at its `vertex/<Type>.parquet` plus the CSR
-/// Parquet of any self-edge, and rewrite the placeholder `x/y/cluster_id` with a
-/// real layout. Local-filesystem paths (the `run_to_dir` dest is a local dir).
+/// Run the W3 layout enrichment over the just-written `GraphAr` manifests: for
+/// each vertex type, hand the pass the batches `execute_graph` materialised and
+/// the prefixes the manifest declares, and let it emit the payload with real
+/// `x`/`y`/`cluster_id` and `dense_id` in Morton order. Local-filesystem paths
+/// (the `run_to_dir` dest is a local dir).
 ///
-/// `memory_bytes` is the run's budget again, and it now **reaches** this half of
-/// the write path. It did not, and the gap was not small: `let _ =
-/// memory_bytes;` stood here, and at ten million vertices a declared 4 GiB run
-/// peaked at 8.39 GiB — a bound overshot by more than double, which is worse
-/// than no bound because the person who declared it believed it.
+/// # It writes the payload, it no longer rewrites one
+///
+/// `run_to_dir` staged every vertex type and every orientation as Parquet, this
+/// function pointed the pass at those files, and then it **deleted them** — two
+/// loops of `remove_file` at the bottom, one per kind. Both are gone with the
+/// thing they cleaned up after: 43.3 MB of the 115.9 MB a com-DBLP run wrote
+/// existed only to be read back and unlinked.
+///
+/// `memory_bytes` is the run's budget again, and it **reaches** this half of the
+/// write path. It did not, and the gap was not small: `let _ = memory_bytes;`
+/// stood here, and at ten million vertices a declared 4 GiB run peaked at 8.39
+/// GiB — a bound overshot by more than double, which is worse than no bound
+/// because the person who declared it believed it.
 ///
 /// What it buys is a refusal rather than a spill: the pass holds Rust `Vec`s and
 /// has nowhere to put them, so `fossil_layout::layout::enrich_layout_within`
-/// estimates from the Parquet footers before it decodes anything and stops if
-/// the corpus does not fit. See `LayoutError::OverBudget`.
+/// estimates from the batches it was handed before it gathers anything and stops
+/// if the corpus does not fit. See `LayoutError::OverBudget`.
 fn enrich_written_layout(
     graph: &fossil_df::GraphArData,
     dest_dir: &Path,
     memory_bytes: Option<u64>,
 ) -> miette::Result<()> {
     let path_str = |rel: String| dest_dir.join(rel).to_string_lossy().into_owned();
-    let adjacency = |e: &fossil_df::EdgeTable, file: &str| {
-        path_str(format!(
-            "edge/{}_{}_{}/{file}.parquet",
-            e.src_type, e.label, e.dst_type
-        ))
+    let relation = |e: &fossil_df::EdgeTable| {
+        path_str(format!("edge/{}_{}_{}/", e.src_type, e.label, e.dst_type))
     };
-    let targets: Vec<fossil_layout::layout::VertexLayoutTarget> = graph
-        .schema
-        .nodes
+
+    // Driven by `graph.vertices` and not by `graph.schema.nodes`, because this
+    // is the side that carries the rows. `execute_graph` pushes one of each per
+    // type in one loop, so they are the same set either way; taking the one with
+    // the batches in it removes the lookup that would otherwise have to handle a
+    // node with no table and cannot say what it would mean.
+    let targets: Vec<fossil_layout::layout::VertexLayoutTarget<'_>> = graph
+        .vertices
         .iter()
-        .map(|node| {
-            let self_edge_csr = graph
-                .edges
-                .iter()
-                .filter(|e| e.src_type == node.label && e.dst_type == node.label)
-                .map(|e| adjacency(e, "by_source"))
-                .collect();
-            fossil_layout::layout::VertexLayoutTarget {
-                type_name: node.label.clone(),
-                vertex_parquet: path_str(format!("vertex/{}.parquet", node.label)),
-                // Trailing separator: the layout appends the tiles file.
-                chunk_prefix: path_str(format!("vertex/{}/", node.label)),
-                // The same constant the manifest is written with, so the files
-                // and the promise cannot drift apart.
-                chunk_size: fossil_sinks::manifest::DEFAULT_CHUNK_SIZE,
-                self_edge_csr,
-            }
+        .map(|table| fossil_layout::layout::VertexLayoutTarget {
+            type_name: table.label.clone(),
+            batches: &table.batches,
+            // Trailing separator: the layout appends the tiles file.
+            chunk_prefix: path_str(format!("vertex/{}/", table.label)),
+            // The same constant the manifest is written with, so the files and
+            // the promise cannot drift apart.
+            chunk_size: fossil_sinks::manifest::DEFAULT_CHUNK_SIZE,
         })
         .collect();
 
-    // Every adjacency file, both orientations, cross-type included — the layout
-    // renumbers `dense_id`, and a file left out keeps ids that now belong to
-    // somebody else. Enumerated here rather than derived there because this is
-    // the side that has the schema.
+    // Every orientation, cross-type included — the layout renumbers `dense_id`,
+    // and one left out keeps ids that now belong to somebody else. Enumerated
+    // here rather than derived there because this is the side that has the
+    // schema.
     //
-    // A missed file is a silent corruption, and what catches one is not this
-    // comment: `tests/conformance.rs` assertion 4 reads every endpoint of every
-    // adjacency file back with plain SQL and fails on a dense id no vertex
-    // carries. A file this loop skipped keeps ids from before the renumbering
-    // and dangles there.
-    let adjacencies: Vec<fossil_layout::layout::AdjacencyTarget> = graph
+    // A missed orientation is a silent corruption, and what catches one is not
+    // this comment: `tests/conformance.rs` assertion 4 reads every endpoint of
+    // every adjacency back with plain SQL and fails on a dense id no vertex
+    // carries. One this loop skipped keeps ids from before the renumbering and
+    // dangles there.
+    let adjacencies: Vec<fossil_layout::layout::AdjacencyTarget<'_>> = graph
         .edges
         .iter()
         .flat_map(|e| {
             use fossil_layout::layout::Endpoint;
             [
-                (adjacency(e, "by_source"), Endpoint::Src),
-                (adjacency(e, "by_target"), Endpoint::Dst),
+                ("by_source", Endpoint::Src, &e.by_source),
+                ("by_target", Endpoint::Dst, &e.by_target),
             ]
             .map(
-                |(parquet, ordered_by)| fossil_layout::layout::AdjacencyTarget {
-                    parquet,
+                |(dir, ordered_by, batches)| fossil_layout::layout::AdjacencyTarget {
                     src_type: e.src_type.clone(),
+                    label: e.label.clone(),
                     dst_type: e.dst_type.clone(),
                     ordered_by,
+                    batches,
+                    tile_prefix: format!("{}{dir}/", relation(e)),
+                    levels_prefix: relation(e),
                 },
             )
         })
@@ -633,32 +644,5 @@ fn enrich_written_layout(
         &adjacencies,
         memory_bytes,
     )
-    .map_err(|e| miette::miette!("layout: {e}"))?;
-
-    // The single-file vertex Parquet was this pass's input and nothing reads it
-    // afterwards: the manifest points at the chunk prefix, and leaving it would
-    // be a second copy of every vertex, stale the moment anything is re-run.
-    //
-    // A second loop stood here repointing a `RunStatus` at the prefix this pass
-    // had just filled, because the status carried its own answer to «where are
-    // this type's rows» and that answer was the deleted file. There is one
-    // answer now — `VertexInfo::prefix`, written before the run started — so the
-    // deletion is just a deletion.
-    for target in &targets {
-        std::fs::remove_file(&target.vertex_parquet)
-            .map_err(|e| miette::miette!("remove staged {}: {e}", target.vertex_parquet))?;
-    }
-
-    // And the staged adjacencies, for the same reason and one more. The pass
-    // reads each one, renumbers it and emits its tiles; the file it read is
-    // pre-renumbering, so leaving it is a copy of the relation carrying ids that
-    // now belong to other vertices. It used to be rewritten in place and left —
-    // the uncut relation published beside its own tiles, which is two containers
-    // for one set of rows, and `apps/corpus`'s `declared-tiling` is the guard
-    // that says so in as many words.
-    for adjacency in &adjacencies {
-        std::fs::remove_file(&adjacency.parquet)
-            .map_err(|e| miette::miette!("remove staged {}: {e}", adjacency.parquet))?;
-    }
-    Ok(())
+    .map_err(|e| miette::miette!("layout: {e}"))
 }

@@ -188,117 +188,98 @@ pub async fn execute_core(
         .await
         .map_err(|e| format!("execute_graph: {e}"))?;
 
-    let files = graph.to_files().map_err(|e| format!("encode: {e}"))?;
+    let manifests = graph.manifest_files().map_err(|e| format!("encode: {e}"))?;
     let report = RunReport::of(dest, &graph);
-    let files = enrich_layout_in_memory(&graph, files)?;
+    let files = enrich_layout_in_memory(&graph, manifests)?;
     Ok(ExecOutput { files, report })
 }
 
-/// Run the real layout pass over the staged corpus, in memory.
+/// Run the real layout pass, in memory, and get the whole corpus back.
 ///
 /// This is `fossil_cli::host::enrich_written_layout` with a different
 /// filesystem under it, and the two are deliberately the same shape: the same
-/// targets, the same adjacencies in both orientations, the same deletions
-/// afterwards. **What the tab writes has to be what `fossil run` writes**, and
-/// the only way to be sure of that is for the browser to run the pass rather
-/// than to approximate it.
+/// targets, the same adjacencies in both orientations. **What the tab writes has
+/// to be what `fossil run` writes**, and the only way to be sure of that is for
+/// the browser to run the pass rather than to approximate it.
 ///
-/// It is not optional. `fossil-df` writes `x`, `y` and `cluster_id` as zeroed
-/// placeholders and declares in the manifest the tree this pass delivers, so a
-/// browser that skips it publishes a corpus satisfying the manifest's *shape*
-/// and violating the property that shape exists to express — `dense_id`
-/// ascending with the Morton code of the vertex's position
-/// (`/docs/format/conventions/addressing`) — and every count-based check
-/// passes.
+/// It is not optional, and it is not a rewrite: `fossil-df` emits the manifests
+/// and `x`/`y`/`cluster_id` as zeroed placeholders in batches nobody has written
+/// yet, so this pass is what puts the payload in the map at all. A browser that
+/// skipped it would publish manifests over an empty tree.
 ///
-/// What it costs: one resident copy of every file, twice over at the crossing
-/// point, because there is no filesystem here to stream to as the native pass
-/// does. The pass is the memory-hungry half of the write path
-/// (`/docs/design/streaming`) and `wasm32`'s address space is 4 GiB, so a
-/// corpus that fits natively can fail here. That ceiling is a property of the
-/// target, stated rather than worked around.
+/// What it costs: one resident copy of every file the pass writes, because there
+/// is no filesystem here to stream to as the native pass does. The pass is the
+/// memory-hungry half of the write path (`/docs/design/streaming`) and
+/// `wasm32`'s address space is 4 GiB, so a corpus that fits natively can fail
+/// here. That ceiling is a property of the target, stated rather than worked
+/// around.
+///
+/// It used to be **three** resident copies at the crossing point: the executor's
+/// Arrow, the staged Parquet this function inserted into the map, and the copy
+/// the pass decoded back out of it. Two of the three were there so that a pass
+/// in the same process could read what the same process had just encoded.
 fn enrich_layout_in_memory(
     graph: &fossil_df::GraphArData,
-    files: Vec<GraphArFile>,
+    manifests: Vec<GraphArFile>,
 ) -> Result<Vec<GraphArFile>, String> {
     use fossil_layout::io::MemoryFs;
     use fossil_layout::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget};
 
-    // The keys are the corpus-relative paths the files already carry, so a
-    // target composed below names the same string the executor emitted. No
-    // `dest` prefix: the native host joins one because it writes into a
-    // directory, and this writes into a map whose keys are what JS receives.
+    // The manifests go in so that they come back out with the payload, in one
+    // list for JS. No `dest` prefix: the native host joins one because it writes
+    // into a directory, and this writes into a map whose keys are what JS
+    // receives.
     let fs = MemoryFs::new();
-    for file in files {
+    for file in manifests {
         fs.insert(file.rel_path, file.bytes);
     }
 
-    let adjacency = |e: &fossil_df::EdgeTable, file: &str| {
-        format!(
-            "edge/{}_{}_{}/{file}.parquet",
-            e.src_type, e.label, e.dst_type
-        )
-    };
+    let relation =
+        |e: &fossil_df::EdgeTable| format!("edge/{}_{}_{}/", e.src_type, e.label, e.dst_type);
 
-    let targets: Vec<VertexLayoutTarget> = graph
-        .schema
-        .nodes
+    // `graph.vertices` and not `graph.schema.nodes`: this is the side that
+    // carries the rows, and the native host reads the same one for the same
+    // reason.
+    let targets: Vec<VertexLayoutTarget<'_>> = graph
+        .vertices
         .iter()
-        .map(|node| VertexLayoutTarget {
-            type_name: node.label.clone(),
-            vertex_parquet: format!("vertex/{}.parquet", node.label),
+        .map(|table| VertexLayoutTarget {
+            type_name: table.label.clone(),
+            batches: &table.batches,
             // Trailing separator: the layout appends the tiles file.
-            chunk_prefix: format!("vertex/{}/", node.label),
+            chunk_prefix: format!("vertex/{}/", table.label),
             // The same constant the manifest is written with, so the files and
             // the promise cannot drift apart.
             chunk_size: fossil_sinks::manifest::DEFAULT_CHUNK_SIZE,
-            self_edge_csr: graph
-                .edges
-                .iter()
-                .filter(|e| e.src_type == node.label && e.dst_type == node.label)
-                .map(|e| adjacency(e, "by_source"))
-                .collect(),
         })
         .collect();
 
-    // Every adjacency file, both orientations, cross-type included. The pass
-    // renumbers `dense_id`, so a file left out keeps ids that now belong to
-    // somebody else — a silent corruption, which is why this enumerates rather
-    // than letting the layout guess.
-    let adjacencies: Vec<AdjacencyTarget> = graph
+    // Every orientation, cross-type included. The pass renumbers `dense_id`, so
+    // one left out keeps ids that now belong to somebody else — a silent
+    // corruption, which is why this enumerates rather than letting the layout
+    // guess.
+    let adjacencies: Vec<AdjacencyTarget<'_>> = graph
         .edges
         .iter()
         .flat_map(|e| {
             [
-                (adjacency(e, "by_source"), Endpoint::Src),
-                (adjacency(e, "by_target"), Endpoint::Dst),
+                ("by_source", Endpoint::Src, &e.by_source),
+                ("by_target", Endpoint::Dst, &e.by_target),
             ]
-            .map(|(parquet, ordered_by)| AdjacencyTarget {
-                parquet,
+            .map(|(dir, ordered_by, batches)| AdjacencyTarget {
                 src_type: e.src_type.clone(),
+                label: e.label.clone(),
                 dst_type: e.dst_type.clone(),
                 ordered_by,
+                batches,
+                tile_prefix: format!("{}{dir}/", relation(e)),
+                levels_prefix: relation(e),
             })
         })
         .collect();
 
     fossil_layout::layout::enrich_layout_with(&fs, &targets, &adjacencies)
         .map_err(|e| format!("layout: {e}"))?;
-
-    // The staged single-file vertex Parquet was this pass's input and nothing
-    // reads it afterwards — the manifest points at the chunk prefix. Left in, it
-    // is a second, stale copy of every vertex, and `apps/corpus`'s
-    // `exactly-once` fails a corpus for exactly that.
-    for target in &targets {
-        fs.remove(&target.vertex_parquet);
-    }
-    // And the staged adjacencies: the pass read each one pre-renumbering, so
-    // leaving it publishes the relation with ids that now belong to other
-    // vertices — and publishes it beside its own tiles, which is two containers
-    // for one set of rows (`declared-tiling`).
-    for adjacency in &adjacencies {
-        fs.remove(&adjacency.parquet);
-    }
 
     Ok(fs
         .drain()

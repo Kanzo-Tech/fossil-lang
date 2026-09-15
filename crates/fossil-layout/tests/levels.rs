@@ -47,13 +47,16 @@ fn lit(path: &Path) -> String {
 
 /// **The relation the pass WROTE, not the one it was given.**
 ///
-/// `enrich_layout` renumbers every vertex, so the staged `by_source.parquet` the
-/// fixture hands it carries the OLD `dense_id`s and the tiles it emits carry the
-/// new ones. Measured on this fixture: 27,976 rows each and **55,698 of them
-/// differ** — which is all of them. A test that reads the staged file and joins
-/// it to the written payload on `dense_id` is joining two different numberings
-/// and gets an answer about nothing; the edges it counts are not edges of this
-/// corpus.
+/// `enrich_layout` renumbers every vertex, so the batches the fixture hands it
+/// carry the OLD `dense_id`s and the tiles it emits carry the new ones. Measured
+/// on this fixture: 27,976 rows each and **55,698 of them differ** — which is all
+/// of them. A test that reads the input and joins it to the written payload on
+/// `dense_id` is joining two different numberings and gets an answer about
+/// nothing; the edges it counts are not edges of this corpus.
+///
+/// It is harder to get wrong than it was, and worth saying why: the input used to
+/// be a `by_source.parquet` sitting in the same directory tree as the output, so
+/// reading the wrong one was a plausible path. There is no file to read.
 ///
 /// That is not hypothetical. It is what
 /// `what_the_pixel_floor_leaves_of_a_coarse_view` did on the day it was written,
@@ -77,8 +80,8 @@ fn scalar(db: &Connection, sql: &str) -> i64 {
 #[test]
 fn a_level_file_holds_exactly_what_the_level_predicate_selects() {
     let mut f = fixture(dir("levels"), ROWS, 14);
-    f.targets[0].chunk_size = CHUNK;
-    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+    f.chunk_size = CHUNK;
+    enrich_layout(&f.targets(), &f.adjacencies()).expect("the layout pass");
 
     let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("4,000 rows is over one tile");
     assert_eq!(
@@ -156,8 +159,8 @@ fn a_level_file_holds_exactly_what_the_level_predicate_selects() {
 #[test]
 fn a_coarser_level_file_is_a_subset_of_the_finer_one() {
     let mut f = fixture(dir("levels_nest"), ROWS, 14);
-    f.targets[0].chunk_size = CHUNK;
-    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+    f.chunk_size = CHUNK;
+    enrich_layout(&f.targets(), &f.adjacencies()).expect("the layout pass");
 
     let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("over one tile");
     let chunks = f.root.join("chunks");
@@ -191,8 +194,8 @@ fn a_coarser_level_file_is_a_subset_of_the_finer_one() {
 #[test]
 fn the_levels_on_disk_are_the_levels_the_plan_names() {
     let mut f = fixture(dir("levels_declared"), ROWS, 14);
-    f.targets[0].chunk_size = CHUNK;
-    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+    f.chunk_size = CHUNK;
+    enrich_layout(&f.targets(), &f.adjacencies()).expect("the layout pass");
 
     let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("over one tile");
     let chunks = f.root.join("chunks");
@@ -237,8 +240,8 @@ fn the_levels_on_disk_are_the_levels_the_plan_names() {
 #[test]
 fn a_small_type_writes_no_levels_at_all() {
     let f = fixture(dir("levels_one_tile"), 200, 14);
-    assert!(VertexLevels::planned(200, f.targets[0].chunk_size).is_none());
-    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+    assert!(VertexLevels::planned(200, f.chunk_size).is_none());
+    enrich_layout(&f.targets(), &f.adjacencies()).expect("the layout pass");
 
     let strays: Vec<String> = fs::read_dir(f.root.join("chunks"))
         .expect("the tile directory")
@@ -267,8 +270,8 @@ fn a_small_type_writes_no_levels_at_all() {
 fn level_cost_against_the_whole_type() {
     const BIG: u32 = 300_000;
     let f = fixture(dir("levels_cost"), BIG, 14);
-    let chunk = f.targets[0].chunk_size;
-    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+    let chunk = f.chunk_size;
+    enrich_layout(&f.targets(), &f.adjacencies()).expect("the layout pass");
 
     let plan = VertexLevels::planned(u64::from(BIG), chunk).expect("over one tile");
     let chunks = f.root.join("chunks");
@@ -329,8 +332,8 @@ fn what_the_pixel_floor_leaves_of_a_coarse_view() {
     const MIN_LINK_PX: f64 = 3.0;
 
     let f = fixture(dir("levels_camera"), BIG, 14);
-    let chunk = f.targets[0].chunk_size;
-    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+    let chunk = f.chunk_size;
+    enrich_layout(&f.targets(), &f.adjacencies()).expect("the layout pass");
 
     let plan = VertexLevels::planned(u64::from(BIG), chunk).expect("over one tile");
     let payload = lit(&f.root.join("chunks").join("tiles.parquet"));
@@ -440,8 +443,8 @@ fn what_the_pixel_floor_leaves_of_a_coarse_view() {
 #[test]
 fn an_edge_level_holds_the_incident_edges_at_the_payload_s_own_coordinates() {
     let mut f = fixture(dir("levels_edge_sets"), ROWS, 14);
-    f.targets[0].chunk_size = CHUNK;
-    enrich_layout(&f.targets, &f.adjacencies).expect("the layout pass");
+    f.chunk_size = CHUNK;
+    enrich_layout(&f.targets(), &f.adjacencies()).expect("the layout pass");
 
     let plan = VertexLevels::planned(u64::from(ROWS), CHUNK).expect("over one tile");
     let by_source = written_relation(&f.root, "by_source");

@@ -1,14 +1,23 @@
-//! The GraphAr output as in-memory bytes — the single Arrow→Parquet encoder
-//! shared by the native fs sink ([`crate::sink`]) and the browser executor
-//! (`fossil-df-wasm`).
+//! The GraphAr output as in-memory bytes — the manifests, and the tile encoder
+//! both the native host and the browser write their payload through.
 //!
 //! Universal-substrate decision: ONE parquet encoder in Rust (parquet-rs,
-//! native + wasm), no parquet-wasm JS. [`GraphArData::to_files`] turns the
-//! materialised graph into the W0b GraphAr tree as `(rel_path, bytes)` pairs —
-//! one Parquet per vertex type, the CSR/CSC Parquet pair per edge, and the
-//! manifest YAMLs. The native sink writes each pair to disk; the wasm host hands
-//! them to JS for signed `PUT`. Pure in-memory (`Vec<u8>` writer), so the encoder
-//! itself never touches the filesystem and compiles to `wasm32`.
+//! native + wasm), no parquet-wasm JS.
+//!
+//! # What this module emits, and what it stopped emitting
+//!
+//! [`GraphArData::manifest_files`] turns the materialised graph into the
+//! dataset's **manifest YAMLs** as `(rel_path, bytes)` pairs. It used to emit
+//! the payload too — one Parquet per vertex type and the CSR/CSC pair per edge —
+//! and the layout pass then read every one of those back, rewrote it as tiles
+//! and deleted it. Measured on com-DBLP: 115.9 MB written against 72.6 MB of
+//! final corpus, **43.3 MB staged and deleted, a 1.60× write amplification**.
+//!
+//! So the payload is written **once**, by `fossil_layout`, out of the same
+//! `RecordBatch`es this module would have encoded — through [`TileWriter`],
+//! which lives here so that the row-group-per-tile property a reader indexes on
+//! is stated in one place. Pure in-memory (`Vec<u8>` writer), so nothing here
+//! touches the filesystem and all of it compiles to `wasm32`.
 
 use std::io::Write;
 
@@ -21,7 +30,7 @@ use parquet::file::properties::WriterProperties;
 use crate::GraphArData;
 
 /// One output file of the GraphAr dataset: its dataset-relative path
-/// (`vertex/<Type>.parquet`, `edge/<dir>/by_source.parquet`, `graph.graph.yml`,
+/// (`graph.graph.yml`, `vertex/<Type>.vertex.yml`, `vertex/<Type>/tiles.parquet`,
 /// …) and its encoded bytes. The path keys both the on-disk layout (native sink)
 /// and the signed-`PUT` object key (browser host).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,9 +39,10 @@ pub struct GraphArFile {
     pub bytes: Vec<u8>,
 }
 
-/// Encoding the GraphAr dataset to bytes failed — Parquet encode or manifest
-/// YAML serialization. Filesystem errors live in [`crate::sink::SinkError`]
-/// (native-only); this stays wasm-clean.
+/// Encoding the GraphAr dataset to bytes failed — Parquet encode (through
+/// [`TileWriter`] or [`batches_to_parquet`]) or manifest YAML serialization.
+/// Filesystem errors live in [`crate::sink::SinkError`] (native-only); this
+/// stays wasm-clean.
 #[derive(Debug, thiserror::Error)]
 pub enum EncodeError {
     #[error("parquet encode: {0}")]
@@ -42,61 +52,37 @@ pub enum EncodeError {
 }
 
 impl GraphArData {
-    /// The whole GraphAr dataset as in-memory `(rel_path, bytes)` files: every
-    /// vertex Parquet, every edge CSR/CSC Parquet pair, and the manifest YAMLs
-    /// ([`Self::manifests`]). A zero-row vertex/edge encodes nothing (no schema
-    /// to declare) and is skipped, exactly as the fs sink does.
+    /// The dataset's manifest YAMLs as in-memory `(rel_path, bytes)` files.
     ///
-    /// This is the single encoder both hosts share: the native [`crate::sink`]
-    /// writes each file to a directory, the wasm host returns them to JS.
+    /// **The payload is not here** — see the module header. What describes the
+    /// corpus is written by this crate; what the corpus *is* comes out of
+    /// `fossil_layout`'s pass, which holds the same batches and the addresses to
+    /// cut them on.
     ///
     /// # Errors
-    /// Parquet encode or manifest YAML serialization failures.
-    pub fn to_files(&self) -> Result<Vec<GraphArFile>, EncodeError> {
+    /// Manifest YAML serialization failures.
+    pub fn manifest_files(&self) -> Result<Vec<GraphArFile>, EncodeError> {
         let mut out = Vec::new();
-        self.try_for_each_file::<EncodeError>(|file| {
+        self.try_for_each_manifest::<EncodeError>(|file| {
             out.push(file);
             Ok(())
         })?;
         Ok(out)
     }
 
-    /// The same dataset, one file at a time: each is encoded, handed to `emit`,
+    /// The same manifests, one at a time: each is serialized, handed to `emit`,
     /// and dropped before the next one is built.
     ///
-    /// This is the encoder — [`Self::to_files`] is this with a `Vec` on the end.
-    /// Collecting first keeps every Parquet buffer resident at once, which the
-    /// native sink never needed: it writes each file and forgets it. The browser
-    /// host does, because it hands JS a list.
-    ///
-    /// **This is a shape, not a measured win** — the measurement that refuted the
-    /// saving, and why the shape stayed anyway, is `/docs/design/streaming`.
+    /// [`Self::manifest_files`] is this with a `Vec` on the end. The native
+    /// [`crate::sink`] writes each one to a directory and forgets it; the wasm
+    /// host collects them, because it hands JS a list.
     ///
     /// # Errors
-    /// Whatever `emit` returns, or an encode failure converted through `E`.
-    pub fn try_for_each_file<E: From<EncodeError>>(
+    /// Whatever `emit` returns, or a serialization failure converted through `E`.
+    pub fn try_for_each_manifest<E: From<EncodeError>>(
         &self,
         mut emit: impl FnMut(GraphArFile) -> Result<(), E>,
     ) -> Result<(), E> {
-        for v in &self.vertices {
-            if let Some(bytes) = batches_to_parquet(&v.batches).map_err(EncodeError::from)? {
-                emit(GraphArFile {
-                    rel_path: format!("vertex/{}.parquet", v.label),
-                    bytes,
-                })?;
-            }
-        }
-        for e in &self.edges {
-            let dir = format!("{}_{}_{}", e.src_type, e.label, e.dst_type);
-            for (orient, batches) in [("by_source", &e.by_source), ("by_target", &e.by_target)] {
-                if let Some(bytes) = batches_to_parquet(batches).map_err(EncodeError::from)? {
-                    emit(GraphArFile {
-                        rel_path: format!("edge/{dir}/{orient}.parquet"),
-                        bytes,
-                    })?;
-                }
-            }
-        }
         for manifest in self.manifests().map_err(EncodeError::from)? {
             emit(GraphArFile {
                 rel_path: manifest.rel_path,
@@ -110,6 +96,15 @@ impl GraphArData {
 /// Encode `batches` to a Parquet byte buffer (uncompressed — `parquet`'s default
 /// props; the discovery reader decodes any valid Parquet). Returns `None` for an
 /// empty batch set (a 0-row type has no schema to declare).
+///
+/// **Nothing in the write path calls this any more**, and that is the point of
+/// the phase inversion: it encoded the writer's staged payload, which the layout
+/// pass then read back and replaced. What still calls it is
+/// `examples/tile_layout.rs` and `fossil-layout`'s `examples/compaction_pass.rs`
+/// — the benches that measure [`TileWriter`] against the alternative of one
+/// Parquet per tile, which is the comparison this function is the baseline of.
+/// It is kept for that and for being the statement of the row-group property
+/// [`TileWriter`] enforces by cutting.
 ///
 /// **One row group per tile.** The only property set is the row-group row count,
 /// and it is [`DEFAULT_CHUNK_SIZE`] — the same 4,096 rows of `dense_id` that

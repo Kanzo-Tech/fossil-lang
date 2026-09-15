@@ -3,7 +3,7 @@
 //! # Where this runs, and why that is the whole design
 //!
 //! Between [`execute_graph`](crate::execute_graph) and
-//! [`write_to_dir`](crate::GraphArData::write_to_dir): **after the corpus
+//! [`write_manifests`](crate::GraphArData::write_manifests): **after the corpus
 //! exists as a value and before a single byte of it reaches a disk.** A refusal
 //! here leaves nothing behind to leak.
 //!

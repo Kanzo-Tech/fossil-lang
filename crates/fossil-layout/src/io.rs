@@ -1,4 +1,4 @@
-//! Where the layout pass gets its bytes, and where it puts them.
+//! Where the layout pass puts its bytes.
 //!
 //! The pass itself is arithmetic over Arrow — Louvain, a Morton renumbering, a
 //! gather, one sort. **None of it is about files.** What was about files was a
@@ -8,44 +8,48 @@
 //! nothing to open.
 //!
 //! So the seam is here, and it is deliberately the narrowest one that works:
-//! **open a URL for reading, create a URL for writing, ensure a prefix exists.**
-//! Everything above them is unchanged and unaware.
+//! **create a URL for writing, ensure a prefix exists.** Everything above them
+//! is unchanged and unaware.
 //!
-//! # Why a trait and not bytes in, bytes out
+//! # It had a reader, and the reader is gone
 //!
-//! The obvious alternative — hand the pass a `Vec<(String, Vec<u8>)>` and take
-//! one back — was rejected because it makes the *native* path worse to buy the
-//! browser path nothing. Natively the vertex read is already the memory peak of
-//! the whole write path (`/docs/design/streaming`: 4.80 G at one million
-//! vertices and ten million edges, and it is the vertex read and the gather, not
-//! the edge sort). A byte-slice interface would force every input file resident
-//! before the pass starts and every output file resident until it ends, on a
-//! host that has a filesystem and does not need either. [`LocalFs`] streams
-//! through `File` exactly as the code did before this module existed, and the
-//! browser pays the in-memory cost because in a browser there is nothing else to
-//! pay.
+//! `open(url) -> Source` was the third method, and the pass opened the Parquet
+//! the writer had staged. The rows arrive as `RecordBatch`es now — see
+//! [`crate::layout::VertexLayoutTarget`] — so there is nothing to open, and the
+//! `ChunkReader` switch that let one `parquet` call site decode either a `File`
+//! or a `Bytes` went with it. **This seam is one-way.**
+//!
+//! What that removed, besides code: on the browser path a staged file was
+//! resident as bytes in this map *and* as the Arrow the executor was still
+//! holding, and then again as the decoded copy the pass made of it. Three
+//! copies, and the crate said so in this comment.
+//!
+//! # Why a trait and not bytes out
+//!
+//! The obvious alternative — have the pass return a `Vec<(String, Vec<u8>)>` —
+//! makes the *native* path worse to buy the browser path nothing: it would force
+//! every output file resident until the pass ends, on a host that has a
+//! filesystem and does not need that. [`LocalFs`] streams a row group at a time
+//! through `File`, and the browser pays the in-memory cost because in a browser
+//! there is nothing else to pay.
 //!
 //! # Why enum dispatch below the trait
 //!
 //! `LayoutIo` is a `&dyn` parameter — the pass takes one reference and calls it
 //! a few dozen times, so the vtable is free and the alternative is making
 //! `enrich_layout` generic over a type parameter that would then appear in every
-//! helper signature it threads through. But the *reader* and the *writer* it
-//! hands back are enums, not
-//! boxes, because `parquet` puts them in hot loops: [`Source`] is what every
-//! column chunk is decoded through and [`Sink`] is what every row group is
-//! encoded into. That is the split `CLAUDE.md` asks for — `&dyn` at the seam,
-//! concrete types under it.
+//! helper signature it threads through. But the *writer* it hands back is an
+//! enum and not a box, because `parquet` puts it in a hot loop: [`Sink`] is what
+//! every row group is encoded into. That is the split `CLAUDE.md` asks for —
+//! `&dyn` at the seam, concrete types under it.
 
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{Cursor, Read, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use parquet::errors::{ParquetError, Result as ParquetResult};
-use parquet::file::reader::{ChunkReader, Length};
 
 use crate::layout::LayoutError;
 
@@ -53,8 +57,8 @@ use crate::layout::LayoutError;
 ///
 /// Shared by both filesystems on purpose: a URL that names a file to
 /// [`LocalFs`] must name the same key to [`MemoryFs`], or the browser and the
-/// CLI would disagree about what a target *is* before either of them reads a
-/// byte. `file://` is stripped, a bare path passes through, anything carrying
+/// CLI would disagree about what a destination *is* before either of them writes
+/// a byte. `file://` is stripped, a bare path passes through, anything carrying
 /// another `://` is [`LayoutError::Remote`] — an object store is a registration
 /// rather than a string, and neither of these two is one.
 pub(crate) fn normalise(url: &str) -> Result<&str, LayoutError> {
@@ -67,24 +71,17 @@ pub(crate) fn normalise(url: &str) -> Result<&str, LayoutError> {
     Ok(path)
 }
 
-/// Read a Parquet, write a Parquet, make room for one.
+/// Write a Parquet, make room for one.
 ///
 /// Implemented twice: [`LocalFs`] for the native host and [`MemoryFs`] for the
 /// browser. There is no third, and a third would be an object store, which is
 /// a different kind of thing — see [`normalise`].
 pub trait LayoutIo {
-    /// Open `url` for reading. The result is what `parquet` decodes through.
-    ///
-    /// # Errors
-    /// [`LayoutError::Io`] if it is not there, [`LayoutError::Remote`] if the
-    /// URL names a scheme this pass does not dereference.
-    fn open(&self, url: &str) -> Result<Source, LayoutError>;
-
     /// Create `url` for writing, truncating whatever was there.
     ///
     /// # Errors
-    /// [`LayoutError::Io`] if it cannot be created, [`LayoutError::Remote`] as
-    /// [`Self::open`].
+    /// [`LayoutError::Io`] if it cannot be created, [`LayoutError::Remote`] if
+    /// the URL names a scheme this pass does not dereference.
     fn create(&self, url: &str) -> Result<Sink, LayoutError>;
 
     /// Make `prefix` a place a [`Self::create`] can land.
@@ -92,98 +89,6 @@ pub trait LayoutIo {
     /// # Errors
     /// [`LayoutError::Prefix`] if it cannot be made.
     fn ensure_prefix(&self, prefix: &str) -> Result<(), LayoutError>;
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// The reader
-// ──────────────────────────────────────────────────────────────────────────
-
-/// A Parquet the pass reads: a file on a disk, or bytes in a map.
-///
-/// `parquet` wants a [`ChunkReader`], and both halves already are one — `File`
-/// and `Bytes` each carry an impl in `parquet` itself. This is the two-way
-/// switch that lets one call site accept either, and every method below is a
-/// delegation to whichever impl is underneath.
-#[derive(Debug)]
-pub enum Source {
-    /// A file, read with seeks. The decoder pulls the footer and then only the
-    /// column chunks it was projected onto, so the file never becomes resident.
-    File(File),
-    /// Bytes already in memory. Slicing one is a refcount, not a copy, which is
-    /// what makes the browser path a single resident copy per file rather than
-    /// one per read.
-    Memory(Bytes),
-}
-
-impl Length for Source {
-    fn len(&self) -> u64 {
-        match self {
-            Self::File(file) => Length::len(file),
-            Self::Memory(bytes) => bytes.len() as u64,
-        }
-    }
-}
-
-impl ChunkReader for Source {
-    type T = SourceRead;
-
-    fn get_read(&self, start: u64) -> ParquetResult<Self::T> {
-        match self {
-            Self::File(file) => Ok(SourceRead::File(ChunkReader::get_read(file, start)?)),
-            Self::Memory(bytes) => {
-                let start = usize::try_from(start).map_err(|_| too_far(start))?;
-                if start > bytes.len() {
-                    return Err(too_far(start as u64));
-                }
-                Ok(SourceRead::Memory(Cursor::new(bytes.slice(start..))))
-            }
-        }
-    }
-
-    fn get_bytes(&self, start: u64, length: usize) -> ParquetResult<Bytes> {
-        match self {
-            Self::File(file) => ChunkReader::get_bytes(file, start, length),
-            Self::Memory(bytes) => {
-                let start = usize::try_from(start).map_err(|_| too_far(start))?;
-                let end = start
-                    .checked_add(length)
-                    .ok_or_else(|| too_far(start as u64))?;
-                if end > bytes.len() {
-                    return Err(ParquetError::EOF(format!(
-                        "read of {length} bytes at {start} runs past the end of a {}-byte buffer",
-                        bytes.len()
-                    )));
-                }
-                Ok(bytes.slice(start..end))
-            }
-        }
-    }
-}
-
-fn too_far(start: u64) -> ParquetError {
-    ParquetError::EOF(format!("offset {start} is past the end of the buffer"))
-}
-
-/// The [`Read`] a [`Source`] hands out. One variant per variant of it.
-#[derive(Debug)]
-pub enum SourceRead {
-    /// A handle on the same file, per `ChunkReader`'s `File::try_clone` model.
-    ///
-    /// `BufReader` and not `File`, because that is what `parquet`'s own
-    /// `impl ChunkReader for File` returns and this variant is a delegation to
-    /// it — the buffering is that impl's decision, not one taken here.
-    File(std::io::BufReader<File>),
-    /// A cursor over a refcounted slice — no copy of the underlying bytes.
-    Memory(Cursor<Bytes>),
-}
-
-impl Read for SourceRead {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            Self::File(file) => file.read(buf),
-            Self::Memory(cursor) => cursor.read(buf),
-        }
-    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -270,15 +175,6 @@ impl LocalFs {
 }
 
 impl LayoutIo for LocalFs {
-    fn open(&self, url: &str) -> Result<Source, LayoutError> {
-        File::open(Self::path(url)?)
-            .map(Source::File)
-            .map_err(|source| LayoutError::Io {
-                target: url.to_string(),
-                source,
-            })
-    }
-
     fn create(&self, url: &str) -> Result<Sink, LayoutError> {
         File::create(Self::path(url)?)
             .map(Sink::File)
@@ -303,13 +199,14 @@ impl LayoutIo for LocalFs {
 ///
 /// # What it costs
 ///
-/// One resident copy of every file the pass touches, for as long as the handle
-/// lives: the staged vertex and adjacency Parquet the executor produced go in,
-/// the tiles come out, and until [`Self::remove`] takes the staged ones away
-/// both are held at once. Reads off it are refcounted slices and add nothing.
-/// That is strictly more than the native path, which holds one row group, and
-/// it is the price of not having a filesystem — see the module header for why
-/// the native side is not made to pay it too.
+/// One resident copy of every file the pass writes, for as long as the handle
+/// lives. That is strictly more than the native path, which holds one row group,
+/// and it is the price of not having a filesystem — see the module header for
+/// why the native side is not made to pay it too.
+///
+/// It used to be more than that: the staged vertex and adjacency Parquet went in
+/// here too, and were held beside the tiles until the caller removed them. That
+/// is not a smaller map now, it is a map holding only outputs.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryFs {
     files: Arc<Mutex<BTreeMap<String, Bytes>>>,
@@ -331,19 +228,6 @@ impl MemoryFs {
             .lock()
             .expect("layout memory filesystem poisoned")
             .insert(url.into(), bytes.into());
-    }
-
-    /// Drop `url` if it is there. What the caller uses to delete the staged
-    /// single-file vertex Parquet, which `exactly-once` fails a corpus for
-    /// leaving behind.
-    ///
-    /// # Panics
-    /// If the shared map was poisoned by a panic in another holder.
-    pub fn remove(&self, url: &str) {
-        self.files
-            .lock()
-            .expect("layout memory filesystem poisoned")
-            .remove(url);
     }
 
     /// Every file, in URL order, leaving the filesystem empty.
@@ -376,23 +260,6 @@ impl MemoryFs {
 }
 
 impl LayoutIo for MemoryFs {
-    fn open(&self, url: &str) -> Result<Source, LayoutError> {
-        let key = normalise(url)?;
-        self.files
-            .lock()
-            .expect("layout memory filesystem poisoned")
-            .get(key)
-            .cloned()
-            .map(Source::Memory)
-            .ok_or_else(|| LayoutError::Io {
-                target: url.to_string(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "not in the layout memory filesystem",
-                ),
-            })
-    }
-
     fn create(&self, url: &str) -> Result<Sink, LayoutError> {
         Ok(Sink::Memory(MemSink {
             url: normalise(url)?.to_string(),
@@ -423,46 +290,29 @@ mod tests {
         assert!(fs.contains("vertex/Person/tiles.parquet"));
     }
 
-    #[test]
-    fn a_memory_source_reads_back_what_was_written() {
-        let fs = MemoryFs::new();
-        fs.insert("a", Bytes::from_static(b"0123456789"));
-        let source = fs.open("a").unwrap();
-        assert_eq!(Length::len(&source), 10);
-        assert_eq!(source.get_bytes(2, 3).unwrap(), Bytes::from_static(b"234"));
-        let mut read = String::new();
-        source
-            .get_read(7)
-            .unwrap()
-            .read_to_string(&mut read)
-            .unwrap();
-        assert_eq!(read, "789");
-    }
-
-    #[test]
-    fn a_read_past_the_end_is_an_error_and_not_a_panic() {
-        let fs = MemoryFs::new();
-        fs.insert("a", Bytes::from_static(b"0123"));
-        let source = fs.open("a").unwrap();
-        assert!(source.get_bytes(2, 99).is_err());
-        assert!(source.get_read(99).is_err());
-    }
-
     /// Both filesystems answer the same question about a URL, which is what
     /// lets one set of targets drive either of them.
     #[test]
     fn both_filesystems_refuse_the_same_schemes() {
         let memory = MemoryFs::new();
-        for url in ["s3://bucket/vertex.parquet", "https://host/v.parquet"] {
-            assert!(matches!(memory.open(url), Err(LayoutError::Remote { .. })));
-            assert!(matches!(LocalFs.open(url), Err(LayoutError::Remote { .. })));
+        for url in ["s3://bucket/vertex/", "https://host/vertex/"] {
+            assert!(matches!(
+                memory.create(url),
+                Err(LayoutError::Remote { .. })
+            ));
+            assert!(matches!(
+                LocalFs.create(url),
+                Err(LayoutError::Remote { .. })
+            ));
+            assert!(matches!(
+                memory.ensure_prefix(url),
+                Err(LayoutError::Remote { .. })
+            ));
+            assert!(matches!(
+                LocalFs.ensure_prefix(url),
+                Err(LayoutError::Remote { .. })
+            ));
         }
-        // `file://` is stripped by both, so it reaches a not-found rather than
-        // a refusal.
-        assert!(matches!(
-            memory.open("file:///tmp/nope.parquet"),
-            Err(LayoutError::Io { .. })
-        ));
     }
 
     #[test]
