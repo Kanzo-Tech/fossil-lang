@@ -304,17 +304,32 @@ Claimed in comments, never run. Measured 2026-09-11, two processes per row:
 A spatial partition inherits it for free and for a duller reason — a cell id is a shift of a number
 the payload already fixed — which is one more thing the texel reading costs nothing.
 
-What it still does not have is a test that keeps *the pass* holding.
+A measurement is not a guard, though, and for a while nothing kept the property holding.
 `crates/fossil-layout/tests/holons.rs, the_same_graph_gives_the_same_holon_rows_twice` keeps the
 **holon rows** reproducible, which is a narrower claim one artefact along: the rows come out of
 `Dendrogram` in memory, and the measurement above was of `enrich_layout` writing Parquet across two
-processes. The bytes are the thing nothing guards, and that is this direction's first debt.
+processes. `crates/fossil-layout/tests/cells.rs` narrowed the gap without closing it — it evaluates
+every obligation against the written rungs, so a *wrong* summary is caught, and the same corpus
+summarising *differently* twice was not.
 
-`crates/fossil-layout/tests/cells.rs` narrows it without closing it: it evaluates every obligation
-against the written rungs, so a *wrong* summary is caught — what is not caught is the same corpus
-summarising differently in two processes. Everything the writer does is a sorted walk of arrays, and
-the tie-break in the mode is explicit for exactly this reason, so the property is expected to hold;
-expected is not measured.
+`crates/fossil-layout/tests/cells.rs, the_same_graph_writes_byte_identical_rungs_in_a_second_process_worth_of_work` is the guard.
+It spawns its own binary twice — `current_exe`, filtered to the one `#[ignore]`d half that writes where
+the parent tells it to — and compares every file of the two corpora as **bytes**, rungs and
+quotients alike.
+
+Bytes because the five obligations beside it are all `count(*)` over a join, and a rung holding
+exactly the right rows in a different *order* satisfies every one of them while being a different
+file: the tiling is the addressing, so rows that moved between tiles are a bookmark that resolves to
+somebody else's cells. Two processes because two calls inside one share every value drawn once per
+process and reused — the pid, a seed behind a `OnceLock`, an address the allocator settled on — and
+those are the inputs a summariser reaches for by accident.
+
+It was run red twice before it was believed, and the second time is what says what it is for: a
+per-process order over the quotient's runs, every run and every weight intact, leaves all five
+obligations green and is caught here alone, at `payload/holon/r1/quotient/tiles.parquet` byte 18.
+
+What the guard does not carry is the row above's **scale** — 4,000 vertices against 200,000 — so
+what runs on every PR is the property, and the corpus it was first measured on stays a measurement.
 
 ### 2 · The branching factor is declared, not inherited
 

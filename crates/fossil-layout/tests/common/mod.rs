@@ -1,14 +1,23 @@
-//! Fixture construction shared by the two budget suites.
+//! Fixture construction shared by the two budget suites, and [`tree`] — what a
+//! suite reads a written corpus as when what it has to say about one is that it
+//! is the same bytes as another.
 //!
 //! `budget.rs` asserts the refusal's contract; `budget_bound.rs` measures a
 //! resident set and therefore has to be the only test in its process. They need
 //! the same input corpus, and a corpus generator copied into two files is two
 //! generators the moment one of them is edited.
 //!
-//! `dead_code` is allowed because this module is compiled into BOTH targets and
-//! neither uses all of it — `budget.rs` compares whole trees and reads `root`,
-//! `budget_bound.rs` samples a resident set and does not. The alternative is a
-//! `cfg` per helper, which is a worse way to say the same thing.
+//! [`tree`] came here by that same argument one artefact later. `budget.rs`
+//! compares a bounded run against an unbounded one and `cells.rs` compares two
+//! *processes*: two suites asking whether two corpora are the same bytes, and a
+//! directory walk copied into both is the walk that stops agreeing about what a
+//! corpus contains the day one of them learns about a new directory.
+//!
+//! `dead_code` is allowed because this module is compiled into every target that
+//! takes it and none of them uses all of it — `budget.rs` compares whole trees
+//! and reads `root`, `budget_bound.rs` samples a resident set and does not, and
+//! `cells.rs` plants its own fixture and takes the walk alone. The alternative
+//! is a `cfg` per helper, which is a worse way to say the same thing.
 #![allow(dead_code)]
 // `pub(crate)` here is what `unreachable_pub` asks for and what `redundant_pub_crate`
 // objects to — the two lints disagree about a private module in a test target, and
@@ -34,6 +43,33 @@ pub(crate) fn dir(name: &str) -> PathBuf {
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).expect("create test dir");
     path
+}
+
+/// Every file under `root`, as `(relative path, bytes)`, sorted — so two corpora
+/// compare as one value and a difference names the file it is in.
+pub(crate) fn tree(root: &Path) -> Vec<(String, Vec<u8>)> {
+    fn walk(at: &Path, base: &Path, out: &mut Vec<(String, Vec<u8>)>) {
+        let mut entries: Vec<_> = fs::read_dir(at)
+            .expect("read the corpus directory")
+            .map(|e| e.expect("a directory entry").path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                walk(&path, base, out);
+            } else {
+                let rel = path
+                    .strip_prefix(base)
+                    .expect("a path under the root")
+                    .to_string_lossy()
+                    .into_owned();
+                out.push((rel, fs::read(&path).expect("read a corpus file")));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out
 }
 
 fn url(path: &Path) -> String {

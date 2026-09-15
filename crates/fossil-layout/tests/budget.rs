@@ -25,38 +25,8 @@
 
 mod common;
 
-use std::fs;
-use std::path::Path;
-
-use common::{dir, fixture};
+use common::{dir, fixture, tree};
 use fossil_layout::layout::{LayoutError, enrich_layout_within, estimated_peak_bytes};
-
-/// Every file under `root`, as `(relative path, bytes)`, sorted — so two corpora
-/// compare as one value and a difference names the file it is in.
-fn tree(root: &Path) -> Vec<(String, Vec<u8>)> {
-    fn walk(at: &Path, base: &Path, out: &mut Vec<(String, Vec<u8>)>) {
-        let mut entries: Vec<_> = fs::read_dir(at)
-            .expect("read the corpus directory")
-            .map(|e| e.expect("a directory entry").path())
-            .collect();
-        entries.sort();
-        for path in entries {
-            if path.is_dir() {
-                walk(&path, base, out);
-            } else {
-                let rel = path
-                    .strip_prefix(base)
-                    .expect("a path under the root")
-                    .to_string_lossy()
-                    .into_owned();
-                out.push((rel, fs::read(&path).expect("read a corpus file")));
-            }
-        }
-    }
-    let mut out = Vec::new();
-    walk(root, root, &mut out);
-    out
-}
 
 /// **The refusal, and that it happens first.**
 ///

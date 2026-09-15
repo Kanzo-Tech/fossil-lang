@@ -30,15 +30,28 @@
 //! The third is the one the page argues hardest for, and it is the only one that
 //! sees a writer relabelling the children's edge set and keeping it — which on a
 //! graph with any structure is not an edge case but the overwhelming majority.
+//!
+//! **And one property that is not an obligation against anything below.** All
+//! five rows above are a summary against the data it summarises, and all five
+//! are evaluated in SQL, which is set semantics: a rung holding exactly the right
+//! rows in a different *order* satisfies every one of them and is a different
+//! file. Determinism is that difference, so it is compared as bytes and needs a
+//! second process rather than a second query —
+//! `the_same_graph_writes_byte_identical_rungs_in_a_second_process_worth_of_work`,
+//! at the foot of this file.
 
 #![cfg(not(target_arch = "wasm32"))]
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Float32Array, RecordBatch, StringArray, UInt32Array};
 use arrow::datatypes::{DataType, Field, Schema};
+use common::tree;
 use duckdb::Connection;
 use fossil_layout::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget, enrich_layout};
 use fossil_sinks::manifest::HolonTree;
@@ -476,4 +489,175 @@ fn a_type_that_is_one_cell_earns_no_pyramid() {
     );
 
     fs::remove_dir_all(&root).ok();
+}
+
+/// The directory a child process is to write its corpus into.
+///
+/// An environment variable and not an argument: the child is a libtest binary
+/// and its argv belongs to the harness.
+const DEST: &str = "FOSSIL_CELLS_DEST";
+
+/// The writing half below, by the name libtest filters on.
+const CHILD: &str = "one_corpus_written_where_the_parent_asked";
+
+/// **The same graph writes the same pyramid in a second process, byte for byte.**
+///
+/// `/docs/design/holons` puts determinism first of the three properties it puts
+/// on a holon, and names this gap in the same breath: everything above catches a
+/// *wrong* summary, and what nothing caught is the same corpus summarising
+/// *differently* twice. A holon whose referent moves between writes is not
+/// navigable — a reader who descends, pans and ascends has to arrive back where
+/// they were, and a bookmark has to still resolve tomorrow.
+///
+/// **Bytes, because the obligations above are sets.** Every one of them is a
+/// `count(*)` over a join, and a rung holding exactly the right rows in a
+/// different order satisfies all five: the cells are the same cells, and the
+/// *file* is not the same file. That is not a cosmetic difference in a pyramid,
+/// where the tiling is the addressing — a reader takes tile `j` by arithmetic on
+/// a cell id, so rows that moved between tiles are a bookmark resolving to
+/// somebody else's cells. So this reads the bytes, and it reads the quotients
+/// with them, whose row order is a second run-length walk and a second chance to
+/// differ.
+///
+/// **And a second process, which is the load-bearing half.**
+/// `tests/holons.rs, the_same_graph_gives_the_same_holon_rows_twice` evaluates
+/// the aggregation twice inside one process, which cannot rule out anything drawn
+/// **once per process and then reused** — the pid, a seed behind a `OnceLock`, an
+/// address the allocator settled on, a clock read at startup. Two calls in one
+/// process see the same value of each and agree; two processes are free to
+/// disagree. Those are the inputs a summariser reaches for by accident, so the
+/// second run is `current_exe`: this binary, filtered to the one `#[ignore]`d
+/// test below.
+#[test]
+fn the_same_graph_writes_byte_identical_rungs_in_a_second_process_worth_of_work() {
+    let root = dir("determinism");
+    let first = corpus_from_its_own_process(&root.join("first"));
+    let second = corpus_from_its_own_process(&root.join("second"));
+
+    // **The pyramid is in what is compared**, stated as the two files that carry
+    // it. Without this the test is green on a walk that reached neither: two
+    // identical payloads and no rung between them would report the summary
+    // deterministic without having read one.
+    let holon = Path::new("payload").join("holon").join("r1");
+    let wanted = [
+        holon.join("tiles.parquet"),
+        holon.join("quotient").join("tiles.parquet"),
+    ];
+    for path in &wanted {
+        let path = path.to_string_lossy();
+        assert!(
+            first
+                .iter()
+                .any(|(seen, bytes)| *seen == path && !bytes.is_empty()),
+            "`{path}` is not among the files compared: {:?}",
+            first.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+        );
+    }
+
+    assert_eq!(
+        first.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+        second.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+        "the two processes wrote different files",
+    );
+    for ((path, left), (_, right)) in first.iter().zip(&second) {
+        if let Some(at) = first_difference(left, right) {
+            let show = |bytes: &[u8]| {
+                bytes
+                    .get(at)
+                    .map_or_else(|| "end of file".to_string(), |b| format!("0x{b:02x}"))
+            };
+            panic!(
+                "`{path}` differs between the two processes at byte {at}: {} against {}, \
+                 over {} and {} bytes",
+                show(left),
+                show(right),
+                left.len(),
+                right.len(),
+            );
+        }
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+/// **One corpus, written by a process of its own**, as `(relative path, bytes)`.
+///
+/// `current_exe` is this test binary, so the second process needs no second
+/// fixture and no `main` of its own — it runs [`CHILD`] and nothing else.
+///
+/// The `1 passed` check is not belt-and-braces. **A libtest filter that matches
+/// nothing exits zero**, so renaming the function without renaming [`CHILD`]
+/// would leave this comparing two empty directories, and every assertion in the
+/// caller would hold.
+fn corpus_from_its_own_process(dest: &Path) -> Vec<(String, Vec<u8>)> {
+    let binary = std::env::current_exe().expect("this test binary's own path");
+    let out = Command::new(&binary)
+        .args([CHILD, "--exact", "--ignored", "--nocapture"])
+        .env(DEST, dest)
+        .output()
+        .unwrap_or_else(|e| panic!("spawning {} failed: {e}", binary.display()));
+    let log = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert!(out.status.success(), "the child process failed:\n{log}");
+    assert!(
+        log.contains("1 passed"),
+        "the child harness ran no test — `{CHILD}` is the name it filters on:\n{log}",
+    );
+    tree(dest)
+}
+
+/// The offset of the first byte two files disagree at, or `None` where they
+/// agree whole.
+///
+/// The offset and not a `bool`, because "the trees differ" is not a finding. A
+/// rung is one Parquet, and the offset is what separates a column's values from a
+/// row-group boundary from the footer — which is the difference between a
+/// summary that was computed differently and a tiling that landed differently.
+fn first_difference(left: &[u8], right: &[u8]) -> Option<usize> {
+    if let Some(at) = left.iter().zip(right).position(|(a, b)| a != b) {
+        return Some(at);
+    }
+    (left.len() != right.len()).then_some(left.len().min(right.len()))
+}
+
+/// **The writing half of the test above: one process, one corpus, and no claim
+/// about it.**
+///
+/// `#[ignore]` rather than a binary target or a `cfg`: the parent needs a second
+/// process running *this* fixture, and the fixture is in this file. It is ignored
+/// because it is not a test — it writes what the parent reads, and the parent is
+/// what chooses where.
+///
+/// The one thing it does assert is that a pyramid was written at all. Two corpora
+/// with no rung in them compare equal, and this is the cheaper place to notice
+/// than the caller's file list.
+#[test]
+#[ignore = "the writing half of the determinism test, which spawns it with --ignored"]
+fn one_corpus_written_where_the_parent_asked() {
+    // Unset means somebody ran `-- --ignored` by hand, which on this crate is
+    // how `tests/levels.rs`'s instruments are run. There is nothing to write and
+    // nothing to claim, and a panic would fail an invocation that was not asking
+    // for this. It cannot go unnoticed where it matters: the parent sets the
+    // variable and then asserts that one test ran and that the rungs are in what
+    // it compared.
+    let Some(dest) = std::env::var_os(DEST) else {
+        eprintln!("{DEST} is unset, so there is nowhere to write: this is the writing half of");
+        eprintln!("`the_same_graph_writes_byte_identical_rungs_in_a_second_process_worth_of_work`");
+        return;
+    };
+    let dest = PathBuf::from(dest);
+    fs::create_dir_all(&dest).expect("create the corpus directory");
+
+    let edges = planted(ROWS);
+    let c = corpus(ROWS, &edges);
+    let (v, a) = targets(&c, &dest);
+    let report = enrich_layout(&v, &a).expect("the layout pass");
+
+    assert!(
+        !report.pyramids.is_empty(),
+        "this wrote no pyramid, and two corpora without one compare equal for the wrong reason",
+    );
 }
