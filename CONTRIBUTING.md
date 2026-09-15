@@ -75,9 +75,10 @@ claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-gra
 
 ## Generated files
 
-Six files are generated and must not be hand-edited — three Rust, two TypeScript,
-one MDX. **All six have one source**, which they did not until the stdlib half of
-the catalogue moved into the file:
+Two data files generate eight, and none of the eight may be hand-edited. Each data
+file has its own command and its own `--check`, because they answer different
+questions and a single command would make one file's staleness the other's
+failure.
 
 ```
                      ┌─▶ crates/fossil-base/src/providers/generated.rs
@@ -86,7 +87,19 @@ catalogue.bnf ──cargo├─▶ crates/fossil-hir/src/stdlib/generated.rs
               xtask  ├─▶ packages/introspect/src/catalogue.generated.ts
             catalogue├─▶ packages/executor/src/catalogue.generated.ts
                      └─▶ apps/docs/content/generated/stdlib.mdx
+
+corpus.bnf ─────cargo┌─▶ crates/fossil-sinks/src/generated.rs
+              xtask  └─▶ packages/corpus/src/vocabulary.generated.ts
+              corpus
 ```
+
+`corpus.bnf` is the newer of the two and says what the WRITER emits — the payload
+and adjacency columns, and what each one IS. It exists because that set was
+written by hand in three places with **two different contents**, and the two were
+not wrong, they were answering different questions with the same literal: *what is
+not user data* against *what this struct already surfaces as a named member*. A
+`role` is what tells them apart, and each reader now names the roles it means. The
+file's header carries the literal count that made the case.
 
 Each is a PROJECTION of the same rows, not a copy of the file: `fossil-base` gets
 the rows whose behaviour the compiler can link, `descriptors-output` the ones
@@ -112,6 +125,11 @@ the tool the problem broke. Cargo does not build dev-dependencies for a plain
 `run -p xtask`, so the binary links none of it; the tests still do, and
 `the_generated_table_is_the_file` holds the emitted table against the registry it
 becomes, parameter by parameter.
+
+Add or change a column in `corpus.bnf`, run `cargo xtask corpus`, commit what it
+wrote; `crates/xtask/tests/corpus_generated.rs` is its `--check` as a test, and
+also holds the one cross-clause rule (`aligns` belongs to an endpoint) and the two
+sets the roles keep apart.
 
 Add or change a row in `catalogue.bnf`, run `cargo xtask catalogue`, commit what
 it wrote. `cargo xtask catalogue --check` fails without writing, and there is no

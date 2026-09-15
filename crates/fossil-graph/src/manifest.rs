@@ -23,7 +23,15 @@ pub const GRAPH_INFO_PATH: &str = "graph.graph.yml";
 
 /// Writer-emitted (non-user) vertex columns. Schema verbs hide these from
 /// field listings so callers don't chart on `dense_id` or `x`/`y`.
-pub const RESERVED_VERTEX_COLUMNS: [&str; 5] = ["dense_id", "subject", "x", "y", "cluster_id"];
+///
+/// **Every column the writer emits**, which is the whole payload table and not a
+/// subset of it — and that is the distinction this used to lose. It was five
+/// names written here, against four written in `packages/corpus/src/corpus.ts`,
+/// and the two meant different questions: this one is *what is not user data*,
+/// that one is *what the struct already surfaces as a named member*. Naming the
+/// table instead of the names makes the difference legible and makes a column
+/// added to `corpus.bnf` arrive in both.
+pub use fossil_sinks::generated::PAYLOAD_NAMES as RESERVED_VERTEX_COLUMNS;
 
 /// Abstraction over fetching a manifest file by its dataset-relative path.
 ///

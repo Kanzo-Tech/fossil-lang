@@ -5,4 +5,5 @@
 //! cannot be tested without spawning `cargo`.
 
 pub mod catalogue;
+pub mod corpus;
 pub mod reference;

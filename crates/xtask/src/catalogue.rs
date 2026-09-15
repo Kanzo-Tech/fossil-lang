@@ -65,9 +65,15 @@ use std::process::{Command, Stdio};
 
 // ── The lexer ──────────────────────────────────────────────────────────────
 
-/// One token of `catalogue.bnf`.
+/// One token of a `.bnf` data file.
+///
+/// `pub(crate)` rather than private because `corpus.bnf` is written in this same
+/// dialect and is lexed by [`lex`] rather than by a second scanner. What it does
+/// NOT share is the statement parser below, whose messages name this file: the
+/// grammar of a `col` is four clauses and stating them in `super::corpus` keeps
+/// each file's parse errors naming the file the reader has open.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Tok {
+pub(crate) enum Tok {
     /// An identifier, possibly dotted: `csv`, `read_csv_auto`, `str.replace`,
     /// `String`. A `.` is part of a word only when a word character follows it,
     /// which is what tells `str.replace` from the `.` that ends a row.
@@ -83,6 +89,9 @@ const PUNCT: &[&str] = &["->", "=", ";", ".", "(", ")", ",", ":", "+", "?"];
 
 /// Tokenise the whole file, skipping `(* … *)` commentary.
 ///
+/// Shared with `corpus.bnf` — see [`Tok`]. The comment, string and dotted-word
+/// rules are the part that would drift between two scanners, so there is one.
+///
 /// Comment detection takes precedence over string detection, which is what lets
 /// the commentary contain quotation marks (it is full of them) without the
 /// scanner mistaking one for the start of a literal.
@@ -91,7 +100,7 @@ const PUNCT: &[&str] = &["->", "=", ";", ".", "(", ")", ",", ":", "+", "?"];
 ///
 /// On an unterminated string literal, and on any character that begins no
 /// token — both are malformed input to a file that is now a source of truth.
-fn lex(text: &str) -> Vec<Tok> {
+pub(crate) fn lex(text: &str) -> Vec<Tok> {
     let chars: Vec<char> = text.chars().collect();
     let mut toks = Vec::new();
     let mut i = 0;

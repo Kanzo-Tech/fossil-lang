@@ -1,0 +1,103 @@
+(* ==========================================================================
+   corpus.bnf — WHAT A CORPUS IS MADE OF.
+
+   `grammar.bnf` says the SHAPE of a program. `catalogue.bnf` says the NAMES a
+   program may write. This says the names the WRITER emits and every reader has
+   to know — the third data file, and the one that was missing.
+
+   Reference: the same shape as `catalogue.bnf`, same dialect, same lexer. Not a
+   second mechanism.
+
+   # Why this file exists
+
+   Of the three boundaries this system has — program, plan, artefact — two were
+   specified by a grammar that generates code and the third was not. The corpus
+   format is the only one of the three that crosses a process, a language and a
+   network, and it was specified in prose and re-implemented per language.
+
+   Measured before this file existed, over `crates/`, `packages/` and `apps/`:
+   **545 string literals for eight words** — `dense_id` 190 times, `subject` 74,
+   `src_dense`/`dst_dense` 134, `by_source`/`by_target` 73, `cluster_id` 50,
+   `tiles.parquet` 34 — with no declaration any of them derived from.
+
+   And they had already drifted. «The columns the writer emits» was stated in
+   three places with **two different contents**:
+
+     crates/fossil-graph/src/manifest.rs   five names, `cluster_id` included
+     packages/corpus/src/corpus.ts         four names, `cluster_id` absent
+     apps/playground/src/encoding.ts       the same set spelled a third way
+
+   Neither is wrong where it stands, and that is the point: they mean different
+   things — *every column the writer emits* against *the columns this struct
+   already surfaces as named members* — and nothing said so, because there was
+   nowhere for a set to be named. A `role` is what tells them apart now, and each
+   reader names the roles it means.
+
+   # What is data and what is not
+
+   Same split as `catalogue.bnf`. The NAME, the TYPE and the ROLE are data and
+   live here. What a reader DOES with a role — hide it from a field listing,
+   surface it as a member, colour by it — is the reader's decision and stays
+   where it is made.
+
+   # What is NOT here, on purpose
+
+   **Prefixes and file names** (`tiles.parquet`, `by_source/`, `index/`,
+   `l{k}/`, `graph.graph.yml`). They are addressing, and addressing is
+   `crates/fossil-graph/src/plan.rs` — one implementation already, compiled to
+   wasm32 for the TypeScript side. A second declaration of them here would be a
+   second source for a fact that already has one. Columns are different: nothing
+   owns them today, which is why they drifted.
+
+   **`TILE_SHIFT` and `STRIDE_BITS`.** They are in
+   `crates/fossil-sinks/src/manifest.rs` and every reader derives from them
+   there. Same reason.
+
+   # Status
+
+   `cargo xtask corpus` generates `crates/fossil-sinks/src/generated.rs` and
+   `packages/corpus/src/vocabulary.generated.ts` from this file, and
+   `cargo xtask corpus --check` fails when a checked-in output is stale.
+   `crates/xtask/tests/corpus_generated.rs` runs that check, so `cargo test`
+   catches an edit to this file that was not regenerated, and an edit to a
+   generated file by hand. There is no CI step for it, for the reason
+   `catalogue.bnf` has none.
+   ========================================================================== *)
+
+(* ------------------------------------------------------------------ roles *)
+(* A role says what a column IS, not what anyone does with it.
+
+   address      the row's position in the ordering. `dense_id` is the vertex's
+                rank in Morton order of its position, so it is an ADDRESS and
+                never an identity: re-running the layout renumbers every vertex.
+                `/docs/design/identity` is the argument.
+   identity     what a bookmark keys on and what survives a rebuild.
+   coordinate   the plane. Declared as a pair, drawn as a pair.
+   categorical  an ordinal the writer computed, for a reader to colour by.
+   endpoint     one end of a relation, in the aligned type's `dense_id` space.
+
+   `declared` marks a column that also appears in the manifest's `properties:`.
+   Exactly one does. That asymmetry is the whole of the manifest-versus-bytes
+   difference `packages/corpus/src/corpus.ts` documents from the other side: on
+   the conformance corpus it is three declared properties against seven columns
+   on disk, and this file is where the three-versus-seven is stated once. *)
+
+(* ------------------------------------------------------- the vertex payload *)
+(* In writer order, which is the order `fossil-df` prepends and `fossil-layout`
+   replaces. A reader may project any subset; the order is what the two writers
+   agree on. *)
+
+col dense_id   = in payload ; type uint32  ; role address .
+col subject    = in payload ; type string  ; role identity    ; declared .
+col x          = in payload ; type float32 ; role coordinate .
+col y          = in payload ; type float32 ; role coordinate .
+col cluster_id = in payload ; type uint32  ; role categorical .
+
+(* ----------------------------------------------------------- the adjacency *)
+(* Both orientations carry the same two columns and differ only in row order —
+   `by_source` is sorted by `src_dense`, `by_target` by `dst_dense`. `aligns`
+   names which one a given orientation is tiled by, which is the column a tile
+   of that orientation filters on. *)
+
+col src_dense = in adjacency ; type uint32 ; role endpoint ; aligns src .
+col dst_dense = in adjacency ; type uint32 ; role endpoint ; aligns dst .

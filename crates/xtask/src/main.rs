@@ -10,36 +10,53 @@
 //!                statics from `catalogue.bnf`, and the reference page's tables
 //!                from that file plus `fossil_hir::stdlib`'s registry. `--check`
 //!                fails instead of writing, which is what CI runs.
+//!   corpus       The same, one data file along: the writer's column table from
+//!                `corpus.bnf`, projected into Rust and TypeScript. Two data
+//!                files, two commands, one generator loop.
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::process::{Command, exit};
 
-use xtask::catalogue;
+use xtask::{catalogue, corpus};
 
 fn main() {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
         Some("wasm-check") => wasm_check(),
-        Some("catalogue") => catalogue_cmd(args.next().as_deref() == Some("--check")),
+        Some("catalogue") => generate(
+            "catalogue.bnf",
+            "catalogue",
+            catalogue::generated(),
+            args.next().as_deref() == Some("--check"),
+        ),
+        Some("corpus") => generate(
+            "corpus.bnf",
+            "corpus",
+            corpus::generated(),
+            args.next().as_deref() == Some("--check"),
+        ),
         other => {
             if let Some(c) = other {
                 eprintln!("xtask: unknown command {c:?}");
             }
-            eprintln!("usage: cargo xtask <wasm-check | catalogue [--check]>");
+            eprintln!("usage: cargo xtask <wasm-check | catalogue [--check] | corpus [--check]>");
             exit(2);
         }
     }
 }
 
-/// Write — or, under `--check`, prove current — every file generated from
-/// `catalogue.bnf`.
+/// Write — or, under `--check`, prove current — every file generated from one
+/// data file.
 ///
-/// The check mode names the file and the command that fixes it, because the
-/// failure a generator produces in CI is read by somebody who did not run it.
-fn catalogue_cmd(check: bool) {
+/// One loop for both data files rather than one per command: what a generator
+/// command does is identical and only the source and the fix-it line differ, so
+/// a second copy of this would be a second place for the `--check` semantics to
+/// drift. The check mode names the file and the command that fixes it, because
+/// the failure a generator produces is read by somebody who did not run it.
+fn generate(source: &str, command: &str, targets: Vec<(std::path::PathBuf, String)>, check: bool) {
     let root = catalogue::repo_root();
     let mut stale = Vec::new();
-    for (path, want) in catalogue::generated() {
+    for (path, want) in targets {
         let shown = path
             .strip_prefix(&root)
             .unwrap_or(&path)
@@ -60,13 +77,13 @@ fn catalogue_cmd(check: bool) {
     }
     if !stale.is_empty() {
         eprintln!(
-            "xtask: {} generated file(s) do not match `catalogue.bnf`:",
+            "xtask: {} generated file(s) do not match `{source}`:",
             stale.len()
         );
         for s in &stale {
             eprintln!("  {s}");
         }
-        eprintln!("run `cargo xtask catalogue` and commit the result");
+        eprintln!("run `cargo xtask {command}` and commit the result");
         exit(1);
     }
 }

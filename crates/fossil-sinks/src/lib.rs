@@ -9,4 +9,11 @@
 //! what keeps this buildable for wasm32; it is in the gate closure through
 //! `fossil-df-wasm`.
 
+/// The writer's column table, generated from `corpus.bnf`.
+///
+/// Here rather than in either half of the write path because this crate is the
+/// junta: the manifest model is in the closure of both the writer and the
+/// reader, so every Rust consumer of the vocabulary already depends on it and
+/// none grows an edge to reach the table.
+pub mod generated;
 pub mod manifest;

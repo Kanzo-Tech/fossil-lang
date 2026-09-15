@@ -8,6 +8,11 @@ Keep it under 200 lines, rules-not-context.
 - `grammar.bnf` — the syntax, normative, and ahead of the parser on purpose. A production
   written here and absent from `crates/fossil-syntax` is work outstanding, not an error in
   the file.
+- `corpus.bnf` — WHAT A CORPUS IS MADE OF: the columns the writer emits and what each
+  one IS. The third data file, and the newest. A reader that needs «the writer's columns»
+  names the ROLES it means rather than the names — two readers used to write the names and
+  meant different questions by them. `cargo xtask corpus` generates the Rust and TypeScript
+  projections; `crates/xtask/tests/corpus_generated.rs` is the `--check` as a test.
 - `catalogue.bnf` — WHICH NAMES EXIST, both halves: the `io.` constructors and every stdlib
   function with its signature and lowering. Generated from, not compared against — six files
   come out of `cargo xtask catalogue` and no Rust states a row a second time. Adding a
@@ -136,7 +141,11 @@ crates/
   fossil-descriptors-{input,output}/   trait + impls (ShEx, inferred)
   fossil-resolver/         host-injected cloud path resolution (s3://, az://)  [NATIVE-ONLY]
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
-  fossil-sinks/            the canonical GraphAr manifest model. It byte-writes nothing —
+  fossil-sinks/            the canonical GraphAr manifest model, plus `generated.rs` — the
+                           writer's column table from `corpus.bnf`, which lives here because
+                           this crate is the junta: in the closure of both the writer and the
+                           reader, so no consumer grows an edge to reach it.
+                           It byte-writes nothing —
                            `arrow-schema` for the types, `serde_yaml_ng` to emit, and
                            `fossil-policy` because a declared bound is part of what the
                            artefact says about itself
@@ -187,9 +196,11 @@ crates/
   fossil-wasm/             WASM host shim (FossilPlayground API + the tokenizer the editor reuses)
   fossil-df-wasm/          the fossil-df executor exposed to JS
   fossil-graph-wasm/       wasm-bindgen binding for the fossil-graph verb surface
-  xtask/                   repo automation. Two commands: `wasm-check` derives the wasm32
-                           subset from the cdylib closure, `catalogue [--check]` regenerates
-                           every projection of `catalogue.bnf`
+  xtask/                   repo automation. Three commands: `wasm-check` derives the wasm32
+                           subset from the cdylib closure, and `catalogue [--check]` and
+                           `corpus [--check]` regenerate every projection of the data file
+                           each is named after. One generator loop behind both, so the
+                           `--check` semantics cannot drift between them
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
@@ -258,6 +269,10 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
                            source of six generated files; no Rust states a row twice
+corpus.bnf                 what a corpus is made of — the payload and adjacency columns and
+                           the ROLE of each. The source of two generated files, one Rust and
+                           one TypeScript. Prefixes and file names are NOT here: those are
+                           addressing, and `fossil-graph`'s plan already owns them
 tests/wasm_parity/         the manual DuckDB-WASM cross-engine parity harness
 ```
 

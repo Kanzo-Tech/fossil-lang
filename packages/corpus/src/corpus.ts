@@ -80,6 +80,11 @@ import {
   type VertexAddress,
 } from './address.js';
 import { createGraphClient, type GraphClient } from './client.js';
+import {
+  PAYLOAD_ADDRESS,
+  PAYLOAD_COORDINATES,
+  PAYLOAD_IDENTITY,
+} from './vocabulary.generated.js';
 import type {
   AggregateParams,
   AggregateResult,
@@ -643,10 +648,26 @@ export interface OpenCorpusOptions {
 }
 
 /** The four columns an answer reads by name; everything else is payload. */
-const RESERVED = new Set(['dense_id', 'subject', 'x', 'y']);
+/**
+ * The payload columns {@link PlacedVertex} already surfaces as NAMED members, so
+ * that `fields` carries each column exactly once.
+ *
+ * Read by ROLE and not written down: the address, the identity and the two
+ * coordinates are the four this struct has a field for. `cluster_id` is
+ * deliberately absent — nothing here surfaces it, so it belongs in `fields` —
+ * and that is why this set is four where `fossil-graph`'s is five. The two ask
+ * different questions: that one is *what is not user data*, this one is *what
+ * this type already answers another way*. They were two literals and nothing
+ * said so; `corpus.bnf` is where the table lives now.
+ */
+const RESERVED = new Set<string>([
+  ...PAYLOAD_ADDRESS,
+  ...PAYLOAD_IDENTITY,
+  ...PAYLOAD_COORDINATES,
+]);
 
 /** The column the identity is read from. See {@link Corpus.node} for why it is not `dense_id`. */
-const IDENTITY = 'subject';
+const IDENTITY = PAYLOAD_IDENTITY[0]!;
 
 /** A single-quoted SQL string literal. Every URL in this module reaches SQL through here. */
 function lit(value: string): string {
