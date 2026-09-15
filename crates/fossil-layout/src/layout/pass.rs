@@ -396,10 +396,44 @@ pub enum LayoutError {
 /// | [`Neighbourhood`], and [`Weighted::contract`]'s counting sort under it | 21 |
 /// | `clusters`, `placement`, `positions`, `morton`, `new_ids`, `order` | 28 |
 /// | `row_of_dense`, `gather`, `new_dense`, `xs`, `ys`, `cluster_ids` | 24 |
+/// | the cell pyramid, at [`fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL`] | 3 |
 ///
-/// That is 125, and this is 128 — the remainder is the allocator's, and it is a
+/// That is 128, and this is 132 — the remainder is the allocator's, and it is a
 /// term rather than a rounding. `vec![0u32; n]` asks for `4n` and the OS hands
 /// over whole pages of whichever size class holds them.
+///
+/// # The pyramid's row is derived, and its measurement came back empty
+///
+/// `crates/fossil-layout/src/layout/cells.rs, Rung` is struct-of-arrays, so one
+/// cell costs `4 + 8 + 8 + 4 + 4 + 8 = 36` bytes and rung `k` holds
+/// `ceil(V / 2^shift)` of them. The octave makes the tree a geometric series in
+/// a quarter from `V / base`, so it is `36 · (V/base) · 4/3 = 48·V / base` —
+/// **3 bytes per vertex at a base of sixteen**, and checked against the real
+/// rung lists at four sizes rather than against the closed form alone (3.0006,
+/// 3.0003, 3.0001, 3.0001).
+///
+/// **It holds at the default base and nowhere else**, because this function has
+/// no base parameter: the cost is `48/base`, so a base of four is 12 and a base
+/// of one is 48, and both are accepted bases. A corpus laid out at a finer base
+/// than the default is under-estimated by this term, and what would fix it is a
+/// fourth argument rather than a bigger number.
+///
+/// The row is **derived and not fitted, and that is the honest report**: the
+/// marginal cost of the pyramid on the process peak was measured at 200k, 500k,
+/// 1M and 2M vertices, three runs each, and came out **negative at three of the
+/// four** — `|Δ| ≤ 4.2 MB` against a within-condition spread of up to 11.9 MB.
+/// It is not a small signal, it is no signal, and there is a structural reason
+/// visible in the same probe output: the peak is `community_hierarchy`'s, and
+/// `flatten + order + place` then hands 0.32 GiB at one million and 0.72 at two
+/// back to the allocator, so every later phase — the pyramid's two included —
+/// runs inside pages that have already fallen released. Sweeping the base at one
+/// million over 16× more cells moved the peak by nothing, while the
+/// end-of-pass resident set tracked it exactly (0.48 → 0.50 → 0.51 → 0.53 GiB
+/// against a derived 0, 2.9, 11.4, 45.8 MiB). So the term is carried because the
+/// allocation is real and the estimate is a **bound**, not because a peak moved.
+///
+/// (`examples/enrich_memory <N> 14 <16|none>`, release, 2026-09-15, Mac16,8 —
+/// 14 cores, 48 GiB, macOS 26.2 / Darwin 25.2.0.)
 ///
 /// # Summed, and that is now an over-estimate rather than the reading
 ///
@@ -415,7 +449,7 @@ pub enum LayoutError {
 /// So the sum is kept, and kept deliberately: it is now a bound on the maximum
 /// rather than a reading of it, which is the direction
 /// [`estimated_peak_bytes`] is calibrated in.
-const VERTEX_ARRAY_BYTES: u64 = 128;
+const VERTEX_ARRAY_BYTES: u64 = 132;
 
 /// Bytes per adjacency row, counting each orientation's rows separately.
 ///
@@ -446,6 +480,16 @@ const VERTEX_ARRAY_BYTES: u64 = 128;
 /// of the rows counted here — and it is not live at the same time as the CSR.
 /// Eight is the larger of the two, rounded up: the constant has to bound a peak,
 /// and the peak holds one of them.
+///
+/// **The cell pyramid adds a third of exactly that size, and it is already
+/// covered.** `crates/fossil-layout/src/layout/cells.rs, Edges` is walked into
+/// one `Vec<u64>` per rung — 8 bytes per edge, so 4 per row counted here, the
+/// same as the remap's — and it is built, sorted and dropped inside one rung's
+/// iteration, after the remap loop has dropped its own. Measured, `write cells`
+/// bills +0.00, +0.00, +0.01 and +0.03 GiB at 200k, 500k, 1M and 2M where `8·E`
+/// would be 11, 28, 56 and 112 MB, which is that reuse. A second 4 B/row here
+/// would double-count a term whose whole argument is that only one of them is
+/// live.
 ///
 /// # Why it is not fitted on the pass's total any more
 ///

@@ -16,6 +16,30 @@
 //! FOSSIL_MEM_PROBE=1 cargo run --release -p fossil-layout --example enrich_memory -- 1000000
 //! ```
 //!
+//! # Why the pyramid base is an argument
+//!
+//! The third argument is the cell pyramid's base, and it exists so that **one
+//! build measures the same corpus twice** — once with a pyramid and once
+//! without. `estimated_peak_bytes`'s four constants were every one of them
+//! fitted on a pass that wrote no pyramid, so the term the pyramid owes is a
+//! DIFFERENCE and not a reading: what the same fixture, the same seed and the
+//! same phases cost with the rungs in hand minus what they cost without them.
+//! Two binaries could not say that, and neither could two hardcoded builds —
+//! the run-to-run spread at these sizes is tens of megabytes, which is the same
+//! order as the thing being measured.
+//!
+//! `0` and `none` both disable it, and the default is
+//! [`fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL`] — so the command in the
+//! line above still measures what it measured, pyramid included. `0` is not a
+//! base the pass would accept anyway (`HolonTree::base_bits` refuses anything
+//! that is not a power of four), which is what makes it free to spell «off»:
+//! there is no base it takes away.
+//!
+//! ```text
+//! FOSSIL_MEM_PROBE=1 cargo run --release -p fossil-layout \
+//!     --example enrich_memory -- 1000000 14 none
+//! ```
+//!
 //! # What makes the number mean anything
 //!
 //! **The rows are WIDE.** A vertex row in a real corpus is a subject IRI and
@@ -69,12 +93,22 @@ fn main() {
         .unwrap_or("10")
         .parse()
         .expect("mean degree must be a u32");
+    // The pyramid's base, or none. `none` and `0` are the same request spelled
+    // two ways — see the header — and anything else is read as a base and handed
+    // to the pass unvalidated, because the pass is what refuses a base that is
+    // not a power of four and a second opinion here could only disagree with it.
+    let per_cell: Option<u64> = match args.next().as_deref() {
+        None => Some(fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL),
+        Some("none" | "0") => None,
+        Some(base) => Some(base.parse().expect("the pyramid base must be a u64")),
+    };
 
     if std::env::var("FOSSIL_MEM_PROBE").is_err() {
         eprintln!(
             "note: FOSSIL_MEM_PROBE is unset, so `enrich_layout` will report nothing.\n\
              re-run as: FOSSIL_MEM_PROBE=1 cargo run --release -p fossil-layout \\\n\
-             \x20   --example enrich_memory -- {rows} {degree}"
+             \x20   --example enrich_memory -- {rows} {degree} {}",
+            per_cell.map_or_else(|| "none".to_string(), |b| b.to_string())
         );
     }
 
@@ -89,7 +123,13 @@ fn main() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("chunks")).expect("create the fixture directory");
 
-    eprintln!("building a {rows}-vertex fixture at mean degree {degree}…");
+    // The base is echoed because the two halves of the difference are the SAME
+    // command but for this one word, and a captured log that does not say which
+    // half it is cannot be told apart from the other afterwards.
+    eprintln!(
+        "building a {rows}-vertex fixture at mean degree {degree}, pyramid base {}…",
+        per_cell.map_or_else(|| "none".to_string(), |b| b.to_string())
+    );
     let vertices = vertex_batches(rows);
     let edges = planted(rows, degree);
     eprintln!("  {} edges", edges.len());
@@ -120,9 +160,10 @@ fn main() {
         chunk_prefix: chunk_prefix.clone(),
         chunk_size: 4_096,
         // The pyramid is part of what the pass costs, so the instrument that
-        // measures the pass writes one. It is also what the budget's missing
-        // pyramid term will be fitted on — see `tests/common/mod.rs`.
-        vertices_per_cell: Some(fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL),
+        // measures the pass writes one — unless it was asked for the other half
+        // of the difference. It is what the budget's missing pyramid term is
+        // fitted on: see `tests/common/mod.rs` and the header above.
+        vertices_per_cell: per_cell,
     };
     let adjacencies = [
         ("by_source", Endpoint::Src, &by_source),

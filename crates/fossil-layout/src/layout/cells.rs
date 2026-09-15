@@ -34,6 +34,31 @@
 //! rung is summarised from the payload in its own pass rather than folded up
 //! from the rung below. The rows arrive in write order and `dense_id` ascends,
 //! so a cell is a **contiguous run** and one linear scan answers a whole rung.
+//!
+//! # What it costs, measured
+//!
+//! **Nothing on the peak, and a little clock.** The two phases this module marks
+//! bill `summarise cells` 0.1 s and `write cells` 0.7 s at one million vertices
+//! and mean degree fourteen, release — stable across runs whose *totals* were
+//! 12.7 s and 74.5 s on the same machine, which is why the attributable figure
+//! is the phase and not the total.
+//!
+//! On memory the marginal cost was measured at four sizes, three runs each, and
+//! came back **unresolvable**: negative at three of the four, `|Δ| ≤ 4.2 MB`
+//! against a spread of up to 11.9 MB. `estimated_peak_bytes`'s
+//! `VERTEX_ARRAY_BYTES` carries the pyramid's 3 bytes per vertex anyway, derived
+//! rather than fitted, and says there why.
+//!
+//! **In a debug build the clock is not little**, and it lands on the test suite:
+//! `tests/budget_bound.rs` went from about five seconds to sixty-seven when the
+//! pyramid was switched on in its fixture, over sixty thousand vertices and
+//! thirteen rungs. That is the per-rung re-walk, which is the price of not
+//! holding a map — see [`Pyramid::write`]. It is the trade this module made on
+//! purpose and the number is here so the next person weighing it has both
+//! halves.
+//!
+//! (`examples/enrich_memory 1000000 14 16`, 2026-09-15, Mac16,8 — 14 cores,
+//! 48 GiB, macOS 26.2 / Darwin 25.2.0.)
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
