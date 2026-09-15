@@ -102,8 +102,8 @@ corpus whose `by_target` is not tiled, every window reports `dst: not-declared` 
 `--memory-gib` is a `FairSpillPool` around `execute_graph`, and for a long time it was nothing after
 it: `enrich_layout` took the run's `memory_bytes` and discarded it, so three stages sat outside the
 pool and a declared 4 GiB run peaked at 8.39 GiB. The number reaches the layout pass now, and is
-honoured there by **refusing** rather than spilling — `estimated_peak_bytes` over the staged Parquet
-footers, checked before the first column chunk is decoded. That closes the *declaration* for that stage — and the flag
+honoured there by **refusing** rather than spilling — `estimated_peak_bytes` over three numbers the
+batches carry, checked before the first tile is gathered. That closes the *declaration* for that stage — and the flag
 bounds each stage rather than their sum, which is decided rather than outstanding and argued on
 [streaming](/docs/design/streaming). It does not close the shape below, and the two should not be
 confused. **The peak still grows with N, and a
@@ -197,14 +197,14 @@ the byte counts are file sizes and carry no such caveat.
 | --- | --- | --- |
 | `prepare vertices` + `collect vertex` | 9.0 | 11% |
 | `collect 1 edge table(s)` | 47.5 | **58%** |
-| `write_to_dir` | 3.3 | 4% |
+| `write_to_dir` — now `write_manifests`, and no payload | 3.3 | 4% |
 | `community_hierarchy` | 8.0 | 10% |
 | re-read — CSR + CSC, vertices, remap | 1.2 | 1.5% |
 | write tiles, levels, index, adjacencies | 13.1 | 16% |
 | **total** | **82.1** | peak **0.80 GiB** |
 
 And the bytes, sampled from the destination directory *while the run was in flight*, because the CLI
-deletes the staged files when it is done:
+deleted the staged files when it was done:
 
 | | |
 | --- | --- |
@@ -212,25 +212,48 @@ deletes the staged files when it is done:
 | the corpus that survives | **72.6 MB** in 15 files |
 | staged — `vertex/Person.parquet` 17.3 MB, `by_source.parquet` 13.0 MB, `by_target.parquet` 13.0 MB | **43.3 MB**, written, re-read and deleted |
 
-That is **37.4% of everything written**, and a write amplification of **1.60×** over the artefact.
+That was **37.4% of everything written**, and a write amplification of **1.60×** over the artefact.
 
-**The writer's round trip is a problem of bytes and of correctness, not of time.** It takes 37.4% of
-what is written and **5.5%** of the clock. The clock is somewhere else: 58% of it is `collect`, which
+**The writer's round trip was a problem of bytes and of correctness, not of time.** It took 37.4% of
+what was written and **5.5%** of the clock. The clock is somewhere else: 58% of it is `collect`, which
 is the barrier — placing a vertex requires having seen every edge — and no redesign of the staging
 removes a barrier. Anyone reading the table for a speedup is reading the wrong column.
 
-### What bounds the redesign, and the probe prints it
+### The redesign, and what is left of the table
+
+**The staged bytes are not written.** `crates/fossil-df/src/files.rs, manifest_files` is the whole
+of what the writer emits; the payload is emitted once, by the layout pass, out of the
+`RecordBatch`es the executor returns —
+`crates/fossil-layout/src/layout/pass.rs, VertexLayoutTarget` takes them rather than a URL. So the
+third row of that table is zero **by construction** rather than by measurement, and what holds it
+there is a test asserting the absence: `crates/fossil-df/tests/sink.rs` fails if a
+`vertex/<Type>.parquet` or a `by_{source,target}.parquet` appears beside the manifests.
+
+Two consequences worth separating, because only one of them is measured:
+
+- **The corpus is unchanged, byte for byte.** Two runs of one program over a 20,000-vertex
+  self-relation — a vertex pyramid, an edge pyramid, both orientations and the identity index, 11
+  files — produce identical SHA-256 digests across the change. That is the property the whole
+  inversion had to preserve and it is the reason it could be made at all: the pass was already
+  reading, as Parquet, the rows it was already being handed.
+- **The rest of the table is owed a re-run.** The three phases that touched those bytes —
+  `write_to_dir`, the re-read, and the deletions — are gone or changed, and the numbers above are
+  the ones the old path measured. **They are recorded here as a "before" and not as a current
+  reading.** Nothing on this page draws a new conclusion from them.
+
+### What bounded the redesign, and the probe printed it
 
 The same run marks `execute_graph — 0.05G in Arrow` against a process peak of 0.80 GiB. That mark is
 `crates/fossil-df/src/lib.rs, arrow_gib` over the boundary value, and the boundary value already
-holds everything: `crates/fossil-df/src/lib.rs, GraphArData` carries a `Vec<RecordBatch>` per vertex
+held everything: `crates/fossil-df/src/lib.rs, GraphArData` carries a `Vec<RecordBatch>` per vertex
 type and `crates/fossil-df/src/lib.rs, EdgeTable` carries one per orientation of every relation. So
-the data never leaves memory in the first place. The trip is **Arrow → Parquet → Arrow**, and the
-original Arrow is alive the whole time it happens.
+the data never left memory in the first place. The trip was **Arrow → Parquet → Arrow**, and the
+original Arrow was alive the whole time it happened.
 
 **Carrying the rows in memory to the pass instead of through Parquet and back costs 6% of the
-peak.** That is the size of the thing the 43.3 MB is being paid for, and it is measured rather than
-estimated, which is the only reason it belongs on this page.
+peak.** That was the size of the thing the 43.3 MB was being paid for, and it is measured rather than
+estimated, which is the only reason it belonged on this page — and it is what made the answer
+"invert the phase" rather than "stream the staging".
 
 ## How a claim on this page stays true
 

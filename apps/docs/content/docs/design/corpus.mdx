@@ -747,6 +747,11 @@ never need, and the second file was a second container for bytes the tiles alrea
 MCP is native and can list — but two readers disagreeing about where the bytes are is GraphAr's
 failure wearing a different coat.
 
+That second file is not there to be read any more, by this consumer or a future one: the writer
+stages no Parquet at all, and the tiles are the first and only time the payload is written. Which
+does not retire the lesson, because the defect was a reader composing a path the manifest had not
+given it.
+
 It composes both paths from the manifest now: `container` says whether a tile is a file or a row
 group and `prefix` says where the set is, so under the container fossil writes each relation is one
 named file and there is nothing to expand. Under the other one a vertex type's tiles are enumerated

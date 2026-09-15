@@ -197,7 +197,7 @@ const ARCHITECTURE = join(CONTENT_ROOT, "(root)/architecture.mdx");
 
 /**
  * The one cross-group edge the page keeps, with its reason written beside it there: moving
- * `files::batches_to_parquet` would put `arrow` + `parquet` into a browser bundle that has neither.
+ * `files::TileWriter` would put `arrow` + `parquet` into a browser bundle that has neither.
  */
 const EXCUSED_EDGE: readonly [string, string] = ["fossil-layout", "fossil-df"];
 

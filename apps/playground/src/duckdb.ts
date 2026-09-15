@@ -89,7 +89,7 @@ export function booted(): boolean {
  *
  * This is the seam that makes the whole corpus half work without a server. The executor
  * hands back `{rel_path, bytes}`; registering each one under `<dest>/<rel_path>` means
- * `read_parquet('corpus/vertex/Person.parquet')` resolves to bytes that were never
+ * `read_parquet('corpus/vertex/Person/tiles.parquet')` resolves to bytes that were never
  * written anywhere. `openCorpus`'s tile arithmetic produces those same names, so the
  * reader cannot tell the difference between this and an HTTP corpus — which is the point.
  */

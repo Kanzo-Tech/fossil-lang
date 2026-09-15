@@ -21,10 +21,18 @@ graph LR
     X["<b>execute_graph</b><br/>DataFusion reserves,<br/>spills, releases"]
   end
   X --> G["<b>GraphArData</b><br/><i>seam 1 · still collects</i><br/>1.64 GiB of Arrow at ten million"]
-  G --> F["<b>try_for_each_file</b><br/><i>seam 2 · refuted by measurement</i><br/>0.02 GB, inside the noise"]
+  G --> F["<b>try_for_each_manifest</b><br/><i>seam 2 · the manifests only</i><br/>no payload, so no round trip"]
+  G --> E["<b>enrich_layout_within</b><br/><i>the same number, honoured differently</i><br/>takes the batches, estimates, refuses"]
   F --> W[("GraphAr tree on disk<br/>713 MB · 87 files")]
-  W --> E["<b>enrich_layout_within</b><br/><i>the same number, honoured differently</i><br/>estimates from the footers, refuses"]
+  E --> W
 ```
+
+**Seam 2 forked, and that is the change.** It used to be the only edge out of `GraphArData`: the
+whole corpus was encoded to Parquet, written, and then re-read by the pass, which rewrote it as tiles
+and deleted what it had read. The manifests still take that edge; the payload takes the second one,
+straight from the same batches. [cost](/docs/design/cost#the-redesign-and-what-is-left-of-the-table)
+has the bytes that made the case — 43.3 MB of 115.9 written and then unlinked, on a corpus of 72.6 —
+and the digests that say the tree it writes is unchanged.
 
 The box used to be the whole finding. `enrich_written_layout` took the run's `memory_bytes` and
 wrote `let _ = memory_bytes;`, with a comment saying there was nothing left to cap and nothing
@@ -36,10 +44,15 @@ first statement.**
 
 The number reaches the second half now, and the two halves honour it differently because only one of
 them can. The executor reserves against a pool and **spills**. The layout pass holds Rust `Vec`s
-with no disk manager under them, so it **refuses**: `estimated_peak_bytes` over three numbers out of
-the staged Parquet footers — rows, adjacency rows, uncompressed vertex bytes — checked before a
-single column chunk is decoded. Over budget is an error at second zero and a corpus left exactly as
-the writer staged it, instead of an out-of-memory at second two hundred.
+with no disk manager under them, so it **refuses**: `estimated_peak_bytes` over three numbers the
+batches already carry — rows, adjacency rows, resident Arrow bytes — checked before a single tile is
+gathered. Over budget is an error at second zero that writes nothing at all, instead of an
+out-of-memory at second two hundred.
+
+Those three used to be Parquet footer fields, read off the staged files. A footer read is cheap and
+that was never the point; what the input being in hand changes is that a refusal now touches no
+filesystem, and that the payload term is per resident Arrow byte rather than per uncompressed
+Parquet byte — the same product, because the 1.30 between them *was* the decode.
 
 <Callout title="A refusal is not the same promise as a spill, and the page should not blur them">
 This is not larger-than-RAM for the layout pass. It is a declaration that has stopped being a lie:
@@ -50,7 +63,7 @@ that the number means something; what it does not buy is the run.
 rather than cautious. `fossil run` and the playground tab write the same tree byte for byte through
 one `LayoutIo`, and only one of them has a flag to declare a budget with — so a budget that degraded
 the output would make the two paths disagree exactly when somebody declared one.
-`crates/fossil-layout/tests/budget.rs` runs one staged corpus twice, once unbounded and once under a
+`crates/fossil-layout/tests/budget.rs` runs one input corpus twice, once unbounded and once under a
 budget, and compares every byte of every file.
 </Callout>
 
@@ -440,26 +453,40 @@ the next attempt starts from something sharper than *the boundary holds a value*
 
 ### 2. `to_files()` encoded every file first — measured, and refuted
 
-`try_for_each_file` builds each file, hands it over and drops it before the next; `to_files()` is
-that with a `Vec` on the end, kept for the browser host, which genuinely needs a list. **Peak RSS at
+`try_for_each_file` built each file, handed it over and dropped it before the next; `to_files()` was
+that with a `Vec` on the end, for the browser host, which genuinely needs a list. **Peak RSS at
 ten million moved from 10.60 GB to 10.58 GB.** Two identical runs differ by more than that, so the
-number is not small: it is absent. The +0.58 GiB the probe bills to the encode phase is the encoder's
-working memory — the output is 713 MB across six files, so holding six of them was never that figure.
+number is not small: it is absent. The +0.58 GiB the probe billed to the encode phase was the
+encoder's working memory — the output was 713 MB across six files, so holding six of them was never
+that figure.
 
 The change stayed, and the reason has to be stated separately from the number, because mixing them is
-how a refuted hypothesis quietly survives: holding N files in order to write them one at a time has
+how a refuted hypothesis quietly survives: holding N files in order to write them one at a time had
 **no reader on that path**. Indefensible per file, and saying so is not saying it saved megabytes.
+
+**And the question stopped being asked**, which is the right kind of ending for it. The encoder does
+not encode the payload any more — `crates/fossil-df/src/files.rs, try_for_each_manifest` is what is
+left of it, and the layout pass writes the tiles from the batches directly — so one-at-a-time against
+all-at-once is now a question about a handful of YAML documents. What the measurement bought was
+knowing that this seam was **not** where the seventeen gigabytes were, which is what sent the search
+to the one that mattered: not how the staged bytes were held, but that they were written at all.
+[cost](/docs/design/cost#the-redesign-and-what-is-left-of-the-table) has that one.
 
 ### 3. The layout read the whole edge list — landed 2026-08-05
 
-`enrich_layout` reads both adjacency Parquet files **as the CSR they already are**, one
-`RecordBatch` at a time, the two columns arriving as the `u32` slices `CsrBuilder::push` wants; no row
-is ever a Rust tuple. Gone with it: a `Vec<(u32, u32)>` of every edge (568 MB at ten million), a
-degree-counting pre-pass, and an 80 MB cloned cursor scattering random writes over the 568.
+`enrich_layout` walks both orientations **as the CSR they already are**, one `RecordBatch` at a time,
+the two columns arriving as the `u32` slices `CsrBuilder::push` wants; no row is ever a Rust tuple.
+Gone with it: a `Vec<(u32, u32)>` of every edge (568 MB at ten million), a degree-counting pre-pass,
+and an 80 MB cloned cursor scattering random writes over the 568.
+
+It read those batches out of Parquet at the time, and takes them from the executor now — which
+removed the decode but not the reason this entry is here. The shape it argues for is that the pass
+consumes an orientation in the order it already has, and that shape is what made the input being
+Arrow a substitution rather than a rewrite.
 
 **None of the three was asked for by the algorithm.** `local_moving` is a sequential CSR scan whose
 only random access is `community[u]`, which is O(n), and the files have been sorted since they were
-written — `by_source.parquet` has zero out-of-order rows by `src_dense` across 71,024,690, and
+written — `by_source` has zero out-of-order rows by `src_dense` across 71,024,690, and
 `by_target.parquet` likewise by `dst_dense`. All three existed because of a type.
 `Weighted::from_edges(vertex_count, edges: &[(u32, u32)])` takes an unordered bag, so the ordering the
 file already had could not pass through it. **A parameter that is an adjacency cannot need a counting

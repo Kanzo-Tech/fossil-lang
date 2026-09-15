@@ -42,8 +42,8 @@ The mutual arrow is `engine ↔ corpus`, and one edge holds it:
 
 | direction | edge | why it is there |
 | --- | --- | --- |
-| corpus → engine | `fossil-layout → fossil-df` | one function, `files::batches_to_parquet`, the single Arrow→Parquet encoder — moving it would put `arrow` + `parquet` into `fossil-graph-wasm`'s browser bundle, which has neither |
-| engine → corpus | `fossil-cli → fossil-layout` | the post-pass runs after the write, so the thing that writes calls it |
+| corpus → engine | `fossil-layout → fossil-df` | one type, `files::TileWriter`, the row-group container the corpus's payload is written through — moving it would put `arrow` + `parquet` into `fossil-graph-wasm`'s browser bundle, which has neither |
+| engine → corpus | `fossil-cli → fossil-layout` | the post-pass **is** the payload write, so the thing that writes the manifests calls it |
 | engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
 | engine → corpus | `fossil-cli → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk — and `Privacy`, which the run summary prints |
 | engine → corpus | `fossil-df → fossil-policy` | the bound is verified where the release is still a value, before any of it is a file |
