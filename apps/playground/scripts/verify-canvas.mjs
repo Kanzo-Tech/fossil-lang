@@ -391,12 +391,14 @@ console.log('\npinned');
   let found = false;
   for (let i = 0; i < slice.marks; i++) if (denseOf(slice.vertices[i]) === far) found = true;
   ok('a pinned vertex outside the window is returned', found, `dense_id ${far}`);
-  // **A pin costs TWO tiles, not one, and this is the open question rather than a stale check.**
-  // Measured both ways on this corpus: without links it is still 2, and a pin that IS in the level
-  // (dense 999996, a multiple of 4 at level 1) costs 2 exactly like one that is not (999999, odd,
-  // in no level above 0). So it is not the payload being opened beside the level. The pin comes
-  // back and it is on the ledger -- this is a cost defect, not a correctness one -- but one of the
-  // two tiles has not been accounted for.
+  // **A pin costs one tile, and for a while it cost two.** This line was red from the day it was
+  // measured, and the two observations that stood here are what eventually named the cause: without
+  // links it was still 2, and a pin that IS in the level cost the same as one that is not -- so it
+  // was never the payload being opened beside the level, and never anything about which rows the
+  // pin fell on. It was one tile counted twice. `Corpus.frame` added the pin's PAYLOAD tile number
+  // to the level selection *and* read it again through its own `pinUrls`, and `FrameCost.tiles` is
+  // the sum of the two. Under a level read the first of those is now dropped: the second read is
+  // what brings the pin back, and the level tile it opened bought nothing.
   ok('its tile is on the ledger, not hidden in it', lastCost.tiles === bare + 1, `${lastCost.tiles} vs ${bare} without it`);
   const other = await source.slice({ view, limit: BOUNDED_DEFAULTS.limit, pinned: [vertexId(9, far)], fill: 'cluster_id' });
   let leaked = false;

@@ -1731,10 +1731,19 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       })();
       const viaLevel = levelSet !== null && (!wantLinks || edgeLevels !== null);
       const selected = new Set<number>(selectedTiles(address, box));
-      // A pin's tile is COUNTED. Left out of the selection the disjunct that brings the pin back
-      // has nothing to match against, and the fetch it costs would be missing from the ledger
-      // rather than absent from the read.
-      for (const tile of address.tilesOf(pins)) selected.add(Number(tile));
+      // A pin's tile is COUNTED, and **only where this read is the one that brings it back.**
+      // Without a level there is a single read and the pin has to be inside the selection: left
+      // out, the disjunct that returns it has nothing to match against, and the fetch it costs
+      // would be missing from the ledger rather than absent from the read.
+      //
+      // Under a level read there is a SECOND read — `pinUrls` below, against the pin's own payload
+      // tile — and adding the tile here as well counted one pin twice: once mapped into `held` as
+      // a level tile, once in `pinTiles` as a payload one, and `FrameCost.tiles` is their sum. That
+      // is the whole of «a pin costs two tiles, not one», which `verify-canvas` has held red since
+      // it was measured. It is not a discount: the level tile was genuinely opened and genuinely
+      // bought nothing. A pin the rectangle already selects is still in `selected` from
+      // `selectedTiles`; one it does not select carries only rows the box predicate drops.
+      if (!viaLevel) for (const tile of address.tilesOf(pins)) selected.add(Number(tile));
 
       const payloadTiles = [...selected].sort((a, b) => a - b);
       /**
