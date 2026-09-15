@@ -591,6 +591,25 @@ impl VertexLevels {
 /// [`VertexInfo::prefix`]. See [`HolonTree`].
 pub const HOLON_PREFIX: &str = "holon/";
 
+/// **The base of the pyramid a writer takes when nothing tells it otherwise** —
+/// sixteen vertices per cell.
+///
+/// The screen picks it. A megapixel canvas draws about fifteen thousand marks
+/// comfortably, and a base of roughly twenty vertices per cell is the one that
+/// fills it on a corpus the size of com-DBLP; sixteen is the power of four
+/// nearest twenty, which is what [`HolonTree::base_bits`] requires. The whole
+/// pyramid then costs `1/16 · 4/3` = **8.3% of the type**, against 25.7% at a
+/// base of five and 1.6% at a base of 83.
+///
+/// **A default and not a constant of the format.** It is data-dependent by
+/// construction — where cells start to touch is a property of *this* point set —
+/// and which number a corpus used is in its own [`HolonTree::vertices_per_cell`]
+/// rather than read off a spec. `/docs/design/holons` ends on whether it should
+/// be declared per corpus or once globally; declaring it per vertex type is the
+/// shape the block already has, and what would settle it is a second corpus of a
+/// different shape measured the same way.
+pub const DEFAULT_VERTICES_PER_CELL: u64 = 16;
+
 /// The filename stem of one **rung**, under a tree's own
 /// [`HolonTree::prefix`]: rung `k` lives under `<prefix>r{k}/`, and inside it
 /// the container rules apply unchanged. See [`HolonRung`].
@@ -623,17 +642,19 @@ pub const QUOTIENT_PREFIX: &str = "quotient/";
 /// reader divides if it wants a ratio; see [`HolonRung::holon_count`] and
 /// [`Self::contracts_by_at_least`].
 ///
-/// **One tree per vertex type, because the partition is.** The layout pass runs
-/// community detection per type over that type's own self-relations, so a
-/// holon's members are `dense_id`s of one type and a quotient edge joins two
-/// holons of one tree. [`Self::relations`] names which edges it was computed
-/// over, without which the mass a rung conserves is not a defined quantity.
+/// **One tree per vertex type, because the partition is.** A cell is an interval
+/// of one type's `dense_id` axis, so a cell's members are `dense_id`s of one
+/// type and a quotient edge joins two cells of one tree. [`Self::relations`]
+/// names which edges it was computed over, without which the mass a rung
+/// conserves is not a defined quantity.
 ///
-/// **Nothing writes one yet, and this is still the plan and not a stub** — the
-/// rule [`VertexIndex`] and [`VertexLevels`] are both declared under, stated at
-/// `crates/fossil-df/src/lib.rs, vertex_info`: the manifest is the plan, the
-/// pass is what fills it, and a guard is what goes red if the pass does not
-/// deliver it.
+/// **`crates/fossil-layout/src/layout/cells.rs, Pyramid` writes one**, and it is
+/// what declares it: a rung's cell count is arithmetic and could have been
+/// stated in front of the bytes, and a rung's quotient edge count is a
+/// measurement that could not. `crates/fossil-layout/tests/cells.rs` is the
+/// guard, and it evaluates the obligations against the payload rather than
+/// trusting the writer — every way of getting a summary wrong produces a
+/// pyramid that opens, addresses and draws.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HolonTree {
     /// Path prefix for the whole tree, e.g. `"holon/"`, relative to the vertex
@@ -642,16 +663,33 @@ pub struct HolonTree {
     /// is the one part of a tile's URL a reader cannot compute, and there is no
     /// directory to list over HTTP.
     pub prefix: String,
-    /// Rows per tile of a rung.
+    /// **The base of the pyramid, in vertices per cell** — the one number a
+    /// reader cannot recover and a writer must therefore declare.
     ///
-    /// Its own, and never read off the payload, for exactly
-    /// [`VertexIndex::chunk_size`]'s reason: tile `k` of a rung holds the `k`th
-    /// run of **holon** rows, and a holon id is not a `dense_id`. Reusing the
-    /// type's number would read as an alignment that does not exist. One per
-    /// tree and not one per rung, because the cut does not change with the rung
-    /// — a rung is a run of `chunk_size` rows of its own sequence, whatever that
-    /// sequence summarises.
-    pub chunk_size: u64,
+    /// A mipmap over an image needs no such field: level 0 is every pixel and
+    /// each level is a quarter of the one below all the way down. **A set of
+    /// points is never full**, and the whole difference lives at the base. So
+    /// this is a knob, and what it trades is measured — on com-DBLP, a base of 5
+    /// vertices per cell costs 25.7% of `V` and one of 331 costs 0.4%.
+    ///
+    /// **The screen picks it, not taste.** A megapixel canvas draws about fifteen
+    /// thousand marks comfortably, so a base of roughly twenty vertices per cell
+    /// is the one that fills it — [`DEFAULT_VERTICES_PER_CELL`] is the power of
+    /// four nearest that.
+    ///
+    /// A power of four, and refused otherwise. Cell `r` of rung `k` covers
+    /// exactly `[r·4^k, (r+1)·4^k)` of the `dense_id` axis, so a cell id is a
+    /// SHIFT of a `dense_id` — [`VertexLevels::stride`]'s octave, reached
+    /// through the same constant — and a base that is not a power of four makes
+    /// the finest rung a division instead.
+    ///
+    /// **It replaces a `chunk_size` of this tree's own.** That field existed on
+    /// [`VertexIndex::chunk_size`]'s reasoning — a rung's rows are its own
+    /// sequence, so it slices at its own number — and the premise it rested on
+    /// is gone: a rung's ids are a shift of the payload's, so its tiles are the
+    /// payload's arithmetic with a wider shift and there is no second number to
+    /// declare. See the callout on [`HolonRung::holon_count`].
+    pub vertices_per_cell: u64,
     /// **Which relations the partition was computed over, by
     /// [`EdgeInfo::edge_type`] label** — both of whose endpoints are this vertex
     /// type, which is why a label alone names one.
@@ -733,15 +771,32 @@ pub struct HolonRung {
     /// [`HolonTree::contracts_by_at_least`] — which no ratio field could be,
     /// because a ratio recorded beside the rows is a second statement of what
     /// the rows already say.
+    ///
+    /// **Declared and derivable, which is what made the whole block writable.**
+    /// It is `ceil(vertex_count / 4^k)` — see [`HolonTree::holons_at`] — so a
+    /// manifest can state the entire tree in front of the pass, exactly as
+    /// [`VertexLevels::planned`] plans the level pyramid before a byte is
+    /// written. This page's obstacle used to be that a rung's count was
+    /// something only a completed pass could report; under a quaternary
+    /// partition it is arithmetic, and a field that repeats arithmetic is a
+    /// second thing to check rather than a second source of truth.
     pub holon_count: u64,
-    /// The columns a holon row carries: its group id, its position, its member
-    /// count, its parent, and the internal weight that absorbed the edges
-    /// between its own children.
+    /// The columns a holon row carries: its cell id, its position, its member
+    /// count, the internal weight that absorbed the edges between its own
+    /// children, and the mode and purity of the payload's categorical.
     ///
     /// Declared per rung and not inherited, which is where this differs from
     /// [`VertexIndex`]: an index is a second copy of the payload's rows and its
     /// schema is the payload's, while **no column here exists anywhere else in
-    /// the corpus**. A reader that cannot see the list cannot open the file.
+    /// the corpus**. `crates/fossil-sinks/src/generated.rs, CELL_COLUMNS` is
+    /// where the set is stated once; a reader that cannot see the list cannot
+    /// open the file.
+    ///
+    /// **No `parent`, and that is the quaternary partition doing work.** Cell
+    /// `r` of rung `k` covers `[r·4^k, (r+1)·4^k)`, so its parent is `r >> 2`
+    /// and the id carries it — a stored parent would be a second statement of a
+    /// shift. The column was in this list while a rung was a dendrogram cut,
+    /// where group ids are whatever the algorithm handed back.
     ///
     /// The member count is a recorded column rather than something derived from
     /// the members, and that is what makes obligation 2 an obligation at all:
@@ -828,16 +883,22 @@ impl HolonRung {
 }
 
 impl HolonTree {
-    /// A tree over `relations`, tiled at `chunk_size`, publishing `rungs`.
+    /// A tree over `relations`, based at `vertices_per_cell`, publishing
+    /// `rungs`.
     ///
     /// `relations` is an argument and not a setter because a tree that does not
     /// name its edge population conserves nothing measurable; see
     /// [`Self::relations`].
+    ///
+    /// Prefer [`Self::planned`], which derives the rungs rather than taking
+    /// them: this is the constructor for a tree whose rungs are *not* the
+    /// arithmetic — a dendrogram cut is the case — and for the fixtures that
+    /// lock the document's spelling.
     #[must_use]
-    pub fn new(chunk_size: u64, relations: Vec<String>, rungs: Vec<HolonRung>) -> Self {
+    pub fn new(vertices_per_cell: u64, relations: Vec<String>, rungs: Vec<HolonRung>) -> Self {
         Self {
             prefix: HOLON_PREFIX.to_string(),
-            chunk_size,
+            vertices_per_cell,
             relations,
             // Not declared, which is neither "derived" nor "none". A writer that
             // knows where it put its holons says so with `with_coordinates`; one
@@ -845,6 +906,110 @@ impl HolonTree {
             coordinates: None,
             rungs,
         }
+    }
+
+    /// **How many bits of `dense_id` the finest rung drops**, or `None` where
+    /// `vertices_per_cell` is not a power of four.
+    ///
+    /// The refusal is the same one [`VertexInfo::chunk_size`] earns: a base that
+    /// is not a power of four still *emits* correctly and quietly costs every
+    /// reader a division where a shift would do, so it is an error here rather
+    /// than a rounding.
+    ///
+    /// Four and not two, through [`VertexLevels::stride_bits`]: the pyramid's
+    /// octave is written down in exactly one place and this reaches it there.
+    #[must_use]
+    pub const fn base_bits(vertices_per_cell: u64) -> Option<u32> {
+        if !vertices_per_cell.is_power_of_two() {
+            return None;
+        }
+        let bits = vertices_per_cell.trailing_zeros();
+        // A power of four is a power of two with an even exponent. `stride_bits`
+        // is `2k`, so the base is rung `k` of the same octave.
+        if bits.is_multiple_of(VertexLevels::stride_bits(1)) {
+            Some(bits)
+        } else {
+            None
+        }
+    }
+
+    /// How many bits of `dense_id` rung `k` drops — the base, plus the octave
+    /// once per rung above it. Rung 1 is the finest.
+    ///
+    /// Saturating at the top for [`VertexLevels::stride`]'s reason: past the
+    /// width of a `dense_id` the whole type is one cell, which is the answer and
+    /// not an overflow.
+    #[must_use]
+    pub const fn shift_at(vertices_per_cell: u64, rung: u32) -> Option<u32> {
+        match Self::base_bits(vertices_per_cell) {
+            Some(base) => {
+                Some(base.saturating_add(VertexLevels::stride_bits(rung.saturating_sub(1))))
+            }
+            None => None,
+        }
+    }
+
+    /// How many cells rung `k` of a type of `vertex_count` rows holds —
+    /// `ceil(vertex_count / 2^shift)`.
+    ///
+    /// The sibling of [`VertexLevels::rows_at`], and the reason
+    /// [`HolonRung::holon_count`] can be declared in front of the pass.
+    #[must_use]
+    pub fn holons_at(vertex_count: u64, vertices_per_cell: u64, rung: u32) -> Option<u64> {
+        let shift = Self::shift_at(vertices_per_cell, rung)?;
+        let cells = 1u64.checked_shl(shift).unwrap_or(u64::MAX);
+        Some(vertex_count.div_ceil(cells).max(1))
+    }
+
+    /// **The tree a type of `vertex_count` rows gets at this base**, rungs and
+    /// counts and all, or `None` where it gets none.
+    ///
+    /// **One function, two callers**, exactly as [`VertexLevels::planned`] is:
+    /// the layout pass writes these rungs and the manifest declares these
+    /// rungs, so the two cannot drift into a document naming a file nobody
+    /// wrote.
+    ///
+    /// The list is **complete** — rung 1 up to the rung that holds a single
+    /// cell — and that is where it differs from a level pyramid, which stops at
+    /// the level that fits one tile. A level is a transport optimisation and one
+    /// tile is already one range request, so coarser buys nothing; a rung is a
+    /// *picture*, and a reader zoomed all the way out wants four marks rather
+    /// than four thousand. It is the 1×1 level a mipmap has.
+    ///
+    /// `None` for a type no bigger than one cell: there is nothing to summarise
+    /// when the whole type is the summary. `None` too for a base that is not a
+    /// power of four — see [`Self::base_bits`].
+    ///
+    /// No quotients. Whether a rung publishes one is a measurement and not a
+    /// plan — see [`HolonRung::with_quotient`] — which is the one part of this
+    /// document the writer fills in after the fact.
+    #[must_use]
+    pub fn planned(
+        vertex_count: u64,
+        vertices_per_cell: u64,
+        relations: Vec<String>,
+        properties: &[Property],
+    ) -> Option<Self> {
+        Self::base_bits(vertices_per_cell)?;
+        if vertex_count <= vertices_per_cell {
+            return None;
+        }
+        let mut rungs = Vec::new();
+        for rung in 1u32.. {
+            let holon_count = Self::holons_at(vertex_count, vertices_per_cell, rung)?;
+            rungs.push(HolonRung::at(rung, holon_count, properties.to_vec()));
+            if holon_count <= 1 {
+                break;
+            }
+        }
+        Some(Self::new(vertices_per_cell, relations, rungs))
+    }
+
+    /// The prefix rung `k`'s tiles live under, relative to this tree's own
+    /// [`Self::prefix`] — `<stem>{k}/`.
+    #[must_use]
+    pub fn rung_prefix(rung: u32) -> String {
+        format!("{RUNG_PREFIX_STEM}{rung}/")
     }
 
     /// Declare where this tree's positions came from. See [`Self::coordinates`],
@@ -872,12 +1037,25 @@ impl HolonTree {
     /// It is checkable from the document alone, which is the whole reason
     /// [`HolonRung::holon_count`] is a declared field: a reader weighing a
     /// descent does not open a rung to find out it was not worth opening.
+    ///
+    /// # It divides, where it used to multiply, and that was a defect
+    ///
+    /// The test was `holon_count * 4 <= below`, which is the floor as prose and
+    /// is **false for a perfectly quartered tree at the top**: five cells become
+    /// `ceil(5/4)` = two, and `2 * 4 = 8` is not `<= 5`. Nothing noticed while
+    /// nothing wrote a tree; the first planned pyramid fails it at every rung
+    /// where the division does not come out even.
+    ///
+    /// `holon_count <= below.div_ceil(4)` is the same statement without the
+    /// rounding error, and it keeps every verdict the old form got right: a cut
+    /// contracting by 5.69× clears it, and Louvain's 690 → 595 stall — 1.16× —
+    /// still fails, because 595 is not `<= 173`.
     #[must_use]
     pub fn contracts_by_at_least(&self, leaves: u64) -> bool {
         let factor = VertexLevels::stride(1);
         let mut below = leaves;
         self.rungs.iter().all(|rung| {
-            let clears = rung.holon_count > 0 && rung.holon_count.saturating_mul(factor) <= below;
+            let clears = rung.holon_count > 0 && rung.holon_count <= below.div_ceil(factor);
             below = rung.holon_count;
             clears
         })
@@ -1390,6 +1568,63 @@ impl GraphInfo {
     }
 }
 
+/// **The `properties:` entries one declared column set becomes.**
+///
+/// The bridge from `corpus.bnf`'s table to the manifest's property list, and the
+/// one place the three flags a [`Property`] carries beyond a name and a type are
+/// answered for a column the *writer* owns: none of these is a primary key, none
+/// is nullable, and each holds one value. A payload property comes from a
+/// mapping and can be any of those things; a cell's id, count and mode cannot.
+///
+/// It lives here because this crate is the only one that knows both types, and
+/// two callers already wanted it — the layout pass, which declares the tree it
+/// wrote, and the fixture that locks the document's spelling.
+#[must_use]
+pub fn declared_properties(columns: &[crate::generated::WriterColumn]) -> Vec<Property> {
+    columns
+        .iter()
+        .map(|column| Property {
+            name: column.name.to_string(),
+            data_type: column.data_type.to_string(),
+            is_primary: false,
+            is_nullable: Some(false),
+            cardinality: Some(Cardinality::Single),
+        })
+        .collect()
+}
+
+/// **The partial inverse of [`data_type_name`]** — the Arrow type a declared
+/// `data_type` spelling means, or `None` for a spelling with no single answer.
+///
+/// Partial, and the reason is [`data_type_name`]'s own lossiness rather than a
+/// gap here: it maps `Int8`, `Int16` and `Int32` all to `int32`, so `int32` has
+/// no inverse and this returns `None` for it. What it does answer is every
+/// spelling `crates/fossil-sinks/src/generated.rs, CELL_COLUMNS` and its
+/// siblings use, which is the whole point — a writer builds its Arrow schema
+/// from the declared table rather than spelling the columns a second time, and
+/// the `corpus.bnf` promise is only cashed if the TYPE comes from there too and
+/// not just the name.
+///
+/// `uint32` and `uint64` are in the table and are fossil's own: `GraphAr`
+/// defines no unsigned type and its reference reader throws on `dense_id`. See
+/// this module's header.
+#[must_use]
+pub fn arrow_type(name: &str) -> Option<DataType> {
+    Some(match name {
+        "bool" => DataType::Boolean,
+        "int64" => DataType::Int64,
+        "float" => DataType::Float32,
+        "double" => DataType::Float64,
+        "string" => DataType::Utf8,
+        "uint32" => DataType::UInt32,
+        "uint64" => DataType::UInt64,
+        // `int32` has three arrow types behind it, `date`/`timestamp`/`time`
+        // have a unit this spelling drops, and `binary` is the fallback rather
+        // than a type. A caller that needs one of those declares it itself.
+        _ => return None,
+    })
+}
+
 /// Map an [`arrow_schema::DataType`] to its `GraphAr` `data_type` string spelling.
 ///
 /// `arrow-schema` is the single authority for the spellings — never
@@ -1398,6 +1633,12 @@ impl GraphInfo {
 /// problem from the other side, in the specification's list with no arm in the
 /// C++. Both are divergences, and `/docs/design/corpus` has them beside the
 /// `uint32` that is the real one.
+///
+/// **`uint32` and `uint64` are two more of fossil's own**, and they were falling
+/// through to `binary` until [`arrow_type`]'s round-trip test asked. Nothing was
+/// visibly wrong because the only unsigned column any manifest declared was
+/// `dense_id`, written as a literal string; a mapping that emitted an unsigned
+/// property would have had it declared as bytes.
 ///
 /// **Nothing enforces that the declared type matches the column the writer
 /// emits**, except for the three names every convention *shifts*:
@@ -1414,6 +1655,14 @@ pub fn data_type_name(dt: &DataType) -> String {
         DataType::Boolean => "bool",
         DataType::Int8 | DataType::Int16 | DataType::Int32 => "int32",
         DataType::Int64 => "int64",
+        // **The two `GraphAr` does not have, and fossil does.** They had no arm
+        // and fell through to `binary`, which nothing noticed because the one
+        // unsigned column the writer declared — `dense_id` — was spelled as a
+        // literal rather than mapped. Any OTHER unsigned column reaching here
+        // was being declared as bytes: well-formed YAML, and a lie about the
+        // column. See the header for why an unsigned type is written at all.
+        DataType::UInt8 | DataType::UInt16 | DataType::UInt32 => "uint32",
+        DataType::UInt64 => "uint64",
         DataType::Float16 | DataType::Float32 => "float",
         DataType::Float64 => "double",
         DataType::Utf8 | DataType::LargeUtf8 => "string",
@@ -1916,6 +2165,157 @@ version: gar/v1
             block.contains(&"  quasi_identifiers: Person.birth_year Person.postcode Person.sex"),
             "{yaml}"
         );
+    }
+
+    /// **Every spelling the generated column tables use has an Arrow type**, and
+    /// the round trip holds where it is defined.
+    ///
+    /// This is what lets a writer build a schema out of `corpus.bnf` instead of
+    /// spelling the columns twice, so a column added to the data file without a
+    /// spelling this understands is a failure here rather than at write time.
+    #[test]
+    fn every_declared_column_type_has_an_arrow_type() {
+        use crate::generated::{
+            ADJACENCY_COLUMNS, CELL_COLUMNS, PAYLOAD_COLUMNS, QUOTIENT_COLUMNS,
+        };
+        for set in [
+            PAYLOAD_COLUMNS,
+            ADJACENCY_COLUMNS,
+            CELL_COLUMNS,
+            QUOTIENT_COLUMNS,
+        ] {
+            for column in set {
+                let dt = arrow_type(column.data_type)
+                    .unwrap_or_else(|| panic!("`{}` has no arrow type", column.data_type));
+                assert_eq!(
+                    data_type_name(&dt),
+                    column.data_type,
+                    "`{}` does not round-trip",
+                    column.name,
+                );
+            }
+        }
+        // Partial where `data_type_name` is lossy, and it says so rather than
+        // guessing one of the three.
+        assert_eq!(arrow_type("int32"), None);
+        assert_eq!(arrow_type("binary"), None);
+    }
+
+    /// **A base is a power of four and nothing else**, because a cell id is a
+    /// shift of a `dense_id`. Eight and thirty-two are the interesting refusals:
+    /// they are powers of *two*, so a check that only asked `is_power_of_two`
+    /// would pass them and give the finest rung a half-octave nothing else in
+    /// the format has.
+    #[test]
+    fn a_base_is_a_power_of_four() {
+        assert_eq!(HolonTree::base_bits(4), Some(2));
+        assert_eq!(HolonTree::base_bits(16), Some(4));
+        assert_eq!(HolonTree::base_bits(DEFAULT_VERTICES_PER_CELL), Some(4));
+        assert_eq!(
+            HolonTree::base_bits(4_096),
+            Some(12),
+            "the tile, which is 4^6"
+        );
+
+        assert_eq!(HolonTree::base_bits(8), None);
+        assert_eq!(HolonTree::base_bits(32), None);
+        assert_eq!(HolonTree::base_bits(20), None);
+        assert_eq!(HolonTree::base_bits(0), None);
+        // One cell per vertex is a pyramid whose base is the payload, which is
+        // the degenerate answer rather than an error — `planned` is what refuses
+        // a type with nothing to summarise.
+        assert_eq!(HolonTree::base_bits(1), Some(0));
+    }
+
+    /// **A rung's count is `ceil(count below / 4)` at every step**, which is the
+    /// property that lets the manifest declare the tree in front of the pass.
+    ///
+    /// Asserted as the chain rather than against a list of numbers: what a
+    /// reader reproduces is the division, and a recorded answer would pass a
+    /// pyramid whose every rung was off by the same amount.
+    #[test]
+    fn a_rungs_count_is_a_quarter_of_the_one_below_it() {
+        let base = DEFAULT_VERTICES_PER_CELL;
+        let v = 317_080; // com-DBLP, which is the corpus the base was measured on
+        let mut below = HolonTree::holons_at(v, base, 1).expect("a valid base");
+        assert_eq!(
+            below,
+            v.div_ceil(base),
+            "the finest rung is V over the base"
+        );
+        for rung in 2..=12 {
+            let here = HolonTree::holons_at(v, base, rung).expect("a valid base");
+            assert_eq!(here, below.div_ceil(4), "rung {rung} of {below}");
+            below = here;
+        }
+        assert_eq!(below, 1, "twelve rungs reach a single cell over com-DBLP");
+    }
+
+    /// The tree runs to **one** cell, where a level pyramid stops at the level
+    /// that fits one tile. A level is a transport optimisation; a rung is a
+    /// picture, and a reader zoomed all the way out wants four marks.
+    #[test]
+    fn a_planned_tree_runs_to_a_single_cell() {
+        let props = Vec::new();
+        let tree = HolonTree::planned(20_000, DEFAULT_VERTICES_PER_CELL, Vec::new(), &props)
+            .expect("twenty thousand is more than one cell");
+        let counts: Vec<u64> = tree.rungs.iter().map(|r| r.holon_count).collect();
+        assert_eq!(counts, vec![1_250, 313, 79, 20, 5, 2, 1]);
+        assert_eq!(
+            tree.rungs
+                .iter()
+                .map(|r| r.path.clone())
+                .collect::<Vec<_>>(),
+            ["r1/", "r2/", "r3/", "r4/", "r5/", "r6/", "r7/"],
+        );
+        assert_eq!(tree.vertices_per_cell, DEFAULT_VERTICES_PER_CELL);
+        // The cost of the whole tree, which is the 4/3 series on the base.
+        assert_eq!(counts.iter().sum::<u64>(), 1_670);
+
+        // Nothing to summarise when the type IS one cell.
+        assert!(HolonTree::planned(16, 16, Vec::new(), &props).is_none());
+        assert!(HolonTree::planned(1, 16, Vec::new(), &props).is_none());
+        assert!(HolonTree::planned(17, 16, Vec::new(), &props).is_some());
+        // And a base the addressing cannot shift by is refused rather than
+        // rounded.
+        assert!(HolonTree::planned(20_000, 20, Vec::new(), &props).is_none());
+    }
+
+    /// **The branching floor divides, and the old form multiplied.**
+    ///
+    /// `holon_count * 4 <= below` is the floor as prose and is false for a
+    /// perfectly quartered tree wherever the division is not even: five cells
+    /// become two, and eight is not at most five. This is the case that was red
+    /// and that nothing had run, because nothing wrote a tree.
+    #[test]
+    fn a_perfectly_quartered_tree_clears_the_branching_floor() {
+        let props = Vec::new();
+        let tree = HolonTree::planned(20_000, DEFAULT_VERTICES_PER_CELL, Vec::new(), &props)
+            .expect("a tree");
+        assert!(
+            tree.contracts_by_at_least(20_000),
+            "the rungs are {:?}",
+            tree.rungs.iter().map(|r| r.holon_count).collect::<Vec<_>>(),
+        );
+
+        // The verdicts the old form got right are unchanged: a cut that
+        // contracts by 5.69× clears it, and Louvain's 690 → 595 stall does not.
+        let stalled = HolonTree::new(
+            DEFAULT_VERTICES_PER_CELL,
+            Vec::new(),
+            vec![
+                HolonRung::at(1, 690, props.clone()),
+                HolonRung::at(2, 595, props.clone()),
+            ],
+        );
+        assert!(!stalled.contracts_by_at_least(317_080));
+        // A rung of nothing is not a contraction either.
+        let empty = HolonTree::new(
+            DEFAULT_VERTICES_PER_CELL,
+            Vec::new(),
+            vec![HolonRung::at(1, 0, props)],
+        );
+        assert!(!empty.contracts_by_at_least(317_080));
     }
 
     /// The budget is integer arithmetic, and this is the comparison a reader

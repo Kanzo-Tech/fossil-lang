@@ -155,6 +155,9 @@ fn corpus(batches: usize, null_postcodes: usize) -> GraphArData {
 
     GraphArData {
         privacy: Privacy::Undeclared,
+        // No pyramid: these fixtures are about the privacy bound, and a tree is
+        // the layout pass's to write.
+        pyramids: Vec::new(),
         schema: GraphSchema {
             nodes: vec![NodeType {
                 label: "Person".to_string(),

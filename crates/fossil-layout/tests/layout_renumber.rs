@@ -158,6 +158,11 @@ fn targets<'a>(
             // as three chunks and a boundary rather than as one file wearing a
             // chunk's name.
             chunk_size: 2,
+            // Four vertices per cell, and not the default sixteen, so that six
+            // vertices earn a pyramid at all: at the default the whole type is
+            // one cell and there is nothing to summarise. Assertion 3 below is
+            // what notices that the tree appeared.
+            vertices_per_cell: Some(4),
         }],
         vec![
             adjacency("by_source", Endpoint::Src, &c.by_source),
@@ -305,9 +310,10 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
 
     // ONE Parquet in the prefix, and it is the payload. Two containers at once
     // is one too many — a reader that globs finds both — which is the convention
-    // `apps/corpus`'s `declared-tiling` fires on. `index/` and `l1/` are not a
-    // second one: they are directories. The list is exhaustive so that a fourth
-    // entry cannot appear unremarked.
+    // `apps/corpus`'s `declared-tiling` fires on. `index/`, `l1/` and `holon/`
+    // are not a second one: they are directories. The list is exhaustive so that
+    // a fifth entry cannot appear unremarked — and `holon/` is the entry that
+    // proved it works, having appeared here the moment the pass grew a pyramid.
     let mut emitted: Vec<String> = fs::read_dir(&chunks)
         .expect("read the tile prefix")
         .filter_map(Result::ok)
@@ -317,13 +323,37 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     assert_eq!(
         emitted,
         vec![
+            "holon".to_string(),
             "index".to_string(),
             "l1".to_string(),
             "tiles.parquet".to_string(),
         ],
-        "the tile prefix holds the payload, the index and the one level six vertices at two a \
-         tile earn, and nothing else",
+        "the tile prefix holds the payload, the index, the one level six vertices at two a \
+         tile earn, the cell pyramid, and nothing else",
     );
+
+    // **The pyramid, as the arithmetic names it.** Six vertices at four per cell
+    // is two cells and then one, so two rungs — and each is a directory with a
+    // tile set in it. Asserted by listing rather than by opening, because what
+    // the rungs HOLD is `tests/cells.rs`, evaluated against the predicate; this
+    // is the assertion that they are where the manifest will say they are.
+    let mut rungs: Vec<String> = fs::read_dir(chunks.join("holon"))
+        .expect("read the tree prefix")
+        .filter_map(Result::ok)
+        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+        .collect();
+    rungs.sort();
+    assert_eq!(rungs, vec!["r1".to_string(), "r2".to_string()]);
+    for rung in &rungs {
+        assert!(
+            chunks
+                .join("holon")
+                .join(rung)
+                .join("tiles.parquet")
+                .exists(),
+            "{rung} has no tile set",
+        );
+    }
 
     // And the index the pass writes beside it, addressed the same way: tiled at
     // the same size over the SORTED order, so three row groups again.

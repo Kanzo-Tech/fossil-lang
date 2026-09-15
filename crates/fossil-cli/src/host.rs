@@ -523,7 +523,7 @@ pub fn run(
         let locator = anchor.locator(uri);
         std::fs::read_to_string(&locator).map_err(|e| format!("read source `{locator}`: {e}"))
     };
-    let graph = fossil_df::materialise(
+    let mut graph = fossil_df::materialise(
         &db,
         file,
         &descriptor,
@@ -550,7 +550,12 @@ pub fn run(
     // `vertex/<Type>.parquet` — a staged file whose deletion used to be the
     // pass's last act — and `fossil run --output-json` was handing keasy a path
     // to a file that had just stopped existing. The report is the manifest.
-    enrich_written_layout(&graph, &dest_dir, memory_bytes)?;
+    let report = enrich_written_layout(&graph, &dest_dir, memory_bytes)?;
+    // **What the pass measured, into the document it describes.** A rung's cell
+    // count is arithmetic and the manifest could have stated it first; its
+    // quotient edge count is a measurement, so the tree the pass hands back is
+    // the tree that gets declared.
+    graph.declare_pyramids(report.pyramids);
     graph
         .write_manifests(&dest_dir)
         .map_err(|e| miette::miette!("write manifests: {e}"))?;
@@ -587,7 +592,7 @@ fn enrich_written_layout(
     graph: &fossil_df::GraphArData,
     dest_dir: &Path,
     memory_bytes: Option<u64>,
-) -> miette::Result<()> {
+) -> miette::Result<fossil_layout::layout::LayoutReport> {
     let path_str = |rel: String| dest_dir.join(rel).to_string_lossy().into_owned();
     let relation = |e: &fossil_df::EdgeTable| {
         path_str(format!("edge/{}_{}_{}/", e.src_type, e.label, e.dst_type))
@@ -609,6 +614,13 @@ fn enrich_written_layout(
             // The same constant the manifest is written with, so the files and
             // the promise cannot drift apart.
             chunk_size: fossil_sinks::manifest::DEFAULT_CHUNK_SIZE,
+            // **The base of the cell pyramid, declared per vertex type**, which
+            // is the shape the manifest block has. It is a default and not a
+            // constant of the format — the right base is data-dependent, and
+            // `/docs/design/holons` ends on whether it should be declared per
+            // corpus or globally. Nothing in the language sets it yet, which is
+            // why every type gets the same one.
+            vertices_per_cell: Some(fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL),
         })
         .collect();
 

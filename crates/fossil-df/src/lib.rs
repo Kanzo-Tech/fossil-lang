@@ -114,6 +114,18 @@ pub struct GraphArData {
     /// nothing was checked, and `apps/corpus`'s `declared-privacy` says so
     /// again to whoever receives it.
     pub privacy: Privacy,
+    /// **The cell pyramid each vertex type carries**, keyed by its label — and
+    /// the second field here that is not data.
+    ///
+    /// Empty until the layout pass has written one, for exactly [`Self::privacy`]'s
+    /// reason: it is carried on the value so that the tree and the rows it
+    /// summarises cannot be separated, and there is no call shape in which a
+    /// caller supplies a pyramid for rows it did not partition.
+    ///
+    /// A type absent from this list declares no tree, which is what a corpus
+    /// written before the block existed reads as — weaker than an empty one
+    /// rather than equivalent to it.
+    pub pyramids: Vec<(String, fossil_sinks::manifest::HolonTree)>,
 }
 
 /// A materialised edge's adjacency data in both orientations — `by_source` (CSR,
@@ -221,6 +233,7 @@ pub async fn execute_graph<'db>(
     };
     Ok(GraphArData {
         privacy: Privacy::Undeclared,
+        pyramids: Vec::new(),
         schema,
         vertices,
         edges,
@@ -1803,6 +1816,16 @@ fn count_rows(batches: &[RecordBatch]) -> u64 {
 }
 
 impl GraphArData {
+    /// **Record the cell pyramids the layout pass wrote.**
+    ///
+    /// The seam the phase order needs: the pass is what measures a rung's
+    /// quotient, and [`Self::manifests`] is what states it. Replaces rather than
+    /// appends, for [`fossil_sinks::manifest::VertexInfo::with_coordinates`]'s
+    /// reason — the list **is** the declaration.
+    pub fn declare_pyramids(&mut self, pyramids: Vec<(String, fossil_sinks::manifest::HolonTree)>) {
+        self.pyramids = pyramids;
+    }
+
     /// What this value costs in Arrow buffers, in `GiB` — every vertex batch plus
     /// both orientations of every edge table. Cheap (a walk of the batch list, no
     /// data touched) and the number the peak-memory work is about: the whole corpus
@@ -1879,7 +1902,19 @@ impl GraphArData {
                     .iter()
                     .find(|v| v.label == node.label)
                     .map_or(0, |v| count_rows(&v.batches));
-                vertex_info(node, rows)
+                let mut info = vertex_info(node, rows);
+                // **The pyramid the pass measured**, attached here because this
+                // is where a `VertexInfo` is assembled and because the tree is
+                // the one part of the document the writer cannot plan: a rung's
+                // cell count is `ceil(rows / 4^k)` and its quotient edge count
+                // is a measurement. A type the pass wrote none for declares
+                // none, which is weaker than declaring an empty one.
+                if let Some((_, tree)) =
+                    self.pyramids.iter().find(|(label, _)| *label == node.label)
+                {
+                    info = info.with_holons(tree.clone());
+                }
+                info
             })
             .collect();
         let edges = self

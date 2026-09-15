@@ -119,6 +119,10 @@ fn main() {
         batches: &vertices,
         chunk_prefix: chunk_prefix.clone(),
         chunk_size: 4_096,
+        // The pyramid is part of what the pass costs, so the instrument that
+        // measures the pass writes one. It is also what the budget's missing
+        // pyramid term will be fitted on — see `tests/common/mod.rs`.
+        vertices_per_cell: Some(fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL),
     };
     let adjacencies = [
         ("by_source", Endpoint::Src, &by_source),

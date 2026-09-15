@@ -31,7 +31,7 @@ coordinates:
   derived_by: louvain+phyllotaxis
 holons:
   prefix: holon/
-  chunk_size: 4096
+  vertices_per_cell: 16
   relations:
   - knows
   coordinates:
@@ -39,12 +39,12 @@ holons:
     x: x
     y: y
     provenance: derived
-    derived_by: louvain-cut+member-centroid
+    derived_by: cell-member-centroid
   rungs:
   - path: r1/
-    holon_count: 1744
+    holon_count: 625
     properties:
-    - name: holon_id
+    - name: cell_id
       data_type: uint32
       is_primary: false
       is_nullable: false
@@ -59,18 +59,23 @@ holons:
       is_primary: false
       is_nullable: false
       cardinality: single
-    - name: member_count
+    - name: count
       data_type: uint32
       is_primary: false
       is_nullable: false
       cardinality: single
-    - name: parent
+    - name: internal
+      data_type: uint64
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: mode
       data_type: uint32
       is_primary: false
       is_nullable: false
       cardinality: single
-    - name: internal_weight
-      data_type: int64
+    - name: purity
+      data_type: float
       is_primary: false
       is_nullable: false
       cardinality: single
@@ -78,25 +83,25 @@ holons:
       path: quotient/
       edge_count: 5012
       properties:
-      - name: src_holon
+      - name: src_cell
         data_type: uint32
         is_primary: false
         is_nullable: false
         cardinality: single
-      - name: dst_holon
+      - name: dst_cell
         data_type: uint32
         is_primary: false
         is_nullable: false
         cardinality: single
       - name: weight
-        data_type: int64
+        data_type: uint64
         is_primary: false
         is_nullable: false
         cardinality: single
   - path: r2/
-    holon_count: 301
+    holon_count: 157
     properties:
-    - name: holon_id
+    - name: cell_id
       data_type: uint32
       is_primary: false
       is_nullable: false
@@ -111,18 +116,23 @@ holons:
       is_primary: false
       is_nullable: false
       cardinality: single
-    - name: member_count
+    - name: count
       data_type: uint32
       is_primary: false
       is_nullable: false
       cardinality: single
-    - name: parent
+    - name: internal
+      data_type: uint64
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: mode
       data_type: uint32
       is_primary: false
       is_nullable: false
       cardinality: single
-    - name: internal_weight
-      data_type: int64
+    - name: purity
+      data_type: float
       is_primary: false
       is_nullable: false
       cardinality: single

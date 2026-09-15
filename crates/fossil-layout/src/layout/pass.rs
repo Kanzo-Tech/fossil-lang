@@ -6,6 +6,7 @@
 //! [`super::community`], [`super::place`] and [`super::morton`] are the halves
 //! that do not, which is what lets them be unit-tested without a filesystem.
 
+use super::cells::{Edges, Pyramid};
 use super::community::{
     Csr, CsrBuilder, Weighted, flatten_to_budget, hierarchy, order_by_hierarchy,
 };
@@ -25,7 +26,7 @@ use fossil_df::files::TileWriter;
 use fossil_mem_probe::Probe;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
-use fossil_sinks::manifest::{TILES_FILE, VertexLevels};
+use fossil_sinks::manifest::{HOLON_PREFIX, HolonTree, TILES_FILE, VertexLevels};
 
 /// `row_of_dense[d]` when no row of the vertex file carries `dense_id` `d`.
 ///
@@ -92,6 +93,20 @@ pub struct VertexLayoutTarget<'a> {
     /// still *emits* correctly and quietly costs every reader that arithmetic,
     /// which is why it is an error here rather than a rounding.
     pub chunk_size: u64,
+    /// **The base of this type's pyramid, in vertices per cell**, or `None` to
+    /// write none.
+    ///
+    /// Declared per vertex type, which is the shape the manifest block already
+    /// has — it hangs off a type beside `index:` and `coordinates:`. The
+    /// alternative is a constant of the format, and the measurements say the
+    /// right base is data-dependent: `/docs/design/holons` ends on that
+    /// question, and what would settle it is a second corpus of a different
+    /// shape measured the same way.
+    ///
+    /// [`fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL`] is what a host
+    /// passes when nothing tells it otherwise, and the screen is what picked
+    /// that number.
+    pub vertices_per_cell: Option<u64>,
 }
 
 /// Which endpoint column an adjacency list is sorted by — `GraphAr`'s
@@ -191,6 +206,26 @@ impl AdjacencyTarget<'_> {
         };
         format!("{}[{orientation}]", self.relation())
     }
+}
+
+/// **What the pass measured, in the terms the manifest states it in.**
+///
+/// The pass returns this rather than `()` because the manifest is emitted after
+/// it, and one field of the document is a measurement rather than a plan: how
+/// many edges survive as a quotient at a rung. Everything else a manifest says
+/// about the pyramid is `ceil(vertex_count / 4^k)` and could have been written
+/// in front of the bytes.
+#[derive(Debug, Default)]
+pub struct LayoutReport {
+    /// One entry per vertex type that earned a pyramid, keyed by
+    /// [`VertexLayoutTarget::type_name`] — the argument to
+    /// `VertexInfo::with_holons`.
+    ///
+    /// A type with no pyramid is **absent** rather than present and empty, which
+    /// is the difference between a manifest that declares no tree and one that
+    /// declares an empty one. The first is what a corpus written before the
+    /// block existed reads as.
+    pub pyramids: Vec<(String, HolonTree)>,
 }
 
 /// Failure modes of [`enrich_layout`].
@@ -657,7 +692,7 @@ pub const fn estimated_peak_bytes(
 pub fn enrich_layout(
     targets: &[VertexLayoutTarget<'_>],
     adjacencies: &[AdjacencyTarget<'_>],
-) -> Result<(), LayoutError> {
+) -> Result<LayoutReport, LayoutError> {
     enrich_layout_with(&LocalFs, targets, adjacencies)
 }
 
@@ -689,7 +724,7 @@ pub fn enrich_layout_within(
     targets: &[VertexLayoutTarget<'_>],
     adjacencies: &[AdjacencyTarget<'_>],
     memory_bytes: Option<u64>,
-) -> Result<(), LayoutError> {
+) -> Result<LayoutReport, LayoutError> {
     if let Some(declared) = memory_bytes {
         let mut vertex_count = 0u64;
         let mut vertex_payload_bytes = 0u64;
@@ -757,7 +792,7 @@ pub fn enrich_layout_with(
     io: &dyn LayoutIo,
     targets: &[VertexLayoutTarget<'_>],
     adjacencies: &[AdjacencyTarget<'_>],
-) -> Result<(), LayoutError> {
+) -> Result<LayoutReport, LayoutError> {
     // Where the next vertex type's grid starts, so the types do not stack. Each
     // is laid out independently and `cluster_layout` always begins at the
     // origin, so without this every type occupies the same coordinates and a
@@ -789,6 +824,22 @@ pub fn enrich_layout_with(
     // writer. Two `f32` per vertex: 8 MB at a million, against the batches this
     // pass already holds.
     let mut placed: Vec<Vec<(f32, f32)>> = vec![Vec::new(); targets.len()];
+
+    // The pyramid per vertex type, index-aligned with `targets`, and `None` for
+    // a type that earns none — one no bigger than a single cell, or one whose
+    // caller declared no base.
+    //
+    // It is built here and finished in the adjacency phase for the reason its
+    // columns divide: a cell's count, position and categorical summary are
+    // functions of the ROWS, and its internal weight and its quotient are
+    // functions of the EDGES, which do not exist renumbered until the second
+    // loop has read them.
+    let mut pyramids: Vec<Option<Pyramid>> = (0..targets.len()).map(|_| None).collect();
+
+    // Each type's vertex count, which the pyramid's declaration needs after the
+    // loop that computed it. `max + 1` over the ids and not the row count — the
+    // same number the levels are planned from.
+    let mut counts: Vec<u64> = vec![0; targets.len()];
 
     for (index, target) in targets.iter().enumerate() {
         // What names this type in an error and in the memory report. It was the
@@ -1098,6 +1149,25 @@ pub fn enrich_layout_with(
         }
         placed[index] = by_address;
 
+        // The rows half of the pyramid, off the four arrays that are still in
+        // hand — one linear pass per rung, and the cells it allocates are 4/3 of
+        // the base. `None` where the type is no bigger than one cell: there is
+        // nothing to summarise when the whole type is the summary.
+        counts[index] = u64::from(vertex_count);
+        if let Some(per_cell) = target.vertices_per_cell {
+            pyramids[index] = Pyramid::summarise(
+                u64::from(vertex_count),
+                per_cell,
+                &new_dense,
+                &xs,
+                &ys,
+                &cluster_ids,
+            );
+            if pyramids[index].is_some() {
+                probe.mark("summarise cells");
+            }
+        }
+
         maps[index] = new_ids;
     }
 
@@ -1256,9 +1326,51 @@ pub fn enrich_layout_with(
         }
     }
     probe.mark("remap adjacencies + write edge tiles");
+
+    // **The pyramid, last**, because its internal weight and its quotient are
+    // functions of the edges the loop above has only just remapped. Each tree
+    // comes back declared — see `Pyramid::write` for why the writer is what
+    // states it rather than a plan written in front of the bytes.
+    let mut report = LayoutReport::default();
+    for (index, target) in targets.iter().enumerate() {
+        let Some(pyramid) = pyramids[index].as_mut() else {
+            continue;
+        };
+        // **The self-relations, source-ordered**, which is what a cell's
+        // internal weight and a rung's quotient are computed over. A
+        // self-relation because a cell is an interval of ONE type's `dense_id`
+        // space and a cross-type edge has its two ends in two numberings with
+        // no cell holding both; source-ordered because the two orientations are
+        // one relation stored twice.
+        //
+        // Handed as the caller's own batches plus this type's mapping, so the
+        // pyramid remaps them itself, one rung at a time. Holding the remapped
+        // relation instead would be a `Vec<u64>` per relation alive across
+        // every rung — see `Pyramid::write`.
+        let edges: Vec<Edges<'_>> = adjacencies
+            .iter()
+            .filter(|a| {
+                a.ordered_by == Endpoint::Src
+                    && a.src_type == target.type_name
+                    && a.dst_type == target.type_name
+            })
+            .map(|a| Edges {
+                label: a.label.as_str(),
+                batches: a.batches,
+                map: &maps[index],
+            })
+            .collect();
+
+        let prefix = format!("{}{HOLON_PREFIX}", target.chunk_prefix);
+        io.ensure_prefix(&prefix)?;
+        let tree = pyramid.write(io, &prefix, target.chunk_size, counts[index], &edges)?;
+        report.pyramids.push((target.type_name.clone(), tree));
+        probe.mark(&format!("write cells — {}", target.type_name));
+    }
+
     probe.finish();
 
-    Ok(())
+    Ok(report)
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -2023,6 +2135,9 @@ mod tests {
             batches: &empty,
             chunk_prefix: "vertex/Nobody/".to_string(),
             chunk_size: 4_096,
+            // A base, so that the absence of a pyramid below is the type having
+            // no rows rather than the caller having declared none.
+            vertices_per_cell: Some(fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL),
         }];
 
         enrich_layout_with(&fs, &targets, &[]).expect("a type with no rows is not an error");

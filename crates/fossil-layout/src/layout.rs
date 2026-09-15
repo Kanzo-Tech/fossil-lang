@@ -53,6 +53,7 @@
     clippy::option_if_let_else
 )]
 
+pub mod cells;
 pub mod community;
 pub mod morton;
 pub mod pass;
@@ -60,7 +61,7 @@ pub mod place;
 
 pub use community::{community_hierarchy, weakly_connected_components};
 pub use pass::{
-    AdjacencyTarget, Endpoint, LayoutError, VertexLayoutTarget, enrich_layout, enrich_layout_with,
-    enrich_layout_within, estimated_peak_bytes,
+    AdjacencyTarget, Endpoint, LayoutError, LayoutReport, VertexLayoutTarget, enrich_layout,
+    enrich_layout_with, enrich_layout_within, estimated_peak_bytes,
 };
 pub use place::cluster_layout;

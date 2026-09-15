@@ -33,6 +33,23 @@
    nowhere for a set to be named. A `role` is what tells them apart now, and each
    reader names the roles it means.
 
+   # The `type` is the spelling the MANIFEST writes
+
+   Not Arrow's and not Rust's. `crates/fossil-sinks/src/manifest.rs, data_type_name`
+   is the mapping from an Arrow type to it, and a `properties:` entry carries
+   whatever that returns — so a column declared here with a different spelling
+   for the same type would put two names for one thing in one document, which is
+   the defect this file exists to remove.
+
+   That was live and cost nothing to find: `x` and `y` read `float32` here while
+   the manifest wrote `float` for the same column, and it stayed invisible for as
+   long as nothing read this field. A cell row's columns go into a manifest, so it
+   is read now.
+
+   `uint32` and `uint64` are fossil's own, and the format says so: GraphAr defines
+   no unsigned type and its reference reader throws on `dense_id`. See the header
+   of `crates/fossil-sinks/src/manifest.rs`.
+
    # What is data and what is not
 
    Same split as `catalogue.bnf`. The NAME, the TYPE and the ROLE are data and
@@ -98,8 +115,8 @@
 
 col dense_id   = in payload ; type uint32  ; role address .
 col subject    = in payload ; type string  ; role identity    ; declared .
-col x          = in payload ; type float32 ; role coordinate .
-col y          = in payload ; type float32 ; role coordinate .
+col x          = in payload ; type float   ; role coordinate .
+col y          = in payload ; type float   ; role coordinate .
 col cluster_id = in payload ; type uint32  ; role categorical .
 
 (* ----------------------------------------------------------- the adjacency *)
@@ -129,12 +146,12 @@ col dst_dense = in adjacency ; type uint32 ; role endpoint ; aligns dst .
    camera ask which artefact it is holding. *)
 
 col cell_id  = in cell ; type uint32  ; role address .
-col x        = in cell ; type float32 ; role coordinate .
-col y        = in cell ; type float32 ; role coordinate .
+col x        = in cell ; type float   ; role coordinate .
+col y        = in cell ; type float   ; role coordinate .
 col count    = in cell ; type uint32  ; role tally .
 col internal = in cell ; type uint64  ; role weight .
 col mode     = in cell ; type uint32  ; role mode .
-col purity   = in cell ; type float32 ; role purity .
+col purity   = in cell ; type float   ; role purity .
 
 (* ------------------------------------------------------------- the quotient *)
 (* The edges between one rung's cells, beside that rung's rows. A separate

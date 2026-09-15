@@ -5,9 +5,11 @@
 //! field-name guard assertions in `fossil_sinks::manifest` unit tests complement these.
 
 use arrow_schema::DataType;
+use fossil_sinks::generated::{CELL_COLUMNS, QUOTIENT_COLUMNS};
 use fossil_sinks::manifest::{
-    Cardinality, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, HolonRung,
-    HolonTree, Projection, Property, Provenance, VertexInfo, data_type_name,
+    Cardinality, CoordinateSystem, DEFAULT_CHUNK_SIZE, DEFAULT_VERTICES_PER_CELL, EdgeInfo,
+    GRAPHAR_VERSION, HolonRung, HolonTree, Projection, Property, Provenance, VertexInfo,
+    data_type_name, declared_properties,
 };
 
 fn person_vertex() -> VertexInfo {
@@ -54,61 +56,45 @@ fn person_vertex() -> VertexInfo {
 /// emitted in, which is what the snapshot beside this is a lock on. The line
 /// scanners over this document read a nested mapping one level deep and skip
 /// what is deeper, so the rungs have to nest where they nest and nowhere else.
+///
+/// **`new` and not `planned`**, because what this locks is the document's
+/// spelling and not the arithmetic. A planned tree runs every rung down to one
+/// cell, which would make the snapshot a table of `div_ceil` rather than a
+/// picture of the block, and it publishes no quotient — where this fixture
+/// deliberately carries both shapes, one rung with and one without.
+/// `HolonTree::planned`'s own unit tests are where the counts are checked.
 fn holon_tree() -> HolonTree {
     HolonTree::new(
-        DEFAULT_CHUNK_SIZE,
+        DEFAULT_VERTICES_PER_CELL,
         vec!["knows".to_string()],
         vec![
-            HolonRung::at(1, 1_744, holon_columns()).with_quotient(5_012, quotient_columns()),
-            HolonRung::at(2, 301, holon_columns()),
+            HolonRung::at(1, 625, cell_columns()).with_quotient(5_012, quotient_columns()),
+            HolonRung::at(2, 157, cell_columns()),
         ],
     )
     .with_coordinates(vec![CoordinateSystem::derived(
         "holon",
         "x",
         "y",
-        "louvain-cut+member-centroid",
+        "cell-member-centroid",
     )])
 }
 
-/// A group, its position, its member count, its parent — and the internal
-/// weight the edges between its own children were absorbed into. The names are
-/// this fixture's; the model reserves none.
-fn holon_columns() -> Vec<Property> {
-    [
-        "holon_id",
-        "x",
-        "y",
-        "member_count",
-        "parent",
-        "internal_weight",
-    ]
-    .into_iter()
-    .zip(["uint32", "float", "float", "uint32", "uint32", "int64"])
-    .map(|(name, data_type)| Property {
-        name: name.to_string(),
-        data_type: data_type.to_string(),
-        is_primary: false,
-        is_nullable: Some(false),
-        cardinality: Some(Cardinality::Single),
-    })
-    .collect()
+/// The columns of a cell row, **off the generated table** rather than spelled
+/// here.
+///
+/// This fixture used to name them itself, under a comment saying the model
+/// reserved no spelling for any of them — which was true, and stopped being
+/// true when `corpus.bnf` grew the set. A snapshot that locked a spelling
+/// nothing writes would lock the wrong document.
+fn cell_columns() -> Vec<Property> {
+    declared_properties(CELL_COLUMNS)
 }
 
-/// The pair and its weight — a different arity from a holon row, which is the
+/// The pair and its weight — a different arity from a cell row, which is the
 /// whole reason it is a different artefact.
 fn quotient_columns() -> Vec<Property> {
-    ["src_holon", "dst_holon", "weight"]
-        .into_iter()
-        .zip(["uint32", "uint32", "int64"])
-        .map(|(name, data_type)| Property {
-            name: name.to_string(),
-            data_type: data_type.to_string(),
-            is_primary: false,
-            is_nullable: Some(false),
-            cardinality: Some(Cardinality::Single),
-        })
-        .collect()
+    declared_properties(QUOTIENT_COLUMNS)
 }
 
 fn knows_edge() -> EdgeInfo {

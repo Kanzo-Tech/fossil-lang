@@ -62,13 +62,13 @@ pub const PAYLOAD_COLUMNS: &[WriterColumn] = &[
     },
     WriterColumn {
         name: "x",
-        data_type: "float32",
+        data_type: "float",
         role: ColumnRole::Coordinate,
         declared: false,
     },
     WriterColumn {
         name: "y",
-        data_type: "float32",
+        data_type: "float",
         role: ColumnRole::Coordinate,
         declared: false,
     },
@@ -127,13 +127,13 @@ pub const CELL_COLUMNS: &[WriterColumn] = &[
     },
     WriterColumn {
         name: "x",
-        data_type: "float32",
+        data_type: "float",
         role: ColumnRole::Coordinate,
         declared: false,
     },
     WriterColumn {
         name: "y",
-        data_type: "float32",
+        data_type: "float",
         role: ColumnRole::Coordinate,
         declared: false,
     },
@@ -157,7 +157,7 @@ pub const CELL_COLUMNS: &[WriterColumn] = &[
     },
     WriterColumn {
         name: "purity",
-        data_type: "float32",
+        data_type: "float",
         role: ColumnRole::Purity,
         declared: false,
     },

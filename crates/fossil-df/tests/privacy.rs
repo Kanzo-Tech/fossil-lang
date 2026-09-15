@@ -69,6 +69,9 @@ fn corpus(props: &[&str], rows: &[Vec<Option<&str>>], batches: usize) -> GraphAr
     }
 
     GraphArData {
+        // No pyramid: these fixtures are about the privacy bound, and a tree is
+        // the layout pass's to write.
+        pyramids: Vec::new(),
         // Undeclared until measured, which is what `verify` returns rather than
         // mutates: the value it is handed is one no bound has touched.
         privacy: Privacy::Undeclared,

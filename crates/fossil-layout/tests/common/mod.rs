@@ -150,6 +150,23 @@ pub(crate) struct Fixture {
     /// Rows per tile, which `levels.rs` turns down so that four thousand rows
     /// span a five-level pyramid instead of four million.
     pub(crate) chunk_size: u64,
+    /// The base of the cell pyramid, and **`None` by default**.
+    ///
+    /// The budget suites measure the pass against `estimated_peak_bytes`, and
+    /// that estimate has no term for a pyramid: its three linear terms and its
+    /// floor were fitted on a pass that wrote none. A fixture that switched one
+    /// on would be measuring an extrapolation rather than the bound, which is
+    /// the same reason `budget_bound.rs` fixes the mean degree at the one every
+    /// calibration point was taken at.
+    ///
+    /// **So the term is owed**, and what it needs is the same instrument the
+    /// others had: `examples/enrich_memory` with a base declared, at the five
+    /// calibration sizes. The cells themselves are `4/3` of the base and derive
+    /// cheaply; the transient `Vec<u64>` the quotient sorts is one per rung and
+    /// is not live beside the remap's, which is the argument
+    /// `ADJACENCY_ROW_BYTES` already makes about which of two terms a peak
+    /// holds. Neither is measured, so neither is in the estimate.
+    pub(crate) vertices_per_cell: Option<u64>,
     vertices: Vec<RecordBatch>,
     by_source: Vec<RecordBatch>,
     by_target: Vec<RecordBatch>,
@@ -163,6 +180,7 @@ impl Fixture {
             batches: &self.vertices,
             chunk_prefix: prefix(&self.root.join("chunks")),
             chunk_size: self.chunk_size,
+            vertices_per_cell: self.vertices_per_cell,
         }]
     }
 
@@ -191,6 +209,7 @@ pub(crate) fn fixture(root: PathBuf, rows: u32, mean_degree: u32) -> Fixture {
     let edges = planted(rows, mean_degree);
     Fixture {
         chunk_size: 4_096,
+        vertices_per_cell: None,
         vertices: vertices(rows),
         by_source: adjacency(&edges, Endpoint::Src),
         by_target: adjacency(&edges, Endpoint::Dst),

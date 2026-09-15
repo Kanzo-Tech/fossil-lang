@@ -45,8 +45,8 @@ export interface WriterColumn {
 export const PAYLOAD_COLUMNS: readonly WriterColumn[] = [
   { name: 'dense_id', dataType: 'uint32', role: 'address', declared: false },
   { name: 'subject', dataType: 'string', role: 'identity', declared: true },
-  { name: 'x', dataType: 'float32', role: 'coordinate', declared: false },
-  { name: 'y', dataType: 'float32', role: 'coordinate', declared: false },
+  { name: 'x', dataType: 'float', role: 'coordinate', declared: false },
+  { name: 'y', dataType: 'float', role: 'coordinate', declared: false },
   { name: 'cluster_id', dataType: 'uint32', role: 'categorical', declared: false },
 ];
 
@@ -80,12 +80,12 @@ export const ADJACENCY_ENDPOINTS: readonly string[] = ['src_dense', 'dst_dense']
 /** Every column of a cell row of one rung of the pyramid, in writer order. */
 export const CELL_COLUMNS: readonly WriterColumn[] = [
   { name: 'cell_id', dataType: 'uint32', role: 'address', declared: false },
-  { name: 'x', dataType: 'float32', role: 'coordinate', declared: false },
-  { name: 'y', dataType: 'float32', role: 'coordinate', declared: false },
+  { name: 'x', dataType: 'float', role: 'coordinate', declared: false },
+  { name: 'y', dataType: 'float', role: 'coordinate', declared: false },
   { name: 'count', dataType: 'uint32', role: 'tally', declared: false },
   { name: 'internal', dataType: 'uint64', role: 'weight', declared: false },
   { name: 'mode', dataType: 'uint32', role: 'mode', declared: false },
-  { name: 'purity', dataType: 'float32', role: 'purity', declared: false },
+  { name: 'purity', dataType: 'float', role: 'purity', declared: false },
 ];
 
 /** The names of a cell row of one rung of the pyramid, in writer order. */

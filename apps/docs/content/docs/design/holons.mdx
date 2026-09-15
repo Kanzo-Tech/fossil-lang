@@ -253,11 +253,30 @@ down. So `holon_count` per rung is derivable from one declared number, exactly a
 `crates/fossil-sinks/src/manifest.rs, rows_at` derives a level's rows from `vertex_count` and
 `crates/fossil-sinks/src/manifest.rs, planned` plans the whole pyramid before a byte is written.
 
-**This dissolves the obstacle this page used to name.** The block was declarable and unfillable —
-*nothing writes one yet* — because a rung's count was something only a completed pass could report.
-It is not: a manifest can declare the entire tree in front of the pass, which is the order
-`index:` and the pyramid were both declared in, and a guard is what goes red when the pass does not
-deliver it.
+**This dissolved the obstacle this page used to name, and the tree is written.** The block was
+declarable and unfillable — *nothing writes one yet* — because a rung's count was something only a
+completed pass could report. It is not:
+`crates/fossil-sinks/src/manifest.rs, holons_at` is `ceil(vertex_count / 4^k)`, so the entire tree
+is arithmetic from one declared number.
+
+What writes it is `crates/fossil-layout/src/layout/cells.rs, Pyramid`, and the base is declared **per
+vertex type** — `crates/fossil-sinks/src/manifest.rs, DEFAULT_VERTICES_PER_CELL` is sixteen, the
+power of four nearest the twenty a megapixel of marks asks for, and the whole pyramid then costs 8.3%
+of the type. Per type rather than globally because that is the shape the block has; the question
+below is still open and what would settle it is unchanged.
+
+<Callout title="One field of it is a measurement, and that decided the phase order">
+A rung's cell count can be stated in front of the bytes. **Its quotient edge count cannot** — how
+many edges survive as a quotient at a rung is measured, not planned — and a document written first
+either omits it or guesses.
+
+So the manifest is emitted **last**, over a payload that exists: `fossil_df::materialise` returns a
+value and writes nothing, the layout pass writes the corpus, and
+`crates/fossil-df/src/lib.rs, declare_pyramids` carries what the pass measured into the document.
+That retires *the manifest is the plan and the pass is what fills it* for this block only, and the
+distinction it rested on survives: a count that is arithmetic is **described** whenever it is
+written, and only a measured one has an order.
+</Callout>
 
 ## Three properties, in this order
 
@@ -290,6 +309,12 @@ What it still does not have is a test that keeps *the pass* holding.
 **holon rows** reproducible, which is a narrower claim one artefact along: the rows come out of
 `Dendrogram` in memory, and the measurement above was of `enrich_layout` writing Parquet across two
 processes. The bytes are the thing nothing guards, and that is this direction's first debt.
+
+`crates/fossil-layout/tests/cells.rs` narrows it without closing it: it evaluates every obligation
+against the written rungs, so a *wrong* summary is caught — what is not caught is the same corpus
+summarising differently in two processes. Everything the writer does is a sorted walk of arrays, and
+the tie-break in the mode is explicit for exactly this reason, so the property is expected to hold;
+expected is not measured.
 
 ### 2 · The branching factor is declared, not inherited
 

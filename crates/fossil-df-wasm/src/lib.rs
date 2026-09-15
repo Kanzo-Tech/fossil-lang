@@ -185,7 +185,7 @@ pub async fn execute_core(
     // The executor resolves each `@conn` source alias through `connections`
     // (same name→URL map the browser used in `sources()`), so the registered
     // object-store / RDF tables line up with what the plan reads.
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor, connections)
+    let mut graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor, connections)
         .await
         .map_err(|e| format!("execute_graph: {e}"))?;
 
@@ -194,7 +194,8 @@ pub async fn execute_core(
     // can only promise them. `enrich_layout_in_memory` hands back the filesystem
     // it wrote into, and the manifests go in on top.
     let report = RunReport::of(dest, &graph);
-    let fs = enrich_layout_in_memory(&graph)?;
+    let (fs, pyramids) = enrich_layout_in_memory(&graph)?;
+    graph.declare_pyramids(pyramids);
     for file in graph.manifest_files().map_err(|e| format!("encode: {e}"))? {
         fs.insert(file.rel_path, file.bytes);
     }
@@ -234,7 +235,9 @@ pub async fn execute_core(
 /// Arrow, the staged Parquet this function inserted into the map, and the copy
 /// the pass decoded back out of it. Two of the three were there so that a pass
 /// in the same process could read what the same process had just encoded.
-fn enrich_layout_in_memory(graph: &fossil_df::GraphArData) -> Result<MemoryFs, String> {
+fn enrich_layout_in_memory(
+    graph: &fossil_df::GraphArData,
+) -> Result<(MemoryFs, Vec<(String, fossil_sinks::manifest::HolonTree)>), String> {
     use fossil_layout::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget};
 
     // No `dest` prefix: the native host joins one because it writes into a
@@ -258,6 +261,10 @@ fn enrich_layout_in_memory(graph: &fossil_df::GraphArData) -> Result<MemoryFs, S
             // The same constant the manifest is written with, so the files and
             // the promise cannot drift apart.
             chunk_size: fossil_sinks::manifest::DEFAULT_CHUNK_SIZE,
+            // The same base the native host declares. **What the tab writes has
+            // to be what `fossil run` writes**, and a pyramid the browser
+            // skipped would be a corpus the two paths disagree about.
+            vertices_per_cell: Some(fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL),
         })
         .collect();
 
@@ -285,10 +292,10 @@ fn enrich_layout_in_memory(graph: &fossil_df::GraphArData) -> Result<MemoryFs, S
         })
         .collect();
 
-    fossil_layout::layout::enrich_layout_with(&fs, &targets, &adjacencies)
+    let report = fossil_layout::layout::enrich_layout_with(&fs, &targets, &adjacencies)
         .map_err(|e| format!("layout: {e}"))?;
 
-    Ok(fs)
+    Ok((fs, report.pyramids))
 }
 
 /// Enumerate the program's sources as `(uri, row-name)` — the target-agnostic
