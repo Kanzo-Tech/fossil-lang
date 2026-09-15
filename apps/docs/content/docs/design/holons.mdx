@@ -1,8 +1,8 @@
 ---
 title: Holons
-description: The second reader — a tree of aggregates for the corpus that does not fit on the GPU; why a holon is a summary row rather than an entity, why it is a third artefact rather than a level, and the three properties that separate a holarchy from a dump of whatever Louvain emitted.
+description: The second reader — a mipmap over the corpus that does not fit on the GPU; why a holon is a texel and not a community, why the partition is arbitrary while the aggregation is exact, why the base of the pyramid has to be declared because no writer can derive it, and the three properties that separate a holarchy from a dump of whatever Louvain emitted.
 direction:
-  summary: A corpus too large to draw carries a tree of summary rows whose branching factor is declared rather than inherited, every aggregate verifiable against the level below by symmetric difference, and only the position declared rather than derived.
+  summary: A corpus too large to draw carries a mipmap of summary rows on the same quaternary addressing its tiles already use, with the base of the pyramid declared rather than derived, every aggregate verifiable against the level below by symmetric difference, and only the position declared rather than derived.
 ---
 
 There are two ways to read a graph you cannot see all of, and the decision here is to build both and
@@ -11,7 +11,7 @@ There are two ways to read a graph you cannot see all of, and the decision here 
 | | what it is | when |
 | --- | --- | --- |
 | **cosmos.gl** | the whole graph on the GPU, pan and zoom freely | it fits |
-| **holons** | a tree of aggregates, you descend and ascend | it does not |
+| **holons** | a mipmap of aggregates, you descend and ascend | it does not |
 
 A mode that switches between the two as the camera zooms was built far enough to be rejected, and
 [what was discarded](/docs/design/discarded) carries why. The short form: the zoom level at which
@@ -20,17 +20,82 @@ the reader is most lost is the one where the interaction changes under them.
 The corpus serves both without knowing about either — cosmos.gl reads the payload,
 a holon reader reads the tree. This page is the second one.
 
-## A holon is a summary row, not an entity
+## The partition is arbitrary. The aggregation is exact.
+
+That sentence governs everything below, and it is narrower than the one this page used to make.
+
+**A reader may not conclude *these vertices belong together*.** Whatever put two vertices in the same
+holon — a community detection run, a grid, a sort — is a choice made by a writer, and nothing in the
+corpus certifies it as structure in the world.
+
+**A reader may conclude *this region holds exactly N vertices and M edges leave it*.** That is an
+arithmetic fact about the rows below, it is falsifiable against them, and it is the only thing a
+holon is allowed to assert.
+
+The weaker promise is what makes the three obligations further down **necessary rather than
+optional**. If the grouping carried meaning, a reader could take the writer's word for the counts as
+well; because it carries none, the counts are the entire content of a rung, and a rung whose counts
+do not reconcile against the level below is not a coarser view of anything.
+`crates/fossil-layout/tests/holons.rs` does not change a line for this page's change of mind, and
+that is the test: what it checks is the aggregation, which is the half that was never arbitrary.
+
+## A holon is a texel, and the corpus is already a mipmap
+
+The format did not have to be argued into this shape. It is in it.
+
+`crates/fossil-sinks/src/manifest.rs, TILE_SHIFT` is 12, and 4,096 is 4⁶.
+`crates/fossil-sinks/src/manifest.rs, STRIDE_BITS` is 2, so
+`crates/fossil-sinks/src/manifest.rs, stride` is `4^k` and a level's address is the payload's shift
+plus `2k`. And `dense_id` is not a name a writer chose: it is a vertex's **rank in the Morton order
+of its own position**, which is what `crates/fossil-layout/src/layout/morton.rs, morton_ranks`
+computes and what
+[the order that makes an interval mean something](/docs/format/conventions/addressing#the-order-that-makes-an-interval-mean-something)
+specifies. `crates/fossil-sinks/src/manifest.rs, tile_of` states the consequence in its own doc:
+
+> tile `i` **is** the range `[i·4096, (i+1)·4096)`, its parent is a further shift, and the lowest
+> common ancestor of two vertices is the common prefix of their ids.
+
+So **a cell at any depth is a contiguous interval of `dense_id`** — exactly, not approximately, and
+without a tree on disk to walk. That is a mipmap's addressing, arrived at for a transport reason and
+then true for a rendering one.
+
+What the analogy then demands is a distinction the page did not have a word for:
+
+| | what it holds | what is equal across it | who reads it |
+| --- | --- | --- | --- |
+| **texel** | a summary of a region | **area** | the camera — one mark per texel |
+| **tile** | the rows themselves | **count** | the transport — one range request per tile |
+
+Both are intervals of the same `dense_id` axis, and **neither nests inside the other**: a tile
+boundary falls at every 4,096th vertex, wherever the population puts that on the plane, and a cell
+boundary falls where the grid puts it, holding however many vertices are there. A reader that
+conflates them gets a mark whose size means nothing.
+
+And the pyramid is already the other half of a mipmap. A level in
+`crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex whose `dense_id` is a multiple of
+`4^k` — one **representative** per block. A rung is the **aggregate** of the same block. Same
+address, two answers to two questions, which is why one cannot be spelled as the other.
+
+## A holon is not an entity, and no reader is in a position to ask
 
 The attractive version of this gives each community a type and an IRI — `Person@l1`, addressable,
-shaped, a first-class subject. It is rejected, and the reason is identity rather than cost.
+shaped, a first-class subject. It is rejected, and the page used to reject it on identity: a
+community does not exist in the source, hashing the member set changes the moment one author joins,
+a counter is not stable across reorderings, and every reference dangles.
 
-**A community does not exist in the source.** It is what a partitioning algorithm returned on one
-run over one graph. Minting an IRI for it fabricates identity for something derived: the obvious
-scheme — hash the member set — changes the moment one author joins, so the "same" community is a
-different subject after an incremental write, and every reference to it dangles. The alternative
-schemes are worse in the ordinary way (a counter is not stable across reorderings) rather than in
-an interesting one.
+That argument still holds, and under *the partition is arbitrary* it no longer has to be made.
+**Nothing but the camera reads the tree.** `crates/fossil-graph/src/operations/mod.rs, Verb` is the
+six-verb surface, and none of them descends a rung: `read`, `expand` and `path` return **vertices**,
+because a holon is not one, and a verb that returned a holon would be answering a question about the
+plane in a language about the graph. That is the split the door already draws between its addressed
+half and its queried half — the camera computes addresses and asks for bytes, the verbs run SQL —
+and `crates/fossil-graph/src/lib.rs` states it as *no verb draws; the camera is addressed, not
+queried*. [One door](/docs/design/one-door) is where the seam itself is argued.
+
+So the question *is a holon an entity?* disappears without being answered, which is where the
+identity argument in [what was discarded](/docs/design/discarded) ran aground: it had to say what a
+holon **is**, and there was no answer that survived an incremental write. Saying who reads it costs
+nothing and settles the same thing.
 
 What survives is the small version, and it is enough: **a row** carrying a group, its position, how
 many members it has, and its parent. No IRI, no shape, no new vertex type, nothing that pretends to
@@ -59,29 +124,46 @@ A level in `crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex w
 multiple of `4^k`. Every row is a real vertex at the position the payload gives it; nothing is
 synthesised. A holon is a synthetic row by construction. Putting one in a `Projection` would make
 `scale:` mean two different things in the same document, which is exactly the failure the
-one-contract rule exists to prevent.
+one-contract rule exists to prevent. **Being a texel over the same cells does not soften that** — it
+sharpens it, because now the two blocks would share an address and disagree about what a row is.
 
 So: its own block, its own prefix, its own name. It is
 `crates/fossil-sinks/src/manifest.rs, HolonTree`, and it hangs off a vertex type beside `index:` and
 `coordinates:` rather than inside `projections:`. A type declares one with
-`crates/fossil-sinks/src/manifest.rs, with_holons`, and **nothing writes one yet**, which is the
-same order the index and the pyramid were declared in: the manifest is the plan, the pass is what
-fills it.
+`crates/fossil-sinks/src/manifest.rs, with_holons`.
 
 | the block declares | because |
 | --- | --- |
 | a `prefix`, and a `path` per rung | a tile's URL is the one part a reader cannot compute, and there is no listing over HTTP |
-| a `chunk_size` of its own | tile `k` of a rung is the `k`th run of **holon** rows, and a holon id is not a `dense_id` — `crates/fossil-sinks/src/manifest.rs, VertexIndex`'s argument against reusing the payload's number, one artefact along |
+| a `chunk_size` of its own | tile `k` of a rung is the `k`th run of **holon** rows, and a rung is not as long as the payload — the number that slices it is its own even where the two arithmetics agree |
 | a `holon_count` per rung | the sibling of `vertex_count`: a hole in the middle is caught by the addressing and a missing tail is caught by nothing |
 | the `relations` it was computed over | mass conservation has no population without them, and a type may be the source of several |
 | `properties` per rung | a group id, a position, a member count, a parent and an internal weight are columns that exist nowhere else in the corpus |
 | `coordinates` | the one thing on a holon that is chosen rather than aggregated |
 
+<Callout type="warn">
+**That second row said *a holon id is not a `dense_id`*, and the premise it rested on is gone.** The
+argument was `crates/fossil-sinks/src/manifest.rs, VertexIndex`'s, one artefact along: an index is a
+second **order** over the payload's rows, so its tile `k` has nothing to do with the payload's tile
+`k`, and reusing the payload's number would read as an alignment that does not exist. Carried across
+to a holon, it assumed group ids are whatever a partitioning algorithm handed back — arbitrary
+labels with no relation to the id space.
+
+Under a quaternary partition they are not arbitrary. **Holon `r` of rung `k` covers exactly
+`[r·4^k, (r+1)·4^k)`**, so a holon id is `dense_id >> 2k` — `tile_of` with a different shift — and
+the alignment the argument denied is the whole mechanism. What survives is the weaker reason the row
+now gives: a rung is a different *length* from the payload, so it slices at its own number.
+
+`VertexIndex`'s own argument is untouched, because an index really is a second order and a rung is
+not.
+</Callout>
+
 **And no `scale`, which is the difference doing work rather than a field left out.** A projection's
 scale is arithmetic a reader spends — rows are `count.div_ceil(scale)` and a tile address is a shift
-by `log2(scale)`. A rung's contraction is none of that: it is measured after the fact, it is 5.69×
-where the exponent says 4, and nothing addresses anything with it. So a rung declares **how many
-holons it has** and a reader divides if it wants a ratio.
+by `log2(scale)`. A rung declares **how many holons it has** and a reader divides if it wants a
+ratio, which is what lets one manifest describe a tree cut out of a dendrogram (where the
+contraction is measured after the fact, and is 5.69× where the exponent says 4) and a tree over
+cells (where it is 4 exactly) without the document meaning two things.
 
 ## What Louvain actually emits is not a holarchy
 
@@ -96,7 +178,7 @@ com-DBLP — 317,080 authors, 1,049,866 undirected co-authorship edges — those
 | 4 | 690 | 2.5× | 12 | 910 | 30,722 | 0.8091 | 26.0 |
 | 5 | 595 | **1.2×** | 10 | 1,355 | 30,722 | 0.8092 | 23.2 |
 
-Three things in that table disqualify it as a navigable tree, and none of them is a flaw in Louvain
+Four things in that table disqualify it as a navigable tree, and none of them is a flaw in Louvain
 — it was not solving this problem.
 
 **The contraction collapses.** 5.7×, 6.0×, 5.5×, then 2.5×, then 1.2×. The last level buys almost
@@ -111,11 +193,71 @@ rest.
 **The finest level is very nearly the graph itself.** 55,712 groups over 317,080 vertices, median
 size 3, and **53.5% of them have three members or fewer**. Nothing is summarised.
 
+**And it does not break when you zoom, which is the one a reader feels.** Read the `max` column
+downwards — 30,722, 30,722, 30,700, 29,720, 20,459. Descending from the top, the largest group keeps
+**100%, 99.9%, 96.8% and 68.8%** of itself at each step. You zoom into the biggest blob on the
+screen, the one holding 9.7% of the graph, and for four steps nothing happens: the group does not
+break up, it *follows you down*. A cell splits into four. Every time, at every depth, whatever the
+data does. That is the difference between a level of detail and a lucky one, and it is the argument
+that decides between the two partitions rather than a preference between them.
+
 Where the structure genuinely is: modularity climbs from 0.6356 to 0.8092 and the levels whose
 quotient is still sparse enough to lay out are **2 and 3** — 9,248 and 1,696 groups at mean quotient
 degree 11.6 and 23.5. That is the measurement `crates/fossil-layout/examples/hierarchy_stats.rs, read_edges`
 exists to produce, and it says the hierarchy is real and its published levels are an accident of
 where the algorithm's sweeps happened to stop.
+
+## The base of the pyramid is a parameter, not a property
+
+A mipmap over an image needs no such field: level 0 is every pixel, the image is full by
+construction, and each level is a quarter of the one below it all the way down. **A set of points is
+never full**, and the whole difference between the two lives at the base.
+
+Measured over com-DBLP, quantised to 16 bits per axis — a quaternary tree of depth 16 over square
+cells, which is the grid the Morton order already imposes. Read *level k* as cells of side `2^k`, so
+level `k` has at most `4^(16−k)` of them.
+
+Below the scale where cells start to touch, merging four buys almost nothing — the occupied count
+falls by **1.0× to 1.8×** per level, because the cells were nearly all singletons already. **From
+level 9 it is exactly 4.00×.** The turn is at level 8, and it is sharp: 61,210 occupied cells out of
+65,536, an occupancy of **93.4%**. That is saturation, and everything above it behaves like an image.
+
+The cost follows immediately. The whole pyramid, every level from 0 to 16, is **1,375,552 cells —
+4.34× V**, which is not a summary of anything. Taken from the saturation scale instead it is
+61,210 × 4/3 = **81,613**, the `1/4 + 1/16 + …` series that `crates/fossil-sinks/src/manifest.rs, STRIDE_BITS`
+already costs the tile pyramid at a third of the type. The 4/3 rule is exactly right — **once you
+start at the right level**, and nothing in the data says which that is.
+
+So the base is a knob, and here is the whole of what it trades:
+
+| vertices per base cell | base cells | cost of the tree | marks at the finest rung |
+| --- | --- | --- | --- |
+| 5 | 61,210 | 25.7% of V | 61,210 |
+| 21 | 15,303 | 6.4% of V | 15,303 |
+| 83 | 3,826 | 1.6% of V | 3,826 |
+| 331 | 957 | 0.4% of V | 957 |
+
+**And the choice is not an aesthetic one — the screen makes it.** A megapixel canvas draws about
+fifteen thousand marks comfortably, so a base of roughly twenty vertices per cell is the one that
+fills it: the display resolution picks the row, and the corpus pays 6.4% of V for it.
+
+**Which is why the base has to be declared in the manifest.** It is data-dependent by construction —
+saturation is where *this* point set's cells start to touch, and no reader can recover it from
+`vertex_count` — so a writer that does not record it has published a pyramid whose bottom step is
+unknown.
+
+Once it is declared, the rest is arithmetic: **rung `k` has `ceil(base_count / 4^k)` holons.** That
+is not a projection of the measurement, it *is* the measurement — 61,210 → 15,303 → 3,826 → 957 →
+240 → 60 is `ceil(n/4)` at every step, and every one of those numbers is in the table two sections
+down. So `holon_count` per rung is derivable from one declared number, exactly as
+`crates/fossil-sinks/src/manifest.rs, rows_at` derives a level's rows from `vertex_count` and
+`crates/fossil-sinks/src/manifest.rs, planned` plans the whole pyramid before a byte is written.
+
+**This dissolves the obstacle this page used to name.** The block was declarable and unfillable —
+*nothing writes one yet* — because a rung's count was something only a completed pass could report.
+It is not: a manifest can declare the entire tree in front of the pass, which is the order
+`index:` and the pyramid were both declared in, and a guard is what goes red when the pass does not
+deliver it.
 
 ## Three properties, in this order
 
@@ -140,6 +282,8 @@ Claimed in comments, never run. Measured 2026-09-11, two processes per row:
 | `crates/fossil-layout/src/layout/pass.rs, enrich_layout`, the whole pass | 200,000 vertices, 999,079 edges, via `crates/fossil-layout/examples/enrich_memory.rs, planted` | the entire written tree byte-identical — Morton-permuted payload, both adjacency orientations, identity index, tiles and level directories |
 
 **The property holds.** Had it come out red, the two properties below would not be worth stating.
+A spatial partition inherits it for free and for a duller reason — a cell id is a shift of a number
+the payload already fixed — which is one more thing the texel reading costs nothing.
 
 What it still does not have is a test that keeps *the pass* holding.
 `crates/fossil-layout/tests/holons.rs, the_same_graph_gives_the_same_holon_rows_twice` keeps the
@@ -149,29 +293,35 @@ processes. The bytes are the thing nothing guards, and that is this direction's 
 
 ### 2 · The branching factor is declared, not inherited
 
-Rather than publishing the levels Louvain emitted, cut the dendrogram at **chosen** sizes — roughly
-4× per level, which is the same octave the tile pyramid already uses. `VertexLevels` fixes that
-exponent in one place and says why a second spelling of it is the bug the constant exists to
-prevent; a holon tree on the same octave inherits that arithmetic instead of inventing one.
+Every published step contracts by at least four — the same octave the tile pyramid already uses.
+`VertexLevels` fixes that exponent in one place and says why a second spelling of it is the bug the
+constant exists to prevent; a holon tree on the same octave inherits that arithmetic instead of
+inventing one.
+
+Over cells the rule is met **with equality**, which is what a mipmap is: 61,210 → 15,303 → 3,826 is
+4.00× at every step. What the same rule does below saturation is the more useful half — the 1.0× to
+1.8× steps fail it, so **the floor is what chooses the base**, and a writer that starts too fine
+publishes a tree that does not deserialise as one rather than a tree of useless rungs.
 
 <Callout type="warn">
-**The declared factor is a floor, not a target, and that was measured rather than intended.** This
-paragraph said the branching factor would then be *about four everywhere*. It is not, and it cannot
-be: a cut chooses out of the partitions the dendrogram already holds, and Louvain's own steps on
-com-DBLP are 5.7×, 6.0× and 5.5×. There is no level near 79,270 or 13,928 to take, so the rule that
-survives is **every published step contracts by at least four** — which is what removes the 2.5×
-and 1.2× rungs, and is the whole of what was wrong with the emitted levels.
+**Over a dendrogram the declared factor is a floor and not a target, and that was measured rather
+than intended.** This paragraph said the branching factor would be *about four everywhere*. It is
+not, and it cannot be: a cut chooses out of the partitions the dendrogram already holds, and
+Louvain's own steps on com-DBLP are 5.7×, 6.0× and 5.5×. There is no level near 79,270 or 13,928 to
+take, so the rule that survives is **every published step contracts by at least four** — which is
+what removes the 2.5× and 1.2× rungs, and is the whole of what was wrong with the emitted levels.
 
 Getting nearer to four would need levels *between* Louvain's — undoing part of a pass's merges —
-and that needs a merge ordering `community_hierarchy` does not emit. It is not a tuning knob.
+and that needs a merge ordering `community_hierarchy` does not emit. It is not a tuning knob. Over
+cells the question does not arise, which is the cleanest single difference between the two
+partitions after the zoom one.
 
 `log₄(V/chunk)` is likewise an **upper bound** and not the level count: with steps of at least four
-you get at most that many rungs. On com-DBLP it is tight by accident — three rungs against
-`log₄(317,080/4,096) ≈ 3.1` — and nothing guarantees that on another graph.
+you get at most that many rungs.
 </Callout>
 
-What the cut does deliver is the removal of the useless rungs. Measured on com-DBLP at a chunk of
-4,096, `crates/fossil-layout/src/layout/community.rs, Cut` keeps three of the five levels:
+Measured on com-DBLP at a chunk of 4,096, `crates/fossil-layout/src/layout/community.rs, Cut` keeps
+three of the five levels, and that is the cut that exists in code today:
 
 | rung | groups | ceiling it had to clear | contraction |
 | --- | --- | --- | --- |
@@ -181,11 +331,12 @@ What the cut does deliver is the removal of the useless rungs. Measured on com-D
 
 Levels 4 and 5 are dropped because neither is a quarter of the one above it — which is exactly the
 1.2× step that moved modularity by 0.0001. **The tree has no root**, and the cut does not invent
-one: it ends where the dendrogram stops delivering, and whether a holon tree gets a synthetic root
-above 1,696 groups is a decision for whatever writes one.
-
-`crates/fossil-layout/src/layout/community.rs, flatten_to_budget` is the existing half of this: it walks the
-hierarchy and picks **one** level that fits a budget. This is the same walk choosing a **sequence**.
+one: it ends where the dendrogram stops delivering.
+`crates/fossil-layout/src/layout/community.rs, flatten_to_budget` is the existing half of this: it
+walks the hierarchy and picks **one** level that fits a budget; `Cut` is the same walk choosing a
+**sequence**. A quaternary tree ends the other way round — at one cell, whose members are the graph
+— and which end a rung sequence has is the one thing the manifest block does not need to know,
+because it declares counts and not a method.
 
 **And the floor is checkable from the document alone.** Because a rung declares a count rather than
 a scale, `crates/fossil-sinks/src/manifest.rs, contracts_by_at_least` evaluates the whole rule over
@@ -196,9 +347,9 @@ enforce. A reader weighing a descent finds out it is not worth taking before it 
 
 ### 3 · A holon is defined against the level below, so it is checkable
 
-The bar is the one `levels.rs` already clears — evaluate the definition against the data and diff,
-rather than trusting the writer. For a holon there are three obligations and all three are
-falsifiable by symmetric difference:
+This is the half the change of mind does not touch. The bar is the one `levels.rs` already clears —
+evaluate the definition against the data and diff, rather than trusting the writer. For a holon
+there are three obligations and all three are falsifiable by symmetric difference:
 
 <div className="fd-steps">
 
@@ -214,6 +365,12 @@ parents. A child edge whose two ends have the **same** parent is not an edge of 
 — it is absorbed into the parent's internal weight.
 
 </div>
+
+**None of the three mentions how the partition was chosen**, which is why
+`crates/fossil-layout/tests/holons.rs, the_three_obligations_hold_up_a_cut_of_a_partition_nobody_designed`
+already ran them over a partition with no design behind it and they held. A grid is such a partition.
+*The partition is arbitrary, the aggregation is exact* is the sentence those tests were written
+under before the page had it.
 
 <Callout type="warn">
 **That third bullet said "its edges are the aggregation of its children's edges", and that is
@@ -235,23 +392,89 @@ published level and nothing anchors the sequence to the corpus.
 
 **And the quotient is an artefact beside the rows, not a column on one.** A holon row is one holon;
 a quotient edge is a pair of them, which is a different arity — the same reason a corpus writes its
-vertices and its relations as separate artefacts rather than as one wide table. This page listed a
-row as *a group, its position, how many members it has, and its parent*, with no edges on it, and
-then made an obligation out of edges; the two only fit together this way.
+vertices and its relations as separate artefacts rather than as one wide table.
 
 In the manifest it is `crates/fossil-sinks/src/manifest.rs, HolonQuotient`, under the rung's own
 path, declaring its edge count for the reason a relation declares one — a tile with no rows is not
 written, so a 404 reads as *no edges here* and as *never uploaded* alike. It is **optional per
-rung**, because whether the aggregated edge set is worth writing at every rung is the question this
-page ends on and a writer answers it rung by rung; an absent quotient says none was written, not
-that there are none. What is deliberately *not* in the manifest is a summed weight: mass
-conservation is a property of the bytes, and a total recorded here would be a third place to
-disagree rather than a fourth thing to check.
+rung**, and the next section is what a writer answers that with. What is deliberately *not* in the
+manifest is a summed weight: mass conservation is a property of the bytes, and a total recorded here
+would be a third place to disagree rather than a fourth thing to check.
+
+## No coarse quotient is drawable, and the partition is not the reason
+
+The page used to end on *whether the aggregated edge set is worth writing at every level*, with a
+hairball at level 5 as the worry. It is not a worry and it is not about Louvain. Measured, spatial
+partition over the same com-DBLP:
+
+| level | cells | edges absorbed | quotient edges | mean degree | density |
+| --- | --- | --- | --- | --- | --- |
+| 6 | 70,462 | 50.2% | 246,412 | 7.0 | 0.010% |
+| 8 | 61,210 | 59.6% | 213,128 | 7.0 | 0.011% |
+| 9 | 15,303 | 64.4% | 153,880 | 20.1 | 0.13% |
+| 10 | 3,826 | 70.0% | 110,621 | 57.8 | 1.51% |
+| 11 | 957 | 74.5% | 70,416 | 147.2 | 15.4% |
+| 12 | 240 | 78.1% | 22,899 | 190.8 | 79.8% |
+| 13 | 60 | 81.5% | 1,770 | 59.0 | 100% |
+
+At level 12 the quotient is **79.8% of a complete graph**, and at 13 it is complete. Nothing drawn
+from it carries information: every node is joined to every other, and the picture is the same
+picture for any graph of sixty nodes.
+
+**And it is worse than the community quotient at every comparable size**, which is the measurement
+that rules out blaming the partition. Against the community rows in the Louvain table — 9,248 groups
+at mean degree 11.6, 1,696 at 23.5, 595 at 23.2 — the spatial cells are **2.5× to 6× denser** at
+comparable counts: 3,826 cells at 57.8 against 1,696 communities at 23.5, and 957 cells at 147.2
+against 595 communities at 23.2. The reason is mechanical. A community hierarchy **nests**, so
+merging two groups absorbs the edges between them — that is what the modularity was maximising.
+Merging four arbitrary neighbouring cells absorbs whatever happens to fall inside, which is why the
+absorbed column climbs so much more slowly than the node count falls.
+
+So the conclusion is not about this corpus and not about this partition: **no coarse quotient of a
+real graph is drawable, however it is partitioned.** An image has no edges. A mipmap summarises a
+*field*, and a field is exactly the thing that averages; a relation is not, and a coarse level of a
+relation is a complete graph.
+
+Which says where edges go. **They are drawn at the bottom**, where the quotient has mean degree 7.0
+and density 0.010% — which is where a three-pixel floor is already drawing them, because at that
+scale the marks are far enough apart to have something between them. And the quotient at a coarse
+rung is kept **to be measured against**: it is what makes mass conservation checkable per rung. It
+stops being an input to a renderer, which is a demotion and not a deletion — `HolonQuotient` is
+still optional per rung, and a writer that publishes one is publishing evidence rather than a
+picture.
+
+## A categorical channel gets a mode and a purity
+
+A texel averages colour. A category does not average: the mean of two `cluster_id`s is not a cluster,
+and `crates/fossil-sinks/src/generated.rs, PAYLOAD_CATEGORICAL` is the column that says which of the
+payload's columns this is true of.
+
+The answer is the one indexed textures already use — **the majority value, and what fraction of the
+cell holds it**. Both, because the mode without the purity is a lie at the coarse end. Measured,
+purity of a cell with respect to `cluster_id`:
+
+| level | purity of the mode |
+| --- | --- |
+| ≤ 8 | 100% |
+| 9 | 98.6% |
+| 10 | 94.0% |
+| 11 | 83.4% |
+| 12 | 68.1% |
+| 13 | 48.7% |
+| 16 | 7.7% |
+
+At and below the saturation scale a cell is **pure by construction** — it holds one cluster, and the
+mode is not a summary but the value. It decays smoothly from there, and the decay is the useful
+signal: a cell whose mode holds 94% of it draws solid, one at 27% draws desaturated, and the picture
+then shows **where the structure is sharp and where the reader is looking at a blur**. Which is
+strictly more than a colour would have carried, and it costs one extra column on a holon row.
 
 ## And the one thing that is not an exact aggregate
 
-Counts sum. Edges sum. **Where a holon goes on the plane is a choice** — a centroid weighted
-somehow, or something else — and no amount of checking makes a choice correct.
+Counts sum. Edges sum. **Where a holon goes on the plane is a choice** — and a spatial partition
+narrows that choice without closing it. A cell's extent is known from its id alone, so the two
+candidates are the cell's own centre and the members' centroid; they are different pictures, the
+first regular and the second following the data, and no amount of checking makes either correct.
 
 So it is declared rather than derived in silence, exactly as a vertex's position is:
 [where x and y come from](/docs/design/position) is the field, and a holon's position carries a
@@ -266,20 +489,39 @@ names. A tree whose writer recorded none reads back as **not declared**, which i
 `derived` rather than equivalent to it — the rule a corpus written before the block existed is
 already held under, and the reason the whole block is optional rather than defaulted.
 
+## The name promises a nesting this does not have
+
+**«Holon» is Koestler's**, and the word means a thing that is simultaneously a whole and a part —
+semantic nesting, a level of organisation that is *about* something. That is exactly what the
+sentence at the top of this page gives up. If the partition carries no meaning, a name that promises
+meaning works against every reader who looks it up.
+
+The candidate is `holon` → **`cell`**, which says what it is: a region of the plane, summarised.
+`pyramid:` is then free as a block name if the rungs are ever retired into the level machinery.
+Against it: the rename touches a manifest block, a crate's public types, a test file and this page,
+and it should not be paid twice.
+
+What would settle it is the decision this page has already made being made in code — a writer that
+partitions spatially, so that nothing in the tree is a community any more. Until one exists the
+old name is still describing what `Cut` emits, and renaming ahead of that would be the second
+spelling this repository keeps learning not to create.
+
 ## What this does not settle
 
-**Which level a reader opens on.** The tree makes every level addressable and says nothing about
-where a reader starts.
+**Whether the base is declared per corpus or once globally.** The measurements say it is
+data-dependent and must be written down; they do not say where. Per vertex type is the shape the
+block already has, and a global default would be a number in a spec that is wrong for most corpora —
+but a corpus of many small types would then carry the same measurement many times. What would
+settle it is a second corpus of a different shape, measured the same way.
 
-**Whether the aggregated edge set is worth writing at every level.** A quotient at level 1 over
-com-DBLP has 159,413 edges against the graph's 1,049,866 — a real saving — but by level 5 it is
-6,905 edges between 595 nodes at mean degree 23.2, which is dense enough that drawing it is a
-hairball rather than a picture. A force layout over that quotient was tried and is in
-[what was discarded](/docs/design/discarded). What would settle it is a reader that renders a level
-and is looked at.
+**The name.** Above, with what would settle it.
+
+**Which level a reader opens on.** The tree makes every level addressable and says nothing about
+where a reader starts. The screen picks the base; nothing yet picks the entry point.
 
 **How a holon tree is written incrementally.** Everything above assumes one pass over a finished
-corpus.
+corpus, and a spatial partition makes this harder rather than easier in one specific way: a new
+vertex outside the current bounding box requantises every position and renumbers every `dense_id`.
 
 **Which relation a tree is over when a type has several.** The block names them and the writer
 chooses them; nothing here says what a reader should do with two trees over the same type, and

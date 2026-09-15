@@ -148,6 +148,103 @@ Two graph shapes — a real co-authorship network and a planted partition — an
 pass. **The property holds.** What it does not yet have is a test that keeps it holding, and that is
 the first thing this direction owes.
 
+## What a derived plane turns out to look like
+
+Everything above is about *whether* a coordinate system was derived. These two findings are about
+what a derived one looks like once it is, and both were measured over the same com-DBLP — 317,080
+authors, 1,049,866 undirected co-authorship edges. Neither is an argument against deriving
+positions. Both are the same observation from the other side: a picture of the algorithm is exactly
+what the far view shows, so it is worth knowing which algorithm, and at what resolution.
+
+### 1 · The grid pitch is fixed by the largest group, and 82× of it is spare
+
+`crates/fossil-layout/src/layout/place.rs, cluster_layout` places the clusters on the cells of a
+grid in Z order and packs each cluster's members in phyllotaxis inside its own cell. The pitch is
+`2 * INTRA_CLUSTER_RADIUS * sqrt(largest) + CLUSTER_SPACING`, with `INTRA_CLUSTER_RADIUS` at 12 and
+`CLUSTER_SPACING` at 100 — and it is **one number for every cell**.
+
+The partition that places is the finest level of Louvain, whose median group holds 3 members and
+whose largest holds 20,459. So the disc term is sized for 20,459 in a grid whose median cell holds
+three: √(20,459/3) ≈ **82× more radius than its occupant uses**, and every cell pays it.
+
+| the placement grid | measured over com-DBLP |
+| --- | --- |
+| the pitch | 2·12·√20,459 + 100 ≈ **3,534**, uniform across every cell |
+| the median group's disc | 2·12·√3 ≈ **41.6** |
+| that disc against its own cell | **1.18%** of the width, **0.014%** of the area |
+| every disc summed against the written extent | the plane is **0.046% occupied** — 99.95% empty |
+
+The code says why the pitch is uniform, and the reason is a good one:
+
+> The pitch is uniform rather than per-cluster because a cluster's *cell* must be findable from its
+> id alone — that is what makes the placement a pure function of `cluster_ids` and reproducible
+> without carrying a table.
+>
+> — `crates/fossil-layout/src/layout/place.rs, cluster_layout`
+
+**That constraint stops holding the moment the cell pyramid is written** — the tree of summary rows
+[holons](/docs/design/holons) is about. It is true of a corpus
+whose only record of the partition is the two coordinate columns: with nothing else published, the
+id is all a reader has, and a per-cluster size would need a table beside it. A pyramid that declares
+a count per rung — `crates/fossil-sinks/src/manifest.rs, HolonRung` is the row that would carry one
+— is that table, already published for another reason. A reader with the counts recomputes the
+geometry rather than looking it up, and the placement stays a pure function of what the artefact
+says.
+
+Priced with a simulated buddy assignment giving every group a cell of its own size:
+
+| | as placed | with a cell per group |
+| --- | --- | --- |
+| written extent | 560,176 | **63,640** — 8.8× more compact |
+| occupancy | 0.046% | **3.5%** — 76× of the plane recovered |
+
+**It does not make the pyramid cheaper, and saying so is half the finding.** The base rung stays
+where it was — 25.7% of V before, 23.1% after — because the base is the placement partition either
+way and compacting the plane does not merge a group with its neighbour. What improves is the
+picture: 76× of the plane recovered is 76× of a far view that is looking at the graph rather than at
+the grid's empty margins.
+
+### 2 · The artefact publishes one partition and hides the one that drew it
+
+`crates/fossil-layout/src/layout/pass.rs, enrich_layout_with` computes **two** partitions and
+publishes one. `cluster_id` comes from
+`crates/fossil-layout/src/layout/community.rs, flatten_to_budget` under `CLUSTER_BUDGET`, sized so a
+drawing reader's aggregate stays under its row cap. The placement uses `levels.first()` — the finest
+level — because the budget partition makes every community a root and leaves the ordering nothing to
+put side by side. The pass argues both:
+
+> `cluster_id` is what a drawing reader colours and aggregates by, one super-node per cluster under
+> a row cap, so it must fit `CLUSTER_BUDGET` — which on this corpus means the top of the hierarchy.
+> Placement wants the opposite: the finest level, whose communities are small enough that several
+> fit in one window.
+>
+> — `crates/fossil-layout/src/layout/pass.rs, enrich_layout_with`
+
+Each argument is correct on its own. What fails is that **only the first one reaches the artefact**.
+
+| what a reader has against what drew the picture | measured over the written corpus |
+| --- | --- |
+| distinct `cluster_id` values written | **1,229** |
+| groups the placement actually used | **~55,712**, filling 61,210 cells at cluster-cell scale |
+| cells one written `cluster_id` spans | **14** at p50, **77** at p90, **3,445** at most |
+| cells holding two different `cluster_id` values | **none, at any point in the corpus** |
+| each `cluster_id` split per cell, width / (2·12·√m) | **0.83** at p50, **0.91** at p90 |
+
+That last row is the confirmation rather than a curiosity: 0.83 and 0.91 are what `cluster_layout`
+produces, so every per-cell subgroup is a phyllotaxis disc sized for its own membership. The
+placement partition is not hiding somewhere abstract — it is legible in the coordinates, one cell at
+a time, and the coordinates are the only place it exists at all.
+
+The consequence for a reader is the whole of the finding. Colouring by `cluster_id` colours packets
+of roughly 45 placement groups scattered across the plane, and nothing in the artefact says so.
+**It is not the palette: the colour is not what is on the screen.** The palette row on [what was
+discarded](/docs/design/discarded) asks for a slot per community, and a slot per community solves
+the other half — running out of colours — while leaving this one exactly where it was.
+
+And the repair is one repair, not two. The placement partition **is** the base rung of the cell
+pyramid: publishing what drew the picture and publishing the mipmap are the same change, which is
+why it is argued on [holons](/docs/design/holons) rather than here.
+
 ## What this does not settle
 
 **Which system a reader draws when a type declares two.** The list makes the choice expressible and

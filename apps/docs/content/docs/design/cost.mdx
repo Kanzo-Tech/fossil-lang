@@ -183,6 +183,55 @@ Both figures are the old contraction's. On the current code the same example bil
 phase of the pass — `remap adjacencies + write edge tiles` is.
 </Callout>
 
+## What the write path costs, phase by phase
+
+One run of the whole write path over com-DBLP — 317,080 vertices, 1,049,866 undirected edges — with
+HEAD's binary in **debug** profile, 2026-09-15, reported by the probe below
+(`crates/fossil-mem-probe/src/lib.rs, Probe`).
+
+**The seconds are indicative and the bytes are exact.** A debug build is nobody's shipping profile,
+so what the clock column is for is the *share* each phase takes of it and not the number of seconds;
+the byte counts are file sizes and carry no such caveat.
+
+| phase | seconds | share |
+| --- | --- | --- |
+| `prepare vertices` + `collect vertex` | 9.0 | 11% |
+| `collect 1 edge table(s)` | 47.5 | **58%** |
+| `write_to_dir` | 3.3 | 4% |
+| `community_hierarchy` | 8.0 | 10% |
+| re-read — CSR + CSC, vertices, remap | 1.2 | 1.5% |
+| write tiles, levels, index, adjacencies | 13.1 | 16% |
+| **total** | **82.1** | peak **0.80 GiB** |
+
+And the bytes, sampled from the destination directory *while the run was in flight*, because the CLI
+deletes the staged files when it is done:
+
+| | |
+| --- | --- |
+| written in total | **115.9 MB** |
+| the corpus that survives | **72.6 MB** in 15 files |
+| staged — `vertex/Person.parquet` 17.3 MB, `by_source.parquet` 13.0 MB, `by_target.parquet` 13.0 MB | **43.3 MB**, written, re-read and deleted |
+
+That is **37.4% of everything written**, and a write amplification of **1.60×** over the artefact.
+
+**The writer's round trip is a problem of bytes and of correctness, not of time.** It takes 37.4% of
+what is written and **5.5%** of the clock. The clock is somewhere else: 58% of it is `collect`, which
+is the barrier — placing a vertex requires having seen every edge — and no redesign of the staging
+removes a barrier. Anyone reading the table for a speedup is reading the wrong column.
+
+### What bounds the redesign, and the probe prints it
+
+The same run marks `execute_graph — 0.05G in Arrow` against a process peak of 0.80 GiB. That mark is
+`crates/fossil-df/src/lib.rs, arrow_gib` over the boundary value, and the boundary value already
+holds everything: `crates/fossil-df/src/lib.rs, GraphArData` carries a `Vec<RecordBatch>` per vertex
+type and `crates/fossil-df/src/lib.rs, EdgeTable` carries one per orientation of every relation. So
+the data never leaves memory in the first place. The trip is **Arrow → Parquet → Arrow**, and the
+original Arrow is alive the whole time it happens.
+
+**Carrying the rows in memory to the pass instead of through Parquet and back costs 6% of the
+peak.** That is the size of the thing the 43.3 MB is being paid for, and it is measured rather than
+estimated, which is the only reason it belongs on this page.
+
 ## How a claim on this page stays true
 
 The one capability this package asks a host for is a `query` callback, so everything a reader does

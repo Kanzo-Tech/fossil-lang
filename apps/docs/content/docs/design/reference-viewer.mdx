@@ -383,6 +383,12 @@ what stopped it is gone — and it must keep measuring through the door, because
 read the level files directly would be a second reader, and the ratio it printed would be a property
 of the instrument rather than of the corpus.
 
+**And it measures the decimation only.** Every figure in the last section was taken off the corpus's
+positions rather than through the door, because no corpus writes a summary and the door has nothing
+to open. That is not a defect in the instrument and it is not a gap in the writer: when something
+writes cells, they are measured the same way — one rectangle, both artefacts, through the door — or
+the number is again a property of whatever read them.
+
 ## What would reverse the model
 
 The model is one decision deep, and it is the decision to make a level a **subset of real rows**
@@ -395,4 +401,111 @@ density: at a zoom where a million vertices become fifteen thousand, a heat map 
 vertices are* is a truer picture than fifteen thousand of them, and no subset of rows is a heat map.
 That would be a **third** artefact and not a replacement — a level that answers a different question
 under a different name, which is the one thing the one-contract invariant forbids doing under the
-same one. It is not written down as discarded because nothing has asked for it yet.
+same one.
+
+**This paragraph used to end "nothing has asked for it yet". It has been asked for, and it has been
+measured**, and the four sections below are what the measurement says. None of it reverses the
+model; what it does is move the level files from *the* answer at a far zoom to *an* answer, and
+leave one question about them open in its correct form.
+
+### A level and a cell are the same node, answered two ways
+
+Level *k* is the rows whose `dense_id` is a multiple of `4^k`, which over a Morton-ordered
+`dense_id` is one real vertex per quadtree cell of depth *k*
+(`crates/fossil-layout/src/layout/pass.rs, write_levels`). The cell is therefore already in the
+model, and has been since the numbering was chosen. A level names a cell and returns a **sample** of
+its rows; a summary names the same cell and returns its **aggregate**. Same node, two answers, and
+the arithmetic a reader already composes reaches both.
+
+That is what keeps the third artefact from being a rival hierarchy. It is not another way to build a
+tree over the graph — the tree is the one the positions already induce — it is the other question
+one can ask of a node in it. Which is also why the summary does not inherit
+`crates/fossil-sinks/src/manifest.rs, VertexLevels`' block: a level declares a `scale` a reader
+spends as arithmetic, and a summary declares a count, for the reasons
+`crates/fossil-sinks/src/manifest.rs, HolonTree` is a block of its own and not a `Projection`.
+[Holons](/docs/design/holons) is the page that rules on that, and the grouping it rules over is
+Louvain's rather than the plane's; what is measured below is the plane's.
+
+### The level files are a cache, and the open question is whether a reader still wants the sample
+
+Invariant 3 above already says what a level file is: `dense_id % 4^k == 0` **is** the level, and a
+written `l{k}/` is an optimisation of it. Stated as cost rather than as contract, that is: **giving
+one real vertex in `4^k` is reading the payload with a stride and throwing away `4^k - 1` rows out
+of every `4^k`, and the file only avoids those bytes.** Nothing else is bought. The picture is
+identical either way — that is the property, not a side effect.
+
+So the question the measurement opens is **not** "levels or rungs", which would be a question about
+two hierarchies and there is only one. It is: **is there a reader left that wants a decimated view
+of REAL rows once the cells can answer?** If there is not, the level files are dead weight — bytes
+the writer pays, and a second set of artefacts to keep nesting, for a worse picture than the
+summary gives at the same zoom. If there is, they stay exactly what invariant 3 says they are: a
+declared optimisation of a predicate, and not an artefact carrying a meaning of its own.
+
+What would settle it is a reader that wants to **click something real at a far zoom**. A sample row
+is a subject — it has an identity, a tile, an entry in the index, and a rectangle around it refines
+into its neighbours. A cell has none of those: it is not a subject and
+[identity](/docs/design/identity) is the page that says why nothing derived gets to be one. A
+picture nobody interrogates does not need the sample; a picture somebody clicks does.
+
+### What the summary costs, measured
+
+Over com-DBLP — 317,080 vertices, 1,049,866 undirected edges — with a quaternary over the positions:
+
+| | |
+| --- | --- |
+| fusion per level, below saturation | **1.0–1.8×** |
+| fusion per level, from level 9 | **exactly 4.00×** |
+| occupancy at level 8 | **61,210 cells of 65,536 — 93.4%** |
+| the whole pyramid, every level | **1,375,552 cells — 4.34× V** |
+| the pyramid from the saturation scale | 61,210 × 4/3 = **81,613** |
+
+Two things in that table. **Summarising every cell at every level costs more than the graph** —
+4.34 times the vertex count, because below saturation a coarser level merges almost nothing and each
+level is very nearly a copy of the one under it. And **from the saturation scale up it is `1/3` of
+the base, to the digit**, which is invariant 4's fraction arriving unchanged at an artefact that is
+not a decimation: the geometry is the same geometry.
+
+Which makes the base a **declared parameter and not a property of the corpus**:
+
+| vertices per base cell | cells, as a share of *V* |
+| --- | --- |
+| 5 | 25.7% |
+| 21 | 6.4% |
+| 83 | 1.6% |
+| 331 | 0.4% |
+
+Nothing in the graph chooses that row. **The resolution of the screen does** — a base cell is worth
+writing when it is about the size of a mark, and every figure above moves by an order of magnitude
+across four plausible answers to that. It is the same shape of decision as a branching factor being
+declared rather than inherited, and it is the reason a summary block would have to carry the number
+rather than derive one.
+
+### What the summary cannot do, and it is the edges
+
+The quotient of the spatial partition — the edges between cells — is not drawable at any coarse
+scale, measured on the same corpus:
+
+| cells | quotient |
+| --- | --- |
+| 15,303 | mean degree **20.1** |
+| 3,826 | mean degree **57.8** |
+| 957 | mean degree **147.2** |
+| 240 | **79.8% density** |
+
+At 240 cells four in five of the possible pairs have an edge, which is a filled square and not a
+picture. And it is **denser than the community quotient at comparable counts**, which stays around
+23 on the same graph — [holons](/docs/design/holons) has that table. Grouping by position is worse
+for edges than grouping by community, and grouping by community is already too dense to lay out.
+**No coarse quotient of a real graph is drawable**, and no choice of grouping rescues it.
+
+So the third artefact summarises **the field and not the relation**. It answers *where the vertices
+are*, which is the question density was raised for, and it answers nothing about who is connected to
+whom. The edges keep being drawn where they are drawable: at the bottom, where the quotient is the
+graph — mean degree 7 at density 0.01% — off the relation's own level set, which is the second
+artefact and is unaffected by any of this.
+
+One caveat on reading the field at all. A heat map of `derived` positions is a picture of the
+layout's own regularities rather than of the world — `crates/fossil-sinks/src/manifest.rs, Provenance`
+is where a corpus says which it has, and [where x and y come from](/docs/design/position) is the
+argument. The summary is worth writing for a `geographic` or an `embedded` plane in a way it is not
+for a plane a drawing algorithm chose.
