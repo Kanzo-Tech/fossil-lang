@@ -184,7 +184,8 @@ pub(super) fn flatten_to_budget(
 /// Renumber the chosen level's communities so that **siblings are consecutive**,
 /// by sorting each community on the path of ancestors above it.
 ///
-/// The number a community wears decides where [`cluster_layout`] puts it, and
+/// The number a community wears decides where [`super::cluster_layout`] puts it,
+/// and
 /// until now that number came from the order vertices happened to be visited in
 /// — which is `dense_id` order, which is IRI order, which has nothing to do with
 /// the graph. Two communities with thousands of edges between them therefore
