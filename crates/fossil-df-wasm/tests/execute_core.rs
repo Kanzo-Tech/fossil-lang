@@ -158,6 +158,99 @@ fn program_sources_lists_each_distinct_source_with_its_format() {
     assert!(srcs.iter().all(|(_, fmt)| *fmt == "csv"));
 }
 
+/// **The browser's report IS the documents the browser shipped** — every
+/// manifest, field for field, checked against the YAML in the same
+/// `ExecOutput`.
+///
+/// It is written as an equality over the whole set and not as an assertion
+/// about two named fields, because the defect it guards is not about a field.
+/// `RunReport::of` snapshots `graph.manifest()`, so a report built at the wrong
+/// moment states the manifest as it was THEN: every key declared afterwards is
+/// simply absent from the JSON, with nothing anywhere going red. That is how the
+/// browser came to omit `holons:` and then `channels:` — the report was built
+/// before `declare_pyramids`/`declare_channels`, so the tab handed its host an
+/// account of a corpus missing two measured facts the YAML it uploaded beside it
+/// carried, while `fossil run --output-json` carried both. A test naming those
+/// two fields would have caught those two fields; this one catches the third.
+///
+/// The two-source program is used so neither half is vacuous: it materialises a
+/// vertex document and an edge document, and `Person` is a type the layout pass
+/// reaches — so the report has something to lose.
+#[tokio::test]
+async fn the_report_is_the_manifest_the_browser_shipped() {
+    let sources = vec![
+        SourceInput {
+            uri: "https://data.example.com/users.csv".to_string(),
+            format: source_row("csv").expect("the csv row"),
+            bytes: std::fs::read("../fossil-df/tests/fixtures/users.csv").expect("fixture"),
+        },
+        SourceInput {
+            uri: "https://data.example.com/orders.csv".to_string(),
+            format: source_row("csv").expect("the csv row"),
+            bytes: std::fs::read("../fossil-df/tests/fixtures/orders.csv").expect("fixture"),
+        },
+    ];
+    let out = execute_core(
+        TWO_SOURCE_PROGRAM,
+        Some(EXECUTOR_SHEX),
+        sources,
+        "s3://jobs/run-1",
+        &empty_refs(),
+    )
+    .await
+    .expect("executor runs the two-source program");
+
+    let shipped = |rel: &str| -> String {
+        let file = out
+            .files
+            .iter()
+            .find(|f| f.rel_path == rel)
+            .unwrap_or_else(|| panic!("the run emitted `{rel}`"));
+        String::from_utf8(file.bytes.clone()).expect("a manifest is UTF-8")
+    };
+
+    // The index, then every document it names — positionally, which is the
+    // agreement `GraphInfo::vertices`/`edges` already carry.
+    assert_eq!(
+        shipped("graph.graph.yml"),
+        out.report.graph.to_yaml().expect("the index serialises"),
+        "the report's index is not the `graph.graph.yml` the run shipped"
+    );
+    assert!(!out.report.vertices.is_empty() && !out.report.edges.is_empty());
+    for (rel, info) in out.report.graph.vertices.iter().zip(&out.report.vertices) {
+        assert_eq!(
+            shipped(rel),
+            info.to_yaml().expect("a vertex document serialises"),
+            "the report's entry for `{rel}` is not the document the run shipped"
+        );
+    }
+    for (rel, info) in out.report.graph.edges.iter().zip(&out.report.edges) {
+        assert_eq!(
+            shipped(rel),
+            info.to_yaml().expect("an edge document serialises"),
+            "the report's entry for `{rel}` is not the document the run shipped"
+        );
+    }
+
+    // And the equality is not vacuous on the field that found this: the pass
+    // partitioned `Person`, so its document declares a channel with a measured
+    // domain — and therefore so must the report.
+    let person = out
+        .report
+        .vertices
+        .iter()
+        .find(|v| v.vertex_type == "Person")
+        .expect("Person is in the report");
+    let channels = person
+        .channels
+        .as_ref()
+        .expect("the pass measured a channel for Person, so the report declares one");
+    assert!(
+        channels.iter().any(|c| c.domain.is_some()),
+        "a categorical channel carries the domain the pass measured: {channels:?}"
+    );
+}
+
 const CONN_PROGRAM: &str = "\
 type { Person, Order } := io.shex(\"executor.shex\")
 

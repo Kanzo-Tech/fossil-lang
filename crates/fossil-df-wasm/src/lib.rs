@@ -193,7 +193,6 @@ pub async fn execute_core(
     // writes in, and for the same reason: a document written before the bytes
     // can only promise them. `enrich_layout_in_memory` hands back the filesystem
     // it wrote into, and the manifests go in on top.
-    let report = RunReport::of(dest, &graph);
     let (fs, layout) = enrich_layout_in_memory(&graph)?;
     graph.declare_pyramids(layout.pyramids);
     // Both measured fields, and both by the same argument the native host makes:
@@ -201,6 +200,23 @@ pub async fn execute_core(
     // not exist until the pass has run. The tab declares them because the tab
     // ran the pass — see this function's doc for why it is not allowed to skip.
     graph.declare_channels(layout.channels);
+    // **The report is built here — after every declaration — and the position of
+    // this line is the whole of what it says.** [`RunReport::of`] takes a
+    // snapshot of `graph.manifest()`, so a report built earlier states the
+    // manifest as it was at that moment and says nothing about a field declared
+    // after it: not an error, not a `None` a reader can interrogate, just a key
+    // that is absent from the JSON while it is present in the YAML the very same
+    // call emits below. It WAS built first, and the browser's account of a run
+    // silently lost `holons:` and then `channels:` — two measured facts about a
+    // corpus the tab had just written, missing from the tab's own report of
+    // writing it, while `fossil run --output-json` carried both.
+    //
+    // `fossil-cli`'s `host::run` builds its report in the same place for the same
+    // reason, and `/docs/design/three-hosts` is the page that says the two hosts
+    // differ only in their `System`.
+    // `tests/execute_core.rs::the_report_is_the_manifest_the_browser_shipped`
+    // holds the report against the emitted YAML so a third field cannot repeat it.
+    let report = RunReport::of(dest, &graph);
     for file in graph.manifest_files().map_err(|e| format!("encode: {e}"))? {
         fs.insert(file.rel_path, file.bytes);
     }
