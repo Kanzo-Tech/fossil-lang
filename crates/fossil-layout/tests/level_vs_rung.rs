@@ -46,12 +46,16 @@
 #![cfg(not(target_arch = "wasm32"))]
 // Deliberate numeric code, and the same declension `layout.rs` makes for the same
 // reason: this prints byte counts as kilobytes and row counts as ratios, so every
-// count becomes an `f64` on its way to a table. `tuple_array_conversions` is
-// declined beside them because the pair being flattened IS an edge, and spelling
-// that as an array conversion says less than the pattern does.
+// count becomes an `f64` on its way to a table. `cast_sign_loss` joins them for
+// the one trip in the other direction — a canvas divided by a mark width is a
+// ratio of two positive constants and lands back as a count of marks.
+// `tuple_array_conversions` is declined beside them because the pair being
+// flattened IS an edge, and spelling that as an array conversion says less than
+// the pattern does.
 #![allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
     clippy::tuple_array_conversions
 )]
 
@@ -306,18 +310,33 @@ fn drawn_on_key(
 /// second spelling is the whole of how a rung is compared honestly — its
 /// centroids rasterised with their populations, against the real vertices.
 fn density(db: &Connection, path: &Path, predicate: &str, weight: &str, extent: Rect) -> Vec<f64> {
-    let mut cells = vec![0.0f64; GRID * GRID];
+    density_on(db, path, predicate, weight, extent, GRID)
+}
+
+/// The same grid at a **stated** resolution, which is the one knob
+/// [`what_grid_resolution_does_to_the_fidelity_verdict_on_com_dblp`] turns.
+/// [`density`] is this at [`GRID`], and that spelling is kept because every
+/// caller but the sweep means the camera's 48.
+fn density_on(
+    db: &Connection,
+    path: &Path,
+    predicate: &str,
+    weight: &str,
+    extent: Rect,
+    grid: usize,
+) -> Vec<f64> {
+    let mut cells = vec![0.0f64; grid * grid];
     if !path.is_file() {
         return cells;
     }
-    let cw = (extent.x1 - extent.x0) / GRID as f64;
-    let ch = (extent.y1 - extent.y0) / GRID as f64;
+    let cw = (extent.x1 - extent.x0) / grid as f64;
+    let ch = (extent.y1 - extent.y0) / grid as f64;
     let sql = format!(
         "SELECT least({last}, greatest(0, floor((x - {x0}) / {cw})))::INTEGER AS gx, \
                 least({last}, greatest(0, floor((y - {y0}) / {ch})))::INTEGER AS gy, \
                 CAST(sum({weight}) AS DOUBLE) AS n \
            FROM read_parquet('{p}') WHERE {predicate} GROUP BY 1, 2",
-        last = GRID - 1,
+        last = grid - 1,
         x0 = extent.x0,
         y0 = extent.y0,
         p = lit(path),
@@ -334,7 +353,7 @@ fn density(db: &Connection, path: &Path, predicate: &str, weight: &str, extent: 
         .expect("the grid");
     let mut total = 0.0;
     for (gx, gy, n) in rows.filter_map(Result::ok) {
-        let i = usize::try_from(gy.max(0)).unwrap_or(0) * GRID
+        let i = usize::try_from(gy.max(0)).unwrap_or(0) * grid
             + usize::try_from(gx.max(0)).unwrap_or(0);
         if let Some(cell) = cells.get_mut(i) {
             *cell += n;
@@ -1527,5 +1546,314 @@ fn crossover_report(
             ls[li].name,
             gs[gi].name,
         );
+    }
+}
+
+// ===================================================================
+//  THE GRID IS A CONSTANT, AND THE VERDICT DEPENDS ON IT
+// ===================================================================
+
+/// **The grids the verdict is re-measured on.** They bracket the mark count of
+/// every rung from both sides: 64 bins is coarser than all but the last two
+/// rungs, 9,216 bins is finer than all but the first.
+const SWEEP_GRIDS: &[usize] = &[8, 16, GRID, 96];
+
+/// **The mark budget the production consumer actually spends** —
+/// `@kanzo-tech/graph`'s `BOUNDED_DEFAULTS.limit`, which
+/// `apps/playground/src/tiles.ts` converts into the door's `pixels` as
+/// `√limit × √limit` rather than passing its window, and which
+/// `/docs/design/reference-viewer` measures a frame at. Restated here for the
+/// same reason [`GRID`] is: it lives on the other side of the wasm boundary and
+/// nothing imports it into Rust.
+const RENDERER_LIMIT: u64 = 20_000;
+
+/// One row of the sweep: an artefact drawn some way, the marks it delivers, and
+/// the stride whose unstructured subsample is its null.
+struct SweepArm {
+    name: String,
+    marks: u64,
+    path: PathBuf,
+    predicate: &'static str,
+    weight: &'static str,
+    null_stride: u64,
+}
+
+/// The stored pyramids as the fidelity table reads them — the levels off their
+/// own files, the rungs as centroids weighted by `count`. Strides are left out:
+/// a stride's row is identical to the level's at the same `4^k` and the table
+/// has to stay narrow enough to read five times over.
+fn sweep_arms(c: &Corpus, big: u64, chunks: &Path, plan: &VertexLevels) -> Vec<SweepArm> {
+    let holon = chunks.join(HOLON_PREFIX.trim_end_matches('/'));
+    let mut arms = Vec::new();
+    for &k in &plan.levels {
+        let path = chunks.join(plan.level_prefix(k)).join("tiles.parquet");
+        arms.push(SweepArm {
+            name: format!("level l{k}"),
+            marks: rows_of(&path),
+            path,
+            predicate: "TRUE",
+            weight: "1",
+            null_stride: VertexLevels::stride(k),
+        });
+    }
+    for (index, rung) in c.tree.rungs.iter().enumerate() {
+        arms.push(SweepArm {
+            name: format!("rung r{}", index + 1),
+            marks: rung.holon_count,
+            path: holon
+                .join(rung.path.trim_end_matches('/'))
+                .join("tiles.parquet"),
+            predicate: "TRUE",
+            weight: "\"count\"",
+            null_stride: (big / rung.holon_count.max(1)).next_power_of_two().max(1),
+        });
+    }
+    arms
+}
+
+/// One arm at one resolution: its distance, its null's, and the gap between
+/// them. The gap is the whole verdict — `dist <= noise` is `gap >= 0`.
+fn gap_at(
+    db: &Connection,
+    payload: &Path,
+    base: &[f64],
+    arm: &SweepArm,
+    extent: Rect,
+    grid: usize,
+) -> (f64, f64) {
+    let drawn = density_on(db, &arm.path, arm.predicate, arm.weight, extent, grid);
+    let unstructured = format!("hash(dense_id) % {} = 0", arm.null_stride);
+    let null = density_on(db, payload, &unstructured, "1", extent, grid);
+    (tv(base, &drawn), tv(base, &null))
+}
+
+fn sweep_row(name: &str, marks: u64, bins: usize, dist: f64, noise: f64) {
+    println!(
+        "{name:<10} {marks:>9} {bins:>7} {:>10.2} {dist:>9.4} {noise:>9.4} {:>+8.4} {:>8}",
+        bins as f64 / marks.max(1) as f64,
+        noise - dist,
+        if dist <= noise { "pass" } else { "FAIL" },
+    );
+}
+
+fn sweep_header() {
+    println!(
+        "{:<10} {:>9} {:>7} {:>10} {:>9} {:>9} {:>8} {:>8}",
+        "arm", "marks", "bins", "bins/mark", "TV", "null TV", "gap", "verdict"
+    );
+}
+
+/// **Is the tail's failure a property of the pyramid or of the ruler?** — an
+/// instrument, `#[ignore]`d like its neighbours, and the second question
+/// `fidelity` opens rather than answers.
+///
+/// `fidelity` measures every arm on ONE grid, `GRID`×`GRID` = 2,304 bins,
+/// because that is the number `/docs/design/camera` states and a figure measured
+/// at two resolutions is two figures. That constant is safe while an arm has
+/// more marks than the grid has bins and **stops being safe below it**: total
+/// variation against a normalised base saturates at 1 once the drawn set cannot
+/// reach most cells, and a null of the same size saturates with it. Two numbers
+/// pinned against the same ceiling differ by their binning noise, which is what
+/// a verdict of `FAIL` at 310 marks in 2,304 bins is reporting.
+///
+/// So this turns the constant into a variable and prints the same table at each
+/// value, with `bins/mark` beside it — the ratio that says whether the ruler is
+/// in its range — and then once more on a grid **fitted to each arm**, about
+/// `sqrt(marks)` bins per axis, where no arm is asked to fill more bins than it
+/// has points.
+///
+/// The fitted table is the discriminating one and it is not comparable ACROSS
+/// arms: every row is measured on its own grid, so a distance on one line and a
+/// distance on the next are answers to two questions. What is comparable is the
+/// GAP, because an arm and its null are always weighed on the same grid.
+///
+/// `cargo test -p fossil-layout --test level_vs_rung -- --ignored --nocapture`
+#[test]
+#[ignore = "an instrument: it writes a 300,000-vertex corpus and re-measures fidelity at five resolutions"]
+fn what_grid_resolution_does_to_the_fidelity_verdict_on_a_planted_corpus() {
+    let c = write_corpus("level_vs_rung_grid");
+    resolution_sweep(&c, u64::from(BIG), "planted partition, mean degree 14");
+}
+
+/// The same sweep over com-DBLP, which is the arm the failing verdict was
+/// reported on and the one whose tail disagrees with the planted fixture's.
+///
+/// `cargo test -p fossil-layout --test level_vs_rung -- --ignored --nocapture`
+#[test]
+#[ignore = "an instrument: it reads com-DBLP off disk and re-measures fidelity at five resolutions"]
+fn what_grid_resolution_does_to_the_fidelity_verdict_on_com_dblp() {
+    let Some(c) = dblp_corpus("level_vs_rung_grid_dblp") else {
+        println!("com-DBLP is not checked out at {DBLP_CSV}; skipping");
+        return;
+    };
+    let v = c.vertex_count;
+    resolution_sweep(&c, v, "com-DBLP, both directions");
+}
+
+#[allow(clippy::too_many_lines)]
+fn resolution_sweep(c: &Corpus, big: u64, shape: &str) {
+    let chunks = c.root.join("chunks");
+    let payload = chunks.join("tiles.parquet");
+
+    let db = Connection::open_in_memory().expect("duckdb");
+    let pay = lit(&payload);
+    let (min_x, max_x, min_y, max_y): (f64, f64, f64, f64) = db
+        .query_row(
+            &format!("SELECT min(x), max(x), min(y), max(y) FROM read_parquet('{pay}')"),
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("the extent");
+    let extent = Rect {
+        x0: min_x,
+        x1: max_x,
+        y0: min_y,
+        y1: max_y,
+    };
+
+    let plan = VertexLevels::planned(big, c.chunk).expect("over one tile");
+    let arms = sweep_arms(c, big, &chunks, &plan);
+
+    println!("\n=== IS THE VERDICT A PROPERTY OF THE PYRAMID OR OF THE GRID? ===");
+    println!(
+        "  {big} vertices ({shape}), vertices_per_cell {}",
+        c.tree.vertices_per_cell
+    );
+    println!(
+        "  every row is one arm against the payload, and the tolerance is always the null of the \
+         same SIZE: `hash(dense_id) % s = 0`. `gap` is `null TV - TV`, so `pass` is `gap >= 0`. \
+         `bins/mark` is the ratio that says whether the ruler is in its range — above 1 the arm \
+         is being asked to fill more cells than it has points."
+    );
+
+    for &grid in SWEEP_GRIDS {
+        println!(
+            "\n-- grid {grid}x{grid} = {} bins{} --",
+            grid * grid,
+            if grid == GRID {
+                "   (the constant `/docs/design/camera` states, and what `=== 6 ===` reports)"
+            } else {
+                ""
+            }
+        );
+        sweep_header();
+        let base = density_on(&db, &payload, "TRUE", "1", extent, grid);
+        for arm in &arms {
+            let (dist, noise) = gap_at(&db, &payload, &base, arm, extent, grid);
+            sweep_row(&arm.name, arm.marks, grid * grid, dist, noise);
+        }
+    }
+
+    println!(
+        "\n-- fitted: each arm on about `sqrt(marks)` bins per axis, so no arm fills more bins than it has points --"
+    );
+    println!(
+        "  the distances down this table are NOT comparable to each other — every row is a \
+         different grid. The GAP is, because an arm and its null are always weighed on the same one."
+    );
+    sweep_header();
+    for arm in &arms {
+        let grid = fitted_grid(arm.marks);
+        let base = density_on(&db, &payload, "TRUE", "1", extent, grid);
+        let (dist, noise) = gap_at(&db, &payload, &base, arm, extent, grid);
+        sweep_row(&arm.name, arm.marks, grid * grid, dist, noise);
+    }
+    println!(
+        "  (a grid of one bin is the degenerate ruler — every distribution is the same one — so \
+         the fit floors at 2 bins per axis, which is the coarsest question that still has an answer)"
+    );
+
+    asked_for(c, big);
+}
+
+/// **A grid fitted to a mark count**: about one bin per mark, which is
+/// `sqrt(marks)` bins per axis.
+///
+/// Floored at 2 and not at 1 because a 1×1 grid holds all the ink of every
+/// distribution in its one cell, so every TV over it is 0 and every verdict is
+/// `pass` — a ruler with no marks on it. 2 is the coarsest grid that still
+/// distinguishes two pictures.
+fn fitted_grid(marks: u64) -> usize {
+    usize::try_from(marks.isqrt().max(2)).unwrap_or(2)
+}
+
+/// **The mark count below which nothing asks**, derived from what the tree
+/// already states rather than from a number invented here, and which rung of
+/// this corpus it lands on.
+///
+/// **A camera asks for a budget in marks and takes the coarsest artefact that
+/// still carries them**, so the floor on what any artefact is read for is the
+/// smallest budget anything spends — not the deepest zoom. Zooming IN does not
+/// lower it: `levelForCanvas` estimates what the rectangle holds and answers
+/// level 0 the moment that estimate drops below the budget, which puts the read
+/// on the payload rather than on a coarser rung.
+///
+/// Three budgets, all of them already in the tree:
+///
+/// - **[`RENDERER_LIMIT`] — what the production consumer actually spends.**
+///   `apps/playground/src/tiles.ts` does not pass its canvas. It passes
+///   `pixels = √limit × √limit`, so the door's one-mark-per-pixel rule spends
+///   exactly `BOUNDED_DEFAULTS.limit` marks whatever the window is, and that file
+///   argues the point at length: deriving from the real canvas asks for 368,000
+///   marks on a 920×400 window, drops the frame two levels and draws 250,000
+///   points where 15,625 were asked for. So this is a budget and not a ceiling
+///   on one.
+/// - **[`SCREEN_MARKS`]**, the number `HolonTree::vertices_per_cell` picks the
+///   *base* of the pyramid with: *«a megapixel canvas draws about fifteen
+///   thousand marks comfortably»*. The smallest of the three, so it is the one
+///   that decides.
+/// - **The canvas, if the door ever did take it.** `FrameParams.pixels` is
+///   *«one mark per pixel»* and its own doc says what to do about a mark wider
+///   than one: *«Marks four pixels wide: pass the canvas divided by four»*. At
+///   the `BOUNDED_DEFAULTS.minLinkPixels` of 3 that is [`MIN_LINK_PX`], on the
+///   [`CANVAS_PX`] canvas both instruments in this crate measure their pixel
+///   floor on, that is `(1200 / 3)²` — an order of magnitude ABOVE the other
+///   two, which is `tiles.ts`'s complaint restated.
+fn asked_for(c: &Corpus, big: u64) {
+    let pixel_floor = ((CANVAS_PX / MIN_LINK_PX) * (CANVAS_PX / MIN_LINK_PX)) as u64;
+    println!("\n=== WHAT ANYTHING ACTUALLY ASKS FOR ===");
+    println!(
+        "  a camera spends a budget in MARKS and takes the coarsest artefact that still carries \
+         them, so the floor is the smallest budget anything spends — not the deepest zoom. \
+         zooming in shrinks what the rectangle holds, which answers level 0 and puts the read on \
+         the payload rather than on a coarser rung."
+    );
+    println!(
+        "  BOUNDED_DEFAULTS.limit, what `tiles.ts` actually spends  : {RENDERER_LIMIT:>9} marks"
+    );
+    println!(
+        "  a megapixel canvas, comfortably (SCREEN_MARKS)           : {SCREEN_MARKS:>9} marks"
+    );
+    println!(
+        "  the {CANVAS_PX} px canvas at {MIN_LINK_PX} px a mark, if the door took it   : {pixel_floor:>9} marks"
+    );
+    let floor = SCREEN_MARKS.min(RENDERER_LIMIT).min(pixel_floor);
+    println!("  the floor is the smallest of the three                   : {floor:>9} marks");
+
+    println!(
+        "\n{:<10} {:>10} {:>12} {:>10}",
+        "rung", "marks", "vs floor", "asked for"
+    );
+    let mut deepest: Option<String> = None;
+    for (index, rung) in c.tree.rungs.iter().enumerate() {
+        let name = format!("r{}", index + 1);
+        let reached = rung.holon_count >= floor;
+        if reached {
+            deepest = Some(name.clone());
+        }
+        println!(
+            "{name:<10} {:>10} {:>11.2}x {:>10}",
+            rung.holon_count,
+            rung.holon_count as f64 / floor as f64,
+            if reached { "yes" } else { "no" },
+        );
+    }
+    match deepest {
+        Some(name) => println!(
+            "  the deepest rung anything ever asks for is {name}, out of {} the tree publishes \
+             for {big} vertices",
+            c.tree.rungs.len()
+        ),
+        None => println!("  no rung of this tree carries as many marks as the floor asks for"),
     }
 }
