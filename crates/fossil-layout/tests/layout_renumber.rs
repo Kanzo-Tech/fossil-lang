@@ -27,6 +27,7 @@ use arrow::array::{ArrayRef, Float32Array, RecordBatch, StringArray, UInt32Array
 use arrow::datatypes::{DataType, Field, Schema};
 use duckdb::Connection;
 use fossil_layout::layout::{AdjacencyTarget, Endpoint, LayoutError, VertexLayoutTarget};
+use fossil_sinks::manifest::Scale;
 
 /// Two triangles joined by one edge — the smallest graph with communities to
 /// find, so the layout actually moves the vertices and the renumbering is a
@@ -478,6 +479,78 @@ fn a_relation_with_one_orientation_is_refused() {
     assert!(
         matches!(err, LayoutError::MissingOrientation { ref target } if target == "Node_edge_Node"),
         "expected the RELATION to be named, got {err:?}",
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+/// **The domain the manifest declares is the number of colours the payload
+/// actually needs.**
+///
+/// `channels:`'s `domain` is the one number in that block a reader cannot
+/// recover cheaply — Parquet footers carry min/max per row group and nothing
+/// carries a count of distinct values (`/docs/design/position`) — so it is
+/// declared, and a declared number that nobody checks is a number that drifts.
+/// The failure is silent in the way everything else in this file is: a corpus
+/// with a domain one too large draws, addresses and opens, and the only thing
+/// wrong with it is that the legend has an entry no vertex is in.
+///
+/// So it is checked the way `cells.rs` checks a cell: against the **payload**,
+/// through a second engine, rather than against the variable the pass computed
+/// it from. Comparing the report to itself would pass for any arithmetic at all,
+/// including the two ways this can be got wrong — counting the partition before
+/// the budget cut, and counting the level the PLACEMENT uses, which is the
+/// finest one and a different number.
+#[test]
+fn the_declared_domain_is_the_payloads_own_count_of_clusters() {
+    let root = dir("channel_domain");
+    let conn = Connection::open_in_memory().expect("duckdb");
+    let c = corpus(&EDGES);
+    let chunks = root.join("chunks");
+    fs::create_dir_all(&chunks).expect("chunk dir");
+
+    let (v, a) = targets(&c, &root, &chunks);
+    let report = fossil_layout::layout::enrich_layout(&v, &a).expect("enrich_layout");
+
+    // One type, one channel. The corpus has exactly one column a writer computed
+    // for a reader to colour by; a second entry would name a column no writer
+    // produces.
+    let declared: Vec<&str> = report
+        .channels
+        .iter()
+        .map(|(label, _)| label.as_str())
+        .collect();
+    assert_eq!(declared, ["Node"], "one type laid out, one type declared");
+    let (_, channels) = &report.channels[0];
+    assert_eq!(channels.len(), 1, "one column, one channel: {channels:?}");
+    let channel = &channels[0];
+    assert_eq!(channel.name, "community");
+    assert_eq!(channel.column, "cluster_id");
+    assert_eq!(channel.scale, Scale::Categorical);
+    // The CUT and not the placement. `x`/`y` are `louvain+phyllotaxis`; which
+    // group a vertex is in owes nothing to phyllotaxis, and a deriver that said
+    // so would claim the two fields travel together.
+    assert_eq!(channel.derived_by.as_deref(), Some("louvain-cut"));
+
+    let all = payload(&chunks);
+    let distinct = scalar(
+        &conn,
+        &format!("SELECT count(DISTINCT cluster_id) FROM read_parquet('{all}')"),
+    );
+    assert_eq!(
+        channel.domain,
+        Some(distinct.unsigned_abs()),
+        "the manifest declares {:?} clusters and the payload carries {distinct}",
+        channel.domain,
+    );
+    // And the equality is not the trivial one. Two triangles joined by a bridge
+    // is the smallest graph with communities to find, so a pass that emitted a
+    // constant — every vertex in group zero — would satisfy the line above and
+    // fail this one.
+    assert!(
+        distinct > 1,
+        "the fixture has two communities; a domain of {distinct} means the \
+         partition collapsed and the assertion above proved nothing",
     );
 
     fs::remove_dir_all(&root).ok();

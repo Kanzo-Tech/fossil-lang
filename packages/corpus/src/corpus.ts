@@ -82,6 +82,7 @@ import {
 import { createGraphClient, type GraphClient } from './client.js';
 import {
   PAYLOAD_ADDRESS,
+  PAYLOAD_CATEGORICAL,
   PAYLOAD_COORDINATES,
   PAYLOAD_IDENTITY,
 } from './vocabulary.generated.js';
@@ -332,7 +333,21 @@ export interface FrameParams extends Box {
    * Given here it wins and `pixels` is not consulted.
    */
   level?: number;
-  /** Which column carries the categorical the caller will colour by. Defaults to `cluster_id`. */
+  /**
+   * Which column carries the categorical the caller will colour by.
+   *
+   * Defaults to the column `corpus.bnf` gives the `categorical` role — read from
+   * `vocabulary.generated.ts` and not written here, because this door used to be the fourth place
+   * one name was spelled out by hand and the generated one was the only machine-readable of the
+   * four with no consumer.
+   *
+   * **The default is a convention, and a caller who has read the corpus outranks it.** The role
+   * says what fossil's writer emits; a vertex type's `channels:` block says what *this* corpus
+   * carries, and where the two disagree the corpus is right. This package cannot see that block —
+   * the per-type manifests are parsed by `fossil-graph` in WASM, which does not surface it — so a
+   * caller that has read it names the column here and it wins, which is what
+   * `apps/playground/src/tiles.ts` does with `Encoding.fill`.
+   */
   fill?: string;
   /**
    * Addresses that ride whatever the rectangle and the level select — a pinned vertex.
@@ -668,6 +683,15 @@ const RESERVED = new Set<string>([
 
 /** The column the identity is read from. See {@link Corpus.node} for why it is not `dense_id`. */
 const IDENTITY = PAYLOAD_IDENTITY[0]!;
+
+/**
+ * The column {@link FrameParams.fill} falls back to — the payload's `categorical` role, which
+ * `corpus.bnf` glosses *an ordinal the writer computed, for a reader to colour by*.
+ *
+ * One entry today and read as one on purpose: a frame carries ONE categorical per row, so a second
+ * role column would need a second array on {@link Frame} before it could mean anything here.
+ */
+const CATEGORICAL = PAYLOAD_CATEGORICAL[0]!;
 
 /** A single-quoted SQL string literal. Every URL in this module reaches SQL through here. */
 function lit(value: string): string {
@@ -1678,7 +1702,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         type,
         level: named,
         pixels,
-        fill = 'cluster_id',
+        fill = CATEGORICAL,
         pinned = [],
         links: wantLinks = true,
         minLinkLength = 0,

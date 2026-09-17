@@ -96,6 +96,21 @@ export type {
   RowsParams,
 } from './corpus.js';
 
+// The writer's column table, by ROLE — `corpus.bnf` through `cargo xtask corpus`, and the same
+// table `crates/fossil-sinks/src/generated.rs` carries on the Rust side.
+//
+// Exported because the alternative is a consumer spelling the names again. `cluster_id` was
+// written down in `corpus.bnf`, in this generated file, twice in this package, and three times in
+// `apps/playground` — six statements of one fact, of which the only machine-readable one had no
+// consumer. A reader asks for the ROLE it means and gets whatever the writer calls it.
+export {
+  PAYLOAD_ADDRESS,
+  PAYLOAD_CATEGORICAL,
+  PAYLOAD_COORDINATES,
+  PAYLOAD_IDENTITY,
+} from './vocabulary.generated.js';
+export type { ColumnRole, WriterColumn } from './vocabulary.generated.js';
+
 // The codegen'd wire types (params + results + the Operation envelope). Re-exported
 // so consumers type their calls without reaching into the generated module.
 export type * from './generated.js';

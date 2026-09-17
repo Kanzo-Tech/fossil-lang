@@ -153,3 +153,81 @@ async fn write_manifests_lays_out_the_graphar_manifests_and_no_payload() {
         assert_eq!(rows, 4, "{orientation}");
     }
 }
+
+/// **A channel the pass measured survives the trip to disk, and a type it never
+/// reached declares nothing.**
+///
+/// `sink.rs` is the test that holds the bytes a run wrote, and a `domain` is a
+/// claim about the artefact in exactly the way `is_primary` above is: it is read
+/// back through the structs rather than by substring, because what is asserted
+/// is which channel carries which number and a `contains` cannot say.
+///
+/// The second half is the one the field's three states exist for. `Order` is a
+/// type the layout pass did not report on, and the manifest it gets must have **no
+/// `channels:` key** — not an empty list. The two are different sentences: no key
+/// is *nobody said*, and an empty list is *this type carries none*. A writer that
+/// wrote `channels: []` for every silent type would make a corpus predating the
+/// field indistinguishable from one whose author looked and found nothing, which
+/// is the whole of what keeps this a declaration rather than a flag day
+/// (`/docs/design/position`).
+#[tokio::test]
+async fn a_measured_channel_reaches_the_manifest_and_a_silent_type_declares_none() {
+    let (db, file) =
+        support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
+    let descriptor = fossil_df::OutputDescriptorKind::ShEx(
+        fossil_shex::ShExDescriptor::from_shex_source(GRAPH_SHEX).expect("parse graph.shex"),
+    );
+
+    let ctx = SessionContext::new();
+    let mut graph = fossil_df::execute_graph(
+        &ctx,
+        &db,
+        file,
+        &descriptor,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
+
+    // What the layout pass hands back for one of the two types, in the shape
+    // `LayoutReport::channels` carries — a domain is a count of distinct values
+    // and nothing here is allowed to have planned it.
+    graph.declare_channels(vec![(
+        "Person".to_string(),
+        vec![
+            fossil_sinks::manifest::Channel::categorical("community", "cluster_id", 3)
+                .derived_by("louvain-cut"),
+        ],
+    )]);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    graph.write_manifests(dir.path()).expect("write_manifests");
+
+    let yaml = fs::read_to_string(dir.path().join("vertex/Person.vertex.yml")).unwrap();
+    let info: fossil_sinks::manifest::VertexInfo =
+        serde_yaml_ng::from_str(&yaml).unwrap_or_else(|e| panic!("Person.vertex.yml: {e}\n{yaml}"));
+    let channels = info
+        .channels
+        .unwrap_or_else(|| panic!("Person declares its channels\n{yaml}"));
+    assert_eq!(channels.len(), 1, "one column, one channel\n{yaml}");
+    assert_eq!(channels[0].name, "community");
+    assert_eq!(channels[0].column, "cluster_id");
+    assert_eq!(
+        channels[0].scale,
+        fossil_sinks::manifest::Scale::Categorical
+    );
+    assert_eq!(
+        channels[0].domain,
+        Some(3),
+        "the measured domain is what the document states\n{yaml}"
+    );
+    assert_eq!(channels[0].derived_by.as_deref(), Some("louvain-cut"));
+
+    let silent = fs::read_to_string(dir.path().join("vertex/Order.vertex.yml")).unwrap();
+    let order: fossil_sinks::manifest::VertexInfo = serde_yaml_ng::from_str(&silent)
+        .unwrap_or_else(|e| panic!("Order.vertex.yml: {e}\n{silent}"));
+    assert_eq!(
+        order.channels, None,
+        "a type the pass did not reach says nothing, and `channels: []` is saying something\n{silent}"
+    );
+}

@@ -194,8 +194,13 @@ pub async fn execute_core(
     // can only promise them. `enrich_layout_in_memory` hands back the filesystem
     // it wrote into, and the manifests go in on top.
     let report = RunReport::of(dest, &graph);
-    let (fs, pyramids) = enrich_layout_in_memory(&graph)?;
-    graph.declare_pyramids(pyramids);
+    let (fs, layout) = enrich_layout_in_memory(&graph)?;
+    graph.declare_pyramids(layout.pyramids);
+    // Both measured fields, and both by the same argument the native host makes:
+    // a rung's quotient and a categorical channel's domain are numbers that do
+    // not exist until the pass has run. The tab declares them because the tab
+    // ran the pass — see this function's doc for why it is not allowed to skip.
+    graph.declare_channels(layout.channels);
     for file in graph.manifest_files().map_err(|e| format!("encode: {e}"))? {
         fs.insert(file.rel_path, file.bytes);
     }
@@ -235,9 +240,12 @@ pub async fn execute_core(
 /// Arrow, the staged Parquet this function inserted into the map, and the copy
 /// the pass decoded back out of it. Two of the three were there so that a pass
 /// in the same process could read what the same process had just encoded.
+/// It hands back the whole [`LayoutReport`] and not one field of it, because
+/// there are two measured fields now and a second one destructured at the call
+/// site is a second chance for this host to drop one the native host declares.
 fn enrich_layout_in_memory(
     graph: &fossil_df::GraphArData,
-) -> Result<(MemoryFs, Vec<(String, fossil_sinks::manifest::HolonTree)>), String> {
+) -> Result<(MemoryFs, fossil_layout::layout::LayoutReport), String> {
     use fossil_layout::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget};
 
     // No `dest` prefix: the native host joins one because it writes into a
@@ -295,7 +303,7 @@ fn enrich_layout_in_memory(
     let report = fossil_layout::layout::enrich_layout_with(&fs, &targets, &adjacencies)
         .map_err(|e| format!("layout: {e}"))?;
 
-    Ok((fs, report.pyramids))
+    Ok((fs, report))
 }
 
 /// Enumerate the program's sources as `(uri, row-name)` — the target-agnostic

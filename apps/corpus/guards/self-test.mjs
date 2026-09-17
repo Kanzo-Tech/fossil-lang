@@ -113,15 +113,18 @@ function failing(dir) {
 // ── 1. non-vacuity ──────────────────────────────────────────────────────────────────────────────
 
 console.log("\nA conforming corpus, in both containers");
+/** What the fixture reports it wrote, kept so a later block can hold a guard against it. */
+const written = {};
 for (const [layout, dir] of Object.entries(pristine)) {
-  const written = write(dir, { layout });
+  written[layout] = write(dir, { layout });
   const results = runAll(inspect(dir));
   const broke = results.filter((r) => r.failures.length > 0);
   assert(
     broke.length === 0,
     `${layout}: ${results.length} guards pass`,
-    `${written.count.toLocaleString("en-US")} vertices · ${written.edges.toLocaleString("en-US")} edges · ` +
-      `${written.tiles} tiles${broke.length ? ` · broke: ${broke.map((b) => b.guard.id).join(", ")}` : ""}`,
+    `${written[layout].count.toLocaleString("en-US")} vertices · ` +
+      `${written[layout].edges.toLocaleString("en-US")} edges · ` +
+      `${written[layout].tiles} tiles${broke.length ? ` · broke: ${broke.map((b) => b.guard.id).join(", ")}` : ""}`,
   );
 }
 
@@ -441,6 +444,55 @@ const MUTATIONS = [
       rewrite(join(dir, VERTEX_DIR, "l3", "chunk0.parquet"), "SELECT * REPLACE (x + 1 AS x) FROM m");
     },
   },
+  // The channel block, broken the four ways a DECLARATION breaks that a derivation
+  // could not: every one of them edits the manifest and leaves the bytes exactly
+  // as they were, which is the class of failure the block introduces. The domain
+  // is the one worth the most — a reader weighs it against what it has to draw
+  // with before it draws, so a stale one is worse than an absent one.
+  {
+    guard: "declared-channels",
+    what: "the declared domain is one short of the communities on disk",
+    layout: "rowgroups",
+    mutate(dir) {
+      const path = join(dir, "vertex", "Person.vertex.yml");
+      const yaml = readFileSync(path, "utf8");
+      const domain = /domain: (\d+)/.exec(yaml);
+      writeFileSync(path, yaml.replace(domain[0], `domain: ${Number(domain[1]) - 1}`));
+    },
+  },
+  {
+    guard: "declared-channels",
+    what: "the channel names a column the payload does not have",
+    layout: "rowgroups",
+    mutate(dir) {
+      const path = join(dir, "vertex", "Person.vertex.yml");
+      writeFileSync(
+        path,
+        readFileSync(path, "utf8").replace("column: cluster_id", "column: community_id"),
+      );
+    },
+  },
+  {
+    guard: "declared-channels",
+    what: "the quantitative entry grows a domain, which is the footers stated a second time",
+    layout: "rowgroups",
+    mutate(dir) {
+      const path = join(dir, "vertex", "Person.vertex.yml");
+      writeFileSync(
+        path,
+        readFileSync(path, "utf8").replace("  scale: quantitative", "  scale: quantitative\n  domain: 40"),
+      );
+    },
+  },
+  {
+    guard: "declared-channels",
+    what: "the categorical entry loses its domain, which is the state the block exists to remove",
+    layout: "rowgroups",
+    mutate(dir) {
+      const path = join(dir, "vertex", "Person.vertex.yml");
+      writeFileSync(path, readFileSync(path, "utf8").replace(/ {2}domain: \d+\n/, ""));
+    },
+  },
   {
     guard: "tile-of",
     what: "the `by_target` tiles are cut on `src_dense`, which is the source half again",
@@ -451,6 +503,28 @@ const MUTATIONS = [
     mutate: (dir) => recut(dir, "by_target", "src_dense"),
   },
 ];
+
+console.log("\nThe declared channels are recounted rather than skipped");
+{
+  // `declared-channels` passes on a corpus that declares none, which is what
+  // every corpus written before the block does — so the guard going green says
+  // nothing until somebody checks it had a declaration to read. The fixture
+  // writes one; this is the assertion that it is still being READ, and it is
+  // the difference between a guard and a sentence.
+  const [{ failures, notes }] = runAll(inspect(pristine.rowgroups), ["declared-channels"]);
+  const recounted = notes
+    .map((note) => /(\d+) domain\(s\) recounted/.exec(note))
+    .filter(Boolean)
+    .reduce((n, m) => n + Number(m[1]), 0);
+  assert(
+    failures.length === 0 && recounted > 0,
+    `the fixture declares a domain and the guard recounts it off the Parquet`,
+    `${recounted} domain(s) recounted, ${written.rowgroups.communities} communities written`,
+  );
+  const communities = written.rowgroups.communities;
+  const measured = notes.some((note) => note.includes(`${communities} distinct value(s)`));
+  assert(measured, "the recounted domain is the one the fixture wrote", `${communities}`);
+}
 
 console.log("\nEvery guard fires when its convention is broken");
 const collateral = [];

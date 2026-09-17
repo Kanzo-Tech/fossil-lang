@@ -158,6 +158,9 @@ fn corpus(batches: usize, null_postcodes: usize) -> GraphArData {
         // No pyramid: these fixtures are about the privacy bound, and a tree is
         // the layout pass's to write.
         pyramids: Vec::new(),
+        // And no channels, for the same reason: a domain is a measurement
+        // and the pass is what takes it.
+        channels: Vec::new(),
         schema: GraphSchema {
             nodes: vec![NodeType {
                 label: "Person".to_string(),

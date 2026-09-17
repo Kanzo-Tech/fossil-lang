@@ -11,16 +11,20 @@
  * - **the payload** says which columns a binned histogram is the right form for — *numeric, and
  *   not the address, the position, the identity, or the colour*, the last because brushing the
  *   colour is brushing the legend;
- * - **`graph.graph.yml`** says which of those is interesting, by declaring it a quasi-identifier
- *   under the corpus's k-anonymity bound.
+ * - **the vertex manifest's `channels:` block** says which of those the writer means, by declaring
+ *   it `quantitative`. It is the only field in the format whose subject is the drawing, so it
+ *   outranks the other one;
+ * - **`graph.graph.yml`**, where no channel is declared, still says which is interesting by
+ *   declaring it a quasi-identifier under the corpus's k-anonymity bound. That is a
+ *   disclosure-control field answering an encoding question, which is what `channels:` exists to
+ *   stop — and it stays as the fallback because a corpus written before the block has to keep
+ *   drawing the chart it drew.
  *
- * On the bench corpus the two land on `birth_year`, which is what this header used to name: its
- * payload's other columns are the four the layout pass writes plus `subject` and a
- * high-cardinality `postcode`, and `quasi_identifiers: Person.birth_year Person.postcode` is
- * declared under a `k` of 5. So the column this chart brushes is one the corpus says is a
- * re-identification risk, and the chart shows the k-anonymised distribution — the generalisation is
- * already in the bytes, because the writer refused to seal a manifest whose data did not reach the
- * bound.
+ * On the bench corpus all of them land on `birth_year`: it is declared as the channel `age`, and it
+ * is also one of `quasi_identifiers: Person.birth_year Person.postcode` under a `k` of 5. So the
+ * column this chart brushes is one the corpus says is a re-identification risk, and the chart shows
+ * the k-anonymised distribution — the generalisation is already in the bytes, because the writer
+ * refused to seal a manifest whose data did not reach the bound.
  *
  * ## No plotting dependency, deliberately
  *

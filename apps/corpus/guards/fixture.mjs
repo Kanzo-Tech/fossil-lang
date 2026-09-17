@@ -189,6 +189,14 @@ export function write(
   }
   const reached = Math.min(...classes.values());
 
+  // The categorical channel's domain, COUNTED — the same rule `reached` is
+  // counted under. `clusters` is what this fixture was asked for and the number
+  // of discs that end up carrying a vertex is what it wrote, and those two part
+  // company whenever the count does not fill the last disc. A manifest states
+  // what is on disk, so the guard that recounts it off the Parquet is comparing
+  // against a measurement rather than against the same formula twice.
+  const communities = new Set(ordered.map((p) => p.cluster)).size;
+
   const per = Math.ceil(count / clusters);
   const pairs = [];
   for (let i = 0; i < count; i += 1) {
@@ -431,6 +439,26 @@ export function write(
       "  prefix: index/",
       "  ordered_by: subject",
       `  chunk_size: ${tileRows}`,
+      // What a reader can draw this type with, and the one number it cannot recover: how many
+      // distinct values the categorical has. A quantitative channel declares no domain — its range
+      // is min/max in the footers — so BOTH kinds are written here, because a fixture carrying one
+      // of them freezes half the contract and leaves the other half of the guard passing on
+      // nothing.
+      //
+      // Flat mappings, like everything else this writes: `manifest.mjs` reads one level of
+      // sequence-of-mappings and SKIPS anything deeper, so a nested channel would be a channel
+      // half its readers cannot see.
+      "channels:",
+      "- name: community",
+      "  column: cluster_id",
+      "  scale: categorical",
+      `  domain: ${communities}`,
+      // Present because this writer computed the column. `birth_year` below carries no
+      // `derived_by`, which is how a column that came off the source is written.
+      "  derived_by: phyllotaxis-grid",
+      "- name: age",
+      "  column: birth_year",
+      "  scale: quantitative",
       "version: gar/v1",
       "",
     ].join("\n"),
@@ -500,7 +528,7 @@ export function write(
     }
   }
 
-  return { dir, count, edges: pairs.length, tiles, layout, chunkSize: tileRows, reached };
+  return { dir, count, edges: pairs.length, tiles, layout, chunkSize: tileRows, reached, communities };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

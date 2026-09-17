@@ -49,7 +49,7 @@ import type { BoundedSource, Slice, SliceRequest, Viewport } from '@kanzo-tech/g
 import { vertexId } from '@kanzo-tech/graph';
 
 import type { QueryFn } from './duckdb.js';
-import { categoricalOf } from './encoding.js';
+import { categoricalOf, type Channel } from './encoding.js';
 import { extentOf, type Rect, type TileBox } from './stream.js';
 
 /**
@@ -103,6 +103,12 @@ export interface WholeSourceOptions {
   onCost?(cost: WholeCost): void;
   /** Palette slots, asked of the theme rather than assumed. Same argument as `corpusSource`. */
   slots?: number;
+  /**
+   * The drawn type's `channels:` block, in its three states — the same value `corpusSource` and
+   * `encodingFor` are given, so that the baseline and the streaming path colour by one declaration
+   * rather than by two derivations that happen to agree.
+   */
+  channels?: readonly Channel[];
   /**
    * The ceiling, in bytes of typed array, that this source will not cross.
    *
@@ -189,7 +195,8 @@ interface Plan {
  * more honest way to show that the asking costs nothing.
  */
 export function wholeSource(options: WholeSourceOptions): BoundedSource {
-  const { batch = 250_000, boxes, budgetBytes = 256 * 1024 * 1024, onCost, query, slots = 8, vertexType } = options;
+  const { batch = 250_000, boxes, budgetBytes = 256 * 1024 * 1024, channels, onCost, query, slots = 8, vertexType } =
+    options;
   const extent: Rect | null = extentOf(boxes);
 
   /** The one load. `null` until the first `slice()`, and never re-entered. */
@@ -259,7 +266,7 @@ export function wholeSource(options: WholeSourceOptions): BoundedSource {
       edgeCount,
       // The colour this corpus carries, for a request that names a CSS colour instead of a column.
       // Read where the payload's vocabulary first exists, which is the same moment the file list does.
-      carries: declared === undefined ? null : categoricalOf(declared),
+      carries: declared === undefined ? null : categoricalOf(declared, channels),
       vertexFiles: filesOf(address.tiles, (k) => address.tileUrl(k)),
       edgeFiles: [...new Set(edgeFiles)],
     };

@@ -1452,6 +1452,152 @@ export const GUARDS = [
       );
     },
   },
+  {
+    id: "declared-channels",
+    title: "A declared channel names a column the payload has, on the domain it publishes",
+    proves:
+      "That every entry of a vertex type's `channels:` is drawable from the bytes: the `column` " +
+      "is a column the payload actually carries, the `scale` is one of the two a reader " +
+      "dispatches on, and — for a categorical — the declared `domain` is the number of distinct " +
+      "values in that column, **recounted over the whole payload set** rather than over a tile. " +
+      "The domain is the field the block exists for, because it is the one a reader cannot " +
+      "recover: a quantitative channel's range is min/max in the footers, and a count of distinct " +
+      "values is in no footer and costs a scan to find. A reader compares that number against " +
+      "what it has to draw with *before* it draws, so a stale one is worse than an absent one — " +
+      "absent, the reader knows it is guessing.\n\n" +
+      "A quantitative entry is required to declare NO domain, for the same reason the categorical " +
+      "must: declaring a range would be a second statement of what the footers carry, and the " +
+      "second statement is the one that goes stale when a tile is rewritten.\n\n" +
+      "Silence is not a violation and neither is an empty list, and the two are reported apart. " +
+      "No `channels:` is a corpus whose writer said nothing — every corpus written before the " +
+      "field is one — and an empty list is a writer declaring that this type carries none.",
+    cannotProve:
+      "That the domain FITS. A palette has a capacity, and a capacity is not a corpus fact: it " +
+      "belongs to whatever is drawing, and the same corpus is well drawn by one reader and " +
+      "unreadable in another. What the declaration changes is *when* the mismatch is knowable, " +
+      "not whether it happens — this guard proves the number is true, and a reader is what " +
+      "compares it against eight.\n\n" +
+      "That `derived_by` is true. It says what computed the column, and nothing on disk records " +
+      "what computed anything: a corpus claiming `louvain-cut` over a column somebody pasted in " +
+      "passes here, and so does a derived column that claims nothing.\n\n" +
+      "That the SCALE is the right reading of the column. An integer column can be read as a " +
+      "measure or as a group and the bytes do not decide which — a `birth_year` declared " +
+      "categorical with a truthful domain of 40 satisfies every line of this guard and draws a " +
+      "picture nobody wants.\n\n" +
+      "That the declaration is COMPLETE. A column a reader would happily colour by and no channel " +
+      "names is invisible here, for the reason it is invisible to a reader: silence is legal, and " +
+      "which columns are worth drawing is not a question the artefact answers.",
+    run(corpus) {
+      const SCALES = new Set(["categorical", "quantitative"]);
+      const failures = [];
+      const notes = [];
+      for (const type of corpus.types) {
+        if (type.channels === null) {
+          notes.push(
+            `${type.name}: no \`channels:\` — the writer says nothing, which is a corpus and not a claim`,
+          );
+          continue;
+        }
+        if (type.channels.length === 0) {
+          notes.push(`${type.name}: declares no channel, which is not the same as saying nothing`);
+          continue;
+        }
+        if (type.files.length === 0) {
+          failures.push(
+            `${type.name}: declares ${type.channels.length} channel(s) over a payload with no tiles`,
+          );
+          continue;
+        }
+
+        // ONE relation over every tile of the set, which is the line the domain
+        // turns on: a distinct count per tile and summed is a different number
+        // and a larger one, and it is the easiest wrong answer available here.
+        // `declared-privacy` spans the payload the same way and for the same
+        // reason.
+        const relation = `read_parquet(${fileList(type.files)})`;
+        const named = new Set();
+        let recounted = 0;
+        for (const channel of type.channels) {
+          const where = `${type.name}.${channel.name || "«unnamed»"}`;
+          if (channel.name === "") {
+            failures.push(`${type.name}: a channel with no name, which a reader cannot ask for`);
+          } else if (named.has(channel.name)) {
+            failures.push(`${where}: two channels of one name, so asking for it by name is ambiguous`);
+          }
+          named.add(channel.name);
+
+          if (!SCALES.has(channel.scale)) {
+            failures.push(
+              `${where}: a scale of \`${channel.scale}\`, which is neither \`categorical\` nor ` +
+                "`quantitative` — a reader dispatches on it rather than displaying it",
+            );
+            continue;
+          }
+          // The failure a declaration introduces that a derivation could not
+          // have: a derived column is the column it was derived from, and a
+          // named one is a name that can be wrong.
+          if (!type.columns.has(channel.column)) {
+            failures.push(
+              `${where}: names column \`${channel.column}\`, which the payload has no column for`,
+            );
+            continue;
+          }
+          if (channel.scale === "quantitative") {
+            if (channel.declaresDomain) {
+              failures.push(
+                `${where}: is quantitative and declares a domain — its range is min/max in the ` +
+                  "footers, and a second statement of what the bytes carry is the one that goes stale",
+              );
+            }
+            notes.push(`${where}: quantitative over ${channel.column}, range read from the footers`);
+            continue;
+          }
+          if (!channel.declaresDomain) {
+            failures.push(
+              `${where}: is categorical and declares no domain, which is the state the block ` +
+                "exists to remove — no footer holds a distinct count",
+            );
+            continue;
+          }
+          if (channel.domain === null) {
+            failures.push(`${where}: declares a domain that is not a count of distinct values`);
+            continue;
+          }
+
+          const quoted = `"${channel.column.replace(/"/g, '""')}"`;
+          const row = query(
+            `SELECT count(DISTINCT ${quoted}) AS distinct_values,
+                    count(*) FILTER (${quoted} IS NULL) AS absent
+               FROM ${relation}`,
+          )[0];
+          recounted += 1;
+          const distinct = BigInt(row.distinct_values);
+          const absent = BigInt(row.absent);
+          if (distinct !== channel.domain) {
+            failures.push(
+              `${where}: declares a domain of ${channel.domain} and \`${channel.column}\` holds ` +
+                `${distinct} distinct value(s) — that number is what a reader weighs against what ` +
+                "it has to draw with, before it draws",
+            );
+          }
+          notes.push(
+            `${where}: categorical over ${channel.column}, ${distinct} distinct value(s)` +
+              // A null is not a value of the domain — SQL counts it out, and a
+              // reader drawing the column has rows it has no slot for. Reported
+              // rather than counted in: which of the two a writer meant is not
+              // something the bytes say.
+              (absent > 0n ? `, ${absent} row(s) carrying none` : "") +
+              (channel.derivedBy === null ? "" : ` · derived by ${channel.derivedBy}`),
+          );
+        }
+        notes.push(
+          `${type.name}: ${type.channels.length} channel(s) declared, ${recounted} domain(s) ` +
+            "recounted over the whole payload",
+        );
+      }
+      return result(failures, notes);
+    },
+  },
 ];
 
 /** Run every guard, or the subset whose ids are given. */

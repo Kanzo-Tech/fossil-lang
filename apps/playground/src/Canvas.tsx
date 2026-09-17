@@ -30,7 +30,7 @@ import type { Bench } from './bench.js';
 import { readDeclaration } from './bound.js';
 import { openCrossfilter, type Crossfilter, type CrossfilterCost } from './crossfilter.js';
 import * as duck from './duckdb.js';
-import { encodingFor, type Encoding } from './encoding.js';
+import { channelsFor, encodingFor, type Encoding } from './encoding.js';
 import { n } from './format.js';
 import Histogram from './Histogram.js';
 import { ModeComparison, START, StreamingDetail, WholeDetail, type Mode, type ModeLedger } from './Ledger.js';
@@ -132,6 +132,24 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
   const slots = useMemo(() => categoricalCapacity(document.documentElement), []);
 
   /**
+   * **What this corpus declares it is drawn with**, read once and handed to all three readers.
+   *
+   * The block is per vertex type and lives in `vertex/<Type>.vertex.yml`, which `bench.ts` has
+   * already fetched — so this is a scan of text in hand rather than a request, and it is
+   * synchronous where `Corpus.types` is not. `undefined` for a corpus with no `channels:` key,
+   * which is every corpus written before the field and which is why nothing below branches on it:
+   * `encodingFor` and `categoricalOf` take the absence as *derive*, exactly as they did.
+   *
+   * Which type: the first the index names, taken off `bench.addressing` because that is the same
+   * ordering `encodingFor` falls back to and the addressing already holds it. The encoding needs
+   * the block to be computed, so the block cannot wait for the encoding to say which type it is.
+   */
+  const channels = useMemo(
+    () => channelsFor(Object.values(bench.manifestTexts), bench.addressing.types[0]?.type ?? ''),
+    [bench],
+  );
+
+  /**
    * The corpus, opened once — and as a PROMISE, which is what keeps this component unchanged.
    *
    * `openCorpus` is asynchronous and a `BoundedSource` is not: the query loop builds the source
@@ -143,8 +161,8 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
   const corpus = useMemo(() => openCorpus(bench.base, { query: duck.query, wasmUrl: CORPUS_WASM_URL }), [bench]);
 
   const streaming: BoundedSource = useMemo(
-    () => corpusSource({ corpus, boxes, onCost, slots }),
-    [corpus, boxes, onCost, slots],
+    () => corpusSource({ corpus, boxes, channels, onCost, slots }),
+    [channels, corpus, boxes, onCost, slots],
   );
 
   /**
@@ -157,8 +175,8 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
    * asks for it — nothing here is loaded eagerly.
    */
   const baseline: BoundedSource = useMemo(
-    () => wholeSource({ corpus, boxes, query: duck.query, onCost: onWhole, slots }),
-    [corpus, boxes, onWhole, slots],
+    () => wholeSource({ corpus, boxes, channels, query: duck.query, onCost: onWhole, slots }),
+    [channels, corpus, boxes, onWhole, slots],
   );
 
   const source = mode === 'whole' ? baseline : streaming;
@@ -188,6 +206,7 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
       setEncoding(
         encodingFor({
           types: open.types,
+          channels,
           quasiIdentifiers:
             declaration.state === 'declared' ? declaration.bound.quasiIdentifiers : [],
         }),
@@ -196,7 +215,7 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
     return () => {
       live = false;
     };
-  }, [bench, corpus]);
+  }, [bench, channels, corpus]);
 
   /**
    * The crossfilter, opened once the corpus is — one coordinator, over the engine already booted.
@@ -369,14 +388,17 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
 
       <p className="str-note">
         <strong>What the crossfilter actually crosses.</strong> The chart brushes{' '}
-        <code>{encoding?.brush ?? '…'}</code>, and which column that is <em>is derived rather than
+        <code>{encoding?.brush ?? '…'}</code>, and which column that is <em>is read rather than
         chosen</em>: the payload says which of its columns a binned histogram is the right form for
-        — numeric, and not the address, the position, the identity or the colour — and{' '}
-        <code>graph.graph.yml</code> says which of those is interesting, by naming it a{' '}
-        <em>quasi-identifier</em> under the declared k-anonymity bound. The bytes decide the set and
-        the declaration orders it; neither half is asked the other&apos;s question. So the
-        distribution on screen is the generalised one: the writer refused to seal a manifest whose
-        data did not reach the bound, and this is what reached it.
+        — numeric, and not the address, the position, the identity or the colour — and the vertex
+        manifest&apos;s <code>channels:</code> block says which of those the writer means, by
+        declaring it <em>quantitative</em>. Where a corpus declares none,{' '}
+        <code>graph.graph.yml</code> still ranks them by naming one a{' '}
+        <em>quasi-identifier</em> under the declared k-anonymity bound — which is how this was
+        answered before the block existed, and is what a corpus written then still gets. The bytes
+        decide the set and the declarations order it; no half is asked another&apos;s question. So
+        the distribution on screen is the generalised one: the writer refused to seal a manifest
+        whose data did not reach the bound, and this is what reached it.
         The two clients are different <em>kinds</em> on purpose.
         The chart&apos;s <code>x</code> is a column, so its brush publishes an interval the database
         evaluates directly. The canvas&apos;s is not: what is drawn is a rectangle-and-level answer

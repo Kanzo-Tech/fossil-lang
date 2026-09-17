@@ -126,6 +126,18 @@ pub struct GraphArData {
     /// written before the block existed reads as — weaker than an empty one
     /// rather than equivalent to it.
     pub pyramids: Vec<(String, fossil_sinks::manifest::HolonTree)>,
+    /// **The channels each vertex type's rows can be drawn with**, keyed by its
+    /// label — and the third field here that is not data.
+    ///
+    /// Empty until the layout pass has partitioned the rows, for exactly
+    /// [`Self::pyramids`]' reason: a categorical channel's `domain` is a count
+    /// of distinct values and no Parquet footer holds one, so it is a
+    /// measurement and cannot be carried by a caller that did not take it.
+    ///
+    /// A type absent from this list declares no channels at all, which is not
+    /// the same statement as declaring an empty list — see
+    /// `fossil_sinks::manifest::VertexInfo::channels` for the three states.
+    pub channels: Vec<(String, Vec<fossil_sinks::manifest::Channel>)>,
 }
 
 /// A materialised edge's adjacency data in both orientations — `by_source` (CSR,
@@ -234,6 +246,7 @@ pub async fn execute_graph<'db>(
     Ok(GraphArData {
         privacy: Privacy::Undeclared,
         pyramids: Vec::new(),
+        channels: Vec::new(),
         schema,
         vertices,
         edges,
@@ -1826,6 +1839,25 @@ impl GraphArData {
         self.pyramids = pyramids;
     }
 
+    /// **Record the channels the layout pass measured a domain for.**
+    ///
+    /// [`Self::declare_pyramids`]' seam and its rule: the list **is** the
+    /// declaration, so this replaces rather than appends. Two passes over one
+    /// corpus would otherwise declare the `community` channel twice, each with
+    /// its own domain, and a reader has no way to choose between them.
+    ///
+    /// What the pass measures is the DOMAIN. The rest of the entry — the name,
+    /// the column, the scale — is a plan and could have been written in front of
+    /// the bytes; it travels with the measurement because splitting a channel
+    /// across two writers is how the column name came to be stated six times
+    /// (`/docs/design/position`).
+    pub fn declare_channels(
+        &mut self,
+        channels: Vec<(String, Vec<fossil_sinks::manifest::Channel>)>,
+    ) {
+        self.channels = channels;
+    }
+
     /// What this value costs in Arrow buffers, in `GiB` — every vertex batch plus
     /// both orientations of every edge table. Cheap (a walk of the batch list, no
     /// data touched) and the number the peak-memory work is about: the whole corpus
@@ -1913,6 +1945,18 @@ impl GraphArData {
                     self.pyramids.iter().find(|(label, _)| *label == node.label)
                 {
                     info = info.with_holons(tree.clone());
+                }
+                // **And the channels the pass measured a domain for**, attached
+                // the same way and for the same reason: `domain` is a count of
+                // distinct values, no footer holds one, and a writer that
+                // planned it would be planning the output of Louvain. A type
+                // the pass did not reach — one that materialised no rows —
+                // declares no channels, which says *nobody looked* rather than
+                // *this type carries none*.
+                if let Some((_, declared)) =
+                    self.channels.iter().find(|(label, _)| *label == node.label)
+                {
+                    info = info.with_channels(declared.clone());
                 }
                 info
             })

@@ -151,6 +151,14 @@ pub(super) fn hierarchy(mut graph: Weighted) -> Vec<Vec<u32>> {
 /// every vertex is its own community, which is the truth about that graph.
 /// Returns the membership and **which level it came from**, because the level is
 /// what the placement above it still needs in order to know who is whose sibling.
+///
+/// It does **not** return how many groups the partition it chose has, and a
+/// caller that needs that number — [`super::pass`] does, to declare the
+/// `community` channel's domain — calls [`group_count`] on the membership. The
+/// signature stayed two-wide on purpose: widening it would put the count in two
+/// places, here and in the function whose doc carries the argument for why
+/// `max + 1` IS the distinct count. One of them would then be the one a reader
+/// checks and the other the one the manifest quotes.
 #[must_use]
 pub(super) fn flatten_to_budget(
     levels: &[Vec<u32>],
@@ -160,12 +168,11 @@ pub(super) fn flatten_to_budget(
     let Some(finest) = levels.first() else {
         return ((0..vertex_count).collect(), None);
     };
-    let count = |m: &[u32]| m.iter().copied().max().map_or(0, |x| x + 1);
 
     let mut current = finest.clone();
     let mut chosen = 0;
     for level in &levels[1..] {
-        if count(&current) <= budget {
+        if group_count(&current) <= budget {
             break;
         }
         current = current.iter().map(|&c| level[c as usize]).collect();
@@ -1064,7 +1071,15 @@ impl Cut {
 /// How many groups a level names — `max + 1`, which for a level this module
 /// produced is also its count of distinct ids, because [`densify`] relabels
 /// them to `0..k`.
-fn group_count(level: &[u32]) -> u32 {
+///
+/// **The one place that argument is written down**, which is why it is also the
+/// one place that computes the number. [`flatten_to_budget`] tests a partition
+/// against a budget with it and [`super::pass`] declares the same partition's
+/// `community` channel with it — `domain` on a categorical channel IS a count
+/// of distinct values (`/docs/design/position`, *the one number a reader cannot
+/// recover*), so the test and the declaration have to be the same arithmetic or
+/// the manifest states something the budget was never checked against.
+pub(super) fn group_count(level: &[u32]) -> u32 {
     level.iter().copied().max().map_or(0, |m| m + 1)
 }
 

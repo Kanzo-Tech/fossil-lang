@@ -423,17 +423,19 @@ is specified on [privacy](/docs/format/conventions/privacy) as *the one field a 
 derive, and the one the whole bound turns on* — a disclosure-control vocabulary, doing encoding work
 because it was the only writer-side statement in reach.
 
-And the honest statement exists on the other side, unread. `corpus.bnf` marks `cluster_id`
+And the honest statement existed on the other side, unread. `corpus.bnf` marks `cluster_id`
 `role categorical` — glossed *an ordinal the writer computed, for a reader to colour by* — and
 `cargo xtask corpus` emits it as
-`packages/corpus/src/vocabulary.generated.ts, PAYLOAD_CATEGORICAL`. The door imports
+`packages/corpus/src/vocabulary.generated.ts, PAYLOAD_CATEGORICAL`. The door imported
 `PAYLOAD_ADDRESS`, `PAYLOAD_COORDINATES` and `PAYLOAD_IDENTITY` from that file **and not that
-one**, and writes the string `cluster_id` itself instead.
+one**, and wrote the string `cluster_id` itself instead.
 
-Counted: the name is written down in `corpus.bnf`, in the generated TypeScript, in
+Counted at the time: the name was written down in `corpus.bnf`, in the generated TypeScript, in
 `apps/playground/src/encoding.ts, categoricalOf`, in `packages/corpus/src/corpus.ts` as
 `FrameParams.fill`'s default, in `crates/fossil-graph/src/manifest.rs`, and at eight script call
-sites. Six statements of one fact, and the only machine-readable one has no consumer.
+sites. Six statements of one fact, and the only machine-readable one had no consumer. Two of the six
+are now reads of it — the door's default and the app's fallback both resolve `PAYLOAD_CATEGORICAL`,
+and the harness assertion that used to compare them is gone with the difference it was measuring.
 </Callout>
 
 **So the question was never whether a writer may declare it.** It is whether the declaration is a
@@ -526,24 +528,37 @@ block does is make the row's number checkable from the artefact instead of from 
 - **The declaration, for the one corpus fossil writes**: `cluster_id`, `categorical`, the measured
   domain, `derived_by` naming the cut that produced it — and nothing invented for a second channel
   no writer produces, which is [the error this project has made at nine
-  scales](/docs/design/discarded).
+  scales](/docs/design/discarded). **Done**, and measured rather than planned:
+  `crates/fossil-layout/src/layout/community.rs, group_count` is the count the partition already
+  computed to test itself against `CLUSTER_BUDGET`, and it reaches the document by the path the
+  pyramid's measured counts already travel —
+  `crates/fossil-layout/src/layout/pass.rs, LayoutReport` to
+  `crates/fossil-df/src/lib.rs, declare_channels`. The deriver is `louvain-cut` and not
+  `louvain+phyllotaxis`: what produced this column is the modularity pass and the cut of its
+  hierarchy, and phyllotaxis turns a partition into `x`/`y` with no say in which group a vertex
+  is in.
 - **The reader collapsing to a read.** `categoricalOf`'s preference-then-first-integral derivation
   becomes *read what is declared*, with today's rule kept as what an undeclared corpus gets. Not
-  deleted: a corpus written before the field has to keep drawing.
+  deleted: a corpus written before the field has to keep drawing. **Done**, in
+  `apps/playground/src/encoding.ts, categoricalOf` — with the derivation intact beneath it, and
+  `apps/playground/src/encoding.ts, readChannels` as the scanner over the block.
 - **A flat block.** `apps/corpus/guards/manifest.mjs` scans lines, reads one level of
   sequence-of-mappings, and silently skips anything deeper. A `channels:` entry that nests is a
   `channels:` entry half its readers cannot see.
 - **The inverted assertion, reframed rather than deleted.**
-  `apps/playground/scripts/verify-encoding.mjs` asserts today that withholding the declaration
+  `apps/playground/scripts/verify-encoding.mjs` asserted that withholding the declaration
   leaves the colour unchanged — *it never came from the declaration*. That is the invariant this
   section inverts, and the honest replacement is the three-state one: a corpus that declares nothing
   draws exactly as it did, and a corpus that declares something is drawn by what it declares.
-- **What replaces the cross-check that is lost.** That harness also asserts that
-  `frame({fill})` and `frame({})` answer one rectangle with identical categories — which is a real
-  comparison today, because `encoding.ts` and `corpus.ts` write the name independently. Once both
-  read the manifest there is one source and the assertion is a tautology. The check that is worth
-  having instead is the one it was standing in for: **the column a corpus declares is a column the
-  corpus has.**
+  **Done**, and both halves are asserted — the first against the harness's own copy of the old rule
+  rather than against what the module now returns.
+- **What replaces the cross-check that is lost.** That harness also asserted that
+  `frame({fill})` and `frame({})` answer one rectangle with identical categories — a real
+  comparison while `encoding.ts` and `corpus.ts` wrote the name independently, and a tautology once
+  both read `PAYLOAD_CATEGORICAL`. The check that is worth having instead is the one it was standing
+  in for: **the column a corpus declares is a column the corpus has.** **Done**, with the door's own
+  default held to the same rule: a generated constant states what fossil's writer emits and cannot
+  state what a given corpus carries.
 
 ## What this does not settle
 

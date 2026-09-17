@@ -135,6 +135,42 @@ export function rowGroups(files) {
 }
 
 /**
+ * The channels a vertex type declares, or `null` when it declares none of them and `[]` when it
+ * declares that it has none.
+ *
+ * **Three states, and the first two are different findings** — `privacy:`'s rule, on the block
+ * written under it. An absent `channels:` is a writer that said nothing, which is every corpus
+ * written before the field existed; an empty list is a writer saying this type carries no channel.
+ * A reader that collapsed the two would be reporting the age of a writer as a property of the data.
+ *
+ * `domain` is kept twice on purpose: `declaresDomain` is whether the key is *there*, and `domain`
+ * is the count under it. A quantitative entry owes the first to be false, and a categorical one
+ * owes a number — and `domain: many` is a third thing, which a single nullable field would report
+ * as the second.
+ */
+function channelsOf(info) {
+  const declared = info.channels;
+  if (declared === undefined) return null;
+  // `channels: []` scans as the two-character string, the way `projections: []` does: the flow form
+  // of an empty collection is the one flow form this scanner reads, and it carries no entries
+  // either way.
+  if (!Array.isArray(declared)) return [];
+  return declared.map((entry) => {
+    const domain = String(entry?.domain ?? "").trim();
+    return {
+      name: String(entry?.name ?? ""),
+      column: String(entry?.column ?? ""),
+      scale: String(entry?.scale ?? ""),
+      /** Whether the key is written at all, which is what the scale owes an answer about. */
+      declaresDomain: entry?.domain !== undefined,
+      /** The count under it, or `null` for a key that is there and is not a count. */
+      domain: /^\d+$/.test(domain) ? BigInt(domain) : null,
+      derivedBy: entry?.derived_by === undefined ? null : String(entry.derived_by),
+    };
+  });
+}
+
+/**
  * The projections a manifest declares, resolved against the type's own prefix.
  *
  * **One function for a vertex type and a relation**, because there is one list. A corpus is an
@@ -223,6 +259,11 @@ export function inspect(root) {
           columnTypes: columnsOf(tiles).types,
         };
       })(),
+      /**
+       * What this type says a reader can draw it with, or `null` for a type that says nothing —
+       * see {@link channelsOf}. The declaration `declared-channels` holds against the payload.
+       */
+      channels: channelsOf(info),
       /**
        * Every projection this type declares, the payload included — see {@link projectionsOf}.
        *

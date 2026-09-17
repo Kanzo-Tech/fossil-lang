@@ -8,7 +8,7 @@
 
 use super::cells::{Edges, Pyramid};
 use super::community::{
-    Csr, CsrBuilder, Weighted, flatten_to_budget, hierarchy, order_by_hierarchy,
+    Csr, CsrBuilder, Weighted, flatten_to_budget, group_count, hierarchy, order_by_hierarchy,
 };
 use super::morton::{morton_codes, morton_ranks};
 use super::place::{CLUSTER_BUDGET, cluster_layout, place_after};
@@ -26,7 +26,7 @@ use fossil_df::files::TileWriter;
 use fossil_mem_probe::Probe;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
-use fossil_sinks::manifest::{HOLON_PREFIX, HolonTree, TILES_FILE, VertexLevels};
+use fossil_sinks::manifest::{Channel, HOLON_PREFIX, HolonTree, TILES_FILE, VertexLevels};
 
 /// `row_of_dense[d]` when no row of the vertex file carries `dense_id` `d`.
 ///
@@ -215,6 +215,15 @@ impl AdjacencyTarget<'_> {
 /// many edges survive as a quotient at a rung. Everything else a manifest says
 /// about the pyramid is `ceil(vertex_count / 4^k)` and could have been written
 /// in front of the bytes.
+///
+/// **There are two such fields now, and that is what this type is for.** A
+/// categorical channel's `domain` is the second: it is a count of distinct
+/// values, no footer holds one (`/docs/design/position`), and the partition it
+/// counts is chosen by running Louvain and cutting the hierarchy at a budget —
+/// so like the quotient it is a number that does not exist until the pass has
+/// run. Everything else `channels:` says about `cluster_id` — its name, its
+/// column, that it is categorical — is a plan and is written by `fossil-df` in
+/// front of the bytes, exactly as the pyramid's arithmetic is.
 #[derive(Debug, Default)]
 pub struct LayoutReport {
     /// One entry per vertex type that earned a pyramid, keyed by
@@ -226,6 +235,23 @@ pub struct LayoutReport {
     /// declares an empty one. The first is what a corpus written before the
     /// block existed reads as.
     pub pyramids: Vec<(String, HolonTree)>,
+    /// One entry per vertex type the pass **partitioned**, keyed by
+    /// [`VertexLayoutTarget::type_name`] — the argument to
+    /// `VertexInfo::with_channels`.
+    ///
+    /// Absent rather than empty for a type the pass did not reach, for
+    /// [`Self::pyramids`]' reason and one more: the three states of `channels:`
+    /// are no key, an empty list and a list, and they mean *nobody said*, *this
+    /// type carries none* and *these*. A type with no rows carries no
+    /// `cluster_id` a reader could colour by and has not been asked about, so it
+    /// is the first — an empty list here would be the pass answering a question
+    /// it did not look at.
+    ///
+    /// The list per type is one channel long. The corpus has exactly one column
+    /// a writer computed for a reader to colour by; a second entry would be a
+    /// declaration about a column no writer produces, which is the error
+    /// `/docs/design/discarded` counts at nine scales.
+    pub channels: Vec<(String, Vec<Channel>)>,
 }
 
 /// Failure modes of [`enrich_layout`].
@@ -869,6 +895,15 @@ pub fn enrich_layout_with(
     // pass already holds.
     let mut placed: Vec<Vec<(f32, f32)>> = vec![Vec::new(); targets.len()];
 
+    // **What the manifest cannot plan**, filled as the pass measures it. Opened
+    // here rather than after the loops because its two fields are measured in
+    // two different phases: a channel's domain is a function of the PARTITION,
+    // which the vertex loop below computes, and a rung's quotient is a function
+    // of the renumbered EDGES, which do not exist until the adjacency loop has
+    // read them. A value built at the end would need the first of those carried
+    // to it in a second vector.
+    let mut report = LayoutReport::default();
+
     // The pyramid per vertex type, index-aligned with `targets`, and `None` for
     // a type that earns none — one no bigger than a single cell, or one whose
     // caller declared no base.
@@ -995,6 +1030,41 @@ pub fn enrich_layout_with(
         // at the top level every community is a root and there are no siblings
         // left to put side by side.
         let (clusters, _) = flatten_to_budget(&levels, vertex_count, CLUSTER_BUDGET);
+        // **The one channel this corpus carries, with its domain measured.**
+        //
+        // `cluster_id` is the only column in the payload a writer computed for a
+        // reader to colour by, so the list is one entry long and stays that way:
+        // a second entry would name a column no writer produces.
+        // `/docs/design/position` is where the field is argued and
+        // `/docs/design/discarded` is where inventing the second one is counted.
+        //
+        // The domain is `group_count` over the partition just chosen, which is
+        // its count of DISTINCT ids: `flatten_to_budget` returns a level this
+        // module densified to `0..k`, so `max + 1` is the count rather than a
+        // bound on it — the argument is on `group_count` and this calls it
+        // rather than restating it. It is also exactly the number of distinct
+        // `cluster_id` values the gather below writes, because the partition is
+        // indexed by `dense_id` and `fossil-df` numbers those `0..N-1` with no
+        // gaps (`prepend_dense_id`). A caller that hands this pass a gapped
+        // numbering — no host does; the `NO_ROW` sentinel is what tolerates one
+        // — would have a community whose only member has no row, and that is
+        // the single case where the declaration is an upper bound instead of a
+        // count.
+        //
+        // `louvain-cut` and not `louvain+phyllotaxis`: the deriver names what
+        // produced THIS column, and what produced it is the modularity pass plus
+        // the cut of its hierarchy at `CLUSTER_BUDGET`. Phyllotaxis is what
+        // turns a partition into `x`/`y` and has no say in which group a vertex
+        // is in — a reader recolouring by `cluster_id` is not looking at the
+        // placement, and a deriver that named it would say the two travel
+        // together when the whole reason both fields exist is that they do not.
+        report.channels.push((
+            target.type_name.clone(),
+            vec![
+                Channel::categorical("community", "cluster_id", u64::from(group_count(&clusters)))
+                    .derived_by("louvain-cut"),
+            ],
+        ));
         let mut placement = levels
             .first()
             .cloned()
@@ -1375,7 +1445,6 @@ pub fn enrich_layout_with(
     // functions of the edges the loop above has only just remapped. Each tree
     // comes back declared — see `Pyramid::write` for why the writer is what
     // states it rather than a plan written in front of the bytes.
-    let mut report = LayoutReport::default();
     for (index, target) in targets.iter().enumerate() {
         let Some(pyramid) = pyramids[index].as_mut() else {
             continue;

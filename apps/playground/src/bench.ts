@@ -65,6 +65,17 @@ export interface Bench {
    * the recomputation. Costs nothing — the text is already in hand and already counted below.
    */
   indexText: string;
+  /**
+   * Every manifest as it was served, keyed by the dataset-relative path — the index under
+   * `graph.graph.yml`, and one per type beside it.
+   *
+   * The same map `resolveCorpus` was handed, kept for the reader that wants a document the
+   * addressing does not: a vertex type's `channels:` block is per TYPE and lives in
+   * `vertex/<Type>.vertex.yml`, so `src/encoding.ts` cannot get at it through `indexText` the way
+   * `src/bound.ts` gets at `privacy:`. Costs nothing — these are the bytes already fetched and
+   * already counted below.
+   */
+  manifestTexts: Record<string, string>;
   /** The manifests, and what they weighed — the only bytes addressing costs. */
   manifestBytes: number;
   manifestCount: number;
@@ -151,6 +162,7 @@ export async function openBench(): Promise<Bench | null> {
     base,
     addressing,
     indexText,
+    manifestTexts: manifestFiles,
     manifestBytes,
     manifestCount: Object.keys(manifestFiles).length,
     fetchMs,

@@ -556,6 +556,11 @@ pub fn run(
     // quotient edge count is a measurement, so the tree the pass hands back is
     // the tree that gets declared.
     graph.declare_pyramids(report.pyramids);
+    // The second measured field, by the same argument: a categorical channel's
+    // domain is a count of distinct values, and the values are the partition the
+    // pass just chose. Nothing in front of the bytes knows how many communities
+    // Louvain will find.
+    graph.declare_channels(report.channels);
     graph
         .write_manifests(&dest_dir)
         .map_err(|e| miette::miette!("write manifests: {e}"))?;

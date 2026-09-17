@@ -28,4 +28,13 @@ index:
   prefix: index/
   ordered_by: subject
   chunk_size: 64
+channels:
+- name: community
+  column: cluster_id
+  scale: categorical
+  domain: 16
+  derived_by: phyllotaxis-grid
+- name: age
+  column: birth_year
+  scale: quantitative
 version: gar/v1

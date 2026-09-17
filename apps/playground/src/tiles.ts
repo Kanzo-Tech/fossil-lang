@@ -57,7 +57,7 @@ import {
   type VertexId,
 } from '@kanzo-tech/graph';
 
-import { categoricalOf } from './encoding.js';
+import { categoricalOf, type Channel } from './encoding.js';
 import { frame } from './frame.js';
 import { residency } from './residency.js';
 import { extentOf, type Rect, type TileBox } from './stream.js';
@@ -148,6 +148,15 @@ export interface CorpusSourceOptions {
    * in some, 8 in others). A number, so nothing here imports a design system.
    */
   slots?: number;
+  /**
+   * What the corpus declares it is drawn with — the drawn type's `channels:` block, in its three
+   * states (`undefined` for a manifest that has no such key).
+   *
+   * Passed in rather than read here because a `BoundedSource` is built before the corpus resolves
+   * and this file fetches no document: `Canvas.tsx` has the manifests from `bench.ts` and hands
+   * the block to both sources and to `encodingFor`, so one declaration answers all three.
+   */
+  channels?: readonly Channel[];
 }
 
 const EMPTY: Slice = {
@@ -258,7 +267,7 @@ function sliceOf(view: Drawable, typeIndex: number, slots: number): Slice {
  * corpus and a first paint of empty space with the corpus in one corner of it.
  */
 export function corpusSource(options: CorpusSourceOptions): BoundedSource {
-  const { boxes, onCost, slots = 8, vertexType } = options;
+  const { boxes, channels, onCost, slots = 8, vertexType } = options;
   const extent = extentOf(boxes);
 
   /**
@@ -352,7 +361,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
         // The colour this corpus carries, for a request that names a CSS colour instead of a
         // column. Derived here rather than taken as an option because a `BoundedSource` is built
         // before the corpus resolves, and this is the first moment the payload's vocabulary exists.
-        fill: declared === undefined ? null : categoricalOf(declared),
+        fill: declared === undefined ? null : categoricalOf(declared, channels),
       };
     })();
     return opened;
