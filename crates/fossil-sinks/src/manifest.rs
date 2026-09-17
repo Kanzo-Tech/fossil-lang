@@ -284,6 +284,26 @@ pub struct VertexInfo {
     /// is the argument.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coordinates: Option<Vec<CoordinateSystem>>,
+    /// **Which channels a reader can draw this type with, and how big each
+    /// one's domain is.** See [`Channel`].
+    ///
+    /// The sibling of [`Self::coordinates`] and written under its rules: a
+    /// list, because a type can carry more than one and which of them a reader
+    /// draws is a reader's question; `None` because a corpus written before the
+    /// field has no declaration to record and must not be made to look as
+    /// though it had one.
+    ///
+    /// **What it exists for is the domain.** A reader that colours by a
+    /// categorical is spending a palette of published capacity, and the count
+    /// of distinct values is the one number that decides whether the picture
+    /// says anything — measured on the bench corpus, 128 communities against a
+    /// capacity of eight means 937,496 vertices of a million share a slot with
+    /// seven other communities. Without a declaration those two numbers are
+    /// known on two sides of a boundary and nowhere together, so the picture is
+    /// the first place a reader finds out. `/docs/design/position` is the
+    /// argument.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channels: Option<Vec<Channel>>,
     /// **The tree of summary rows over this type** — the corpus's third
     /// artefact, for the graph that does not fit on the GPU. See [`HolonTree`].
     ///
@@ -396,6 +416,115 @@ impl CoordinateSystem {
             self.provenance,
             Provenance::Geographic | Provenance::Embedded
         )
+    }
+}
+
+/// One channel a reader can draw a vertex type with: **which column, read on
+/// which scale, and over how large a domain.**
+///
+/// A coordinate system answers *where*; this answers *with what*. They are
+/// separate blocks rather than one because a position is a pair of columns and
+/// a channel is one, and because the question a reader asks of each is
+/// different — a coordinate system is asked whether its density means anything,
+/// and a channel is asked whether its domain fits what the reader has to draw
+/// it with.
+///
+/// **The field this exists for is [`Self::domain`]**, and the two that are not
+/// it are there so a reader knows what it is holding. Everything else about a
+/// column — its name, its type, its role — the payload already carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Channel {
+    /// What this channel is called, so a reader can ask for one by name —
+    /// `community`. Names are the writer's; nothing here reserves any, which is
+    /// [`CoordinateSystem::name`]'s rule and for the same reason.
+    pub name: String,
+    /// The payload column it reads.
+    pub column: String,
+    /// How the values in that column are to be read. See [`Scale`].
+    pub scale: Scale,
+    /// **How many distinct values a [`Scale::Categorical`] channel has**, and
+    /// absent on any other kind.
+    ///
+    /// This is the one field here a reader cannot recover, which is the whole
+    /// test for whether it belongs in a document —
+    /// [`HolonTree::vertices_per_cell`] is in the manifest under the same rule.
+    /// A quantitative channel's domain is a *range*, and Parquet already writes
+    /// min and max per row group: declaring it would be a second statement of
+    /// what the footers carry, and the second statement is the one that goes
+    /// stale when a tile is rewritten. A count of distinct values is in no
+    /// footer and costs a scan to find, so a reader without it cannot know its
+    /// palette is too small until it has already drawn.
+    ///
+    /// **It is not called `cardinality`, and the collision is not cosmetic.**
+    /// [`Property::cardinality`] already means SHACL multiplicity — whether a
+    /// predicate admits more than one value. That is a different question about
+    /// the same column, and two fields a spelling apart in one document is how
+    /// a reader comes to answer one with the other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<u64>,
+    /// What computed the column, present exactly when the writer did — a free
+    /// string, for [`CoordinateSystem::derived_by`]'s reason: the set of things
+    /// that can partition a graph is not closed.
+    ///
+    /// `None` says the column came from the source rather than from this
+    /// writer. There is only one kind of not-derived for a channel, which is
+    /// why this carries the distinction alone and there is no [`Provenance`]
+    /// beside it: that enum separates the *spaces* a position can live in, and
+    /// a channel has no spaces to separate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived_by: Option<String>,
+}
+
+/// How a channel's values are to be read — a closed set, because a reader
+/// dispatches on it rather than displaying it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scale {
+    /// Values that name rather than measure: an ordinal standing for a group,
+    /// drawn by giving each value a colour. Carries a [`Channel::domain`],
+    /// because how many there are decides whether the drawing can be done.
+    Categorical,
+    /// Values that measure: a quantity, drawn by position on a ramp or binned
+    /// into a histogram. Carries no domain — its range is in the footers.
+    Quantitative,
+}
+
+impl Channel {
+    /// A categorical channel over `column`, with the distinct-value count that
+    /// makes it drawable.
+    ///
+    /// The count is required rather than optional here on purpose: a
+    /// categorical channel whose domain is unknown is the state this block
+    /// exists to remove, and a constructor that admitted one would put it back.
+    #[must_use]
+    pub fn categorical(name: impl Into<String>, column: impl Into<String>, domain: u64) -> Self {
+        Self {
+            name: name.into(),
+            column: column.into(),
+            scale: Scale::Categorical,
+            domain: Some(domain),
+            derived_by: None,
+        }
+    }
+
+    /// A quantitative channel over `column`. No domain: see [`Self::domain`].
+    #[must_use]
+    pub fn quantitative(name: impl Into<String>, column: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            column: column.into(),
+            scale: Scale::Quantitative,
+            domain: None,
+            derived_by: None,
+        }
+    }
+
+    /// Name what computed this channel's column. Not calling it says the column
+    /// came from the source.
+    #[must_use]
+    pub fn derived_by(mut self, what: impl Into<String>) -> Self {
+        self.derived_by = Some(what.into());
+        self
     }
 }
 
@@ -1391,6 +1520,10 @@ impl VertexInfo {
             // `with_coordinates`; a writer that does not must not be made to
             // look as though it did.
             coordinates: None,
+            // The same three states, for the same reason: a writer that knows
+            // which channels its rows carry says so with `with_channels`, and
+            // silence stays silence.
+            channels: None,
             // No holon tree, and for `index`'s reason rather than
             // `coordinates`': writing one is a partition of the type plus a
             // quotient per rung, which the caller that decides to pay for it
@@ -1417,6 +1550,18 @@ impl VertexInfo {
     #[must_use]
     pub fn with_coordinates(mut self, systems: Vec<CoordinateSystem>) -> Self {
         self.coordinates = Some(systems);
+        self
+    }
+
+    /// Declare which channels this type's rows carry.
+    ///
+    /// Replaces rather than appends, for [`Self::with_coordinates`]'s reason:
+    /// the list **is** the declaration, and a caller adding to one reads it and
+    /// hands back a longer one. An empty `channels` declares that the type
+    /// carries none, which is a different answer from not calling this at all.
+    #[must_use]
+    pub fn with_channels(mut self, channels: Vec<Channel>) -> Self {
+        self.channels = Some(channels);
         self
     }
 
@@ -1977,6 +2122,77 @@ version: gar/v1
     fn an_undeclared_system_is_absent_from_the_yaml() {
         let yaml = person_vertex().to_yaml().expect("serialize");
         assert!(!yaml.contains("coordinates"), "{yaml}");
+    }
+
+    #[test]
+    fn an_undeclared_channel_is_absent_from_the_yaml() {
+        let yaml = person_vertex().to_yaml().expect("serialize");
+        assert!(!yaml.contains("channels"), "{yaml}");
+    }
+
+    /// The three states again, on the second block written under the rule.
+    #[test]
+    fn declaring_no_channels_is_not_declaring_nothing() {
+        let silent = person_vertex();
+        let explicit = person_vertex().with_channels(Vec::new());
+        assert_eq!(silent.channels, None);
+        assert_eq!(explicit.channels, Some(Vec::new()));
+        assert_ne!(silent, explicit);
+
+        let yaml = explicit.to_yaml().expect("serialize");
+        let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        assert_eq!(parsed.channels, Some(Vec::new()));
+    }
+
+    /// **The wire shape, frozen.** Both kinds in one list, because the pair is
+    /// what locks both spellings: a categorical carries a domain and a
+    /// quantitative must not grow one, and a fixture with only one of them
+    /// freezes half the contract.
+    ///
+    /// Flat mappings, and that is load-bearing rather than tidy: the line
+    /// scanners over this document — `apps/corpus/guards/manifest.mjs` and
+    /// `packages/corpus/src/manifest.ts` — read one level of
+    /// sequence-of-mappings and silently skip anything deeper, so a channel
+    /// that nested would be a channel half its readers cannot see.
+    #[test]
+    fn a_channel_pair_round_trips_and_only_the_categorical_carries_a_domain() {
+        let declared = person_vertex().with_channels(vec![
+            Channel::categorical("community", "cluster_id", 1_229).derived_by("louvain-cut"),
+            Channel::quantitative("age", "birth_year"),
+        ]);
+        let yaml = declared.to_yaml().expect("serialize");
+
+        assert!(yaml.contains("scale: categorical"), "{yaml}");
+        assert!(yaml.contains("scale: quantitative"), "{yaml}");
+        assert!(yaml.contains("domain: 1229"), "{yaml}");
+        assert!(yaml.contains("derived_by: louvain-cut"), "{yaml}");
+        // One domain and one deriver in the document, not two of either: the
+        // quantitative entry writes neither key rather than writing them null.
+        assert_eq!(yaml.matches("domain:").count(), 1, "{yaml}");
+        assert_eq!(yaml.matches("derived_by:").count(), 1, "{yaml}");
+
+        let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        assert_eq!(parsed.channels, declared.channels);
+        let channels = parsed.channels.expect("declared");
+        assert_eq!(channels[0].domain, Some(1_229));
+        assert_eq!(channels[1].domain, None);
+        assert_eq!(channels[1].derived_by, None);
+    }
+
+    /// A channel whose column the writer computed says so, and one that came
+    /// off the source says nothing — which is the distinction `derived_by`
+    /// carries alone, with no `Provenance` beside it.
+    #[test]
+    fn a_source_channel_names_no_deriver() {
+        let from_source = Channel::categorical("sex", "sex", 2);
+        assert_eq!(from_source.derived_by, None);
+        let computed = from_source.clone().derived_by("k-anonymity generalisation");
+        assert_ne!(from_source, computed);
+        assert_eq!(
+            computed.domain,
+            Some(2),
+            "naming a deriver moves no other field"
+        );
     }
 
     /// Declaring an empty list says «this type carries no coordinate system»,
