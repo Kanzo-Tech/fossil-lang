@@ -69,6 +69,17 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   for months and X was the one crate that had none, because the set was kept by hand.
   `crates/xtask/tests/tokio_placement.rs` derives it instead, prints the real table on any
   failure, and goes red if a crate name reappears in this bullet.
+- **The batch pass does not link the compiler substrate.** `fossil-layout` must reach `salsa`
+  over no normal edge. It reached it over four branches until `39d0fb8`: one `use` of a 37-line
+  Parquet encoder the executor never called put a compiler front-end and a query engine inside
+  the closure of a pass that resolves no name and holds no database. The DEV edge stays — an
+  example measures the tiling against the baseline encoder in `fossil_df::files`, and an example
+  links dev-dependencies. **This bullet is the policy and the only copy of it:**
+  `crates/xtask/tests/substrate_reach.rs` reads the crate name out of THIS line, derives the
+  linker set from `cargo metadata`, and prints the whole table when it goes red — so neither
+  half is ever written down twice. It does NOT keep the substrate out of the wasm payload and
+  never claimed to: two cdylib roots take the compiler directly, and the gate's crate set did
+  not shrink when this edge moved.
 - **No `Box<dyn Trait>` inside Salsa queries.** Salsa interns concrete types; trait objects break
   memoization. Use `&dyn` parameters or enum dispatch.
 - **`unsafe_code = "deny"`** at workspace level, not `"forbid"`. Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (Salsa Update for rowan types; future FFI), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.

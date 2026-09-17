@@ -31,7 +31,10 @@
 //!    mentions `tokio` is scanned for the name of a workspace member, matched
 //!    as a whole word against the member list `cargo metadata` reports. A list
 //!    that cannot be written down cannot go stale, which is the only defect
-//!    this rule has ever actually had.
+//!    this rule has ever actually had. The bullet parser is
+//!    `xtask::rulebook`, shared with `tests/substrate_reach.rs`, which reads
+//!    the same file for the opposite reason — its rule has a subject that no
+//!    graph can derive, so it must name exactly one crate.
 //!
 //! Both halves read the tree. Nothing here restates a fact that lives
 //! somewhere else, so there is no second copy to drift.
@@ -69,10 +72,10 @@
 //! test` is one idea in two places.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
+use xtask::depgraph::{member_names, metadata, workspace_ids};
+use xtask::rulebook::{bullets_mentioning, crates_named};
 
 /// The one `cfg` this guard reads as proof that a dependency is outside the
 /// wasm build. Anything else is unrecognised — and unrecognised fails, because
@@ -162,15 +165,6 @@ fn holders(meta: &Value, dep_name: &str) -> BTreeMap<String, Hold> {
     out
 }
 
-fn workspace_ids(meta: &Value) -> HashSet<&str> {
-    meta["workspace_members"]
-        .as_array()
-        .expect("workspace_members")
-        .iter()
-        .map(|v| v.as_str().expect("member id"))
-        .collect()
-}
-
 /// The wasm closure, derived the way `xtask::wasm_check` derives it: cdylib
 /// crates and crates declaring `[package.metadata.fossil] wasm = true`, closed
 /// over workspace-member edges.
@@ -239,135 +233,7 @@ fn wasm_closure(meta: &Value) -> BTreeSet<String> {
         .collect()
 }
 
-// ---------------------------------------------------------------- CLAUDE.md
-
-/// Every markdown bullet in `md` whose text mentions `word`, as
-/// `(1-based line of the `- `, the bullet joined into one line)`.
-///
-/// A bullet runs from its `- ` to the next `- ` at any indent, the next
-/// heading, or a blank line — which is how the file is actually written.
-fn bullets_mentioning(md: &str, word: &str) -> Vec<(usize, String)> {
-    /// A finished bullet is kept only if it is about `word`.
-    fn keep(out: &mut Vec<(usize, String)>, done: Option<(usize, String)>, word: &str) {
-        if let Some((n, text)) = done
-            && text.contains(word)
-        {
-            out.push((n, text));
-        }
-    }
-
-    let mut out = Vec::new();
-    let mut current: Option<(usize, String)> = None;
-    for (i, line) in md.lines().enumerate() {
-        let t = line.trim_start();
-        let starts = t.starts_with("- ") || t.starts_with("* ");
-        let ends = t.is_empty() || line.starts_with('#');
-        if starts || ends {
-            keep(&mut out, current.take(), word);
-        }
-        if starts {
-            current = Some((i + 1, t[2..].to_string()));
-        } else if let Some((_, text)) = current.as_mut() {
-            // Only reachable when the bullet is still open: an ending line took
-            // it above, leaving `None` here.
-            text.push(' ');
-            text.push_str(t);
-        }
-    }
-    keep(&mut out, current, word);
-    out
-}
-
-/// `text` with every backticked span that looks like a path or a filename
-/// blanked out, so `` `crates/xtask/tests/tokio_placement.rs` `` does not read
-/// as a mention of the crate `xtask`. A backticked span with no `/` and no `.`
-/// survives, because `` `fossil-df` `` is exactly the thing being forbidden.
-fn blank_backticked_paths(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(open) = rest.find('`') {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + 1..];
-        let Some(close) = after.find('`') else {
-            out.push_str(&rest[open..]);
-            return out;
-        };
-        let inner = &after[..close];
-        if inner.contains('/') || inner.contains('.') {
-            out.extend(std::iter::repeat_n(' ', inner.len() + 2));
-        } else {
-            out.push('`');
-            out.push_str(inner);
-            out.push('`');
-        }
-        rest = &after[close + 1..];
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Whether `word` occurs in `hay` bounded by something that is not part of a
-/// crate name, so `fossil-df` does not match inside `fossil-df-wasm`.
-fn contains_word(hay: &str, word: &str) -> bool {
-    let is_part = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
-    let mut from = 0;
-    while let Some(i) = hay[from..].find(word) {
-        let start = from + i;
-        let end = start + word.len();
-        let before_ok = !hay[..start].chars().next_back().is_some_and(is_part);
-        let after_ok = !hay[end..].chars().next().is_some_and(is_part);
-        if before_ok && after_ok {
-            return true;
-        }
-        from = end;
-    }
-    false
-}
-
-/// The crate names `bullet` writes down, out of `members`.
-fn crates_named(bullet: &str, members: &BTreeSet<String>) -> Vec<String> {
-    let text = blank_backticked_paths(bullet);
-    members
-        .iter()
-        .filter(|m| contains_word(&text, m))
-        .cloned()
-        .collect()
-}
-
 // ------------------------------------------------------------------ harness
-
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("crates/xtask is two levels below the repo root")
-        .to_path_buf()
-}
-
-fn metadata() -> Value {
-    let out = Command::new(env!("CARGO"))
-        .args(["metadata", "--format-version", "1"])
-        .current_dir(repo_root())
-        .output()
-        .expect("run cargo metadata");
-    assert!(
-        out.status.success(),
-        "cargo metadata failed, so this guard cannot see the workspace at all:\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    serde_json::from_slice(&out.stdout).expect("parse cargo metadata json")
-}
-
-fn member_names(meta: &Value) -> BTreeSet<String> {
-    let ws = workspace_ids(meta);
-    meta["packages"]
-        .as_array()
-        .expect("packages")
-        .iter()
-        .filter(|p| ws.contains(p["id"].as_str().expect("package id")))
-        .map(|p| p["name"].as_str().expect("package name").to_string())
-        .collect()
-}
 
 /// The whole `tokio` situation, rendered — printed on every failure, because
 /// the person reading it did not run the command and the point of not writing
@@ -441,7 +307,7 @@ fn tokio_never_reaches_a_wasm_build() {
 fn the_tokio_rule_names_no_crate() {
     let meta = metadata();
     let members = member_names(&meta);
-    let claude = repo_root().join("CLAUDE.md");
+    let claude = xtask::catalogue::repo_root().join("CLAUDE.md");
     let md = std::fs::read_to_string(&claude).expect("read CLAUDE.md");
 
     let bullets = bullets_mentioning(&md, "tokio");
@@ -478,6 +344,8 @@ fn the_tokio_rule_names_no_crate() {
 // The two tests above are green once the tree is right, which is exactly when
 // a guard stops demonstrating that it works. These feed the same pure
 // functions inputs that should fail, so every branch above is known to fire.
+// The bullet parser's own failure modes are proved beside it, in
+// `xtask::rulebook`, because a second guard now reads the same file.
 
 #[cfg(test)]
 mod fires {
@@ -560,70 +428,5 @@ mod fires {
     fn a_crate_that_does_not_name_tokio_is_not_a_holder() {
         let p = pkg(vec![dep("serde", Value::Null, Value::Null)]);
         assert_eq!(hold_of(&p, "tokio"), None);
-    }
-
-    #[test]
-    fn a_bullet_naming_a_crate_is_caught_backticked_or_bare() {
-        let members: BTreeSet<String> = ["fossil-df", "fossil-df-wasm", "fossil-lsp", "xtask"]
-            .into_iter()
-            .map(String::from)
-            .collect();
-
-        assert_eq!(
-            crates_named("- tokio lives in `fossil-df` and fossil-lsp.", &members),
-            vec!["fossil-df".to_string(), "fossil-lsp".to_string()],
-            "both the backticked and the bare name are a written-down list"
-        );
-
-        // A path is not a mention of the crate whose directory it passes
-        // through, or this guard could never cite its own file.
-        assert!(
-            crates_named(
-                "tokio: see `crates/xtask/tests/tokio_placement.rs` and `Cargo.toml`.",
-                &members,
-            )
-            .is_empty(),
-            "a backticked path must not read as naming a crate"
-        );
-
-        // `fossil-df` is a prefix of `fossil-df-wasm`; only the whole word counts.
-        assert_eq!(
-            crates_named("tokio is in `fossil-df-wasm`.", &members),
-            vec!["fossil-df-wasm".to_string()],
-        );
-    }
-
-    #[test]
-    fn a_bullet_is_read_to_its_end_and_no_further() {
-        let md = "\
-# Hard Rules
-
-- **`tokio` never reaches a wasm build.** It is
-  gated in the crates that hold it.
-- **No `Box<dyn Trait>` inside Salsa queries.** Nothing to do with runtimes.
-
-Some prose mentioning tokio that is not a bullet.
-";
-        let found = bullets_mentioning(md, "tokio");
-        assert_eq!(found.len(), 1, "found: {found:?}");
-        assert_eq!(found[0].0, 3, "the bullet starts on line 3");
-        assert!(
-            found[0].1.contains("gated in the crates that hold it"),
-            "the continuation line belongs to the bullet: {:?}",
-            found[0].1
-        );
-        assert!(
-            !found[0].1.contains("Salsa"),
-            "the next bullet does not: {:?}",
-            found[0].1
-        );
-    }
-
-    #[test]
-    fn a_rule_that_vanished_is_not_a_rule_that_passes() {
-        assert!(
-            bullets_mentioning("# Hard Rules\n\n- Something else entirely.\n", "tokio").is_empty(),
-            "the anchor check must notice the rule is gone"
-        );
     }
 }
