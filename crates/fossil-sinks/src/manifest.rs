@@ -764,12 +764,22 @@ pub const QUOTIENT_PREFIX: &str = "quotient/";
 /// **It carries no `scale`, and that is the difference doing work rather than a
 /// field left out.** A projection's scale is arithmetic a reader spends: rows
 /// are `count.div_ceil(scale)` and a tile address is a shift by `log2(scale)`.
-/// A rung's contraction is not any of that — it is measured after the fact, and
-/// on com-DBLP the published rungs contract by 5.69×, 6.02× and 5.45× against a
-/// declared floor of four, because a cut chooses out of the partitions a
-/// dendrogram already holds. So a rung declares **how many holons it has** and a
-/// reader divides if it wants a ratio; see [`HolonRung::holon_count`] and
-/// [`Self::contracts_by_at_least`].
+/// A rung's contraction is not any of that — it is a number the document states
+/// rather than a shift a reader spends. So a rung declares **how many holons it
+/// has** and a reader divides if it wants a ratio; see
+/// [`HolonRung::holon_count`] and [`Self::contracts_by_at_least`].
+///
+/// This paragraph carried a second argument and it belonged to a writer that no
+/// longer exists: *on com-DBLP the published rungs contract by 5.69×, 6.02× and
+/// 5.45× against a declared floor of four, because a cut chooses out of the
+/// partitions a dendrogram already holds*. That was the dendrogram-cut writer
+/// `Pyramid` replaced. Measured on com-DBLP with the writer that is here —
+/// `crates/fossil-layout/tests/level_vs_rung.rs` — the rungs contract by
+/// **exactly 4.00× at every step**, 317,080 → 19,818 → 4,955 → … → 1, because
+/// [`Self::holons_at`] is `ceil(V / 4^k)` and `Pyramid::write` asserts against
+/// it. The field survives the correction: a declared count is still not a
+/// spendable scale, and it is now also the only place the ratio is stated at
+/// all.
 ///
 /// **One tree per vertex type, because the partition is.** A cell is an interval
 /// of one type's `dense_id` axis, so a cell's members are `dense_id`s of one
@@ -900,10 +910,14 @@ pub struct HolonTree {
     /// and a tree whose rungs the manifest forgot to name is the difference
     /// between a corpus and a 404.
     ///
-    /// **There is no root.** The cut ends where the dendrogram stops delivering
-    /// a quarter-step, not at one group, so the coarsest rung is whatever
-    /// survived — `crates/fossil-layout/src/layout/community.rs, Cut` keeps three
-    /// of Louvain's five levels on com-DBLP and invents nothing above them.
+    /// **There is a root, and this doc said there was not.** The sentence
+    /// described the dendrogram-cut writer that `Pyramid` replaced — *the cut
+    /// ends where the dendrogram stops delivering a quarter-step, not at one
+    /// group*. A quaternary partition has no such stopping point:
+    /// [`HolonTree::planned`] breaks on `holon_count <= 1` **inclusive**, so the
+    /// single-holon rung is written and is the last one. Measured on com-DBLP,
+    /// nine rungs ending at one — which is the 1×1 level a mipmap has, and what
+    /// [`HolonTree::planned`]'s own doc already says it is for.
     pub rungs: Vec<HolonRung>,
 }
 
@@ -979,9 +993,13 @@ pub struct HolonRung {
     ///
     /// `Option` and per rung, because whether the aggregated edge set is worth
     /// writing at every rung is the open question `/docs/design/holons` ends on:
-    /// a quotient at the finest rung of com-DBLP is 159,413 edges against the
+    /// a quotient at the finest rung of com-DBLP is **274,647** edges against the
     /// graph's 1,049,866 — a real saving — while a coarse one is dense enough
-    /// that drawing it is a hairball. A writer answers that rung by rung, and
+    /// that drawing it is a hairball. That figure read 159,413 and is not
+    /// reproducible from this writer; `crates/fossil-layout/tests/level_vs_rung.rs`
+    /// is what measures it, and it also measures where the hairball starts —
+    /// density is 0.14% at the finest rung and **69.9% by the fourth**, reaching
+    /// the complete graph from the sixth down. A writer answers that rung by rung, and
     /// `None` says it wrote none rather than that there are none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quotient: Option<HolonQuotient>,
@@ -2851,11 +2869,16 @@ version: gar/v1
         assert!(yaml.contains("\nholons:\n"), "{yaml}");
     }
 
-    /// **A rung declares a count because a contraction is not a scale.** The
-    /// published rungs contract by 5.69×, 6.02× and 5.45× — nowhere near four,
-    /// and no arithmetic a reader could do with a declared `4` would address
-    /// anything. What the declared exponent buys is the floor, and the floor is
-    /// `VertexLevels::stride(1)` rather than a second spelling of it.
+    /// **A rung declares a count because a contraction is not a scale**, and the
+    /// tree under test is a `Cut`'s rather than the writer's on purpose: its
+    /// rungs contract by 5.69×, 6.02× and 5.45×, nowhere near four, and no
+    /// arithmetic a reader could do with a declared `4` would address anything.
+    ///
+    /// The writer this crate ships emits a quaternary tree that contracts by
+    /// exactly four, so a fixture built from it could not tell a declared count
+    /// from a declared exponent — which is the whole property here. A tree the
+    /// writer does not produce is the only one that can falsify it, and
+    /// `crates/fossil-layout/src/layout/community.rs, Cut` produces this one.
     #[test]
     fn a_rung_declares_a_count_and_clears_the_floor_without_meeting_it() {
         let tree = dblp_tree();

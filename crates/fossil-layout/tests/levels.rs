@@ -333,13 +333,31 @@ fn level_cost_against_the_whole_type() {
 /// the edges a coarse view draws scale with the marks (`V/4^k · degree`), not
 /// with their square, and the induced count says nothing about them.
 ///
-/// That distinction is what decides whether a level file can answer at all. A
-/// read of `l{k}/` holds the level's rows and nothing else, so the far end of a
-/// mark-incident edge is not in it: reading the level means those edges and
-/// their anchors go. The question is therefore not *how many edges are induced*
-/// but **how many survive the three-pixel floor at the zoom where the pyramid is
-/// used** — if that is near zero the level file costs no picture, and if it is
-/// not, the bytes cost a drawing that is there today.
+/// That distinction is what decided whether a level file could answer at all.
+/// The question is not *how many edges are induced* but **how many survive the
+/// three-pixel floor at the zoom where the pyramid is used**, and this still
+/// measures that.
+///
+/// # The premise underneath it was closed, and the number is answering an old question
+///
+/// This paragraph read: *a read of `l{k}/` holds the level's rows and nothing
+/// else, so the far end of a mark-incident edge is not in it — reading the level
+/// means those edges and their anchors go.* That was true when it was written
+/// and stopped being true at commit `0003d13`, which gave a relation its own
+/// level and put **both endpoints' coordinates on every row**, making the set
+/// self-drawing. That commit did not come back and update this header.
+///
+/// So the percentages below — 14.31, 3.20, 0.74, 0.14 on the planted fixture —
+/// are what a level read would lose **if a level of a relation did not exist**.
+/// Against today's camera the answer is 100% at every level: an edge level draws
+/// every mark-incident edge past the floor, because it carries the far end
+/// itself. `crates/fossil-layout/tests/level_vs_rung.rs` reports both columns
+/// side by side, and the vertex-only one reproduces these numbers exactly, which
+/// is also how the two instruments are held to the same graph.
+///
+/// It is kept rather than corrected because the figure it prints is the cost of
+/// NOT writing edge levels, and that is the number anyone weighing whether to
+/// keep writing them needs.
 ///
 /// The floor is the app's: `@kanzo-tech/graph`'s `BOUNDED_DEFAULTS.minLinkPixels`
 /// is 3, `apps/playground/src/tiles.ts` multiplies it by the corpus units a
