@@ -28,7 +28,7 @@ import { dirname, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { openCorpus } from '@fossil-lang/corpus';
+import { levelsOf, openCorpus } from '@fossil-lang/corpus';
 import { query as duckQuery } from '../../corpus/guards/duck.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -84,7 +84,7 @@ const box = {
   h: extent.maxY - extent.minY + 2 * pad,
 };
 
-const written = corpus.levels(type).filter((l) => l.written);
+const written = levelsOf(corpus.addressing, type).filter((l) => l.written);
 // The door takes the canvas now and derives the level from it at one mark per pixel, so a
 // budget of BUDGET marks is the square that holds them. `frame.level` reports what it chose.
 const side = Math.sqrt(BUDGET);

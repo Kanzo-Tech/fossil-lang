@@ -31,23 +31,28 @@
  *   calls in the right order. {@link openCorpus} awaits it, and
  *   `OpenCorpusOptions.wasmUrl` is the one thing about it a caller can still need to say, because
  *   only the caller knows how its bundler resolves an asset.
- * - **`resolveCorpus` and `GRAPH_INFO_PATH`** — tile URLs, projections and `tilesFor` are
- *   internals; a `Corpus` never asks a consumer what a tile is. It is reachable as
- *   `Corpus.addressing` for the drawing path that has outgrown this surface, which is ONE route
- *   where there were two — `resolveCorpus` and `corpus.addressing` answered the same question, and
- *   that pair was the rule's own violation sitting inside the package that states it.
- *   **What it cost is real and is not hypothetical**: `apps/playground/src/bench.ts` addresses a
- *   million-vertex corpus with no engine at all, which `openCorpus` cannot do — it requires a
- *   `query` and spends `1 + N` round trips before it returns. The two are not the same route from
- *   the same position, and that app is broken by this line.
+ * - **`GRAPH_INFO_PATH`** — the index's file name is the door's business and not a consumer's;
+ *   `openCorpus` takes a corpus URL and reads whatever is under it.
  * - **`export type *`** — an unbounded star publishes whatever the codegen makes, now and later,
  *   with nobody deciding. The fourteen the surviving surface names are re-exported below; the
  *   ten `./generated.ts` also holds (`Operation`, `FossilGraphSchemas`, the row and summary
  *   shapes) stay reachable structurally, e.g. `SchemaResult['vertices'][number]`.
  *
- * `Corpus.levels()` went the same way and did not leave the tree: it is `levelsOf` in
- * `./address.ts`, three calls to that module and no fourth fact, and a consumer here never names a
- * level file.
+ * # What came back, and why narrowing is not the same as withdrawing
+ *
+ * **`resolveCorpus` came off beside `GRAPH_INFO_PATH` and is back.** The argument for taking it
+ * off was that it and `corpus.addressing` answered one question from two routes, and the sentence
+ * that reported the cost is the refutation: the door is the ENGINE-BEARING route and spends
+ * `1 + N` round trips before it answers, `resolveCorpus` needs neither an engine nor a request,
+ * and `corpus.addressing` is what the door already resolved for a caller who has paid for one.
+ * Three positions, not one answer three times — and `apps/playground/src/bench.ts` names 245 tiles
+ * of a million-vertex corpus from the position only the second one covers. Removing it removed a
+ * capability. The rejected alternative is the one that was in force: leave it off and tell the two
+ * callers that need it to re-implement `fossil_graph::plan`.
+ *
+ * **`Corpus.levels()` is `levelsOf` in `./address.ts`** — three calls to that module and no fourth
+ * fact, which is why it is not a member of the door. It IS re-exported here, and was not: the
+ * grounds were that a consumer never names a level file, and two do. See the export.
  *
  * **What deliberately stayed.** The four `PAYLOAD_*` role constants, because the check found a
  * consumer: `apps/playground/src/encoding.ts` reads all three of `PAYLOAD_ADDRESS`,
@@ -61,6 +66,35 @@
 // `CorpusReadError` is the bytes disagreeing with what the manifest promised. A caller can retry
 // one of those against a different corpus and never the other.
 export { CorpusManifestError, CorpusReadError, openCorpus } from './corpus.js';
+
+// The OTHER door, and the reason there are two is that they answer different questions.
+//
+// **`resolveCorpus` was taken off this barrel as a duplicate of `corpus.addressing`, and it is not
+// one.** `openCorpus` is the ENGINE-BEARING route: it takes a `query`, reads the index, then one
+// manifest per type, and spends `1 + N` round trips before it hands anything back — because
+// everything it answers needs bytes. `resolveCorpus` is the ENGINE-FREE route: hand it manifests
+// you already hold and it names every URL the corpus can produce with no engine, no request and no
+// round trip at all. `apps/playground/src/bench.ts` names all 245 tiles of a million-vertex corpus
+// that way, and there is no expressing that through the door — which is what makes withdrawing
+// this a withdrawn CAPABILITY rather than a removed duplicate.
+//
+// `corpus.addressing` is neither of those two things: it is what the door ALREADY resolved, for a
+// caller that has one. It cannot be reached without paying for the door first, so it is not a
+// second route to this answer; it is this answer, already bought.
+//
+// What genuinely was a second route stays internal. `initFossilGraphWasm` made a consumer know
+// there IS a wasm module and order two calls against it; `wasmUrl` on `ResolveCorpusOptions` is the
+// one thing about that boot a caller can still say, spelled exactly as it is on `OpenCorpusOptions`.
+export { resolveCorpus } from './address.js';
+
+// Which levels of detail a type has, and which of them the writer spent bytes on.
+//
+// It came off `Corpus` in the same change and did not leave the tree — every line of it is
+// addressing. It is back on the barrel because two readers outside this package name a level file:
+// `apps/playground/scripts/measure-frame.mjs` and `measure-pyramid.mjs` report the written levels
+// beside what a frame cost. `Frame.matchedAt` is a member of the door and reports a level; what
+// makes that number readable has to be reachable from the same surface.
+export { levelsOf } from './address.js';
 
 // The writer's column table, by ROLE — `corpus.bnf` through `cargo xtask corpus`, and the same
 // table `crates/fossil-sinks/src/generated.rs` carries on the Rust side.
@@ -123,7 +157,9 @@ export type {
   Gap,
   GapReason,
   IndexAddress,
+  LevelInfo,
   ProjectionAddress,
+  ResolveCorpusOptions,
   VertexAddress,
 } from './address.js';
 

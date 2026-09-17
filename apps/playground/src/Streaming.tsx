@@ -9,8 +9,10 @@
  * What the reader should come away having SEEN, in this order:
  *
  *   1. **Every URL, before any request.** The manifests are three small YAML files; from them
- *      `resolveCorpus` names all 245 tiles synchronously. The panel prints the count and the
- *      microseconds it took, and lists the URLs a given window resolves to — before fetching.
+ *      `resolveCorpus` names all 245 tiles with no engine and nothing further off the wire — the
+ *      engine-free half of `@fossil-lang/corpus`, which is why that export exists beside the door.
+ *      The panel prints the count and the milliseconds it took, and lists the URLs a given window
+ *      resolves to — before fetching.
  *   2. **The footer, bought once.** Which tiles a rectangle touches comes from the Parquet
  *      footer *on this panel*. It is read once per corpus and its cost is shown alongside the
  *      payload's, so the one thing that grows with N is visible as the one thing that grows
@@ -185,7 +187,8 @@ export default function Streaming({ ready }: StreamingProps) {
       <p className="str-claim">
         The corpus is addressed. <strong>{bench.manifestCount} manifests, {KB(bench.manifestBytes)}</strong>{' '}
         fetched in {bench.fetchMs.toFixed(0)} ms, then <code>resolveCorpus</code> in{' '}
-        <strong>{bench.resolveMs.toFixed(2)} ms</strong> — synchronous, no engine, no WASM. Every
+        <strong>{bench.resolveMs.toFixed(2)} ms</strong> — no engine, and no request beyond those
+        manifests. Every
         one of the {bench.stamp.tiles} tile URLs is now computable by arithmetic: a tile is{' '}
         <code>dense_id &gt;&gt; 12</code>. Nothing below has been requested yet.
       </p>

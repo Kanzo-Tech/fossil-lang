@@ -8,22 +8,32 @@ and the five bounded verbs (`read`, `expand`, `path`, `aggregate`, `schema`) on
 one object. No tiles, no `dense_id`, no Morton, no `by_source`, no prefixes, no
 footers.
 
-The module exports **three** things beside the writer's role table:
-`openCorpus` and the two errors an `instanceof` is for. Everything else that was
-on it is reachable through the door or not at all:
+**Two doors, and they answer different questions.** `openCorpus` is the
+engine-bearing one. `resolveCorpus({ manifestFiles, base, wasmUrl })` is the
+engine-free one: hand it manifests you already hold and it names every URL the
+corpus can produce with no engine, no request and no round trip. Give it a
+`wasmUrl` and it awaits the reader's memoised boot and returns a promise; omit
+it, and it is synchronous arithmetic for a caller whose module is already up.
+`corpus.addressing` is neither — it is what the door already resolved, for a
+caller who has paid for one.
+
+Everything else that was on the barrel is reachable through the door or not at
+all:
 
 - `createGraphClient` — the in-process transport the verbs dispatch through.
   `openCorpus` already holds the two things it took.
-- `resolveCorpus` and `GRAPH_INFO_PATH` — the addressing, now `corpus.addressing`
-  for a drawing path that has outgrown this surface. Two exported routes to one
-  answer was the rule's own violation inside the package that states it.
-- `initFossilGraphWasm` — the boot, awaited inside `openCorpus`. A consumer
-  should not have to know there is a wasm module, let alone sequence two calls
-  against it. `wasmUrl` is what survives, because only the caller knows how its
-  bundler resolves an asset.
+- `GRAPH_INFO_PATH` — the index's file name is the door's business. `openCorpus`
+  takes a corpus URL and reads whatever is under it.
+- `initFossilGraphWasm` — the boot, awaited inside `openCorpus` and inside
+  `resolveCorpus`. A consumer should not have to know there is a wasm module, let
+  alone sequence two calls against it. `wasmUrl` is what survives, because only
+  the caller knows how its bundler resolves an asset.
 - `export type *` — an unbounded star publishes whatever the codegen makes, now
   and later, with nobody deciding. The twelve params/results the members name
   are re-exported by name instead.
+
+`Corpus.levels()` is the free function `levelsOf(addressing, type?)`, because
+every line of it is addressing rather than a member of a door.
 
 `./corpus` was a subpath whose one justification was that its closure reached no
 WASM; the door reaches the verbs now, so it does, and the subpath went with the
@@ -63,7 +73,7 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
   ├─ src/client.ts      the verb transport, dispatched through by the door (not exported)
   ├─ src/query.ts       QueryFn — the one capability a host supplies, for both surfaces
   ├─ src/manifest.ts    graph.graph.yml, scanned for the paths to fetch next
-  ├─ src/address.ts     resolveCorpus + levelsOf — the binding, not the reader (internal)
+  ├─ src/address.ts     resolveCorpus + levelsOf — the binding, not the reader
   └─ src/corpus.ts      openCorpus(url, { query, wasmUrl }) — THE DOOR
 ```
 

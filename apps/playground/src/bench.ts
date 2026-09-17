@@ -13,11 +13,18 @@
  * to wasm32 — one implementation instead of two — so composing a URL costs loading a wasm module
  * where it used to cost parsing three small YAML files.
  *
- * What survives is the shape of the win: `resolveCorpus` is still SYNCHRONOUS once the module is
- * up, so every tile URL in a million-vertex corpus becomes available on one line with no further
- * request. The init is awaited once, here, and memoised for the rest of the session.
+ * What survives is the shape of the win, and it is the half that mattered: **no engine and no
+ * request**. Every tile URL in a million-vertex corpus becomes available on one line, out of the
+ * manifests already in hand. The boot is an option on that line now — `wasmUrl`, the same option
+ * `openCorpus` takes — rather than a call sequenced before it, and it is memoised for the rest of
+ * the session.
+ *
+ * **`resolveCorpus` is the engine-free door and `openCorpus` is the engine-bearing one.** This
+ * module is why the distinction is a capability rather than a preference: there is no `query` here
+ * to give the door, and nothing to run one against. See the export's own comment in
+ * `@fossil-lang/corpus`.
  */
-import { initFossilGraphWasm, resolveCorpus, type CorpusAddressing } from '@fossil-lang/corpus';
+import { resolveCorpus, type CorpusAddressing } from '@fossil-lang/corpus';
 
 import { CORPUS_WASM_URL } from './corpus.js';
 
@@ -79,7 +86,14 @@ export interface Bench {
   /** The manifests, and what they weighed — the only bytes addressing costs. */
   manifestBytes: number;
   manifestCount: number;
-  /** Milliseconds spent fetching manifests, and milliseconds inside `resolveCorpus`. */
+  /**
+   * Milliseconds spent fetching manifests, and milliseconds inside `resolveCorpus`.
+   *
+   * `resolveMs` covers the reader's one-time boot as well as the arithmetic, because the boot is
+   * an option on the call rather than a step before it. It is memoised per session, so a second
+   * corpus in the same tab pays the arithmetic alone — and neither number is a request for a byte
+   * of payload, which is the claim the panel beside them makes.
+   */
   fetchMs: number;
   resolveMs: number;
 }
@@ -148,11 +162,11 @@ export async function openBench(): Promise<Bench | null> {
   const manifestFiles: Record<string, string> = { 'graph.graph.yml': indexText };
   for (const [path, text] of rest) manifestFiles[path] = text;
 
-  // The whole of the addressing, and it is synchronous once the module is up. Every tile URL of a
-  // million-vertex corpus becomes available on this line, with no further request.
-  await initFossilGraphWasm({ wasmUrl: CORPUS_WASM_URL });
+  // The whole of the addressing, on one line and with no engine. Every tile URL of a
+  // million-vertex corpus becomes available here, with no further request — the `wasmUrl` boots
+  // the reader (memoised) and the arithmetic runs against manifests already in hand.
   const resolveStarted = performance.now();
-  const addressing = resolveCorpus({ manifestFiles, base });
+  const addressing = await resolveCorpus({ manifestFiles, base, wasmUrl: CORPUS_WASM_URL });
   const resolveMs = performance.now() - resolveStarted;
 
   const manifestBytes = Object.values(manifestFiles).reduce((a, t) => a + new Blob([t]).size, 0);

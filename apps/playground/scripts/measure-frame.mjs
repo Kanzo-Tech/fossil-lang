@@ -71,7 +71,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { openCorpus } from '@fossil-lang/corpus';
+import { levelsOf, openCorpus } from '@fossil-lang/corpus';
 import { BOUNDED_DEFAULTS } from '@kanzo-tech/graph';
 
 import { query as duckQuery, lit } from '../../corpus/guards/duck.mjs';
@@ -255,7 +255,7 @@ const shape = duckQuery(`
   FROM disc, ext, grid`)[0];
 const overExtent = num(shape.over_extent);
 const overCentres = num(shape.over_centres);
-const written = corpus.levels(address.type).filter((l) => l.written);
+const written = levelsOf(corpus.addressing, address.type).filter((l) => l.written);
 
 // ---------------------------------------------------------------------------------------------
 // One warm-up frame, discarded from the table and reported on its own line.

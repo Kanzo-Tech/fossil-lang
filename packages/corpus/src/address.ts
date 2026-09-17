@@ -9,11 +9,13 @@
  * is left of the second one: the shapes the answers arrive in, and the calls that ask.
  *
  * **It costs a WASM module, and that is the price rather than an oversight.** Composing a URL was
- * synchronous arithmetic over a parsed manifest and is now a call into `fossil-graph-wasm`, so a
- * caller must `await initFossilGraphWasm({ wasmUrl })` before {@link resolveCorpus} — the same
- * precondition every verb already had. The subpath `@fossil-lang/corpus/address` existed exactly so
- * a third party could address a corpus *without* that, and it is deleted: a WASM-free path is a
- * second implementation, and a second implementation is what this change removed.
+ * synchronous arithmetic over a parsed manifest and is now a call into `fossil-graph-wasm`, so the
+ * module has to be up before {@link resolveCorpus} answers — the same precondition every verb
+ * already had. That precondition is an OPTION and not a call a caller sequences: `wasmUrl` on
+ * {@link ResolveCorpusOptions}, exactly as on `OpenCorpusOptions`, awaiting the same memoised boot.
+ * The subpath `@fossil-lang/corpus/address` existed exactly so a third party could address a corpus
+ * *without* the module at all, and it is deleted: a WASM-free path is a second implementation, and a
+ * second implementation is what this change removed.
  *
  * **What it does not do**, and each absence is the seam this package is on the far side of:
  *
@@ -31,8 +33,8 @@
  */
 
 // '../pkg/fossil_graph_wasm.js' is the wasm-bindgen `--target web` output, gitignored and always
-// present at build time — the same import `./load.js` makes, and the reason this module now needs
-// `initFossilGraphWasm` to have been awaited before any of it runs.
+// present at build time — the same import `./load.js` makes, and the reason this module needs the
+// module booted before any of it runs.
 import {
   Corpus as CorpusReader,
   rowsAt as rowsAtLevel,
@@ -40,6 +42,7 @@ import {
   strideOf as idsPerLevelRow,
 } from '../pkg/fossil_graph_wasm.js';
 
+import { initFossilGraphWasm } from './load.js';
 import { CorpusManifestError } from './manifest.js';
 
 export { CorpusManifestError, GRAPH_INFO_PATH } from './manifest.js';
@@ -133,8 +136,11 @@ export interface LevelInfo {
  * with nothing answering that, eight assertions in `tests/frame.test.ts` and
  * `tests/frame-levels.test.ts` would have had to re-derive these three calls themselves — a second
  * statement of the arithmetic, which is the rule the door was being narrowed for. Moved, not
- * deleted, and not re-exported from the barrel: a consumer of `@fossil-lang/corpus` never names a
- * level file.
+ * deleted — and re-exported from the barrel after all, because two consumers outside this package
+ * do name a level file: `apps/playground/scripts/measure-frame.mjs` and `measure-pyramid.mjs` both
+ * report which levels a corpus WROTE beside what a frame cost, and neither is in a position to
+ * re-derive `strideOf`/`rowsAt`/`projection` for itself. `Frame.matchedAt` is on the door, so what
+ * makes `matchedAt` readable has to be reachable from it.
  */
 export function levelsOf(addressing: CorpusAddressing, type?: string): readonly LevelInfo[] {
   const address = addressing.vertexType(type);
@@ -434,6 +440,16 @@ export interface ResolveCorpusOptions {
    * `''` for addresses relative to the dataset root. Prepended to every URL and nothing else.
    */
   base?: string;
+  /**
+   * Where `fossil_graph_wasm_bg.wasm` is — the same option, spelled the same way and meaning the
+   * same thing, as `OpenCorpusOptions.wasmUrl`, and the same memoised boot behind it.
+   *
+   * Give it and {@link resolveCorpus} hands back a promise, because it had to await that boot;
+   * omit it and the call is the synchronous arithmetic it has always been, for a caller whose
+   * module is already up. Only the caller knows how its bundler resolves an asset, which is why
+   * this is a parameter at all and why it is the ONLY thing about the boot a consumer can say.
+   */
+  wasmUrl?: string | URL | Request | Response;
 }
 
 /**
@@ -708,14 +724,26 @@ function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress 
  * Resolve a corpus's manifest set into the addresses a reader composes URLs from.
  *
  * ```ts
- * await initFossilGraphWasm({ wasmUrl });
- * const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
+ * const corpus = await resolveCorpus({ manifestFiles, base: '/bench/1000000', wasmUrl });
  * const person = corpus.vertexType();
  * const { edgeUrls, complete, gaps } = corpus.tilesFor({ tiles: [3, 4], directions: ['src', 'dst'] });
  * ```
  *
- * **`initFossilGraphWasm` must have been awaited first.** The resolution runs in
- * `fossil-graph-wasm`; without the module instantiated this throws the same way a verb call does.
+ * **This is the engine-free route to a corpus, and it is not `openCorpus` by another name.** The
+ * door demands a `query` and spends `1 + N` round trips before it answers, because the questions
+ * it answers need bytes. This one is handed the manifests and names every URL the corpus can
+ * produce — no engine, no request, no round trip. `apps/playground/src/bench.ts` names all 245
+ * tiles of a million-vertex corpus that way, and there is no expressing that through the door.
+ *
+ * **Its return type depends on `wasmUrl`, and that is the one place in this package where that is
+ * true.** The resolution runs in `fossil-graph-wasm`, so the module has to be up; giving the
+ * option awaits the memoised boot and hands back a promise, and omitting it is the synchronous
+ * arithmetic for a caller whose module already is. Two alternatives were rejected. Making it
+ * unconditionally `async` would have rewritten fourteen `expect(() => …).toThrow(…)` assertions
+ * in `tests/address.test.ts` and `tests/conformance.test.ts` into `rejects`, which changes what
+ * two suites assert in order to change how one of them spells it. Exporting the boot again is the
+ * sequencing step this package removed on purpose: a consumer would have to know there IS a wasm
+ * module and order two calls against it.
  *
  * Throws {@link CorpusManifestError} when the manifest cannot address itself — a missing file, a
  * `chunk_size` no shift addresses, an endpoint type the index does not declare, or an edge whose
@@ -723,7 +751,24 @@ function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress 
  * orientation the corpus does not publish: that is a legitimate corpus, and it is reported as an
  * address that does not exist rather than one that 404s.
  */
-export function resolveCorpus(options: ResolveCorpusOptions): CorpusAddressing {
+export function resolveCorpus(
+  options: ResolveCorpusOptions & { wasmUrl: NonNullable<ResolveCorpusOptions['wasmUrl']> },
+): Promise<CorpusAddressing>;
+export function resolveCorpus(
+  options: ResolveCorpusOptions & { wasmUrl?: undefined },
+): CorpusAddressing;
+export function resolveCorpus(
+  options: ResolveCorpusOptions,
+): CorpusAddressing | Promise<CorpusAddressing> {
+  const { wasmUrl } = options;
+  if (wasmUrl !== undefined) {
+    return initFossilGraphWasm({ wasmUrl }).then(() => addressManifests(options));
+  }
+  return addressManifests(options);
+}
+
+/** The resolution itself, once the module is up — the one implementation both overloads reach. */
+function addressManifests(options: ResolveCorpusOptions): CorpusAddressing {
   const { manifestFiles, base = '' } = options;
   const reader = asked(() => new CorpusReader(manifestFiles, base));
   const plan = asked(() => reader.snapshot() as PlanSnapshot);
