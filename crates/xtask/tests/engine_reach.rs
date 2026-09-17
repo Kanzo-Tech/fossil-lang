@@ -51,11 +51,11 @@
 //! # What this CANNOT prove
 //!
 //! - **That any of the declared crates SHOULD link an engine.** It proves the
-//!   list is complete, not that it is right. `fossil-layout` is in it, is in the
-//!   wasm closure, and `CLAUDE.md` describes it as "linking no engine (`DuckDB`
-//!   is a dev-dependency)" — true of DuckDB and false of DataFusion, which it
-//!   reaches through `fossil-df`. This guard makes that visible; it has no
-//!   opinion about it.
+//!   list is complete, not that it is right. `fossil-layout` was the example:
+//!   in the wasm closure, described everywhere as linking no engine, and
+//!   reaching DataFusion through `fossil-df` for a Parquet writer that is now
+//!   `fossil-tile-writer`. This guard is what made that visible, and it had no
+//!   opinion about it — the repair came from reading its table, not from it.
 //! - **Anything about a feature-gated edge.** `cargo metadata`'s resolve graph
 //!   is taken as given, for the default feature set and the host target. A
 //!   dependency that only exists under a non-default feature is counted as

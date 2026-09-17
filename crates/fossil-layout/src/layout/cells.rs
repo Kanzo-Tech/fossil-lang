@@ -80,7 +80,7 @@ use fossil_sinks::manifest::{
 
 use super::pass::LayoutError;
 use crate::io::{LayoutIo, Sink};
-use fossil_df::files::TileWriter;
+use fossil_tile_writer::TileWriter;
 
 /// **How a cell's position was arrived at**, as the manifest declares it.
 ///

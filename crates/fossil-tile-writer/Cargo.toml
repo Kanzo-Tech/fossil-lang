@@ -1,0 +1,61 @@
+# The row-group container the corpus's payload is written through — the one
+# byte-writer of tiles in the tree.
+#
+# It is a crate rather than a module because of where it used to be. It lived in
+# `fossil-df`, which never called it: its only consumer is `fossil-layout`'s
+# pass, and that one `use` put `datafusion`, `fossil-hir`, `fossil-mir`,
+# `fossil-descriptors-output`, `fossil-base` and `salsa` into a batch pass's
+# dependency closure for a 37-line Parquet writer.
+#
+# `fossil-sinks` was the obvious other home and is the wrong one twice over: it
+# takes `arrow-schema` ALONE to keep `arrow-ipc`/`mio` out of the browser bundle,
+# and it is a plan + manifest generator that declares the tiling and byte-writes
+# nothing. A Parquet encoder there would contradict both, and `fossil-graph`,
+# `fossil-graph-wasm` and `fossil-mcp` would link a writer none of them calls.
+[package]
+name = "fossil-tile-writer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The row-group container a corpus's payload is written through — one tile, one row group"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+# The sink is a `W: Write`, so nothing here touches a filesystem and all of it
+# compiles to wasm32 — the browser host writes its corpus through this writer.
+# Today the gate would reach it anyway, through `fossil-layout`; the key is here
+# so that membership does not depend on one consumer's edge staying a normal
+# one, which is the drift `xtask::wasm_closure` reads this field to prevent.
+# Remove it the day the crate stops being true to it, never to make a red gate
+# go green.
+[package.metadata.fossil]
+wasm = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The two `arrow` sub-crates and not the umbrella, for the reason `fossil-sinks`
+# and `fossil-kanon` give: `arrow` 58's default features pull `arrow-csv`,
+# `arrow-json` and `arrow-cast`'s prettyprint, readers and a formatter this crate
+# never calls. It does NOT buy freedom from `arrow-ipc` — `parquet`'s own `arrow`
+# feature depends on it unconditionally, so it is in this tree either way and
+# saying otherwise would be a claim `cargo tree -p fossil-tile-writer` refutes.
+# Both are the workspace pin 58, the single arrow line `datafusion` resolves to,
+# so a `RecordBatch` handed here by either half of the write path crosses without
+# a conversion.
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+# `default-features = false` + `arrow` keeps it pure Rust — no compression C
+# deps — which is the universal-substrate decision: ONE parquet encoder shared
+# native and wasm, no parquet-wasm JS.
+parquet = { version = "58", default-features = false, features = ["arrow"] }
+
+[dev-dependencies]
+# The footer is the thing under test, and reading one back needs a file:
+# `ParquetMetaDataReader` parses from a `ChunkReader`, and a `NamedTempFile` is
+# the shortest one that is not a second in-memory reader implementation.
+tempfile = { workspace = true }

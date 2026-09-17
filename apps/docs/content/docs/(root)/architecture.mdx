@@ -1,9 +1,6 @@
 ---
 title: The architecture
-description: The dependency graph fossil has today, the one pair of groups that still points both ways, and what `base` is supposed to mean.
-direction:
-  summary: The dependency graph over the five subject groups is acyclic — no pair of groups points at each other.
-  arguedIn: /docs/design/three-hosts
+description: The dependency graph fossil has today, why no pair of groups points both ways any more, and what `base` is supposed to mean.
 ---
 
 ## The graph today
@@ -16,20 +13,19 @@ graph LR
   L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 4 crates<br/>df · df-wasm · cli · introspect"]
-  C["<b>corpus</b> · 8 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · resolver · policy · kanon"]
+  C["<b>corpus</b> · 9 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · tile-writer · resolver · policy · kanon"]
   X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
   E -->|18| L
   E -->|1| M
   M -->|24| L
   M -->|9| C
-  C -->|1| M
   C -->|1| L
   M -->|1| X
   C -->|1| X
 ```
 
-**56 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
+**55 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -38,11 +34,22 @@ The single `editor → engine` edge is `fossil-lsp → fossil-introspect`, and i
 the columns a `DESCRIBE` finds, the editor is silent on every diagnostic whose evidence is a source's
 schema, which is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`.
 
-The mutual arrow is `engine ↔ corpus`, and one edge holds it:
+`engine ↔ corpus` was the mutual pair, and one edge held it: `fossil-layout → fossil-df`, for one
+type — the row-group container the corpus's payload is written through. It looked like an edge with
+nowhere to go. `fossil-sinks` was the obvious home and takes `arrow-schema` alone, so moving the
+writer there would have put `arrow` + `parquet` into `fossil-graph-wasm`'s browser bundle, which has
+neither; a leaf crate of its own looked like a whole crate for one shared function.
+
+What settled it was what the edge cost rather than what it was worth. A struct `fossil-df` never
+called put `datafusion`, `fossil-hir`, `fossil-mir`, `fossil-descriptors-output`, `fossil-base` and
+`salsa` into the closure of a pass that resolves no name and holds no database — measurable as
+`cargo tree -p fossil-layout -e normal -i salsa`, which printed a tree and now prints nothing. The
+writer is `crates/fossil-tile-writer/src/lib.rs, TileWriter`, a leaf over `arrow` and `parquet`, and
+`fossil-layout` reaches the engine on a dev edge alone, for the bench that measures the tiling
+against the baseline encoder. The arrow that remains runs one way:
 
 | direction | edge | why it is there |
 | --- | --- | --- |
-| corpus → engine | `fossil-layout → fossil-df` | one type, `files::TileWriter`, the row-group container the corpus's payload is written through — moving it would put `arrow` + `parquet` into `fossil-graph-wasm`'s browser bundle, which has neither |
 | engine → corpus | `fossil-cli → fossil-layout` | the post-pass **is** the payload write, so the thing that writes the manifests calls it |
 | engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
 | engine → corpus | `fossil-cli → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk — and `Privacy`, which the run summary prints |
@@ -65,8 +72,8 @@ predicate was declared with. `fossil-resolver` is still a leaf. It **cost** an e
 `fossil-cli → fossil-sinks` and `fossil-introspect → fossil-resolver` used to be internal to the
 engine, three that started crossing against two that stopped — and it bought the cycle:
 `fossil-graph → fossil-sinks` and `fossil-mcp → fossil-resolver` are now inside `corpus`, so the
-return leg went from three edges to one. There are still two cores,
-but the stitch that closes the loop is one function.
+return leg went from three edges to one — and that one has since gone too, which is the section
+above. There are still two cores; there is no longer a stitch closing the loop.
 [One engine](/docs/design/one-engine) is where the rest of the filing gets settled.
 
 `fossil-policy` is filed under **corpus** and not under the engine that reads it, for the reason

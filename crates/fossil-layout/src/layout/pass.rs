@@ -22,8 +22,8 @@ use arrow::array::{Array, ArrayRef, Float32Array, RecordBatch, StringArray, UInt
 use arrow::compute::{cast, interleave_record_batch};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::error::ArrowError;
-use fossil_df::files::TileWriter;
 use fossil_mem_probe::Probe;
+use fossil_tile_writer::TileWriter;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
 use fossil_sinks::manifest::{Channel, HOLON_PREFIX, HolonTree, TILES_FILE, VertexLevels};
@@ -711,9 +711,8 @@ pub const fn estimated_peak_bytes(
 /// # No engine
 ///
 /// Everything below is `arrow-rs` and `parquet-rs`: the arithmetic is Arrow
-/// kernels and the tiles go out through [`fossil_df::files::TileWriter`], the
-/// row-group container that is now the *only* Parquet writer on the corpus's
-/// payload. There was a `DuckDB` connection here, and what it was used for was
+/// kernels and the tiles go out through [`TileWriter`], the row-group container
+/// that is now the *only* Parquet writer on the corpus's payload. There was a `DuckDB` connection here, and what it was used for was
 /// `COPY` — see `docs/design/one-engine.mdx`.
 ///
 /// The reason the substitution is small is that the relational work was never

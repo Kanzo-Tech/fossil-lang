@@ -168,15 +168,22 @@ crates/
                            holds it against `deny.toml`. Native by that edge and by
                            `fossil-resolver`, without a tripwire of its own
   fossil-layout/           the layout post-pass — Louvain + Morton over Parquet through
-                           arrow-rs. It links no `DuckDB` (that is a dev-dependency) but it
-                           DOES link `DataFusion`, transitively through `fossil-df` for the
-                           one module `files` (`TileWriter`). This line said "linking no
-                           engine" and `cargo tree -p fossil-layout -e normal -i
-                           datafusion` says otherwise; `crates/xtask/tests/engine_reach.rs`
-                           is the guard that now derives the real linkers. It
+                           arrow-rs. It links no engine: `DuckDB` and `fossil-df` are both
+                           dev-dependencies, the second since `TileWriter` became
+                           `fossil-tile-writer` and stopped dragging `DataFusion` and
+                           `salsa` in behind it. `crates/xtask/tests/engine_reach.rs`
+                           derives the real linkers and is what made that edge visible. It
                            COMPILES for wasm32 and declares it with `[package.metadata.fossil]
                            wasm = true`, which is what puts it in the gate closure. It was
                            `fossil-runtime`, and it is not a runtime: the crate IS the pass
+  fossil-tile-writer/      the row-group container a corpus's payload is written through —
+                           one tile, one row group, and the only byte-writer of tiles in the
+                           tree. A leaf over `arrow` and `parquet`. It was a struct in
+                           `fossil_df::files` that `fossil-df` never called, and the layout
+                           pass's one `use` of it is what put `salsa` and `DataFusion` under
+                           a pass that resolves no name. NOT in `fossil-sinks`: that crate
+                           takes `arrow-schema` alone and declares the tiling without
+                           byte-writing it
   fossil-mem-probe/        `FOSSIL_MEM_PROBE` — peak RSS + elapsed seconds per phase of a
                            write. Depends on NOTHING; both halves of the write path
                            (fossil-df, fossil-layout) report through it

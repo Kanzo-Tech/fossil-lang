@@ -131,8 +131,8 @@ impl Write for Sink {
 /// that closes it is `TileWriter::finish`, which consumes the `TileWriter` and
 /// drops the sink inside `ArrowWriter::close` — after the footer is written and
 /// flushed. There is no seam between "the bytes are complete" and "the sink is
-/// dropped" to put a call in, short of changing `fossil-df`'s writer signature
-/// for the benefit of one of its two callers.
+/// dropped" to put a call in, short of changing `fossil-tile-writer`'s
+/// signature for the benefit of one of its two callers.
 #[derive(Debug)]
 pub struct MemSink {
     url: String,

@@ -2121,6 +2121,7 @@ dependencies = [
  "fossil-hir",
  "fossil-mem-probe",
  "fossil-sinks",
+ "fossil-tile-writer",
  "parquet",
  "serde_json",
  "sha2",
@@ -2251,6 +2252,16 @@ dependencies = [
  "salsa",
  "smol_str",
  "text-size",
+]
+
+[[package]]
+name = "fossil-tile-writer"
+version = "0.1.0"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "parquet",
+ "tempfile",
 ]
 
 [[package]]

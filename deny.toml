@@ -141,14 +141,17 @@ deny = [
         # Links it, directly.
         "fossil-df",
         "fossil-df-wasm",
-        # Links it TRANSITIVELY, through `fossil-df`. Neither is new — they were
-        # undeclared for as long as the check could not see them, and they are
-        # recorded here rather than changed, because whether the layout pass
-        # should carry an executor is a question this entry does not own.
-        # `fossil-engine` was a third and is gone: `fossil-cli` absorbed it.
+        # Links it TRANSITIVELY, through `fossil-df`. Not new — it was
+        # undeclared for as long as the check could not see it, and it is
+        # recorded here rather than changed. `fossil-engine` was a second and is
+        # gone: `fossil-cli` absorbed it.
         "fossil-cli",
+        # A parent by a DEV edge only, and it was a linker until the tile writer
+        # left `fossil_df::files`. `examples/compaction_pass.rs` is what keeps
+        # the name here: it measures the tiling against `batches_to_parquet`, the
+        # baseline encoder, and a bench's dependency is not the library's.
         "fossil-layout",
-    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — compiling the engine to the browser asserts the opposite of a camera that is addressed rather than queried. The last two reach it through `fossil-df` and are recorded, not endorsed: `fossil-layout` is in the wasm closure and reaches the executor for exactly two symbols, `files::TileWriter` and `files::batches_to_parquet`, neither of which is a DataFusion type — so the edge is an artifact of where that module lives, not of what the pass needs. Retiring it means moving `fossil_df::files` below the executor, which is a change to two crates this entry does not own. `crates/xtask/tests/engine_reach.rs` is what made the edge visible; it has no opinion about it. `CLAUDE.md` used to describe this crate as linking no engine and no longer does — `77d03c8` corrected it against `cargo tree -p fossil-layout -e normal -i datafusion`." },
+    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — compiling the engine to the browser asserts the opposite of a camera that is addressed rather than queried. `fossil-cli` reaches it through `fossil-df` and is recorded, not endorsed. `fossil-layout` was the other, for exactly two symbols — `files::TileWriter` and `files::batches_to_parquet`, neither of which is a DataFusion type — and this entry said retiring the edge meant moving `fossil_df::files` below the executor, a change to two crates it does not own. That change was made: `TileWriter` is `fossil-tile-writer` now, a leaf over `arrow` and `parquet`, and the layout pass reaches `fossil-df` on a dev edge alone for the bench's baseline encoder. `cargo tree -p fossil-layout -e normal -i datafusion` prints nothing. `crates/xtask/tests/engine_reach.rs` is what made the edge visible; it has no opinion about it." },
 ]
 
 [sources]

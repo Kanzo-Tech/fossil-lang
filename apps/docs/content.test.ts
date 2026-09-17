@@ -181,25 +181,22 @@ describe("the graph core reaches the rest of the tree exactly once", () => {
  * guard existed, and hand-counting is how `xtask` gets mapped as `fossil-xtask` and one edge
  * vanishes — 46 where the tree has 47.
  *
- * The page's `direction:` is *acyclic*, and it is one edge away. That last edge is named here
- * rather than tolerated: remove `fossil-layout → fossil-df` and the group graph must have no cycle
- * left at all, which makes the direction's closure condition a test rather than a promise.
+ * The page carried a `direction:` of *acyclic* and it was one edge away — `fossil-layout →
+ * fossil-df`, named in the guard so that removing it had to leave no cycle behind. It is removed:
+ * the tile writer is a leaf crate, the direction is closed, and the page describes what is there.
+ * So the cycle check is no longer conditional on an excused edge, and there is no excused edge to
+ * pin. What replaces it is stricter: the group graph must be acyclic as measured, with nothing
+ * skipped.
  *
  * What this does NOT prove:
  *
  *   - **That the grouping is right.** Nothing can. It proves the drawing matches the tree, and a
  *     crate filed under the wrong subject is a drawing that matches the tree perfectly.
  *   - **Anything about a dev or build edge.** Same scope as the page: `[dependencies]` only.
- *   - **That the excuse is good.** It pins the one excused edge in place, so deleting the excuse
- *     without deleting the edge fails, and deleting the edge without rewriting the page fails too.
+ *   - **That a cycle will not come back through a group nobody drew.** A crate filed nowhere is
+ *     absent from `measuredArrows`, so `files every crate exactly once` is what keeps this honest.
  */
 const ARCHITECTURE = join(CONTENT_ROOT, "(root)/architecture.mdx");
-
-/**
- * The one cross-group edge the page keeps, with its reason written beside it there: moving
- * `files::TileWriter` would put `arrow` + `parquet` into a browser bundle that has neither.
- */
-const EXCUSED_EDGE: readonly [string, string] = ["fossil-layout", "fossil-df"];
 
 const crates: Manifest[] = readdirSync(join(repoRoot, "crates"))
   .map((dir) => join(repoRoot, "crates", dir, "Cargo.toml"))
@@ -253,12 +250,11 @@ const groupOf = new Map<string, string>(
 );
 
 /** Every cross-group `[dependencies]` edge, counted per ordered pair of groups. */
-function measuredArrows(skip: readonly (readonly [string, string])[] = []): Map<string, number> {
+function measuredArrows(): Map<string, number> {
   const out = new Map<string, number>();
 
   for (const crate of crates) {
     for (const dep of crate.deps) {
-      if (skip.some(([from, to]) => from === crate.name && to === dep)) continue;
       const from = groupOf.get(crate.name);
       const to = groupOf.get(dep);
       if (!from || !to || from === to) continue;
@@ -327,16 +323,8 @@ describe("the group diagram is the manifests", () => {
     expect(Number(stated?.[1])).toBe([...declaredArrows.values()].reduce((a, b) => a + b, 0));
   });
 
-  it("keeps the one edge the page excuses", () => {
-    const [from, to] = EXCUSED_EDGE;
-    expect(
-      crates.find((c) => c.name === from)?.deps,
-      `${from} no longer depends on ${to}: the direction may be closed, and the page has to say so`,
-    ).toContain(to);
-  });
-
-  it("is acyclic once that edge is removed", () => {
-    expect(cycle(measuredArrows([EXCUSED_EDGE]))).toBeUndefined();
+  it("is acyclic", () => {
+    expect(cycle(measuredArrows())).toBeUndefined();
   });
 });
 
@@ -587,6 +575,16 @@ describe("every argument that is named is a page of this site", () => {
   const withArgument = pages.filter(
     (p) => (p.data.direction as { arguedIn?: string } | undefined)?.arguedIn,
   );
+
+  // Nothing declares one right now: `architecture.mdx` was the last, and its direction closed when
+  // the tile writer left `fossil-df` and the group graph went acyclic. For an optional field that
+  // is a legal state, but an empty `it.each` is a vitest SUITE ERROR rather than a green vacuum, so
+  // the suite carries a test of its own. It asserts nothing about how many pages name an argument,
+  // on purpose: a floor there would be the rule that a direction must be argued on another page,
+  // which is the directory rule this field replaced.
+  it("has directions to read the field off at all", () => {
+    expect(pages.length).toBeGreaterThan(0);
+  });
 
   it.each(withArgument)("$id names an argument on this site", ({ path, data }) => {
     const arguedIn = (data.direction as { arguedIn?: string }).arguedIn as string;
