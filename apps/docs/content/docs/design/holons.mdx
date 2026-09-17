@@ -522,6 +522,45 @@ A texel averages colour. A category does not average: the mean of two `cluster_i
 and `crates/fossil-sinks/src/generated.rs, PAYLOAD_CATEGORICAL` is the column that says which of the
 payload's columns this is true of.
 
+**That constant is a fact about fossil's writer, not about the corpus in front of you**, and until
+the channel was declared it was the closest thing to an answer the document had. A cell row's `mode`
+is a bare `uint32`. `crates/fossil-sinks/src/manifest.rs, HolonRung` said *the mode and purity of the
+payload's categorical* in prose, `corpus.bnf`'s `mode` role said *the majority value of a categorical
+over the rows summarised*, and neither named **which** categorical — because until
+[`channels:`](/docs/design/position) there was nothing to name. So a reader colouring a rung by
+`mode` had to guess which palette the values belonged to, and could not know the domain at all. That
+is the same defect the `domain` field closed one level down, and it survived at this one.
+
+`crates/fossil-sinks/src/manifest.rs, HolonTree` names it now — `mode_channel:`, a scalar sitting
+between `coordinates:` and `rungs:` — and the shape comes from the field this tree already carries
+for the same reason. A holon's position is declared rather than derived in silence, and the section
+below notes that it *does a second job while it is there: it names which columns hold the position*.
+The mode had no such field. It has one, and what it holds is the **name** of a channel, resolved
+against the vertex type's own `channels:` list.
+
+**A reference and not a copy**, which is the whole of why it is a name. Repeating the channel's
+`domain` on the tree would put a measured number in the document twice, and a number written twice is
+the thing this block was added to stop — the second copy is the one that goes stale when the
+partition moves. A reader follows one hop and gets the column and the domain from the entry that
+measured them.
+
+**Two states, and that is a departure worth stating rather than noticing.** `coordinates:` and
+`channels:` are lists with three states, because *this type carries none* is an answer a list can
+give. A reference cannot give it: a rung's `mode` column always holds the mode of something, so
+there is no «carries none» to express. And the two are not a choice a writer makes — every tree
+`fossil-layout` writes names its channel, so the absent state is reachable only by a tree written
+before the field or by a writer that is not this one. Absent means *nobody said*, and it never means
+*the mode is of nothing*, because no such rung exists.
+
+**The reference is checked in two places, and neither could make the other's claim.** A name that
+resolves to nothing is the failure a reference introduces, so `apps/corpus/guards` carries
+`mode-names-a-channel` over the document — the name is one of the type's own channels, and the entry
+it lands on is `categorical`, because a measure has no majority to take. That guard cannot reach
+bytes. `crates/fossil-layout/tests/cells.rs` can and does: the pyramid's fifth obligation no longer
+spells `cluster_id`, it *resolves* the reference and recounts the mode and the purity over whatever
+column it lands on, against the written Parquet. So a tree that named the wrong channel fails a test
+rather than drawing a picture, and a tree that named a channel nobody declared fails a guard.
+
 The answer is the one indexed textures already use — **the majority value, and what fraction of the
 cell holds it**. Both, because the mode without the purity is a lie at the coarse end. Measured,
 purity of a cell with respect to `cluster_id`:

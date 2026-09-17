@@ -30,6 +30,13 @@
 //! the coarse end. Measured on com-DBLP, purity of a cell with respect to
 //! `cluster_id` is 100% at and below the saturation scale and 7.7% at the root.
 //!
+//! **Which categorical is not in the column.** `mode` is a bare `u32` and a
+//! `u32` carries no referent, so the tree names the channel its rungs summarise
+//! and a reader resolves that name against the type's own `channels:` — the
+//! column and the domain in one hop, from the entry that measured them. The
+//! name reaches this module beside the array it is the name of; see
+//! [`Pyramid::summarise`].
+//!
 //! And a mode cannot be computed from its children's modes, which is why every
 //! rung is summarised from the payload in its own pass rather than folded up
 //! from the rung below. The rows arrive in write order and `dense_id` ascends,
@@ -95,6 +102,15 @@ const DERIVED_BY: &str = "cell-member-centroid";
 pub(crate) struct Pyramid {
     /// The declared base, carried so the tree this reports is the tree it built.
     vertices_per_cell: u64,
+    /// **The name of the channel `mode` is the mode of**, carried from the
+    /// array it was summarised over.
+    ///
+    /// It arrives beside `clusters` in [`Pyramid::summarise`] rather than as a
+    /// constant here, and that is the point: this module never learns which
+    /// column it is tallying, so the only thing it could invent is a second
+    /// spelling of a name the pass has already declared. See
+    /// `fossil_sinks::manifest::HolonTree::mode_channel`.
+    mode_channel: String,
     /// Finest first, which is the order a manifest lists rungs in.
     rungs: Vec<Rung>,
 }
@@ -173,6 +189,12 @@ impl Pyramid {
     /// phase already holds, in write order — so this costs one pass per rung
     /// over them and allocates the cells, which is `4/3` of the base.
     ///
+    /// **`mode_channel` travels with `clusters` and is not a parameter beside
+    /// it by accident**: the mode this writes is the mode of *that array*, and
+    /// the name is what the pass declared the array as. A constant here would
+    /// be a second spelling of it, which is the failure the declaration exists
+    /// to remove — see [`HolonTree::mode_channel`].
+    ///
     /// The plan comes from [`HolonTree`] and not from arithmetic here, which is
     /// the same rule the level pyramid is written under: one function chooses
     /// the rungs and both the writer and the manifest call it.
@@ -183,6 +205,7 @@ impl Pyramid {
         xs: &[f32],
         ys: &[f32],
         clusters: &[u32],
+        mode_channel: &str,
     ) -> Option<Self> {
         HolonTree::base_bits(vertices_per_cell)?;
         if vertex_count <= vertices_per_cell {
@@ -227,6 +250,7 @@ impl Pyramid {
 
         Some(Self {
             vertices_per_cell,
+            mode_channel: mode_channel.to_string(),
             rungs,
         })
     }
@@ -341,11 +365,16 @@ impl Pyramid {
         relations.sort_unstable();
         relations.dedup();
 
-        Ok(
-            HolonTree::new(self.vertices_per_cell, relations, declared).with_coordinates(vec![
-                CoordinateSystem::derived("holon", "x", "y", DERIVED_BY),
-            ]),
-        )
+        // And the two things about a rung that the rung itself cannot say. The
+        // position is a choice, so it is declared; the `mode` is a `u32` whose
+        // referent is nowhere in the column, so the channel it summarises is
+        // NAMED — the name the pass declared the partition under, carried here
+        // since `summarise` rather than spelled a second time.
+        Ok(HolonTree::new(self.vertices_per_cell, relations, declared)
+            .with_coordinates(vec![CoordinateSystem::derived(
+                "holon", "x", "y", DERIVED_BY,
+            )])
+            .with_mode_channel(self.mode_channel.clone()))
     }
 
     /// One rung's quotient, or `None` where the rung has no cross edges.

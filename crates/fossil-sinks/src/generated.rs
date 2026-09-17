@@ -26,7 +26,7 @@ pub enum ColumnRole {
     Tally,
     /// A summed edge weight.
     Weight,
-    /// The majority value of a categorical over the rows summarised.
+    /// The majority value, over the rows summarised, of the channel the tree names.
     Mode,
     /// What fraction of the rows summarised carry the mode.
     Purity,
@@ -178,7 +178,7 @@ pub const CELL_TALLY: &[&str] = &["count"];
 /// The weight column(s) of a cell row of one rung of the pyramid — a summed edge weight.
 pub const CELL_WEIGHT: &[&str] = &["internal"];
 
-/// The mode column(s) of a cell row of one rung of the pyramid — the majority value of a categorical over the rows summarised.
+/// The mode column(s) of a cell row of one rung of the pyramid — the majority value, over the rows summarised, of the channel the tree names.
 pub const CELL_MODE: &[&str] = &["mode"];
 
 /// The purity column(s) of a cell row of one rung of the pyramid — what fraction of the rows summarised carry the mode.

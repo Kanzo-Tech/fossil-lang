@@ -94,7 +94,13 @@
    endpoint     one end of a relation, in the aligned type's `dense_id` space.
    tally        how many rows of the level below a summary row stands for.
    weight       a summed edge weight.
-   mode         the majority value of a categorical over the rows summarised.
+   mode         the majority value, over the rows summarised, of the channel the
+                tree NAMES — `crates/fossil-sinks/src/manifest.rs,
+                HolonTree::mode_channel`. The referent is not in this column and
+                cannot be: the value is a bare ordinal. This read «a
+                categorical» for as long as there was nothing to name, which is
+                an indefinite article over a set the document did not
+                constrain.
    purity       what fraction of those rows carry the mode.
    incident     one end of a quotient edge, in its own rung's cell space. NOT an
                 `endpoint`: an endpoint indexes a vertex type's `dense_id`, and

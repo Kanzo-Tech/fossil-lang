@@ -26,6 +26,12 @@
 //! | cross weight + internal == the edges below | edges kept as self-loops, or dropped |
 //! | a cell's position is its members' centroid | a tree whose referent moved |
 //! | the mode is the majority and the purity is its share | a categorical averaged |
+//! | the tree's `mode_channel` resolves, and the mode is that column's | a rung a reader would colour off the wrong palette |
+//!
+//! The last one is a claim about a name rather than about a number, and it is
+//! evaluated the same way the others are: the column obligation 5 runs over is
+//! the one the reference resolved to, so a tree naming a channel the type does
+//! not declare, or naming the wrong one, fails here rather than drawing.
 //!
 //! The third is the one the page argues hardest for, and it is the only one that
 //! sees a writer relabelling the children's edge set and keeping it — which on a
@@ -250,6 +256,41 @@ fn every_rung_says_what_the_level_below_it_says() {
     let payload = lit(&root.join("payload").join("tiles.parquet"));
     let relation = lit(&root.join("by_source").join("tiles.parquet"));
 
+    // **The reference resolves**, and everything below it colours by what it
+    // resolved to. A rung's `mode` is a bare `u32`: the tree names the channel
+    // it summarises and the type declares that channel, so the column the
+    // obligation is evaluated against is READ out of the document rather than
+    // written here. A test spelling `cluster_id` itself would pass over a tree
+    // that names the wrong channel, which is exactly the failure a reference
+    // introduces.
+    let named = tree
+        .mode_channel
+        .as_deref()
+        .expect("the tree names the channel its mode summarises");
+    let channel = report
+        .channels
+        .iter()
+        .find(|(label, _)| label == "Node")
+        .expect("Node declares its channels")
+        .1
+        .iter()
+        .find(|entry| entry.name == named)
+        .unwrap_or_else(|| panic!("`{named}` resolves into the channels the type declares"));
+    let categorical = channel.column.clone();
+    // And the entry it resolves to is the one that carries the domain, so a
+    // reader that followed the name has the count without a scan of its own.
+    assert_eq!(
+        channel.domain,
+        Some(
+            u64::try_from(scalar(
+                &db,
+                &format!("SELECT count(DISTINCT {categorical}) FROM read_parquet('{payload}')"),
+            ))
+            .expect("a distinct count")
+        ),
+        "the channel the tree names declares a domain the payload does not hold",
+    );
+
     // The plan the manifest declares is the plan the arithmetic names. Asserted
     // against `holons_at` rather than against a list, because what a reader
     // reproduces is the division.
@@ -335,12 +376,17 @@ fn every_rung_says_what_the_level_below_it_says() {
             "rung {at}: a cell is not at its members' centroid",
         );
 
-        // **Obligation 5 — the mode is the majority and the purity is its share.**
+        // **Obligation 5 — the mode is the majority of the channel the tree
+        // names, and the purity is its share.**
         //
         // A category does not average, so a cell carries the majority value and
         // what fraction of it holds that value. Both, because a mode without a
         // purity is a lie at the coarse end — and the purity is what a reader
         // desaturates by, so a wrong one draws a confident blur.
+        //
+        // The column is `{categorical}` and this file does not know that: it is
+        // the one the tree's `mode_channel` resolved to, which is what makes the
+        // reference a claim about the bytes rather than a string in a document.
         // Ranked rather than nested: a window over an aggregate inside a join
         // makes DuckDB's own subplan optimizer abort (`ConvertTableIndex`), and
         // the tie-break is explicit either way — highest count, then lowest
@@ -350,24 +396,24 @@ fn every_rung_says_what_the_level_below_it_says() {
                 &db,
                 &format!(
                     "WITH tally AS ( \
-                       SELECT dense_id >> {shift} AS cell_id, cluster_id, count(*) AS n \
+                       SELECT dense_id >> {shift} AS cell_id, {categorical}, count(*) AS n \
                        FROM read_parquet('{payload}') GROUP BY 1, 2 \
                      ), ranked AS ( \
-                       SELECT cell_id, cluster_id, n, \
+                       SELECT cell_id, {categorical}, n, \
                               row_number() OVER ( \
-                                PARTITION BY cell_id ORDER BY n DESC, cluster_id ASC \
+                                PARTITION BY cell_id ORDER BY n DESC, {categorical} ASC \
                               ) AS rk \
                        FROM tally \
                      ) \
                      SELECT count(*) FROM read_parquet('{rows}') c \
-                     JOIN (SELECT cell_id, cluster_id AS mode, n AS best FROM ranked WHERE rk = 1) p \
+                     JOIN (SELECT cell_id, {categorical} AS mode, n AS best FROM ranked WHERE rk = 1) p \
                        USING (cell_id) \
                      WHERE c.mode <> p.mode \
                         OR abs(c.purity - p.best::DOUBLE / c.count) > 1e-6"
                 )
             ),
             0,
-            "rung {at}: the mode is not the majority, or the purity is not its share",
+            "rung {at}: the mode is not the majority of `{categorical}`, or the purity is not its share",
         );
 
         // **Obligation 3 — mass conservation.**

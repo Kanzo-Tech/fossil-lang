@@ -269,6 +269,15 @@ export interface EdgeDrops {
  * seven of its nine fields respelled `graph.yaml`, and it named
  * `vertex/<Type>.parquet`, a file the native layout pass deletes. Keep this
  * interface derived from the Rust by hand only until something generates it.
+ *
+ * **It is partial, and the absences are deliberate rather than the wire's.** A
+ * `VertexInfo` on the wire also carries `holons:` — the pyramid of summary rows,
+ * its rungs, their quotients and the channel its `mode` names — and this
+ * interface does not, because transcribing that tree by hand for no consumer is
+ * the kind of speculative mirror that drifts, which is what the paragraph above
+ * is about. A reader that needs it reads the manifest YAML, which is what
+ * `apps/playground` does for `channels:` today. So read an absence here as
+ * «nothing in TypeScript has asked», never as «the wire does not carry it».
  */
 export interface RunReport {
   dest: string;

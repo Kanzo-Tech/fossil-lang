@@ -1598,6 +1598,88 @@ export const GUARDS = [
       return result(failures, notes);
     },
   },
+  {
+    id: "mode-names-a-channel",
+    title: "A holon tree's `mode` names a channel the type declares",
+    proves:
+      "That the reference a holon tree makes RESOLVES: the channel it names its rungs' `mode` " +
+      "after is one of the entries in that same vertex type's `channels:`, and that entry is " +
+      "categorical. A cell row's `mode` is a bare `uint32` and the column says nothing about what " +
+      "it is the mode OF — which palette the values belong to, or how many of them there are — so " +
+      "the tree names the channel and a reader follows one hop to the entry that measured the " +
+      "domain. That is the same question `declared-channels` answers one level down, asked of the " +
+      "summary instead of the payload.\n\n" +
+      "**A name and not a copy, which is why this guard exists at all.** The domain stays written " +
+      "once, on the channel, so the number `declared-channels` recounts off the Parquet is the " +
+      "number a reader arrives at through this reference; a tree carrying its own copy would need " +
+      "both checked and would go stale in exactly one of them. What a name buys in one place it " +
+      "costs in another: a dangling reference is a well-formed document that answers neither " +
+      "question, and nothing in either block can see the other.\n\n" +
+      "Two states and not three, which is where this departs from `channels:` and `coordinates:`. " +
+      "No `mode_channel` is a tree whose writer did not say — every tree written before the field " +
+      "is one — and it is reported rather than failed. There is no empty state to tell apart: a " +
+      "rung's `mode` always holds the mode of something, so «declares none» is not an answer a " +
+      "reference can give.",
+    cannotProve:
+      "That the rungs' `mode` values ARE that column's mode. This corpus publishes no rungs, and " +
+      "the claim is about bytes rather than about a document: it is evaluated where the rungs are " +
+      "written, by `crates/fossil-layout/tests/cells.rs`, which recounts the majority and its " +
+      "share per cell against the payload — over the column this same reference resolves to.\n\n" +
+      "That the channel named is the RIGHT one. A type declaring two categoricals can name either " +
+      "and both resolve; which of them a summary should be of is a writer's decision, and the " +
+      "artefact records it rather than justifying it.\n\n" +
+      "That a tree which says nothing should have said something. Silence is legal and every tree " +
+      "written before the field is silent — a reader colouring a rung against a palette it " +
+      "guessed is guessing, and this guard is what leaves it knowing that.",
+    run(corpus) {
+      const failures = [];
+      const notes = [];
+      for (const type of corpus.types) {
+        if (type.holons === null) {
+          notes.push(`${type.name}: declares no holon tree, so there is no reference to resolve`);
+          continue;
+        }
+        const named = type.holons.modeChannel;
+        if (named === null) {
+          notes.push(
+            `${type.name}: a tree whose \`mode\` names no channel — the writer did not say, which is a corpus and not a claim`,
+          );
+          continue;
+        }
+        if (type.channels === null || type.channels.length === 0) {
+          failures.push(
+            `${type.name}: the tree's \`mode\` names \`${named}\` and the type declares ` +
+              `${type.channels === null ? "no channels at all" : "an empty list of channels"}, ` +
+              "so the name resolves against nothing",
+          );
+          continue;
+        }
+        const resolved = type.channels.find((channel) => channel.name === named);
+        if (resolved === undefined) {
+          failures.push(
+            `${type.name}: the tree's \`mode\` names \`${named}\`, which is none of the ` +
+              `${type.channels.length} channel(s) this type declares ` +
+              `(${type.channels.map((c) => c.name || "«unnamed»").join(", ")}) — a reader ` +
+              "following it gets neither a column nor a domain",
+          );
+          continue;
+        }
+        if (resolved.scale !== "categorical") {
+          failures.push(
+            `${type.name}: the tree's \`mode\` names \`${named}\`, declared \`${resolved.scale}\` — ` +
+              "a mode is the majority value of a category, and a measure has no majority to take",
+          );
+          continue;
+        }
+        notes.push(
+          `${type.name}: \`mode\` is \`${named}\` over ${resolved.column}` +
+            (resolved.domain === null ? "" : `, ${resolved.domain} value(s) wide`) +
+            " — resolved, not derived",
+        );
+      }
+      return result(failures, notes);
+    },
+  },
 ];
 
 /** Run every guard, or the subset whose ids are given. */

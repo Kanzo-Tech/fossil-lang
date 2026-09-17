@@ -857,6 +857,41 @@ pub struct HolonTree {
     /// as "not declared" rather than as "derived".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coordinates: Option<Vec<CoordinateSystem>>,
+    /// **Which channel this tree's rungs take their `mode` of**, by
+    /// [`Channel::name`] — a reference into the vertex type's own
+    /// [`VertexInfo::channels`] list.
+    ///
+    /// A cell row carries a `mode` and a `purity` and the `mode` is a bare
+    /// `uint32`. Nothing in the document said what it was the mode OF: this
+    /// field's own [`HolonRung::properties`] called it *the payload's
+    /// categorical* and `corpus.bnf` called it *a categorical*, so a reader
+    /// colouring a rung by it could not know which palette the values belong to
+    /// or how many of them there are. That is the defect [`Channel::domain`]
+    /// closed one level down, surviving at this one.
+    ///
+    /// **A name and not a [`Channel`]**, and that is the whole of it. Resolving
+    /// the name gets a reader the column *and* the domain in one hop, from the
+    /// entry that measured them; a copied channel would state a measured number
+    /// twice, and the second copy is the one that goes stale when the partition
+    /// moves — which is the failure the block this points into exists to
+    /// remove.
+    ///
+    /// **Two states, where [`Self::coordinates`] and [`VertexInfo::channels`]
+    /// have three, and the departure is deliberate rather than an omission.** A
+    /// list can be empty because *this type carries no coordinate system* is an
+    /// answer. A reference cannot: a rung's `mode` column always holds the mode
+    /// of *something*, so there is no «carries none» to express and nothing for
+    /// an empty state to mean. `None` is the writer not saying — a tree written
+    /// before this field is one, and it draws exactly as it drew — and never
+    /// «the mode is of nothing».
+    ///
+    /// **Nothing here can check it.** A tree cannot see the `channels:` list it
+    /// points into, so a name that resolves to no entry is a well-formed
+    /// document and a dangling reference is the failure this introduces.
+    /// `apps/corpus/guards`' `mode-names-a-channel` is where the two are held
+    /// together, and `/docs/design/holons` is the argument.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode_channel: Option<String>,
     /// **The rungs, finest first** — the same order [`VertexInfo::projections`]
     /// is in and `OME-NGFF` fixes for its own `datasets`.
     ///
@@ -912,7 +947,14 @@ pub struct HolonRung {
     pub holon_count: u64,
     /// The columns a holon row carries: its cell id, its position, its member
     /// count, the internal weight that absorbed the edges between its own
-    /// children, and the mode and purity of the payload's categorical.
+    /// children, and the mode and purity of **the channel
+    /// [`HolonTree::mode_channel`] names**.
+    ///
+    /// That last clause read *the payload's categorical* while the tree had no
+    /// field to say which one, which is a definite article over a set the
+    /// document did not constrain. `mode` is a bare `uint32` in this list and
+    /// nothing in a rung makes it anything else; what it is the mode OF is one
+    /// level up, on the tree, because it is the same answer for every rung.
     ///
     /// Declared per rung and not inherited, which is where this differs from
     /// [`VertexIndex`]: an index is a second copy of the payload's rows and its
@@ -1033,6 +1075,10 @@ impl HolonTree {
             // knows where it put its holons says so with `with_coordinates`; one
             // that does not must not be made to look as though it did.
             coordinates: None,
+            // Nor which channel the rungs summarise, and here there is no third
+            // state to fall into: not saying is the only thing a tree that was
+            // not told can do. See `mode_channel`.
+            mode_channel: None,
             rungs,
         }
     }
@@ -1147,6 +1193,18 @@ impl HolonTree {
     #[must_use]
     pub fn with_coordinates(mut self, systems: Vec<CoordinateSystem>) -> Self {
         self.coordinates = Some(systems);
+        self
+    }
+
+    /// Declare which channel this tree's rungs take their `mode` of, by
+    /// [`Channel::name`]. See [`Self::mode_channel`].
+    ///
+    /// A name and not a [`Channel`], so there is no domain to restate; and no
+    /// «declare none» counterpart to [`Self::with_coordinates`]'s empty list,
+    /// because a rung's `mode` is always the mode of something.
+    #[must_use]
+    pub fn with_mode_channel(mut self, channel: impl Into<String>) -> Self {
+        self.mode_channel = Some(channel.into());
         self
     }
 
@@ -2941,5 +2999,81 @@ version: gar/v1
         );
         assert_eq!(silent.coordinates, None);
         assert_ne!(silent, silent.clone().with_coordinates(Vec::new()));
+    }
+
+    /// **Two states where the blocks beside it have three**, which is the one
+    /// departure the reference makes and the reason it is a test rather than a
+    /// remark. `channels:` and `coordinates:` can be declared *empty*, because
+    /// «this type carries none» is an answer a list can give. A rung's `mode`
+    /// column always holds the mode of something, so there is no such answer
+    /// here and the only thing a tree that was not told can do is say nothing:
+    /// absent and named, and no third.
+    #[test]
+    fn a_tree_that_names_no_mode_channel_is_a_tree_that_did_not_say() {
+        let silent = dblp_tree();
+        let named = dblp_tree().with_mode_channel("community");
+        assert_eq!(silent.mode_channel, None);
+        assert_eq!(named.mode_channel.as_deref(), Some("community"));
+        assert_ne!(silent, named);
+
+        // Absent from the document rather than `mode_channel: null`, so a tree
+        // written before the field is byte-for-byte the tree it was.
+        let quiet = person_vertex()
+            .with_holons(silent)
+            .to_yaml()
+            .expect("serialize");
+        assert!(!quiet.contains("mode_channel"), "{quiet}");
+        let old: VertexInfo = serde_yaml_ng::from_str(&quiet).expect("deserialize");
+        assert_eq!(old.holons.expect("a tree").mode_channel, None);
+
+        // A scalar under `holons:`, which is the grammar the line scanners over
+        // this document read — one level of mapping, and anything deeper is
+        // skipped rather than seen.
+        let yaml = person_vertex()
+            .with_holons(named.clone())
+            .to_yaml()
+            .expect("serialize");
+        assert!(yaml.contains("\n  mode_channel: community\n"), "{yaml}");
+        let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        assert_eq!(
+            parsed.holons.expect("a tree").mode_channel,
+            named.mode_channel
+        );
+    }
+
+    /// **A reference and not a copy**, which is the whole reason it is a name.
+    /// The tree names a channel, the type declares it, and the measured number
+    /// is written once — in the entry that measured it. A reader follows one
+    /// hop from the name and has the column and the domain together.
+    #[test]
+    fn the_mode_reference_resolves_into_the_types_own_channels() {
+        let declared = person_vertex()
+            .with_channels(vec![
+                Channel::categorical("community", "cluster_id", 1_229).derived_by("louvain-cut"),
+                Channel::quantitative("age", "birth_year"),
+            ])
+            .with_holons(dblp_tree().with_mode_channel("community"));
+        let yaml = declared.to_yaml().expect("serialize");
+        // One domain in the document, and it is on the channel rather than on
+        // the tree: a second statement of a measured count is what a copied
+        // `Channel` here would have been.
+        assert_eq!(yaml.matches("domain:").count(), 1, "{yaml}");
+
+        let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        let named = parsed
+            .holons
+            .as_ref()
+            .and_then(|tree| tree.mode_channel.as_deref())
+            .expect("a named channel");
+        let resolved = parsed
+            .channels
+            .as_ref()
+            .expect("declared channels")
+            .iter()
+            .find(|channel| channel.name == named)
+            .expect("the name resolves into the list");
+        assert_eq!(resolved.column, "cluster_id");
+        assert_eq!(resolved.scale, Scale::Categorical);
+        assert_eq!(resolved.domain, Some(1_229));
     }
 }

@@ -171,6 +171,31 @@ function channelsOf(info) {
 }
 
 /**
+ * The holon tree a vertex type declares, or `null` when it declares none.
+ *
+ * **Two fields, and the second is the one a guard reads.** `declared` is whether the block is there
+ * at all; `modeChannel` is the name the tree gives the channel its rungs' `mode` summarises, or
+ * `null` where the tree does not say. A tree written before that field said nothing and draws
+ * exactly as it drew, so absence is a corpus and not a claim — `channels:`'s rule, one artefact
+ * along, minus the empty state a reference cannot have: a rung's `mode` is always the mode of
+ * something.
+ *
+ * The rungs are deliberately not read here. `manifest.mjs` scans one level of mapping and skips
+ * anything deeper, so a rung — a mapping inside a sequence inside a mapping — is out of its grammar
+ * and would have to be guessed at. Nothing in this directory opens a rung either: what is checked
+ * is the reference, and the bytes under it are `crates/fossil-layout/tests/cells.rs`'s to evaluate.
+ */
+function holonsOf(info) {
+  const declared = info.holons;
+  if (declared === undefined) return null;
+  // A key with an empty value and no `k: v` child scans as `[]`, which carries nothing; a tree
+  // written that way has declared no field this reads.
+  const tree = Array.isArray(declared) ? {} : declared;
+  const named = tree.mode_channel === undefined ? null : String(tree.mode_channel).trim();
+  return { modeChannel: named === "" ? null : named };
+}
+
+/**
  * The projections a manifest declares, resolved against the type's own prefix.
  *
  * **One function for a vertex type and a relation**, because there is one list. A corpus is an
@@ -264,6 +289,12 @@ export function inspect(root) {
        * see {@link channelsOf}. The declaration `declared-channels` holds against the payload.
        */
       channels: channelsOf(info),
+      /**
+       * The holon tree this type declares, or `null` for a type with none — see {@link holonsOf}.
+       * Its `modeChannel` is a reference into `channels` above, and `mode-names-a-channel` is what
+       * holds the two together: nothing in either block can see the other.
+       */
+      holons: holonsOf(info),
       /**
        * Every projection this type declares, the payload included — see {@link projectionsOf}.
        *

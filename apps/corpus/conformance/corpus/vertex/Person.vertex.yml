@@ -37,4 +37,11 @@ channels:
 - name: age
   column: birth_year
   scale: quantitative
+holons:
+  prefix: holon/
+  vertices_per_cell: 16
+  relations:
+  - knows
+  mode_channel: community
+  rungs: []
 version: gar/v1

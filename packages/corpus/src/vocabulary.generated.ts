@@ -23,7 +23,7 @@ export type ColumnRole =
   | 'tally'
   /** A summed edge weight. */
   | 'weight'
-  /** The majority value of a categorical over the rows summarised. */
+  /** The majority value, over the rows summarised, of the channel the tree names. */
   | 'mode'
   /** What fraction of the rows summarised carry the mode. */
   | 'purity'
@@ -103,7 +103,7 @@ export const CELL_TALLY: readonly string[] = ['count'];
 /** The weight column(s) of a cell row of one rung of the pyramid — a summed edge weight. */
 export const CELL_WEIGHT: readonly string[] = ['internal'];
 
-/** The mode column(s) of a cell row of one rung of the pyramid — the majority value of a categorical over the rows summarised. */
+/** The mode column(s) of a cell row of one rung of the pyramid — the majority value, over the rows summarised, of the channel the tree names. */
 export const CELL_MODE: readonly string[] = ['mode'];
 
 /** The purity column(s) of a cell row of one rung of the pyramid — what fraction of the rows summarised carry the mode. */

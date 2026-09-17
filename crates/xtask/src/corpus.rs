@@ -99,7 +99,9 @@ pub enum Role {
     Tally,
     /// A summed edge weight.
     Weight,
-    /// The majority value of a categorical over the rows summarised.
+    /// The majority value, over the rows summarised, of the channel the tree
+    /// names — `HolonTree::mode_channel`, and never «a categorical»: the column
+    /// is a bare ordinal and carries no referent.
     Mode,
     /// What fraction of the rows summarised carry the mode.
     Purity,
@@ -424,7 +426,7 @@ const fn role_doc(role: Role) -> &'static str {
         Role::Endpoint => "one end of a relation, in the aligned type's `dense_id` space",
         Role::Tally => "how many rows of the level below this one summarises",
         Role::Weight => "a summed edge weight",
-        Role::Mode => "the majority value of a categorical over the rows summarised",
+        Role::Mode => "the majority value, over the rows summarised, of the channel the tree names",
         Role::Purity => "what fraction of the rows summarised carry the mode",
         Role::Incident => "one end of a quotient edge, in its own rung's cell space",
     }

@@ -33,6 +33,16 @@ import { join } from "node:path";
 import { execute, lit, scalar } from "./duck.mjs";
 import { TILE_ROWS, mortonOf } from "./arithmetic.mjs";
 
+/**
+ * The base a holon tree declares, in vertices per cell.
+ *
+ * Sixteen, which is `fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL` — a power of four, because
+ * a cell id is a SHIFT of a `dense_id` and a base that is not one makes the finest rung a division.
+ * A declared base and not a computed one: which base a corpus used is a knob, and the manifest is
+ * where the answer lives rather than a spec.
+ */
+const VERTICES_PER_CELL = 16;
+
 const GOLDEN_ANGLE = 2.3999632;
 const CLUSTER_SPACING = 100;
 const INTRA_CLUSTER_RADIUS = 12;
@@ -459,6 +469,26 @@ export function write(
       "- name: age",
       "  column: birth_year",
       "  scale: quantitative",
+      // The tree, for the one field of it a reader cannot recover from anywhere else: **which of
+      // the channels above a rung's `mode` is the mode of.** A cell row's `mode` is a bare
+      // `uint32`, so a reader colouring a rung by it has no palette and no domain until the tree
+      // says which entry to resolve — and it is a NAME, so the domain stays measured in one place.
+      //
+      // `rungs: []` is the honest half. This fixture writes no summary rows: a pyramid is a third
+      // artefact with its own aggregation to get right, nothing in this directory opens one, and a
+      // declared rung with no tile under it would be a conformance corpus claiming bytes it does
+      // not have. A tree with no rungs has no bytes — which is exactly what a writer that
+      // published none declares — and what is frozen here is the reference's spelling, which is
+      // what `mode-names-a-channel` reads.
+      "holons:",
+      "  prefix: holon/",
+      `  vertices_per_cell: ${VERTICES_PER_CELL}`,
+      // The relations the partition would be over, without which the mass a rung conserves is not
+      // a defined quantity. Required, and required even of a tree that publishes no rung.
+      "  relations:",
+      "  - knows",
+      "  mode_channel: community",
+      "  rungs: []",
       "version: gar/v1",
       "",
     ].join("\n"),

@@ -224,6 +224,14 @@ impl AdjacencyTarget<'_> {
 /// run. Everything else `channels:` says about `cluster_id` — its name, its
 /// column, that it is categorical — is a plan and is written by `fossil-df` in
 /// front of the bytes, exactly as the pyramid's arithmetic is.
+///
+/// **The two fields are related and not merely parallel.** A tree names the
+/// channel its rungs' `mode` summarises, by [`Channel::name`], so a
+/// [`Self::pyramids`] entry pointing at a name [`Self::channels`] does not
+/// carry would be a dangling reference in the emitted document. Nothing in
+/// either field can notice that; what keeps it true is that both are written
+/// from one partition inside one loop iteration, and the pyramid takes the name
+/// off the channel value rather than restating it.
 #[derive(Debug, Default)]
 pub struct LayoutReport {
     /// One entry per vertex type that earned a pyramid, keyed by
@@ -1058,13 +1066,20 @@ pub fn enrich_layout_with(
         // is in — a reader recolouring by `cluster_id` is not looking at the
         // placement, and a deriver that named it would say the two travel
         // together when the whole reason both fields exist is that they do not.
-        report.channels.push((
-            target.type_name.clone(),
-            vec![
-                Channel::categorical("community", "cluster_id", u64::from(group_count(&clusters)))
-                    .derived_by("louvain-cut"),
-            ],
-        ));
+        let channel =
+            Channel::categorical("community", "cluster_id", u64::from(group_count(&clusters)))
+                .derived_by("louvain-cut");
+        // The pyramid below summarises this same partition, so the channel its
+        // rungs' `mode` is the mode OF is this one — and the name it publishes
+        // is taken off the value rather than written a second time. A literal
+        // beside `Pyramid::summarise` would be a second spelling of a name the
+        // line above already chose, and the one that goes stale silently:
+        // nothing on disk relates a rung's `u32` to a name, so a tree naming a
+        // channel nobody declared reads exactly like a tree naming one.
+        let mode_channel = channel.name.clone();
+        report
+            .channels
+            .push((target.type_name.clone(), vec![channel]));
         let mut placement = levels
             .first()
             .cloned()
@@ -1276,6 +1291,10 @@ pub fn enrich_layout_with(
                 &xs,
                 &ys,
                 &cluster_ids,
+                // `cluster_ids` is `clusters` gathered into write order, so the
+                // channel declared over the one is the channel the mode of the
+                // other belongs to.
+                &mode_channel,
             );
             if pyramids[index].is_some() {
                 probe.mark("summarise cells");

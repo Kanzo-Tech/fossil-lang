@@ -493,6 +493,33 @@ const MUTATIONS = [
       writeFileSync(path, readFileSync(path, "utf8").replace(/ {2}domain: \d+\n/, ""));
     },
   },
+  // The reference one level up, and the two ways a name can be wrong. Both edit the manifest and
+  // leave the bytes untouched, which is the whole class of failure a name introduces: a derived
+  // column is the column it was derived from, and a named one is a name that can be wrong.
+  {
+    guard: "mode-names-a-channel",
+    what: "the tree's `mode` names a channel the type does not declare",
+    layout: "rowgroups",
+    mutate(dir) {
+      const path = join(dir, "vertex", "Person.vertex.yml");
+      writeFileSync(
+        path,
+        readFileSync(path, "utf8").replace("mode_channel: community", "mode_channel: cluster"),
+      );
+    },
+  },
+  {
+    guard: "mode-names-a-channel",
+    what: "the tree's `mode` names the quantitative channel, which has no majority to take",
+    layout: "rowgroups",
+    mutate(dir) {
+      const path = join(dir, "vertex", "Person.vertex.yml");
+      writeFileSync(
+        path,
+        readFileSync(path, "utf8").replace("mode_channel: community", "mode_channel: age"),
+      );
+    },
+  },
   {
     guard: "tile-of",
     what: "the `by_target` tiles are cut on `src_dense`, which is the source half again",
@@ -524,6 +551,31 @@ console.log("\nThe declared channels are recounted rather than skipped");
   const communities = written.rowgroups.communities;
   const measured = notes.some((note) => note.includes(`${communities} distinct value(s)`));
   assert(measured, "the recounted domain is the one the fixture wrote", `${communities}`);
+}
+
+console.log("\nThe tree's `mode` resolves into the list rather than being guessed at");
+{
+  // `mode-names-a-channel` passes on a corpus that declares no tree and on a tree that names no
+  // channel, which is what every corpus written before the field does — so the guard going green
+  // says nothing until somebody checks it had a reference to follow. The fixture writes one; this
+  // is the assertion that it RESOLVED, and it names the entry it resolved to rather than the
+  // string it read.
+  const [{ failures, notes }] = runAll(inspect(pristine.rowgroups), ["mode-names-a-channel"]);
+  const resolved = notes.find((note) => note.includes("resolved, not derived"));
+  assert(
+    failures.length === 0 && resolved !== undefined,
+    "the fixture names a channel for its `mode` and the guard resolves it",
+    resolved ?? "nothing resolved",
+  );
+  // And the hop is worth making: what the name resolves to carries the column AND the domain, so a
+  // reader that followed it has both without a scan and without a second copy in the tree.
+  const channels = inspect(pristine.rowgroups).types[0].channels ?? [];
+  const entry = channels.find((c) => c.name === "community");
+  assert(
+    entry !== undefined && entry.column === "cluster_id" && entry.declaresDomain,
+    "one hop from the name is the column and the domain, stated once",
+    entry === undefined ? "the name resolves to nothing" : `${entry.column}, ${entry.domain}`,
+  );
 }
 
 console.log("\nEvery guard fires when its convention is broken");
