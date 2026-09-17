@@ -92,7 +92,9 @@ beforeAll(async () => {
     conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
 
 
-  corpus = await openCorpus(CORPUS, { query });
+  // `sql: 'allowed'` because this file exercises `read`'s `where`, which is the second
+  // raw-SQL door and is withheld by default now. The capability is the one it always had.
+  corpus = await openCorpus(CORPUS, { query, sql: 'allowed' });
 }, 60_000);
 
 /** One scalar out of a query this file wrote, so an expectation is never the code under test. */
@@ -545,6 +547,28 @@ describe('the verbs, through the same door', () => {
     const placed = await corpus.node(id);
     expect(placed!.id).toBe(id);
     expect(Object.keys(placed!.fields)).toEqual(['birth_year', 'postcode', 'cluster_id']);
+  }, 30_000);
+
+  it('withholds both raw-SQL doors by default, and opens both together', async () => {
+    // `crates/fossil-graph/tests/schemas.rs` asserts the pair on the Rust side —
+    // `Verb::reaches_raw_sql()` is `["read", "execute_sql"]` — and `crates/fossil-mcp/src/tools.rs`
+    // is the surface this ports: the closed policy drops the hatch from the list AND refuses the
+    // predicate. There is no fifth combination to test, because there is no spelling of
+    // `openCorpus` that opens one and closes the other.
+    const closed = await openCorpus(CORPUS, { query });
+    expect('executeSql' in closed).toBe(false);
+    await expect(
+      closed.read({ vertex_type: 'Person', where: 'birth_year > 1900' }),
+    ).rejects.toThrow(/same authority as execute_sql/);
+    // A predicate-free read is unaffected: what is withheld is the SQL, not the verb.
+    expect((await closed.read({ vertex_type: 'Person', limit: 1 })).rows).toHaveLength(1);
+
+    // And the corpus this file opened with the permission has both.
+    expect('executeSql' in corpus).toBe(true);
+    const open = corpus as typeof corpus & {
+      executeSql(params: { sql: string }): Promise<{ rows: unknown[] }>;
+    };
+    expect((await open.executeSql({ sql: 'SELECT 1 AS n' })).rows).toHaveLength(1);
   }, 30_000);
 
   it('expands over the whole relation, in identities, where neighbours walks tiles', async () => {

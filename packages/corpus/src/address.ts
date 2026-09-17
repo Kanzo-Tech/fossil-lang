@@ -94,6 +94,66 @@ export const strideOf = (level: number): bigint => idsPerLevelRow(level);
  */
 export const rowsAt = (count: bigint, level: number): bigint => rowsAtLevel(count, level);
 
+/**
+ * One level of the pyramid — Zarr's `multiscales` entry, spelled for this corpus.
+ *
+ * **It is three calls to this module and no fourth fact**: {@link strideOf} is the stride,
+ * {@link rowsAt} is the count, and {@link VertexAddress.projection} is whether a file answers it.
+ * That is why it lives here rather than on the door — see {@link levelsOf}.
+ */
+export interface LevelInfo {
+  /** *k*. Level 0 is every vertex. */
+  readonly level: number;
+  /** `strideOf(k)` — one `dense_id` in this many survives. */
+  readonly stride: number;
+  /** How many vertices the whole type has at this level: `ceil(count / stride)`. */
+  readonly count: number;
+  /**
+   * Whether a written `vertex/<Type>/l{k}/` answers this level, or the full tiles are strided.
+   *
+   * **The two select the same rows** — `dense_id % strideOf(k) == 0` is the definition and a level
+   * file is a cache of it. What a written level changes is the byte count; see `Frame.matchedAt`
+   * and `/docs/design/one-door` for why that is a cost and not a second contract.
+   */
+  readonly written: boolean;
+}
+
+/**
+ * Which levels of detail a vertex type has — every level from all of it down to one vertex.
+ *
+ * Every level is listed because every one is answerable: level *k* is the predicate
+ * `dense_id % strideOf(k) == 0`, which needs no bytes on disk. {@link LevelInfo.written} is the
+ * only thing a pyramid on disk changes, and it changes a cost rather than an answer.
+ *
+ * **This was `Corpus.levels()`, a member of the door, and a door is the wrong place for it.**
+ * Every line of it is addressing — `strideOf`, `rowsAt`, `projection` — so on the door it was the
+ * coarse mechanism restated one layer up, where a reader could reasonably have expected it to mean
+ * something the addressing does not already say. The rejected alternative was deleting it outright:
+ * `Frame.matchedAt` reports a level and is only interpretable against which levels are WRITTEN, so
+ * with nothing answering that, eight assertions in `tests/frame.test.ts` and
+ * `tests/frame-levels.test.ts` would have had to re-derive these three calls themselves — a second
+ * statement of the arithmetic, which is the rule the door was being narrowed for. Moved, not
+ * deleted, and not re-exported from the barrel: a consumer of `@fossil-lang/corpus` never names a
+ * level file.
+ */
+export function levelsOf(addressing: CorpusAddressing, type?: string): readonly LevelInfo[] {
+  const address = addressing.vertexType(type);
+  const count = address.count ?? 0n;
+  const out: LevelInfo[] = [];
+  for (let level = 0; ; level += 1) {
+    const stride = strideOf(level);
+    out.push({
+      level,
+      stride: Number(stride),
+      count: Number(rowsAt(count, level)),
+      // Whether a written `l{k}/` answers this level — a projection COARSER than the payload,
+      // which is why level 0 is `false` where its projection is the payload and always there.
+      written: level > 0 && address.projection(stride) !== null,
+    });
+    if (stride >= count) return out;
+  }
+}
+
 /** One vertex type's address: where its tiles are and which `dense_id` range each holds. */
 export interface VertexAddress {
   /** The type label, e.g. `Person`. */

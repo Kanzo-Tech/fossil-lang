@@ -9,7 +9,7 @@ import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/b
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { rowsAt, strideOf } from '../src/address.js';
+import { levelsOf, rowsAt, strideOf } from '../src/address.js';
 import { openCorpus, type Corpus, type Frame } from '../src/corpus.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
@@ -96,7 +96,7 @@ const drawn = (frame: Frame): bigint[] =>
 
 describe('levels — the multiscale metadata', () => {
   it('lists every level from all of it down to one vertex', () => {
-    const levels = corpus.levels();
+    const levels = levelsOf(corpus.addressing);
     expect(levels[0]).toMatchObject({ level: 0, stride: 1, count: VERTEX_COUNT, written: false });
     // In quarters `strideOf(5)` = 1,024 is the first stride at or above 300, so five levels above
     // zero. In halves it was nine, and a camera crossed two of them per zoom step.
@@ -113,7 +113,7 @@ describe('levels — the multiscale metadata', () => {
     // with exactly that. Before it had a pyramid this asserted that NOTHING was written, and said
     // the day `l{k}/` existed it would flip and no other answer would change. It flipped; the test
     // below is the half that says nothing else did.
-    expect(corpus.levels().filter((l) => l.written).map((l) => l.level)).toEqual([1, 2]);
+    expect(levelsOf(corpus.addressing).filter((l) => l.written).map((l) => l.level)).toEqual([1, 2]);
   });
 });
 
@@ -147,8 +147,8 @@ describe('the level a canvas asks for, derived inside the frame', () => {
       pixels: { w: CHUNK_SIZE, h: 1 },
       links: false,
     });
-    expect(corpus.levels()[level]!.count).toBeLessThanOrEqual(CHUNK_SIZE);
-    expect(corpus.levels()[level - 1]!.count).toBeGreaterThan(CHUNK_SIZE);
+    expect(levelsOf(corpus.addressing)[level]!.count).toBeLessThanOrEqual(CHUNK_SIZE);
+    expect(levelsOf(corpus.addressing)[level - 1]!.count).toBeGreaterThan(CHUNK_SIZE);
   });
 
   it('refuses a frame that names neither a canvas nor a level', async () => {
@@ -190,7 +190,7 @@ describe('frame — the same rectangle at the same level is the same answer', ()
     const place = new Map<bigint, string>();
     let coarser: bigint[] | null = null;
     // Descending, so `previous` is always the coarser of the pair and containment is the claim.
-    for (let level = corpus.levels().length - 1; level >= 0; level -= 1) {
+    for (let level = levelsOf(corpus.addressing).length - 1; level >= 0; level -= 1) {
       const frame = await corpus.frame({ ...box, level });
       const ids = drawn(frame);
       for (let i = 0; i < frame.marks; i += 1) {
@@ -216,7 +216,7 @@ describe('frame — the same rectangle at the same level is the same answer', ()
       expect(frame.matched).toBe(Number(rowsAt(BigInt(VERTEX_COUNT), frame.matchedAt)));
       // And `matchedAt` is the only thing that says which artefact replied — a level above zero is
       // a written `l{k}/` and nothing else can report one. There is no second field restating it.
-      expect(frame.matchedAt).toBe(corpus.levels()[level]!.written ? level : 0);
+      expect(frame.matchedAt).toBe(levelsOf(corpus.addressing)[level]!.written ? level : 0);
     }
   });
 

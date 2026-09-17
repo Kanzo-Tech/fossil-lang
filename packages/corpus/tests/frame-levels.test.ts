@@ -10,7 +10,7 @@ import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/b
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { rowsAt, strideOf } from '../src/address.js';
+import { levelsOf, rowsAt, strideOf } from '../src/address.js';
 import { openCorpus, type Corpus } from '../src/corpus.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
@@ -134,10 +134,10 @@ async function everything() {
 
 describe.skipIf(!hasDuckdb)('a corpus that declares a pyramid', () => {
   it('reports exactly the written levels, and every other level as answerable anyway', () => {
-    const written = corpus.levels('Person').filter((l) => l.written);
+    const written = levelsOf(corpus.addressing, 'Person').filter((l) => l.written);
     expect(written.map((l) => l.level)).toEqual(LEVELS);
     // Every level is in the list, written or not: a level is a predicate, and `written` is a cost.
-    const all = corpus.levels('Person');
+    const all = levelsOf(corpus.addressing, 'Person');
     expect(all[0]!.level).toBe(0);
     expect(all[0]!.written).toBe(false);
     for (const { level, stride, count } of all) {
@@ -145,8 +145,8 @@ describe.skipIf(!hasDuckdb)('a corpus that declares a pyramid', () => {
       expect(count).toBe(Math.ceil(ROWS / stride));
     }
     // The control declares none, and every level is still listed and still answerable.
-    expect(flat.levels('Person').every((l) => !l.written)).toBe(true);
-    expect(flat.levels('Person').map((l) => l.level)).toEqual(all.map((l) => l.level));
+    expect(levelsOf(flat.addressing, 'Person').every((l) => !l.written)).toBe(true);
+    expect(levelsOf(flat.addressing, 'Person').map((l) => l.level)).toEqual(all.map((l) => l.level));
   });
 });
 
@@ -219,7 +219,7 @@ describe.skipIf(!hasDuckdb)('a level read answers with what the predicate select
   it('strides the payload for a level nobody wrote, and says so', async () => {
     const box = await everything();
     const level = LEVELS[LEVELS.length - 1]! + 1;
-    expect(corpus.levels('Person').find((l) => l.level === level)?.written).toBe(false);
+    expect(levelsOf(corpus.addressing, 'Person').find((l) => l.level === level)?.written).toBe(false);
     const frame = await corpus.frame({ ...box, level, links: false });
     expect(frame.matchedAt).toBe(0);
     expect(frame.marks).toBe(Number(rowsAt(BigInt(ROWS), level)));

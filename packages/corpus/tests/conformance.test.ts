@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { resolveCorpus, type Direction, type CorpusAddressing } from '../src/index.js';
+import { resolveCorpus, type Direction, type CorpusAddressing } from '../src/address.js';
 
 /**
  * The conformance corpus, executed against the published module.

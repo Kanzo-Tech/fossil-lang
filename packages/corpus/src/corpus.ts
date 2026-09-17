@@ -2,11 +2,11 @@
  * A corpus, opened from a URL — **the door**, with the addressing underneath and invisible.
  *
  * There were three entry points over one manifest and no rule for choosing between them, and this
- * is the one door now: `createGraphClient` is the transport it dispatches through, and
- * `resolveCorpus` stays exported because a drawing path that does its own fetching wants the URLs
- * — it is a binding over `fossil_graph::plan` and no longer a reader of its own.
- * `/docs/design/one-door` has what the removal settled, and why the camera grew this object rather
- * than opening a fourth beside it.
+ * is the one door now: `createGraphClient` is the transport it dispatches through, `resolveCorpus`
+ * is the addressing it resolves with, and NEITHER is on the module surface — a consumer of
+ * `@fossil-lang/corpus` reaches both through this function or not at all. `./index.ts` carries what
+ * each internalisation cost. `/docs/design/one-door` has what the removal settled, and why the
+ * camera grew this object rather than opening a fourth beside it.
  *
  * **The object has two halves and the line between them is not a spelling.** `extent`, `rows`,
  * `node` and `neighbours` compute which FILES to open and open those; `schema`, `read`, `expand`,
@@ -73,7 +73,6 @@ import {
   type Gap,
   GRAPH_INFO_PATH,
   resolveCorpus,
-  rowsAt,
   strideBits,
   strideOf,
   type CorpusAddressing,
@@ -293,7 +292,7 @@ export interface RowsAnswer extends Answer {
  *   `stride 64 = l3`, measured identical to four decimals on total-variation fidelity by
  *   `crates/fossil-layout/tests/level_vs_rung.rs`. Which of the two served the bytes is a **cache
  *   hit against a cache miss** and nothing else; it is invisible from out here on purpose, and
- *   {@link LevelInfo.written} is that cache's index rather than a second contract. The payload at
+ *   `levelsOf`'s `written` is that cache's index rather than a second contract. The payload at
  *   stride 1 is `sampled` too — it is the sample that leaves everything in, which is why level 0
  *   needs no face of its own.
  * - **`aggregated`** — a rung, `holon/r{k}/`: synthetic summary cells carrying `count`, `mode` and
@@ -309,33 +308,6 @@ export interface RowsAnswer extends Answer {
  * *which picture* is a decision separate from the seam that makes it sayable.
  */
 export type CoarseSource = 'sampled' | 'aggregated';
-
-/**
- * One level of the pyramid — Zarr's `multiscales` entry, spelled for this corpus.
- *
- * A reader asks the store which levels exist and then decides. {@link Corpus.levels} is the list,
- * and {@link Corpus.frame} draws one of them — the one a canvas of the given size can show, or the
- * one the caller names.
- *
- * **Every entry here is a {@link CoarseSource} of `'sampled'`**, written or not: the level is the
- * answer and {@link LevelInfo.written} is which bytes serve it.
- */
-export interface LevelInfo {
-  /** *k*. Level 0 is every vertex. */
-  readonly level: number;
-  /** `strideOf(k)` — one `dense_id` in this many survives. */
-  readonly stride: number;
-  /** How many vertices the whole type has at this level: `ceil(count / stride)`. */
-  readonly count: number;
-  /**
-   * Whether a written `vertex/<Type>/l{k}/` answers this level, or the full tiles are strided.
-   *
-   * **The two select the same rows** — `dense_id % strideOf(k) == 0` is the definition and a level file is
-   * a cache of it. What a written level changes is the byte count; see {@link Frame.matchedAt} and
-   * `/docs/design/one-door` for why that is a cost and not a second contract.
-   */
-  readonly written: boolean;
-}
 
 /**
  * The canvas a frame is drawn into. **A number a caller already has** — this was a budget in
@@ -406,8 +378,8 @@ export interface FrameParams extends Box {
  *
  * **Requests and bytes are the answer; tiles are how it was arrived at.** And there is no field
  * saying which artefact replied: the pyramid is complete, so the level that answered is
- * {@link Frame.matchedAt} and whether it was written is `levels()` — a field restating a
- * derivation is a field that can disagree with it.
+ * {@link Frame.matchedAt}, and whether it was written is `levelsOf` in `./address.ts` — a field
+ * restating a derivation is a field that can disagree with it.
  */
 export interface FrameCost {
   /** `Range` requests — maximal runs of tiles whose bytes abut, which is what a run costs. */
@@ -561,15 +533,6 @@ export interface Corpus {
   /** The vertices in a rectangle and the edges among them, entire. */
   rows(params: RowsParams): Promise<RowsAnswer>;
   /**
-   * Which levels of detail exist — the multiscale metadata, and the first half of the Zarr shape.
-   *
-   * Every level from 0 to the one holding a single vertex is listed, because every one of them is
-   * answerable: level *k* is the predicate `dense_id % strideOf(k) == 0`, which needs no bytes on disk.
-   * {@link LevelInfo.written} is the only thing a pyramid on disk changes, and it changes a cost
-   * rather than an answer.
-   */
-  levels(type?: string): readonly LevelInfo[];
-  /**
    * A rectangle at a resolution, ready to draw — **the door a camera goes through.**
    *
    * **This and {@link Corpus.rows} both take a rectangle and they are not the same question.**
@@ -654,8 +617,10 @@ export interface Corpus {
   /**
    * Rows of one vertex type under a `where` predicate, an order and a limit.
    *
-   * `where` is SQL and carries the same authority as {@link Corpus.executeSql}: a host that gates
-   * one behind a permission MUST gate the other with it.
+   * **`where` is SQL and carries the same authority as {@link SqlCorpus.executeSql}**, so it is
+   * governed by the same {@link SqlPolicy} and refused with it: a corpus opened without
+   * `sql: 'allowed'` has no `executeSql` member AND rejects a `where`. There is no spelling of
+   * `openCorpus` that opens one door and closes the other — see {@link SqlPolicy}.
    */
   read(params: ReadParams): Promise<ReadResult>;
   /**
@@ -671,26 +636,74 @@ export interface Corpus {
   path(params: PathParams): Promise<PathResult>;
   /** One grouping, over values or — with `bins` — over equal-width ranges. */
   aggregate(params: AggregateParams): Promise<AggregateResult>;
+}
+
+/**
+ * A corpus opened with `sql: 'allowed'` — {@link Corpus} plus the escape hatch.
+ *
+ * A second interface rather than an optional member, because the member is not optional: it is
+ * present or it is not, and which one is decided at `openCorpus` by an argument the host wrote.
+ * An `executeSql?:` would have made every caller of an OPEN corpus test for a member it knows it
+ * has, and would have said nothing at all to a caller of a closed one.
+ */
+export interface SqlCorpus extends Corpus {
   /** The escape hatch, for the question the other five cannot shape. */
   executeSql(params: ExecuteSqlParams): Promise<ExecuteSqlResult>;
 }
+
+/**
+ * Whether this corpus puts a caller's SQL in front of the engine.
+ *
+ * The default is `'withheld'`, and the asymmetry is deliberate: the five bounded verbs cost a
+ * function of the answer, and the escape hatch costs a function of whatever was typed. A host that
+ * wants the hatch says so.
+ *
+ * **It is one option and it has two consequences, on purpose.** `'withheld'` drops
+ * {@link SqlCorpus.executeSql} from the object AND makes {@link Corpus.read} refuse a `where`,
+ * because that field carries the same authority — it reaches the same engine unparsed. There is no
+ * second knob to set inconsistently: a corpus that offers the hatch admits the predicate, and one
+ * that hides it refuses both. This is `fossil-mcp`'s `SqlPolicy` ported to the browser door;
+ * `crates/fossil-graph/src/operations/raw_sql.rs` is the argument, and
+ * `crates/fossil-graph/tests/schemas.rs` is the assertion that `read` and `execute_sql` are the two
+ * verbs the permission covers — the rejected alternative, deleting `executeSql`, leaves the other
+ * one open.
+ *
+ * **What it does NOT claim.** It is not a sanitiser and it is not a security boundary: the engine
+ * is the host's, the corpus is files the host already holds, and `/docs/design/privacy` is why a
+ * read-time gate has no chokepoint to stand on. What this holds is the *coupling* — whatever the
+ * policy is, it lands on both doors at once — and the fact that a host must write the word down.
+ */
+export type SqlPolicy = 'withheld' | 'allowed';
 
 /** What {@link openCorpus} takes. */
 export interface OpenCorpusOptions {
   /** The host's engine. One method, and see `./query.ts` for why it is the only one. */
   query: QueryFn;
   /**
-   * Where `fossil_graph_wasm_bg.wasm` is.
+   * Whether this corpus admits raw SQL. Defaults to `'withheld'`. See {@link SqlPolicy}.
    *
-   * **It used to be optional because only the verbs needed it**, and a caller that only drew
-   * never instantiated the module. The addressing is the same reader now — `resolveCorpus` asks
-   * `fossil-graph` through that module rather than re-deriving the arithmetic in TypeScript — so
-   * `openCorpus` boots it before it resolves anything, and drawing costs the module too. That is
-   * the price of there being one reader.
+   * `sql: 'allowed'` widens the return type to {@link SqlCorpus}, so the hatch is reachable
+   * exactly where the host opened it and the type system carries the policy rather than a runtime
+   * check the caller has to remember.
+   */
+  sql?: SqlPolicy;
+  /**
+   * Where `fossil_graph_wasm_bg.wasm` is, for the bundler that needs to be told.
    *
-   * Still optional in the sense that a caller who has already awaited `initFossilGraphWasm` need
-   * not repeat itself: it is the same memoised boot, and omitting it here means the caller did it.
-   * Omitted AND never called, `openCorpus` rejects with what the WASM says.
+   * **The boot is not a step a consumer sequences.** It was: `initFossilGraphWasm` was exported
+   * beside `openCorpus` and had to be awaited first, which put the existence of a wasm module — and
+   * the ORDER of two calls — in a surface whose whole claim is that a corpus is a URL. It is
+   * memoised inside `openCorpus` now, and this is the one thing about it a caller can still need to
+   * say, because only the caller knows how its bundler resolves an asset:
+   *
+   *  - Vite: `import wasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url'`
+   *  - Next.js: serve from `public/` and pass the static URL
+   *  - Web Worker: `new URL('@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm', import.meta.url)`
+   *  - Node test: a `file://` URL resolved from `import.meta.url`
+   *
+   * Optional because the boot is memoised for the process: the second `openCorpus` need not repeat
+   * what the first said. Omitted on the FIRST one, it rejects with what the WASM says — which is
+   * the one failure this option exists to let a caller avoid.
    */
   wasmUrl?: string | URL | Request | Response;
 }
@@ -862,15 +875,28 @@ function text(row: QueryRow, column: string): string {
  * footer against 1.15 MB, at five million vertices) and it is the container fossil does not write
  * yet, which is why both are read and not one.
  *
+ * **Raw SQL is withheld unless the host asks for it.** `sql: 'allowed'` widens the answer to
+ * {@link SqlCorpus} and admits {@link Corpus.read}'s `where` with it; see {@link SqlPolicy} for
+ * why one option decides both.
+ *
  * @throws {CorpusManifestError} when the manifest cannot address itself, or declares no row count.
  */
+export function openCorpus(
+  url: string,
+  options: OpenCorpusOptions & { sql: 'allowed' },
+): Promise<SqlCorpus>;
+export function openCorpus(url: string, options: OpenCorpusOptions): Promise<Corpus>;
 export async function openCorpus(url: string, options: OpenCorpusOptions): Promise<Corpus> {
   const { query } = options;
   if (typeof query !== 'function') {
     throw new TypeError('openCorpus needs a query capability: the host brings the engine');
   }
+  // The policy, read once. Both consequences come off this one binding — the hatch below and
+  // `read`'s predicate — so there is no way to wire half of it. See `SqlPolicy`.
+  const rawSql = options.sql === 'allowed';
   // Before anything is resolved, because resolving is what needs it: the addressing is
-  // `fossil_graph::plan` behind this module, not a second implementation of it on this side.
+  // `fossil_graph::plan` behind this module, not a second implementation of it on this side. The
+  // boot is memoised, so a second corpus in the same process costs the check and nothing else.
   if (options.wasmUrl !== undefined) await initFossilGraphWasm({ wasmUrl: options.wasmUrl });
 
   const readText = async (relative: readonly string[]): Promise<Record<string, string>> => {
@@ -1835,7 +1861,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     };
   };
 
-  return {
+  const corpus: Corpus = {
     url,
     types,
     addressing,
@@ -1844,6 +1870,21 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       return (await verbs()).schema(params);
     },
     async read(params) {
+      // `where` is the second raw-SQL door and it is refused HERE rather than by the transport,
+      // because the transport is `fossil-graph-wasm` and that binding grants the permission
+      // unconditionally — deliberately, since in a browser the engine, the tab and the files are
+      // all the caller's already (`crates/fossil-graph-wasm/src/lib.rs` says so). The policy this
+      // door holds is the HOST's, over an embedding where the two are not the same party.
+      //
+      // A `TypeError` rather than a third error class: the caller asked for a door this corpus was
+      // not opened with, which is a programming error at the call site and not the corpus
+      // disagreeing with its manifest — which is what `CorpusReadError` means and all it means.
+      if (!rawSql && params.where != null) {
+        throw new TypeError(
+          `read.where is SQL and carries the same authority as execute_sql, and this corpus was ` +
+            `opened without it. Pass sql: 'allowed' to openCorpus to admit both.`,
+        );
+      }
       return (await verbs()).read(params);
     },
     async expand(params) {
@@ -1854,9 +1895,6 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     },
     async aggregate(params) {
       return (await verbs()).aggregate(params);
-    },
-    async executeSql(params) {
-      return (await verbs()).executeSql(params);
     },
 
     async extent(type) {
@@ -1959,26 +1997,6 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         complete: plan.complete,
         gaps: plan.gaps,
       };
-    },
-
-    levels(type) {
-      const address = vertexType(type);
-      const count = address.count ?? 0n;
-      const out: LevelInfo[] = [];
-      for (let level = 0; ; level += 1) {
-        const stride = strideOf(level);
-        out.push({
-          level,
-          stride: Number(stride),
-          count: Number(rowsAt(count, level)),
-          // Whether a written `l{k}/` answers this level — a projection COARSER than the payload,
-          // which is why level 0 is `false` where its projection is the payload and always there.
-          // It changes a cost rather than an answer: every level in this list is answerable either
-          // way, and this says only which bytes answer it.
-          written: level > 0 && address.projection(stride) !== null,
-        });
-        if (stride >= count) return out;
-      }
     },
 
     async frame(params) {
@@ -2370,4 +2388,18 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       };
     },
   };
+
+  // The hatch is ADDED rather than gated, which is the whole of `SqlPolicy` in one line: a
+  // withheld corpus does not carry a member that refuses — it does not carry the member. That is
+  // `fossil-mcp`'s `VerbSurface::tools` filtering `execute_sql` out of the list rather than
+  // publishing a tool that says no, and for the same reason: what is not on the surface cannot be
+  // reached by a caller that forgot to check.
+  if (!rawSql) return corpus;
+  const open: SqlCorpus = {
+    ...corpus,
+    async executeSql(params) {
+      return (await verbs()).executeSql(params);
+    },
+  };
+  return open;
 }

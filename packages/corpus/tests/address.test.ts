@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { CorpusManifestError, resolveCorpus } from '../src/index.js';
+import { CorpusManifestError, resolveCorpus } from '../src/address.js';
 
 /**
  * The addressing binding, on the manifests the rest of this package already uses.

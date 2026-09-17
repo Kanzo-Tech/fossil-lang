@@ -2,24 +2,32 @@
 
 The query layer for whatever draws the graph. **Fossil ships no viewer.**
 
-**One door.** There were three entry points over one manifest with no rule for
-choosing between them.
+**One door, and it is one function.** `openCorpus(url, { query, wasmUrl })`
+returns discovery, the camera (`extent`, `frame`, `rows`, `node`, `neighbours`)
+and the five bounded verbs (`read`, `expand`, `path`, `aggregate`, `schema`) on
+one object. No tiles, no `dense_id`, no Morton, no `by_source`, no prefixes, no
+footers.
 
-- **`@fossil-lang/corpus`** — `openCorpus(url, { query, wasmUrl })`. Discovery,
-  the camera (`extent`, `frame`, `rows`, `node`, `neighbours`) and the six verbs
-  (`read`, `expand`, `path`, `aggregate`, `schema`, `executeSql`) on one object.
-  **Start here.** No tiles, no `dense_id`, no Morton, no `by_source`, no
-  prefixes, no footers.
-- **the addressing** — `resolveCorpus`, which turns the manifest into the tile
-  URLs a camera reads. It is what the door is built **on**, and it is exported
-  from the same barrel for a drawing path that wants the URLs and does its own
-  fetching.
+The module exports **three** things beside the writer's role table:
+`openCorpus` and the two errors an `instanceof` is for. Everything else that was
+on it is reachable through the door or not at all:
 
-`createGraphClient` was the second entry and is not exported: it is the
-in-process transport the verbs dispatch through, and `openCorpus` already holds
-the two things it took. `./corpus` was the third, whose one justification was
-that its closure reached no WASM; the door reaches the verbs now, so it does,
-and the subpath went with the justification.
+- `createGraphClient` — the in-process transport the verbs dispatch through.
+  `openCorpus` already holds the two things it took.
+- `resolveCorpus` and `GRAPH_INFO_PATH` — the addressing, now `corpus.addressing`
+  for a drawing path that has outgrown this surface. Two exported routes to one
+  answer was the rule's own violation inside the package that states it.
+- `initFossilGraphWasm` — the boot, awaited inside `openCorpus`. A consumer
+  should not have to know there is a wasm module, let alone sequence two calls
+  against it. `wasmUrl` is what survives, because only the caller knows how its
+  bundler resolves an asset.
+- `export type *` — an unbounded star publishes whatever the codegen makes, now
+  and later, with nobody deciding. The twelve params/results the members name
+  are re-exported by name instead.
+
+`./corpus` was a subpath whose one justification was that its closure reached no
+WASM; the door reaches the verbs now, so it does, and the subpath went with the
+justification.
 
 ### The addressing costs a WASM module now, and that is the price
 
@@ -37,9 +45,9 @@ with it because people kept making them agree. Nothing compared the two.
 So the TypeScript reader is gone and `resolveCorpus` asks the Rust one, through
 `fossil-graph-wasm`. What that costs:
 
-- **`initFossilGraphWasm({ wasmUrl })` has to be awaited first**, exactly as for
-  a verb. Composing a URL was arithmetic over bytes the host already held and is
-  now a call into an instantiated module.
+- **The module has to be up before anything resolves**, exactly as for a verb.
+  Composing a URL was arithmetic over bytes the host already held and is now a
+  call into an instantiated module. `openCorpus` awaits the boot itself.
 - **There is no WASM-free path, and there will not be one.** A second
   implementation is what a WASM-free path is.
 - `tests/address-standalone.test.ts` proved the subpath's closure loaded from a
@@ -51,11 +59,11 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
 @fossil-lang/corpus (this package)
   ├─ pkg/            fossil-graph-wasm, wasm-bindgen --target web (built, gitignored)
   ├─ src/generated.ts   verb Params/Result types — codegen'd from schemars JSON Schema
-  ├─ src/load.ts        initFossilGraphWasm({ wasmUrl })
+  ├─ src/load.ts        the memoised wasm boot (internal; openCorpus awaits it)
   ├─ src/client.ts      the verb transport, dispatched through by the door (not exported)
   ├─ src/query.ts       QueryFn — the one capability a host supplies, for both surfaces
   ├─ src/manifest.ts    graph.graph.yml, scanned for the paths to fetch next
-  ├─ src/address.ts     resolveCorpus({ manifestFiles, base }) — the binding, not the reader
+  ├─ src/address.ts     resolveCorpus + levelsOf — the binding, not the reader (internal)
   └─ src/corpus.ts      openCorpus(url, { query, wasmUrl }) — THE DOOR
 ```
 
@@ -72,10 +80,9 @@ const corpus = await openCorpus('https://data.example/graph', {
     const table = await coordinator.query(sql, { type: 'arrow' });
     return table.toArray().map((r) => r.toJSON());
   },
-  // Booted before anything is resolved, because the addressing needs it too:
-  // `resolveCorpus` asks `fossil_graph::plan` rather than re-deriving it here.
-  // Omit it and boot the module yourself with `initFossilGraphWasm`; it is the
-  // same memoised init.
+  // Where the wasm lives. Booted here, because the addressing needs it too: it
+  // asks `fossil_graph::plan` rather than re-deriving anything. The boot is
+  // memoised, so a second corpus in the same process may omit this.
   wasmUrl,
 });
 
@@ -128,9 +135,10 @@ manifest field answers. This reads the file-per-tile container that `fossil run`
 writes; handed the other it refuses by name, and it never globs, because a glob
 picks up the staged single-file copy beside the tiles and counts every row twice.
 
-## The six verbs
+## The verbs
 
-`read` · `expand` · `path` · `aggregate` · `schema` · `executeSql`.
+`read` · `expand` · `path` · `aggregate` · `schema`, and `executeSql` when the
+host asks for it.
 
 Verb→SQL runs in WASM (`fossil-graph-wasm`, single-source with the native
 runtime and with `fossil-mcp`'s server-side surface); SQL **execution** goes
@@ -155,8 +163,8 @@ while `corpus.types` reports all seven — the four the manifest never names are
 vocabulary does not. Neither is wrong and they are not the same question.
 
 - **`read`** — rows of one vertex type under a `where` predicate, an order and
-  a limit. `where` is SQL and carries the same authority as `executeSql`: gate
-  it with the same permission.
+  a limit. `where` is SQL and carries the same authority as `executeSql`, so it
+  is governed by the same option and refused with it.
 - **`expand`** — the neighbourhood of a set of vertices. `all` walks outward up
   to `depth`; `into` keeps only the edges whose both ends are in the set.
 - **`path`** — the shortest route between two vertices.
@@ -166,7 +174,18 @@ vocabulary does not. Neither is wrong and they are not the same question.
   `vertex_type` for its per-field statistics, and a `field` for its samples;
   a bare call runs no per-field query.
 - **`executeSql`** — the escape hatch, for the question the other five cannot
-  shape.
+  shape. **Withheld unless the host asks**: `openCorpus(url, { query })` returns
+  a `Corpus` with no `executeSql` member and a `read` that refuses a `where`;
+  `openCorpus(url, { query, sql: 'allowed' })` returns a `SqlCorpus` with both.
+
+  One option, two consequences, no second knob — `crates/fossil-graph`'s
+  `Verb::reaches_raw_sql()` is `["read", "execute_sql"]`, so deleting the hatch
+  would have left the other door open. This is `crates/fossil-mcp`'s `SqlPolicy`
+  ported: closed by default because the five bounded verbs cost a function of the
+  answer and the hatch costs a function of whatever was typed. It is not a
+  sanitiser and not a security boundary — the engine and the files are the
+  host's; see [`/docs/design/privacy`]. What it holds is the coupling, and the
+  fact that a host has to write the word down.
 
 **None of them draws.** The camera is addressed, not queried — the
 LOD is not a filter but a different relation, and a `WHERE` cannot change which
@@ -176,20 +195,21 @@ canvas masks its resident tiles with them.
 ## Addressing
 
 What gets drawn comes from tiles, and a tile's URL is arithmetic over four
-manifest fields. That arithmetic is `fossil_graph::plan`, in Rust, and
-`resolveCorpus` is how JavaScript asks it — one reader, reached from two
-languages, rather than one contract implemented in each:
+manifest fields. That arithmetic is `fossil_graph::plan`, in Rust, and this
+package is how JavaScript asks it — one reader, reached from two languages,
+rather than one contract implemented in each.
+
+**It is not a second import.** `corpus.addressing` is the resolved plan the door
+already built while it was opening, so a drawing path that fetches its own tiles
+reaches it through the corpus it already has:
 
 ```ts
-import { initFossilGraphWasm, resolveCorpus } from '@fossil-lang/corpus';
+const { addressing } = await openCorpus(url, { query, wasmUrl });
 
-await initFossilGraphWasm({ wasmUrl });
-const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
-
-corpus.vertexType().tileUrl(10);
+addressing.vertexType().tileUrl(10);
 // '/bench/1000000/vertex/Person/chunk10.parquet'
 
-const { vertexUrls, edgeUrls, complete, gaps } = corpus.tilesFor({
+const { vertexUrls, edgeUrls, complete, gaps } = addressing.tilesFor({
   tiles: [10, 11],          // from the host's own footer read — see below
   directions: ['src'],      // the drawing read
 });
