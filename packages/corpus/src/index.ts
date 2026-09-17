@@ -77,6 +77,7 @@ export type {
   Box,
   Corpus,
   PlacedEdge,
+  CoarseSource,
   CorpusEdgeType,
   CorpusField,
   CorpusTypes,

@@ -281,11 +281,44 @@ export interface RowsAnswer extends Answer {
 }
 
 /**
+ * **Which kind of picture a coarse read comes back as** — and there are TWO of them, not three.
+ *
+ * A coarse answer has two faces because a coarse artefact has two kinds, and the difference
+ * between them is what a caller cannot deduce and genuinely needs:
+ *
+ * - **`sampled`** — real rows, real addresses, real lines: a sample OF THE GRAPH. Every level of
+ *   the pyramid is one, and so is the payload. A level *is* the predicate
+ *   `dense_id % strideOf(k) == 0` over the payload, so a level file and a computed stride return
+ *   **the same rows with the same `dense_id`s** — `stride 4 = l1`, `stride 16 = l2`,
+ *   `stride 64 = l3`, measured identical to four decimals on total-variation fidelity by
+ *   `crates/fossil-layout/tests/level_vs_rung.rs`. Which of the two served the bytes is a **cache
+ *   hit against a cache miss** and nothing else; it is invisible from out here on purpose, and
+ *   {@link LevelInfo.written} is that cache's index rather than a second contract. The payload at
+ *   stride 1 is `sampled` too — it is the sample that leaves everything in, which is why level 0
+ *   needs no face of its own.
+ * - **`aggregated`** — a rung, `holon/r{k}/`: synthetic summary cells carrying `count`, `mode` and
+ *   `purity`, no real `dense_id` behind any of them, and **no drawable lines** —
+ *   `/docs/design/holons` argues, measured, that no coarse quotient of a real graph is drawable.
+ *   A summary OF THE FIELD, which is a different picture from a sample of the graph and not a
+ *   second price for the same one. A pin in an `aggregated` answer draws as its own cell,
+ *   `dense_id >> shift`: arithmetic, never a second read.
+ *
+ * **Nothing on this side writes or reads a rung yet**, so this names the second face and the
+ * package implements the first. {@link Frame} does not carry it either: `matchedAt` still reports
+ * a level, which is what the contract suite pins, and moving the wire from *what one cost* to
+ * *which picture* is a decision separate from the seam that makes it sayable.
+ */
+export type CoarseSource = 'sampled' | 'aggregated';
+
+/**
  * One level of the pyramid — Zarr's `multiscales` entry, spelled for this corpus.
  *
  * A reader asks the store which levels exist and then decides. {@link Corpus.levels} is the list,
  * and {@link Corpus.frame} draws one of them — the one a canvas of the given size can show, or the
  * one the caller names.
+ *
+ * **Every entry here is a {@link CoarseSource} of `'sampled'`**, written or not: the level is the
+ * answer and {@link LevelInfo.written} is which bytes serve it.
  */
 export interface LevelInfo {
   /** *k*. Level 0 is every vertex. */
@@ -1001,14 +1034,17 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
    *   the payload's number wearing a level's label.
    */
   const tileBoxes = (type: string, level?: number): Promise<readonly TileBox[]> => {
-    const key = level === undefined ? type : `${type}\u0000l${level}`;
+    // **Level 0 and the payload are one key**, because they are one artefact: the payload IS the
+    // projection at `scale: 1` — `address.ts` states it normatively — so asking for its footers by
+    // level has to hit the read `openCorpus` already made and not issue a second one under a name
+    // for the same bytes. Without this the seam's «the payload is the cache for stride 1» would be
+    // true of the answer and false of the request count.
+    const payload = level === undefined || level === 0;
+    const key = payload ? type : `${type}\u0000l${level}`;
     const cached = boxes.get(key);
     if (cached) return cached;
     const address = addressing.vertexType(type);
-    const urls =
-      level === undefined
-        ? payloadFiles.get(type)!
-        : [...address.projectionFiles(strideOf(level))];
+    const urls = payload ? payloadFiles.get(type)! : [...address.projectionFiles(strideOf(level!))];
     // Which tile a footer row is about. Under `files` it is the file — one per tile, and the row
     // groups inside it are one tile's worth however many there are. Under `rowgroups` it is the
     // ordinal, and this is the one place in this file where that ordinal is the address: a vertex
@@ -1550,6 +1586,255 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     return transport;
   };
 
+  /**
+   * The lines one `sampled` read draws, and where their coordinates come from.
+   *
+   * **{@link SampledLines.positioned} is the one fork a byte source does not dissolve**, because it
+   * is a difference in what the bytes SAY rather than in where they are. A relation's level file
+   * carries `src_x`…`dst_y` beside the two ids and draws its own far ends; a relation's projection
+   * at `scale: 1` is the ADJACENCY, which carries the two ids and nothing else, so its far ends
+   * have to be joined out of vertex tiles that were opened anyway. Same lines either way where
+   * both ends are held — see `frame-levels.test.ts` — and two shapes of SQL to get them.
+   */
+  interface SampledLines {
+    /** The files the edge rows come out of. Empty when the caller asked for no links. */
+    readonly urls: readonly string[];
+    /** The columns those files are WEIGHED over — what the read projects, and never the file. */
+    readonly columns: readonly string[];
+    /** Whether an edge row positions both of its endpoints on its own. */
+    readonly positioned: boolean;
+  }
+
+  /**
+   * **One `sampled` read, resolved** — the seam that used to be a `viaLevel` boolean.
+   *
+   * A {@link CoarseSource} of `'sampled'` is real rows at real addresses, and this is the answer to
+   * *which bytes serve them*. The payload and a written `l{k}/` return the same rows by
+   * construction, so **everything that differs between them is here and nothing that differs
+   * between them is a contract** — which footers, which tiles, how wide one is, which URLs, which
+   * edge URLs, which columns the ledger counts, and whether a pin needs a tile of its own. One
+   * implementation of `sampled` consumes this record; there is no second one, and there is no
+   * third face for «the payload».
+   *
+   * The `'aggregated'` face has no record here because nothing on this side writes or reads a rung.
+   * When one does it is a sibling of this, not a flag on it: its cells carry no `dense_id` to
+   * address, its pins are `dense_id >> shift` rather than a read, and it has no `lines` at all.
+   */
+  interface SampledRead {
+    /** Every tile the artefact that answered has — {@link FrameCost.ofTiles}. */
+    readonly all: readonly TileBox[];
+    /** The tiles of it this rectangle selects, in that artefact's own ordinals. */
+    readonly tiles: readonly number[];
+    /** Those tiles collapsed into maximal byte runs — what they cost in `Range` requests. */
+    readonly runs: TileRun[];
+    /**
+     * **How wide one of its tiles is in `dense_id`.**
+     *
+     * The payload's `chunk_size` when the payload serves, and a projection's own tile times its
+     * declared `scale` when a level file does — one row of it stands for that many ids, so its tile
+     * of `chunkSize` rows spans that many times the ids. Both numbers come off the manifest and
+     * neither is an exponent. Using the payload's over a level file is the bug this field exists
+     * as: the range clause bounded tile 0 of `l6` at 8 ids where it holds 512, so the read came
+     * back with one row and looked like a corpus rather than like a predicate.
+     */
+    readonly span: bigint;
+    /** The files {@link SampledRead.tiles} name, distinct. */
+    readonly urls: readonly string[];
+    /**
+     * The PAYLOAD tiles a pin needs opening for, and **empty when the bytes already carry every
+     * id** — which is the honest form of the rule, not «is this a level read».
+     *
+     * A pin is one `dense_id` and an odd one is a multiple of no stride above 1, so a cache that
+     * holds one row in `strideOf(k)` does not have it and its own tile is opened for it. Where the
+     * payload serves, the pin is already in the selection and there is nothing to open twice —
+     * which is why these are counted rather than discounted: under a cache the level tile was
+     * genuinely opened and genuinely bought nothing.
+     */
+    readonly pinTiles: readonly number[];
+    readonly pinRuns: TileRun[];
+    readonly pinUrls: readonly string[];
+    readonly lines: SampledLines;
+    /** What {@link Frame.matchedAt} reports — and see {@link CoarseSource} for what it does not. */
+    readonly matchedAt: number;
+  }
+
+  /**
+   * Resolve a `sampled` read: **decide the cache once, and answer every byte question from it.**
+   *
+   * The cache lookup is the first three statements and the whole of it. Everything after them is
+   * arithmetic off whichever artefact won, because a level file and a strided payload select the
+   * same rows — so a caller of this cannot ask which one answered, and neither can `frame`.
+   */
+  const sampledRead = async (params: {
+    readonly address: VertexAddress;
+    readonly box: Box;
+    readonly level: number;
+    readonly stride: number;
+    readonly pins: readonly bigint[];
+    readonly wantLinks: boolean;
+  }): Promise<SampledRead> => {
+    const { address, box, level, stride, pins, wantLinks } = params;
+    const chunk = BigInt(address.chunkSize);
+    // The per-tile `x`/`y` boxes in the Parquet footers, which is the ONE index over which tiles a
+    // rectangle touches — `footer-is-the-index`. Already read by `openCorpus` for every type with
+    // geometry; awaited here for the one that has none cached.
+    const all = await tileBoxes(address.type);
+
+    /**
+     * **Which artefact serves this stride** — and there is no arm here for «the payload».
+     *
+     * `address.ts` states it normatively: *the payload is not a special case — it is the projection
+     * whose scale is one.* So stride 1 resolves to the payload through the same lookup every other
+     * stride resolves through, and the `level === 0 ? null :` guard that used to stand here is
+     * gone. It was never a face; it was this file disagreeing with the addressing vocabulary about
+     * whether the payload is a projection, and paying for the disagreement with a second arm on
+     * every question below. `null` now means one thing and one thing only: **nobody wrote a cache
+     * at this stride**, so the payload is strided for it.
+     */
+    const levelSet = address.projection(stride);
+    /**
+     * The relations whose own level `k` is written, when every relation this frame draws is.
+     *
+     * **All or none, deliberately.** A frame drawing the edges of two relations out of one and the
+     * payload out of the other would be reading two artefacts in one answer and reporting one
+     * number for it.
+     *
+     * **The relations a frame draws are the ones its type is the SOURCE of**, and that is the
+     * payload path's own rule rather than a second one: it asks `tilesFor` for `['src']`, and
+     * `crates/fossil-graph/src/plan.rs, ReadPlan::window` drops an orientation whose `dense_id`
+     * space is not the window's. A level of a relation is source-aligned, so a relation this type
+     * is only the DESTINATION of is tiled by ranges of ANOTHER type's `dense_id`: the tile numbers
+     * this frame holds name different vertices there, and two `dense_id` spaces compare without
+     * complaint, so reading it would draw lines between vertices that are not related rather than
+     * fail. A type that is the source of nothing draws no lines either way, so an empty set is a
+     * cache hit and not a fallback.
+     *
+     * **Why asking for links is part of the cache lookup.** A vertex level holds the level's rows
+     * and nothing else, so the far end of a mark-incident edge is not in it — and the camera keeps
+     * an edge with ONE end drawn, not two. Measured on the 300,000-vertex bench corpus with the
+     * app's own three-pixel floor (`crates/fossil-layout/tests/levels.rs`,
+     * `what_the_pixel_floor_leaves_of_a_coarse_view`): a coarse view draws 51,254 edges and 46,571
+     * far ends, of which a VERTEX level can position **405 — 0.79%**. So a vertex level alone is
+     * not a cache of a view that asked for links; the PAIR is.
+     */
+    const edgeLevels = (() => {
+      const drawn = addressing.edges.filter((e) => e.srcType === address.type);
+      // Source-aligned, always: a level of a relation is *which vertices are in it*, and the source
+      // type's own pyramid is what says which.
+      const sets = drawn.map((e) => e.projection(stride, 'src'));
+      return sets.every((s) => s !== null) ? (sets as NonNullable<(typeof sets)[number]>[]) : null;
+    })();
+    /**
+     * **A cache HIT** — an artefact exists at this stride that carries what the answer needs.
+     *
+     * True at stride 1, where that artefact is the payload. Nothing past this line is allowed to
+     * mean anything else by it, and in particular nothing past it may mean «a level answered»:
+     * that is {@link SampledRead.matchedAt}, which is a cost and not a contract.
+     */
+    const cached = levelSet !== null && (!wantLinks || edgeLevels !== null);
+    /**
+     * **Does the artefact that serves carry EVERY id?**
+     *
+     * The honest form of what used to read «is this a level read», and the two stopped agreeing
+     * the moment the payload became a projection like any other. What decides whether a pin needs
+     * a tile of its own is not which artefact answered but whether that artefact is complete in
+     * `dense_id`: a cache holding one row in `strideOf(k)` has no odd id in it, and the payload —
+     * served as a hit at scale 1 or strided on a miss — has all of them.
+     */
+    const whole = !cached || levelSet!.scale === 1;
+    /**
+     * **Does an edge row of it position its own endpoints?**
+     *
+     * Scale, again, and not «is this a level read»: a relation's projection at `scale: 1` is the
+     * ADJACENCY, which carries `src_dense` and `dst_dense` and no coordinates at all, while a
+     * level of a relation carries `src_x`…`dst_y` beside them. Keying this on the hit rather than
+     * on the scale is what made the level-0 guard load-bearing — it would have composed
+     * `src_x` against an adjacency that has no such column.
+     */
+    const positioned = cached && edgeLevels !== null && edgeLevels.every((e) => e.scale > 1);
+
+    const selected = new Set<number>(selectedTiles(address, box));
+    // A pin's tile is COUNTED, and **only where this read is the one that brings it back.** Where
+    // the artefact is `whole` there is a single read and the pin has to be inside the selection:
+    // left out, the disjunct that returns it has nothing to match against, and the fetch it costs
+    // would be missing from the ledger rather than absent from the read. Where it is not, there is
+    // a SECOND read — `pinUrls` below — and adding the tile here as well counted one pin twice:
+    // once mapped into `tiles` as a level tile, once in `pinTiles` as a payload one, and
+    // `FrameCost.tiles` is their sum. That is the whole of «a pin costs two tiles, not one», which
+    // `verify-canvas` has held red since it was measured. It is not a discount: the level tile was
+    // genuinely opened and genuinely bought nothing. A pin the rectangle already selects is still
+    // in `selected` from `selectedTiles`; one it does not select carries only rows the box
+    // predicate drops.
+    if (whole) for (const tile of address.tilesOf(pins)) selected.add(Number(tile));
+    const payloadTiles = [...selected].sort((a, b) => a - b);
+
+    /**
+     * The same tiles, read off the cache — arithmetic, and **nothing new to address it with.**
+     *
+     * Level `k`'s tile `j` covers the `dense_id` range `[j·chunk·stride, (j+1)·chunk·stride)`, so a
+     * run of payload tiles is a run of level tiles under the level's own shift. That is why the
+     * manifest writes no per-level index: the footers that addressed the payload have already
+     * addressed the level.
+     */
+    const cachedTilesOf = (tiles: readonly number[]): number[] => {
+      const out = new Set<number>();
+      for (const run of runsOf(tiles, new Map(all.map((b) => [Number(b.tile), b])))) {
+        const lo = levelSet!.tileOf(BigInt(run.first) * chunk);
+        const hi = levelSet!.tileOf(BigInt(run.last + 1) * chunk - 1n);
+        for (let t = lo; t <= hi; t += 1n) out.add(Number(t));
+      }
+      return [...out].sort((a, b) => a - b);
+    };
+
+    const source = cached
+      ? { all: await tileBoxes(address.type, level), tiles: cachedTilesOf(payloadTiles) }
+      : { all, tiles: payloadTiles };
+    const held = source.tiles;
+    const runs = runsOf(held, new Map(source.all.map((b) => [Number(b.tile), b])));
+    // A pin's tile is a PAYLOAD tile whichever artefact served the sample, so its cost is measured
+    // against the payload's footers and added to the ledger the sample's own runs opened.
+    const pinTiles = whole ? [] : [...new Set(address.tilesOf(pins).map(Number))].sort((a, b) => a - b);
+
+    // The `src` orientations of every incident edge type, addressed by the tiles already chosen.
+    // The addressing decides which orientations exist and why one is missing; reproducing that rule
+    // here is how the two halves of a read drift apart.
+    //
+    // Under a hit the lines come from the relation's OWN level set, whose tiles carry the same
+    // ordinals the vertex level's do — both are `src_dense` shifted by the source's shift plus `k`,
+    // from one plan — so the tiles already selected address them with no new arithmetic.
+    const edgeUrls = !wantLinks
+      ? []
+      : positioned
+        ? distinct(edgeLevels!.flatMap((set) => held.map((tile) => set.tileUrl(tile))))
+        : distinct([
+            ...addressing.tilesFor({ type: address.type, tiles: held, directions: ['src'] })
+              .edgeUrls,
+          ]);
+
+    return {
+      all: source.all,
+      tiles: held,
+      runs,
+      span: cached ? BigInt(levelSet!.chunkSize) * BigInt(levelSet!.scale) : chunk,
+      urls: distinct(
+        cached
+          ? held.map((tile) => levelSet!.tileUrl(tile))
+          : held.map((tile) => address.tileUrl(tile)),
+      ),
+      pinTiles,
+      pinRuns: runsOf(pinTiles, new Map(all.map((b) => [Number(b.tile), b]))),
+      pinUrls: whole ? [] : distinct(address.tilesOf(pins).map((t) => address.tileUrl(t))),
+      lines: {
+        urls: edgeUrls,
+        columns: positioned
+          ? ['src_dense', 'dst_dense', 'src_x', 'src_y', 'dst_x', 'dst_y']
+          : ['src_dense', 'dst_dense'],
+        positioned,
+      },
+      matchedAt: cached ? level : 0,
+    };
+  };
+
   return {
     url,
     types,
@@ -1723,123 +2008,18 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const chunk = BigInt(address.chunkSize);
       const pins = [...new Set(pinned.map((id) => BigInt(id)))].sort(ascending);
 
-      // Which tiles: the per-tile `x`/`y` boxes in the Parquet footers, which is the ONE index
-      // over that question — `footer-is-the-index`. It is the same array the level came out of
-      // and `openCorpus` already read; awaited here for the type that has no geometry cached.
-      const all = await tileBoxes(address.type);
       /**
-       * Whether a written level answers this read, and **why asking for links is what decides it.**
+       * **Which bytes serve this sample** — one lookup, and every fork that used to hang off a
+       * boolean is a field of what comes back.
        *
-       * A level file holds the level's rows and nothing else, so the far end of a mark-incident
-       * edge is not in it — and the camera keeps an edge with ONE end drawn, not two. Measured on
-       * the 300,000-vertex bench corpus with the app's own three-pixel floor
-       * (`crates/fossil-layout/tests/levels.rs`, `what_the_pixel_floor_leaves_of_a_coarse_view`):
-       * a coarse view draws 51,254 edges and 46,571 far ends, of which a VERTEX level can position
-       * **405 — 0.79%**. So reading the VERTEX level alone for a view that asked for links would
-       * not be the same answer more cheaply; it would be a different picture.
-       *
-       * The rule that keeps one contract is therefore: **the pyramid answers when the level set
-       * carries what the answer needs** — for points that is the vertex level, for lines it is the
-       * pair, because a level row of a RELATION carries both endpoints' coordinates and places the
-       * far end without a vertex tile. A caller that asks for links against a relation whose level
-       * nobody wrote opens the payload, and `matchedAt` says `0`.
+       * A level file and a computed stride return the same rows, so `frame` from here down cannot
+       * tell which answered and does not try: it reads {@link SampledRead.urls},
+       * {@link SampledRead.span}, {@link SampledRead.runs} and {@link SampledRead.lines} and
+       * composes ONE query shape over them. See {@link CoarseSource}.
        */
-      // The projection this level reads out of, and `null` at level 0 — whose projection IS the
-      // payload, which is the claim the vocabulary rests on and still not a coarser read.
-      const levelSet = level === 0 ? null : address.projection(stride);
-      /**
-       * The relations whose own level `k` is written, when every relation this frame draws is.
-       *
-       * **All or none, deliberately.** A frame drawing the edges of two relations out of one and
-       * the payload out of the other would be reading level `k` and level 0 in the same answer and
-       * reporting one number for it. Where any relation it draws is missing its level set, the
-       * read is the payload's and `matchedAt` says `0`.
-       *
-       * **The relations a frame draws are the ones its type is the SOURCE of**, and that is the
-       * payload path's own rule rather than a second one: it asks `tilesFor` for `['src']`, and
-       * `crates/fossil-graph/src/plan.rs, ReadPlan::window` drops an orientation whose `dense_id`
-       * space is not the window's. A level of a relation is source-aligned, so a relation this
-       * type is only the DESTINATION of is tiled by ranges of ANOTHER type's `dense_id`: the tile
-       * numbers this frame holds name different vertices there, and two `dense_id` spaces compare
-       * without complaint, so reading it would draw lines between vertices that are not related
-       * rather than fail. A type that is the source of nothing draws no lines on either path, so
-       * an empty set is a level read and not a fallback.
-       */
-      const edgeLevels = (() => {
-        const drawn = addressing.edges.filter((e) => e.srcType === address.type);
-        // Source-aligned, always: a level of a relation is *which vertices are in it*, and the
-        // source type's own pyramid is what says which.
-        const sets = drawn.map((e) => e.projection(stride, 'src'));
-        return sets.every((s) => s !== null)
-          ? (sets as NonNullable<(typeof sets)[number]>[])
-          : null;
-      })();
-      const viaLevel = levelSet !== null && (!wantLinks || edgeLevels !== null);
-      const selected = new Set<number>(selectedTiles(address, box));
-      // A pin's tile is COUNTED, and **only where this read is the one that brings it back.**
-      // Without a level there is a single read and the pin has to be inside the selection: left
-      // out, the disjunct that returns it has nothing to match against, and the fetch it costs
-      // would be missing from the ledger rather than absent from the read.
-      //
-      // Under a level read there is a SECOND read — `pinUrls` below, against the pin's own payload
-      // tile — and adding the tile here as well counted one pin twice: once mapped into `held` as
-      // a level tile, once in `pinTiles` as a payload one, and `FrameCost.tiles` is their sum. That
-      // is the whole of «a pin costs two tiles, not one», which `verify-canvas` has held red since
-      // it was measured. It is not a discount: the level tile was genuinely opened and genuinely
-      // bought nothing. A pin the rectangle already selects is still in `selected` from
-      // `selectedTiles`; one it does not select carries only rows the box predicate drops.
-      if (!viaLevel) for (const tile of address.tilesOf(pins)) selected.add(Number(tile));
-
-      const payloadTiles = [...selected].sort((a, b) => a - b);
-      /**
-       * The same tiles, read off the pyramid — arithmetic, and **nothing new to address it with.**
-       *
-       * Level `k`'s tile `j` covers the `dense_id` range `[j·chunk·stride, (j+1)·chunk·stride)`, so
-       * a run of payload tiles is a run of level tiles under the level's own shift. That is why the
-       * manifest writes no per-level index: the footers that addressed the payload have already
-       * addressed the level.
-       */
-      const levelTilesOf = (tiles: readonly number[]): number[] => {
-        const out = new Set<number>();
-        for (const run of runsOf(tiles, new Map(all.map((b) => [Number(b.tile), b])))) {
-          const lo = levelSet!.tileOf(BigInt(run.first) * chunk);
-          const hi = levelSet!.tileOf(BigInt(run.last + 1) * chunk - 1n);
-          for (let t = lo; t <= hi; t += 1n) out.add(Number(t));
-        }
-        return [...out].sort((a, b) => a - b);
-      };
-
-      const source = viaLevel
-        ? { all: await tileBoxes(address.type, level), tiles: levelTilesOf(payloadTiles) }
-        : { all, tiles: payloadTiles };
-      const held = source.tiles;
-      const boxOfTile = new Map(source.all.map((b) => [Number(b.tile), b]));
-      const runs = runsOf(held, boxOfTile);
-      /**
-       * **How wide a tile of what was read is, in `dense_id`.**
-       *
-       * The payload's `chunk_size` for a payload read, and a projection's own tile times its
-       * declared `scale` for a level read — one row of it stands for that many ids, so its tile of
-       * `chunkSize` rows spans that many times the ids. Both numbers come off the manifest and
-       * neither is an exponent. Using the payload's over a level file is the bug this line exists
-       * as: the range clause bounded tile 0 of `l6` at 8 ids where it holds 512, so the read came
-       * back with one row and looked like a corpus rather than like a predicate.
-       */
-      const span = viaLevel ? BigInt(levelSet!.chunkSize) * BigInt(levelSet!.scale) : chunk;
-      // A pin's tile is a PAYLOAD tile even under a level read, so its cost is measured against
-      // the payload's footers and added to the ledger the level's own runs opened.
-      const pinTiles = viaLevel
-        ? [...new Set(address.tilesOf(pins).map(Number))].sort((a, b) => a - b)
-        : [];
-      const pinRuns = runsOf(pinTiles, new Map(all.map((b) => [Number(b.tile), b])));
-
-      // A pin is one `dense_id` and an odd one is a multiple of no stride above 1, so the level
-      // file does not carry it. Its PAYLOAD tile is opened for it — which is what
-      // `FrameCost.tiles` counting a pin's tile has always meant, now with the bytes to match.
-      const pinUrls = viaLevel ? distinct(address.tilesOf(pins).map((t) => address.tileUrl(t))) : [];
-      const urls = distinct(
-        viaLevel ? held.map((tile) => levelSet!.tileUrl(tile)) : held.map((tile) => address.tileUrl(tile)),
-      );
+      const read = await sampledRead({ address, box, level, stride, pins, wantLinks });
+      const { runs, span, urls, pinRuns, pinUrls } = read;
+      const held = read.tiles;
       // The vertex half, weighed over the four columns a view draws with rather than over the
       // whole tile — `runs` carries the tile's total and that total includes `subject`.
       //
@@ -1866,9 +2046,9 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         positions: new Float32Array(0),
         categories: new Uint32Array(0),
         marks: 0,
-        matchedAt: viaLevel ? level : 0,
+        matchedAt: read.matchedAt,
         links: new Uint32Array(0),
-        cost: { requests: 0, bytes: 0, ms: 0, tiles: 0, ofTiles: source.all.length },
+        cost: { requests: 0, bytes: 0, ms: 0, tiles: 0, ofTiles: read.all.length },
       };
       if (urls.length === 0) return empty;
 
@@ -1907,26 +2087,9 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         `  SELECT dense_id, x, y, cat, (SELECT count(*) FROM inrect) AS matched,\n` +
         `         (row_number() OVER (ORDER BY dense_id) - 1)::INTEGER AS local FROM pool\n)`;
 
-      // The `src` orientations of every incident edge type, addressed by the tiles already chosen.
-      // The addressing decides which orientations exist and why one is missing; reproducing that
-      // rule here is how the two halves of a read drift apart.
-      const plan = viaLevel
-        ? null
-        : addressing.tilesFor({ type: address.type, tiles: held, directions: ['src'] });
-      /**
-       * Where the lines come from, and it is one file or two relations.
-       *
-       * Under a level read they come from the relation's OWN level set, whose tiles carry the same
-       * ordinals the vertex level's do — both are `src_dense` shifted by the source's shift plus
-       * `k`, from one plan — so the tiles already selected address them with no new arithmetic.
-       * Each row carries both endpoints' coordinates, which is what lets the far ends be drawn
-       * without opening a vertex tile for them.
-       */
-      const edgeUrls = !wantLinks
-        ? []
-        : viaLevel
-          ? distinct(edgeLevels!.flatMap((set) => held.map((tile) => set.tileUrl(tile))))
-          : distinct([...plan!.edgeUrls]);
+      // Where the lines come from — resolved with the sample, because it is the same cache lookup:
+      // a relation's level set is addressed by the tiles the vertex level already chose.
+      const edgeUrls = read.lines.urls;
 
       /**
        * The far ends, and why they are in the same answer.
@@ -1951,14 +2114,15 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
           : '';
       const long = lengthFloor('a.x', 'a.y', 'b.x', 'b.y');
       /**
-       * The level read's own edge half: the lines and their ends out of one file.
+       * The self-drawing edge half: the lines and their ends out of one file.
        *
-       * `links` keeps an edge with at least one end drawn, which is the same rule the payload path
-       * applies — and `anchor` places the other end from the edge row rather than from a vertex
-       * tile, which is the whole difference. The length floor is applied here as it is there, over
-       * coordinates the file already carries.
+       * The shape a {@link SampledLines.positioned} source takes, which is a level of a relation
+       * and never an adjacency. `links` keeps an edge with at least one end drawn, which is the
+       * same rule the joined shape applies — and `anchor` places the other end from the edge row
+       * rather than from a vertex tile, which is the whole difference. The length floor is applied
+       * here as it is there, over coordinates the file already carries.
        */
-      const levelEdges =
+      const selfDrawn =
         `${base}, links AS (\n` +
         `  SELECT src_dense, dst_dense, src_x, src_y, dst_x, dst_y\n` +
         `  FROM read_parquet(${list(edgeUrls)})\n` +
@@ -1976,8 +2140,8 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const withEdges =
         edgeUrls.length === 0
           ? base
-          : viaLevel
-            ? levelEdges
+          : read.lines.positioned
+            ? selfDrawn
             : `${base}, span AS (\n` +
             `  SELECT sv.local AS src, tv.local AS dst, e.src_dense, e.dst_dense\n` +
             `  FROM read_parquet(${list(edgeUrls)}) e\n` +
@@ -2006,7 +2170,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         edgeUrls.length === 0
           ? []
           : await query(
-              viaLevel
+              read.lines.positioned
                 ? `${withEdges}\nSELECT coalesce(sv.local, sa.local) AS src, coalesce(dv.local, da.local) AS dst\n` +
                   `FROM links l\n` +
                   `LEFT JOIN vis sv ON sv.dense_id = l.src_dense\n` +
@@ -2028,9 +2192,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       // box on `src_dense`, which is what this weighs against.
       const edgeBytes = await bytesOf(
         edgeUrls,
-        viaLevel
-          ? ['src_dense', 'dst_dense', 'src_x', 'src_y', 'dst_x', 'dst_y']
-          : ['src_dense', 'dst_dense'],
+        read.lines.columns,
         { column: 'src_dense', runs, span },
       );
       const rows = points.length;
@@ -2062,7 +2224,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         level,
         stride,
         matched,
-        matchedAt: viaLevel ? level : 0,
+        matchedAt: read.matchedAt,
         denseIds,
         positions,
         categories,
@@ -2072,8 +2234,8 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
           requests: runs.length + pinRuns.length,
           bytes: bytes + edgeBytes,
           ms: Date.now() - started,
-          tiles: held.length + pinTiles.length,
-          ofTiles: source.all.length,
+          tiles: held.length + read.pinTiles.length,
+          ofTiles: read.all.length,
         },
       };
     },
