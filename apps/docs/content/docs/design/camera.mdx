@@ -164,6 +164,36 @@ graph. Worst case is the 5% window at level 4: **0.720% against 0.709%**. The ba
 against is measured too: at the smallest region and coarsest level tested the level-0 share is over
 a thousand vertices, and a binomial of that size has a relative standard error of about 3%.
 
+#### A fidelity measure has a resolution, and below one bin per mark it is measuring itself
+
+**The 48×48 is not part of the measure. It is a resolution chosen for the arms in the table above,
+and it does not travel.** The statistic is only reading the picture while the drawn set has at least
+as many points as the grid has bins. Below that the drawn set cannot reach most cells, its distance
+from the whole graph saturates towards 1 — and so does its null's, because the null is the same size.
+Two numbers pinned against the same ceiling differ by their binning noise, and the sign of that
+difference is not evidence of anything. **The quantity that says which regime you are in is
+`bins/mark`**, and it belongs beside the verdict rather than left to be recomputed.
+
+The table above is safe on that rule with room to spare: its coarsest row draws 3,907 marks into
+2,304 bins, **0.59 bins per mark**. A coarse *summary* is exactly the artefact that breaks it. A cell
+of [the pyramid](/docs/design/holons) at rung 4 on com-DBLP delivers 310 marks — 7.43 bins per mark —
+and read on this grid it scores 0.8431 against a null of 0.8415 and appears to fail. It does not:
+re-measured at about `sqrt(marks)` bins per axis, where nothing is asked to fill more bins than it
+has points, the same rung on the same file beats the same null by **+0.1470** — a wider margin than
+rung 1 gets at 48×48.
+
+**This was published as a fact about the pyramid before it was recognised as a fact about the grid**,
+and the retraction is on [holons](/docs/design/holons#the-quotient-saturates-down-the-pyramid-and-the-marks-do-not).
+The tell was in the numbers the whole time: a gap that collapses from ~0.1 to ~0.002 and then holds at
+~0.002 for six rungs running is a saturated statistic, not six artefacts losing information at six
+different scales. `crates/fossil-layout/tests/level_vs_rung.rs, resolution_sweep` is the instrument
+that separates the two, and it is kept in the tree rather than retired with its conclusion: measured
+across two corpora at five resolutions, **no arm at one bin per mark or finer fails, and every failure
+is at two bins per mark or coarser** — 130 rows, zero counterexamples in either direction.
+
+So a fidelity figure quoted without the mark count it was taken at, and the grid it was taken on, is
+not a figure. Every one on this page has both.
+
 ### 2. Monotone refinement — zooming in only adds
 
 `{drawn at the closer zoom} ⊇ {drawn at the farther zoom} ∩ {inside the closer window}`.

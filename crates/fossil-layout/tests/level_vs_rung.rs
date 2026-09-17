@@ -61,6 +61,7 @@
 
 mod common;
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -140,8 +141,14 @@ const QUOTIENT_DRAW: &[&str] = &["src_cell", "dst_cell", "weight"];
 
 /// The grid `/docs/design/camera` measures fidelity on: 48 cells per axis over
 /// the extent, 2,304 cells. Restated here rather than imported because it lives
-/// in a `.mjs` script on the other side of the repo, and the number is the
-/// measurement's — changing it changes what every figure below means.
+/// in a `.mjs` script on the other side of the repo.
+///
+/// **Nothing measures a verdict on it any more, and that is the correction.** It
+/// is one of the resolutions [`SWEEP_GRIDS`] sweeps, kept so the sweep brackets
+/// camera's own number from both sides. `=== 6 ===` fits its grid to each arm
+/// instead — see [`fidelity`] for why, and [`fitted_grid`] for the rule. 48 is a
+/// good resolution for the fifteen thousand marks camera measures at, at 0.15
+/// bins per mark; it is a ruler with no marks on it at a rung of 310, at 7.43.
 const GRID: usize = 48;
 
 /// The mark budgets the three arms are compared at. `SCREEN_MARKS` is one of
@@ -302,21 +309,23 @@ fn drawn_on_key(
     u64::try_from(scalar(db, &sql)).unwrap_or(0)
 }
 
-/// A normalised density grid over the extent — `GRID`×`GRID` cells, each holding
-/// its share of the ink.
+/// A normalised density grid over the extent at a **stated** resolution —
+/// `grid`×`grid` cells, each holding its share of the ink.
 ///
 /// `weight` is what a row contributes: `1` for real vertices, `"count"` for a
 /// rung, whose rows are synthetic and each stand for that many members. That
 /// second spelling is the whole of how a rung is compared honestly — its
 /// centroids rasterised with their populations, against the real vertices.
-fn density(db: &Connection, path: &Path, predicate: &str, weight: &str, extent: Rect) -> Vec<f64> {
-    density_on(db, path, predicate, weight, extent, GRID)
-}
-
-/// The same grid at a **stated** resolution, which is the one knob
-/// [`what_grid_resolution_does_to_the_fidelity_verdict_on_com_dblp`] turns.
-/// [`density`] is this at [`GRID`], and that spelling is kept because every
-/// caller but the sweep means the camera's 48.
+///
+/// **The resolution is a parameter and not a constant, and that is not a
+/// convenience.** There used to be a `density` wrapper pinning it to [`GRID`],
+/// on the reasoning that `/docs/design/camera` states 48 and a figure measured
+/// at two resolutions is two figures. It is gone: a fixed grid measures a
+/// distribution only while the drawn set has at least as many points as the grid
+/// has bins, and the pyramid spends most of its rungs far below that. See
+/// [`fitted_grid`] for the rule every caller here uses instead, and
+/// [`what_grid_resolution_does_to_the_fidelity_verdict_on_com_dblp`] for the
+/// sweep that measured the difference.
 fn density_on(
     db: &Connection,
     path: &Path,
@@ -1239,15 +1248,91 @@ fn stride_arm(
     }
 }
 
-/// **Fidelity, on the measure this repo already has.**
+/// **The payload rasterised at a resolution, memoised.**
+///
+/// Once every arm is weighed on a grid fitted to its own mark count, the base is
+/// no longer one grid computed once — it is one per distinct resolution. Arms
+/// that deliver the same number of marks share a fitted grid, which the levels
+/// and the strides at the same `4^k` do by construction, so this is what stops
+/// the fitted table from re-scanning the whole payload on every row.
+struct Bases<'a> {
+    db: &'a Connection,
+    payload: &'a Path,
+    extent: Rect,
+    cache: HashMap<usize, Vec<f64>>,
+}
+
+impl<'a> Bases<'a> {
+    fn new(db: &'a Connection, payload: &'a Path, extent: Rect) -> Self {
+        Self {
+            db,
+            payload,
+            extent,
+            cache: HashMap::new(),
+        }
+    }
+
+    fn at(&mut self, grid: usize) -> &[f64] {
+        let (db, payload, extent) = (self.db, self.payload, self.extent);
+        self.cache
+            .entry(grid)
+            .or_insert_with(|| density_on(db, payload, "TRUE", "1", extent, grid))
+    }
+}
+
+/// One row of `=== 6 ===` — and **`bins/mark` is printed beside the verdict, not
+/// left to be recomputed.**
+///
+/// It is the quantity the verdict is only valid at or below 1 of: there the grid
+/// has no more bins than the arm has points and the distance is measuring the
+/// picture, while above it the arm and its null both saturate towards TV 1 and
+/// what is left between them is binning noise. A table printed without this
+/// column is exactly how `b57e6c7` reported `FAIL` for six rungs running and
+/// `5a41889` published it as a fact about the pyramid.
+fn fidelity_row(name: &str, stride: &str, marks: u64, bins: usize, dist: f64, noise: f64) {
+    println!(
+        "{name:<10} {stride:>7} {marks:>10} {bins:>8} {:>10.2} {dist:>9.4} {noise:>9.4} {:>+8.4} {:>8}",
+        bins as f64 / marks.max(1) as f64,
+        noise - dist,
+        if dist <= noise { "pass" } else { "FAIL" },
+    );
+}
+
+/// **Fidelity, on the measure this repo already has, at a resolution fitted to
+/// each arm.**
 ///
 /// `/docs/design/camera` and `apps/playground/scripts/verify-properties.mjs`
-/// state it: total variation distance between two normalised density grids,
-/// 48×48 over the extent, and a tolerance that is MEASURED rather than picked —
+/// state the measure: total variation distance between two normalised density
+/// grids over the extent, and a tolerance that is MEASURED rather than picked —
 /// the same population drawn with no spatial structure at all
 /// (`hash(dense_id) % s = 0`), which is what sampling noise alone costs at that
 /// size. An arm passes when it is no further from the whole graph than that null
 /// is. It is the figure `design/discarded` quotes as 0.0644 against 0.1326.
+///
+/// **What this table does NOT take from camera is its 48×48.** That constant was
+/// read here as part of the measure and it is not: it is a resolution chosen for
+/// an arm of fifteen thousand marks, where 2,304 bins is 0.15 bins per mark and
+/// the ruler is well inside its range. A coarse rung is the case that breaks it.
+/// At r4's 310 marks the same grid is **7.43 bins per mark** — neither the rung
+/// nor its null can reach two thirds of the cells, both distances pin against 1,
+/// and the sign of the difference between them is binning noise. `b57e6c7`
+/// reported rungs 4 through 9 FAILING on that reading and `5a41889` wrote it into
+/// the reference as a property of the pyramid. It was a property of the grid:
+/// com-DBLP's r4, same file and same null, beats its null by **+0.1470** on its
+/// own fitted 289 bins, a wider margin than r1 gets at 48×48.
+///
+/// So every row here is measured at [`fitted_grid`] of its own mark count —
+/// about `sqrt(marks)` bins per axis, where nothing is asked to fill more bins
+/// than it has points — and `bins/mark` is printed beside the verdict so the next
+/// reader can see the ruler is in range rather than assume it.
+/// [`what_grid_resolution_does_to_the_fidelity_verdict_on_com_dblp`] is the sweep
+/// that establishes the rule, and it is kept for exactly that: without it the fit
+/// looks like a knob somebody turned until the answer came out nicer.
+///
+/// **The distances down this table are not comparable to each other** — every row
+/// is a different grid, so a distance on one line and a distance on the next
+/// answer two questions. The GAP is comparable, because an arm and its null are
+/// always weighed on the same grid.
 ///
 /// The three arms are rasterised as the three things they are:
 ///
@@ -1270,17 +1355,29 @@ fn fidelity(
 ) {
     let chunks = c.root.join("chunks");
     let holon = chunks.join(HOLON_PREFIX.trim_end_matches('/'));
-    let base = density(db, payload, "TRUE", "1", extent);
+    let mut bases = Bases::new(db, payload, extent);
 
-    println!("\n=== 6. FIDELITY — {GRID}x{GRID} total variation against the payload ===");
+    println!(
+        "\n=== 6. FIDELITY — total variation against the payload, each arm on a grid FITTED TO ITS OWN MARK COUNT ==="
+    );
     println!(
         "  the measure is `/docs/design/camera`'s: TV between normalised density grids over the \
          written extent, and the tolerance is the null — the same count drawn by \
          `hash(dense_id) % s = 0`, which has no spatial structure"
     );
     println!(
-        "{:<10} {:>6} {:>10} {:>9} {:>9} {:>8}",
-        "arm", "stride", "marks", "TV", "null TV", "verdict"
+        "  the RESOLUTION is not camera's 48x48. a fixed grid measures a distribution only while \
+         the drawn set has at least as many points as the grid has bins, and the pyramid spends \
+         most of its rungs below that — so each row gets about `sqrt(marks)` bins per axis, and \
+         `bins/mark` is printed beside the verdict as the proof the ruler was in range"
+    );
+    println!(
+        "  distances DOWN this table are not comparable — every row is its own grid. the GAP is, \
+         because an arm and its null are always weighed on the same one"
+    );
+    println!(
+        "{:<10} {:>7} {:>10} {:>8} {:>10} {:>9} {:>9} {:>8} {:>8}",
+        "arm", "stride", "marks", "bins", "bins/mark", "TV", "null TV", "gap", "verdict"
     );
 
     // The stride family, `2^k`, which contains the level family as its even
@@ -1297,52 +1394,67 @@ fn fidelity(
             ),
         ))
         .unwrap_or(0);
-        let arm = density(
+        let grid = fitted_grid(marks);
+        let arm = density_on(
             db,
             payload,
             &format!("dense_id % {stride} = 0"),
             "1",
             extent,
+            grid,
         );
-        let null = density(
+        let null = density_on(
             db,
             payload,
             &format!("hash(dense_id) % {stride} = 0"),
             "1",
             extent,
+            grid,
         );
-        let (dist, noise) = (tv(&base, &arm), tv(&base, &null));
-        println!(
-            "{:<10} {stride:>6} {marks:>10} {dist:>9.4} {noise:>9.4} {:>8}",
-            if k % 2 == 0 {
-                format!("stride=l{}", k / 2)
-            } else {
-                "stride".to_string()
-            },
-            if dist <= noise { "pass" } else { "FAIL" },
+        let base = bases.at(grid);
+        let (dist, noise) = (tv(base, &arm), tv(base, &null));
+        let name = if k % 2 == 0 {
+            format!("stride=l{}", k / 2)
+        } else {
+            "stride".to_string()
+        };
+        fidelity_row(
+            &name,
+            &stride.to_string(),
+            marks,
+            grid * grid,
+            dist,
+            noise,
         );
     }
 
     // The levels, read off their own files rather than off the predicate — a
     // written level that disagreed with the predicate would show up here as a
-    // different TV from the `stride=l{k}` row above it.
+    // different TV from the `stride=l{k}` row above it. They agree only because
+    // they are fitted to the same mark count and therefore land on the same grid.
     for &k in &plan.levels {
         let lfile = chunks.join(plan.level_prefix(k)).join("tiles.parquet");
         let stride = VertexLevels::stride(k);
-        let arm = density(db, &lfile, "TRUE", "1", extent);
-        let null = density(
+        let marks = rows_of(&lfile);
+        let grid = fitted_grid(marks);
+        let arm = density_on(db, &lfile, "TRUE", "1", extent, grid);
+        let null = density_on(
             db,
             payload,
             &format!("hash(dense_id) % {stride} = 0"),
             "1",
             extent,
+            grid,
         );
-        let (dist, noise) = (tv(&base, &arm), tv(&base, &null));
-        println!(
-            "{:<10} {stride:>6} {:>10} {dist:>9.4} {noise:>9.4} {:>8}",
-            format!("level l{k}"),
-            rows_of(&lfile),
-            if dist <= noise { "pass" } else { "FAIL" },
+        let base = bases.at(grid);
+        let (dist, noise) = (tv(base, &arm), tv(base, &null));
+        fidelity_row(
+            &format!("level l{k}"),
+            &stride.to_string(),
+            marks,
+            grid * grid,
+            dist,
+            noise,
         );
     }
 
@@ -1355,27 +1467,37 @@ fn fidelity(
             .join(rung.path.trim_end_matches('/'))
             .join("tiles.parquet");
         let stride = (big / rung.holon_count.max(1)).next_power_of_two().max(1);
-        let arm = density(db, &cfile, "TRUE", "\"count\"", extent);
-        let null = density(
+        let marks = rung.holon_count;
+        let grid = fitted_grid(marks);
+        let arm = density_on(db, &cfile, "TRUE", "\"count\"", extent, grid);
+        let null = density_on(
             db,
             payload,
             &format!("hash(dense_id) % {stride} = 0"),
             "1",
             extent,
+            grid,
         );
-        let (dist, noise) = (tv(&base, &arm), tv(&base, &null));
-        println!(
-            "{:<10} {:>6} {:>10} {dist:>9.4} {noise:>9.4} {:>8}",
-            format!("rung r{k}"),
-            format!("~{stride}"),
-            rung.holon_count,
-            if dist <= noise { "pass" } else { "FAIL" },
+        let base = bases.at(grid);
+        let (dist, noise) = (tv(base, &arm), tv(base, &null));
+        fidelity_row(
+            &format!("rung r{k}"),
+            &format!("~{stride}"),
+            marks,
+            grid * grid,
+            dist,
+            noise,
         );
     }
     println!(
         "  (a rung is rasterised as its CENTROIDS WEIGHTED BY `count`; the other two are one \
          point per row. `~s` is the stride that draws about as many marks, which is what its \
          null is drawn at)"
+    );
+    println!(
+        "  (the fit floors at 2 bins per axis — a 1x1 grid holds all the ink of every \
+         distribution in its one cell — so the last rungs, and only they, are measured above one \
+         bin per mark. `bins/mark` says which)"
     );
 }
 

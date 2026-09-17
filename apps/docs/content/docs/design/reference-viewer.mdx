@@ -517,23 +517,39 @@ it is not settled here. What is settled is the one above it, which no byte count
 The two artefacts are not substitutes with a winner. They are complements, and the crossover is
 measured:
 
-- **Below 1,239 marks only a rung answers — and nothing answers well, which is a correction to what
-  this bullet said.** The level pyramid stops at its one-tile floor, which is six of the nine scales
-  on com-DBLP, and the rungs covering those six scales are rungs 4 through 9. The same instrument
-  that weighs the bytes also runs each rung through
+- **Below 1,239 marks only a rung answers, and it answers well.** The level pyramid stops at its
+  one-tile floor, which is six of the nine scales on com-DBLP, and the rungs covering those six
+  scales are rungs 4 through 9. The same instrument that weighs the bytes also runs each rung through
   [the camera's fidelity measure](/docs/design/camera#1-fidelity-a-coarse-view-is-the-same-image-with-fewer-points),
-  and **all six fail it**: rung 4 scores 0.8431 total variation against a null of 0.8415, and rungs 5
-  to 9 run worse still. So a rung is the only thing down there, and what it draws does not clear the
-  tolerance. The cell pyramid's last usable step is rung 3, at 1,239 cells — the level pyramid's
-  floor exactly, answering the other question.
-  [Why they fail](/docs/design/holons#and-the-deep-rungs-fail-on-their-own-terms-which-the-quotient-already-predicted)
-  is the quotient saturating, and whether the writer should keep emitting them is
-  [open](/docs/design/holons#what-this-does-not-settle).
+  on a grid fitted to each rung's own mark count, and **every one of them clears its tolerance** —
+  rung 4 at 0.2230 total variation against a null of 0.3700, and the margin widening the coarser it
+  gets, to +0.3341 at rung 7.
 - **Above 79,270 marks only a level answers**, because a base of sixteen puts the finest rung below
   it.
 - **In between they both answer, to different questions** — 6.25% of the vertices with real
   identity, or 100% of them summarised. A reader choosing between those is not choosing a cheaper
   encoding of one answer.
+
+<Callout type="warn">
+**The first bullet was narrowed to «and nothing answers well», on a reading that the six rungs below
+1,239 marks do not clear the camera's tolerance. That narrowing is withdrawn.** It came from measuring
+310 marks against a fixed 48×48 grid — **7.43 bins per mark**, where the rung and its null both pin
+against TV 1 and the −0.0016 between them is binning noise. Re-measured at about `sqrt(marks)` bins
+per axis by `crates/fossil-layout/tests/level_vs_rung.rs, fidelity`, rung 4 beats its null by
+**+0.1470** and rung 7 by **+0.3341**, a margin that grows rather than decays down the pyramid.
+[A fidelity measure has a resolution](/docs/design/camera#a-fidelity-measure-has-a-resolution-and-below-one-bin-per-mark-it-is-measuring-itself)
+is the general rule the mistake violated, and
+[the quotient saturates down the pyramid](/docs/design/holons#the-quotient-saturates-down-the-pyramid-and-the-marks-do-not)
+carries the full retraction.
+
+**What this bullet can honestly claim is the complement, and the reason is not fidelity at all:** a
+rung is the only artefact below 1,239 marks, it carries a real picture there — and **nothing in this
+repository ever asks for one.** A camera spends a budget in marks and the smallest budget anything
+here spends is 15,000; `apps/playground/src/tiles.ts` spends 20,000. Only rung 1, at 19,818, is above
+that. So the cell pyramid's depth is not capped by what it can draw; it is uncapped and unvisited.
+Whether the writer should keep emitting rungs nothing asks for is
+[open](/docs/design/holons#what-this-does-not-settle).
+</Callout>
 
 Invariant 3 is unchanged and now carries its reason: a written `l{k}/` is an optimisation of
 `dense_id % 4^k == 0`, and what makes the optimisation worth writing is not its bytes but that its
