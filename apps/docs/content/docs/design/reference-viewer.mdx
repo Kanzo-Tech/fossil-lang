@@ -517,9 +517,18 @@ it is not settled here. What is settled is the one above it, which no byte count
 The two artefacts are not substitutes with a winner. They are complements, and the crossover is
 measured:
 
-- **Below 1,239 marks only a rung answers.** The level pyramid stops at its one-tile floor, which is
-  six of the nine scales on com-DBLP — and a corpus with no cell pyramid has no coarse view there at
-  all, where a corpus with no level pyramid has a slower one.
+- **Below 1,239 marks only a rung answers — and nothing answers well, which is a correction to what
+  this bullet said.** The level pyramid stops at its one-tile floor, which is six of the nine scales
+  on com-DBLP, and the rungs covering those six scales are rungs 4 through 9. The same instrument
+  that weighs the bytes also runs each rung through
+  [the camera's fidelity measure](/docs/design/camera#1-fidelity-a-coarse-view-is-the-same-image-with-fewer-points),
+  and **all six fail it**: rung 4 scores 0.8431 total variation against a null of 0.8415, and rungs 5
+  to 9 run worse still. So a rung is the only thing down there, and what it draws does not clear the
+  tolerance. The cell pyramid's last usable step is rung 3, at 1,239 cells — the level pyramid's
+  floor exactly, answering the other question.
+  [Why they fail](/docs/design/holons#and-the-deep-rungs-fail-on-their-own-terms-which-the-quotient-already-predicted)
+  is the quotient saturating, and whether the writer should keep emitting them is
+  [open](/docs/design/holons#what-this-does-not-settle).
 - **Above 79,270 marks only a level answers**, because a base of sixteen puts the finest rung below
   it.
 - **In between they both answer, to different questions** — 6.25% of the vertices with real

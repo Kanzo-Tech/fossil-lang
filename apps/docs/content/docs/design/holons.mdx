@@ -286,22 +286,40 @@ membership». The graph is in the addressing before any rung is cut.
 **The real difference is where the cut falls — at a fixed count, or at a semantic frontier.** That
 is a far smaller difference than *blind or not*, and it is the one the rest of this section measures.
 
-### The holarchy does not reach further, which was the claim it had left
+### The holarchy does not reach further, and that margin is one rung
 
 If a cut of the dendrogram is not the one that sees the graph, the argument left for it was depth:
 it descends *and* it ends somewhere the data chose. Measured over com-DBLP, it ends soonest of the
-three coarse artefacts this corpus has:
+three coarse artefacts this corpus has — but only just, and the *only just* is the correction below:
 
 | how far a coarse view descends on com-DBLP | its floor |
 | --- | --- |
 | a holarchy, `crates/fossil-layout/src/layout/community.rs, Cut` at factor 4 and chunk 4,096 | **1,696 groups** — levels 4 and 5 are dropped, neither being a quarter of the one above it |
 | the level pyramid, at its one-tile floor | **1,239 marks** |
-| the cell pyramid, at a base of sixteen | 19,818 → 4,955 → 1,239 → 310 → 78 → **20**, and on down |
+| the cell pyramid, at the deepest rung that carries a picture | **1,239 cells** — rung 3. The writer emits 19,818 → 4,955 → 1,239 → 310 → 78 → 20 and on down to one, and everything past rung 3 fails fidelity |
 
-**The holarchy stops above the level pyramid's own floor.** That floor is the number
-[the reference viewer](/docs/design/reference-viewer) uses to say where only a rung answers — six of
-the nine scales on com-DBLP sit below it — and a structure whose remaining attraction was semantic
-depth reaches the coarse end last of the three.
+**The holarchy stops above the level pyramid's own floor**, and above the cell pyramid's usable one
+by the same rung. A structure whose remaining attraction was semantic depth still reaches the coarse
+end last of the three — by one step rather than by the six the emitted rung list appears to give.
+
+<Callout type="warn">
+**This said the cell pyramid «runs 19,818 → 4,955 → 1,239 → 310 → 78 → 20 and on down», and used
+that as a reach argument. The rung list is right and the argument is withdrawn.** Emitted is not the
+same as usable, and the page had no measurement of the difference when it wrote the sentence. It has
+one now: `crates/fossil-layout/tests/level_vs_rung.rs, what_a_level_costs_and_what_a_rung_costs_on_com_dblp`
+runs each rung through the fidelity measure [the camera](/docs/design/camera#1-fidelity-a-coarse-view-is-the-same-image-with-fewer-points)
+already uses — total variation against a null of the same mark count, drawn with no spatial
+structure — and **rungs 4 through 9 fail it**. Rung 4 scores **0.8431** against a null of **0.8415**:
+worse than an unstructured subsample of 310 vertices. Rungs 5 to 9 run 0.9609 to 0.9995 against
+nulls of 0.9528 to 0.9979.
+
+So the honest comparison is **1,239 usable cells against 1,696 groups** — still the pyramid's way,
+and no longer by an order of magnitude. **Reach is retired as a supporting argument here.** What the
+decision above rests on is untouched: a cell is `dense_id >> shift` and a group's extent is measured,
+and no depth measurement moves that. [Why the deep rungs fail](/docs/design/holons#and-the-deep-rungs-fail-on-their-own-terms-which-the-quotient-already-predicted)
+is the mechanism, and [what this does not settle](/docs/design/holons#what-this-does-not-settle)
+carries the question the failure opens, which is about the *writer* and not about the holarchy.
+</Callout>
 
 It cannot be cut differently into something deeper. The cut chooses out of the partitions the
 dendrogram already holds, and getting nearer to four would need levels *between* Louvain's —
@@ -529,7 +547,9 @@ question.** This paragraph ended *it is the one thing the manifest block does no
 because it declares counts and not a method* — true of the manifest, and allowed to stand in for the
 whole question. The manifest does not need to know; a reader descending does, because a cut that
 ends at 1,696 groups is a coarse view that stops existing above the level pyramid's own floor of
-1,239 marks, where a quaternary keeps halving the mark count down to twenty and past it.
+1,239 marks, where a quaternary keeps quartering the mark count past it — down to twenty on paper,
+and, once fidelity is measured rather than assumed, to 1,239 in practice, which is
+[one rung further and not six](/docs/design/holons#the-holarchy-does-not-reach-further-and-that-margin-is-one-rung).
 [One multiscale structure](/docs/design/holons#the-corpus-carries-one-multiscale-structure-and-it-is-the-cell-pyramid)
 is where that is weighed.
 
@@ -648,6 +668,46 @@ stops being an input to a renderer, which is a demotion and not a deletion — `
 still optional per rung, and a writer that publishes one is publishing evidence rather than a
 picture.
 
+### And the deep rungs fail on their own terms, which the quotient already predicted
+
+The table above is over the 16-bit quaternary of positions, which is the tree the Morton order
+imposes rather than the one the writer emits. Over the **written** rungs the same saturation is
+there, and it arrives sooner. Measured on com-DBLP by
+`crates/fossil-layout/tests/level_vs_rung.rs, what_a_level_costs_and_what_a_rung_costs_on_com_dblp`:
+
+| rung | cells | quotient density | bytes per mark, at the whole extent | fidelity against a null of the same mark count |
+| --- | --- | --- | --- | --- |
+| 1 | 19,818 | 0.14% | **69.0** | 0.0513 against 0.1297 — pass |
+| 2 | 4,955 | 1.34% | 115.3 | 0.1375 against 0.2616 — pass |
+| 3 | 1,239 | **12.24%** | 213.9 | 0.4646 against 0.5412 — pass |
+| 4 | 310 | **69.92%** | **285.5** | 0.8431 against 0.8415 — **fail** |
+| 5 | 78 | 98.83% | 144.5 | 0.9609 against 0.9528 — **fail** |
+| 6 | 20 | 100% | 133.9 | 0.9923 against 0.9875 — **fail** |
+| 7–9 | 5, 2, 1 | 100%, 100%, none left | 110.2, 183.5, 222.0 | 0.9982, 0.9990, 0.9995 against 0.9949, 0.9970, 0.9979 — **fail** |
+
+**The quotient saturates, and where it saturates the rung stops being a picture.** By rung 4 the
+quotient is seven-tenths of a complete graph and by rung 5 it is the complete graph, which is the
+same thing the table above says at its levels 12 and 13 — a relation whose coarse level joins everything to
+everything. What the fidelity column adds is that the *marks* go with it: a rung whose quotient
+carries no structure turns out to place its centroids no better than a hash of the same size would.
+
+**And the bytes go the wrong way while it happens.** Bytes per mark should fall as an artefact
+coarsens — a coarser rung is fewer rows for the same picture. Through rung 4 it climbs instead, 69.0
+→ 115.3 → 213.9 → 285.5, because the quotient is filling in faster than the cell count is falling.
+It only falls again at rung 5, once there is almost nothing left to write. So rungs 4 through 9
+are waste on both axes at once: they cost more per mark than the rung above them **and** they carry
+less than noise.
+
+The three rungs that pass are the other half of the finding and it is worth stating: at every mark
+count where both answer, the rung is **closer** to the payload than the level drawing the same
+number of marks — 0.0513 against 0.0591 at 19,818, 0.1375 against 0.1570 at 4,955, 0.4646 against
+0.4821 at 1,239. A count-weighted centroid is a better summary of where the vertices are than a
+one-in-sixteen sample of them, which is what a summary is supposed to be.
+
+What this does **not** settle is whether the writer should stop emitting the failing rungs;
+[what this does not settle](/docs/design/holons#what-this-does-not-settle) carries that, with what it
+would cost.
+
 ## A categorical channel gets a mode and a purity
 
 A texel averages colour. A category does not average: the mean of two `cluster_id`s is not a cluster,
@@ -759,6 +819,25 @@ file and this page, paid once. That is a scheduling question and not a design on
 stays below rather than moving up.
 
 ## What this does not settle
+
+**Whether the writer should stop emitting the rungs that fail fidelity.** Measured on com-DBLP,
+rungs 4 through 9 are waste on both axes at once — they score worse than an unstructured subsample
+of their own mark count, and their bytes per mark climb rather than fall, 213.9 at rung 3 to 285.5 at
+rung 4. [Why they fail](/docs/design/holons#and-the-deep-rungs-fail-on-their-own-terms-which-the-quotient-already-predicted)
+is the quotient saturating: 12.24% dense at rung 3, 69.92% at rung 4, complete from rung 5. Six of
+the nine rungs this corpus gets are bytes nobody can draw from.
+
+**And the obvious conclusion is not taken here, because the property it would break is load-bearing.**
+`crates/fossil-sinks/src/manifest.rs, planned` emits a complete list — rung 1 up to the rung holding
+a single cell — and that completeness is what lets everything downstream stay arithmetic. A reader
+computes `ceil(base_count / 4^k)` and knows the rung is there; nothing needs a *this rung was not
+written* path, and a corpus fossil wrote always has the artefact its own arithmetic names. A writer
+that stopped at a measured floor would make the tree's tail data-dependent — exactly the property
+[the decision above](/docs/design/holons#the-corpus-carries-one-multiscale-structure-and-it-is-the-cell-pyramid)
+refused to pay for in a holarchy — and it would do so to save **119 kB**, which is 5.1% of a cell
+pyramid that is itself 8.1% of payload-plus-adjacency — four parts in a thousand of it. The tension is real in both directions and nothing in the tree resolves
+it. What would settle it is a reader that descends past rung 3 and says which it would rather have:
+a rung it can prove is useless, or an absence it has to handle.
 
 **Whether the base is declared per corpus or once globally.** The measurements say it is
 data-dependent and must be written down; they do not say where. Per vertex type is the shape the
