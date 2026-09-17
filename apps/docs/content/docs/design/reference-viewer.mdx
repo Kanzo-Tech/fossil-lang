@@ -426,7 +426,7 @@ spends as arithmetic, and a summary declares a count, for the reasons
 [Holons](/docs/design/holons) is the page that rules on that, and the grouping it rules over is
 Louvain's rather than the plane's; what is measured below is the plane's.
 
-### The level files are a cache, and the open question is whether a reader still wants the sample
+### The level files are a cache, and the question is whether a reader still wants the sample
 
 Invariant 3 above already says what a level file is: `dense_id % 4^k == 0` **is** the level, and a
 written `l{k}/` is an optimisation of it. Stated as cost rather than as contract, that is: **giving
@@ -441,11 +441,94 @@ the writer pays, and a second set of artefacts to keep nesting, for a worse pict
 summary gives at the same zoom. If there is, they stay exactly what invariant 3 says they are: a
 declared optimisation of a predicate, and not an artefact carrying a meaning of its own.
 
-What would settle it is a reader that wants to **click something real at a far zoom**. A sample row
-is a subject — it has an identity, a tile, an entry in the index, and a rectangle around it refines
-into its neighbours. A cell has none of those: it is not a subject and
-[identity](/docs/design/identity) is the page that says why nothing derived gets to be one. A
-picture nobody interrogates does not need the sample; a picture somebody clicks does.
+What this page proposed would settle it is a reader that wants to **click something real at a far
+zoom** — a sample row is a subject, a cell is not, and a picture nobody interrogates does not need
+the sample.
+
+### It is settled, and the test this page proposed is the half that failed
+
+**Nobody clicks.** There is no click handler, no hover, no tooltip, no bookmark and no deep link
+anywhere on the coarse path in this repository. `Frame` carries `denseIds`, positions, categories
+and links, and no `subject` — `apps/playground/src/encoding.ts` says so with a measurement beside
+it, `Slice.subjects` costing 1.87× the tile, and `apps/playground/src/crossfilter.ts` excludes the
+column from its view for the same reason. The identity verbs take an IRI *in* and know nothing about
+levels. This page already conceded the other half of it above: there is no level of detail for the
+identity index.
+
+**And the sample stays anyway, because identification at a coarse zoom happens by *address*, not by
+name.** Three readers do it, and none of them would get slower without a level — each would stop
+working:
+
+| what it does | why a cell cannot serve it |
+| --- | --- |
+| `apps/playground/src/crossfilter.ts` paints a `Uint8Array` mask indexed by `dense_id`, on every brush, at whatever level the camera settled at | a cell has no `dense_id`, so there is no index entry to paint — the mask is not wrong, it is impossible |
+| `apps/playground/src/residency.ts` pools answers taken at *different* levels into one interim picture and dedupes them by `dense_id` | coherent only because level `k+1`'s rows are a **subset** of level `k`'s. Rung `k+1`'s cells are a disjoint space from rung `k`'s, with no containment a set can see |
+| `packages/corpus/src/corpus.ts` exempts `pinned` from the level and pays a second payload read to serve it | there is nothing to exempt over an artefact whose rows are not addressable |
+
+So a coarse mark has to **be** a row, even though nothing in this tree ever names one.
+
+### Two more reasons, and one of them is not about the reader at all
+
+**An edge level is the only place an edge knows where its ends are.** Its rows carry `src_x`,
+`src_y`, `dst_x`, `dst_y`. The adjacency carries two `dense_id`s and nothing else; a rung's quotient
+carries two cell ids and a weight. So an edge level is self-drawing from one file, and neither of
+the others is — and the quotient is not a substitute in kind: its edges are synthetic, which is the
+one substitution [what was discarded](/docs/design/discarded) refuses outright, because replacing a
+line with the path it stands for moves every line on screen.
+
+**Nothing reads a rung.** `crates/fossil-graph` — the read surface the format exists for — contains
+no occurrence of `holon`, `rung`, `cell` or `quotient`; neither does `packages/corpus`; no guard
+opens one; the conformance corpus declares `rungs: []`. The cell pyramid today is a writer and a
+manifest block. Retiring the levels would therefore not move a capability from one artefact to the
+other. **It would leave the coarse read path with no implementation on either side of the wasm
+boundary.**
+
+### The bytes say the opposite, and saying so is the point
+
+The economic half of the argument goes the other way, and it is worth stating against the decision
+rather than around it. Measured on com-DBLP by
+`crates/fossil-layout/tests/level_vs_rung.rs, what_a_level_costs_and_what_a_rung_costs_on_com_dblp`,
+at the fifteen thousand marks a megapixel canvas asks for — where the pairing is level 2 against
+rung 1, both at 19,818 marks:
+
+| | level 2 | rung 1 |
+| --- | --- | --- |
+| bytes a coarse view reads | 2,410 kB | **1,336 kB** |
+| lines drawn past the three-pixel floor | 136,910 | **272,732** |
+| bytes per line drawn | 18.0 | **5.0** |
+| share of the type represented | 6.25% | **100%** |
+| the whole pyramid, against payload + adjacency | 83.1% | **8.1%** |
+
+The level's defining ratio survives — it is 5.07× cheaper than striding the payload at that scale
+and 57× at its coarsest — but the rung beats it on that same ratio at the same mark count, 9.1×. So
+**the ratio surviving is no longer an argument that the artefact is needed**, and the levels are not
+kept because they are cheap.
+
+<Callout type="warn" title="And this table flips on a generated fixture, which is why it is not the reason">
+On the planted fixture the level wins instead, by 1.24× to 3.46×. That corpus's ten per cent of
+uniform-random edges triples its finest quotient — 871,261 rows against com-DBLP's 274,647 — so
+whoever weighs this on generated data reaches the opposite conclusion from whoever weighs it on a
+real graph. **One more real graph of a different shape is what would settle the byte question**, and
+it is not settled here. What is settled is the one above it, which no byte count can move.
+</Callout>
+
+### So the question closes, and not as «kept as a declared optimisation»
+
+The two artefacts are not substitutes with a winner. They are complements, and the crossover is
+measured:
+
+- **Below 1,239 marks only a rung answers.** The level pyramid stops at its one-tile floor, which is
+  six of the nine scales on com-DBLP — and a corpus with no cell pyramid has no coarse view there at
+  all, where a corpus with no level pyramid has a slower one.
+- **Above 79,270 marks only a level answers**, because a base of sixteen puts the finest rung below
+  it.
+- **In between they both answer, to different questions** — 6.25% of the vertices with real
+  identity, or 100% of them summarised. A reader choosing between those is not choosing a cheaper
+  encoding of one answer.
+
+Invariant 3 is unchanged and now carries its reason: a written `l{k}/` is an optimisation of
+`dense_id % 4^k == 0`, and what makes the optimisation worth writing is not its bytes but that its
+rows are addressable.
 
 ### What the summary costs, measured
 
