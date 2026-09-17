@@ -1,7 +1,7 @@
 /**
  * Check what the app draws the corpus WITH against what the corpus says — in Node, no browser.
  *
- * `src/encoding.ts` replaced three string literals in `src/Canvas.tsx` with a derivation, and a
+ * `@fossil-lang/draw` replaced three string literals in `src/Canvas.tsx` with a derivation, and a
  * derivation is only worth the literals it replaced if it can be run against a real artefact and
  * held to an answer. That is this script: it opens the bench corpus through the same door the tab
  * opens, computes the same `Encoding` the component computes, and checks every field of it against
@@ -71,7 +71,7 @@ registerHooks({
   },
 });
 
-const { encodingFor } = await import('../src/encoding.ts');
+const { encodingFor } = await import('@fossil-lang/draw');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = resolve(here, '..');
@@ -114,7 +114,7 @@ const ok = (label, condition, detail = '') => {
  * agree. An encoding checked against a value this file computed a second way is a check; one
  * checked against a value the app handed it is a tautology.
  *
- * **`channels:` is read here too, and `src/encoding.ts, readChannels` is deliberately not
+ * **`channels:` is read here too, and `@fossil-lang/draw`'s `readChannels` is deliberately not
  * imported** for that reason and no other. The app's scanner is what the tab runs; this one is what
  * holds it to an answer, and a harness that called the scanner it is checking would be asserting
  * that a function equals itself.

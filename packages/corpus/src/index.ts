@@ -55,10 +55,12 @@
  * grounds were that a consumer never names a level file, and two do. See the export.
  *
  * **What deliberately stayed.** The four `PAYLOAD_*` role constants, because the check found a
- * consumer: `apps/playground/src/encoding.ts` reads all three of `PAYLOAD_ADDRESS`,
+ * consumer: `@fossil-lang/draw`'s `encoding.ts` reads all three of `PAYLOAD_ADDRESS`,
  * `PAYLOAD_COORDINATES` and `PAYLOAD_CATEGORICAL`, and `apps/playground/scripts/verify-encoding.mjs`
- * reads the last of them. Internalising them puts `cluster_id` back in a hand-written line in an
- * app — which is the six-statements-of-one-fact this table was generated to end.
+ * reads the last of them through it. Internalising them puts `cluster_id` back in a hand-written
+ * line — which is the six-statements-of-one-fact this table was generated to end. That consumer was
+ * in an app when this was written and is a published package now, which makes the reason stronger
+ * rather than weaker.
  */
 
 // The door, and the two errors an `instanceof` is a legitimate part of a surface for.

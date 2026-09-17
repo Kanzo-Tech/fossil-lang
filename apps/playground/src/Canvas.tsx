@@ -30,7 +30,7 @@ import type { Bench } from './bench.js';
 import { readDeclaration } from './bound.js';
 import { openCrossfilter, type Crossfilter, type CrossfilterCost } from './crossfilter.js';
 import * as duck from './duckdb.js';
-import { channelsFor, encodingFor, type Encoding } from './encoding.js';
+import { channelsFor, encodingFor, type Encoding } from '@fossil-lang/draw';
 import { n } from './format.js';
 import Histogram from './Histogram.js';
 import { ModeComparison, START, StreamingDetail, WholeDetail, type Mode, type ModeLedger } from './Ledger.js';

@@ -233,9 +233,24 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            `openCorpus` and the thing that DOES draw one, `@kanzo-tech/graph`,
                            sits beside it in the playground's `package.json`. The Rust crates
                            keep their names — `fossil-graph` IS a verb surface over a property
-                           graph, and a crate name is not in npm's import space
-  executor/                datafusion-wasm query executor
-  types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme — zero runtime)
+                           graph, and a crate name is not in npm's import space.
+                           TWO doors: `openCorpus` is the engine-bearing route, `resolveCorpus`
+                           the engine-free one over manifests already in hand, and
+                           `corpus.addressing` is what the first already resolved. The boot is
+                           the `wasmUrl` option on both and is internal otherwise
+  draw/                    the half of drawing a corpus that is NOT a renderer — no canvas, no
+                           GPU, no camera, and fossil still ships no viewer. What a corpus is
+                           drawn WITH (the `channels:` block, its three states, the derivation
+                           for a corpus that declares nothing) and what is already LOADED (the
+                           frames a door answered, and the interim assembled from them). NOT part
+                           of `corpus/`: a corpus has no opinion about which column deserves a
+                           histogram, and every part of `corpus/` static-imports the wasm while
+                           nothing here needs one
+  executor/                datafusion-wasm query executor, and the manifest wire mirror, because
+                           a run HANDS THAT BACK — except `Channel`/`Scale`, in `types/` because
+                           `draw/` reads one and 22 MB of wasm is the wrong price for an interface
+  types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme, the
+                           `channels:` wire shape — zero runtime)
   resolvers/               default + mock + public-HTTP ConnectionResolver impls
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
                            and not an editor. FIVE of them, not two: highlighting from

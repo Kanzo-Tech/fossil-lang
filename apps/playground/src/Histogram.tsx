@@ -3,7 +3,7 @@
  *
  * ## Which column it brushes, and why this file does not decide
  *
- * `field` is a prop, and what fills it is `src/encoding.ts` reading the corpus — this header used
+ * `field` is a prop, and what fills it is `@fossil-lang/draw` reading the corpus — this header used
  * to carry the reasoning as prose about `birth_year` and the bench corpus, which is an argument
  * performed once by a person and then true of one artefact. The rule it argued is the rule that is
  * now executed, in two halves that are asked different questions:
@@ -201,7 +201,7 @@ export interface HistogramProps {
   /** What the brush publishes into — the same `Selection` the canvas client is filtered by. */
   filter: Selection;
   /**
-   * Which column. Derived from the corpus by `src/encoding.ts` and passed in, so that the one
+   * Which column. Derived from the corpus by `@fossil-lang/draw` and passed in, so that the one
    * module that decides what this app draws with decides this too.
    */
   field: string;

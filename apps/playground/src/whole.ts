@@ -49,7 +49,7 @@ import type { BoundedSource, Slice, SliceRequest, Viewport } from '@kanzo-tech/g
 import { vertexId } from '@kanzo-tech/graph';
 
 import type { QueryFn } from './duckdb.js';
-import { categoricalOf, type Channel } from './encoding.js';
+import { categoricalOf, type Channel } from '@fossil-lang/draw';
 import { extentOf, type Rect, type TileBox } from './stream.js';
 
 /**
@@ -151,7 +151,7 @@ const list = (values: readonly string[]): string => `[${values.map(lit).join(', 
  * Same rule as `tiles.ts`: a `fill` that is a colour is not a column name.
  *
  * And the same fallback, which is no longer a constant: the column the CORPUS carries, derived by
- * `src/encoding.ts` from the payload's own vocabulary. `null` where it carries none — this source
+ * `@fossil-lang/draw` from the payload's own vocabulary. `null` where it carries none — this source
  * composes its own SQL rather than going through the door, so it has no default to defer to and
  * draws one colour instead of naming a column that is not there.
  */

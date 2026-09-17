@@ -4,18 +4,19 @@
  * `/docs/design/camera` names three states a reader that pans across more data than it can hold
  * keeps apart: residency (what is loaded), visibility (what is drawn out of what is loaded) and the
  * camera. This module is the first of them, and it is a module of its own for the reason that page
- * gives — **it can be tested without a camera.** It imports nothing from this app, knows no
- * rectangle it was not handed, and issues no query: `src/tiles.ts` is the one thing that calls the
- * door, and it hands the answers here afterwards.
+ * gives — **it can be tested without a camera.** It knows no rectangle it was not handed and issues
+ * no query: a host's seam is the one thing that calls the door, and it hands the answers here
+ * afterwards. `apps/playground/src/tiles.ts` is that seam in fossil's own tree.
  *
  * ## What it holds, and why that is not tiles
  *
- * camera.mdx describes residency as *a cache over tiles*, and **this app cannot hold a tile.** The
- * reads are `read_parquet('<url>')` issued by DuckDB from inside its own Worker; the calling thread
- * never sees the bytes, which is the same fact `src/tiles.ts` and every `bytes` column in this tree
- * already say out loud. So the 807-fetches-over-245-tiles figure in Table 3 of
- * `scripts/measure-frame.mjs` is real and is **not this module's to bank** — it is DuckDB's, and
- * `src/duckdb.ts, registerUrl` passes `directIO = false` precisely so that it can.
+ * camera.mdx describes residency as *a cache over tiles*, and **a host on this seam cannot hold a
+ * tile.** The reads are `read_parquet('<url>')` issued by DuckDB from inside its own Worker; the
+ * calling thread never sees the bytes, which is the same fact `apps/playground/src/tiles.ts` and
+ * every `bytes` column in that tree already say out loud. So the 807-fetches-over-245-tiles figure
+ * in Table 3 of `apps/playground/scripts/measure-frame.mjs` is real and is **not this module's to
+ * bank** — it is DuckDB's, and that app's `src/duckdb.ts, registerUrl` passes `directIO = false`
+ * precisely so that it can.
  *
  * What this thread *does* hold is the answers: the `Frame`s the door has already returned, which are
  * bytes already in hand. That is enough for both halves of the separation:
@@ -30,12 +31,12 @@
  *
  * {@link Residency.visible} is a different set from the settled answer by construction — it is
  * assembled out of whatever earlier rectangles happened to hold — so it can only ever be the frame
- * that is on screen *while* the settled one is in flight. `src/tiles.ts` pushes it through
- * `BoundedSource.watch` and returns the door's answer unchanged from `slice`, so the measured
- * property `scripts/verify-properties.mjs` calls **path independence** is untouched: the same
- * rectangle by two routes still settles on the same set.
+ * that is on screen *while* the settled one is in flight. `apps/playground/src/tiles.ts` pushes it
+ * through `BoundedSource.watch` and returns the door's answer unchanged from `slice`, so the
+ * measured property `apps/playground/scripts/verify-properties.mjs` calls **path independence** is
+ * untouched: the same rectangle by two routes still settles on the same set.
  *
- * ## The stride is a power of two, for the reason `src/stride.ts` argues
+ * ## The stride is a power of two, for the reason `apps/playground/src/stride.ts` argues
  *
  * An interim that holds more points than the renderer's budget has to be cut, and it is cut by
  * `dense_id % 2^k == 0` — the same family the door's `4^k` is a subset of. A vertex the interim
@@ -49,7 +50,7 @@ import type { Box, Frame } from '@fossil-lang/corpus';
  * The picture visibility assembles out of what residency holds.
  *
  * Deliberately the same field names and the same layout as a `Frame` — marks first, then anchors —
- * so `src/tiles.ts` converts a held answer and an interim with one function instead of two.
+ * so a host's seam converts a held answer and an interim with one function instead of two.
  */
 export interface Visible {
   /** `dense_id` per row, in the vertex type's own numbering. Marks first, then anchors. */
@@ -101,7 +102,8 @@ export interface Residency {
  * The budget, in rows held.
  *
  * Measured on the bench corpus rather than picked. The whole-extent frame is 75,761 rows, and the
- * ten rectangles of `scripts/measure-frame.mjs` leave **243,240** rows held at the end of the path —
+ * ten rectangles of `apps/playground/scripts/measure-frame.mjs` leave **243,240** rows held at the
+ * end of the path —
  * so half a million is a ceiling that path does not reach, and it costs roughly 10 MB: 8 bytes of
  * `dense_id`, 8 of position and 4 of category per row. A session that never leaves one corner holds
  * one frame.
@@ -214,7 +216,11 @@ export function residency({ points = POINTS }: { points?: number } = {}): Reside
           if (seen.has(dense)) continue;
           seen.add(dense);
           matched += 1;
-          byTwos[twos(dense)] += 1;
+          // `twos` is capped at CAP and the array is CAP + 1 long, so the index is always in
+          // bounds — spelled with the same `!` `cutFor` reads the array through, because this
+          // package compiles under `noUncheckedIndexedAccess` and the app it moved from did not.
+          const bucket = twos(dense);
+          byTwos[bucket] = byTwos[bucket]! + 1;
         }
       }
       if (matched === 0) return null;

@@ -30,6 +30,8 @@ export type { InitFossilExecutorOpts } from './load.js';
 export { runJob } from './run-job.js';
 export type { JobTransport, CompletePayload, RunJobOptions } from './run-job.js';
 
+import type { Channel } from '@fossil-lang/types';
+
 import type { DataRow } from './catalogue.generated.js';
 
 /**
@@ -179,45 +181,15 @@ export interface CoordinateSystem {
 export type Provenance = 'geographic' | 'embedded' | 'derived';
 
 /**
- * One channel over a vertex type's rows: a column, the scale it is read on, and — where a reader
- * cannot recover it — the size of its domain.
+ * The `channels:` entry and the scale it dispatches on — **re-exported, not restated.**
  *
- * `crates/fossil-sinks/src/manifest.rs, CoordinateSystem` is the precedent and this copies it
- * rather than re-deriving it: a flat mapping, a list on the type, three states. The two answer
- * different questions about the same rows — that one is *where a row is*, this one is *what it
- * looks like there*.
+ * They live in `@fossil-lang/types` because a channel is the one document of this manifest with a
+ * second reader: `@fossil-lang/draw` turns a declared channel into an encoding having run nothing,
+ * and making that reader install this package's 22 MB of `fossil_df_wasm` to name one interface is
+ * a worse arrangement than the shape sitting where both can reach it. Everything else of the
+ * manifest stays here, beside the run that hands it back. See `@fossil-lang/types/src/channel.ts`.
  */
-export interface Channel {
-  /** The writer's name for the channel. Nothing reserves any. */
-  name: string;
-  /** The payload column it is read out of. */
-  column: string;
-  scale: Scale;
-  /**
-   * How many distinct values a **categorical** has.
-   *
-   * The one number a reader cannot recover: a distinct count is in no Parquet footer, which is the
-   * same test `HolonTree`'s `vertices_per_cell` passes. Absent on a quantitative channel, whose
-   * domain is a range — and the range is already in the footers' per-row-group min/max, so
-   * declaring it would be a second statement of what the bytes carry.
-   *
-   * Not `cardinality`: {@link Property} does not carry that field here, but the manifest's Rust
-   * `Property` does and it means SHACL multiplicity. Two fields a spelling apart in one document is
-   * how a reader comes to answer one with the other.
-   */
-  domain?: number;
-  /** What computed the column, present exactly when the writer did. Absent ⇒ it came off the source. */
-  derived_by?: string;
-}
-
-/**
- * How a channel's column is read — a closed set, because a reader **dispatches** on it: a
- * categorical is a lookup into a palette of finite capacity, a quantitative is a ramp over a range.
- *
- * It is the field that decides whether {@link Channel.domain} is a number at all, which is why it
- * is the one field of the entry that is not the writer's to spell.
- */
-export type Scale = 'categorical' | 'quantitative';
+export type { Channel, Scale } from '@fossil-lang/types';
 
 /** One edge type's manifest document (`edge/<dir>/<dir>.edge.yml`). */
 export interface EdgeInfo {

@@ -78,7 +78,7 @@ export interface Bench {
    *
    * The same map `resolveCorpus` was handed, kept for the reader that wants a document the
    * addressing does not: a vertex type's `channels:` block is per TYPE and lives in
-   * `vertex/<Type>.vertex.yml`, so `src/encoding.ts` cannot get at it through `indexText` the way
+   * `vertex/<Type>.vertex.yml`, so an encoding cannot get at it through `indexText` the way
    * `src/bound.ts` gets at `privacy:`. Costs nothing — these are the bytes already fetched and
    * already counted below.
    */

@@ -20,7 +20,7 @@
  * ## Residency is NOT here, and that is the point of it
  *
  * What is loaded and what is drawn used to be the same set: this file called the door on every
- * camera move and held nothing between them. They are two things now — `src/residency.ts` holds
+ * camera move and held nothing between them. They are two things now — `@fossil-lang/draw`'s `residency` holds
  * what has been answered and assembles an interim picture out of it, knowing nothing about a
  * camera and issuing no query; this file is the only part that asks the door. So three answers are
  * possible where there was one, and the middle one is new:
@@ -57,9 +57,8 @@ import {
   type VertexId,
 } from '@kanzo-tech/graph';
 
-import { categoricalOf, type Channel } from './encoding.js';
+import { categoricalOf, residency, type Channel } from '@fossil-lang/draw';
 import { frame } from './frame.js';
-import { residency } from './residency.js';
 import { extentOf, type Rect, type TileBox } from './stream.js';
 
 /** What one answer cost, in the terms the panel beside the canvas is already reporting. */
@@ -208,7 +207,7 @@ function boxFor(view: Viewport, extent: Rect | null): Box | null {
  * A `fill` starting with `var(` or `#` is a COLOUR handed through the same field, and naming it as a
  * column asks DuckDB for `"#4c78a8"`. Omitted or a colour, the one the CORPUS carries: this said
  * `cluster_id`, which is the right column and the wrong place to write it down — see
- * `src/encoding.ts`, which derives it from the payload's own vocabulary and is the only module in
+ * `@fossil-lang/draw`, which derives it from the payload's own vocabulary and is the only reader in
  * this app that names it.
  *
  * `undefined` where the corpus carries no categorical at all, which hands the question to the
@@ -222,7 +221,7 @@ function column(fill: string | undefined, carried: string | null): string | unde
 /**
  * What this file can turn into a `Slice` — a settled `Frame` from the door, or the interim
  * `Visible` residency assembles out of what it holds. **One conversion and not two**, which is why
- * `src/residency.ts` answers in the door's own field names: the two differ in where they came from
+ * `@fossil-lang/draw`'s `Visible` answers in the door's own field names: the two differ in where they came from
  * and in nothing the renderer can see.
  */
 type Drawable = Pick<Frame, 'categories' | 'denseIds' | 'links' | 'marks' | 'matched' | 'positions'>;
@@ -271,7 +270,7 @@ export function corpusSource(options: CorpusSourceOptions): BoundedSource {
   const extent = extentOf(boxes);
 
   /**
-   * **What is loaded**, held apart from what is drawn — see `src/residency.ts` and
+   * **What is loaded**, held apart from what is drawn — see `@fossil-lang/draw` and
    * `/docs/design/camera`.
    *
    * It is consulted twice per camera move and for two different questions. A rectangle it has

@@ -125,6 +125,9 @@ importers:
       '@fossil-lang/corpus':
         specifier: workspace:*
         version: link:../../packages/corpus
+      '@fossil-lang/draw':
+        specifier: workspace:*
+        version: link:../../packages/draw
       '@fossil-lang/executor':
         specifier: workspace:*
         version: link:../../packages/executor
@@ -227,7 +230,27 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)(happy-dom@15.11.7)(lightningcss@1.32.0)
 
+  packages/draw:
+    dependencies:
+      '@fossil-lang/corpus':
+        specifier: workspace:*
+        version: link:../corpus
+      '@fossil-lang/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.41)(happy-dom@15.11.7)(lightningcss@1.32.0)
+
   packages/executor:
+    dependencies:
+      '@fossil-lang/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
       typescript:
         specifier: ^5.6.0

@@ -68,7 +68,7 @@ export interface CrossfilterOptions {
   /** Which vertex type. The crossfilter is over one type, like everything else the canvas draws. */
   type?: string;
   /**
-   * The view's projection — `src/encoding.ts`'s `Encoding.columns`, and not a list written
+   * The view's projection — `@fossil-lang/draw`'s `Encoding.columns`, and not a list written
    * here.
    *
    * It was `dense_id, birth_year, postcode, cluster_id`: three facts about the bench corpus in a
