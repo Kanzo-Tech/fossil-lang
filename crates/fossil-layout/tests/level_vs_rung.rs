@@ -8,11 +8,24 @@
 //! two artefacts have to be weighed against each other on the SAME corpus or the
 //! comparison is between two graphs.
 //!
-//! So this writes one corpus and measures both sides of it:
+//! So this writes one corpus and measures THREE arms on it:
 //!
 //! - the level pyramid — `chunks/l{k}/` and the edge levels at `l{k}/`;
 //! - the cell pyramid — `chunks/holon/r{k}/` and `chunks/holon/r{k}/quotient/`;
-//! - and the head-to-head at the scales where both can answer.
+//! - **a stride**, which stores nothing: `dense_id % 2^k = 0` evaluated per
+//!   query over the Morton-ordered payload. It is what `frame` falls back to
+//!   where no `l{k}/` is written, and the only thing the production consumer
+//!   does at all.
+//!
+//! — and the head-to-head at the scales where they can answer together.
+//!
+//! **A stride returns few rows and READS many bytes, and that is the whole
+//! reason it needs measuring rather than reasoning about.** `pool` strides
+//! `inrect` rather than the file, and `vis` carries `count(*)` over `inrect`, so
+//! the predicate is evaluated over everything the rectangle matched. The only
+//! thing that cuts it is Parquet footer pruning, and at the far view there is
+//! nothing to prune. So the unit is **bytes read per mark delivered**, not rows
+//! returned, and the tables are run at two rectangles and swept over eight.
 //!
 //! **Bytes are measured two ways and both are reported.** A camera does not read
 //! a whole Parquet: it projects the columns it draws with, and Parquet's
@@ -120,6 +133,250 @@ const EDGE_DRAW: &[&str] = &["src_x", "src_y", "dst_x", "dst_y"];
 const ADJACENCY_DRAW: &[&str] = &["src_dense", "dst_dense"];
 const CELL_DRAW: &[&str] = &["cell_id", "x", "y", "count", "mode", "purity"];
 const QUOTIENT_DRAW: &[&str] = &["src_cell", "dst_cell", "weight"];
+
+/// The grid `/docs/design/camera` measures fidelity on: 48 cells per axis over
+/// the extent, 2,304 cells. Restated here rather than imported because it lives
+/// in a `.mjs` script on the other side of the repo, and the number is the
+/// measurement's — changing it changes what every figure below means.
+const GRID: usize = 48;
+
+/// The mark budgets the three arms are compared at. `SCREEN_MARKS` is one of
+/// them; the others bracket it by roughly half-decades, because the crossover is
+/// a number on this axis and one sample cannot find it.
+const BUDGETS: &[u64] = &[1_000, 5_000, SCREEN_MARKS, 50_000];
+
+/// A camera's rectangle, in corpus units.
+#[derive(Clone, Copy)]
+struct Rect {
+    x0: f64,
+    x1: f64,
+    y0: f64,
+    y1: f64,
+}
+
+impl Rect {
+    /// The concentric box covering `f` of each axis of the written extent —
+    /// `f == 1.0` being the far view, where the rectangle covers the graph and
+    /// footer pruning has nothing to prune.
+    fn centred(x0: f64, x1: f64, y0: f64, y1: f64, f: f64) -> Self {
+        let (cx, cy) = (f64::midpoint(x0, x1), f64::midpoint(y0, y1));
+        let (hw, hh) = ((x1 - x0) * f / 2.0, (y1 - y0) * f / 2.0);
+        Self {
+            x0: cx - hw,
+            x1: cx + hw,
+            y0: cy - hh,
+            y1: cy + hh,
+        }
+    }
+
+    /// The box predicate, over a table that has `x` and `y`.
+    fn sql(self) -> String {
+        format!(
+            "x >= {} AND x <= {} AND y >= {} AND y <= {}",
+            self.x0, self.x1, self.y0, self.y1
+        )
+    }
+}
+
+/// **The stride the production consumer actually builds** — `apps/playground/src/stride.ts`,
+/// `strideSql`.
+///
+/// It is NOT `ceil(matched / limit)`. That integer is quantised UP to the next
+/// power of two, and the reason is in that file: arbitrary strides do not nest,
+/// so two adjacent zoom steps share almost no vertices and the camera move
+/// REPLACES the picture instead of refining it. So the stride family is `2^k`,
+/// one octave finer than the level family's `4^k` — not "any budget", which is
+/// the thing this measurement had to check before it could compare the two.
+///
+/// Spelled in integers where that file spells it in doubles, and it is the same
+/// function: `1 << (floor(log2(n - 0.5)) + 1)` IS `n.next_power_of_two()`, and
+/// the `- 0.5` is the hack that makes the float version agree with the integer
+/// one at the exact powers of two, where a double lands on either side of an
+/// integer and buys a doubling nobody asked for. Checked at 1, 4, 6, 20 and 300.
+fn stride_for(matched: u64, limit: u64) -> u64 {
+    matched.div_ceil(limit.max(1)).max(1).next_power_of_two()
+}
+
+/// The rows of `parquet_metadata`, folded to one row per row group: the `x`/`y`
+/// box the footer carries, the `dense_id`-like key's range, and the compressed
+/// size of just the columns a camera opens.
+///
+/// **This is the index, and it is the only one.** `frame` selects tiles out of
+/// the per-tile boxes in the Parquet footer and out of nothing else; the tiles
+/// of this corpus are row groups of one file, so the footer's row-group
+/// statistics ARE those boxes.
+fn footer(path: &Path, columns: &[&str], key: &str) -> String {
+    // `IN ()` is a parse error, and the empty projection is a real call: `key_ranges`
+    // wants the footer's boxes and no byte count at all.
+    let cols = if columns.is_empty() {
+        "NULL".to_string()
+    } else {
+        columns
+            .iter()
+            .map(|c| format!("'{c}'"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "SELECT row_group_id AS rg, \
+                max(CASE WHEN path_in_schema = 'x' THEN CAST(stats_min_value AS DOUBLE) END) AS xlo, \
+                max(CASE WHEN path_in_schema = 'x' THEN CAST(stats_max_value AS DOUBLE) END) AS xhi, \
+                max(CASE WHEN path_in_schema = 'y' THEN CAST(stats_min_value AS DOUBLE) END) AS ylo, \
+                max(CASE WHEN path_in_schema = 'y' THEN CAST(stats_max_value AS DOUBLE) END) AS yhi, \
+                max(CASE WHEN path_in_schema = '{key}' THEN CAST(stats_min_value AS BIGINT) END) AS klo, \
+                max(CASE WHEN path_in_schema = '{key}' THEN CAST(stats_max_value AS BIGINT) END) AS khi, \
+                sum(CASE WHEN path_in_schema IN ({cols}) THEN total_compressed_size ELSE 0 END) AS drawn \
+           FROM parquet_metadata('{p}') GROUP BY 1",
+        p = lit(path)
+    )
+}
+
+/// The drawn-column bytes of the row groups whose footer box meets `r`, and how
+/// many of how many that was. `(0, 0, 0)` where the file is not there.
+fn drawn_in_rect(db: &Connection, path: &Path, columns: &[&str], r: Rect) -> (u64, u64, u64) {
+    if !path.is_file() {
+        return (0, 0, 0);
+    }
+    let g = footer(path, columns, "dense_id");
+    let sql = format!(
+        "WITH g AS ({g}) SELECT coalesce(sum(CASE WHEN {keep} THEN drawn ELSE 0 END), 0), \
+                                count(*) FILTER (WHERE {keep}), count(*) FROM g",
+        keep = format!(
+            "xhi >= {} AND xlo <= {} AND yhi >= {} AND ylo <= {}",
+            r.x0, r.x1, r.y0, r.y1
+        )
+    );
+    let (b, kept, all): (i64, i64, i64) = db
+        .query_row(&sql, [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .expect("the footer");
+    (
+        u64::try_from(b).unwrap_or(0),
+        u64::try_from(kept).unwrap_or(0),
+        u64::try_from(all).unwrap_or(0),
+    )
+}
+
+/// The `[min, max]` of `key` over the row groups whose footer box meets `r` —
+/// the id runs a rectangle selects, which is what addresses the adjacency and
+/// the quotient, neither of which carries an `x`.
+fn key_ranges(db: &Connection, path: &Path, key: &str, r: Rect) -> Vec<(i64, i64)> {
+    if !path.is_file() {
+        return Vec::new();
+    }
+    let g = footer(path, &[], key);
+    let sql = format!(
+        "WITH g AS ({g}) SELECT klo, khi FROM g \
+          WHERE xhi >= {} AND xlo <= {} AND yhi >= {} AND ylo <= {} ORDER BY klo",
+        r.x0, r.x1, r.y0, r.y1
+    );
+    let mut stmt = db.prepare(&sql).expect("prepare the ranges");
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+        .expect("the ranges");
+    rows.filter_map(Result::ok).collect()
+}
+
+/// The drawn-column bytes of the row groups whose `key` range meets any of
+/// `ranges` — a keyed file pruned by the ids a rectangle already chose.
+fn drawn_on_key(
+    db: &Connection,
+    path: &Path,
+    columns: &[&str],
+    key: &str,
+    ranges: &[(i64, i64)],
+) -> u64 {
+    if !path.is_file() || ranges.is_empty() {
+        return 0;
+    }
+    let g = footer(path, columns, key);
+    let keep = ranges
+        .iter()
+        .map(|&(lo, hi)| format!("(khi >= {lo} AND klo <= {hi})"))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let sql = format!("WITH g AS ({g}) SELECT coalesce(sum(drawn), 0) FROM g WHERE {keep}");
+    u64::try_from(scalar(db, &sql)).unwrap_or(0)
+}
+
+/// A normalised density grid over the extent — `GRID`×`GRID` cells, each holding
+/// its share of the ink.
+///
+/// `weight` is what a row contributes: `1` for real vertices, `"count"` for a
+/// rung, whose rows are synthetic and each stand for that many members. That
+/// second spelling is the whole of how a rung is compared honestly — its
+/// centroids rasterised with their populations, against the real vertices.
+fn density(db: &Connection, path: &Path, predicate: &str, weight: &str, extent: Rect) -> Vec<f64> {
+    let mut cells = vec![0.0f64; GRID * GRID];
+    if !path.is_file() {
+        return cells;
+    }
+    let cw = (extent.x1 - extent.x0) / GRID as f64;
+    let ch = (extent.y1 - extent.y0) / GRID as f64;
+    let sql = format!(
+        "SELECT least({last}, greatest(0, floor((x - {x0}) / {cw})))::INTEGER AS gx, \
+                least({last}, greatest(0, floor((y - {y0}) / {ch})))::INTEGER AS gy, \
+                CAST(sum({weight}) AS DOUBLE) AS n \
+           FROM read_parquet('{p}') WHERE {predicate} GROUP BY 1, 2",
+        last = GRID - 1,
+        x0 = extent.x0,
+        y0 = extent.y0,
+        p = lit(path),
+    );
+    let mut stmt = db.prepare(&sql).expect("prepare the grid");
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i32>(0)?,
+                row.get::<_, i32>(1)?,
+                row.get::<_, f64>(2)?,
+            ))
+        })
+        .expect("the grid");
+    let mut total = 0.0;
+    for (gx, gy, n) in rows.filter_map(Result::ok) {
+        let i = usize::try_from(gy.max(0)).unwrap_or(0) * GRID
+            + usize::try_from(gx.max(0)).unwrap_or(0);
+        if let Some(cell) = cells.get_mut(i) {
+            *cell += n;
+            total += n;
+        }
+    }
+    if total > 0.0 {
+        for cell in &mut cells {
+            *cell /= total;
+        }
+    }
+    cells
+}
+
+/// Total variation distance — the largest fraction of the ink that can land in
+/// the wrong cell. `/docs/design/camera`'s statistic, and TV rather than a χ²
+/// for its reason: the question is about a picture, TV is bounded in `[0, 1]`
+/// and it does not grow with the grid.
+fn tv(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b).map(|(p, q)| (p - q).abs()).sum::<f64>() / 2.0
+}
+
+/// **The mark budget at which a stride's bytes-per-mark comes down to an
+/// artefact's.**
+///
+/// A stride's bytes do not move with the budget, so its bytes-per-mark is
+/// `stride / budget` — a hyperbola. An artefact's is a constant, `bytes /
+/// marks`, because it can only be read at the scales it was written at. They
+/// meet at `budget = stride · marks / bytes`, and BELOW that budget the artefact
+/// is cheaper per mark. That is the crossover, and it is one division rather
+/// than an interpolation because one of the two curves is flat.
+///
+/// `None` where the budget is past `matched`: a stride cannot deliver more marks
+/// than the rectangle holds, so the artefact is cheaper at every budget a camera
+/// can ask for.
+fn crossover(stride_bytes: u64, arm: &Arm, matched: u64) -> Option<f64> {
+    if arm.bytes == 0 || arm.marks == 0 {
+        return None;
+    }
+    let budget = stride_bytes as f64 * arm.marks as f64 / arm.bytes as f64;
+    (budget <= matched as f64).then_some(budget)
+}
 
 /// Where com-DBLP lives, relative to the repository root. Both directions of
 /// each of its 1,049,866 undirected edges, which is how the playground's bench
@@ -257,13 +514,19 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
     // ---- the whole-extent floor, from the WRITTEN positions ----
     let db = Connection::open_in_memory().expect("duckdb");
     let pay = lit(&payload);
-    let (min_x, max_x): (f64, f64) = db
+    let (min_x, max_x, min_y, max_y): (f64, f64, f64, f64) = db
         .query_row(
-            &format!("SELECT min(x), max(x) FROM read_parquet('{pay}')"),
+            &format!("SELECT min(x), max(x), min(y), max(y) FROM read_parquet('{pay}')"),
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .expect("the extent");
+    let extent = Rect {
+        x0: min_x,
+        x1: max_x,
+        y0: min_y,
+        y1: max_y,
+    };
     let floor = MIN_LINK_PX * (max_x - min_x) / CANVAS_PX;
     let f2 = floor * floor;
     println!(
@@ -634,4 +897,635 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
         c.tree.rungs.len(),
         c.tree.rungs.last().map_or(0, |r| r.holon_count),
     );
+
+    // ================== 5. THE THIRD ARM, AT TWO RECTANGLES ==================
+    for f in [1.0, 0.1] {
+        stride_arm(&db, c, big, &payload, &by_source, &plan, extent, f);
+    }
+
+    // ========================== 6. FIDELITY ==========================
+    fidelity(&db, c, big, &payload, &plan, extent);
+
+    // ========================== 7. THE CROSSOVER ==========================
+    crossover_report(&db, c, &payload, &by_source, &plan, extent);
+}
+
+/// One arm at one rectangle: what it is called, what it DELIVERS, what it
+/// TOUCHES. Marks and bytes are the two halves of the headline and nothing else
+/// in this file needs to be carried beside them.
+struct Arm {
+    name: String,
+    marks: u64,
+    bytes: u64,
+}
+
+impl Arm {
+    fn per_mark(&self) -> f64 {
+        if self.marks == 0 {
+            f64::INFINITY
+        } else {
+            self.bytes as f64 / self.marks as f64
+        }
+    }
+}
+
+/// **Every scale of the level pyramid at one rectangle, `l0` included.**
+///
+/// `l0` is the payload read — and it is BYTE-FOR-BYTE the stride's read, because
+/// a stride does not change which files are opened. Listing it is how the table
+/// says that the level arm degenerates INTO the stride arm as the rectangle
+/// tightens, rather than losing to something else.
+///
+/// The vertex file is pruned on its own `x`/`y` footers. The edge file has no
+/// `x`, so it is pruned on the `src_dense` runs the vertex file's kept row
+/// groups hold — which is `frame`'s own rule, which derives the edge tiles from
+/// the vertex tiles arithmetically out of one plan.
+fn level_arms(
+    db: &Connection,
+    c: &Corpus,
+    payload: &Path,
+    by_source: &Path,
+    plan: &VertexLevels,
+    r: Rect,
+) -> Vec<Arm> {
+    let chunks = c.root.join("chunks");
+    let mut out = Vec::new();
+    for k in std::iter::once(0).chain(plan.levels.iter().copied()) {
+        let (vfile, efile) = if k == 0 {
+            (payload.to_path_buf(), by_source.to_path_buf())
+        } else {
+            (
+                chunks.join(plan.level_prefix(k)).join("tiles.parquet"),
+                c.root.join(format!("l{k}")).join("tiles.parquet"),
+            )
+        };
+        let (vb, _, _) = drawn_in_rect(db, &vfile, VERTEX_DRAW, r);
+        let ids = key_ranges(db, &vfile, "dense_id", r);
+        let eb = if k == 0 {
+            drawn_on_key(db, &efile, ADJACENCY_DRAW, "src_dense", &ids)
+        } else {
+            drawn_on_key(db, &efile, EDGE_DRAW, "src_dense", &ids)
+        };
+        let marks = u64::try_from(scalar(
+            db,
+            &format!(
+                "SELECT count(*) FROM read_parquet('{}') WHERE {}",
+                lit(&vfile),
+                r.sql()
+            ),
+        ))
+        .unwrap_or(0);
+        out.push(Arm {
+            name: format!("l{k}"),
+            marks,
+            bytes: vb + eb,
+        });
+    }
+    out
+}
+
+/// Every rung at one rectangle: its cells by their own `x`/`y` footers, its
+/// quotient by the `cell_id` runs those footers chose.
+fn rung_arms(db: &Connection, c: &Corpus, r: Rect) -> Vec<Arm> {
+    let holon = c
+        .root
+        .join("chunks")
+        .join(HOLON_PREFIX.trim_end_matches('/'));
+    c.tree
+        .rungs
+        .iter()
+        .enumerate()
+        .map(|(index, rung)| {
+            let rdir = holon.join(rung.path.trim_end_matches('/'));
+            let cfile = rdir.join("tiles.parquet");
+            let qfile = rdir
+                .join(QUOTIENT_PREFIX.trim_end_matches('/'))
+                .join("tiles.parquet");
+            let (cb, _, _) = drawn_in_rect(db, &cfile, CELL_DRAW, r);
+            let ids = key_ranges(db, &cfile, "cell_id", r);
+            let qb = drawn_on_key(db, &qfile, QUOTIENT_DRAW, "src_cell", &ids);
+            let marks = u64::try_from(scalar(
+                db,
+                &format!(
+                    "SELECT count(*) FROM read_parquet('{}') WHERE {}",
+                    lit(&cfile),
+                    r.sql()
+                ),
+            ))
+            .unwrap_or(0);
+            Arm {
+                name: format!("r{}", index + 1),
+                marks,
+                bytes: cb + qb,
+            }
+        })
+        .collect()
+}
+
+/// One row of the three tables [`stride_arm`] prints: a budget, the stride it
+/// quantises to, and the index of the level and the rung a camera would read at
+/// it. Three tables out of ONE gathering, so they cannot disagree.
+struct Row {
+    budget: u64,
+    stride: u64,
+    /// Marks the stride delivers, and the bytes it touched to deliver them.
+    sm: u64,
+    sb: u64,
+    /// Into `levels` and into `rungs`.
+    l: usize,
+    g: usize,
+}
+
+/// **The third arm: a stride, at one rectangle.**
+///
+/// A stride is what `frame` falls back to when no `l{k}/` is written, and — as of
+/// the measurement this was added for — the only thing the production consumer
+/// (`@kanzo-tech/graph`'s `duck-source.ts`) ever does. It stores nothing. The
+/// question it has to answer is therefore not what it stores but what it READS,
+/// and the trap is that a stride returns few rows and touches many:
+///
+/// - `pool` applies `dense_id % stride = 0` to `inrect`, not to the file, so the
+///   predicate is evaluated over every row the rectangle holds;
+/// - `vis` carries `(SELECT count(*) FROM inrect) AS matched`, which is the
+///   number the NEXT stride is computed from, so `inrect` has to be counted
+///   whether or not the predicate could have pruned it.
+///
+/// **So the stride's byte count does not move with the budget, and that is the
+/// whole of its shape.** The only thing that cuts it is footer pruning — the row
+/// groups whose `x`/`y` box misses the rectangle — which is why this is run at
+/// two rectangles and then swept over a range of them in [`where_the_stride_wins`].
+///
+/// A level and a rung are read at the scale whose IN-RECTANGLE mark count is
+/// nearest the budget, not at the scale whose global row count is: a rung's
+/// cells are laid out over the whole graph, so a rectangle over a hundredth of
+/// the extent meets a hundredth of them, and picking by the global count asks a
+/// coarse artefact a question it cannot answer and then reports the loss as a
+/// cost.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn stride_arm(
+    db: &Connection,
+    c: &Corpus,
+    big: u64,
+    payload: &Path,
+    by_source: &Path,
+    plan: &VertexLevels,
+    extent: Rect,
+    fraction: f64,
+) {
+    let rect = Rect::centred(extent.x0, extent.x1, extent.y0, extent.y1, fraction);
+    let pay = lit(payload);
+    let matched = u64::try_from(scalar(
+        db,
+        &format!(
+            "SELECT count(*) FROM read_parquet('{pay}') WHERE {}",
+            rect.sql()
+        ),
+    ))
+    .unwrap_or(0);
+
+    let levels = level_arms(db, c, payload, by_source, plan, rect);
+    let rungs = rung_arms(db, c, rect);
+    // The stride reads what `l0` reads — the same files, pruned by the same
+    // footers — because striding changes which rows survive and not which bytes
+    // are opened.
+    let stride_bytes = levels.first().map_or(0, |a| a.bytes);
+    let (_, kept, of) = drawn_in_rect(db, payload, VERTEX_DRAW, rect);
+
+    println!(
+        "\n=== 5. A STRIDE AS A THIRD ARM — {} ===",
+        if fraction >= 1.0 {
+            "THE FAR VIEW, the rectangle covers the extent".to_string()
+        } else {
+            format!("a rectangle over {:.0}% of each axis", fraction * 100.0)
+        }
+    );
+    println!(
+        "  the rectangle holds {matched} of {big} vertices ({:.1}%) and selects {kept} of {of} \
+         payload row groups; a stride over it touches {:.0} kB — the payload's drawn columns plus \
+         the adjacency the ids it kept address — whatever the budget",
+        pct(matched, big),
+        kb(stride_bytes),
+    );
+
+    let nearest = |arms: &[Arm], budget: u64| {
+        arms.iter()
+            .enumerate()
+            .min_by_key(|(_, a)| a.marks.abs_diff(budget))
+            .map_or(0, |(i, _)| i)
+    };
+    let rows: Vec<Row> = BUDGETS
+        .iter()
+        .map(|&budget| {
+            let stride = stride_for(matched, budget);
+            let sm = u64::try_from(scalar(
+                db,
+                &format!(
+                    "SELECT count(*) FROM read_parquet('{pay}') \
+                      WHERE {} AND dense_id % {stride} = 0",
+                    rect.sql()
+                ),
+            ))
+            .unwrap_or(0);
+            Row {
+                budget,
+                stride,
+                sm,
+                sb: stride_bytes,
+                l: nearest(&levels, budget),
+                g: nearest(&rungs, budget),
+            }
+        })
+        .collect();
+
+    println!("\n  1. BYTES READ, in the camera's projected columns (kB)");
+    println!(
+        "{:>9} {:>10} {:>12} {:>7} {:>11} {:>7} {:>11}",
+        "budget", "stride", "stride kB", "level", "level kB", "rung", "rung kB"
+    );
+    for row in &rows {
+        println!(
+            "{:>9} {:>10} {:>12.1} {:>7} {:>11.1} {:>7} {:>11.1}",
+            row.budget,
+            format!("1 in {}", row.stride),
+            kb(row.sb),
+            levels[row.l].name,
+            kb(levels[row.l].bytes),
+            rungs[row.g].name,
+            kb(rungs[row.g].bytes),
+        );
+    }
+
+    println!("\n  2. MARKS DELIVERED");
+    println!(
+        "{:>9} {:>12} {:>7} {:>12} {:>7} {:>12}",
+        "budget", "stride", "level", "level", "rung", "rung"
+    );
+    for row in &rows {
+        println!(
+            "{:>9} {:>12} {:>7} {:>12} {:>7} {:>12}",
+            row.budget,
+            row.sm,
+            levels[row.l].name,
+            levels[row.l].marks,
+            rungs[row.g].name,
+            rungs[row.g].marks,
+        );
+    }
+
+    println!("\n  3. BYTES PER MARK — the headline");
+    println!(
+        "{:>9} {:>12} {:>12} {:>12} {:>16}",
+        "budget", "stride B/mk", "level B/mk", "rung B/mk", "cheapest"
+    );
+    for row in &rows {
+        let strided = if row.sm == 0 {
+            f64::INFINITY
+        } else {
+            row.sb as f64 / row.sm as f64
+        };
+        let (level, rung) = (levels[row.l].per_mark(), rungs[row.g].per_mark());
+        let best = if rung <= strided && rung <= level {
+            format!("{} {:.1}x", rungs[row.g].name, strided / rung)
+        } else if level <= strided {
+            // `l0` IS the stride, so a tie is not a level winning: it is the two
+            // arms being the same read, and the table says so rather than
+            // awarding it.
+            if levels[row.l].name == "l0" {
+                "stride (= l0)".to_string()
+            } else {
+                format!("{} {:.1}x", levels[row.l].name, strided / level)
+            }
+        } else {
+            "stride".to_string()
+        };
+        println!(
+            "{:>9} {strided:>12.1} {level:>12.1} {rung:>12.1} {best:>16}",
+            row.budget
+        );
+    }
+
+    println!("\n  every scale of both artefacts at this rectangle, for the crossover below");
+    println!(
+        "{:<7} {:>10} {:>11} {:>12}",
+        "arm", "marks", "kB", "B per mark"
+    );
+    for arm in levels.iter().chain(&rungs) {
+        println!(
+            "{:<7} {:>10} {:>11.1} {:>12.1}",
+            arm.name,
+            arm.marks,
+            kb(arm.bytes),
+            arm.per_mark()
+        );
+    }
+}
+
+/// **Fidelity, on the measure this repo already has.**
+///
+/// `/docs/design/camera` and `apps/playground/scripts/verify-properties.mjs`
+/// state it: total variation distance between two normalised density grids,
+/// 48×48 over the extent, and a tolerance that is MEASURED rather than picked —
+/// the same population drawn with no spatial structure at all
+/// (`hash(dense_id) % s = 0`), which is what sampling noise alone costs at that
+/// size. An arm passes when it is no further from the whole graph than that null
+/// is. It is the figure `design/discarded` quotes as 0.0644 against 0.1326.
+///
+/// The three arms are rasterised as the three things they are:
+///
+/// - a **level**: the rows of `l{k}/tiles.parquet`, one point each;
+/// - a **stride**: `dense_id % 2^k = 0` over the payload, one point each — and
+///   where `2^k` is `4^j` that is the SAME SET as level `j`, which is the first
+///   thing the table says;
+/// - a **rung**: the cell centroids of `holon/r{k}/tiles.parquet`, each weighted
+///   by its `count`. That is the honest comparison: a rung row is synthetic and
+///   stands for that many members, so rasterising it unweighted would measure a
+///   different quantity from the other two.
+#[allow(clippy::too_many_lines)]
+fn fidelity(
+    db: &Connection,
+    c: &Corpus,
+    big: u64,
+    payload: &Path,
+    plan: &VertexLevels,
+    extent: Rect,
+) {
+    let chunks = c.root.join("chunks");
+    let holon = chunks.join(HOLON_PREFIX.trim_end_matches('/'));
+    let base = density(db, payload, "TRUE", "1", extent);
+
+    println!("\n=== 6. FIDELITY — {GRID}x{GRID} total variation against the payload ===");
+    println!(
+        "  the measure is `/docs/design/camera`'s: TV between normalised density grids over the \
+         written extent, and the tolerance is the null — the same count drawn by \
+         `hash(dense_id) % s = 0`, which has no spatial structure"
+    );
+    println!(
+        "{:<10} {:>6} {:>10} {:>9} {:>9} {:>8}",
+        "arm", "stride", "marks", "TV", "null TV", "verdict"
+    );
+
+    // The stride family, `2^k`, which contains the level family as its even
+    // members. Walked as far as the deepest level's stride so the two tables
+    // cover the same range of marks.
+    let deepest = plan.levels.last().copied().unwrap_or(0);
+    for k in 1..=(deepest * 2) {
+        let stride = 1u64 << k;
+        let marks = u64::try_from(scalar(
+            db,
+            &format!(
+                "SELECT count(*) FROM read_parquet('{}') WHERE dense_id % {stride} = 0",
+                lit(payload)
+            ),
+        ))
+        .unwrap_or(0);
+        let arm = density(
+            db,
+            payload,
+            &format!("dense_id % {stride} = 0"),
+            "1",
+            extent,
+        );
+        let null = density(
+            db,
+            payload,
+            &format!("hash(dense_id) % {stride} = 0"),
+            "1",
+            extent,
+        );
+        let (dist, noise) = (tv(&base, &arm), tv(&base, &null));
+        println!(
+            "{:<10} {stride:>6} {marks:>10} {dist:>9.4} {noise:>9.4} {:>8}",
+            if k % 2 == 0 {
+                format!("stride=l{}", k / 2)
+            } else {
+                "stride".to_string()
+            },
+            if dist <= noise { "pass" } else { "FAIL" },
+        );
+    }
+
+    // The levels, read off their own files rather than off the predicate — a
+    // written level that disagreed with the predicate would show up here as a
+    // different TV from the `stride=l{k}` row above it.
+    for &k in &plan.levels {
+        let lfile = chunks.join(plan.level_prefix(k)).join("tiles.parquet");
+        let stride = VertexLevels::stride(k);
+        let arm = density(db, &lfile, "TRUE", "1", extent);
+        let null = density(
+            db,
+            payload,
+            &format!("hash(dense_id) % {stride} = 0"),
+            "1",
+            extent,
+        );
+        let (dist, noise) = (tv(&base, &arm), tv(&base, &null));
+        println!(
+            "{:<10} {stride:>6} {:>10} {dist:>9.4} {noise:>9.4} {:>8}",
+            format!("level l{k}"),
+            rows_of(&lfile),
+            if dist <= noise { "pass" } else { "FAIL" },
+        );
+    }
+
+    // The rungs: centroids weighted by `count`, against the real vertices. The
+    // null is the unstructured subsample of the same SIZE — the rung's holon
+    // count expressed as the stride that draws that many.
+    for (index, rung) in c.tree.rungs.iter().enumerate() {
+        let k = index + 1;
+        let cfile = holon
+            .join(rung.path.trim_end_matches('/'))
+            .join("tiles.parquet");
+        let stride = (big / rung.holon_count.max(1)).next_power_of_two().max(1);
+        let arm = density(db, &cfile, "TRUE", "\"count\"", extent);
+        let null = density(
+            db,
+            payload,
+            &format!("hash(dense_id) % {stride} = 0"),
+            "1",
+            extent,
+        );
+        let (dist, noise) = (tv(&base, &arm), tv(&base, &null));
+        println!(
+            "{:<10} {:>6} {:>10} {dist:>9.4} {noise:>9.4} {:>8}",
+            format!("rung r{k}"),
+            format!("~{stride}"),
+            rung.holon_count,
+            if dist <= noise { "pass" } else { "FAIL" },
+        );
+    }
+    println!(
+        "  (a rung is rasterised as its CENTROIDS WEIGHTED BY `count`; the other two are one \
+         point per row. `~s` is the stride that draws about as many marks, which is what its \
+         null is drawn at)"
+    );
+}
+
+/// **The composite crossover, and why a per-arm column is not it.**
+///
+/// A coarse arm's own crossover is a budget nobody would ever read it at: `r3`
+/// delivers 1,172 marks, so its 27,000-mark figure is the budget at which a
+/// stride would match the bytes-per-mark of an artefact that cannot fill a
+/// twentieth of that screen. The number that decides anything is the one over
+/// the arm a camera would ACTUALLY read at each budget — the scale nearest it —
+/// so this sweeps the budget in one-percent steps and reads that.
+fn composite(stride_bytes: u64, arms: &[Arm], matched: u64) -> Option<(u64, String)> {
+    let mut budget = 100u64;
+    while budget <= matched {
+        let arm = arms.iter().min_by_key(|a| a.marks.abs_diff(budget))?;
+        if stride_bytes as f64 / budget as f64 <= arm.per_mark() {
+            return Some((budget, arm.name.clone()));
+        }
+        budget = (budget * 101 / 100).max(budget + 1);
+    }
+    None
+}
+
+/// **The crossover, on both axes it has one.**
+///
+/// The question it was asked on is the mark budget, and the answer on that axis
+/// is [`crossover`]: one division per scale, because a stride's bytes-per-mark
+/// falls as `1 / budget` while an artefact's is fixed by what was written.
+///
+/// **But the budget is not the axis the decision turns on, and this reports the
+/// other one beside it.** A stride's bytes come down only when the footer prunes
+/// row groups, so what moves it is the RECTANGLE. The sweep below holds the
+/// budget at the screen's `SCREEN_MARKS` and tightens the rectangle until the
+/// stride wins — and what it finds is not a budget at all. It is the zoom at
+/// which a coarse artefact stops being the thing a camera should read, because
+/// the rectangle no longer holds enough vertices to need decimating.
+fn crossover_report(
+    db: &Connection,
+    c: &Corpus,
+    payload: &Path,
+    by_source: &Path,
+    plan: &VertexLevels,
+    extent: Rect,
+) {
+    let pay = lit(payload);
+    println!("\n=== 7. THE CROSSOVER ===");
+
+    // ---- on the budget axis, at the far view ----
+    let far = Rect::centred(extent.x0, extent.x1, extent.y0, extent.y1, 1.0);
+    let matched = u64::try_from(scalar(
+        db,
+        &format!(
+            "SELECT count(*) FROM read_parquet('{pay}') WHERE {}",
+            far.sql()
+        ),
+    ))
+    .unwrap_or(0);
+    let levels = level_arms(db, c, payload, by_source, plan, far);
+    let rungs = rung_arms(db, c, far);
+    let stride_bytes = levels.first().map_or(0, |a| a.bytes);
+    println!(
+        "\n  A. ON THE MARK BUDGET, at the far view. A stride reads {:.0} kB whatever the \
+         budget, so its bytes-per-mark is {:.0} kB / budget; an artefact's is flat. They meet \
+         at `stride x marks / bytes`.",
+        kb(stride_bytes),
+        kb(stride_bytes)
+    );
+    println!(
+        "{:<7} {:>10} {:>11} {:>12} {:>16}",
+        "arm", "marks", "kB", "B per mark", "stride wins at"
+    );
+    for arm in levels.iter().skip(1).chain(&rungs) {
+        println!(
+            "{:<7} {:>10} {:>11.1} {:>12.1} {:>16}",
+            arm.name,
+            arm.marks,
+            kb(arm.bytes),
+            arm.per_mark(),
+            crossover(stride_bytes, arm, matched).map_or_else(
+                || "never (> matched)".to_string(),
+                |b| format!("{b:.0} marks")
+            ),
+        );
+    }
+    // `l0` is left out of the level arm: it IS the stride's read, and an arm
+    // that is the thing it is being compared against cannot be overtaken by it.
+    for (what, arms) in [
+        ("level pyramid", &levels[1..]),
+        ("cell pyramid", &rungs[..]),
+    ] {
+        match composite(stride_bytes, arms, matched) {
+            Some((budget, name)) => println!(
+                "  -> the {what} reads fewer bytes per mark than a far-view stride at every \
+                 budget below {budget} marks, where the stride catches {name}"
+            ),
+            None => println!(
+                "  -> the {what} is never overtaken at any budget this rectangle can supply"
+            ),
+        }
+    }
+
+    // ---- on the rectangle axis, at the screen's budget ----
+    println!(
+        "\n  B. ON THE RECTANGLE, at the {SCREEN_MARKS}-mark screen. This is the axis the \
+         decision actually turns on: a stride's bytes fall only when the footer prunes row \
+         groups, and the budget never prunes one."
+    );
+    println!(
+        "{:>7} {:>10} {:>12} {:>12} {:>7} {:>12} {:>7} {:>12} {:>10}",
+        "extent",
+        "matched",
+        "stride kB",
+        "stride B/mk",
+        "level",
+        "level B/mk",
+        "rung",
+        "rung B/mk",
+        "cheapest"
+    );
+    for f in [1.0, 0.7, 0.5, 0.35, 0.25, 0.15, 0.1, 0.05] {
+        let r = Rect::centred(extent.x0, extent.x1, extent.y0, extent.y1, f);
+        let m = u64::try_from(scalar(
+            db,
+            &format!(
+                "SELECT count(*) FROM read_parquet('{pay}') WHERE {}",
+                r.sql()
+            ),
+        ))
+        .unwrap_or(0);
+        let ls = level_arms(db, c, payload, by_source, plan, r);
+        let gs = rung_arms(db, c, r);
+        let sb = ls.first().map_or(0, |a| a.bytes);
+        let stride = stride_for(m, SCREEN_MARKS);
+        let sm = u64::try_from(scalar(
+            db,
+            &format!(
+                "SELECT count(*) FROM read_parquet('{pay}') WHERE {} AND dense_id % {stride} = 0",
+                r.sql()
+            ),
+        ))
+        .unwrap_or(0);
+        let sper = if sm == 0 {
+            f64::INFINITY
+        } else {
+            sb as f64 / sm as f64
+        };
+        // The scale of each artefact whose IN-RECTANGLE marks land nearest the
+        // screen, which is the one a camera at this zoom would actually read.
+        let pick = |arms: &[Arm]| -> usize {
+            arms.iter()
+                .enumerate()
+                .min_by_key(|(_, a)| a.marks.abs_diff(SCREEN_MARKS))
+                .map_or(0, |(i, _)| i)
+        };
+        let (li, gi) = (pick(&ls), pick(&gs));
+        let (lper, gper) = (ls[li].per_mark(), gs[gi].per_mark());
+        let best = if gper < sper && gper <= lper {
+            format!("{} {:.1}x", gs[gi].name, sper / gper)
+        } else if lper < sper && ls[li].name != "l0" {
+            format!("{} {:.1}x", ls[li].name, sper / lper)
+        } else {
+            "stride".to_string()
+        };
+        println!(
+            "{:>6.0}% {m:>10} {:>12.1} {sper:>12.1} {:>7} {lper:>12.1} {:>7} {gper:>12.1} {best:>10}",
+            f * 100.0,
+            kb(sb),
+            ls[li].name,
+            gs[gi].name,
+        );
+    }
 }
