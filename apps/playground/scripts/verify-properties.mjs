@@ -23,6 +23,13 @@
  * largest fraction of the ink that can land in the wrong place, it is bounded in [0, 1] and it does
  * not grow with the grid the way a χ² statistic does.
  *
+ * **And the grid is not part of the measure.** A fidelity figure is a figure only while the drawn
+ * set has at least as many points as the grid has bins; below that an arm and its null both
+ * saturate and the difference between them is binning noise reported as a verdict. So every level
+ * here prints `bins/mark` beside its numbers, and one taken past `BINS_PER_MARK_MAX` prints VOID
+ * instead of a verdict — which the `--grid` flag and a fifth level are each one step away from.
+ * The argument, and the 130 rows it was measured over, are on `BINS_PER_MARK_MAX` below.
+ *
  * ## 2. Monotone refinement — zooming in only ADDS
  *
  * `{drawn at the closer zoom} ⊇ {drawn at the farther zoom} ∩ {inside the closer window}`.
@@ -113,6 +120,19 @@ const ok = (label, condition, detail = '') => {
 const note = (text) => console.log(`  ..   ${text}`);
 
 /**
+ * **A claim the instrument cannot weigh** — not a pass, not a failure of what was claimed, and not
+ * a line anybody may quote.
+ *
+ * It still counts as a failure of the run. A suite that silently drops a property reports a clean
+ * sweep of nothing, which is the shape of the bug this whole script exists to catch one level
+ * down: an answer that is about the ruler rather than about the corpus, arriving as a verdict.
+ */
+const voidVerdict = (label, detail) => {
+  console.log(`  VOID ${label} — ${detail}`);
+  failures += 1;
+};
+
+/**
  * The reader's wasm, as BYTES rather than a URL.
  *
  * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32, and Node is
@@ -154,6 +174,45 @@ console.log(
 
 /** How many cells per axis the density grid has. */
 const GRID = Number(flag('grid', 48));
+
+/** The grid's cell count — the number every mark count below is weighed against. */
+const BINS = GRID * GRID;
+
+/**
+ * **The resolution ceiling. Above one bin per mark this script reports no verdict at all.**
+ *
+ * Total variation against a normalised base reads the picture only while the drawn set has at
+ * least as many points as the grid has bins. Below that the arm cannot reach most cells and its
+ * distance saturates towards 1 — and so does the null's, because the null is drawn at the same
+ * size. Two numbers pinned against the same ceiling differ by their binning noise, and the sign of
+ * that difference is not evidence about any picture.
+ *
+ * That is not a hypothetical. `64e3bd5` read the coarse rungs of the pyramid on a grid with more
+ * bins than they have marks — 310 marks in 2,304 cells, 7.43 bins per mark — and reported them
+ * failing this measure; `d5dc812` wrote the failure into the reference as a property of the
+ * artefact. It was a property of the ruler, and the same rung on the same file beats the same null
+ * by +0.1470 once nothing is asked to fill more bins than it has points.
+ *
+ * **The threshold is measured, not picked.** `crates/fossil-layout/tests/level_vs_rung.rs,
+ * resolution_sweep` runs this statistic across two corpora at five resolutions: over 130 rows, no
+ * arm at one bin per mark or finer ever fails and every failure sits at two bins per mark or
+ * coarser, with no counterexample in either direction. One is where the measure stops being able
+ * to tell a bad sample from a fine grid.
+ *
+ * **This script does not fit its grid to each arm, and that is deliberate.** Its four levels are a
+ * published table on `/docs/design/camera` taken at 48×48, and a figure re-measured at another
+ * resolution is a different figure — `crates/fossil-layout/tests/level_vs_rung.rs, fitted_grid` is
+ * the other instrument's answer for arms that have no published number to hold still. What this
+ * one can do is refuse to pronounce past the end of its own ruler. Its four sit between 0.01 and
+ * 0.59 bins per mark; a level or a `--grid` that leaves that range gets a VOID and not a verdict.
+ */
+const BINS_PER_MARK_MAX = 1;
+
+/** The ruler against one arm: how many cells the drawn set is being asked to fill. */
+const binsPerMark = (marks) => BINS / Math.max(marks, 1);
+
+/** The grid this measure would be honest at for `marks` — `sqrt(marks)` per axis, floored at 2. */
+const fittedGrid = (marks) => Math.max(2, Math.floor(Math.sqrt(marks)));
 
 /**
  * A density grid over the whole extent, for one predicate on `dense_id`.
@@ -204,18 +263,34 @@ console.log('1. fidelity — is a coarse view the same image with fewer points')
     const null_ = grid(`hash(dense_id) % ${stride} = 0`);
     const d = tv(base.cells, level_.cells);
     const n = tv(base.cells, null_.cells);
-    rows.push({ level, stride, drawn: level_.total, d, n, sampled: null_.total });
-    ok(
-      `level ${level} is no further from the whole graph than a random subsample of its size`,
-      d <= n,
-      `TV ${d.toFixed(4)} against ${n.toFixed(4)} over ${level_.total.toLocaleString()} points`,
-    );
+    // The sparser of the two arms is what decides whether the ruler is in range: the null is drawn
+    // at the same size by construction, and it is the one that saturates first when it is not.
+    const ruler = binsPerMark(Math.min(level_.total, null_.total));
+    rows.push({ level, stride, drawn: level_.total, d, n, sampled: null_.total, ruler });
+    const claim = `level ${level} is no further from the whole graph than a random subsample of its size`;
+    const detail =
+      `TV ${d.toFixed(4)} against ${n.toFixed(4)} over ${level_.total.toLocaleString()} points, ` +
+      `${BINS.toLocaleString()} bins | ${ruler.toFixed(2)} bins/mark`;
+    if (ruler > BINS_PER_MARK_MAX) {
+      const fit = fittedGrid(Math.min(level_.total, null_.total));
+      voidVerdict(
+        claim,
+        `${detail}: past this measure's resolution, so neither pass nor fail is evidence. ` +
+          `Both distances saturate together at this size and their difference is binning noise ` +
+          `(see BINS_PER_MARK_MAX). Re-measure at about --grid ${fit}, or leave the level out.`,
+      );
+    } else {
+      ok(claim, d <= n, detail);
+    }
   }
-  note(`grid ${GRID}x${GRID} over the extent, ${GRID * GRID} cells`);
+  note(
+    `grid ${GRID}x${GRID} over the extent, ${BINS.toLocaleString()} cells — a verdict is only taken ` +
+      `at ${BINS_PER_MARK_MAX.toFixed(2)} bins/mark or finer`,
+  );
   for (const r of rows) {
     note(
       `level ${r.level} (1 in ${r.stride}): ${r.drawn.toLocaleString()} drawn, TV ${r.d.toFixed(4)}; ` +
-        `random ${r.sampled.toLocaleString()}, TV ${r.n.toFixed(4)}`,
+        `random ${r.sampled.toLocaleString()}, TV ${r.n.toFixed(4)}; ${r.ruler.toFixed(2)} bins/mark`,
     );
   }
 
