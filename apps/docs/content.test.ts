@@ -888,3 +888,206 @@ describe("every grammar.bnf citation names a production", () => {
     }
   });
 });
+
+/**
+ * A bare call in a fenced ` ```ts ` block names a function some package actually exports.
+ *
+ * Every other guard on this page checks a citation — a path, an anchor, a route. This one checks
+ * the code, and it exists because the code is where this site's worst failure to date happened:
+ * `design/cost.mdx` published a `counting(query)` decorator, with a sample `report()` whose numbers
+ * were lifted out of a measured table twelve screens above it, on a page whose `direction:` says
+ * **every obligation below is asserted by something that runs**. Nothing in the tree declares
+ * `counting`. It was not a stale name — it had never existed — and the page had grown two
+ * paragraphs of prose on top of it, including a claim about this package that its own
+ * instrumentation had already made false. Six guards were green the whole time, because an invented
+ * function is not a citation and nothing here read a fence.
+ *
+ * The rule is the narrowest one that catches it: an identifier in **call position, with nothing
+ * before the `(`** — no receiver, no `new` — must be a name exported by some
+ * `packages/<pkg>/src/index.ts` — the glob is spelled out here because the block-comment form of
+ * it would end this comment. A member call is out of scope on purpose (`corpus.frame(…)` is checked
+ * by the type of the receiver, which no regex here has), and so is a constructor (`new Response(…)`
+ * is the platform's, not ours).
+ *
+ * **Interface-member regions are skipped**, and that is the one structural exemption. A page may
+ * draw a contract it does not own —
+ *
+ *     interface BoundedSource {
+ *       slice(request: { … }): Promise<Slice>;
+ *     }
+ *
+ * — where `slice(` is a signature and not a call. Skipping `interface X { … }` by brace depth
+ * removes it without a name in a list. It was the only false positive over the whole site, measured
+ * twice: **6 fenced `ts` blocks, 3 bare calls, all three `open`**, and `slice` the only thing the
+ * exemption excuses.
+ *
+ * WHAT WAS MEASURED AND REJECTED, because this is the shape this repository keeps having to refuse.
+ *
+ * The wider version reads every backticked identifier adjacent to a cited module and demands the
+ * module declare it. Over this site that is **20 distinct identifiers in 32 occurrences resolving
+ * to nothing, of which about 16 are correctly foreign vocabulary** — ODRL's `leftOperand`,
+ * OME-NGFF's `coordinateTransformations`, JSON Schema's `oneOf`, the browser's `postMessage`, ARX's
+ * `freqCalc`, cosmos.gl's `screenToSpacePosition`, Mosaic's `useQueryLoop`. One false positive per
+ * real catch, on an allowlist that grows every time `design/prior-art` cites another specification:
+ * the hand-kept set this repository has now rejected twice, and `design/discarded` carries it with
+ * what would bring it back. A fence is the discriminator this one gets for free — nobody writes
+ * somebody else's runnable TypeScript in a ` ```ts ` block on this site — which is why the narrow
+ * rule needs no list and the wide one cannot do without one.
+ *
+ * WHAT IT CANNOT PROVE, and the residue is the same one every guard here admits:
+ *
+ *   - **That the call is right.** `open(url, { query })` passing three arguments the signature does
+ *     not have is green. The name exists; the call is not typechecked, and a test of this shape
+ *     never will be. What changed is that a name which exists NOWHERE is now a build failure.
+ *   - **That a block should have been there at all.** A page can still describe a mechanism in
+ *     prose and invent it in the sentence rather than in a fence.
+ *   - **That the exported name is the one meant.** Eight entry points are read as one set, so a
+ *     function exported by any package satisfies a call on any page.
+ *
+ * And it is `it.each` over what the tree contains, so it thins out silently exactly as the suites
+ * above do: deleting the last ` ```ts ` block deletes every test but the two vacuity ones. There is
+ * no floor here either, for the reason `design/discarded` already records.
+ */
+const PACKAGES_ROOT = join(repoRoot, "packages");
+
+/**
+ * Every name a package entry point exports: the `export { a, b as c }` lists, `export type { … }`,
+ * and the declaration forms with `export` in front of them.
+ *
+ * `export * from './x'` is followed **one level**, because `packages/types` is written entirely that
+ * way. A deeper walk would be a module resolver, which this is not and should not become.
+ */
+function exportedNamesOf(path: string, followStar: boolean): Set<string> {
+  const out = new Set<string>();
+  if (!existsSync(path)) return out;
+  const src = readFileSync(path, "utf8");
+
+  for (const [, list] of src.matchAll(/export\s+(?:type\s+)?\{([^}]*)\}/g)) {
+    for (const part of list.split(",")) {
+      const entry = part.trim();
+      if (!entry) continue;
+      const renamed = /\bas\s+([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(entry);
+      out.add(renamed ? renamed[1] : entry.split(/\s+/)[0]);
+    }
+  }
+
+  for (const [, name] of src.matchAll(
+    /^\s*export\s+(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|class|interface|type|enum|namespace|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm,
+  )) {
+    out.add(name);
+  }
+
+  if (followStar) {
+    for (const [, from] of src.matchAll(/^\s*export\s+\*\s+from\s+["']([^"']+)["']/gm)) {
+      const base = join(path, "..", from.replace(/\.js$/, ""));
+      for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, "index.ts")]) {
+        if (!existsSync(candidate)) continue;
+        for (const name of exportedNamesOf(candidate, false)) out.add(name);
+        break;
+      }
+    }
+  }
+
+  return out;
+}
+
+const packageExports: Set<string> = new Set(
+  readdirSync(PACKAGES_ROOT)
+    .map((pkg) => join(PACKAGES_ROOT, pkg, "src/index.ts"))
+    .filter(existsSync)
+    .flatMap((entry) => [...exportedNamesOf(entry, true)]),
+);
+
+/**
+ * An identifier in call position with nothing before it.
+ *
+ * The lookbehind is the whole rule: `.`, `?` and `]` exclude a member call and an optional one,
+ * `)` excludes an immediately-invoked result, and `\w$` excludes the tail of a longer name. A
+ * generic call — `foo<T>(…)` — does not match and is therefore unchecked; that is fail-open and
+ * deliberate, because the alternative is parsing TypeScript here.
+ */
+const BARE_CALL = /(?<![.\w$?)\]])([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+
+/** Keywords and declaration forms that take a `(` and are not calls of anything. */
+const NOT_A_CALL = new Set([
+  "if", "for", "while", "switch", "catch", "return", "await", "typeof", "function", "new", "do",
+  "else", "import", "export", "yield", "void", "delete", "in", "of", "instanceof", "case", "throw",
+  "super", "this", "class", "const", "let", "var", "type", "interface", "as", "satisfies",
+]);
+
+interface FencedCall {
+  /** `<page>:<line in the page>` — the failure points at the prose, as everywhere else here. */
+  where: string;
+  name: string;
+}
+
+/** The fenced `ts` blocks of one page, and the bare calls in them outside any interface body. */
+function fencedTs(file: string): { blocks: number; calls: FencedCall[] } {
+  const page = relative(repoRoot, file);
+  const calls: FencedCall[] = [];
+  let blocks = 0;
+  let inBlock = false;
+  let inInterface = false;
+  let depth = 0;
+
+  readFileSync(file, "utf8").split("\n").forEach((line, index) => {
+    if (!inBlock) {
+      if (/^```ts\s*$/.test(line)) {
+        blocks += 1;
+        inBlock = true;
+        inInterface = false;
+        depth = 0;
+      }
+      return;
+    }
+    if (/^```\s*$/.test(line)) {
+      inBlock = false;
+      return;
+    }
+
+    if (!inInterface && /^\s*(?:export\s+)?(?:declare\s+)?interface\s+[A-Za-z_$][A-Za-z0-9_$]*/.test(line)) {
+      inInterface = true;
+      depth = 0;
+    }
+    if (inInterface) {
+      depth += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length;
+      if (depth <= 0 && line.includes("}")) inInterface = false;
+      return;
+    }
+
+    for (const [, name] of line.matchAll(BARE_CALL)) {
+      if (NOT_A_CALL.has(name)) continue;
+      calls.push({ where: `${page}:${index + 1}`, name });
+    }
+  });
+
+  return { blocks, calls };
+}
+
+const fenced = contentPages.map(fencedTs);
+const tsBlocks = fenced.reduce((total, page) => total + page.blocks, 0);
+const bareCalls = fenced.flatMap((page) => page.calls);
+
+describe("every bare call in a ts block names something a package exports", () => {
+  // Without these two a fence that stopped being read, or an entry point that stopped parsing,
+  // would report a clean sweep of nothing — and the second is the likelier of the pair, because
+  // `export * from` is one spelling away from an empty set that fails nothing.
+  it("finds fenced ts blocks, and a bare call inside one", () => {
+    expect(tsBlocks, "no ```ts block found under content/docs").toBeGreaterThan(0);
+    expect(bareCalls.length, "no bare call found in any ```ts block").toBeGreaterThan(0);
+  });
+
+  it("reads exports out of a package entry point", () => {
+    expect(exportedNamesOf(join(PACKAGES_ROOT, "corpus/src/index.ts"), true).has("open")).toBe(true);
+    expect(packageExports.size).toBeGreaterThan(50);
+  });
+
+  it.each(bareCalls)("$where calls $name", ({ name }) => {
+    expect(
+      packageExports.has(name),
+      `no packages/*/src/index.ts exports ${name} — a fenced ts block on this site runs against ` +
+        "this repository's packages, so a call to a name nothing exports is an illustration, not " +
+        "a mechanism",
+    ).toBe(true);
+  });
+});
