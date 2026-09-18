@@ -99,8 +99,8 @@ There is **one** reference, in three pieces:
 
 - [`grammar.bnf`](grammar.bnf) — the language's syntax, normative. The parser implements it; it does
   not describe the parser. Transcluded whole into `/docs/book/grammar`.
-- [`apps/docs/`](apps/docs/) — all of the prose (Next.js + fumadocs). `/docs/book` teaches the
-  language, `/docs/format` specifies the corpus, and behind a maintainers' divider `/docs/design`
+- [`apps/docs/`](apps/docs/) — all of the prose (Next.js + fumadocs). `/docs/book/getting-started`
+  teaches the language, `/docs/format` specifies the corpus, and behind a maintainers' divider `/docs/design`
   is the argument for why any of it is shaped this way. A page describing something not yet built
   says so in a `direction:` field rather than in its tone; everything else describes what is there.
 - [`apps/corpus/`](apps/corpus/) — the artifact's contract, executable: the guards that make a

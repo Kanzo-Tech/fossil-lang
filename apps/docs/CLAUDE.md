@@ -74,6 +74,12 @@ not count, because four of the thirteen cited the import for a claim about the f
 Where the claim is «this is pinned in that file» and no single item carries it, write the path with
 no line and no anchor. `path:12` in any form fails the build.
 
+The route half reads the whole tree and not only this app, because a route is the one citation form
+both halves use: of 479 of them, 170 are in Rust doc comments, `corpus.bnf`, `grammar.bnf`,
+`README.md` and `packages/…`, and the widening found three dead routes on its first run — one of
+them inside a `NotImplemented` message a user reads. Inside this app it reads more than markdown
+links, too: fifteen `<Card href="/docs/…">` on `design/index.mdx` were unchecked.
+
 **The same spelling reads the other half of the tree**, and there the bare path is checked too: a
 `packages/…` or `apps/…` path must be a file that is on disk, with or without an anchor, and an
 anchor on a `.ts`/`.tsx`/`.mjs` must be a name that file declares — a re-export is this half's `use`.
@@ -86,8 +92,8 @@ path, and `design/discarded` carries which half landed and what the other one ne
 
 `build` runs `test` first, and that is load-bearing. `content.test.ts` fails the build on: a
 direction without a summary, an `arguedIn` that does not resolve or that names its own page, a
-`/docs/…` link to a page that is not there, a `#fragment` naming no heading in the target, a source
-citation naming an item its file does not define, a `packages/…` or `apps/…` path that is not on
+`/docs/…` route cited **anywhere in the repository** that is not a page here, a `#fragment` naming
+no heading in the target, a source citation naming an item its file does not define, a `packages/…` or `apps/…` path that is not on
 disk, a citation written as `path:12` at all, and a `grammar.bnf` citation that names no production. It also carries the one architectural claim a
 manifest can settle.
 

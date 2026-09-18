@@ -17,8 +17,9 @@ Keep it under 200 lines, rules-not-context.
   function with its signature and lowering. Generated from, not compared against — six files
   come out of `cargo xtask catalogue` and no Rust states a row a second time. Adding a
   function is a line here. `CONTRIBUTING.md` has the six and the round-trip guard.
-- `apps/docs/` — the whole of the documentation, and there is no second site. `/docs/book`
-  teaches the language and `/docs/format` specifies the corpus; behind a maintainers' divider,
+- `apps/docs/` — the whole of the documentation, and there is no second site.
+  `/docs/book/getting-started` teaches the language and `/docs/format` specifies the corpus;
+  behind a maintainers' divider,
   `/docs/design` is where an argument lives, with `design/discarded` for every rejected
   alternative and what would bring it back, and `design/prior-art` for every source named.
 - `apps/corpus/` — the artifact's contract, executable: `guards/` and `conformance/`. Its prose

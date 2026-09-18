@@ -65,6 +65,22 @@ function mdxUnder(dir: string): string[] {
   });
 }
 
+/**
+ * Build output and vendored trees, which carry `/docs/` strings that nobody wrote and nobody can
+ * fix. `pkg/` is the gitignored wasm-bindgen output; `dist/` and `.next/` are the two bundlers'.
+ */
+const IGNORED_DIRS = new Set(["target", "node_modules", ".next", "dist", "pkg", "out", ".turbo"]);
+
+function filesUnder(dir: string, ext: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).flatMap((entry) => {
+    if (IGNORED_DIRS.has(entry)) return [];
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) return filesUnder(full, ext);
+    return entry.endsWith(ext) ? [full] : [];
+  });
+}
+
 function read(path: string): Page {
   return {
     id: relative(repoRoot, path),
@@ -588,7 +604,7 @@ describe("every workspace citation names a file that is there", () => {
  * section index may be either `x/index.mdx` or `x.mdx`. All three shapes are in this tree today.
  */
 function pageFileForRoute(route: string): string | null {
-  const rest = route.replace(/^\/docs\/?/, "");
+  const rest = route.replace(/^\/docs\/?/, "").replace(/\/$/, "");
   const candidates = [
     join(CONTENT_ROOT, `${rest}.mdx`),
     join(CONTENT_ROOT, rest, "index.mdx"),
@@ -600,7 +616,8 @@ function pageFileForRoute(route: string): string | null {
 }
 
 /**
- * Every `/docs/…` link resolves, and every `#anchor` names a heading that is there.
+ * Every `/docs/…` route cited ANYWHERE in this repository resolves, and every `#anchor` names a
+ * heading that is there.
  *
  * This did not exist, and its absence was not theoretical: folding the corpus site into
  * `content/docs/format/` moved twelve pages, and every cross-link between them — `/docs/conventions/…`,
@@ -613,12 +630,57 @@ function pageFileForRoute(route: string): string | null {
  * `design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops`. Nothing else in this
  * repository would notice that heading being reworded.
  *
- * WHAT IT CANNOT PROVE: that the target says what the link claims, which is the same residue every
- * citation guard on this site has. And it checks the slug that fumadocs derives from the heading
- * text, so a heading rewritten to different words with the same slug passes — correctly, because
- * the link still lands.
+ * **It read this app's own MDX, and only the markdown-link spelling.** That left two holes and both
+ * were measured. Of 309 routes written under `content/docs`, 24 are not `](…)` at all — fifteen
+ * `<Card href="/docs/…">` on `design/index.mdx`, nine backticked routes in prose — and of 479 in the
+ * tree as a whole, **170 are outside this app entirely**: Rust doc comments, `corpus.bnf`,
+ * `grammar.bnf`, `README.md`, `packages/…`. A route is the one citation form both halves of the tree
+ * use, and it was checked in the half least likely to rot, because that half is the one whose build
+ * reads it. Widening it found three dead routes on the first run, none of them in an MDX file:
+ * `docs/characteristics/rdf12`, in a `NotImplemented` message a user reads and a test asserts;
+ * `docs/book`, a section that has a `meta.json` and no index page, in `README.md` and `CLAUDE.md`;
+ * and `docs/book/typing` in `grammar.bnf`, naming its sibling normative document at a route that
+ * document has never had. Those three are named here without their leading slash, because this file
+ * is read by the regex below exactly like every other, and a guard that cannot survive naming what
+ * it found would have to exempt itself.
+ *
+ * The markdown-link reader is gone rather than kept beside this one: all 285 of its matches are
+ * matched identically here, and two readers of one citation form is the arrangement this site
+ * exists instead of.
+ *
+ * **What is a citation and what is a path.** `apps/docs/programs/hello` contains `/docs/` and is a
+ * directory, so a route starts where its path does and a match preceded by a word character, a dot,
+ * a dash or a slash is not one. A trailing `…` names a FAMILY of routes rather than a route — the
+ * paragraph above names two that are gone on purpose, and they must not be made to resolve. And a
+ * last segment carrying a file extension is a file: `apps/docs/content/docs/book/stdlib.mdx` cited
+ * from `xtask`, or `/docs/book/anatomy.mdx`, which is the llms.mdx handler's route and not a page.
+ *
+ * WHAT IT CANNOT PROVE: that the target says what the citation claims, which is the same residue
+ * every citation guard on this site has. And it checks the slug that fumadocs derives from the
+ * heading text, so a heading rewritten to different words with the same slug passes — correctly,
+ * because the route still lands.
  */
-const DOCS_LINK = /\]\((\/docs[^)\s]*)\)/g;
+const ROUTE_CITATION = /(?<![\w.\-/…])\/docs(?:\/[A-Za-z0-9._#-]+)*\/?/g;
+
+/**
+ * Where a route may be cited. Anything outside this is unchecked, not permitted, and widening the
+ * list is the whole of the change if a fourth tree ever cites one.
+ */
+const ROUTE_TREES: ReadonlyArray<readonly [dir: string, exts: readonly string[]]> = [
+  ["crates", [".rs", ".toml"]],
+  ["apps", [".ts", ".tsx", ".mjs", ".mdx", ".md", ".json"]],
+  ["packages", [".ts", ".tsx", ".mjs", ".md", ".json"]],
+];
+
+/** The three data files and the prose at the root, which are in no tree and cite routes anyway. */
+const ROUTE_ROOT_FILES = [
+  "README.md",
+  "CLAUDE.md",
+  "CONTRIBUTING.md",
+  "grammar.bnf",
+  "corpus.bnf",
+  "catalogue.bnf",
+];
 
 /** fumadocs' heading slug: lowercase, punctuation dropped, runs of anything else become one dash. */
 function slug(heading: string): string {
@@ -636,31 +698,66 @@ function anchorsOf(file: string): Set<string> {
   return new Set([...headings].map((m) => slug(m[1])));
 }
 
-describe("every internal link lands", () => {
-  const links = mdxUnder(CONTENT_ROOT).flatMap((file) =>
-    [...readFileSync(file, "utf8").matchAll(DOCS_LINK)].map(([, href]) => ({
-      id: `${relative(repoRoot, file)} → ${href}`,
-      from: file,
-      href,
-    })),
-  );
+interface RouteCitation {
+  /** `<file>:<line> → <route>` — a failure names the citation, not the page. */
+  id: string;
+  where: string;
+  route: string;
+}
 
-  // Same vacuity trap as everywhere else: a glob that stops matching turns this into a green pass
-  // over nothing. There are ~170 of these; the floor is deliberately far below that and above zero.
-  it("finds links to check", () => {
-    expect(links.length).toBeGreaterThan(50);
+const routeCitingFiles = [
+  ...ROUTE_TREES.flatMap(([dir, exts]) =>
+    exts.flatMap((ext) => filesUnder(join(repoRoot, dir), ext)),
+  ),
+  ...ROUTE_ROOT_FILES.map((name) => join(repoRoot, name)).filter(existsSync),
+];
+
+const routeCitations: RouteCitation[] = routeCitingFiles.flatMap((file) => {
+  const id = relative(repoRoot, file);
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .flatMap((line, index) =>
+      [...line.matchAll(ROUTE_CITATION)].flatMap((m) => {
+        const after = line.slice((m.index as number) + m[0].length);
+        if (after.startsWith("…") || after.startsWith("...")) return [];
+
+        // Prose ends a sentence on a route: `see /docs/design/corpus.` is a citation of the page.
+        const route = m[0].replace(/[.,;:)]+$/, "");
+        if (/\.[A-Za-z0-9]+$/.test((route.split("#")[0] as string).replace(/\/$/, ""))) return [];
+
+        return [{ id: `${id}:${index + 1} → ${route}`, where: `${id}:${index + 1}`, route }];
+      }),
+    );
+});
+
+describe("every /docs route that is cited lands", () => {
+  // Three vacuity traps rather than one, because this guard has three ways to stop guarding: the
+  // tree walk can stop finding files, the regex can stop matching, and — the one the widening
+  // introduced — the whole non-docs half can drop out while the MDX half keeps the suite green.
+  // Every floor is deliberately far below what is there today and above zero.
+  it("finds files to read routes out of", () => {
+    expect(routeCitingFiles.length).toBeGreaterThan(300);
   });
 
-  it.each(links)("$id", ({ href }) => {
-    const [route, fragment] = href.split("#");
-    const target = pageFileForRoute(route);
+  it("finds routes to check, on both sides of the tree", () => {
+    expect(routeCitations.length).toBeGreaterThan(300);
+    expect(
+      routeCitations.filter((c) => !c.where.startsWith("apps/docs/")).length,
+      "no route is cited from outside this app, which is the half this guard was widened for",
+    ).toBeGreaterThan(50);
+    expect(routeCitations.filter((c) => c.route.includes("#")).length).toBeGreaterThan(20);
+  });
 
-    expect(target, `${route} does not resolve to a page under content/docs/`).not.toBeNull();
+  it.each(routeCitations)("$id", ({ route, where }) => {
+    const [path, fragment] = route.split("#");
+    const target = pageFileForRoute(path as string);
+
+    expect(target, `${where} cites ${path}, which is not a page under content/docs/`).not.toBeNull();
     if (!fragment) return;
 
     expect(
       anchorsOf(target as string),
-      `${route} has no heading whose slug is #${fragment}`,
+      `${where} cites #${fragment}, and ${path} has no heading whose slug is that`,
     ).toContain(fragment);
   });
 });
@@ -793,16 +890,6 @@ const GRAMMAR_CITATION =
  * pattern anchored on the bare filename would have walked straight past it.
  */
 const GRAMMAR_STALE_CITATION = /grammar\.bnf`?\s*(?::\s*\d+|§)/;
-
-function filesUnder(dir: string, ext: string): string[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).flatMap((entry) => {
-    if (entry === "target" || entry === "node_modules") return [];
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) return filesUnder(full, ext);
-    return entry.endsWith(ext) ? [full] : [];
-  });
-}
 
 const citingFiles = CITED_TREES.flatMap(([dir, ext]) => filesUnder(join(repoRoot, dir), ext));
 

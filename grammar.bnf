@@ -55,7 +55,7 @@
 (*                                                                     *)
 (*  What a well-formed program MEANS, as against how it is spelled —   *)
 (*  the judgments, the subtyping relation, and the exact statement of  *)
-(*  what a successful compile promises — is `/docs/book/typing`. It    *)
+(*  what a successful compile promises — is `/docs/design/typing`. It  *)
 (*  stands to the checker as this file stands to the parser, and the   *)
 (*  two are the only normative documents about the language.           *)
 (* ═══════════════════════════════════════════════════════════════════ *)

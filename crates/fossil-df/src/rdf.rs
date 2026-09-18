@@ -178,7 +178,7 @@ fn directional_literal_unsupported(
     DataFusionError::NotImplemented(format!(
         "RDF 1.2 base direction on <{subject}> <{predicate}>: {literal} is an \
          rdf:dirLangString, and a pivot column carries a lexical form with no \
-         direction — see /docs/characteristics/rdf12"
+         direction — see /docs/design/discarded#the-surface"
     ))
 }
 
@@ -350,7 +350,7 @@ mod tests {
             "https://ex.org/doc",
             "https://ex.org/title",
             "--rtl",
-            "/docs/characteristics/rdf12",
+            "/docs/design/discarded#the-surface",
         ] {
             assert!(msg.contains(expected), "{expected:?} missing from {msg:?}");
         }
