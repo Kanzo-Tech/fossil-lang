@@ -549,6 +549,12 @@ async fn measure(
             // Four numbers, one pass over the class table: the smallest class,
             // the records in all of them, and the two that describe the failure
             // if there is one.
+            // `k` is the declared anonymity parameter and Arrow's integer
+            // literal is signed. A `k` that wrapped `i64` would name a class
+            // larger than any population that could be certified against it, so
+            // there is no bound to check that the comparison does not already
+            // decide.
+            #[allow(clippy::cast_possible_wrap)]
             let under = || col("n").lt(lit(k as i64));
             let summary = classes.aggregate(
                 vec![],
@@ -568,7 +574,7 @@ async fn measure(
                 row.first()
                     .copied()
                     .flatten()
-                    .unwrap_or(population.saturating_sub(suppressed)),
+                    .unwrap_or_else(|| population.saturating_sub(suppressed)),
                 at(1),
                 at(2),
                 at(3),

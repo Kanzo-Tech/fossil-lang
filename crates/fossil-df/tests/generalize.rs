@@ -102,6 +102,9 @@ fn parse(document: &str) -> PrivacyPolicy {
 ///
 /// `null_postcodes` blanks the postcode of the first `n` rows — the null trap,
 /// which derivation is in a position to destroy and must not.
+// The fixture's own row indices over `PEOPLE` rows: the widths are the corpus's
+// (`dense_id` is `uint32`, `birth_year` an `int32`), not bounds on an input.
+#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
 fn corpus(batches: usize, null_postcodes: usize) -> GraphArData {
     let schema = Arc::new(Schema::new(vec![
         Field::new("dense_id", DataType::UInt32, false),

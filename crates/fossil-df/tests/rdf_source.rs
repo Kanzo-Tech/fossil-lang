@@ -1,4 +1,4 @@
-//! Host input seam (RDF): an `io.rdf` program runs end-to-end on DataFusion.
+//! Host input seam (RDF): an `io.rdf` program runs end-to-end on `DataFusion`.
 //! The host reads the Turtle bytes and registers the pivoted relation
 //! ([`register_provider_sources`]); [`execute_graph`] then scans it exactly like
 //! a CSV — RDF stays at the I/O border, the executor never parses it.
@@ -88,7 +88,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     assert!(graph.edges.is_empty());
 
     let vertex = &graph.vertices[0];
-    let total: usize = vertex.batches.iter().map(|b| b.num_rows()).sum();
+    let total: usize = vertex.batches.iter().map(datafusion::arrow::array::RecordBatch::num_rows).sum();
     assert_eq!(total, 2, "alice + bob are Persons; acme is an Org");
 
     let batch = vertex.batches.first().unwrap();
@@ -202,7 +202,7 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
         .vertices
         .iter()
         .find(|v| v.label == "KB")
-        .map(|v| v.batches.iter().map(|b| b.num_rows()).sum())
+        .map(|v| v.batches.iter().map(datafusion::arrow::array::RecordBatch::num_rows).sum())
         .expect("KB vertex");
     assert_eq!(kb_count, 1, "one KB");
 
@@ -210,7 +210,7 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
         .vertices
         .iter()
         .find(|v| v.label == "Project")
-        .map(|v| v.batches.iter().map(|b| b.num_rows()).sum())
+        .map(|v| v.batches.iter().map(datafusion::arrow::array::RecordBatch::num_rows).sum())
         .expect("Project vertex");
     assert_eq!(proj_count, 2, "two Projects");
 
@@ -224,7 +224,7 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
         (edge.src_type.as_str(), edge.dst_type.as_str()),
         ("KB", "Project")
     );
-    let edge_count: usize = edge.by_source.iter().map(|b| b.num_rows()).sum();
+    let edge_count: usize = edge.by_source.iter().map(datafusion::arrow::array::RecordBatch::num_rows).sum();
     assert_eq!(
         edge_count, 2,
         "kb/1 → {{proj/1, proj/2}} unrolls to 2 edges"

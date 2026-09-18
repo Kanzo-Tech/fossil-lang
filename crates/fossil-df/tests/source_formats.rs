@@ -44,6 +44,9 @@ const PERSON_SHEX: &str = include_str!("fixtures/person-name.shex");
 /// is the format's: you cannot find the end of record N in an array without
 /// parsing from the start. It is not asserted here because a batch count is not
 /// where that shows.
+// The executor's futures are not `Send` and are not meant to be — see the
+// crate-level allow in `src/lib.rs`. A test that awaits one inherits the lint.
+#[allow(clippy::future_not_send)]
 async fn three_users_from(program: &str, name: &str) -> Vec<String> {
     let (db, file) = support::db_with_shapes(program, name, &[("person.shex", PERSON_SHEX)]);
     let mapping = *fossil_hir::def_map::def_map(&db, file)
@@ -110,7 +113,7 @@ async fn reads_an_ndjson_source() {
     });
 
     assert_eq!(node.label, "Person");
-    let total: usize = vertex.batches.iter().map(|b| b.num_rows()).sum();
+    let total: usize = vertex.batches.iter().map(datafusion::arrow::array::RecordBatch::num_rows).sum();
     assert_eq!(total, 3, "users.json has 3 records");
 
     let batch = vertex.batches.first().unwrap();

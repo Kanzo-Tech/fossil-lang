@@ -21,6 +21,12 @@
 /// `None` and the caller reports it rather than emitting a call that would fail
 /// at plan time with an engine-level message.
 #[must_use]
+// The four aggregate names answer `None` exactly as the wildcard does, and the
+// arm stays rather than merging into it for two reasons: it is the only place
+// the reason is written, and `no_mapping_is_dead` reads the arms of this
+// function off this file — merged away, those four names would stop being
+// checked against the templates that call them.
+#[allow(clippy::match_same_arms)]
 pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
     Some(match duckdb_name {
         // Shared spellings.
@@ -158,7 +164,7 @@ mod tests {
     /// guard one level up.
     ///
     /// **What it cannot prove:** that a mapping is CORRECT. That `substring`
-    /// should become `substr` and not `substring` is a fact about DataFusion,
+    /// should become `substr` and not `substring` is a fact about `DataFusion`,
     /// and the test above — which plans every template through the real
     /// renderer — is what would catch it being wrong.
     #[test]

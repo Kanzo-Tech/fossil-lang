@@ -1,3 +1,9 @@
+// These items are `pub(crate)` (a private module ⇒ `unreachable_pub` wants
+// `pub(crate)`), which trips the inverse `redundant_pub_crate` nursery lint —
+// the same pair `fossil-cli`'s `system.rs` is caught between, silenced the same
+// way.
+#![allow(clippy::redundant_pub_crate)]
+
 //! The host half these integration tests owe the checker: a filesystem, a
 //! shape-decoder table, and the shape documents a program names, put into the
 //! database before any query goes looking for them.
@@ -29,7 +35,7 @@ use fossil_base::{FossilDb, FsError, Provider, SourceFile, System, register_file
 /// The real filesystem (the CSV/JSON/Turtle sources still read through it) plus
 /// the `ShEx` decoder row.
 #[derive(Debug, Default)]
-pub struct ShapeHost(NativeSystem);
+pub(crate) struct ShapeHost(NativeSystem);
 
 impl System for ShapeHost {
     fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
@@ -55,7 +61,7 @@ impl System for ShapeHost {
 ///
 /// Registration takes the TEXT, not a path: nothing here touches the disk, so a
 /// shape document needs no fixture file.
-pub fn db_with_shapes(
+pub(crate) fn db_with_shapes(
     program: &str,
     program_path: &str,
     documents: &[(&str, &str)],
@@ -75,7 +81,7 @@ pub fn db_with_shapes(
 /// A mapping that does not compile makes `execute_*` return
 /// `Plan("the mapping did not compile; see the reported diagnostics")` — a
 /// message that names no diagnostic. This is how a test says which.
-pub fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<String> {
+pub(crate) fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<String> {
     let def_map = fossil_hir::def_map::def_map(db, file);
     let mut out = Vec::new();
     for mapping in def_map.mappings(db) {

@@ -69,6 +69,9 @@ Order : Order from orders
     total = orders.amount
 ";
 
+// The executor's futures are not `Send` and are not meant to be — see the
+// crate-level allow in `src/lib.rs`. A test that awaits one inherits the lint.
+#[allow(clippy::future_not_send)]
 async fn run(program: &str) -> fossil_df::GraphArData {
     let (db, file) =
         support::db_with_shapes(program, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
@@ -94,7 +97,7 @@ async fn a_dangling_endpoint_is_counted_rather_than_swallowed() {
     assert_eq!(edge.label, "placedBy");
     // Four order rows in, three edges out — the ruling: the inner join stays.
     assert_eq!(
-        edge.by_source.iter().map(|b| b.num_rows()).sum::<usize>(),
+        edge.by_source.iter().map(datafusion::arrow::array::RecordBatch::num_rows).sum::<usize>(),
         3,
         "the row naming person/99 is not an edge, because person/99 is not a vertex"
     );

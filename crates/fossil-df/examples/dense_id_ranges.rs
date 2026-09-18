@@ -18,8 +18,8 @@
 //! # What it measures
 //!
 //! 1. **The real split.** How many partitions the vertex phase runs in, and how
-//!    many rows land in each — read off the physical plan DataFusion actually
-//!    builds for the same DataFrame `finalize_vertex` builds, not off a model of
+//!    many rows land in each — read off the physical plan `DataFusion` actually
+//!    builds for the same `DataFrame` `finalize_vertex` builds, not off a model of
 //!    it.
 //! 2. **The shortfall against a quantum**, for the three quanta a writer could
 //!    plausibly pick: the largest partition rounded up to `chunk_size`, the mean
@@ -321,17 +321,14 @@ async fn main() {
     let scratch =
         std::env::temp_dir().join(format!("fossil_dense_id_ranges_{}", std::process::id()));
     let synthetic = nodes.is_none() || edges.is_none();
-    let (nodes, edges) = match (nodes, edges) {
-        (Some(n), Some(e)) => (n, e),
-        _ => {
-            let _ = std::fs::remove_dir_all(&scratch);
-            std::fs::create_dir_all(&scratch).expect("create the fixture directory");
-            eprintln!(
-                "synthesising a {rows}-node pair under {}…",
-                scratch.display()
-            );
-            synthesise(&scratch, rows)
-        }
+    let (nodes, edges) = if let (Some(n), Some(e)) = (nodes, edges) { (n, e) } else {
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(&scratch).expect("create the fixture directory");
+        eprintln!(
+            "synthesising a {rows}-node pair under {}…",
+            scratch.display()
+        );
+        synthesise(&scratch, rows)
     };
     println!(
         "source  {} + {}   ({})",
@@ -341,9 +338,17 @@ async fn main() {
     );
 
     let baseline = rss_bytes();
+    // `map_or_else` would put the no-budget case in a closure and the budgeted
+    // one — eight lines of pool construction — in the other, which reads worse
+    // than the match it is.
+    #[allow(clippy::option_if_let_else)]
     let ctx = match budget {
         None => SessionContext::new(),
         Some(gib) => {
+            // `--budget` is parsed from the command line and rejected unless
+            // positive and finite, the same contract `fossil-cli`'s
+            // `gib_to_bytes` states; the cast is after that check, not before.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let bytes = (gib * 1024.0 * 1024.0 * 1024.0) as usize;
             let pool = TrackConsumersPool::new(
                 FairSpillPool::new(bytes),
@@ -454,7 +459,11 @@ async fn main() {
         round_up(max),
         &per_partition,
     );
-    shortfall("the mean, to a tile", round_up(mean as u64), &per_partition);
+    // A mean of partition sizes: non-negative because every size is, so the
+    // sign loss the lint warns about cannot happen to this value.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let mean_rows = mean as u64;
+    shortfall("the mean, to a tile", round_up(mean_rows), &per_partition);
     // The only quantum a writer could choose without running: the source rows
     // are countable by a scan, the deduplicated ones are not.
     let source_rows = ctx

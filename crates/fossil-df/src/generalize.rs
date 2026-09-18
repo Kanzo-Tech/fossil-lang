@@ -458,10 +458,16 @@ fn generalize_table(
         })
         .collect();
 
+    // `fossil_kanon::Config::k` is a `usize` and a declared `k` is a `u64` from
+    // the policy document. The narrowing is real only on wasm32, where a k above
+    // 4,294,967,295 would name a class larger than any release a browser can hold
+    // in memory to begin with.
+    #[allow(clippy::cast_possible_truncation)]
+    let k = policy.k as usize;
     let out = fossil_kanon::anonymize(
         &qis,
         &Config {
-            k: policy.k as usize,
+            k,
             nulls: nulls_for(policy.absent_quasi_identifier),
         },
     )
@@ -522,6 +528,10 @@ fn generalize_table(
     let mut offset = 0usize;
     let mut batches = Vec::with_capacity(table.batches.len());
     for (batch, len) in table.batches.iter().zip(&lengths) {
+        // The nursery lint wants `map_or_else`, which puts the untouched-column
+        // case FIRST and the generalised one second — backwards from what this
+        // loop is about. Same call as `fossil_mir::lower::resolve_source`.
+        #[allow(clippy::option_if_let_else)]
         let columns: Vec<ArrayRef> = (0..batch.num_columns())
             .map(|i| match plan.iter().position(|c| c.index == i) {
                 Some(p) => published[p].slice(offset, *len),

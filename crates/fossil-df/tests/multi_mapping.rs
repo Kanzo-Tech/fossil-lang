@@ -56,7 +56,7 @@ async fn same_type_from_two_sources_merges_into_one_table() {
     assert_eq!(person.label, "Person");
 
     // 5 distinct subjects (person/3 deduped across the two sources), dense 0..4.
-    let total: usize = person.batches.iter().map(|b| b.num_rows()).sum();
+    let total: usize = person.batches.iter().map(datafusion::arrow::array::RecordBatch::num_rows).sum();
     assert_eq!(
         total, 5,
         "union of {{1,2,3}} and {{3,4,5}} deduped by subject = 5"

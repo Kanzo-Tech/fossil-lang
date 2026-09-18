@@ -8,7 +8,7 @@
 //! `SourceProvider` trait and no `fossil-provider-rdf` crate, which
 //! `fossil-base`'s `RowReader::Materialised` also says outright.
 //!
-//! A column is scalar or multi-valued: a ShEx `*`/`+` cardinality pivots into an
+//! A column is scalar or multi-valued: a `ShEx` `*`/`+` cardinality pivots into an
 //! Arrow `List<Utf8>` of every object, a single-valued one into a `Utf8` cell.
 //! `oxttl`/`oxrdf` are pure Rust, so this compiles to wasm and decodes RDF in the
 //! browser too.
@@ -37,7 +37,7 @@ use oxttl::TurtleParser;
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
 /// One pivoted column: the relation column `name` carries the object(s) of
-/// `predicate` for each subject. `multi` (a `*`/`+` ShEx cardinality) pivots into
+/// `predicate` for each subject. `multi` (a `*`/`+` `ShEx` cardinality) pivots into
 /// an Arrow `List<Utf8>` of every object — the source of a multi-valued vertex
 /// property or, after UNNEST, a multi-valued edge; a single-valued column is a
 /// scalar `Utf8` (the deterministic minimum object).
@@ -245,10 +245,10 @@ mod tests {
         assert_eq!(col(2), [Some("30".into()), None]);
     }
 
-    const MULTI_TTL: &str = r#"@prefix ex: <https://ex.org/> .
+    const MULTI_TTL: &str = r"@prefix ex: <https://ex.org/> .
         <https://ex.org/kb/1> a ex:KB ; ex:hasProject <https://ex.org/proj/2>, <https://ex.org/proj/1> .
         <https://ex.org/kb/2> a ex:KB .
-    "#;
+    ";
 
     #[test]
     fn multi_valued_predicate_pivots_to_a_list() {
@@ -288,10 +288,10 @@ mod tests {
 
     #[test]
     fn a_triple_term_parses() {
-        const TTL: &str = r#"@prefix ex: <https://ex.org/> .
+        const TTL: &str = r"@prefix ex: <https://ex.org/> .
             ex:claim a ex:Reifier ;
                      ex:reifies <<( ex:alice ex:knows ex:bob )>> .
-        "#;
+        ";
 
         // The object-position-only rule of Concepts §3.1, as the parser enforces it.
         let terms: Vec<Term> = TurtleParser::new()

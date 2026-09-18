@@ -1,7 +1,7 @@
-//! DataFusion backend for the property-graph MIR.
+//! `DataFusion` backend for the property-graph MIR.
 //!
 //! Consumes a [`fossil_mir::lower_to_mir_pg`] graph and materialises the
-//! GraphAr VERTEX layout on DataFusion: read the source, project
+//! `GraphAr` VERTEX layout on `DataFusion`: read the source, project
 //! `id AS subject` + each prop + the `x`/`y`/`cluster_id` layout placeholders,
 //! dedup single-valued shapes, sort by `subject` for a deterministic dense id,
 //! `collect()`, and prepend `dense_id` (`0..N-1`, sort order). The result is
@@ -15,6 +15,15 @@
 //! the browser). `zstd-sys` is an unavoidable C dep (datafusion 54 hardcodes
 //! `arrow-ipc/zstd`), so the wasm build needs a wasm-capable clang — see the
 //! `datafusion` entry in `Cargo.toml`.
+
+// The executor is single-threaded by construction — the browser has one thread,
+// and the native `run_to_dir` path drives the same future on a current-thread
+// runtime — so a future that is not `Send` costs nothing here. Nor is the bound
+// available: `DataFusion`'s `DataFrame`/`ExecutionPlan` futures are not `Send`,
+// so satisfying the nursery lint would mean a `Send` wrapper over every await in
+// the crate. `fossil-df-wasm`, `fossil-graph` and `fossil-mcp` allow it in the
+// same place for the same reason.
+#![allow(clippy::future_not_send)]
 
 pub mod files;
 /// Deriving the generalisation a declared bound needs, over the same batches
@@ -90,7 +99,7 @@ use fossil_sinks::manifest::{
 /// data — vertex tables and edge tables (CSR + CSC) as in-memory `RecordBatch`es.
 ///
 /// This is the universal substrate made concrete: **relations + a
-/// graph-schema**. The GraphAr view (the manifest + Parquet) is materialized
+/// graph-schema**. The `GraphAr` view (the manifest + Parquet) is materialized
 /// *from* this; the data carriers hold no metadata of their own — it all lives
 /// in [`schema`](Self::schema).
 #[derive(Debug)]
@@ -159,14 +168,14 @@ pub struct EdgeTable {
     pub dropped: u64,
 }
 
-/// One emitted GraphAr manifest YAML + its dataset-relative path.
+/// One emitted `GraphAr` manifest YAML + its dataset-relative path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManifestFile {
     pub rel_path: String,
     pub yaml: String,
 }
 
-/// Execute a whole program's mappings into the GraphAr graph.
+/// Execute a whole program's mappings into the `GraphAr` graph.
 ///
 /// Two phases with a hard barrier between them: **(1)** materialise *every*
 /// vertex (assigning dense ids, registering each as a [`MemTable`]); **(2)**
@@ -180,7 +189,12 @@ pub struct ManifestFile {
 /// outlive the call for inspection.
 ///
 /// # Errors
-/// Propagates DataFusion read/plan/execute errors.
+/// Propagates `DataFusion` read/plan/execute errors.
+// The hasher is not ours to choose: `connections` is the host's connection map —
+// `fossil-cli`'s `host.rs` builds one and the browser's `parse_refs` builds one,
+// both plain `HashMap`. Generalising over `BuildHasher` would add a parameter no
+// caller can vary, which is the same call `fossil-df-wasm` and `fossil-cli` made.
+#[allow(clippy::implicit_hasher)]
 pub async fn execute_graph<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
@@ -267,19 +281,20 @@ pub struct VertexTable {
 /// A mapping's vertex projection before the dense-id barrier — the W0b columns
 /// (`subject` + props + `x`/`y`/`cluster_id`) as an un-collected [`DataFrame`],
 /// plus the [`NodeType`] schema it contributes. Several of these with the same
-/// node `label` are UNIONed before dense ids are assigned.
+/// node `label` are `UNIONed` before dense ids are assigned.
 struct PreparedVertex {
     node: NodeType,
     dedup: bool,
     projected: DataFrame,
 }
 
-/// Materialise a single mapping's VERTEX on DataFusion and register it — the
+/// Materialise a single mapping's VERTEX on `DataFusion` and register it — the
 /// one-mapping convenience over [`prepare_vertex`] + [`finalize_vertex`].
 /// Returns the table data plus the [`NodeType`] it contributes to the schema.
 ///
 /// # Errors
-/// Propagates DataFusion read/plan/execute errors.
+/// Propagates `DataFusion` read/plan/execute errors.
+#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
 pub async fn execute_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
@@ -303,7 +318,7 @@ pub async fn execute_vertex<'db>(
 /// still needed — a [`VProp`]'s type is an interned handle.
 ///
 /// # Errors
-/// The list carries no [`Op::EmitVertex`], or any DataFusion read/plan/execute
+/// The list carries no [`Op::EmitVertex`], or any `DataFusion` read/plan/execute
 /// error.
 pub async fn execute_vertex_ops<'db>(
     ctx: &SessionContext,
@@ -500,6 +515,12 @@ fn prepend_dense_id(batches: Vec<RecordBatch>) -> datafusion::error::Result<Vec<
     let mut out = Vec::with_capacity(batches.len());
     let mut offset: u32 = 0;
     for batch in batches {
+        // `dense_id` is `uint32` in the corpus's own column table — that is the
+        // width `corpus.bnf` declares and the one GraphAr's reader chokes on — so
+        // a type of more than 4,294,967,295 rows is unaddressable before it is
+        // untruncatable. `try_from` here would invent an error the writer has no
+        // way to report and no reader could act on.
+        #[allow(clippy::cast_possible_truncation)]
         let n = batch.num_rows() as u32;
         let ids: ArrayRef = Arc::new(UInt32Array::from_iter_values(offset..offset + n));
 
@@ -784,10 +805,7 @@ async fn execute_edge(
 /// `SourceAnchor::locator`. The `binding` is the table name a `Provider` source
 /// is registered under (the host pre-registers it; [`read_source`] scans it);
 /// object-store formats ignore it.
-fn sources_of<'db>(
-    ops: &[Op<'db>],
-    anchor: SourceAnchor<'_>,
-) -> Vec<(String, SourceFormat, String)> {
+fn sources_of(ops: &[Op<'_>], anchor: SourceAnchor<'_>) -> Vec<(String, SourceFormat, String)> {
     ops.iter()
         .filter_map(|o| match o {
             Op::Source {
@@ -842,7 +860,7 @@ pub(crate) async fn read_source(
 
 /// Read `io.json`, whichever of the two JSON shapes the file is.
 ///
-/// **DataFusion's `read_json` is newline-delimited only**, and `sightings`
+/// **`DataFusion`'s `read_json` is newline-delimited only**, and `sightings`
 /// failed on it with `Json error: Not valid JSON: EOF while parsing a list` —
 /// the fixture is an array, which is what a `.json` file ordinarily holds.
 /// Letting the engine's reader decide what `io.json` MEANS would be the
@@ -907,11 +925,14 @@ async fn read_json_source(ctx: &SessionContext, uri: &str) -> datafusion::error:
 /// through, so a remote `uri` a host signed is reachable here for the same
 /// reason it is there.
 async fn fetch_bytes(ctx: &SessionContext, uri: &str) -> datafusion::error::Result<Vec<u8>> {
-    let url = datafusion::datasource::listing::ListingTableUrl::parse(uri)?;
-    let store = ctx.runtime_env().object_store(&url)?;
+    // `table_url` and not `url`, which is one letter from the `uri` parameter and
+    // names a different thing: `uri` is what the program wrote, this is what the
+    // object store resolves it to.
+    let table_url = datafusion::datasource::listing::ListingTableUrl::parse(uri)?;
+    let store = ctx.runtime_env().object_store(&table_url)?;
     let data = store
         .get_opts(
-            url.prefix(),
+            table_url.prefix(),
             datafusion::object_store::GetOptions::default(),
         )
         .await
@@ -922,8 +943,8 @@ async fn fetch_bytes(ctx: &SessionContext, uri: &str) -> datafusion::error::Resu
     Ok(data.to_vec())
 }
 
-/// CSV read options matching the writer's whole-file schema inference (DuckDB
-/// `sample_size = -1`). DataFusion samples only the first ~1000 rows by default,
+/// CSV read options matching the writer's whole-file schema inference (`DuckDB`
+/// `sample_size = -1`). `DataFusion` samples only the first ~1000 rows by default,
 /// which mis-types a column whose early values look numeric but later turn
 /// stringy (or vice-versa) — read every record so the inferred Arrow types (and
 /// thus the manifest's `data_type`s) match the writer. Trade-off: inference
@@ -979,8 +1000,8 @@ fn csv_options(delimiter: Option<&str>) -> CsvReadOptions<'_> {
 ///
 /// Derived from the **MIR**, so it carries exactly the columns the mapping reads
 /// (each prop's value `ColRef` → column name, its predicate IRI → the pivot
-/// predicate) — no ShEx re-parse here, and unused shape predicates are not
-/// materialised (the relation stays minimal). The ShEx descriptor's role is
+/// predicate) — no `ShEx` re-parse here, and unused shape predicates are not
+/// materialised (the relation stays minimal). The `ShEx` descriptor's role is
 /// type inference at compile time, not the executor's pivot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderBinding {
@@ -995,6 +1016,7 @@ pub struct ProviderBinding {
 /// bytes and calls [`register_rdf`] to put the pivoted relation in the ctx
 /// before running [`execute_graph`].
 #[must_use]
+#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
 pub fn provider_bindings(
     db: &dyn fossil_base::Db,
     file: SourceFile,
@@ -1060,6 +1082,7 @@ pub struct SourceRef {
 /// its fetches before [`execute_graph`]. Mirrors what [`execute_graph`] resolves
 /// internally, so the list is exactly the sources the run will read.
 #[must_use]
+#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
 pub fn program_sources(
     db: &dyn fossil_base::Db,
     file: SourceFile,
@@ -1142,7 +1165,7 @@ pub fn register_rdf(
 /// Namespaced away from the vertex tables [`finalize_vertex`] registers
 /// (`node.label`): for an RDF shape the source binding *is* the shape local name
 /// (`{ KB } := io.rdf …` + `KB : KB from KB`), so an un-namespaced source
-/// table `KB` would collide with the vertex table `KB` (DataFusion folds
+/// table `KB` would collide with the vertex table `KB` (`DataFusion` folds
 /// identifiers to lowercase, so even case wouldn't save it).
 fn provider_table_name(binding: &str) -> String {
     format!("__rdf_src_{binding}")
@@ -1157,6 +1180,7 @@ fn provider_table_name(binding: &str) -> String {
 /// # Errors
 /// Filesystem read errors or decode/registration failures.
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
 pub fn register_provider_sources(
     ctx: &SessionContext,
     db: &dyn fossil_base::Db,
@@ -1177,7 +1201,7 @@ pub fn register_provider_sources(
 ///
 /// Ten million vertices peak at 15.7 GiB in the executor while the graph it
 /// produces is 1.64 GiB of Arrow, and nothing in between is retained — so the
-/// difference is operator memory that DataFusion is never told to bound. A pool
+/// difference is operator memory that `DataFusion` is never told to bound. A pool
 /// bounds it and spills instead, and [`TrackConsumersPool`] names the operators
 /// that asked for it when the budget is too small to hold.
 ///
@@ -1211,7 +1235,7 @@ fn bounded_context(memory_bytes: Option<u64>) -> datafusion::error::Result<Sessi
 ///
 /// Native one-call orchestration the host (CLI/engine) drives: register every
 /// provider (RDF) source from host-read bytes, execute the whole program on
-/// DataFusion, measure the privacy bound, and return the [`GraphArData`].
+/// `DataFusion`, measure the privacy bound, and return the [`GraphArData`].
 ///
 /// # It wrote a directory, and the directory is now the caller's
 ///
@@ -1247,8 +1271,9 @@ fn bounded_context(memory_bytes: Option<u64>) -> datafusion::error::Result<Sessi
 ///
 /// # Errors
 /// Host read errors (surfaced from `read_uri`), decode/registration failures,
-/// DataFusion execution errors, or a privacy bound that could not be measured.
+/// `DataFusion` execution errors, or a privacy bound that could not be measured.
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
 pub fn materialise(
     db: &dyn fossil_base::Db,
     file: SourceFile,
@@ -1314,7 +1339,7 @@ pub fn materialise(
     Ok(graph)
 }
 
-/// Render a MIR [`Expr`] to a DataFusion logical [`DfExpr`]. Total over the
+/// Render a MIR [`Expr`] to a `DataFusion` logical [`DfExpr`]. Total over the
 /// MIR expression space since F2 §2 — there is no `unimplemented!()` left to
 /// reach, which is what makes a property that type-checks a property that runs.
 pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
@@ -1878,7 +1903,7 @@ impl GraphArData {
             / (1024.0 * 1024.0 * 1024.0)
     }
 
-    /// The corpus's own description — the GraphAr
+    /// The corpus's own description — the `GraphAr`
     /// *materializer*: the `graph.graph.yml` index, one [`VertexInfo`] per node
     /// type and one [`EdgeInfo`] per edge type, in the order the index names
     /// them. Reuses the WASM-clean `fossil_sinks::manifest` structs.
@@ -1991,6 +2016,13 @@ impl GraphArData {
     /// The materialised [`EdgeTable`] for a schema edge, matched on the
     /// `(src, label, dst)` triple that identifies it. `None` for a declared edge
     /// type nothing wrote.
+    // The three comparisons read to `suspicious_operation_groupings` as one
+    // mistyped conjunction, and it suggests `e.src_type == edge.src_type` — a
+    // field `GraphEdge` does not have. The two types spell the same triple
+    // differently (`src_type`/`label`/`dst_type` against
+    // `source`/`label`/`destination`), so only the middle pair matches by name
+    // and the heuristic counts the other two as the odd ones out.
+    #[allow(clippy::suspicious_operation_groupings)]
     pub(crate) fn edge_table(&self, edge: &GraphEdge) -> Option<&EdgeTable> {
         self.edges.iter().find(|e| {
             e.src_type == edge.source && e.label == edge.label && e.dst_type == edge.destination
@@ -2254,7 +2286,7 @@ fn edge_info(edge: &GraphEdge, rows: u64, source_rows: u64) -> EdgeInfo {
     }
 }
 
-/// The GraphAr `data_type` spelling (`string`/`int64`/…) of a schema datatype.
+/// The `GraphAr` `data_type` spelling (`string`/`int64`/…) of a schema datatype.
 fn graphar_spelling(p: Primitive) -> String {
     primitive_to_graphar(p).to_string()
 }

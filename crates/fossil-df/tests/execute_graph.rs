@@ -1,4 +1,4 @@
-//! E2E del backend DataFusion (paso 3, edge phase): un programa con dos
+//! E2E del backend `DataFusion` (paso 3, edge phase): un programa con dos
 //! mappings (Person, Order) y un foreign-key interpolado (`placedBy` →
 //! Person) → [`fossil_df::execute_graph`] → dos tablas vertex + una tabla edge
 //! CSR/CSC con los `dense_id` resueltos por join en memoria.

@@ -20,6 +20,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
@@ -149,12 +150,15 @@ fn write_corpus(dir: &Path) {
     let mut users = String::from("id,name\n");
     for i in 0..PEOPLE {
         let key = (u64::from(i) * 7919) % u64::from(PEOPLE);
-        users.push_str(&format!("{key},person-{key}\n"));
+        // `write!` and not `push_str(&format!(…))`: ten million rows is ten
+        // million throwaway `String`s, which is the allocation this fixture's own
+        // memory budget is trying to leave room for.
+        writeln!(users, "{key},person-{key}").expect("a String never fails to grow");
     }
     let mut orders = String::from("order_id,user_id\n");
     for i in 0..ORDERS {
         let key = (u64::from(i) * 7919) % u64::from(PEOPLE);
-        orders.push_str(&format!("{i},{key}\n"));
+        writeln!(orders, "{i},{key}").expect("a String never fails to grow");
     }
     std::fs::write(dir.join("users.csv"), users).expect("write users.csv");
     std::fs::write(dir.join("orders.csv"), orders).expect("write orders.csv");
@@ -195,12 +199,12 @@ fn tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
 /// a budget was declared, which is the very thing under test.
 const SPILL_MARKERS: [&str; 2] = ["as DataFusion tempfile directory for", "Spilling"];
 
-/// Spill evidence, taken from DataFusion itself.
+/// Spill evidence, taken from `DataFusion` itself.
 ///
 /// A spill leaves nothing behind to assert on: `DiskManager::used_disk_space` is
 /// back to zero once the temp files drop, the files themselves are deleted with
 /// them, and the plan's metrics never leave `execute_graph`. What does survive
-/// is DataFusion's own `log` record, so the test installs a logger and keeps the
+/// is `DataFusion`'s own `log` record, so the test installs a logger and keeps the
 /// records that name a spill. This couples to another crate's log wording — a
 /// rewording fails this test loudly, which is the right failure mode for the
 /// only evidence available.

@@ -221,7 +221,7 @@ fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
 }
 
 /// The smallest power of four that is at least `n`, and one for zero.
-fn next_power_of_four(n: u64) -> u64 {
+const fn next_power_of_four(n: u64) -> u64 {
     let mut blocks = 1u64;
     while blocks < n {
         blocks *= 4;
@@ -230,8 +230,8 @@ fn next_power_of_four(n: u64) -> u64 {
 }
 
 /// Inverse of [`morton2`] — the grid cell a cluster id occupies.
-fn morton_decode(code: u32) -> (u32, u32) {
-    fn compact(mut n: u32) -> u32 {
+const fn morton_decode(code: u32) -> (u32, u32) {
+    const fn compact(mut n: u32) -> u32 {
         n &= 0x5555_5555;
         n = (n | (n >> 1)) & 0x3333_3333;
         n = (n | (n >> 2)) & 0x0f0f_0f0f;
@@ -631,7 +631,7 @@ impl Layout {
     fn page_index_present(&self) -> bool {
         self.files.iter().all(|f| f.page_index_present)
     }
-    fn requests(&self, w: &WindowCost) -> usize {
+    const fn requests(&self, w: &WindowCost) -> usize {
         if self.per_file { w.selected } else { w.runs }
     }
 }
@@ -674,6 +674,10 @@ fn arg(name: &str, default: &str) -> String {
         .unwrap_or_else(|| default.to_string())
 }
 
+// A bench reads as its own arithmetic: `n` rows, `k` clusters, `h` a window's
+// half-width, `cx0`/`cy0` its centre. Spelling them out would put a paragraph
+// between each measurement and the next.
+#[allow(clippy::many_single_char_names, clippy::similar_names)]
 fn main() {
     let n: usize = arg("--rows", "5000000")
         .parse()
@@ -971,6 +975,6 @@ fn mb(bytes: u64) -> String {
     }
 }
 
-fn yesno(b: bool) -> &'static str {
+const fn yesno(b: bool) -> &'static str {
     if b { "yes" } else { "no" }
 }

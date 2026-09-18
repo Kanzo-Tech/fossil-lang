@@ -1,4 +1,4 @@
-//! The GraphAr output as in-memory bytes — the dataset's manifests, and the
+//! The `GraphAr` output as in-memory bytes — the dataset's manifests, and the
 //! baseline Parquet encoder the tiling benches measure against.
 //!
 //! Universal-substrate decision: ONE parquet encoder in Rust (parquet-rs,
@@ -30,7 +30,7 @@ use parquet::file::properties::WriterProperties;
 
 use crate::GraphArData;
 
-/// One output file of the GraphAr dataset: its dataset-relative path
+/// One output file of the `GraphAr` dataset: its dataset-relative path
 /// (`graph.graph.yml`, `vertex/<Type>.vertex.yml`, `vertex/<Type>/tiles.parquet`,
 /// …) and its encoded bytes. The path keys both the on-disk layout (native sink)
 /// and the signed-`PUT` object key (browser host).
@@ -40,7 +40,7 @@ pub struct GraphArFile {
     pub bytes: Vec<u8>,
 }
 
-/// Encoding the GraphAr dataset to bytes failed — Parquet encode (through
+/// Encoding the `GraphAr` dataset to bytes failed — Parquet encode (through
 /// [`batches_to_parquet`]) or manifest YAML serialization.
 /// Filesystem errors live in [`crate::sink::SinkError`] (native-only); this
 /// stays wasm-clean.
@@ -130,8 +130,14 @@ pub fn batches_to_parquet(
     let Some(first) = batches.first() else {
         return Ok(None);
     };
+    // 4,096 rows, cast to whatever this target calls a length — 32 bits on
+    // wasm32, which the constant fits with nineteen bits to spare.
+    // `try_from(...).expect(...)` would add a panic path to a function whose only
+    // failure today is Parquet's own.
+    #[allow(clippy::cast_possible_truncation)]
+    let row_group_rows = DEFAULT_CHUNK_SIZE as usize;
     let props = WriterProperties::builder()
-        .set_max_row_group_row_count(Some(DEFAULT_CHUNK_SIZE as usize))
+        .set_max_row_group_row_count(Some(row_group_rows))
         .build();
     let mut buf = Vec::new();
     let mut writer = ArrowWriter::try_new(&mut buf, first.schema(), Some(props))?;
@@ -160,6 +166,9 @@ mod tests {
     /// the row groups are cut at the tile boundary. What it cannot prove is that
     /// the boxes prune well — that is a property of the Morton order upstream,
     /// and `examples/tile_layout.rs` is where it is measured.
+    // The fixture's own numbers: two tiles and a remainder of seven, so every
+    // cast here is over a value this function wrote and none is over an input.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
     #[test]
     fn a_row_group_is_a_tile() {
         let tile = DEFAULT_CHUNK_SIZE as usize;
@@ -184,7 +193,11 @@ mod tests {
         let meta = ParquetMetaDataReader::new()
             .parse_and_finish(f.as_file())
             .expect("parse footer");
-        let counts: Vec<i64> = meta.row_groups().iter().map(|g| g.num_rows()).collect();
+        let counts: Vec<i64> = meta
+            .row_groups()
+            .iter()
+            .map(parquet::file::metadata::RowGroupMetaData::num_rows)
+            .collect();
         assert_eq!(counts, vec![tile as i64, tile as i64, 7]);
     }
 }

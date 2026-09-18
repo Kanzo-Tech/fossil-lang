@@ -39,6 +39,9 @@ fn schema(props: &[&str]) -> Arc<Schema> {
 /// has to give the same answer however the rows are divided, and
 /// [`the_class_is_the_release_and_not_the_tile`] is what makes that a test
 /// rather than a hope.
+// The fixture's own row indices, which no case here takes past a few hundred:
+// the width is the corpus's (`dense_id` is `uint32`), not a bound on the input.
+#[allow(clippy::cast_possible_truncation)]
 fn corpus(props: &[&str], rows: &[Vec<Option<&str>>], batches: usize) -> GraphArData {
     let schema = schema(props);
     let per = rows.len().div_ceil(batches.max(1));

@@ -300,7 +300,7 @@ async fn a_join_whose_two_keys_are_named_differently_plans() {
 }
 
 /// A compound key — `on = a.k == b.k and a.j == b.j` — is a conjunction of
-/// equalities, and DataFusion plans one hash join on two keys. It costs nothing
+/// equalities, and `DataFusion` plans one hash join on two keys. It costs nothing
 /// beyond splitting the condition on `and`, which is why it is in this change
 /// rather than after it.
 #[tokio::test]
@@ -837,7 +837,7 @@ async fn a_group_by_folds_the_rows_of_each_group() {
 /// Proved the way the union's is, by REACHING for each: a `RecordBatch` carries
 /// no qualifier at all — `names` above reads bare `user_id` and `spent` — so a
 /// qualifier can only be asserted by a projection that resolves through it.
-/// That DataFusion drops the qualifier on an aggregate is measured here and not
+/// That `DataFusion` drops the qualifier on an aggregate is measured here and not
 /// assumed; it is why `Op::GroupBy` names its relation instead of borrowing the
 /// input's, which is the same discovery `Op::Union` made.
 #[tokio::test]
@@ -892,7 +892,7 @@ async fn a_group_bys_aggregate_answers_to_the_ops_own_relation() {
 }
 
 /// `group_by(orders.user_id, spent = math.sum(orders.amount))` as an op.
-fn group_by_spend<'db>(db: &'db dyn fossil_base::Db) -> Op<'db> {
+fn group_by_spend(db: &dyn fossil_base::Db) -> Op<'_> {
     Op::GroupBy {
         input: 0,
         keys: vec![ProjectedColumn {

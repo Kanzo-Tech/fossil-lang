@@ -2,7 +2,7 @@
 //! actually returns — the whole table, for every input type a source can carry.
 //!
 //! `math.sum` declares `Float -> Float` (`fossil_hir::stdlib`, the `math/`
-//! block) and DataFusion's `sum` over an `Int64` column gives an `Int64`. The
+//! block) and `DataFusion`'s `sum` over an `Int64` column gives an `Int64`. The
 //! disagreement is older than `group_by`: the row's template is `sum(%0)` and
 //! the scalar rendering has always had it. What `group_by` added is a place
 //! where the declared type is WRITTEN DOWN in the artefact —
@@ -51,7 +51,7 @@ struct Cell {
 /// `Decimal128` is in the list because it is REACHABLE and unrepresentable:
 /// `fossil_introspect`'s `duckdb_type_to_fossil_primitive` maps any `DECIMAL…`
 /// to `Primitive::Float`, so the checker calls the column a `Float` while a
-/// Parquet source hands DataFusion a `Decimal128`. The language has no decimal
+/// Parquet source hands `DataFusion` a `Decimal128`. The language has no decimal
 /// type (`fossil_graph_schema::Primitive` is nine variants and none is one).
 fn input_columns() -> Vec<(&'static str, DataType, ArrayRef)> {
     vec![
@@ -102,7 +102,7 @@ fn table(ctx: &SessionContext, value: DataType, values: ArrayRef) -> DataFrame {
     ctx.read_table(Arc::new(mem)).expect("reading it back")
 }
 
-/// The DataFusion call `crates/fossil-df/src/plan.rs::agg_call` makes, spelled
+/// The `DataFusion` call `crates/fossil-df/src/plan.rs::agg_call` makes, spelled
 /// the same way and by the same enum — a fifth aggregate added to the catalogue
 /// stops compiling here too.
 fn call(f: AggFn, arg: datafusion::prelude::Expr) -> datafusion::prelude::Expr {
@@ -297,7 +297,7 @@ fn every_aggregate_row_is_reachable_and_declares_float() {
 }
 
 /// Does the declared scalar cover this Arrow type?
-fn matches(declared: ScalarTy, actual: &DataType) -> bool {
+const fn matches(declared: ScalarTy, actual: &DataType) -> bool {
     match declared {
         ScalarTy::Float => matches!(
             actual,

@@ -42,7 +42,7 @@ use crate::{read_source, render};
 /// - a [`Op::Join`] whose `kind` is not `Inner`, or whose `on` is not a
 ///   conjunction of equalities between columns of the two inputs — see
 ///   [`join_equalities`];
-/// - any DataFusion read/plan error.
+/// - any `DataFusion` read/plan error.
 pub async fn plan_relation(
     ctx: &SessionContext,
     ops: &[Op<'_>],
@@ -95,11 +95,9 @@ async fn build(
         // `select(users.a, users.b)`: restrict the row to the named columns, in
         // the order named — under the relation each was written against, which
         // after a join is the only thing that says which side `id` came from.
-        Op::Project { input: i, cols } => input(*i)?.select(
-            cols.iter()
-                .map(|c| column(&c.source, &c.column))
-                .collect::<Vec<_>>(),
-        ),
+        Op::Project { input: i, cols } => {
+            input(*i)?.select(cols.iter().map(|c| column(&c.source, &c.column)))
+        }
         Op::Join {
             left,
             right,
@@ -372,7 +370,7 @@ fn qualify(df: DataFrame, name: &str) -> datafusion::error::Result<DataFrame> {
     Ok(DataFrame::new(state, plan))
 }
 
-/// One [`AggFn`] as the DataFusion aggregate it is.
+/// One [`AggFn`] as the `DataFusion` aggregate it is.
 ///
 /// Total on purpose: the catalogue decides which rows are aggregates and a
 /// fifth one added there stops compiling here rather than losing its column.
@@ -386,10 +384,10 @@ fn agg_call(f: AggFn, arg: DfExpr) -> DfExpr {
     }
 }
 
-/// A `(source, column)` pair as a DataFusion column reference — qualified when
+/// A `(source, column)` pair as a `DataFusion` column reference — qualified when
 /// the source is known, bare when it is not (a retired `.column`, or a
 /// hand-built op list). A bare reference resolves against whichever relation
-/// carries the name, and is ambiguous if two do; that is DataFusion's rule and
+/// carries the name, and is ambiguous if two do; that is `DataFusion`'s rule and
 /// its error names both candidates.
 fn column(source: &str, column: &str) -> DfExpr {
     DfExpr::Column(if source.is_empty() {
@@ -450,7 +448,7 @@ fn inputs(op: &Op<'_>) -> Vec<usize> {
 }
 
 /// The operator's name, for an error that has to say which one it is.
-fn op_name(op: &Op<'_>) -> &'static str {
+const fn op_name(op: &Op<'_>) -> &'static str {
     match op {
         Op::Source { .. } => "Source",
         Op::Project { .. } => "Project",
@@ -469,7 +467,7 @@ fn op_name(op: &Op<'_>) -> &'static str {
 }
 
 /// The expression form's name, for the same reason.
-fn expr_name(e: &Expr<'_>) -> &'static str {
+const fn expr_name(e: &Expr<'_>) -> &'static str {
     match e {
         Expr::LitString(_) => "a string literal",
         Expr::LitBool(_) => "a boolean literal",
