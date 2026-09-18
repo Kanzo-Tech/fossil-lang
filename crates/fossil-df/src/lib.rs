@@ -2136,8 +2136,8 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
         // drawing columns. Not a special case and not a first-class block —
         // the pyramid below appends to the same list.
         vec![Projection::payload("", properties)],
-    );
-    info.iri = node.iri.clone().unwrap_or_default();
+    )
+    .with_iri(node.iri.clone().unwrap_or_default());
     // Every vertex this writer emits carries `subject`, so every one of them gets
     // an identity index and the manifest says so. Declared here, beside the
     // properties that make it possible, rather than after the layout pass that
@@ -2242,7 +2242,7 @@ fn edge_level_columns() -> Vec<Property> {
 /// type's count, and it is here for one reason: the levels of a relation are the
 /// levels of the vertices in it.
 fn edge_info(edge: &GraphEdge, rows: u64, source_rows: u64) -> EdgeInfo {
-    let mut info = EdgeInfo::new(
+    let info = EdgeInfo::new(
         edge.source.clone(),
         edge.label.clone(),
         edge.destination.clone(),
@@ -2269,8 +2269,8 @@ fn edge_info(edge: &GraphEdge, rows: u64, source_rows: u64) -> EdgeInfo {
     // what the shape had already said -- when it can be re-derived at all,
     // which it cannot: an edge type whose every source happens to have one
     // destination today is not a functional relation.
-    .with_cardinality(edge.cardinality);
-    info.iri = edge.iri.clone().unwrap_or_default();
+    .with_cardinality(edge.cardinality)
+    .with_iri(edge.iri.clone().unwrap_or_default());
     // The pyramid of edges, when the source type earned one — more entries on
     // the same list, declared here and written by the layout pass, the same
     // split the vertex levels have. Derived from `VertexLevels::planned` over

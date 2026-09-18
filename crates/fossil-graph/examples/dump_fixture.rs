@@ -32,7 +32,7 @@ use fossil_sinks::manifest::{
 use serde_json::{Map, Value, json};
 
 fn main() {
-    let mut person = VertexInfo::new(
+    let person = VertexInfo::new(
         "Person",
         3,
         DEFAULT_CHUNK_SIZE,
@@ -68,10 +68,10 @@ fn main() {
                 },
             ],
         )],
-    );
-    person.iri = "http://example.org/Person".into();
+    )
+    .with_iri("http://example.org/Person");
 
-    let mut edge = EdgeInfo::new(
+    let edge = EdgeInfo::new(
         "Person",
         "knows",
         "Person",
@@ -79,8 +79,8 @@ fn main() {
         DEFAULT_CHUNK_SIZE,
         "edge/Person_knows_Person/",
         vec![],
-    );
-    edge.iri = "http://example.org/knows".into();
+    )
+    .with_iri("http://example.org/knows");
 
     let graph = GraphInfo::new(
         "graph",

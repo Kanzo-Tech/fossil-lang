@@ -290,7 +290,7 @@ mod tests {
             VertexInfo,
         };
 
-        let mut person = VertexInfo::new(
+        let person = VertexInfo::new(
             "Person",
             3,
             DEFAULT_CHUNK_SIZE,
@@ -307,9 +307,9 @@ mod tests {
                     cardinality: Some(Cardinality::Single),
                 }],
             )],
-        );
-        person.iri = "http://example.org/Person".into();
-        let mut edge = EdgeInfo::new(
+        )
+        .with_iri("http://example.org/Person");
+        let edge = EdgeInfo::new(
             "Person",
             "knows",
             "Person",
@@ -321,8 +321,8 @@ mod tests {
             // was `vec![]` while the path was the hard-coded `by_source.parquet`
             // — a fixture that declared no adjacency and got a view over one.
             vec![Projection::payload("by_source/", vec![]).aligned_by("src", true)],
-        );
-        edge.iri = "http://example.org/knows".into();
+        )
+        .with_iri("http://example.org/knows");
         let graph = GraphInfo::new(
             "graph",
             "",

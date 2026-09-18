@@ -1637,6 +1637,23 @@ impl VertexInfo {
         }
     }
 
+    /// Set the IRI this type's subjects are instances of. See [`Self::iri`].
+    ///
+    /// **Sets a field, where its neighbours declare one.** [`Self::with_index`]
+    /// and the three builders after it turn an `Option` from "nothing said so"
+    /// into an answer, and not calling one is a state those callers can still
+    /// distinguish. `iri` is a plain `String` that [`Self::new`] presets empty,
+    /// so there is no third state to reach: not calling this and calling it with
+    /// `""` leave the same document, and both say the type names no IRI. The
+    /// method exists so that a writer that HAS one does not have to break the
+    /// chain to say so — which is the whole of what it buys, and it buys no
+    /// distinction the field did not already have.
+    #[must_use]
+    pub fn with_iri(mut self, iri: impl Into<String>) -> Self {
+        self.iri = iri.into();
+        self
+    }
+
     /// Declare that this type carries an identity index. See [`VertexIndex`].
     #[must_use]
     pub fn with_index(mut self, index: VertexIndex) -> Self {
@@ -1749,13 +1766,14 @@ impl EdgeInfo {
     /// — equal to [`Self::src_chunk_size`] — is not enforceable when the caller
     /// spells all three. A relation between two types whose tile sizes genuinely
     /// differ assigns [`Self::dst_chunk_size`] after; the fields are public, and
-    /// that is the same escape the `iri` below takes.
+    /// that escape stays open for every one of them — it is what the `iri` below
+    /// took before [`Self::with_iri`] existed.
     ///
     /// # What is preset, and how to vary it
     ///
     /// - `iri` is empty, exactly as in [`VertexInfo::new`], and a writer that
-    ///   has one assigns the field — which is what every caller of
-    ///   `VertexInfo::new` that has an IRI already does.
+    ///   has one says so with [`Self::with_iri`] — the counterpart of
+    ///   [`VertexInfo::with_iri`], and the same non-declaration both places.
     /// - `cardinality` is `None`, which is "nothing declared it" and not
     ///   "many". [`Self::with_cardinality`] is how a writer that read a shape
     ///   says so, for [`VertexInfo::with_index`]'s reason: the caller that knows
@@ -1794,6 +1812,18 @@ impl EdgeInfo {
             projections,
             version: GRAPHAR_VERSION.to_string(),
         }
+    }
+
+    /// Set the IRI this relation's predicate is. See [`Self::iri`].
+    ///
+    /// [`VertexInfo::with_iri`]'s method, with its caveat: it sets a `String`
+    /// [`Self::new`] presets empty rather than declaring an `Option`, so unlike
+    /// [`Self::with_cardinality`] beside it, not calling this and calling it
+    /// with `""` are the same document.
+    #[must_use]
+    pub fn with_iri(mut self, iri: impl Into<String>) -> Self {
+        self.iri = iri.into();
+        self
     }
 
     /// Declare how many of these edges one source vertex may have. See

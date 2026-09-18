@@ -42,7 +42,7 @@ fn prop(name: &str, ty: &str, primary: bool) -> Property {
 /// Manifest for a single `Person` vertex type (fields age, name) + a
 /// `Person knows Person` edge — matching the `DuckDB` tables created below.
 fn manifest() -> Manifest {
-    let mut person = VertexInfo::new(
+    let person = VertexInfo::new(
         "Person",
         3,
         DEFAULT_CHUNK_SIZE,
@@ -59,9 +59,9 @@ fn manifest() -> Manifest {
                 prop("cluster_id", "uint32", false),
             ],
         )],
-    );
-    person.iri = "http://example.org/Person".into();
-    let mut edge = EdgeInfo::new(
+    )
+    .with_iri("http://example.org/Person");
+    let edge = EdgeInfo::new(
         "Person",
         "knows",
         "Person",
@@ -69,8 +69,8 @@ fn manifest() -> Manifest {
         DEFAULT_CHUNK_SIZE,
         "edge/Person_knows_Person/",
         vec![],
-    );
-    edge.iri = "http://example.org/knows".into();
+    )
+    .with_iri("http://example.org/knows");
     let graph = GraphInfo::new(
         "graph",
         "",

@@ -994,7 +994,7 @@ mod tests {
     }
 
     fn person_info() -> VertexInfo {
-        let mut info = VertexInfo::new(
+        VertexInfo::new(
             "Person",
             3,
             DEFAULT_CHUNK_SIZE,
@@ -1027,14 +1027,13 @@ mod tests {
                     },
                 ],
             )],
-        );
-        info.iri = "http://example.org/Person".into();
-        info
+        )
+        .with_iri("http://example.org/Person")
     }
 
     fn fixture() -> Manifest {
         let person = person_info();
-        let mut edge = EdgeInfo::new(
+        let edge = EdgeInfo::new(
             "Person",
             "knows",
             "Person",
@@ -1042,8 +1041,8 @@ mod tests {
             DEFAULT_CHUNK_SIZE,
             "edge/Person_knows_Person/",
             vec![],
-        );
-        edge.iri = "http://example.org/knows".into();
+        )
+        .with_iri("http://example.org/knows");
         let graph = GraphInfo::new(
             "graph",
             "",
