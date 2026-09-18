@@ -54,7 +54,7 @@ const PAYLOAD = 'bench-tiles.parquet';
  * Where the vertex payload is — **asked of the addressing rather than spelled here.**
  *
  * This panel used to compose `${bench.base}/vertex/Person/tiles.parquet` at two call sites, which
- * is a second implementation of the one thing `resolveCorpus` exists to do: it reads the type's
+ * is a second implementation of the one thing the addressing exists to do: it reads the type's
  * `prefix` out of the manifest and knows the container, so `vertex/Person/` and `tiles.parquet`
  * are its answers and not this file's. A corpus whose manifest put the type somewhere else would
  * have been addressed correctly by the URL list below and fetched from the wrong place by the two
