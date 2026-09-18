@@ -1,12 +1,149 @@
 ---
 title: The architecture
-description: The dependency graph fossil has today, why no pair of groups points both ways any more, and what `base` is supposed to mean.
+description: The three boundaries fossil has, what a corpus is made of, which loop writes each artefact, which half of the reader reads which, and the dependency graph underneath all of it.
 ---
+
+`corpus.bnf`'s header states the spine: fossil has **three boundaries — program, plan, artefact** —
+and each one is specified by a data file that generates code rather than by prose that describes it.
+`grammar.bnf` is the shape of a program, `catalogue.bnf` is the names a program may write, and
+`corpus.bnf` is the columns a writer emits. Everything below hangs off one of the three.
+
+**This page states the shape and links to the page that argues each part.** Where a section would
+restate an argument, it is a sentence and a route instead. That is the discipline, and it is the one
+this repository has paid for twice.
+
+## What a corpus is
+
+**Four sets of columns, seventeen columns between them**, declared once in `corpus.bnf` and projected
+into `crates/fossil-sinks/src/generated.rs` and `packages/corpus/src/vocabulary.generated.ts` by
+`cargo xtask corpus`: the **payload** (5), the **adjacency** (2), the **cell** (7) and the
+**quotient** (3). Exactly one of the seventeen is also a declared `properties:` entry — `subject` —
+and every reader names the ROLE it means rather than the name, because the eight words the writer
+emits were 545 string literals with no declaration any of them derived from.
+
+**Every one of the four is addressed by a shift, and nothing is listed.** `dense_id` is a vertex's
+rank in the Morton order of its own position; a tile is
+`crates/fossil-sinks/src/manifest.rs, tile_of`, a level's address is the payload's shift plus `2k`
+by `crates/fossil-sinks/src/manifest.rs, STRIDE_BITS`, and a cell of rung `k` is `dense_id >> shift`
+with parent `r >> 2` — `crates/fossil-layout/src/layout/cells.rs, Pyramid`. There is no directory
+listing over HTTP and the format asks for none.
+[Addressing](/docs/format/conventions/addressing) is the specification.
+
+**The corpus carries two coarse faces and neither of them was deleted.** The level pyramid *samples*
+— `dense_id % scale == 0`, real rows sharing the payload's own numbering — and the cell pyramid
+*aggregates* into synthetic rows that no scale describes. They draw different pictures rather than
+being two prices for one, which is why `crates/fossil-layout/tests/level_vs_rung.rs` weighs them on
+ONE corpus: two instruments over two graphs compare two graphs.
+[Holons](/docs/design/holons) is the argument for the cell pyramid being a third artefact.
+
+## What the writer is
+
+Three loops and a document, sequenced in `crates/fossil-cli/src/host.rs` in the order a corpus is
+true in.
+
+| the loop | where | what it produces |
+| --- | --- | --- |
+| every vertex, then every edge, with a hard barrier between them | `crates/fossil-df/src/lib.rs, execute_graph` | the payload columns and both adjacency orientations, as Arrow in memory |
+| partition, place, renumber into Morton order, tile | `crates/fossil-layout/src/layout/pass.rs, enrich_layout` | the payload on disk and the level pyramid |
+| one linear scan per rung, over the payload rather than the rung below | `crates/fossil-layout/src/layout/cells.rs, Pyramid` | the cell rows and the quotient edges |
+
+Nothing is staged and read back: the rows reach the pass as the batches the executor already held.
+The trip that is gone was 43.3 MB of the 115.9 MB a com-DBLP run wrote — **37.4%, a write
+amplification of 1.60×**.
+
+**The manifest is written last, and that is not tidiness.** A document written before the bytes can
+only *promise* them, which is the right shape for a count that is arithmetic and the wrong one for a
+number that is measured — and three of its fields are measured. A rung's quotient edge count; a
+categorical channel's `domain`, because nothing in front of the bytes knows how many communities
+Louvain will find; and `reached` on `crates/fossil-sinks/src/manifest.rs, KAnonymity`, which
+`crates/fossil-df/src/privacy.rs` takes after the corpus is a value and before any of it is a file.
+[Streaming](/docs/design/streaming) argues the budget the write path runs under, and
+[privacy](/docs/format/conventions/privacy) argues the bound.
+
+## What the reader is
+
+**One door, one name, three depths, all of them asynchronous** —
+`packages/corpus/src/corpus.ts, open`. `resolveCorpus` and `openCorpus` are both gone into it, and
+the depth follows from the capability the caller brings, which is the whole of why there is one
+name:
+
+```ts
+await open(url,  { query, wasmUrl })          // Corpus — the whole door
+await open(url,  { readText, wasmUrl })       // CorpusAddressing — the manifests, no payload
+await open(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
+```
+
+`sql: 'allowed'` widens the first of those to `SqlCorpus`; it is a widening and not a fourth depth.
+
+**What comes back has two halves, and the line between them is which bytes get chosen.** `extent`,
+`rows`, `frame`, `node` and `neighbours` compute which files to open and open those. The six verbs —
+`crates/fossil-graph/src/operations/mod.rs, Operation`, compiled to wasm32 — name a table and let the
+engine decide. The two halves meet at exactly one point, the host's `query` callback, and the reader
+brings no engine of its own to either.
+
+**What would merge them is pruning by predicate, and it was measured to lose.** DuckDB evaluates a
+range predicate per row instead of skipping row groups: a range join against the id runs at 237 ms
+and 179 `BETWEEN … OR …` predicates at 189 ms, against 5 ms for not pruning at all. A window written
+as a `WHERE` reads the whole file, so pruning stays the tiles' job and this change did not merge
+anything. [One door](/docs/design/one-door) argues the surface;
+[the reference viewer](/docs/design/reference-viewer) argues what a frame may answer with.
+
+The reader's **policy** over that contract is a second published package and deliberately not on the
+door: `@fossil-lang/draw` holds what a corpus is drawn WITH
+(`packages/draw/src/encoding.ts, encodingFor`) and what is already LOADED
+(`packages/draw/src/residency.ts, residency`). A channel is read off a manifest, but an encoding is a
+reader's ranking of what to do with one and a residency budget is a number measured against one
+renderer on one corpus. Neither is a property of the artefact.
+
+## What is declared and what is derived
+
+One rule, and `crates/fossil-sinks/src/manifest.rs, Channel` states it beside the field it is applied
+to: **a document carries a fact exactly when a reader cannot recover it from the bytes.**
+
+| the field | why the document carries it |
+| --- | --- |
+| `HolonTree::vertices_per_cell` | the base of the pyramid is a choice about what a screen can draw, and a set of points is never full, so no writer derives it from the data |
+| `Channel::domain` | a categorical's distinct-value count is in no footer and costs a scan; a quantitative channel carries none, because Parquet's per-row-group min and max already are one |
+| `CoordinateSystem::provenance` | a latitude and a drawing algorithm's output are both two `float32` columns, and nothing but a declaration tells them apart |
+
+**The absences are the same rule read the other way.** A cell row carries no `parent`, because a cell
+of rung `k` covers a fixed interval of the `dense_id` axis and the parent is `r >> 2`; and no
+`subject`, because a cell is not an entity and no bookmark keys on one.
+`crates/fossil-sinks/src/manifest.rs, HolonTree` carries no `chunk_size` of its own, because a rung's
+ids are a shift of the payload's and there is no second number to declare. And `corpus.bnf` declares
+no prefix, no file name and neither shift: those are addressing, and addressing already has one
+implementation in `crates/fossil-graph/src/plan.rs`.
+
+## The heuristic stops at the corpus
+
+> **What crosses to the reader is arithmetic and declared.**
+
+The fifth quality attribute, and the only one this page states rather than links, because it is the
+only one without a page of its own. The other four have one: a declared budget bounds the write path
+([streaming](/docs/design/streaming)), a read is bounded and reports what it read
+([one door](/docs/design/one-door)), addressing is arithmetic
+([addressing](/docs/format/conventions/addressing)), and a reader never holds the graph
+([holons](/docs/design/holons), [the reference viewer](/docs/design/reference-viewer)).
+
+It is what decided the pyramid against the holarchy. A holarchy's extents are **measured** — they are
+wherever Louvain's sweeps stopped — so addressing one means fetching a heuristic's boundaries into
+the read path, where every reader pays for them and no reader can check them.
+[Holons](/docs/design/holons) carries that argument and this page does not repeat it.
+
+**Its first measured violation was a dependency edge and not a format decision**, which is why it
+belongs here rather than on the format. `fossil-layout`'s pass wrote tiles through a Parquet encoder
+that lived in `fossil-df` and that `fossil-df` never called, and that one `use` put `datafusion`,
+`fossil-hir`, `fossil-mir`, `fossil-descriptors-output`, `fossil-base` and `salsa` into the normal
+closure of a pass that resolves no name and holds no database. `39d0fb8` cut it, and
+`crates/xtask/tests/substrate_reach.rs` is the attribute made checkable: it takes its subject from
+`CLAUDE.md` and its linkers from `cargo metadata`, so neither half is a list anybody keeps by hand.
+It proves the rule is enforced and not that the rule is right, and says so.
 
 ## The graph today
 
-Grouped by what each crate is about, because two dozen nodes drawn flat show nothing. The ugliness is
-the finding, not a failure of the drawing.
+The same three boundaries seen from the tree: `language` and `editor` serve the program, `engine`
+runs the plan, `corpus` is the artefact. Grouped by what each crate is about, because two dozen nodes
+drawn flat show nothing. The ugliness is the finding, not a failure of the drawing.
 
 ```mermaid
 graph LR
@@ -204,16 +341,17 @@ and the cycle goes with it.
 
 ## The verdict is not the crate count
 
-**Twenty-seven crates**, against Gluon's ~11 crates for 90k lines, Gleam's 15 (six real) for 228k
+**Twenty-eight crates**, against Gluon's ~11 crates for 90k lines, Gleam's 15 (six real) for 228k
 and rust-analyzer's 36 for 571k. The line count that used to sit beside this number is deliberately
 not restated: it was measured on 2026-08-25 and `fossil-kanon` and `fossil-policy` have landed
 since, so the only honest options were to re-measure or to drop it.
 **At this size the honest target is five to eight.**
 
-Four of them moved in one sitting and only two are new code: `fossil-locator` arrived by moving a
-module down out of `fossil-base`, `fossil-engine` left by moving three into the crate that already
-used them, and `fossil-kanon` and `fossil-policy` arrived carrying the privacy clause. Which is the
-point of the heading — the count went 25 → 26 → 25 → 27 and none of those numbers is the verdict.
+Five of them moved and only two are new code: `fossil-locator` arrived by moving a module down out
+of `fossil-base`, `fossil-engine` left by moving three into the crate that already used them,
+`fossil-kanon` and `fossil-policy` arrived carrying the privacy clause, and `fossil-tile-writer`
+arrived by moving a struct out of a crate that never called it. Which is the point of the heading —
+the count went 25 → 26 → 25 → 27 → 28 and none of those numbers is the verdict.
 
 What makes two dozen feel like a maze is not the count. Two of them lie about what they are, and a
 false name costs more than a surplus crate because you cannot skip it while reading. There were
