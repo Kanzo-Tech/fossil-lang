@@ -464,6 +464,111 @@ describe("every source citation names an item that exists", () => {
 });
 
 /**
+ * The other half of the tree, and this exists because nothing read it.
+ *
+ * `RUST_CITATION` above reads `crates/…/x.rs, item`. Nothing read a path under `packages/` or
+ * `apps/` — the pnpm workspace's half — so a TypeScript path in prose was checked for exactly one
+ * thing: that it was not written as `path:12`. It could name a file that had moved, or one that had
+ * never existed, and the suite stayed green either way.
+ *
+ * That is not hypothetical, and the measurement is the argument the same way it was up there.
+ * `044cbbf` moved two modules out of the playground into `packages/draw`, and **eight citations of
+ * `apps/playground/src/{encoding,residency}.ts` survived the move** — four pages, nothing red, the
+ * banned-line-number check passing on every one of them because none of them had a line number.
+ * `c2d217e` repaired them by reading, which is the mechanism a guard is for replacing.
+ *
+ * **Same spelling as the Rust one, deliberately**, because an accepted second spelling is how the
+ * first one comes back: a backticked path, and where a single item carries the claim, `, name`
+ * after it. The path must be on disk. The anchor, where there is one and the file is one a
+ * definition can be read out of, must name something that file DEFINES — a re-export
+ * (`export type { Channel } from …`) is this half's `use` and does not count, for the reason four
+ * of the thirteen did not.
+ *
+ * What it does NOT do, and both are the Rust guard's own admissions repeated:
+ *
+ *   - **A bare path is checked for existence and nothing else.** `apps/corpus/guards/manifest.mjs`
+ *     beside a claim about what that scanner skips passes here. Existence is what the move broke,
+ *     and it is the whole of what this buys.
+ *   - **A `.yml`, `.json` or `.css` citation carries no anchor check.** There is no definition to
+ *     read out of one. The extension is in the pattern so that the PATH is checked, which is the
+ *     part that goes stale when a tree is rearranged.
+ *
+ * And it is `it.each` over what the tree contains, so it thins out silently exactly as the suites
+ * above do. There is no floor here either; `design/discarded` carries the rejected one.
+ */
+const WORKSPACE_CITATION =
+  /`((?:packages|apps)\/[\w./@-]+\.(?:ts|tsx|mjs|cjs|js|jsx|json|yml|yaml|css|sh|toml|md|mdx|bnf|rs|fossil))(?:,\s*([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*))?`/g;
+
+/** The extensions a definition can be read out of. Everything else is checked for existence only. */
+const DEFINING = /\.(?:ts|tsx|mjs|cjs|js|jsx)$/;
+
+/**
+ * Every name a TypeScript or JavaScript file DEFINES, by the same rule `RUST_DEF` uses: the
+ * declaration forms, exported or not, and nothing that merely mentions a name.
+ *
+ * `export … from` is excluded by construction — the keyword there is followed by `{` or `*`, never
+ * by an identifier — which is the point rather than a happy accident. A file that re-exports a type
+ * cannot stand in for the file that declares it, the same way a `use` cannot.
+ */
+const WORKSPACE_DEF =
+  /^\s*(?:export\s+(?:default\s+)?)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|class|interface|type|enum|namespace|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)/;
+
+function workspaceItemsOf(path: string): Set<string> {
+  const full = join(repoRoot, path);
+  if (!existsSync(full)) return new Set();
+  return new Set(
+    readFileSync(full, "utf8").split("\n").flatMap((line) => {
+      const m = WORKSPACE_DEF.exec(line);
+      return m ? [m[1] as string] : [];
+    }),
+  );
+}
+
+interface WorkspaceCitation {
+  /** `<page>:<line in the page>` — the failure points at the prose, not at the target. */
+  where: string;
+  /** `<path>` or `<path>, <anchor>`, so a `$id` in the test name reads as the citation does. */
+  id: string;
+  path: string;
+  /** `null` where the claim is «this is pinned in that file» and no single item carries it. */
+  anchor: string | null;
+}
+
+const workspaceCitations: WorkspaceCitation[] = contentPages.flatMap((file) => {
+  const page = relative(repoRoot, file);
+  return readFileSync(file, "utf8").split("\n").flatMap((line, index) =>
+    [...line.matchAll(WORKSPACE_CITATION)].map((m) => ({
+      where: `${page}:${index + 1}`,
+      id: m[2] === undefined ? (m[1] as string) : `${m[1]}, ${m[2]}`,
+      path: m[1] as string,
+      anchor: m[2] ?? null,
+    })),
+  );
+});
+
+describe("every workspace citation names a file that is there", () => {
+  // Without these two a regex that stopped matching would report a clean sweep of nothing.
+  it("finds citations at all", () => {
+    expect(workspaceCitations.length).toBeGreaterThan(20);
+  });
+
+  it("reads items out of a cited file", () => {
+    expect(workspaceItemsOf("packages/draw/src/encoding.ts").has("encodingFor")).toBe(true);
+  });
+
+  it.each(workspaceCitations)("$where cites $id", ({ path, anchor }) => {
+    expect(
+      existsSync(join(repoRoot, path)),
+      `${path} is not on disk — a package move is the way this goes stale, and it is silent`,
+    ).toBe(true);
+    if (anchor === null || !DEFINING.test(path)) return;
+    // A dotted anchor names a member, and the member is defined inside the thing the file declares.
+    const head = anchor.split(".")[0] as string;
+    expect(workspaceItemsOf(path).has(head), `${path} defines no ${head}`).toBe(true);
+  });
+});
+
+/**
  * `arguedIn` is a route on this site, and that is the whole of the change from what it replaced.
  *
  * It used to name a file under `decisions/` — a directory of sixty-three records that was the second

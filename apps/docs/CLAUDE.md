@@ -72,16 +72,23 @@ The anchor is an item the file DEFINES — `fn`, `struct`, `enum`, `trait`, `typ
 `static`, `macro_rules!` — and `content.test.ts` checks it. A `use` that merely names the item does
 not count, because four of the thirteen cited the import for a claim about the function underneath.
 Where the claim is «this is pinned in that file» and no single item carries it, write the path with
-no line and no anchor; nothing checks that, and `design/discarded` records why and what would change
-it. `path:12` in any form fails the build.
+no line and no anchor. `path:12` in any form fails the build.
+
+**The same spelling reads the other half of the tree**, and there the bare path is checked too: a
+`packages/…` or `apps/…` path must be a file that is on disk, with or without an anchor, and an
+anchor on a `.ts`/`.tsx`/`.mjs` must be a name that file declares — a re-export is this half's `use`.
+`044cbbf` moved two modules into a package and eight citations of their old paths survived it across
+four pages with CI green, which is what that buys. It stops at those two directories: `crates/` with
+no anchor is still unchecked, because `design/prior-art` cites rust-analyzer by its real `crates/…`
+path, and `design/discarded` carries which half landed and what the other one needs.
 
 ## What the guards hold, and what they cannot
 
 `build` runs `test` first, and that is load-bearing. `content.test.ts` fails the build on: a
 direction without a summary, an `arguedIn` that does not resolve or that names its own page, a
 `/docs/…` link to a page that is not there, a `#fragment` naming no heading in the target, a source
-citation naming an item its file does not define, a citation written as `path:12` at all, and a
-`grammar.bnf` citation that names no production. It also carries the one architectural claim a
+citation naming an item its file does not define, a `packages/…` or `apps/…` path that is not on
+disk, a citation written as `path:12` at all, and a `grammar.bnf` citation that names no production. It also carries the one architectural claim a
 manifest can settle.
 
 Each of those has a vacuity check beside it, because a glob that stops matching is how a guard
