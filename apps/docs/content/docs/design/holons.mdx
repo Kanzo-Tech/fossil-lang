@@ -848,8 +848,10 @@ meaning works against every reader who looks it up.
 
 The candidate is `holon` → **`cell`**, which says what it is: a region of the plane, summarised.
 `pyramid:` is then free as a block name if the rungs are ever retired into the level machinery.
-Against it: the rename touches a manifest block, a crate's public types, a test file and this page,
-and it should not be paid twice.
+Against it: a cost, which stood here as an estimate — *a manifest block, a crate's public types, a
+test file and this page* — and is counted below instead. **The estimate was wrong in both
+directions**, and the decision is still not taken, because what is left is not arithmetic about the
+word.
 
 **The condition this paragraph named has been met, and the paragraph is rewritten rather than
 annotated.** It said the rename waited on *a writer that partitions spatially, so that nothing in
@@ -860,9 +862,123 @@ the tree is a community any more*, and until one existed the old name was still 
 question the writer was waiting on. So nothing in a written tree is a community, and the name
 describes a thing that no longer exists in the artefact.
 
-What is left holding the rename is only its cost: a manifest block, a crate's public types, a test
-file and this page, paid once. That is a scheduling question and not a design one, which is why it
-stays below rather than moving up.
+What is left holding the rename is its cost, and the three sections below are that cost measured.
+**It is not a scheduling question.** Half of it is already paid; the half that is left is a manifest
+key whose rename fails *silently* rather than loudly; and the exit this page had assumed was
+disqualifying turns out not to be.
+
+### Half of it is already paid, and the half that is paid is the half a reader sees
+
+`corpus.bnf` writes this pyramid's columns as `cell_id`, `count`, `internal`, `mode` and `purity`,
+in a container it names `cell`, and the quotient's as `src_cell` and `dst_cell`. Both generated
+projections of that file — `crates/fossil-sinks/src/generated.rs` and
+`packages/corpus/src/vocabulary.generated.ts` — carry **zero** occurrences of `holon`. So the column
+vocabulary a reader meets in a Parquet file is already `cell`, and it never said `holon`: what
+`cargo xtask corpus` generates cannot be part of this rename because it was never part of the old
+name.
+
+What is left is the manifest block, the Rust types above it, the prose around it, and one directory
+name.
+
+### The rest, counted
+
+**561 occurrences in 36 files**, case-insensitively, over everything `git ls-files` lists. Split by
+what a rename would actually have to do to each:
+
+| where the word is | occurrences | files | what a rename is there |
+| --- | --- | --- | --- |
+| Rust code — `HolonTree`, `HolonRung`, `HolonQuotient`, `HOLON_PREFIX`, `holon_count`, `holons_at`, `with_holons` and the test fns | 260 | 11 | mechanical, and the compiler finds every one |
+| Rust doc and line comments | 162 | 19 | prose, and the compiler finds none of it |
+| design pages on this site | 109 | 6 | prose |
+| guard code under `apps/corpus/guards/` | 11 | 3 | **two of these read the manifest key** |
+| TypeScript and JavaScript comments | 8 | 5 | prose |
+| a corpus on disk — the conformance manifest and one snapshot | 7 | 2 | **the format change, and the whole of it** |
+| `corpus.bnf` | 3 | 1 | prose; its columns are already `cell` |
+| `apps/docs/content/docs/design/meta.json` | 1 | 1 | this page's slug |
+
+**And one more that no count of the word reaches: this page's own route.** `/docs/design/holons` is
+cited **50 times in 20 files**. Twenty-two of them, in six files, are pages of this site, where
+`content.test.ts` fails the build on a `/docs/…` link that does not resolve. The other **28, in
+fourteen files**, are in Rust doc comments, in `corpus.bnf` and in `packages/corpus/src/corpus.ts`,
+and nothing in either half of the tree checks those. A rename that moves the page and not the route
+is the exact failure this site's guards were built out of, one directory along.
+
+### The wire is four spellings, and only two of them are a compatibility question
+
+Four spellings reach a corpus on disk. Two are keys — `holons:` on the vertex info and `holon_count:`
+on a rung — and two are values: the `holon/` prefix and the `holon` coordinate system.
+
+**The values are not a compatibility question at all.**
+`crates/fossil-sinks/src/manifest.rs, HOLON_PREFIX` is *written into* `prefix:`, and every reader
+takes the declared prefix rather than the constant — which is what `Projection::path`'s own
+paragraph means by declared rather than conventional. A corpus written last month keeps resolving
+its tiles under `holon/` however the writer spells the next one, and a corpus is free to carry a
+directory whose name matches nothing in any crate.
+
+**The keys are, and they break in opposite directions — which is the finding.**
+
+<Callout type="warn" title="Renaming `holons:` does not stop an old corpus loading. It stops it saying anything.">
+`crates/fossil-sinks/src/manifest.rs, VertexInfo` carries the block behind
+`#[serde(default, skip_serializing_if = "Option::is_none")]`, and **no struct in the manifest model
+sets `deny_unknown_fields`**. So a corpus written before the rename deserialises *cleanly* under the
+new name, with the pyramid **silently absent** — not an error, not a state a reader can tell apart
+from a corpus that genuinely declares no tree, because
+`crates/fossil-sinks/src/manifest.rs, a_vertex_written_before_the_holon_block_existed_declares_nothing`
+asserts that absence is legal and means *declares nothing*. The rungs are still on disk under
+`holon/` and nothing points at them.
+
+`holon_count` is the opposite — required, no default, so a stale rung fails loudly with a missing
+field. **Under a rename with no alias that failure is unreachable**, because the block above it was
+dropped in silence first. The loud half is the half that never fires.
+
+**This tree has already paid that exact failure once.** `crates/fossil-df-wasm/src/lib.rs` carries
+the account: the browser's report of a run silently lost `holons:` and then `channels:` — two fields
+present in the YAML the very same call emitted — and what caught it was somebody reading both, not a
+test.
+</Callout>
+
+The guards inherit the silence rather than catching it. `apps/corpus/guards/inspect.mjs, holonsOf`
+reads `info.holons` and returns `null` for an absent key, and the `mode-names-a-channel` guard in
+`apps/corpus/guards/guards.mjs` reads that `null` as *declares no holon tree, so there is no
+reference to resolve* — a **note, not a failure**. A rename with no alias turns that guard vacuous
+over every corpus written before it, and vacuously passing is how a guard stops guarding.
+
+### The two exits, and the first is cheaper than this page assumed
+
+**`#[serde(alias = "holons")]` does not leave the document saying the old name.** That objection is
+the obvious one and it is false for the mechanism actually available: `alias` is **read-only**. The
+writer emits the new key from the first corpus after the change; only the reader still accepts the
+old one. What keeps the old spelling is one attribute per renamed key and the corpora already
+written — which are exactly the set no rename can reach. The cost is two attributes, and what it
+buys is that the silent-absence failure above cannot happen.
+
+Its real price is the one an alias always has: **two spellings of one key are legal forever**, which
+is a statement about the format and not about a crate, and this site does not say anywhere whether
+that is allowed. `apps/corpus/guards/inspect.mjs, holonsOf` is the one function in the tree that
+reads the key, so it is the only place the duality would have to live — but a conformance corpus
+then has to decide whether a document spelling the old key is conformant, and that is a question for
+`/docs/format`, not for this page.
+
+**A migration costs the alias plus a tool that does not exist.** Nothing in the tree rewrites a
+written manifest: `crates/fossil-cli/src/main.rs, Commands` has four subcommands and none of them
+opens a corpus to edit it. So «what does a reader do with a corpus written last month» has, today,
+exactly one answer — *nothing, in silence* — and a migration is the option that has to build the
+answer rather than choose one.
+
+### What this needs in order to be taken
+
+Not a further measurement of the word. Three things, and the first is the whole of it:
+
+1. **A ruling on whether two spellings of a manifest key may be legal at once.** If yes, the alias is
+   two attributes and the rename is otherwise mechanical. If no, the rename waits on a migration
+   tool and is a format change with a version bump behind it.
+2. **Whether the page route moves with the block.** 28 of its 50 citations are outside this site and
+   nothing checks them, so moving the route and moving the key are separable decisions that have
+   been treated as one.
+3. **Somewhere for the format policy to be stated**, because 1 is not a fact about this pyramid. The
+   same question is open one artefact along for
+   [`version: gar/v1`](/docs/design/corpus#the-version-string-names-a-format-this-page-declares-non-conformant),
+   and answering it twice differently is the thing to avoid.
 
 ## What this does not settle
 
@@ -910,7 +1026,7 @@ block already has, and a global default would be a number in a spec that is wron
 but a corpus of many small types would then carry the same measurement many times. What would
 settle it is a second corpus of a different shape, measured the same way.
 
-**The name.** Above, with what would settle it.
+**The name.** Above, counted, with the ruling it waits on.
 
 **Which level a reader opens on.** The tree makes every level addressable and says nothing about
 where a reader starts. The screen picks the base; nothing yet picks the entry point.
