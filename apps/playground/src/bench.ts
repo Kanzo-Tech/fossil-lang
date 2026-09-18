@@ -3,7 +3,7 @@
  *
  * `scripts/bench-corpus.mjs` writes a million-vertex corpus into this app's `public/` at build
  * time; this module opens it the way any reader would: fetch the manifests, hand them to
- * `resolveCorpus`, and get back every URL the corpus can produce.
+ * `openCorpus`, and get back every URL the corpus can produce.
  *
  * ## What addressing costs now
  *
@@ -19,12 +19,12 @@
  * `openCorpus` takes — rather than a call sequenced before it, and it is memoised for the rest of
  * the session.
  *
- * **`resolveCorpus` is the engine-free door and `openCorpus` is the engine-bearing one.** This
- * module is why the distinction is a capability rather than a preference: there is no `query` here
- * to give the door, and nothing to run one against. See the export's own comment in
- * `@fossil-lang/corpus`.
+ * **There is one door and the capability decides how deep it goes.** This module is why that is a
+ * capability rather than a preference: there is no `query` here to give it and nothing to run one
+ * against, so `openCorpus` is handed the manifests and answers with the addressing alone. It was
+ * a second function called `resolveCorpus`; it is the same name at a shallower depth now.
  */
-import { resolveCorpus, type CorpusAddressing } from '@fossil-lang/corpus';
+import { openCorpus, type CorpusAddressing } from '@fossil-lang/corpus';
 
 import { CORPUS_WASM_URL } from './corpus.js';
 
@@ -59,7 +59,7 @@ export interface Bench {
    * page, so `bench/1000000/vertex/Person/tiles.parquet` resolved to a path under Vite's
    * dependency-optimiser directory, came back as the SPA fallback's `index.html`, and the
    * footer read died with `No magic bytes found at end of file`. Anchoring here rather than at
-   * each call site means every URL `resolveCorpus` produces is one a Worker can open, which is
+   * each call site means every URL the addressing produces is one a Worker can open, which is
    * the property the addressing layer is supposed to be delivering.
    */
   base: string;
@@ -76,7 +76,7 @@ export interface Bench {
    * Every manifest as it was served, keyed by the dataset-relative path — the index under
    * `graph.graph.yml`, and one per type beside it.
    *
-   * The same map `resolveCorpus` was handed, kept for the reader that wants a document the
+   * The same map the addressing was resolved from, kept for the reader that wants a document the
    * addressing does not: a vertex type's `channels:` block is per TYPE and lives in
    * `vertex/<Type>.vertex.yml`, so an encoding cannot get at it through `indexText` the way
    * `src/bound.ts` gets at `privacy:`. Costs nothing — these are the bytes already fetched and
@@ -87,7 +87,7 @@ export interface Bench {
   manifestBytes: number;
   manifestCount: number;
   /**
-   * Milliseconds spent fetching manifests, and milliseconds inside `resolveCorpus`.
+   * Milliseconds spent fetching manifests, and milliseconds spent addressing them.
    *
    * `resolveMs` covers the reader's one-time boot as well as the arithmetic, because the boot is
    * an option on the call rather than a step before it. It is memoised per session, so a second
@@ -101,10 +101,10 @@ export interface Bench {
 /**
  * Pull the manifest paths out of the index.
  *
- * A three-line reader for two list keys rather than a YAML dependency: `resolveCorpus` needs
+ * A three-line reader for two list keys rather than a YAML dependency: the engine-free rung needs
  * the manifest FILES, and to know which files those are you have to read the index's
- * `vertices:` and `edges:` lists first. `openCorpus` does exactly this and for exactly this
- * reason. Anything subtler about the manifests is `resolveCorpus`'s job, not this function's —
+ * `vertices:` and `edges:` lists first. The door does exactly this and for exactly this
+ * reason. Anything subtler about the manifests is the reader's job, not this function's —
  * it is looking for filenames, and a filename that is not there produces a
  * `CorpusManifestError` from the real reader, which is a better error than one invented here.
  */
@@ -166,7 +166,7 @@ export async function openBench(): Promise<Bench | null> {
   // million-vertex corpus becomes available here, with no further request — the `wasmUrl` boots
   // the reader (memoised) and the arithmetic runs against manifests already in hand.
   const resolveStarted = performance.now();
-  const addressing = await resolveCorpus({ manifestFiles, base, wasmUrl: CORPUS_WASM_URL });
+  const addressing = await openCorpus(base, { manifestFiles, wasmUrl: CORPUS_WASM_URL });
   const resolveMs = performance.now() - resolveStarted;
 
   const manifestBytes = Object.values(manifestFiles).reduce((a, t) => a + new Blob([t]).size, 0);

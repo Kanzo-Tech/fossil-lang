@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { resolveCorpus, type Direction, type CorpusAddressing } from '../src/address.js';
+import type { Direction, CorpusAddressing } from '../src/address.js';
+import { openCorpus } from '../src/corpus.js';
 
 /**
  * The conformance corpus, executed against the published module.
@@ -126,17 +127,25 @@ describe('the conformance corpus', () => {
   for (const expected of table.cases) {
     const root = join(CONFORMANCE, expected.root);
 
-    describe(expected.name, () => {
+    // **`async` because the door is.** The addressing is the shallowest rung of `openCorpus` now,
+    // so resolving costs an `await` — and this suite resolves at COLLECTION time, to generate a
+    // test per subject of the corpus rather than per row of a static table. Vitest awaits a suite
+    // factory, which is what makes that legal; the alternative is deriving the subject list from
+    // `expected.json` instead of from the corpus, and a table that decided which subjects to check
+    // would stop being a table the corpus is checked against.
+    describe(expected.name, async () => {
       if (expected.resolve_throws) {
-        it('refuses a manifest that addresses nothing', () => {
-          expect(() => resolveCorpus({ manifestFiles: manifestFiles(root) })).toThrow(
+        it('refuses a manifest that addresses nothing', async () => {
+          await expect(openCorpus('', { manifestFiles: manifestFiles(root) })).rejects.toThrow(
             expected.resolve_throws,
           );
         });
         return;
       }
 
-      const corpus: CorpusAddressing = resolveCorpus({ manifestFiles: manifestFiles(root) });
+      const corpus: CorpusAddressing = await openCorpus('', {
+        manifestFiles: manifestFiles(root),
+      });
 
       it('reads the container off the manifest', () => {
         // The one thing about a corpus a reader cannot work out: working it out means listing a
@@ -341,12 +350,11 @@ describe('the conformance corpus', () => {
     });
   }
 
-  it('prepends the base and does nothing else to it', () => {
+  it('prepends the base and does nothing else to it', async () => {
     const { base, case: name, path, url } = table.base_join;
     const target = table.cases.find((c) => c.name === name)!;
-    const corpus = resolveCorpus({
+    const corpus = await openCorpus(base, {
       manifestFiles: manifestFiles(join(CONFORMANCE, target.root)),
-      base,
     });
     const tile = Number(path.replace(/^.*chunk(\d+)\.parquet$/, '$1'));
     expect(corpus.vertexType().tileUrl(tile)).toBe(url);

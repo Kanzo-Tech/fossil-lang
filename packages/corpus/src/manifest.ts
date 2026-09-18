@@ -7,7 +7,7 @@
  * whole job: **the manifests themselves are read by `fossil-graph`**, through
  * `fossil-graph-wasm`'s `Corpus`, and this module reads none of them.
  *
- * **It used to read all of them**, because `resolveCorpus` was a second implementation of the
+ * **It used to read all of them**, because the addressing was a second implementation of the
  * addressing and needed every field the Rust reader needs — a chunk size, an `index:` block, a
  * level list. That reader is gone, so the accessors it wanted are gone with it and the scanner is
  * narrowed to the shape its one remaining input has: a flat mapping of scalars, plus the two
@@ -30,7 +30,7 @@ export const GRAPH_INFO_PATH = 'graph.graph.yml';
 /** One scanned manifest file: scalars, and sequences of scalars. */
 export type ScannedManifest = Record<string, string | string[]>;
 
-/** Raised by everything in this module, and by the reader behind `resolveCorpus`. */
+/** Raised by everything in this module, and by the reader behind the addressing. */
 export class CorpusManifestError extends Error {
   constructor(message: string) {
     super(message);

@@ -18,13 +18,30 @@
  * await corpus.aggregate({ vertex_type: 'Person', group_by: 'age', agg: 'count', bins: 20 })
  * ```
  *
- * # One door, and the rule applied to it
+ * # One door, one name, and the depth is an argument
  *
- * *«There is no second reference»* is the repo's rule and this package has twice enforced it
- * against itself — `createGraphClient` is not exported, and the `./address` subpath was deleted
- * because its only justification forced a second implementation of the addressing. It had never
- * been applied to the door as a whole, which measured **10 value exports, 38 named types and an
- * unbounded `export type *`**. Three things came off it, each for its own reason:
+ * *«There is no second reference»* is the repo's rule and this package has now enforced it against
+ * itself three times — `createGraphClient` is not exported, the `./address` subpath was deleted
+ * because its only justification forced a second implementation of the addressing, and
+ * **`resolveCorpus` is gone into {@link openCorpus}**, which is the one that had survived two
+ * previous passes.
+ *
+ * It survived them because the objection to removing it was real and is still real: it needed no
+ * engine and spent no round trip, so deleting it withdrew a capability rather than a duplicate.
+ * What that argument never established is that the capability needs a NAME of its own. It does not.
+ * The capability is what the CALLER brings, so it is an argument:
+ *
+ * ```ts
+ * await openCorpus(url,  { query, wasmUrl })          // Corpus — the door
+ * await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no engine, no request
+ * ```
+ *
+ * Two rungs, one name, and `corpus.addressing` is still what the first rung already resolved for
+ * a caller who paid for it. What it cost: the call is now always asynchronous — the synchronous
+ * form had no production consumer, measured, and both engine-free call sites in this repository
+ * already awaited it.
+ *
+ * Also off the barrel, each for its own reason:
  *
  * - **`initFossilGraphWasm`** — the biggest leak of implementation into a surface whose claim is
  *   that a corpus is a URL: a consumer had to know there is a wasm module and had to sequence two
@@ -38,56 +55,25 @@
  *   ten `./generated.ts` also holds (`Operation`, `FossilGraphSchemas`, the row and summary
  *   shapes) stay reachable structurally, e.g. `SchemaResult['vertices'][number]`.
  *
- * # What came back, and why narrowing is not the same as withdrawing
- *
- * **`resolveCorpus` came off beside `GRAPH_INFO_PATH` and is back.** The argument for taking it
- * off was that it and `corpus.addressing` answered one question from two routes, and the sentence
- * that reported the cost is the refutation: the door is the ENGINE-BEARING route and spends
- * `1 + N` round trips before it answers, `resolveCorpus` needs neither an engine nor a request,
- * and `corpus.addressing` is what the door already resolved for a caller who has paid for one.
- * Three positions, not one answer three times — and `apps/playground/src/bench.ts` names 245 tiles
- * of a million-vertex corpus from the position only the second one covers. Removing it removed a
- * capability. The rejected alternative is the one that was in force: leave it off and tell the two
- * callers that need it to re-implement `fossil_graph::plan`.
+ * # What is here and why
  *
  * **`Corpus.levels()` is `levelsOf` in `./address.ts`** — three calls to that module and no fourth
  * fact, which is why it is not a member of the door. It IS re-exported here, and was not: the
  * grounds were that a consumer never names a level file, and two do. See the export.
  *
- * **What deliberately stayed.** The four `PAYLOAD_*` role constants, because the check found a
- * consumer: `@fossil-lang/draw`'s `encoding.ts` reads all three of `PAYLOAD_ADDRESS`,
- * `PAYLOAD_COORDINATES` and `PAYLOAD_CATEGORICAL`, and `apps/playground/scripts/verify-encoding.mjs`
- * reads the last of them through it. Internalising them puts `cluster_id` back in a hand-written
- * line — which is the six-statements-of-one-fact this table was generated to end. That consumer was
- * in an app when this was written and is a published package now, which makes the reason stronger
- * rather than weaker.
+ * **The four `PAYLOAD_*` role constants**, because the check found a consumer:
+ * `@fossil-lang/draw`'s `encoding.ts` reads all three of `PAYLOAD_ADDRESS`, `PAYLOAD_COORDINATES`
+ * and `PAYLOAD_CATEGORICAL`, and `apps/playground/scripts/verify-encoding.mjs` reads the last of
+ * them through it. Internalising them puts `cluster_id` back in a hand-written line — which is the
+ * six-statements-of-one-fact this table was generated to end. That consumer was in an app when this
+ * was written and is a published package now, which makes the reason stronger rather than weaker.
  */
 
-// The door, and the two errors an `instanceof` is a legitimate part of a surface for.
-// `CorpusManifestError` is the manifest failing to address itself before a byte of payload is read;
-// `CorpusReadError` is the bytes disagreeing with what the manifest promised. A caller can retry
-// one of those against a different corpus and never the other.
+// The door — one name, two depths — and the two errors an `instanceof` is a legitimate part of a
+// surface for. `CorpusManifestError` is the manifest failing to address itself before a byte of
+// payload is read; `CorpusReadError` is the bytes disagreeing with what the manifest promised. A
+// caller can retry one of those against a different corpus and never the other.
 export { CorpusManifestError, CorpusReadError, openCorpus } from './corpus.js';
-
-// The OTHER door, and the reason there are two is that they answer different questions.
-//
-// **`resolveCorpus` was taken off this barrel as a duplicate of `corpus.addressing`, and it is not
-// one.** `openCorpus` is the ENGINE-BEARING route: it takes a `query`, reads the index, then one
-// manifest per type, and spends `1 + N` round trips before it hands anything back — because
-// everything it answers needs bytes. `resolveCorpus` is the ENGINE-FREE route: hand it manifests
-// you already hold and it names every URL the corpus can produce with no engine, no request and no
-// round trip at all. `apps/playground/src/bench.ts` names all 245 tiles of a million-vertex corpus
-// that way, and there is no expressing that through the door — which is what makes withdrawing
-// this a withdrawn CAPABILITY rather than a removed duplicate.
-//
-// `corpus.addressing` is neither of those two things: it is what the door ALREADY resolved, for a
-// caller that has one. It cannot be reached without paying for the door first, so it is not a
-// second route to this answer; it is this answer, already bought.
-//
-// What genuinely was a second route stays internal. `initFossilGraphWasm` made a consumer know
-// there IS a wasm module and order two calls against it; `wasmUrl` on `ResolveCorpusOptions` is the
-// one thing about that boot a caller can still say, spelled exactly as it is on `OpenCorpusOptions`.
-export { resolveCorpus } from './address.js';
 
 // Which levels of detail a type has, and which of them the writer spent bytes on.
 //
@@ -148,8 +134,11 @@ export type {
   SqlPolicy,
 } from './corpus.js';
 
-// What `Corpus.addressing` is, for the drawing path that fetches its own tiles. Named here because
-// the member is: a public member whose type cannot be written down is worse than no member.
+// What `Corpus.addressing` is — and, since the collapse, what the engine-free rung of
+// `openCorpus` answers with. Named here because the member is: a public member whose type cannot
+// be written down is worse than no member.
+//
+// `ResolveCorpusOptions` is NOT replaced by another name: `OpenCorpusOptions` is what it became.
 export type {
   AddressedTiles,
   CorpusAddressing,
@@ -161,7 +150,6 @@ export type {
   IndexAddress,
   LevelInfo,
   ProjectionAddress,
-  ResolveCorpusOptions,
   VertexAddress,
 } from './address.js';
 

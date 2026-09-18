@@ -33,7 +33,7 @@ let _initPromise: Promise<unknown> | null = null;
  * memoised promise, i.e. the thing `@fossil-lang/corpus` has twice already
  * removed. It stays a module export because `tests/boot.ts` instantiates from
  * a `BufferSource` that no bundler resolution names, and because
- * `./address.ts` needs it up before `resolveCorpus` can address anything.
+ * `./address.ts` needs it up before `addressManifests` can address anything.
  */
 export function initFossilGraphWasm(opts: InitFossilGraphWasmOpts): Promise<unknown> {
   if (!_initPromise) {

@@ -48,7 +48,7 @@ import { dirname, join, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { openCorpus, resolveCorpus } from '@fossil-lang/corpus';
+import { openCorpus } from '@fossil-lang/corpus';
 import { BOUNDED_DEFAULTS, denseOf, typeOf, vertexId } from '@kanzo-tech/graph';
 
 import { query as duckQuery } from '../../corpus/guards/duck.mjs';
@@ -143,10 +143,10 @@ for (const path of manifestPaths) manifestFiles[path] = readFileSync(join(root, 
 // A local directory is a legitimate base for the duckdb CLI: every `tileUrl` it composes is a
 // path the binary can open, which is the same string a browser would have fetched.
 //
-// `wasmUrl` because `resolveCorpus` is a binding now: the addressing is `fossil_graph::plan` at
-// wasm32, so it is arithmetic but not free-standing. `openCorpus` below is given the same value
-// and the boot is memoised, so this is one boot rather than two.
-const addressing = await resolveCorpus({ manifestFiles, base: root, wasmUrl: CORPUS_WASM });
+// `wasmUrl` because the addressing is `fossil_graph::plan` at wasm32: arithmetic, but not
+// free-standing. The door below is given the same value and the boot is memoised, so this is one
+// boot rather than two — and it is the same function, at the rung that needs no engine.
+const addressing = await openCorpus(root, { manifestFiles, wasmUrl: CORPUS_WASM });
 const type = addressing.vertexType();
 
 // ---- the host's one capability, counted ----

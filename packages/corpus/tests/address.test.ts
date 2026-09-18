@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { CorpusManifestError, resolveCorpus } from '../src/address.js';
+import { CorpusManifestError } from '../src/address.js';
+import { openCorpus } from '../src/corpus.js';
 
 /**
  * The addressing binding, on the manifests the rest of this package already uses.
@@ -63,7 +64,7 @@ const vectors = JSON.parse(
  * the field the `tile_url` table is about, `container`, is read from `graph.graph.yml` rather than
  * guessed from a prefix.
  */
-function corpusOf(options: {
+async function corpusOf(options: {
   prefix: string;
   edgePrefix?: string;
   adjPrefix?: string;
@@ -72,7 +73,7 @@ function corpusOf(options: {
   container: 'files' | 'rowgroups';
 }) {
   const { prefix, edgePrefix = '', adjPrefix = '', chunkSize, vertexCount, container } = options;
-  return resolveCorpus({
+  return openCorpus('', {
     manifestFiles: {
       'graph.graph.yml': [
         'name: graph',
@@ -115,38 +116,38 @@ function corpusOf(options: {
 }
 
 describe('tileOf', () => {
-  it('reproduces the published border vectors', () => {
+  it('reproduces the published border vectors', async () => {
     // The table's own shift is 12, so the corpus that answers it is one tiled at 4,096. 2³¹ is
     // where a port that took the shift as signed gives a negative tile; 2⁵³ is where one that went
     // through a `Number` stops being exact. Both are rows in the table.
     expect(vectors.tile_of.vectors.length).toBeGreaterThan(0);
-    const person = corpusOf({
+    const person = (await corpusOf({
       prefix: 'v',
       chunkSize: 4096,
       vertexCount: '1',
       container: 'files',
-    }).vertexType();
+    })).vertexType();
     for (const { dense_id, tile } of vectors.tile_of.vectors) {
       expect(person.tileOf(BigInt(dense_id)), dense_id).toBe(BigInt(tile));
     }
   });
 
-  it('refuses a Number, because `>>` truncates to 32 bits before it shifts', () => {
-    const person = corpusOf({
+  it('refuses a Number, because `>>` truncates to 32 bits before it shifts', async () => {
+    const person = (await corpusOf({
       prefix: 'v',
       chunkSize: 4096,
       vertexCount: '1',
       container: 'files',
-    }).vertexType();
+    })).vertexType();
     expect(() => person.tileOf(4096 as unknown as bigint)).toThrow(TypeError);
     expect(() => person.tileOf(-1n)).toThrow(RangeError);
   });
 
-  it('takes the corpus’s own shift, and not a default', () => {
+  it('takes the corpus’s own shift, and not a default', async () => {
     // The same id in two corpora tiled differently is two tiles, which is the whole reason the
     // shift is a manifest field and not a constant this package carries.
-    const wide = corpusOf({ prefix: 'v', chunkSize: 4096, vertexCount: '1', container: 'files' });
-    const narrow = corpusOf({ prefix: 'v', chunkSize: 64, vertexCount: '1', container: 'files' });
+    const wide = await corpusOf({ prefix: 'v', chunkSize: 4096, vertexCount: '1', container: 'files' });
+    const narrow = await corpusOf({ prefix: 'v', chunkSize: 64, vertexCount: '1', container: 'files' });
     expect(wide.vertexType().tileOf(64n)).toBe(0n);
     expect(narrow.vertexType().tileOf(64n)).toBe(1n);
     expect(wide.vertexType().shift).toBe(12);
@@ -163,12 +164,12 @@ describe('tileUrl', () => {
    * against both. Which is what its own `why` says: an adjacency is the projection at `scale: 1`
    * and not a different kind of artefact.
    */
-  const composed = (row: (typeof vectors.tile_url.vectors)[number]): string[] => {
+  const composed = async (row: (typeof vectors.tile_url.vectors)[number]): Promise<string[]> => {
     const prefix = row.prefix.replace(/\/+$/, '');
     // An adjacency's prefix is composed from two manifest fields — the edge type's and the
     // projection's own `path` — so a row that publishes the whole path is split back into them.
     const cut = prefix.lastIndexOf('/');
-    const corpus = corpusOf({
+    const corpus = await corpusOf({
       prefix,
       edgePrefix: prefix.slice(0, cut),
       adjPrefix: prefix.slice(cut + 1),
@@ -183,10 +184,10 @@ describe('tileUrl', () => {
     ];
   };
 
-  it('reproduces the published border vectors', () => {
+  it('reproduces the published border vectors', async () => {
     expect(vectors.tile_url.vectors.length).toBeGreaterThan(0);
     for (const row of vectors.tile_url.vectors) {
-      expect(composed(row), JSON.stringify(row)).toEqual([row.url, row.url]);
+      expect(await composed(row), JSON.stringify(row)).toEqual([row.url, row.url]);
     }
   });
 
@@ -208,7 +209,7 @@ describe('tileUrl', () => {
 });
 
 describe('the declared count', () => {
-  it('reproduces the published declared_count vectors', () => {
+  it('reproduces the published declared_count vectors', async () => {
     // The borders that matter: 4,096 @ 4,096 is ONE tile (the off-by-one addresses a `chunk1` that
     // nothing wrote), 4,097 is two with a tail of one (the tile a truncated corpus loses), 300 @ 64
     // is the conformance corpus and catches a hard-coded stride, and 2⁵³+1 is where a `Number`
@@ -219,12 +220,12 @@ describe('the declared count', () => {
     // publishes it. `apps/corpus/guards` still executes that column, in plain Node.
     expect(vectors.declared_count.vectors.length).toBeGreaterThan(0);
     for (const v of vectors.declared_count.vectors) {
-      const type = corpusOf({
+      const type = (await corpusOf({
         prefix: 'v',
         chunkSize: v.chunk_size,
         vertexCount: v.count,
         container: 'files',
-      }).vertexType();
+      })).vertexType();
       expect(type.count, v.count).toBe(BigInt(v.count));
       expect(type.tiles, v.count).toBe(BigInt(v.tiles));
     }
@@ -245,9 +246,9 @@ describe('the declared count', () => {
   });
 });
 
-describe('resolveCorpus', () => {
-  it('addresses vertex tiles under the declared prefix', () => {
-    const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
+describe('openCorpus — the engine-free rung', () => {
+  it('addresses vertex tiles under the declared prefix', async () => {
+    const corpus = await openCorpus('/bench/1000000', { manifestFiles });
     const person = corpus.vertexType();
 
     // Derived from the fixture, not transcribed from it. `chunkSize` was
@@ -271,16 +272,16 @@ describe('resolveCorpus', () => {
     expect(person.tileOf(BigInt(declared))).toBe(1n);
   });
 
-  it('addresses relative to the dataset root when no base is given', () => {
-    const corpus = resolveCorpus({ manifestFiles });
+  it('addresses relative to the dataset root when the base is empty', async () => {
+    const corpus = await openCorpus('', { manifestFiles });
     expect(corpus.vertexType().tileUrl(9)).toBe('vertex/Person/tiles.parquet');
   });
 
-  it('publishes no orientation for an edge type that declares none', () => {
+  it('publishes no orientation for an edge type that declares none', async () => {
     // This fixture's `projections` is empty — a manifest that says the relation exists and does
     // not say where any of it is. Composing `by_source/chunk{k}.parquet` from the convention is
     // exactly the 404 this module exists to make impossible.
-    const corpus = resolveCorpus({ manifestFiles });
+    const corpus = await openCorpus('', { manifestFiles });
     const knows = corpus.edges[0]!;
 
     expect(knows.edgeType).toBe('knows');
@@ -289,8 +290,8 @@ describe('resolveCorpus', () => {
     expect(knows.adjacency('dst')).toBeNull();
   });
 
-  it('reports an unaddressable orientation as a gap rather than drawing nothing', () => {
-    const corpus = resolveCorpus({ manifestFiles });
+  it('reports an unaddressable orientation as a gap rather than drawing nothing', async () => {
+    const corpus = await openCorpus('', { manifestFiles });
     const addressed = corpus.tilesFor({ tiles: [0, 1], directions: ['src', 'dst'] });
 
     // One file for the two tiles, distinct: under `rowgroups` a list naming it once per tile is
@@ -304,13 +305,15 @@ describe('resolveCorpus', () => {
     ]);
   });
 
-  it('names the file when a manifest it was promised is not there', () => {
+  it('names the file when a manifest it was promised is not there', async () => {
     const { 'vertex/Person.vertex.yml': _dropped, ...without } = manifestFiles;
-    expect(() => resolveCorpus({ manifestFiles: without })).toThrow(CorpusManifestError);
-    expect(() => resolveCorpus({ manifestFiles: without })).toThrow('vertex/Person.vertex.yml');
+    await expect(openCorpus('', { manifestFiles: without })).rejects.toThrow(CorpusManifestError);
+    await expect(openCorpus('', { manifestFiles: without })).rejects.toThrow(
+      'vertex/Person.vertex.yml',
+    );
   });
 
-  it('refuses a chunk_size no shift addresses', () => {
+  it('refuses a chunk_size no shift addresses', async () => {
     // 122,880 is `DuckDB`'s default row-group size and not a power of two, so
     // no shift names a tile.
     const yaml = manifestFiles['vertex/Person.vertex.yml']!;
@@ -323,24 +326,29 @@ describe('resolveCorpus', () => {
     expect(mutated).not.toBe(yaml);
 
     const broken = { ...manifestFiles, 'vertex/Person.vertex.yml': mutated };
-    expect(() => resolveCorpus({ manifestFiles: broken })).toThrow(CorpusManifestError);
-    expect(() => resolveCorpus({ manifestFiles: broken })).toThrow('no shift addresses');
+    await expect(openCorpus('', { manifestFiles: broken })).rejects.toThrow(CorpusManifestError);
+    await expect(openCorpus('', { manifestFiles: broken })).rejects.toThrow('no shift addresses');
   });
 
-  it('is synchronous once the module is up, and takes no fetch', () => {
-    // **The claim moved and did not go.** It used to be that addressing needed nothing at all;
-    // it needs an instantiated WASM module, which `./boot.js` gave this file. What it still does
-    // not need is a request: a round trip between the camera moving and a URL being computable is
-    // the `viewport` verb this format deleted, and `resolveCorpus` returns a corpus, not a promise.
-    const corpus = resolveCorpus({ manifestFiles });
-    expect(corpus).not.toBeInstanceOf(Promise);
+  it('takes no capability and issues no request', async () => {
+    // **The claim moved twice and the surviving half is the one that was ever load-bearing.** It
+    // used to be that addressing needed nothing at all; then it needed an instantiated WASM module,
+    // which `./boot.js` gives this file; and now the call that reaches it is the door's, which is
+    // asynchronous for every rung. So `expect(corpus).not.toBeInstanceOf(Promise)` is gone — it
+    // asserted the SPELLING, and no production caller ever used the synchronous form.
+    //
+    // What it still does not need is a request, or anything to make one with: no `query`, no
+    // `readText`, nothing but bytes already in hand. A round trip between the camera moving and a
+    // URL being computable is the `viewport` verb this format deleted, and that is the assertion
+    // below — a corpus addressed with neither capability, answering with a URL.
+    const corpus = await openCorpus('', { manifestFiles });
     expect(corpus.tilesFor({ tiles: [7] }).vertexUrls).toEqual(['vertex/Person/tiles.parquet']);
   });
 
-  it('refuses a vertex type the manifest does not declare, and names the ones it does', () => {
+  it('refuses a vertex type the manifest does not declare, and names the ones it does', async () => {
     // The refusal has one author. A second copy of the type list on this side of the boundary is
     // what the whole change removed, so the sentence comes back from the reader.
-    const corpus = resolveCorpus({ manifestFiles });
+    const corpus = await openCorpus('', { manifestFiles });
     expect(() => corpus.vertexType('Nobody')).toThrow(CorpusManifestError);
     expect(() => corpus.vertexType('Nobody')).toThrow('it names Person');
   });
@@ -389,8 +397,8 @@ describe('projections — the written pyramid', () => {
     return { ...manifestFiles, 'graph.graph.yml': index, 'vertex/Person.vertex.yml': mutated };
   };
 
-  it('sees the scales, which are the whole of what it cannot derive', () => {
-    const [person] = resolveCorpus({ manifestFiles: withLevels() }).types;
+  it('sees the scales, which are the whole of what it cannot derive', async () => {
+    const [person] = (await openCorpus('', { manifestFiles: withLevels() })).types;
     // The payload is IN the list and not beside it — that is the claim the vocabulary rests on.
     expect(person!.projections.map((p) => p.scale)).toEqual([1, 4, 16, 64, 256]);
     // No second `chunk_size`: the cut does not change with the scale.
@@ -399,8 +407,8 @@ describe('projections — the written pyramid', () => {
     expect(person!.projection(1024)).toBeNull();
   });
 
-  it('addresses a projection tile by the same shift, with log2(scale) more bits falling off', () => {
-    const person = resolveCorpus({ manifestFiles: withLevels() }).types[0]!;
+  it('addresses a projection tile by the same shift, with log2(scale) more bits falling off', async () => {
+    const person = (await openCorpus('', { manifestFiles: withLevels() })).types[0]!;
     // Scale 64 keeps one id in 64, so a tile of 4,096 of its rows spans 262,144 payload ids: the
     // payload's own shift of 12 plus the 6 bits the scale carries.
     const coarse = person.projection(64)!;
@@ -425,31 +433,35 @@ describe('projections — the written pyramid', () => {
     expect(person.projection(256)!.tiles).toBe(1n);
   });
 
-  it('refuses to address a scale nobody wrote, and says what answers it instead', () => {
-    const person = resolveCorpus({ manifestFiles: withLevels() }).types[0]!;
+  it('refuses to address a scale nobody wrote, and says what answers it instead', async () => {
+    const person = (await openCorpus('', { manifestFiles: withLevels() })).types[0]!;
     expect(() => person.projectionFiles(1024)).toThrow('at scales 1, 4, 16, 64, 256 and not 1024');
     expect(() => person.projectionFiles(1024)).toThrow('the predicate over the payload');
   });
 
-  it('refuses a scale no shift addresses, because a projection is never a division', () => {
+  it('refuses a scale no shift addresses, because a projection is never a division', async () => {
     const files = withLevels('- path: l1/\n  scale: 3\n  file_type: parquet\n');
-    expect(() => resolveCorpus({ manifestFiles: files })).toThrow(CorpusManifestError);
-    expect(() => resolveCorpus({ manifestFiles: files })).toThrow('scale 3, which no shift addresses');
+    await expect(openCorpus('', { manifestFiles: files })).rejects.toThrow(CorpusManifestError);
+    await expect(openCorpus('', { manifestFiles: files })).rejects.toThrow(
+      'scale 3, which no shift addresses',
+    );
   });
 
-  it('refuses a type with no payload, which the count and the cut describe and nothing addresses', () => {
+  it('refuses a type with no payload, which the count and the cut describe and nothing addresses', async () => {
     // A `projections:` list that names no `scale: 1` is not a corpus without a pyramid; it is one
     // whose rows have no URL at all, and the two must not resolve to the same thing.
     const yaml = manifestFiles['vertex/Person.vertex.yml']!;
     const mutated = yaml.replace(/^- path: ''\n  scale: 1\n/m, `${'- path: l1/'}\n  scale: 4\n`);
     expect(mutated).not.toBe(yaml);
     const files = { ...manifestFiles, 'vertex/Person.vertex.yml': mutated };
-    expect(() => resolveCorpus({ manifestFiles: files })).toThrow('no projection at scale 1');
-    expect(() => resolveCorpus({ manifestFiles: files })).toThrow('no payload to address');
+    await expect(openCorpus('', { manifestFiles: files })).rejects.toThrow(
+      'no projection at scale 1',
+    );
+    await expect(openCorpus('', { manifestFiles: files })).rejects.toThrow('no payload to address');
   });
 
-  it('reports the payload alone when the manifest declares no pyramid, which is a corpus and not a gap', () => {
-    const [person] = resolveCorpus({ manifestFiles }).types;
+  it('reports the payload alone when the manifest declares no pyramid, which is a corpus and not a gap', async () => {
+    const [person] = (await openCorpus('', { manifestFiles })).types;
     expect(person!.projections.map((p) => p.scale)).toEqual([1]);
     expect(person!.projection(4)).toBeNull();
   });

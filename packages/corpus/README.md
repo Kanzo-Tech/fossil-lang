@@ -8,14 +8,24 @@ and the five bounded verbs (`read`, `expand`, `path`, `aggregate`, `schema`) on
 one object. No tiles, no `dense_id`, no Morton, no `by_source`, no prefixes, no
 footers.
 
-**Two doors, and they answer different questions.** `openCorpus` is the
-engine-bearing one. `resolveCorpus({ manifestFiles, base, wasmUrl })` is the
-engine-free one: hand it manifests you already hold and it names every URL the
-corpus can produce with no engine, no request and no round trip. Give it a
-`wasmUrl` and it awaits the reader's memoised boot and returns a promise; omit
-it, and it is synchronous arithmetic for a caller whose module is already up.
-`corpus.addressing` is neither — it is what the door already resolved, for a
-caller who has paid for one.
+**Two depths on that one name, and the depth is what the caller brings.** The
+engine-free route was a second function, `resolveCorpus`, and is now the shallow
+end of the same call:
+
+```ts
+await openCorpus(url,  { query, wasmUrl })          // Corpus — the whole door
+await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no engine, no request
+```
+
+`query` is the engine; `manifestFiles` is for a caller that already holds the
+manifests, where `base` is what every address is prepended with. Exactly one is
+required, and giving neither is a `TypeError` that names them.
+`corpus.addressing` is neither — it is what the first rung already resolved, for
+a caller who paid for it.
+
+The capability was always the real difference between the two functions, and a
+capability is an argument. The call is now always asynchronous; the synchronous
+form `resolveCorpus` had without a `wasmUrl` had no production consumer.
 
 Everything else that was on the barrel is reachable through the door or not at
 all:
@@ -24,10 +34,10 @@ all:
   `openCorpus` already holds the two things it took.
 - `GRAPH_INFO_PATH` — the index's file name is the door's business. `openCorpus`
   takes a corpus URL and reads whatever is under it.
-- `initFossilGraphWasm` — the boot, awaited inside `openCorpus` and inside
-  `resolveCorpus`. A consumer should not have to know there is a wasm module, let
-  alone sequence two calls against it. `wasmUrl` is what survives, because only
-  the caller knows how its bundler resolves an asset.
+- `initFossilGraphWasm` — the boot, awaited inside `openCorpus`. A consumer
+  should not have to know there is a wasm module, let alone sequence two calls
+  against it. `wasmUrl` is what survives, because only the caller knows how its
+  bundler resolves an asset.
 - `export type *` — an unbounded star publishes whatever the codegen makes, now
   and later, with nobody deciding. The twelve params/results the members name
   are re-exported by name instead.
@@ -42,7 +52,7 @@ justification.
 ### The addressing costs a WASM module now, and that is the price
 
 `@fossil-lang/corpus/address` was a **fourth** entry, and it is deleted. It
-published `resolveCorpus` on a closure that reached no wasm-bindgen output:
+published the addressing on a closure that reached no wasm-bindgen output:
 synchronous arithmetic over a parsed manifest, importable by a notebook, a CLI
 or a server with a Parquet reader of its own and no WebAssembly.
 
@@ -52,12 +62,13 @@ with no JS runtime, so it cannot be the one that goes — and 1,058 lines of
 TypeScript beside it composed the same URLs from the same manifest, agreeing
 with it because people kept making them agree. Nothing compared the two.
 
-So the TypeScript reader is gone and `resolveCorpus` asks the Rust one, through
+So the TypeScript reader is gone and the addressing asks the Rust one, through
 `fossil-graph-wasm`. What that costs:
 
 - **The module has to be up before anything resolves**, exactly as for a verb.
   Composing a URL was arithmetic over bytes the host already held and is now a
-  call into an instantiated module. `openCorpus` awaits the boot itself.
+  call into an instantiated module. `openCorpus` awaits the boot itself, on
+  every rung.
 - **There is no WASM-free path, and there will not be one.** A second
   implementation is what a WASM-free path is.
 - `tests/address-standalone.test.ts` proved the subpath's closure loaded from a
@@ -71,10 +82,10 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
   ├─ src/generated.ts   verb Params/Result types — codegen'd from schemars JSON Schema
   ├─ src/load.ts        the memoised wasm boot (internal; openCorpus awaits it)
   ├─ src/client.ts      the verb transport, dispatched through by the door (not exported)
-  ├─ src/query.ts       QueryFn — the one capability a host supplies, for both surfaces
+  ├─ src/query.ts       QueryFn — the one capability a host supplies, for both depths
   ├─ src/manifest.ts    graph.graph.yml, scanned for the paths to fetch next
-  ├─ src/address.ts     resolveCorpus + levelsOf — the binding, not the reader
-  └─ src/corpus.ts      openCorpus(url, { query, wasmUrl }) — THE DOOR
+  ├─ src/address.ts     addressManifests + levelsOf — the binding, not the reader
+  └─ src/corpus.ts      openCorpus(url, { query | manifestFiles }) — THE DOOR
 ```
 
 ## Usage
@@ -234,6 +245,13 @@ const { vertexUrls, edgeUrls, complete, gaps } = addressing.tilesFor({
 });
 // complete: false
 // gaps: [{ edgeType: 'knows', direction: 'dst', reason: 'not-requested' }]
+```
+
+**And it is not a second function either.** A caller with no engine asks the
+same name for the same object, by bringing less:
+
+```ts
+const addressing = await openCorpus(base, { manifestFiles, wasmUrl });
 ```
 
 **It never composes an address the corpus does not publish.** An edge type with

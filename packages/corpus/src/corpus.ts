@@ -2,11 +2,17 @@
  * A corpus, opened from a URL — **the door**, with the addressing underneath and invisible.
  *
  * There were three entry points over one manifest and no rule for choosing between them, and this
- * is the one door now: `createGraphClient` is the transport it dispatches through, `resolveCorpus`
+ * is the one door now: `createGraphClient` is the transport it dispatches through, `addressManifests`
  * is the addressing it resolves with, and NEITHER is on the module surface — a consumer of
  * `@fossil-lang/corpus` reaches both through this function or not at all. `./index.ts` carries what
  * each internalisation cost. `/docs/design/one-door` has what the removal settled, and why the
  * camera grew this object rather than opening a fourth beside it.
+ *
+ * **`resolveCorpus` was the last of the three and it is this function's shallowest rung.** The
+ * engine-free route is a capability the caller lacks, not a door of its own:
+ * `openCorpus(base, { manifestFiles })` answers with the addressing and never touches an engine,
+ * and `openCorpus(url, { query })` is the whole corpus. See {@link openCorpus} and
+ * {@link OpenCorpusOptions}.
  *
  * **The object has two halves and the line between them is not a spelling.** `extent`, `rows`,
  * `node` and `neighbours` compute which FILES to open and open those; `schema`, `read`, `expand`,
@@ -16,9 +22,9 @@
  * that is the tiles' job, not a verb's*. See {@link Corpus.neighbours} for the one place the two
  * halves answer questions that look identical and are not.
  *
- * `resolveCorpus` is not this. It is the addressing layer: it returns URLs and leaves the consumer
- * knowing what a tile is, which container carries one, how to ask for footers and how to join CSR
- * with CSC. That is exactly the knowledge the handover asked not to need. Here there are no tiles,
+ * The addressing rung is not this. It returns URLs and leaves the consumer knowing what a tile is,
+ * which container carries one, how to ask for footers and how to join CSR with CSC. That is exactly
+ * the knowledge the handover asked not to need. Here — with an engine given — there are no tiles,
  * no `dense_id`, no Morton, no `by_source`, no prefixes and no footers in the caller's face:
  *
  * ```ts
@@ -67,12 +73,12 @@
 
 import {
   type ProjectionAddress,
+  addressManifests,
   CorpusManifestError,
   type Direction,
   type EdgeTiles,
   type Gap,
   GRAPH_INFO_PATH,
-  resolveCorpus,
   strideBits,
   strideOf,
   type CorpusAddressing,
@@ -244,7 +250,7 @@ export interface RowsParams extends Box {
   type?: string;
   /**
    * Which orientations to read. Defaults to **both**, which is the answer that is complete for
-   * incidence — `resolveCorpus`'s `tilesFor` defaults to `['src']` instead, because that is the drawing
+   * incidence — the addressing's `tilesFor` defaults to `['src']` instead, because that is the drawing
    * read and a drawing read pays for nothing it cannot paint. The reference API's default is the
    * honest one and the drawing path opts down to it.
    */
@@ -675,10 +681,38 @@ export interface SqlCorpus extends Corpus {
  */
 export type SqlPolicy = 'withheld' | 'allowed';
 
-/** What {@link openCorpus} takes. */
+/**
+ * What {@link openCorpus} takes.
+ *
+ * **Exactly one of `query` and `manifestFiles` is required, and which one decides how deep the
+ * answer is.** They are a ladder of capability, not two ways to say one thing:
+ *
+ * | given | what it can do | what comes back |
+ * |---|---|---|
+ * | {@link query} | read manifests, footers and payload | {@link Corpus} — the whole door |
+ * | {@link manifestFiles} | nothing; the bytes are already in hand | {@link CorpusAddressing} |
+ *
+ * This was two exported functions — `openCorpus(url, { query })` and
+ * `resolveCorpus({ manifestFiles, base })` — and they were one question at two depths. See
+ * {@link openCorpus}.
+ */
 export interface OpenCorpusOptions {
-  /** The host's engine. One method, and see `./query.ts` for why it is the only one. */
-  query: QueryFn;
+  /**
+   * The host's engine. One method, and see `./query.ts` for why it is the only one.
+   *
+   * **It is what makes the answer a {@link Corpus}** rather than a {@link CorpusAddressing}: every
+   * member of the door needs bytes, so a caller with no engine has nothing to give one.
+   */
+  query?: QueryFn;
+  /**
+   * The manifest YAMLs, keyed by dataset-relative path, when the host already holds them — the
+   * same shape the verbs take. They are small: one index plus one file per type.
+   *
+   * Given, no manifest is fetched and no capability is needed at all: the call is the arithmetic
+   * over bytes in hand, and `url` is read as the base every address is prepended with. Given
+   * *beside* {@link query}, the door skips its own `1 + N` reads and opens against these.
+   */
+  manifestFiles?: Record<string, string>;
   /**
    * Whether this corpus admits raw SQL. Defaults to `'withheld'`. See {@link SqlPolicy}.
    *
@@ -846,8 +880,36 @@ function text(row: QueryRow, column: string): string {
 /**
  * Open a corpus from its URL.
  *
- * One argument is the corpus and the other is the engine. Everything else — which files exist, how
- * many tiles there are, what a row carries — is read from the artefact:
+ * One argument is the corpus and the other is the capability. **How deep the answer is follows
+ * from which capability**, and that is the whole of the argument for there being one name here:
+ *
+ * ```ts
+ * await openCorpus(url,  { query, wasmUrl })          // Corpus — the door, 1 + N round trips
+ * await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no engine, no request
+ * ```
+ *
+ * **This absorbed `resolveCorpus`, which was the third and last of the entry points over one
+ * manifest.** `createGraphClient` went first (it is the transport), the `./address` subpath went
+ * second (its one justification was a WASM-free closure, and keeping it meant keeping a second
+ * implementation of `fossil_graph::plan`), and this is the one that survived longest because the
+ * capability really is different — `resolveCorpus` needed no engine and spent no round trip, which
+ * is a withdrawn capability rather than a removed duplicate if you delete it. It is not deleted: it
+ * is the second line above. What went is the NAME, because the thing it named was a
+ * depth of this call and not a second door, and *«there is no second reference»* is about how many
+ * places state a fact, not about how many capabilities exist.
+ *
+ * **It is always asynchronous, and that is a real cost paid deliberately.** `resolveCorpus` was
+ * synchronous when handed no `wasmUrl`, which is the arithmetic a caller whose module is already up
+ * could have for free; the price of the collapse is that nine `expect(() => …).toThrow(…)`
+ * assertions in `tests/address.test.ts` and `tests/conformance.test.ts` became `rejects`, and that
+ * a synchronous caller would have to await. **The synchronous form had no production consumer** —
+ * measured, not assumed: both engine-free call sites in this repository already passed `wasmUrl`
+ * and already awaited, and the third caller was this function. The rejected alternative is keeping
+ * a conditionally-synchronous overload, which is a return type that depends on an option, on a
+ * door whose other two rungs cannot have one.
+ *
+ * Everything else — which files exist, how many tiles there are, what a row carries — is read from
+ * the artefact:
  *
  * 1. `graph.graph.yml` names the per-type manifests, and they are fetched with `read_text` through
  *    the same `query` the payload goes through. There is no separate `fetch` capability because
@@ -880,16 +942,28 @@ function text(row: QueryRow, column: string): string {
  * why one option decides both.
  *
  * @throws {CorpusManifestError} when the manifest cannot address itself, or declares no row count.
+ * @throws {TypeError} when neither `query` nor `manifestFiles` is given — there is then nothing
+ *   to open the corpus with.
  */
 export function openCorpus(
   url: string,
-  options: OpenCorpusOptions & { sql: 'allowed' },
+  options: OpenCorpusOptions & { query: QueryFn; sql: 'allowed' },
 ): Promise<SqlCorpus>;
-export function openCorpus(url: string, options: OpenCorpusOptions): Promise<Corpus>;
-export async function openCorpus(url: string, options: OpenCorpusOptions): Promise<Corpus> {
-  const { query } = options;
-  if (typeof query !== 'function') {
-    throw new TypeError('openCorpus needs a query capability: the host brings the engine');
+export function openCorpus(
+  url: string,
+  options: OpenCorpusOptions & { query: QueryFn },
+): Promise<Corpus>;
+export function openCorpus(url: string, options: OpenCorpusOptions): Promise<CorpusAddressing>;
+export async function openCorpus(
+  url: string,
+  options: OpenCorpusOptions,
+): Promise<Corpus | CorpusAddressing> {
+  const { query, manifestFiles: held } = options;
+  if (typeof query !== 'function' && held === undefined) {
+    throw new TypeError(
+      'openCorpus needs one of: query (the host brings the engine, and the answer is the whole ' +
+        'corpus), or manifestFiles (the host already holds them)',
+    );
   }
   // The policy, read once. Both consequences come off this one binding — the hatch below and
   // `read`'s predicate — so there is no way to wire half of it. See `SqlPolicy`.
@@ -899,10 +973,12 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   // boot is memoised, so a second corpus in the same process costs the check and nothing else.
   if (options.wasmUrl !== undefined) await initFossilGraphWasm({ wasmUrl: options.wasmUrl });
 
+  // The manifests, read through the engine when there is one. Which files those are is not the
+  // caller's decision: `GRAPH_INFO_PATH` and the index's own two lists decide, here.
   const readText = async (relative: readonly string[]): Promise<Record<string, string>> => {
     if (relative.length === 0) return {};
     const urls = relative.map((path) => join(url, path));
-    const rows = await query(`SELECT filename, content FROM read_text(${list(urls)})`);
+    const rows = await query!(`SELECT filename, content FROM read_text(${list(urls)})`);
     const byUrl = new Map(rows.map((row) => [text(row, 'filename'), text(row, 'content')]));
     const out: Record<string, string> = {};
     for (const [index, path] of relative.entries()) {
@@ -915,14 +991,23 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     return out;
   };
 
-  const manifestFiles = await readText([GRAPH_INFO_PATH]);
-  const index = scan(GRAPH_INFO_PATH, manifestFiles[GRAPH_INFO_PATH]!);
-  Object.assign(
-    manifestFiles,
-    await readText([...paths(index, 'vertices'), ...paths(index, 'edges')]),
-  );
+  let manifestFiles: Record<string, string>;
+  if (held !== undefined) {
+    manifestFiles = held;
+  } else {
+    manifestFiles = await readText([GRAPH_INFO_PATH]);
+    const index = scan(GRAPH_INFO_PATH, manifestFiles[GRAPH_INFO_PATH]!);
+    Object.assign(
+      manifestFiles,
+      await readText([...paths(index, 'vertices'), ...paths(index, 'edges')]),
+    );
+  }
 
-  const addressing = resolveCorpus({ manifestFiles, base: url });
+  const addressing = addressManifests(manifestFiles, url);
+  // The shallow rung. Everything below this line needs bytes, and a caller that brought no engine
+  // has none to read them with — so the addressing IS the answer rather than a member of a
+  // half-built one. `Corpus.addressing` is this same object for a caller that did bring one.
+  if (query === undefined) return addressing;
 
   // Every vertex type's payload files, derived once. `files()` throws when the manifest declares no
   // count, which is the corpus this API cannot open and the addressing layer still can.
