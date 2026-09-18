@@ -321,7 +321,9 @@ async fn main() {
     let scratch =
         std::env::temp_dir().join(format!("fossil_dense_id_ranges_{}", std::process::id()));
     let synthetic = nodes.is_none() || edges.is_none();
-    let (nodes, edges) = if let (Some(n), Some(e)) = (nodes, edges) { (n, e) } else {
+    let (nodes, edges) = if let (Some(n), Some(e)) = (nodes, edges) {
+        (n, e)
+    } else {
         let _ = std::fs::remove_dir_all(&scratch);
         std::fs::create_dir_all(&scratch).expect("create the fixture directory");
         eprintln!(

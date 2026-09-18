@@ -113,7 +113,11 @@ async fn reads_an_ndjson_source() {
     });
 
     assert_eq!(node.label, "Person");
-    let total: usize = vertex.batches.iter().map(datafusion::arrow::array::RecordBatch::num_rows).sum();
+    let total: usize = vertex
+        .batches
+        .iter()
+        .map(datafusion::arrow::array::RecordBatch::num_rows)
+        .sum();
     assert_eq!(total, 3, "users.json has 3 records");
 
     let batch = vertex.batches.first().unwrap();

@@ -97,7 +97,10 @@ async fn a_dangling_endpoint_is_counted_rather_than_swallowed() {
     assert_eq!(edge.label, "placedBy");
     // Four order rows in, three edges out — the ruling: the inner join stays.
     assert_eq!(
-        edge.by_source.iter().map(datafusion::arrow::array::RecordBatch::num_rows).sum::<usize>(),
+        edge.by_source
+            .iter()
+            .map(datafusion::arrow::array::RecordBatch::num_rows)
+            .sum::<usize>(),
         3,
         "the row naming person/99 is not an edge, because person/99 is not a vertex"
     );

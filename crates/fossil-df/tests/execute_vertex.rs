@@ -58,7 +58,11 @@ async fn execute_vertex_materialises_graphar_shape() {
     assert_eq!(node.iri.as_deref(), Some("https://example.org/Person"));
     assert_eq!(node.properties[0].name, "name");
 
-    let total: usize = vertex.batches.iter().map(datafusion::arrow::array::RecordBatch::num_rows).sum();
+    let total: usize = vertex
+        .batches
+        .iter()
+        .map(datafusion::arrow::array::RecordBatch::num_rows)
+        .sum();
     assert_eq!(total, 3, "users.csv has 3 data rows");
 
     let batch = vertex.batches.first().expect("at least one RecordBatch");
