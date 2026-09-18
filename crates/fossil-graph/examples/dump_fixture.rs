@@ -26,8 +26,8 @@
 //! ```
 
 use fossil_sinks::manifest::{
-    Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
-    VertexInfo,
+    Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Projection,
+    Property, VertexInfo,
 };
 use serde_json::{Map, Value, json};
 
@@ -83,7 +83,7 @@ fn main() {
         directed: true,
         prefix: "edge/Person_knows_Person/".into(),
         projections: vec![],
-        version: "gar/v1".into(),
+        version: GRAPHAR_VERSION.to_string(),
         cardinality: None,
     };
 

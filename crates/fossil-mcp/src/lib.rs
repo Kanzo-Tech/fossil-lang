@@ -286,8 +286,8 @@ mod tests {
     fn register_views_sql_uses_writer_layout() {
         use fossil_graph::manifest::ManifestSource as _;
         use fossil_sinks::manifest::{
-            Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
-            VertexInfo,
+            Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo,
+            Projection, Property, VertexInfo,
         };
 
         let mut person = VertexInfo::new(
@@ -325,7 +325,7 @@ mod tests {
             // was `vec![]` while the path was the hard-coded `by_source.parquet`
             // — a fixture that declared no adjacency and got a view over one.
             projections: vec![Projection::payload("by_source/", vec![]).aligned_by("src", true)],
-            version: "gar/v1".into(),
+            version: GRAPHAR_VERSION.to_string(),
             cardinality: None,
         };
         let graph = GraphInfo::new(

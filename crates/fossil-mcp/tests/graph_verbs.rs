@@ -14,8 +14,8 @@ use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
 use fossil_graph::{GraphError, Operation, RawSql, RawSqlAccess, Result, dispatch};
 use fossil_mcp::ConnectionExecutor;
 use fossil_sinks::manifest::{
-    Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
-    VertexInfo,
+    Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Projection,
+    Property, VertexInfo,
 };
 
 /// In-memory manifest source mirroring the writer's on-disk layout.
@@ -73,7 +73,7 @@ fn manifest() -> Manifest {
         directed: true,
         prefix: "edge/Person_knows_Person/".into(),
         projections: vec![],
-        version: "gar/v1".into(),
+        version: GRAPHAR_VERSION.to_string(),
         cardinality: None,
     };
     let graph = GraphInfo::new(

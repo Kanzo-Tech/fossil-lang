@@ -45,6 +45,19 @@ pub use fossil_graph_schema::Cardinality;
 use serde::{Deserialize, Serialize};
 
 /// The `GraphAr` manifest format version string. Emitted as `version: gar/v1`.
+///
+/// **Every writer reads this; every assertion spells the literal.** The two
+/// halves are not one rule and they pull opposite ways. A site that *produces*
+/// a manifest — the real writers, and equally the fixtures whose bytes stand in
+/// for one — routes through the constant, or changing it here changes nothing
+/// three crates emit. A site that *checks* what came out spells `gar/v1` by
+/// hand, because `contains(&format!("version: {GRAPHAR_VERSION}"))` passes
+/// whatever this constant says and so asserts nothing. The same split is
+/// already written one field along, beside [`DEFAULT_CHUNK_SIZE`].
+///
+/// A YAML *input* in a test — a corpus written before some field existed — is a
+/// third thing again: those bytes are on disk in the world and say `gar/v1`
+/// whatever this file later says, so they are frozen literals by definition.
 pub const GRAPHAR_VERSION: &str = "gar/v1";
 
 /// The payload file of a row-group container: one per set, its row groups the
@@ -2147,6 +2160,8 @@ version: gar/v1
     #[test]
     fn vertex_yaml_carries_graphar_v1_field_names() {
         let yaml = person_vertex().to_yaml().expect("vertex serialization");
+        // The literal, deliberately: asserted against `GRAPHAR_VERSION` this
+        // would pass whatever the constant said. See its doc comment.
         assert!(yaml.contains("version: gar/v1"), "{yaml}");
         assert!(yaml.contains("type: Person"), "{yaml}");
         // The count sits before the tiling, because
@@ -2369,6 +2384,7 @@ version: gar/v1
         assert!(yaml.contains("aligned_by: dst"), "{yaml}");
         assert!(yaml.contains("path: by_target/"), "{yaml}");
         assert!(yaml.contains("directed: true"), "{yaml}");
+        // The literal, deliberately — see `GRAPHAR_VERSION`.
         assert!(yaml.contains("version: gar/v1"), "{yaml}");
     }
 

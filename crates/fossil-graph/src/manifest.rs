@@ -202,8 +202,8 @@ fn parse_yaml<T: serde::de::DeserializeOwned>(bytes: &[u8], path: &str) -> Resul
 mod tests {
     use super::*;
     use fossil_sinks::manifest::{
-        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
-        VertexInfo,
+        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo,
+        Projection, Property, VertexInfo,
     };
 
     /// In-memory manifest source: the test analogue of httpfs/fs. Proves the
@@ -288,7 +288,7 @@ mod tests {
                 Projection::payload("by_source/", vec![]).aligned_by("src", true),
                 Projection::payload("by_target/", vec![]).aligned_by("dst", true),
             ],
-            version: "gar/v1".into(),
+            version: GRAPHAR_VERSION.to_string(),
         }
     }
 

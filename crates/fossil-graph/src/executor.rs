@@ -978,8 +978,8 @@ mod tests {
     use crate::manifest::{GRAPH_INFO_PATH, ManifestSource};
     use crate::operations::raw_sql::RawSqlAccess;
     use fossil_sinks::manifest::{
-        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
-        VertexInfo,
+        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo,
+        Projection, Property, VertexInfo,
     };
     use std::collections::HashMap;
 
@@ -1046,7 +1046,7 @@ mod tests {
             directed: true,
             prefix: "edge/Person_knows_Person/".into(),
             projections: vec![],
-            version: "gar/v1".into(),
+            version: GRAPHAR_VERSION.to_string(),
             cardinality: None,
         };
         let graph = GraphInfo::new(
