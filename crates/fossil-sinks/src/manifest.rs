@@ -1165,9 +1165,24 @@ impl HolonTree {
     /// The list is **complete** — rung 1 up to the rung that holds a single
     /// cell — and that is where it differs from a level pyramid, which stops at
     /// the level that fits one tile. A level is a transport optimisation and one
-    /// tile is already one range request, so coarser buys nothing; a rung is a
-    /// *picture*, and a reader zoomed all the way out wants four marks rather
-    /// than four thousand. It is the 1×1 level a mipmap has.
+    /// tile is already one range request, so coarser buys nothing.
+    ///
+    /// **The completeness is arithmetic, and not a picture anybody asks for.**
+    /// This read *a reader zoomed all the way out wants four marks rather than
+    /// four thousand*, and no reader in this tree can ask for four marks:
+    /// `packages/corpus/src/corpus.ts, levelForCanvas` spends `pixels.w *
+    /// pixels.h` marks, and its one production caller —
+    /// `apps/playground/src/tiles.ts` — passes `sqrt(limit) × sqrt(limit)`
+    /// rather than its canvas, so it spends a constant 20,000 whatever the
+    /// window is. The smallest mark budget anything in this tree spends is
+    /// 15,000 (`SCREEN_MARKS`, in `crates/fossil-layout/tests/level_vs_rung.rs`),
+    /// so the coarse end of this list is a region nothing reads.
+    ///
+    /// What completeness buys instead is that `ceil(vertex_count / 4^k)` names
+    /// an artefact that exists for every `k` a reader can compute: no
+    /// *this rung was not written* branch in the reader, and no data-dependent
+    /// tail. It is the 1×1 level a mipmap has, and the reason is the addressing
+    /// rather than the zoom.
     ///
     /// `None` for a type no bigger than one cell: there is nothing to summarise
     /// when the whole type is the summary. `None` too for a base that is not a
@@ -2544,8 +2559,12 @@ version: gar/v1
     }
 
     /// The tree runs to **one** cell, where a level pyramid stops at the level
-    /// that fits one tile. A level is a transport optimisation; a rung is a
-    /// picture, and a reader zoomed all the way out wants four marks.
+    /// that fits one tile. A level is a transport optimisation; a rung is
+    /// arithmetic — `ceil(V / 4^k)` answers for every `k` a reader can compute,
+    /// with no data-dependent tail — which is the reason [`HolonTree::planned`]
+    /// gives, and it is not the picture argument this doc used to make: no
+    /// reader here can ask for four marks, the smallest budget anything spends
+    /// being 15,000.
     #[test]
     fn a_planned_tree_runs_to_a_single_cell() {
         let props = Vec::new();

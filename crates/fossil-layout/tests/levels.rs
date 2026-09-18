@@ -243,10 +243,15 @@ fn the_levels_on_disk_are_the_levels_the_plan_names() {
 /// but `index` appeared at all, and `fossil_sinks::manifest::HolonTree` made it
 /// red by writing a `holon/` beside it: a level is a transport optimisation, so
 /// one tile is already one range request and coarser buys nothing, while a rung
-/// is a *picture* and a reader zoomed all the way out wants four marks rather
-/// than two hundred. The two floors differ on purpose — `HolonTree::planned`
-/// says so in its own doc — so this asserts the level rule and lets the rung
-/// rule state itself.
+/// is arithmetic — `ceil(V / 4^k)` names an artefact for every `k` a reader can
+/// compute, so the tree has no data-dependent tail and no *this rung was not
+/// written* branch for a reader to carry. That is the floor `HolonTree::planned`
+/// argues for in its own doc. It is NOT that *a reader zoomed all the way out
+/// wants four marks rather than two hundred*, which that doc used to say and
+/// this one cited: no reader in this tree can ask for four marks, the smallest
+/// mark budget anything spends being `SCREEN_MARKS`' 15,000 in `level_vs_rung.rs`
+/// beside this file. The two floors differ on purpose, so this asserts the level
+/// rule and lets the rung rule state itself.
 #[test]
 fn a_small_type_writes_no_levels_at_all() {
     let f = fixture(dir("levels_one_tile"), 200, 14);
