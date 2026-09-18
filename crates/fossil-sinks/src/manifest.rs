@@ -23,7 +23,7 @@
 //! are. Borrowed for recognition and not for novelty.
 //!
 //! **The rest of the field vocabulary is `GraphAr` v1.0.0's. The conformance is
-//! not**, and `projections` is a divergence larger than the eight: a `GraphAr`
+//! not**, and `projections` is the largest of the nine divergences: a `GraphAr`
 //! reader looks for `property_groups` and `adj_lists` and finds neither. A
 //! fossil corpus was already not a valid `GraphAr` corpus — `fossil-df` declares
 //! `dense_id` as `uint32` and the reference C++ reader throws on it at the first
