@@ -4,11 +4,11 @@
 //! # The model (one idea)
 //!
 //! A property graph is **not a data structure — it is a SCHEMA over typed
-//! relations** (the SQL:2023 / PGQ + DuckPGQ convergence). The data are plain
+//! relations** (the SQL:2023 / PGQ + `DuckPGQ` convergence). The data are plain
 //! relations (Arrow tables); the *graph* is an interpretation that declares:
 //! which relations are node types, what identifies a node (its **key** — here,
 //! the subject IRI), and which predicates **reference** another node type (the
-//! edges). RDF, GraphAr (`dense_id`/CSR-CSC), edge-lists, traversal, DCAT are
+//! edges). RDF, `GraphAr` (`dense_id`/CSR-CSC), edge-lists, traversal, DCAT are
 //! then all **views or materializers** over this single schema + the relations.
 //!
 //! This type is that schema, made first-class and **format-neutral**: it carries
@@ -23,17 +23,17 @@
 //! The schema is spoken by every side at once — the producer (`fossil-df`), each
 //! materializer, the consumer (`fossil-graph`), and the wire/manifest. So this
 //! crate depends on nothing but `serde`: anyone can deserialize and interpret a
-//! graph without pulling the ShEx descriptor or Arrow. *Decoding* a ShEx
+//! graph without pulling the `ShEx` descriptor or Arrow. *Decoding* a `ShEx`
 //! document (which does need that machinery) lives next to the descriptor, not
 //! here — the contract stays pure. What the decoder produces is [`shapes`],
 //! which is in this crate precisely because it too must be speakable without
-//! ShEx.
+//! `ShEx`.
 //!
 //! # Identity & references
 //!
 //! Every node's key is its **subject IRI** (uniform across fossil). An edge
 //! `source → destination` references node types by `label`; the relational plan
-//! computes the actual IRI-valued columns, and a GraphAr materializer resolves
+//! computes the actual IRI-valued columns, and a `GraphAr` materializer resolves
 //! those IRIs to dense ids. The schema only states the shape.
 //!
 //! # Two contracts, one crate
@@ -83,7 +83,7 @@ pub struct Property {
     /// Column / predicate local name, e.g. `"name"`.
     pub name: String,
     /// The canonical (format-neutral) datatype. A materializer derives its own
-    /// spelling from this (GraphAr `int64`, xsd `…#integer`, …).
+    /// spelling from this (`GraphAr` `int64`, xsd `…#integer`, …).
     pub datatype: Primitive,
     /// The full RDF predicate IRI (e.g. `https://example.org/name`) — RDF-border
     /// metadata. `None` for a non-RDF graph.
@@ -116,7 +116,7 @@ pub struct EdgeType {
 /// the schema, the checker and the descriptors all speak it, and a lattice that
 /// crosses a crate boundary as a string is a lattice with no single definition.
 ///
-/// Materializers map it to their own vocabulary (GraphAr `string/int64/double/…`,
+/// Materializers map it to their own vocabulary (`GraphAr` `string/int64/double/…`,
 /// `DataFusion` scalars, `DuckDB` column types) next to the materializer; only the
 /// xsd direction lives here, because xsd is the RDF border every side reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

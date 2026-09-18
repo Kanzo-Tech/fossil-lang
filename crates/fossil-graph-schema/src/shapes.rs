@@ -8,10 +8,10 @@
 //! per-shape constraint table it asks "given target shape `ex:Person`, what is
 //! the expected type and cardinality of predicate `p`?" — and until now the only
 //! spelling of that table was `fossil_shex::ShapeBinding`, whose fields are
-//! `rudof_iri::IriS` and `shex_ast::ShapeExpr`. Reading it meant linking ShEx.
+//! `rudof_iri::IriS` and `shex_ast::ShapeExpr`. Reading it meant linking `ShEx`.
 //!
 //! This module is the same table with no type from any schema language in it. A
-//! ShEx decoder lowers into it; a SHACL decoder lowers into it; the compiler
+//! `ShEx` decoder lowers into it; a SHACL decoder lowers into it; the compiler
 //! reads it and never learns which document it came from. That is the same cut
 //! `0e6898d` made for `fossil-mir` — the middle of the compiler is handed a
 //! value, not a parser.
@@ -54,7 +54,7 @@ use crate::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property, S
 /// It lives here because this crate is the one both sides of that rule share:
 /// the decoder that produces the IRIs and the schema that carries the names.
 /// There were three independent copies of this three-line function in the tree
-/// — in the MIR lowering, in the ShEx descriptor, and in the SHACL decoder
+/// — in the MIR lowering, in the `ShEx` descriptor, and in the SHACL decoder
 /// (`fossil-descriptors-output/src/shacl.rs`); this is the one they collapse
 /// onto.
 #[must_use]
@@ -120,7 +120,7 @@ impl Renames {
     /// Build from `(shape IRI, renames)` pairs, in the order the program wrote
     /// them.
     #[must_use]
-    pub fn new(by_shape: Vec<(String, Vec<(String, String)>)>) -> Self {
+    pub const fn new(by_shape: Vec<(String, Vec<(String, String)>)>) -> Self {
         Self { by_shape }
     }
 
@@ -603,8 +603,8 @@ mod tests {
     // -- Occurs::collapse over the five shapes the old enum could take -----
 
     /// The enum this replaces had five variants; a later commit deletes it, and
-    /// this is the only thing that will catch a drift. Each row is
-    /// `(the old variant, its (min, max), what its `is_single_valued` answered)`.
+    /// this is the only thing that will catch a drift. Each row is the old
+    /// variant, its `(min, max)`, and what its `is_single_valued` answered.
     ///
     /// One deliberate divergence, and it is unreachable: the old `Exact(n)`
     /// answered `true` for **every** `n`, so `Exact(3)` claimed to be

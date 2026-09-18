@@ -31,3 +31,6 @@ serde = { workspace = true }
 # for what it refuses rather than guesses at.
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[lints]
+workspace = true

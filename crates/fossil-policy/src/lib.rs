@@ -4,7 +4,7 @@
 //!
 //! A fossil program already binds one external document per output type:
 //! `type { Person } := io.shex("persons.shex")`. The obvious place to put a
-//! privacy classification is *in that document* — ShEx and SHACL both have
+//! privacy classification is *in that document* — `ShEx` and SHACL both have
 //! annotation mechanisms, and the shape already enumerates every predicate.
 //!
 //! **It must not go there, and the reason is reuse.** A shape says what a

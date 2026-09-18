@@ -131,7 +131,7 @@ pub enum PolicyError {
     #[error("the policy has no `{0}`")]
     Missing(&'static str),
     /// A term this profile does not define.
-    #[error("`{term}` is not one of this profile's terms{}", context_of(.at))]
+    #[error("`{term}` is not one of this profile's terms{}", context_of(.at.as_ref()))]
     UnknownTerm {
         /// The offending IRI or compact term.
         term: String,
@@ -191,9 +191,8 @@ pub enum PolicyError {
     },
 }
 
-fn context_of(at: &Option<String>) -> String {
-    at.as_ref()
-        .map_or_else(String::new, |a| format!(" (in `{a}`)"))
+fn context_of(at: Option<&String>) -> String {
+    at.map_or_else(String::new, |a| format!(" (in `{a}`)"))
 }
 
 /// Parse a policy document.
@@ -333,12 +332,12 @@ fn read_constraint(
                 profile::ATTRIBUTE => attribute = Some(expand(as_str(&right, "rightOperand")?)),
                 profile::CLASSIFICATION => {
                     let iri = expand(as_str(&right, "rightOperand")?);
-                    classification = Some(profile::classification::of(&iri).ok_or(
+                    classification = Some(profile::classification::of(&iri).ok_or_else(|| {
                         PolicyError::UnknownTerm {
                             term: iri,
                             at: Some("fossil:classification".to_string()),
-                        },
-                    )?);
+                        }
+                    })?);
                 }
                 // The hierarchy, verbatim: not expanded, not interpreted, not
                 // converted. It is an object rather than a term, and the crate
