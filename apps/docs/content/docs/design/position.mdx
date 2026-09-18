@@ -416,12 +416,17 @@ writer deciding a reader's question, and which column means something to look at
 question twice over.* The sentence is retracted, and what retracts it is not an argument. It is that
 the field already exists and is the wrong one.
 
-<Callout type="warn" title="The declaration is already being made, by a privacy field and by a generated constant nobody reads">
-`packages/draw/src/encoding.ts, encodingFor` picks the column whose distribution it offers to
+<Callout type="warn" title="The declaration was already being made, by a privacy field and by a generated constant nobody read">
+`packages/draw/src/encoding.ts, encodingFor` picked the column whose distribution it offers to
 brush by ranking the numeric columns and preferring the ones `quasi_identifiers` names. That field
 is specified on [privacy](/docs/format/conventions/privacy) as *the one field a reader cannot
 derive, and the one the whole bound turns on* — a disclosure-control vocabulary, doing encoding work
 because it was the only writer-side statement in reach.
+
+**That ranking is the defect the block was written to remove, and it is removed.** A declared
+`quantitative` channel now outranks the privacy field, which ranks only where the manifest declares
+none — [what the implementation owes](#what-the-implementation-owes) has the whole of it. The
+paragraph above is the diagnosis and not the behaviour.
 
 And the honest statement existed on the other side, unread. `corpus.bnf` marks `cluster_id`
 `role categorical` — glossed *an ordinal the writer computed, for a reader to colour by* — and
@@ -434,7 +439,8 @@ Counted at the time: the name was written down in `corpus.bnf`, in the generated
 `packages/draw/src/encoding.ts, categoricalOf`, in `packages/corpus/src/corpus.ts` as
 `FrameParams.fill`'s default, in `crates/fossil-graph/src/manifest.rs`, and at eight script call
 sites. Six statements of one fact, and the only machine-readable one had no consumer. Two of the six
-are now reads of it — the door's default and the app's fallback both resolve `PAYLOAD_CATEGORICAL`,
+are now reads of it — the door's default and `packages/draw`'s fallback both resolve
+`PAYLOAD_CATEGORICAL`, and neither of them is in an app any more,
 and the harness assertion that used to compare them is gone with the difference it was measuring.
 </Callout>
 
@@ -542,6 +548,17 @@ block does is make the row's number checkable from the artefact instead of from 
   deleted: a corpus written before the field has to keep drawing. **Done**, in
   `packages/draw/src/encoding.ts, categoricalOf` — with the derivation intact beneath it, and
   `packages/draw/src/encoding.ts, readChannels` as the scanner over the block.
+- **The chart's ranking, which is the defect this section opened with.** Which numeric column's
+  distribution is worth a chart was answered by `quasi_identifiers`, and there is a declaration for
+  it now: a declared `quantitative` channel is the chart's column, the privacy field ranks what is
+  left only where the block declares none, and the first numeric column stays the last resort.
+  **Done**, in `packages/draw/src/encoding.ts, encodingFor`. An empty block does not silence the
+  chart the way it silences the colour: `categorical` **is** the colour role, so declaring none of
+  it says there is nothing to colour by, while a histogram over a column nobody called a channel is
+  still a histogram. And the crossfilter's projection lists the brushed column outright now, where
+  it used to be in the view only by being a quasi-identifier — a declared channel need not be one,
+  and a view without the column the histogram bins fails at open, in a browser, with the corpus
+  already fetched.
 - **A flat block.** `apps/corpus/guards/manifest.mjs` scans lines, reads one level of
   sequence-of-mappings, and silently skips anything deeper. A `channels:` entry that nests is a
   `channels:` entry half its readers cannot see.
