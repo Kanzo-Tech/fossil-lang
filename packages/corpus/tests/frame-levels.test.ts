@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
 import { levelsOf, rowsAt, strideOf } from '../src/address.js';
-import { openCorpus, type Corpus } from '../src/corpus.js';
+import { open, type Corpus } from '../src/corpus.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
@@ -116,8 +116,8 @@ beforeAll(async () => {
   write(withLevels, { ...options, levels: LEVELS });
   write(withoutLevels, { ...options, levels: [] });
 
-  corpus = await openCorpus(withLevels, { query });
-  flat = await openCorpus(withoutLevels, { query });
+  corpus = await open(withLevels, { query });
+  flat = await open(withoutLevels, { query });
 }, 180_000);
 
 /** The whole corpus as a rectangle, from the footers rather than from a constant. */

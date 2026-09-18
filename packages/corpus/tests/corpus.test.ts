@@ -9,7 +9,7 @@ import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/b
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { CorpusManifestError, CorpusReadError, openCorpus, type Corpus } from '../src/corpus.js';
+import { CorpusManifestError, CorpusReadError, open, type Corpus } from '../src/corpus.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 /**
@@ -25,7 +25,7 @@ import type { QueryFn, QueryRow } from '../src/query.js';
  * this file writes over the same files, because a constant transcribed from a run of the code under
  * test agrees with it by construction. The four numbers that *are* constants — 300, 5, 64, 596 —
  * come from the manifest and from `apps/corpus/guards/vectors.json`, which neither this file nor
- * `openCorpus` wrote.
+ * `open` wrote.
  *
  * **What it cannot prove**, and each of these is why:
  *
@@ -94,7 +94,7 @@ beforeAll(async () => {
 
   // `sql: 'allowed'` because this file exercises `read`'s `where`, which is the second
   // raw-SQL door and is withheld by default now. The capability is the one it always had.
-  corpus = await openCorpus(CORPUS, { query, sql: 'allowed' });
+  corpus = await open(CORPUS, { query, sql: 'allowed' });
 }, 60_000);
 
 /** One scalar out of a query this file wrote, so an expectation is never the code under test. */
@@ -111,13 +111,13 @@ const adjTiles = (dir: 'by_source' | 'by_target') =>
     .map((k) => lit(`${CORPUS}/edge/Person_knows_Person/${dir}/chunk${k}.parquet`))
     .join(', ')}]`;
 
-describe('openCorpus — what is inside', () => {
+describe('open — what is inside', () => {
   it('needs a capability, and names the three rather than failing at the first query', async () => {
     // **The claim narrowed when the door absorbed `resolveCorpus`.** It used to be that an engine
     // was the only thing that opened a corpus; now `readText` and `manifestFiles` open the
     // engine-free rung, so what is refused is bringing NONE of the three — and the refusal names
     // them, because which one a caller can supply is the whole of how deep the answer goes.
-    await expect(openCorpus(CORPUS, {} as { query: QueryFn })).rejects.toThrow(
+    await expect(open(CORPUS, {} as { query: QueryFn })).rejects.toThrow(
       /needs one of: query .*, readText .*, or manifestFiles/,
     );
   });
@@ -437,7 +437,7 @@ describe('neighbours — a walk seeded by identity', () => {
   it('resolves a batch of seeds in a fixed number of reads, whatever the batch is', async () => {
     const seeds = await Promise.all([1, 2, 3, 4, 5].map(seedOf));
     let queries = 0;
-    const counted = await openCorpus(CORPUS, {
+    const counted = await open(CORPUS, {
       query: async (sql) => {
         queries += 1;
         return query(sql);
@@ -477,7 +477,7 @@ describe('neighbours — a walk seeded by identity', () => {
     // prunes no disjunction over a VARCHAR column, so `key IN (a, b)` opened all five and only
     // `key = a` opened one.
     const named: string[][] = [];
-    const counted = await openCorpus(CORPUS, {
+    const counted = await open(CORPUS, {
       query: async (sql) => {
         if (sql.includes('/index/')) named.push(sql.match(/index\/tile\d+\.parquet/g) ?? []);
         return query(sql);
@@ -512,14 +512,14 @@ describe('the verbs, through the same door', () => {
    * The six verbs answer over a corpus that was opened by URL — which is the whole of the merge.
    *
    * They were `createGraphClient`, a second entry point taking the same two arguments and with no
-   * rule for choosing. It is the transport now. What it needed and `openCorpus` did not is the
+   * rule for choosing. It is the transport now. What it needed and `open` did not is the
    * bridge asserted below: the verbs' SQL names tables, this corpus is Parquet files, and the door
    * registers the temp views that join the two.
    *
    * **These do not assert what the corpus API asserts elsewhere, on purpose.** A verb reads the
    * MANIFEST's vocabulary and this corpus declares three properties against seven columns on
    * disk, so `read` answers with `subject` alone and `schema` reports no fields at all. That divergence is
-   * the reason `openCorpus` describes the bytes instead, and pinning it here is what stops the two
+   * the reason `open` describes the bytes instead, and pinning it here is what stops the two
    * halves being confused for one.
    */
   it('answers a verb over a corpus opened by URL', async () => {
@@ -558,8 +558,8 @@ describe('the verbs, through the same door', () => {
     // `Verb::reaches_raw_sql()` is `["read", "execute_sql"]` — and `crates/fossil-mcp/src/tools.rs`
     // is the surface this ports: the closed policy drops the hatch from the list AND refuses the
     // predicate. There is no fifth combination to test, because there is no spelling of
-    // `openCorpus` that opens one and closes the other.
-    const closed = await openCorpus(CORPUS, { query });
+    // `open` that opens one and closes the other.
+    const closed = await open(CORPUS, { query });
     expect('executeSql' in closed).toBe(false);
     await expect(
       closed.read({ vertex_type: 'Person', where: 'birth_year > 1900' }),
@@ -569,10 +569,10 @@ describe('the verbs, through the same door', () => {
 
     // And the corpus this file opened with the permission has both.
     expect('executeSql' in corpus).toBe(true);
-    const open = corpus as typeof corpus & {
+    const permitted = corpus as typeof corpus & {
       executeSql(params: { sql: string }): Promise<{ rows: unknown[] }>;
     };
-    expect((await open.executeSql({ sql: 'SELECT 1 AS n' })).rows).toHaveLength(1);
+    expect((await permitted.executeSql({ sql: 'SELECT 1 AS n' })).rows).toHaveLength(1);
   }, 30_000);
 
   it('expands over the whole relation, in identities, where neighbours walks tiles', async () => {
@@ -603,7 +603,7 @@ describe('the verbs, through the same door', () => {
     // in `memory.main`, so `main."Person"` names both and the temp one wins. That precedence is
     // the mechanism under test, and it makes the schema qualifier useless for saying which.
     await query(`CREATE OR REPLACE TABLE memory.main."Person" AS SELECT 99 AS host_owned`);
-    const own = await openCorpus(CORPUS, { query });
+    const own = await open(CORPUS, { query });
     expect((await own.schema()).vertices[0]!.count).toBe(Number(VERTEX_COUNT));
     // The host's table is untouched, and an unqualified name still reaches the corpus.
     expect(await query(`SELECT host_owned FROM memory.main."Person"`)).toEqual([{ host_owned: 99 }]);
@@ -617,7 +617,7 @@ describe('the verbs, through the same door', () => {
     // first verb call. A rectangle read and an extent must not reach for it — this is asserted as
     // absence of a `CREATE ... VIEW`, which is the observable half of that boot.
     const statements: string[] = [];
-    const drawing = await openCorpus(CORPUS, {
+    const drawing = await open(CORPUS, {
       query: async (sql) => {
         statements.push(sql);
         return query(sql);
@@ -630,7 +630,7 @@ describe('the verbs, through the same door', () => {
   }, 30_000);
 });
 
-describe('what openCorpus refuses, and names', () => {
+describe('what open refuses, and names', () => {
   /** A corpus tree whose manifests can be edited without touching the fixture. */
   function fork(edit: (yaml: string) => string, tiles: boolean): string {
     const dir = mkdtempSync(join(tmpdir(), 'fossil-corpus-'));
@@ -650,17 +650,17 @@ describe('what openCorpus refuses, and names', () => {
 
   it('refuses a manifest that declares no vertex_count, because tiles are addressed and never listed', async () => {
     const dir = fork((yaml) => yaml.replace(/^vertex_count: .*\n/m, ''), true);
-    await expect(openCorpus(dir, { query })).rejects.toThrow(CorpusManifestError);
-    await expect(openCorpus(dir, { query })).rejects.toThrow(/no vertex_count/);
+    await expect(open(dir, { query })).rejects.toThrow(CorpusManifestError);
+    await expect(open(dir, { query })).rejects.toThrow(/no vertex_count/);
   });
 
   it('refuses the row-group container by naming the tile it did not find, and does not glob', async () => {
     const dir = fork((yaml) => yaml, false);
-    await expect(openCorpus(dir, { query })).rejects.toThrow(CorpusReadError);
-    await expect(openCorpus(dir, { query })).rejects.toThrow(/chunk0\.parquet/);
+    await expect(open(dir, { query })).rejects.toThrow(CorpusReadError);
+    await expect(open(dir, { query })).rejects.toThrow(/chunk0\.parquet/);
     // The point of naming it: a file with the type's rows in it is sitting beside the address, and
     // a reader that globbed would open it, count every row twice against the manifest, and pass.
-    await expect(openCorpus(dir, { query })).rejects.toThrow(/container/);
+    await expect(open(dir, { query })).rejects.toThrow(/container/);
   });
 });
 
@@ -672,7 +672,7 @@ describe('what openCorpus refuses, and names', () => {
  * this reader drifted from the other one? `expected.json`'s `answers` block is a table neither
  * implementation wrote — its numbers come from a full scan of every tile with no addressing at all
  * — and `conformance/answers.mjs` executes it in plain Node over the `duckdb` binary, sharing no
- * line of answer logic with `openCorpus`.
+ * line of answer logic with `open`.
  *
  * It is the distinction the addressing half already draws and states in `verify.mjs`'s header: a
  * table catches **drift between two readers**, and pointing a reader at bytes a writer just made
@@ -768,7 +768,7 @@ describe('the conformance table, executed against the published API', () => {
     const yml = join(dir, 'vertex/Person.vertex.yml');
     writeFileSync(yml, readFileSync(yml, 'utf8').replace(/^index:\n(?: {2}.*\n)*/m, ''));
 
-    const scanning = await openCorpus(dir, { query });
+    const scanning = await open(dir, { query });
     // The comparison is worthless if the strip did not strip, and worthless the other way if the
     // fixture never had one. Both are asserted.
     expect(corpus.types.vertices[0]!.indexed).toBe(true);

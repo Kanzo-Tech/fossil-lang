@@ -20,7 +20,7 @@
  *
  * What it prints is the table the ledger beside the canvas prints, filled in.
  */
-import { openCorpus } from '@fossil-lang/corpus';
+import { open } from '@fossil-lang/corpus';
 
 import { openBench } from './bench.js';
 import { CORPUS_WASM_URL } from './corpus.js';
@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   );
   say('');
 
-  const corpus = openCorpus(bench.base, { query: duck.query, wasmUrl: CORPUS_WASM_URL });
+  const corpus = open(bench.base, { query: duck.query, wasmUrl: CORPUS_WASM_URL });
 
   // ---- the windowed path ----
   let streamCost: SliceCost | null = null;

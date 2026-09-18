@@ -6,7 +6,7 @@ direction:
 ---
 
 A window that returns the right answer looks exactly like a window that returns it cheaply. That is
-not a figure of speech: `openCorpus` opened every tile in the corpus on every window for as long as
+not a figure of speech: `open` opened every tile in the corpus on every window for as long as
 it existed, answered correctly each time, and eighty-eight green tests never saw it. It was found by
 someone outside the repository timing the same rectangle against two corpus sizes.
 
@@ -263,7 +263,7 @@ inside anything:
 
 ```ts
 const counted = counting(query);          // queries, parquet paths, rows, ms
-const corpus = await openCorpus(url, { query: counted });
+const corpus = await open(url, { query: counted });
 await corpus.rows(box);
 counted.report();                         // { queries: 3, files: 2, rows: 3152, ms: 64.7 }
 ```

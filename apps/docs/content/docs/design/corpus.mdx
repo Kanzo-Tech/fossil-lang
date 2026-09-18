@@ -64,7 +64,7 @@ a reader may derive. Until a `files` corpus is served, the cost is one nobody is
 
 ### A reader is handed the subject IRI, because an address is not something to key on
 
-`openCorpus`'s `node(id)` takes the subject IRI. The alternative was the `dense_id`, and it is the
+`open`'s `node(id)` takes the subject IRI. The alternative was the `dense_id`, and it is the
 cheap one: a shift names the tile, one request answers, the whole lookup is `O(1)`. It is refused
 because **the spatial order is the id space** — redoing the layout ranks every vertex by the Morton
 code of its new position and lets that rank be its id, so a `dense_id` held anywhere outside the
@@ -386,7 +386,7 @@ without it, and until it lands links come from the payload's own `by_source` til
 
 The addressing reads no bytes, so it cannot answer a rectangle: `tilesFor` takes tile numbers, and
 the host supplies them from the per-tile `x`/`y` statistics Parquet writes into every footer.
-`openCorpus` is the layer that has an engine to read them with,
+`open` is the layer that has an engine to read them with,
 and it buys them while the corpus is opening rather than lazily — a request between the camera
 moving and a URL being computable is the `viewport` verb this format deleted.
 
@@ -413,7 +413,7 @@ it.** GraphAr failed that in practice — its own reader cannot open a fossil co
 Zarr meets the condition on the half above and fails it on the half below, and the split is clean:
 
 - **Its addressing model is this one.** A metadata document plus chunks addressed by a key computed
-  from the index, no server, store-agnostic. That is the engine-free depth of `openCorpus`, spelled
+  from the index, no server, store-agnostic. That is the engine-free depth of `open`, spelled
   differently — and its `multiscales` convention is the level pyramid described above, already
   standardised.
 - **Its data model is not.** Zarr is dense N-dimensional arrays. A tile here is a typed table with a
@@ -435,7 +435,7 @@ a size — and no Zarr reader opens a corpus of typed tables with a subject IRI 
 ### The npm package is named for the corpus; the crates are named for the surface
 
 The published binding was `@fossil-lang/graph` and it is now **`@fossil-lang/corpus`**. The section
-title is the reason: none of the six draws, the package's door is `openCorpus`, and every type it
+title is the reason: none of the six draws, the package's door is `open`, and every type it
 exports is `Corpus*`. What forced the rename rather than merely recommending it is that the thing
 which *does* draw arrived and took the obvious name — `apps/playground/package.json` lists
 `@kanzo-tech/graph`, a GPU canvas, and listed `@fossil-lang/graph` beside it. Two dependencies
@@ -579,7 +579,7 @@ and that it is tiled by the same shift as the vertices it addresses. There is st
 
 The verbs do not draw and the corpus is addressed rather than queried, which leaves one thing
 unstated: *something* has to put a million points on a screen, and fossil does not ship it. What
-fossil publishes is the address — `openCorpus` with no engine lent to it, one reader, no bytes — and
+fossil publishes is the address — `open` with no engine lent to it, one reader, no bytes — and
 what draws is `@kanzo-tech/graph`, a bounded WebGL canvas over cosmos.gl whose whole data contract
 is one method:
 
@@ -600,7 +600,7 @@ is left in the file is the mapping between two vocabularies. Nothing in it knows
 a buffer, and nothing in the renderer knows what a corpus is.
 
 **The division is: the renderer owns the contract and the picture, fossil owns the address.** That
-package ships a fossil reader of its own — `openCorpus`, on its `duckdb` subpath — and the
+package ships a fossil reader of its own — `open`, on its `duckdb` subpath — and the
 playground does not call it, for a reason that is a 404 rather than a preference: it composes
 `chunk{k}.parquet` and `by_source/tile{k}.parquet`, which is `container: files`, and fossil's writer
 emits `container: rowgroups`. It also re-derives the addressing from a line scan over six manifest
@@ -681,7 +681,7 @@ graph LR
   R[["recipe · provenance.mjs"]] --> C
   C --> JS["reader.mjs · from the conventions alone"]
   C --> RS["fossil_graph::plan · native, usize 64"]
-  C --> WS["the same plan · wasm32, usize 32<br/>re-entered from JS as openCorpus"]
+  C --> WS["the same plan · wasm32, usize 32<br/>re-entered from JS as open"]
   JS --> D{"diff"}
   RS --> D
   WS --> D

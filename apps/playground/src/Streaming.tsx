@@ -9,7 +9,7 @@
  * What the reader should come away having SEEN, in this order:
  *
  *   1. **Every URL, before any request.** The manifests are three small YAML files; from them
- *      `openCorpus` names all 245 tiles with no engine and nothing further off the wire — the
+ *      `open` names all 245 tiles with no engine and nothing further off the wire — the
  *      engine-free rung of the door, reached by lending it a text reader and nothing else.
  *      The panel prints the count and the milliseconds it took, and lists the URLs a given window
  *      resolves to — before fetching.

@@ -21,7 +21,7 @@
  * thing it is addressing within one frame. The layout is the compiler's output and so is its
  * geometry: if a placement is wrong it is wrong upstream, and it is fixed by recompiling.
  */
-import { openCorpus } from '@fossil-lang/corpus';
+import { open } from '@fossil-lang/corpus';
 import { GraphCanvas, type BoundedSource } from '@kanzo-tech/graph';
 import { categoricalCapacity } from '@kanzo-tech/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -152,13 +152,13 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
   /**
    * The corpus, opened once — and as a PROMISE, which is what keeps this component unchanged.
    *
-   * `openCorpus` is asynchronous and a `BoundedSource` is not: the query loop builds the source
+   * `open` is asynchronous and a `BoundedSource` is not: the query loop builds the source
    * synchronously and calls it later. Handing the promise to `corpusSource` means there is no
    * loading branch here and no state machine around the canvas — the source awaits it inside its
    * own members, once. `bench.base` is absolute for the reason `bench.ts` records: DuckDB resolves
    * a URL inside its Worker, where a relative one names the wrong directory.
    */
-  const corpus = useMemo(() => openCorpus(bench.base, { query: duck.query, wasmUrl: CORPUS_WASM_URL }), [bench]);
+  const corpus = useMemo(() => open(bench.base, { query: duck.query, wasmUrl: CORPUS_WASM_URL }), [bench]);
 
   const streaming: BoundedSource = useMemo(
     () => corpusSource({ corpus, boxes, channels, onCost, slots }),
@@ -191,7 +191,7 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
    * what is left here is the wiring.
    *
    * State and not a `useMemo`, because both inputs arrive late: the payload's vocabulary is one
-   * `DESCRIBE` per type inside `openCorpus`, so it is behind the same promise the sources await.
+   * `DESCRIBE` per type inside `open`, so it is behind the same promise the sources await.
    * The declaration is not — `bench.indexText` is the manifest as it was served — and it is read
    * here anyway, in the same effect, so there is one place where the two halves meet.
    */

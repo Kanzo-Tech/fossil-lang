@@ -22,7 +22,7 @@
  * property of the corpus and not of the format.
  *
  * The published module's half of this is `packages/corpus/tests/containers.test.ts`, which asks the
- * same question of `openCorpus`. Neither shares a line with the other.
+ * same question of `open`. Neither shares a line with the other.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";

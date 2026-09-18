@@ -12,7 +12,7 @@
  * synchronous arithmetic over a parsed manifest and is now a call into `fossil-graph-wasm`, so the
  * module has to be up before an address resolves — the same precondition every verb already had.
  * That precondition is an OPTION and not a call a caller sequences: `wasmUrl` on
- * `OpenCorpusOptions`, awaiting the same memoised boot. The subpath
+ * `OpenOptions`, awaiting the same memoised boot. The subpath
  * `@fossil-lang/corpus/address` existed exactly so a third party could address a corpus *without*
  * the module at all, and it is deleted: a WASM-free path is a second implementation, and a second
  * implementation is what this change removed.
@@ -26,14 +26,14 @@
  *   has one, so the host reads its own footers and hands the tile numbers back to
  *   {@link CorpusAddressing.tilesFor}.
  *
- * `openCorpus` in `./corpus.ts` is the layer that reads those footers, by taking an engine from the
+ * `open` in `./corpus.ts` is the layer that reads those footers, by taking an engine from the
  * host rather than growing one. It sits **on** this module and does not absorb it.
  *
  * **Nothing here is on the barrel except the shapes and {@link levelsOf}.** `resolveCorpus` was,
- * and it was a second name for a depth of `openCorpus`: both took a corpus and answered about it,
+ * and it was a second name for a depth of `open`: both took a corpus and answered about it,
  * and which one a caller wanted was decided by whether it had an engine to lend. That is now an
- * argument rather than an import — `openCorpus(base, { manifestFiles })` is this module's answer
- * and `openCorpus(url, { query })` is the door's, out of one name. {@link addressManifests} is the
+ * argument rather than an import — `open(base, { manifestFiles })` is this module's answer
+ * and `open(url, { query })` is the door's, out of one name. {@link addressManifests} is the
  * resolution itself, reached only from `./corpus.ts`.
  *
  * @see {@link CorpusAddressing}
@@ -719,16 +719,16 @@ function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress 
 
 /**
  * Resolve a corpus's manifest set into the addresses a reader composes URLs from — **the shallow
- * half of `openCorpus`, and not a door of its own.**
+ * half of `open`, and not a door of its own.**
  *
- * This was `resolveCorpus`, exported beside `openCorpus`, and the two were one question asked at
+ * This was `resolveCorpus`, exported beside `open`, and the two were one question asked at
  * two depths: give the door an engine and it reads bytes, hand this the manifests and it names
  * URLs. Which one a caller wanted was decided by what the caller had, which is an argument and not
- * an import — so `openCorpus(base, { manifestFiles })` is how this is reached and the module
+ * an import — so `open(base, { manifestFiles })` is how this is reached and the module
  * surface has one name on it. `./corpus.ts` is the only caller.
  *
  * **It is synchronous and stays synchronous**, because the boot is the caller's problem one layer
- * up: `openCorpus` awaits `wasmUrl` before it gets here, exactly as it does for a verb.
+ * up: `open` awaits `wasmUrl` before it gets here, exactly as it does for a verb.
  *
  * Throws {@link CorpusManifestError} when the manifest cannot address itself — a missing file, a
  * `chunk_size` no shift addresses, an endpoint type the index does not declare, or an edge whose

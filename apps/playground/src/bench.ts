@@ -2,7 +2,7 @@
  * The large corpus, addressed — the half of streaming that costs nothing.
  *
  * `scripts/bench-corpus.mjs` writes a million-vertex corpus into this app's `public/` at build
- * time; this module opens it the way any reader would: lend `openCorpus` a `fetch`, and get back
+ * time; this module opens it the way any reader would: lend `open` a `fetch`, and get back
  * every URL the corpus can produce.
  *
  * ## What addressing costs now
@@ -16,12 +16,12 @@
  * What survives is the shape of the win, and it is the half that mattered: **no engine and no
  * request**. Every tile URL in a million-vertex corpus becomes available on one line, out of the
  * manifests already in hand. The boot is an option on that line now — `wasmUrl`, the same option
- * `openCorpus` takes — rather than a call sequenced before it, and it is memoised for the rest of
+ * `open` takes — rather than a call sequenced before it, and it is memoised for the rest of
  * the session.
  *
  * **The capability is what decides the depth, and this module is why that is a capability rather
  * than a preference**: there is no `query` here to give the door and nothing to run one against, so
- * `openCorpus` is handed a text reader and answers with the addressing alone. It was a second
+ * `open` is handed a text reader and answers with the addressing alone. It was a second
  * function called `resolveCorpus`; it is the same name at a shallower depth now.
  *
  * **What this module no longer contains is the twelve-line scan of the index's `vertices:`/`edges:`
@@ -30,7 +30,7 @@
  * and nothing that said which files those are. `readText` is that sequence published: lend a
  * reader, and the package asks for the index and then for what the index names.
  */
-import { openCorpus, type CorpusAddressing } from '@fossil-lang/corpus';
+import { open, type CorpusAddressing } from '@fossil-lang/corpus';
 
 import { CORPUS_WASM_URL } from './corpus.js';
 
@@ -136,7 +136,7 @@ export async function openBench(): Promise<Bench | null> {
   // callback below is every request that happens, and nothing under it is a byte of payload.
   //
   // **Which files get asked for is not this module's decision any more.** It used to scan the
-  // index's `vertices:`/`edges:` lists itself to find out; `openCorpus` knows, because the index
+  // index's `vertices:`/`edges:` lists itself to find out; `open` knows, because the index
   // is its business, and all this lends it is a `fetch`.
   const manifestFiles: Record<string, string> = {};
   let fetchMs = 0;
@@ -146,7 +146,7 @@ export async function openBench(): Promise<Bench | null> {
   const started = performance.now();
   let addressing: CorpusAddressing;
   try {
-    addressing = await openCorpus(base, {
+    addressing = await open(base, {
       wasmUrl: CORPUS_WASM_URL,
       readText: async (url) => {
         const at = performance.now();
@@ -176,7 +176,7 @@ export async function openBench(): Promise<Bench | null> {
     stamp,
     base,
     addressing,
-    // Non-null by construction: `openCorpus` answered, so it read the index.
+    // Non-null by construction: `open` answered, so it read the index.
     indexText: indexText!,
     manifestTexts: manifestFiles,
     manifestBytes,

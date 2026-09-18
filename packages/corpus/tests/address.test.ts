@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import './boot.js';
 import { CorpusManifestError } from '../src/address.js';
-import { openCorpus } from '../src/corpus.js';
+import { open } from '../src/corpus.js';
 
 /**
  * The addressing binding, on the manifests the rest of this package already uses.
@@ -73,7 +73,7 @@ async function corpusOf(options: {
   container: 'files' | 'rowgroups';
 }) {
   const { prefix, edgePrefix = '', adjPrefix = '', chunkSize, vertexCount, container } = options;
-  return openCorpus('', {
+  return open('', {
     manifestFiles: {
       'graph.graph.yml': [
         'name: graph',
@@ -246,9 +246,9 @@ describe('the declared count', () => {
   });
 });
 
-describe('openCorpus — the engine-free rung', () => {
+describe('open — the engine-free rung', () => {
   it('addresses vertex tiles under the declared prefix', async () => {
-    const corpus = await openCorpus('/bench/1000000', { manifestFiles });
+    const corpus = await open('/bench/1000000', { manifestFiles });
     const person = corpus.vertexType();
 
     // Derived from the fixture, not transcribed from it. `chunkSize` was
@@ -273,7 +273,7 @@ describe('openCorpus — the engine-free rung', () => {
   });
 
   it('addresses relative to the dataset root when the base is empty', async () => {
-    const corpus = await openCorpus('', { manifestFiles });
+    const corpus = await open('', { manifestFiles });
     expect(corpus.vertexType().tileUrl(9)).toBe('vertex/Person/tiles.parquet');
   });
 
@@ -281,7 +281,7 @@ describe('openCorpus — the engine-free rung', () => {
     // This fixture's `projections` is empty — a manifest that says the relation exists and does
     // not say where any of it is. Composing `by_source/chunk{k}.parquet` from the convention is
     // exactly the 404 this module exists to make impossible.
-    const corpus = await openCorpus('', { manifestFiles });
+    const corpus = await open('', { manifestFiles });
     const knows = corpus.edges[0]!;
 
     expect(knows.edgeType).toBe('knows');
@@ -291,7 +291,7 @@ describe('openCorpus — the engine-free rung', () => {
   });
 
   it('reports an unaddressable orientation as a gap rather than drawing nothing', async () => {
-    const corpus = await openCorpus('', { manifestFiles });
+    const corpus = await open('', { manifestFiles });
     const addressed = corpus.tilesFor({ tiles: [0, 1], directions: ['src', 'dst'] });
 
     // One file for the two tiles, distinct: under `rowgroups` a list naming it once per tile is
@@ -307,8 +307,8 @@ describe('openCorpus — the engine-free rung', () => {
 
   it('names the file when a manifest it was promised is not there', async () => {
     const { 'vertex/Person.vertex.yml': _dropped, ...without } = manifestFiles;
-    await expect(openCorpus('', { manifestFiles: without })).rejects.toThrow(CorpusManifestError);
-    await expect(openCorpus('', { manifestFiles: without })).rejects.toThrow(
+    await expect(open('', { manifestFiles: without })).rejects.toThrow(CorpusManifestError);
+    await expect(open('', { manifestFiles: without })).rejects.toThrow(
       'vertex/Person.vertex.yml',
     );
   });
@@ -326,8 +326,8 @@ describe('openCorpus — the engine-free rung', () => {
     expect(mutated).not.toBe(yaml);
 
     const broken = { ...manifestFiles, 'vertex/Person.vertex.yml': mutated };
-    await expect(openCorpus('', { manifestFiles: broken })).rejects.toThrow(CorpusManifestError);
-    await expect(openCorpus('', { manifestFiles: broken })).rejects.toThrow('no shift addresses');
+    await expect(open('', { manifestFiles: broken })).rejects.toThrow(CorpusManifestError);
+    await expect(open('', { manifestFiles: broken })).rejects.toThrow('no shift addresses');
   });
 
   it('takes no capability and issues no request', async () => {
@@ -341,7 +341,7 @@ describe('openCorpus — the engine-free rung', () => {
     // `readText`, nothing but bytes already in hand. A round trip between the camera moving and a
     // URL being computable is the `viewport` verb this format deleted, and that is the assertion
     // below — a corpus addressed with neither capability, answering with a URL.
-    const corpus = await openCorpus('', { manifestFiles });
+    const corpus = await open('', { manifestFiles });
     expect(corpus.tilesFor({ tiles: [7] }).vertexUrls).toEqual(['vertex/Person/tiles.parquet']);
   });
 
@@ -358,7 +358,7 @@ describe('openCorpus — the engine-free rung', () => {
    */
   it('reads the index and the manifests it names through a lent text reader, and nothing else', async () => {
     const asked: string[] = [];
-    const corpus = await openCorpus('/bench/1000000', {
+    const corpus = await open('/bench/1000000', {
       readText: (url) => {
         asked.push(url);
         const text = manifestFiles[url.replace('/bench/1000000/', '')];
@@ -382,7 +382,7 @@ describe('openCorpus — the engine-free rung', () => {
 
   it('names the file a lent reader could not read, as the manifest error it is', async () => {
     await expect(
-      openCorpus('/bench/1000000', {
+      open('/bench/1000000', {
         readText: (url) => {
           if (url.endsWith('graph.graph.yml')) return manifestFiles['graph.graph.yml']!;
           throw new Error('404');
@@ -394,7 +394,7 @@ describe('openCorpus — the engine-free rung', () => {
   it('refuses a vertex type the manifest does not declare, and names the ones it does', async () => {
     // The refusal has one author. A second copy of the type list on this side of the boundary is
     // what the whole change removed, so the sentence comes back from the reader.
-    const corpus = await openCorpus('', { manifestFiles });
+    const corpus = await open('', { manifestFiles });
     expect(() => corpus.vertexType('Nobody')).toThrow(CorpusManifestError);
     expect(() => corpus.vertexType('Nobody')).toThrow('it names Person');
   });
@@ -444,7 +444,7 @@ describe('projections — the written pyramid', () => {
   };
 
   it('sees the scales, which are the whole of what it cannot derive', async () => {
-    const [person] = (await openCorpus('', { manifestFiles: withLevels() })).types;
+    const [person] = (await open('', { manifestFiles: withLevels() })).types;
     // The payload is IN the list and not beside it — that is the claim the vocabulary rests on.
     expect(person!.projections.map((p) => p.scale)).toEqual([1, 4, 16, 64, 256]);
     // No second `chunk_size`: the cut does not change with the scale.
@@ -454,7 +454,7 @@ describe('projections — the written pyramid', () => {
   });
 
   it('addresses a projection tile by the same shift, with log2(scale) more bits falling off', async () => {
-    const person = (await openCorpus('', { manifestFiles: withLevels() })).types[0]!;
+    const person = (await open('', { manifestFiles: withLevels() })).types[0]!;
     // Scale 64 keeps one id in 64, so a tile of 4,096 of its rows spans 262,144 payload ids: the
     // payload's own shift of 12 plus the 6 bits the scale carries.
     const coarse = person.projection(64)!;
@@ -480,15 +480,15 @@ describe('projections — the written pyramid', () => {
   });
 
   it('refuses to address a scale nobody wrote, and says what answers it instead', async () => {
-    const person = (await openCorpus('', { manifestFiles: withLevels() })).types[0]!;
+    const person = (await open('', { manifestFiles: withLevels() })).types[0]!;
     expect(() => person.projectionFiles(1024)).toThrow('at scales 1, 4, 16, 64, 256 and not 1024');
     expect(() => person.projectionFiles(1024)).toThrow('the predicate over the payload');
   });
 
   it('refuses a scale no shift addresses, because a projection is never a division', async () => {
     const files = withLevels('- path: l1/\n  scale: 3\n  file_type: parquet\n');
-    await expect(openCorpus('', { manifestFiles: files })).rejects.toThrow(CorpusManifestError);
-    await expect(openCorpus('', { manifestFiles: files })).rejects.toThrow(
+    await expect(open('', { manifestFiles: files })).rejects.toThrow(CorpusManifestError);
+    await expect(open('', { manifestFiles: files })).rejects.toThrow(
       'scale 3, which no shift addresses',
     );
   });
@@ -500,14 +500,14 @@ describe('projections — the written pyramid', () => {
     const mutated = yaml.replace(/^- path: ''\n  scale: 1\n/m, `${'- path: l1/'}\n  scale: 4\n`);
     expect(mutated).not.toBe(yaml);
     const files = { ...manifestFiles, 'vertex/Person.vertex.yml': mutated };
-    await expect(openCorpus('', { manifestFiles: files })).rejects.toThrow(
+    await expect(open('', { manifestFiles: files })).rejects.toThrow(
       'no projection at scale 1',
     );
-    await expect(openCorpus('', { manifestFiles: files })).rejects.toThrow('no payload to address');
+    await expect(open('', { manifestFiles: files })).rejects.toThrow('no payload to address');
   });
 
   it('reports the payload alone when the manifest declares no pyramid, which is a corpus and not a gap', async () => {
-    const [person] = (await openCorpus('', { manifestFiles })).types;
+    const [person] = (await open('', { manifestFiles })).types;
     expect(person!.projections.map((p) => p.scale)).toEqual([1]);
     expect(person!.projection(4)).toBeNull();
   });

@@ -16,7 +16,7 @@ import type {
 } from './generated.js';
 import type { QueryFn, QueryRow } from './query.js';
 
-// The verb surface and `openCorpus` ask the host for exactly the same thing, so there is one type
+// The verb surface and `open` ask the host for exactly the same thing, so there is one type
 // for it and it lives where the WASM cannot reach — see `query.ts`. Re-exported rather than moved
 // out of sight: `createGraphClient` is where a host first meets it.
 export type { QueryFn, QueryRow } from './query.js';

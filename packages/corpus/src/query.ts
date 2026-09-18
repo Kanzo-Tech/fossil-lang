@@ -8,7 +8,7 @@
  * its own doc for the measured reason it is a capability rather than a documented file name.
  *
  * It lived in `client.ts` as the verb surface's `QueryFn`, reachable only through a barrel that
- * static-imports the wasm-bindgen output. {@link openCorpus} needs the same thing and must not need
+ * static-imports the wasm-bindgen output. {@link open} needs the same thing and must not need
  * the WASM, so the type moved here — one spelling, two callers, and `client.ts` re-exports it so
  * nothing downstream changed name.
  *
@@ -78,14 +78,14 @@ export type QueryFn = (sql: string) => Promise<QueryRow[]>;
  * The host's text reader: given an absolute URL, hand back what is at it.
  *
  * ```ts
- * const addressing = await openCorpus(base, {
+ * const addressing = await open(base, {
  *   readText: async (url) => (await fetch(url)).text(),
  *   wasmUrl,
  * });
  * ```
  *
  * **It exists because the engine-free route could not say which files to read, and three readers
- * paid for that.** `openCorpus(base, { manifestFiles })` takes the manifests already in hand, and
+ * paid for that.** `open(base, { manifestFiles })` takes the manifests already in hand, and
  * to have them in hand you must know that the index is `graph.graph.yml` and that its `vertices:`
  * and `edges:` lists name the rest. That file name came off the barrel on the grounds that *«the
  * index's file name is the door's business»* — true of the engine-bearing route, which reads it
@@ -97,14 +97,14 @@ export type QueryFn = (sql: string) => Promise<QueryRow[]>;
  * **Why a capability and not an exported `GRAPH_INFO_PATH` plus a `manifestPathsOf(index)`.** That
  * pair is the same two facts published as data for the caller to re-assemble: it hands back a list
  * of paths, and every caller then writes the same join, the same fetch loop and the same error
- * when one is missing. The door already owns that sequence — it is step 1 of `openCorpus` — and
+ * when one is missing. The door already owns that sequence — it is step 1 of `open` — and
  * what the engine-free caller was missing was not the file name but the SEQUENCE. So it lends the
  * one thing it has that the package does not, and gets the sequence back. It is also what keeps
  * the index's file name off the surface, which was the right half of the original decision.
  *
  * **It is not a second `query`.** A host with an engine passes `query` and never this; a host with
  * neither passes `manifestFiles`. The three are one ladder — engine, fetcher, bytes in hand — and
- * `openCorpus` takes exactly one rung.
+ * `open` takes exactly one rung.
  *
  * Synchronous is accepted, for a host reading off a local disk (`readFileSync`) — which is what
  * every verifier script under `apps/playground/scripts` is.

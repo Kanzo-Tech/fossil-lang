@@ -121,7 +121,7 @@ export interface SliceCost {
 
 export interface CorpusSourceOptions {
   /**
-   * The corpus, open — or opening. A promise is accepted because `openCorpus` is asynchronous and a
+   * The corpus, open — or opening. A promise is accepted because `open` is asynchronous and a
    * `BoundedSource` is not: the query loop builds one synchronously and calls it later.
    */
   corpus: Corpus | Promise<Corpus>;

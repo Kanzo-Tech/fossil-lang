@@ -258,7 +258,7 @@ pub struct VertexInfo {
     /// `Option` where [`Self::vertex_count`] is not, because a missing count
     /// leaves a question **unanswerable** and a missing index leaves it
     /// answerable and **slower**: `subject = ?` over every tile returns exactly
-    /// the row the index would have found, and `openCorpus` reports the cost.
+    /// the row the index would have found, and `@fossil-lang/corpus`'s `open` reports the cost.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<VertexIndex>,
     /// **Which coordinate systems this type's rows carry, and where each one

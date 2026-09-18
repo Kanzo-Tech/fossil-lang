@@ -1,6 +1,6 @@
 ---
 title: One door for a camera
-description: "`frame(rect, pixels)` derives the level from the canvas and `frame(rect, level)` names one outright; why a written pyramid changes bytes and not rows, and why this grew `openCorpus` instead of opening a port next to it."
+description: "`frame(rect, pixels)` derives the level from the canvas and `frame(rect, level)` names one outright; why a written pyramid changes bytes and not rows, and why this grew `open` instead of opening a port next to it."
 direction:
   summary: "`frame` takes a rectangle and a resolution and depends on nothing else — the same rectangle at the same level is the same answer, however the camera got there."
 ---
@@ -189,7 +189,7 @@ function of numbers computed above it**, never of anything read. That is what ma
 function of `(rect, level)` at all, and it is why the tile ranges, the stride and the pin list are
 built by named helpers rather than written into the template as prose.
 
-## It grew `openCorpus` rather than opening a port beside it
+## It grew `open` rather than opening a port beside it
 
 The camera needs an engine — reading tiles and striding them is SQL — so it was never going to live
 on a subpath that had none. **Both of the subpaths that did are now gone**, and for one reason each
@@ -197,13 +197,13 @@ time: `./corpus` was justified by a closure that reached no WASM and the door re
 `./address` by the same promise kept at the price of
 [a second implementation of the arithmetic](/docs/design/corpus#conformance-is-a-round-trip-and-what-it-rests-on-is-not-a-headcount).
 Composing a URL costs loading a module now, and `packages/corpus/src/index.ts` carries the note
-above the export. Neither objection was ever large — `openCorpus` runs a `DESCRIBE` per vertex type
+above the export. Neither objection was ever large — `open` runs a `DESCRIBE` per vertex type
 before it returns, so a caller holding one is already in *I have an engine* territory. So the shapes
 on the table were two: a member of the existing door, or a second function taking the same two
 arguments.
 
 **This package already made that mistake once and corrected it.** `createGraphClient` took
-`{ query, manifestFiles }` and returned the verbs; `openCorpus` took `(url, { query })` and returned
+`{ query, manifestFiles }` and returned the verbs; `open` took `(url, { query })` and returned
 discovery plus the camera. Two entry points over one manifest with no rule for choosing between
 them is how one question came to have two answers, in two languages, over two SQL generators. It was
 folded in for exactly this reason, and the note survives at the seam: the verbs section of
@@ -214,8 +214,8 @@ Adding `frame` as a third would have re-run the argument that removal settled.
 `resolveCorpus` needed no engine and spent no round trip, so deleting it looked like withdrawing a
 capability rather than removing a duplicate — which is why it outlived both subpaths. What the
 objection never established is that the capability needs a name: it is what the CALLER brings, so
-it is an argument. `openCorpus(base, { manifestFiles })` and `openCorpus(url, { readText })` answer
-with the addressing, `openCorpus(url, { query })` answers with the corpus, and the rule for
+it is an argument. `open(base, { manifestFiles })` and `open(url, { readText })` answer
+with the addressing, `open(url, { query })` answers with the corpus, and the rule for
 choosing is no longer a rule — it is which capability the caller has. The price was the synchronous
 form, which had no production consumer: every rung is `await`ed now.
 

@@ -3,7 +3,7 @@
  *
  * **The footers ARE the index** — `footer-is-the-index` — and this is the measurement of the one
  * path that survives that convention: every tile whose Parquet-footer `x`/`y` box intersects the
- * rectangle, which is what `intersecting` in `../src/corpus.ts` does with the boxes `openCorpus`
+ * rectangle, which is what `intersecting` in `../src/corpus.ts` does with the boxes `open`
  * reads once. Both halves of the question are here: it must MISS nothing, and what it over-reads
  * for that is reported in tiles, in `Range` requests and in kilobytes.
  *
@@ -17,7 +17,7 @@
  * re-measure it here; this file measures what is left.
  *
  * `cost.test.ts` asserts the same path as a SHAPE — never every tile, about one more than the
- * answer needed, a smaller share of a bigger corpus — through `openCorpus` and the host's own
+ * answer needed, a smaller share of a bigger corpus — through `open` and the host's own
  * `query`. This one reports the numbers, at the DuckDB-CLI level, over a corpus this repository's
  * own reader never touches.
  *

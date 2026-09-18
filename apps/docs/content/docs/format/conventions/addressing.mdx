@@ -421,14 +421,14 @@ chose, and the arithmetic above is what that freedom costs a reader who guesses 
 So the composition ships as code, in `@fossil-lang/corpus`, reading the manifest and nothing else:
 
 ```ts
-const corpus = await openCorpus('/bench/1000000', { manifestFiles, wasmUrl });
+const corpus = await open('/bench/1000000', { manifestFiles, wasmUrl });
 const { vertexUrls, edgeUrls, complete, gaps } = corpus.tilesFor({ tiles, directions: ['src'] });
 ```
 
 **The resolution reaches no network, and the module it runs in is up before the first address.** The
 arithmetic is `fossil_graph::plan` at wasm32 — one implementation, not a second written in the
 caller's language — and the boot is the price. It is an argument and not a call to sequence:
-`wasmUrl` says where the module is, `openCorpus` awaits it, and that is why composing a URL out of
+`wasmUrl` says where the module is, `open` awaits it, and that is why composing a URL out of
 manifests already in hand is `await`ed. A caller holding an engine passes `query` instead and gets
 the whole corpus from the same name; the manifests are the one thing every depth reads. Bytes, tile
 caches, debounce, supersede-cancellation and sampling stay in whatever draws. It refuses to compose

@@ -9,10 +9,10 @@
  * camera grew this object rather than opening a fourth beside it.
  *
  * **`resolveCorpus` was the last of the three and it is this function's shallowest rung.** The
- * engine-free route is a capability the caller lacks, not a door of its own: `openCorpus(base,
- * { manifestFiles })` and `openCorpus(url, { readText })` answer with the addressing and never
- * touch an engine, and `openCorpus(url, { query })` is the whole corpus. See {@link openCorpus}
- * and {@link OpenCorpusOptions}.
+ * engine-free route is a capability the caller lacks, not a door of its own: `open(base,
+ * { manifestFiles })` and `open(url, { readText })` answer with the addressing and never
+ * touch an engine, and `open(url, { query })` is the whole corpus. See {@link open}
+ * and {@link OpenOptions}.
  *
  * **The object has two halves and the line between them is not a spelling.** `extent`, `rows`,
  * `node` and `neighbours` compute which FILES to open and open those; `schema`, `read`, `expand`,
@@ -28,7 +28,7 @@
  * no `dense_id`, no Morton, no `by_source`, no prefixes and no footers in the caller's face:
  *
  * ```ts
- * const corpus = await openCorpus(url, { query, wasmUrl });
+ * const corpus = await open(url, { query, wasmUrl });
  * corpus.types                                  // what is inside
  * await corpus.rows({ x, y, w, h })             // vertices + edges, and whether that is all of them
  * await corpus.node(iri)
@@ -56,7 +56,7 @@
  *   way: HTTP gives no directory, and the written alternative was to probe with `HEAD` until a 404.
  *   A corpus that declares no count is the one this refuses to open.
  * - **The payload vocabulary** — from the bytes, with one `DESCRIBE` per vertex type, and
- *   deliberately not from the payload projection's declared `properties`. See {@link openCorpus}
+ *   deliberately not from the payload projection's declared `properties`. See {@link open}
  *   for the count that decided it.
  * - **The `x`/`y` boxes** — from the Parquet footers, as {@link Corpus.extent}, which is a fifth
  *   member on a surface that names four because without it a caller holding only a URL has no
@@ -65,7 +65,7 @@
  *   {@link Corpus.node}: what it costs, what the tree contradicts itself about, and what would
  *   change it.
  * - **Which container** — from the manifest's `container`, because a reader over HTTP has no
- *   directory to list. Both are read; neither is globbed. See {@link openCorpus}.
+ *   directory to list. Both are read; neither is globbed. See {@link open}.
  *
  * And one shape of corpus it refuses rather than guesses at: **an edge label incident twice to one
  * vertex type**, which the addressing's `tilesFor` cannot name unambiguously. See {@link Corpus.rows}.
@@ -494,7 +494,7 @@ export interface NeighboursParams {
 
 /** A corpus, open. */
 export interface Corpus {
-  /** Where it lives, as {@link openCorpus} was given it. */
+  /** Where it lives, as {@link open} was given it. */
   readonly url: string;
   /**
    * What is inside: the vertex and edge types, their counts, and every column a row carries.
@@ -597,7 +597,7 @@ export interface Corpus {
   // from the other side — *pruning is which bytes are read, and that is the tiles' job, not a
   // verb's*.
   //
-  // **What a verb sees is the manifest's vocabulary, not the payload's.** {@link openCorpus}
+  // **What a verb sees is the manifest's vocabulary, not the payload's.** {@link open}
   // refuses to take the column list off the payload's declared `properties` and reads the bytes
   // instead, with the count that decided it; the verbs have no bytes at the time they compose SQL,
   // so they take the manifest at its word. On the conformance corpus that is three declared
@@ -626,7 +626,7 @@ export interface Corpus {
    * **`where` is SQL and carries the same authority as {@link SqlCorpus.executeSql}**, so it is
    * governed by the same {@link SqlPolicy} and refused with it: a corpus opened without
    * `sql: 'allowed'` has no `executeSql` member AND rejects a `where`. There is no spelling of
-   * `openCorpus` that opens one door and closes the other — see {@link SqlPolicy}.
+   * `open` that opens one door and closes the other — see {@link SqlPolicy}.
    */
   read(params: ReadParams): Promise<ReadResult>;
   /**
@@ -648,7 +648,7 @@ export interface Corpus {
  * A corpus opened with `sql: 'allowed'` — {@link Corpus} plus the escape hatch.
  *
  * A second interface rather than an optional member, because the member is not optional: it is
- * present or it is not, and which one is decided at `openCorpus` by an argument the host wrote.
+ * present or it is not, and which one is decided at `open` by an argument the host wrote.
  * An `executeSql?:` would have made every caller of an OPEN corpus test for a member it knows it
  * has, and would have said nothing at all to a caller of a closed one.
  */
@@ -682,7 +682,7 @@ export interface SqlCorpus extends Corpus {
 export type SqlPolicy = 'withheld' | 'allowed';
 
 /**
- * What {@link openCorpus} takes.
+ * What {@link open} takes.
  *
  * **Exactly one of `query`, `readText` and `manifestFiles` is required, and which one decides how
  * deep the answer is.** They are a ladder of capability, not three ways to say one thing:
@@ -693,11 +693,11 @@ export type SqlPolicy = 'withheld' | 'allowed';
  * | {@link readText} | read the manifests, and nothing else | {@link CorpusAddressing} |
  * | {@link manifestFiles} | nothing; the bytes are already in hand | {@link CorpusAddressing} |
  *
- * This was two exported functions — `openCorpus(url, { query })` and
+ * This was two exported functions — `open(url, { query })` and
  * `resolveCorpus({ manifestFiles, base })` — and they were one question at two depths. See
- * {@link openCorpus}.
+ * {@link open}.
  */
-export interface OpenCorpusOptions {
+export interface OpenOptions {
   /**
    * The host's engine. One method, and see `./query.ts` for why it is the only one.
    *
@@ -708,7 +708,7 @@ export interface OpenCorpusOptions {
   /**
    * The host's text reader, for the engine-free route: `(url) => text`.
    *
-   * Given without {@link query}, `openCorpus` reads the index and the per-type manifests through
+   * Given without {@link query}, `open` reads the index and the per-type manifests through
    * it and answers with the addressing alone — the position every engine-free reader was in, which
    * until now had to hand-write the scan of the index's `vertices:`/`edges:` lists to know which
    * files to ask for. See {@link ReadTextFn} for the three copies that cost.
@@ -735,9 +735,9 @@ export interface OpenCorpusOptions {
    * Where `fossil_graph_wasm_bg.wasm` is, for the bundler that needs to be told.
    *
    * **The boot is not a step a consumer sequences.** It was: `initFossilGraphWasm` was exported
-   * beside `openCorpus` and had to be awaited first, which put the existence of a wasm module — and
+   * beside `open` and had to be awaited first, which put the existence of a wasm module — and
    * the ORDER of two calls — in a surface whose whole claim is that a corpus is a URL. It is
-   * memoised inside `openCorpus` now, and this is the one thing about it a caller can still need to
+   * memoised inside `open` now, and this is the one thing about it a caller can still need to
    * say, because only the caller knows how its bundler resolves an asset:
    *
    *  - Vite: `import wasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url'`
@@ -745,7 +745,7 @@ export interface OpenCorpusOptions {
    *  - Web Worker: `new URL('@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm', import.meta.url)`
    *  - Node test: a `file://` URL resolved from `import.meta.url`
    *
-   * Optional because the boot is memoised for the process: the second `openCorpus` need not repeat
+   * Optional because the boot is memoised for the process: the second `open` need not repeat
    * what the first said. Omitted on the FIRST one, it rejects with what the WASM says — which is
    * the one failure this option exists to let a caller avoid.
    */
@@ -894,9 +894,9 @@ function text(row: QueryRow, column: string): string {
  * from which capability**, and that is the whole of the argument for there being one name here:
  *
  * ```ts
- * await openCorpus(url,  { query, wasmUrl })          // Corpus — the door, 1 + N round trips
- * await openCorpus(url,  { readText, wasmUrl })       // CorpusAddressing — the manifests, no payload
- * await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
+ * await open(url,  { query, wasmUrl })          // Corpus — the door, 1 + N round trips
+ * await open(url,  { readText, wasmUrl })       // CorpusAddressing — the manifests, no payload
+ * await open(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
  * ```
  *
  * **This absorbed `resolveCorpus`, which was the third and last of the entry points over one
@@ -956,23 +956,23 @@ function text(row: QueryRow, column: string): string {
  * @throws {TypeError} when none of `query`, `readText` and `manifestFiles` is given — there is
  *   then nothing to open the corpus with.
  */
-export function openCorpus(
+export function open(
   url: string,
-  options: OpenCorpusOptions & { query: QueryFn; sql: 'allowed' },
+  options: OpenOptions & { query: QueryFn; sql: 'allowed' },
 ): Promise<SqlCorpus>;
-export function openCorpus(
+export function open(
   url: string,
-  options: OpenCorpusOptions & { query: QueryFn },
+  options: OpenOptions & { query: QueryFn },
 ): Promise<Corpus>;
-export function openCorpus(url: string, options: OpenCorpusOptions): Promise<CorpusAddressing>;
-export async function openCorpus(
+export function open(url: string, options: OpenOptions): Promise<CorpusAddressing>;
+export async function open(
   url: string,
-  options: OpenCorpusOptions,
+  options: OpenOptions,
 ): Promise<Corpus | CorpusAddressing> {
   const { query, readText: readOne, manifestFiles: held } = options;
   if (typeof query !== 'function' && typeof readOne !== 'function' && held === undefined) {
     throw new TypeError(
-      'openCorpus needs one of: query (the host brings the engine, and the answer is the whole ' +
+      'open() needs one of: query (the host brings the engine, and the answer is the whole ' +
         'corpus), readText (the host reads text, and the answer is the addressing), or ' +
         'manifestFiles (the host already holds them)',
     );
@@ -1179,7 +1179,7 @@ export async function openCorpus(
   const tileBoxes = (type: string, level?: number): Promise<readonly TileBox[]> => {
     // **Level 0 and the payload are one key**, because they are one artefact: the payload IS the
     // projection at `scale: 1` — `address.ts` states it normatively — so asking for its footers by
-    // level has to hit the read `openCorpus` already made and not issue a second one under a name
+    // level has to hit the read `open` already made and not issue a second one under a name
     // for the same bytes. Without this the seam's «the payload is the cache for stride 1» would be
     // true of the answer and false of the request count.
     const payload = level === undefined || level === 0;
@@ -1254,7 +1254,7 @@ export async function openCorpus(
    * So the footers are bought with the manifests.
    *
    * **This is not an extra read.** `tileBoxes` is read once per corpus and cached whatever calls it
-   * first; all this does is decide that the first caller is `openCorpus`. What it replaces is a
+   * first; all this does is decide that the first caller is `open`. What it replaces is a
    * `read_text` of one `codes.json` per type — a second index over the question these same bytes
    * answer, and the request that paid for it.
    */
@@ -1379,7 +1379,7 @@ export async function openCorpus(
    * (`/docs/design/camera` measures why tiles and not area); a type with no geometry falls back to
    * its whole tile count, which the ceiling turns into the level the whole type needs. The
    * logarithm is in the pyramid's base through {@link strideBits}, because a level drops
-   * `strideOf(k)` and not `2^k`. Synchronous over footers `openCorpus` already bought.
+   * `strideOf(k)` and not `2^k`. Synchronous over footers `open` already bought.
    *
    * **This is why the level stopped being the caller's**, reversing `/docs/design/one-door`: that
    * argument rested on a partial pyramid, where a derived level could name an artefact nobody
@@ -1429,10 +1429,10 @@ export async function openCorpus(
     let end: number | null = null;
     for (const tile of tiles) {
       const box = weights.get(tile);
-      const open = runs[runs.length - 1];
-      if (open !== undefined && box !== undefined && tile === open.last + 1 && end === box.start) {
-        open.last = tile;
-        open.bytes += box.bytes;
+      const run = runs[runs.length - 1];
+      if (run !== undefined && box !== undefined && tile === run.last + 1 && end === box.start) {
+        run.last = tile;
+        run.bytes += box.bytes;
       } else {
         runs.push({ first: tile, last: tile, bytes: box?.bytes ?? 0 });
       }
@@ -1819,7 +1819,7 @@ export async function openCorpus(
     const { address, box, level, stride, pins, wantLinks } = params;
     const chunk = BigInt(address.chunkSize);
     // The per-tile `x`/`y` boxes in the Parquet footers, which is the ONE index over which tiles a
-    // rectangle touches — `footer-is-the-index`. Already read by `openCorpus` for every type with
+    // rectangle touches — `footer-is-the-index`. Already read by `open` for every type with
     // geometry; awaited here for the one that has none cached.
     const all = await tileBoxes(address.type);
 
@@ -1999,7 +1999,7 @@ export async function openCorpus(
       if (!rawSql && params.where != null) {
         throw new TypeError(
           `read.where is SQL and carries the same authority as execute_sql, and this corpus was ` +
-            `opened without it. Pass sql: 'allowed' to openCorpus to admit both.`,
+            `opened without it. Pass sql: 'allowed' to open to admit both.`,
         );
       }
       return (await verbs()).read(params);
@@ -2512,11 +2512,11 @@ export async function openCorpus(
   // publishing a tool that says no, and for the same reason: what is not on the surface cannot be
   // reached by a caller that forgot to check.
   if (!rawSql) return corpus;
-  const open: SqlCorpus = {
+  const widened: SqlCorpus = {
     ...corpus,
     async executeSql(params) {
       return (await verbs()).executeSql(params);
     },
   };
-  return open;
+  return widened;
 }

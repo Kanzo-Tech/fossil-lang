@@ -48,7 +48,7 @@ import { dirname, join, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { openCorpus } from '@fossil-lang/corpus';
+import { open } from '@fossil-lang/corpus';
 import { BOUNDED_DEFAULTS, denseOf, typeOf, vertexId } from '@kanzo-tech/graph';
 
 import { query as duckQuery } from '../../corpus/guards/duck.mjs';
@@ -56,7 +56,7 @@ import { query as duckQuery } from '../../corpus/guards/duck.mjs';
 /**
  * The reader's wasm, as BYTES rather than a URL.
  *
- * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32, and Node is
+ * `open` resolves a manifest through `fossil_graph::plan` compiled to wasm32, and Node is
  * the host that has to say where that lives. A `file://` URL is the obvious answer and it does not
  * work: wasm-bindgen's init calls `fetch`, and undici refuses the `file:` scheme with «not
  * implemented... yet...». A `Response` over the bytes is in the accepted union and needs no
@@ -130,14 +130,14 @@ const note = (text) => console.log(`  ..   ${text}`);
 // `readFileSync` lent to the door.
 //
 // **The scan of the index's `vertices:`/`edges:` lists that used to be here is gone.** It was a
-// copy of the one in `src/bench.ts`, which was a copy of the one inside `openCorpus`, and it
+// copy of the one in `src/bench.ts`, which was a copy of the one inside `open`, and it
 // existed because the package asked for `manifestFiles` and published nothing that said which
 // files those are. Now it lends a reader and is told nothing about the layout at all.
 //
 // `wasmUrl` because the addressing is `fossil_graph::plan` at wasm32: arithmetic, but not
-// free-standing. `openCorpus` below is given the same value and the boot is memoised, so this is
+// free-standing. `open` below is given the same value and the boot is memoised, so this is
 // one boot rather than two.
-const addressing = await openCorpus(root, {
+const addressing = await open(root, {
   readText: (url) => readFileSync(url, 'utf8'),
   wasmUrl: CORPUS_WASM,
 });
@@ -145,7 +145,7 @@ const type = addressing.vertexType();
 
 // ---- the host's one capability, counted ----
 //
-// No registration step. `openCorpus` composes `read_parquet('<url>')` against the real addresses,
+// No registration step. `open` composes `read_parquet('<url>')` against the real addresses,
 // and so does everything under it; the app's own reads go straight at URLs too, so a name in a
 // virtual filesystem would be a second addressing scheme for one of the two paths.
 let queries = 0;
@@ -169,7 +169,7 @@ let lastCost = null;
 // it costs — the manifests, one `DESCRIBE` per type, the tile-code anchors — is paid here, before
 // the counter below starts, because none of it is a camera move.
 
-const corpus = await openCorpus(root, { query, wasmUrl: CORPUS_WASM });
+const corpus = await open(root, { query, wasmUrl: CORPUS_WASM });
 const source = corpusSource({
   corpus,
   boxes,

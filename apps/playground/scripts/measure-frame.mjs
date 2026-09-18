@@ -71,7 +71,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { levelsOf, openCorpus } from '@fossil-lang/corpus';
+import { levelsOf, open } from '@fossil-lang/corpus';
 import { BOUNDED_DEFAULTS } from '@kanzo-tech/graph';
 
 import { query as duckQuery, lit } from '../../corpus/guards/duck.mjs';
@@ -79,7 +79,7 @@ import { query as duckQuery, lit } from '../../corpus/guards/duck.mjs';
 /**
  * The reader's wasm, as BYTES rather than a URL.
  *
- * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32, and Node is
+ * `open` resolves a manifest through `fossil_graph::plan` compiled to wasm32, and Node is
  * the host that has to say where that lives. A `file://` URL is the obvious answer and it does not
  * work: wasm-bindgen's init calls `fetch`, and undici refuses the `file:` scheme with «not
  * implemented... yet...». A `Response` over the bytes is in the accepted union and needs no
@@ -219,7 +219,7 @@ const SPAWN_MS = median(spawnSamples);
 
 process.stderr.write('opening the corpus…\n');
 
-const corpus = await openCorpus(root, { query, wasmUrl: CORPUS_WASM });
+const corpus = await open(root, { query, wasmUrl: CORPUS_WASM });
 const address = corpus.addressing.vertexType();
 const payload = address.tileUrl(0);
 const boxes = duckQuery(FOOTER_SQL(payload)).map(toTileBox);

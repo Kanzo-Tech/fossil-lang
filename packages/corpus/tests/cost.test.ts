@@ -11,7 +11,7 @@
  * here compares against a recorded figure. Every expectation is either "smaller than the corpus" or
  * "the same at ten times the size".
  *
- * The seam it measures through is the one the package already has. `openCorpus` asks a host for a
+ * The seam it measures through is the one the package already has. `open` asks a host for a
  * single `query` callback, so everything a reader does passes through one function and counting is
  * a decorator around it: no instrumentation inside `corpus.ts`, and nothing here can drift from
  * what a real host would see.
@@ -36,7 +36,7 @@ import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/b
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { openCorpus, type Corpus } from '../src/corpus.js';
+import { open, type Corpus } from '../src/corpus.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
@@ -112,7 +112,7 @@ beforeAll(async () => {
       seen.push(sql);
       return conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
     };
-    const corpus = await openCorpus(dir, { query });
+    const corpus = await open(dir, { query });
     corpora.push({
       name,
       corpus,

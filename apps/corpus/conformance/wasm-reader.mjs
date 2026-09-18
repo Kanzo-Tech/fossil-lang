@@ -2,7 +2,7 @@
  * The third reader, adapted to the shape the other two are executed in.
  *
  * `reader.mjs` is plain Node written from the conventions. The third leg is the published
- * `@fossil-lang/corpus`, whose `openCorpus` is a binding over exactly the module this file loads —
+ * `@fossil-lang/corpus`, whose `open` is a binding over exactly the module this file loads —
  * so the table is executed by three legs over **two** implementations, and this one is the entry
  * the other two share a language boundary with rather than a reader of its own.
  *

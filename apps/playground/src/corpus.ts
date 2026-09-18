@@ -1,7 +1,7 @@
 /**
  * Half three of the loop: query the corpus that was just written.
  *
- * `openCorpus(url, { query })` is the door — one argument is the corpus and the other is
+ * `open(url, { query })` is the door — one argument is the corpus and the other is
  * the engine, and everything else is read off the artefact. It is used here exactly as a
  * reader over HTTP would use it, against a `url` whose files happen to live in DuckDB's
  * virtual filesystem instead of on a server. The reader cannot tell, and that is the
@@ -36,7 +36,11 @@
  * stand-in left to document.
  */
 import corpusWasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url';
-import { openCorpus, type Corpus } from '@fossil-lang/corpus';
+// Aliased, and this is the one place in the tree where the door's name has to be: this module's
+// own `open()` is what the app calls (`corpus.open()` in `App.tsx`), and an import named `open`
+// beside a local `export function open` is a duplicate declaration rather than a shadow. The
+// alias is the package's own word for what this is.
+import { open as door, type Corpus } from '@fossil-lang/corpus';
 import type { GraphArFile } from '@fossil-lang/executor';
 
 import { query, register } from './duckdb.js';
@@ -47,7 +51,7 @@ export const CORPUS_URL = 'corpus';
 /**
  * Where the corpus reader's wasm lives, named once for the whole app.
  *
- * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32 — there is no
+ * `open` resolves a manifest through `fossil_graph::plan` compiled to wasm32 — there is no
  * second implementation of the addressing on this side any more, so opening a corpus is what needs
  * it rather than only the verbs. Vite rewrites the `?url` at build time, which is the same way
  * `check.ts` reaches the compiler's wasm and `run.ts` the executor's.
@@ -62,7 +66,7 @@ const lit = (value: string) => `'${value.replace(/'/g, "''")}'`;
  *
  * These are the layout pass's OUTPUT — `vertex/<Type>/tiles.parquet`, its `index/`, and
  * `by_source`/`by_target` tiles per edge type — because the pass ran inside the executor.
- * Nothing is rewritten here; the bytes are registered at the exact names `openCorpus`
+ * Nothing is rewritten here; the bytes are registered at the exact names `open`
  * composes by arithmetic.
  */
 export async function stage(files: readonly GraphArFile[]): Promise<void> {
@@ -73,7 +77,7 @@ export async function stage(files: readonly GraphArFile[]): Promise<void> {
 
 /** Open the corpus through the reference door. Throws if the manifest cannot address itself. */
 export function open(): Promise<Corpus> {
-  return openCorpus(CORPUS_URL, { query, wasmUrl: CORPUS_WASM_URL });
+  return door(CORPUS_URL, { query, wasmUrl: CORPUS_WASM_URL });
 }
 
 /**

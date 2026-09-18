@@ -432,7 +432,7 @@ export function write(
       "    is_primary: true",
       // `is_primary` is not optional, and leaving it off produced a manifest fossil's own
       // reader refuses: `fossil_sinks::manifest::Property` has no default for it, so
-      // `openCorpus` failed on this file with «missing field `is_primary`» while every
+      // `open` failed on this file with «missing field `is_primary`» while every
       // JavaScript reader sailed past. That is the asymmetry the third reader was added
       // to catch, catching something.
       "  - name: birth_year",

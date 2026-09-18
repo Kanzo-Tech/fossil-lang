@@ -57,7 +57,7 @@ import { dirname, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { openCorpus } from '@fossil-lang/corpus';
+import { open } from '@fossil-lang/corpus';
 import { query as duckQuery, lit } from '../../corpus/guards/duck.mjs';
 import { PINNED, rescaledFrame, toCorpus } from './frame.mjs';
 
@@ -135,7 +135,7 @@ const voidVerdict = (label, detail) => {
 /**
  * The reader's wasm, as BYTES rather than a URL.
  *
- * `openCorpus` resolves a manifest through `fossil_graph::plan` compiled to wasm32, and Node is
+ * `open` resolves a manifest through `fossil_graph::plan` compiled to wasm32, and Node is
  * the host that has to say where that lives. A `file://` URL is the obvious answer and it does not
  * work: wasm-bindgen's init calls `fetch`, and undici refuses the `file:` scheme with «not
  * implemented... yet...». A `Response` over the bytes is in the accepted union and needs no
@@ -146,7 +146,7 @@ const CORPUS_WASM = new Response(
   { headers: { 'content-type': 'application/wasm' } },
 );
 
-const corpus = await openCorpus(root, {
+const corpus = await open(root, {
   query: async (sql) => duckQuery(sql),
   wasmUrl: CORPUS_WASM,
 });

@@ -11,7 +11,7 @@
  *
  * ## The three steps, and which of them costs anything
  *
- * 1. **Address.** `openCorpus`, given a text reader and no engine, turns the manifests into tile
+ * 1. **Address.** `open`, given a text reader and no engine, turns the manifests into tile
  *    URLs. Costs the three small YAML manifests, and nothing else — no engine, and no request
  *    beyond them. (It costs a WASM module too: the addressing is `fossil_graph::plan` compiled to
  *    wasm32, so that there is one implementation of it rather than one per language.)

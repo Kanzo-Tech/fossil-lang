@@ -47,7 +47,7 @@ import { dirname, join, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { openCorpus, PAYLOAD_CATEGORICAL } from '@fossil-lang/corpus';
+import { open, PAYLOAD_CATEGORICAL } from '@fossil-lang/corpus';
 
 import { query as duckQuery } from '../../corpus/guards/duck.mjs';
 
@@ -222,7 +222,7 @@ function colourBeforeChannels(type) {
 
 const query = async (sql) => duckQuery(sql);
 
-const corpus = await openCorpus(root, { query, wasmUrl: CORPUS_WASM });
+const corpus = await open(root, { query, wasmUrl: CORPUS_WASM });
 const declaredType = corpus.types.vertices[0];
 const vertexManifest = readFileSync(join(root, manifestPaths[0]), 'utf8');
 const properties = declaredProperties(vertexManifest);

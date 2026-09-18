@@ -27,7 +27,7 @@
 //! (`conformance/reader.mjs`), `fossil_graph::plan` natively in
 //! `crates/fossil-graph/tests/conformance.rs`, and the same plan at wasm32
 //! through `conformance/wasm-reader.mjs`, which is the build the published
-//! TypeScript binds as `openCorpus` in
+//! TypeScript binds as `@fossil-lang/corpus`'s `open` in
 //! `packages/corpus/tests/conformance.test.ts`. Three legs over **two**
 //! implementations: the published reader stopped being a third of its own when
 //! it became a binding. This paragraph said two of those three lived in another

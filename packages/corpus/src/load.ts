@@ -8,7 +8,7 @@ import init from '../pkg/fossil_graph_wasm.js';
  * Options for {@link initFossilGraphWasm}.
  *
  * The four resolutions a bundler can want are documented where a consumer can still say one —
- * `OpenCorpusOptions.wasmUrl` in `./corpus.ts`. This type is not re-exported.
+ * `OpenOptions.wasmUrl` in `./corpus.ts`. This type is not re-exported.
  */
 export interface InitFossilGraphWasmOpts {
   /** URL or path to `fossil_graph_wasm_bg.wasm`. */
@@ -23,11 +23,11 @@ let _initPromise: Promise<unknown> | null = null;
  * else.
  *
  * **Internal, and that is the change.** It was exported from `./index.ts`
- * beside `openCorpus` and had to be awaited before it, which is the largest
+ * beside `open` and had to be awaited before it, which is the largest
  * thing the module surface leaked: a consumer had to know there IS a wasm
  * module, and had to sequence two calls in the right order against a package
- * whose whole claim is that a corpus is a URL. `openCorpus` awaits it now and
- * `OpenCorpusOptions.wasmUrl` is the one thing about it a caller can still
+ * whose whole claim is that a corpus is a URL. `open` awaits it now and
+ * `OpenOptions.wasmUrl` is the one thing about it a caller can still
  * need to say. The rejected alternative was keeping it exported "for a caller
  * that wants to pay the boot up front" — which is a second door onto a
  * memoised promise, i.e. the thing `@fossil-lang/corpus` has twice already

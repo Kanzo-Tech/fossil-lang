@@ -237,7 +237,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            standalone test — composing a URL now costs loading the module, which is
                            the price of there being one reader instead of two.
                            It was `@fossil-lang/graph` and it is not a graph: its door is
-                           `openCorpus` and the thing that DOES draw one, `@kanzo-tech/graph`,
+                           `open` and the thing that DOES draw one, `@kanzo-tech/graph`,
                            sits beside it in the playground's `package.json`. The Rust crates
                            keep their names — `fossil-graph` IS a verb surface over a property
                            graph, and a crate name is not in npm's import space.

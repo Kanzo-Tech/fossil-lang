@@ -3,7 +3,7 @@
  *
  * A tile is a fixed range of `dense_id`. Which container carries it — one Parquet per tile with the
  * address in the name, or one Parquet whose row groups are the tiles — is a second question, and
- * `graph.graph.yml`'s `container` is what answers it. `openCorpus` reads both, and this is the file
+ * `graph.graph.yml`'s `container` is what answers it. `open` reads both, and this is the file
  * that says so: the same graph is written both ways and every answer has to come back identical.
  *
  * **This is the diff a format change is allowed to arrive behind**, and its plain-Node twin is
@@ -34,7 +34,7 @@ import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/b
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { openCorpus, type Box, type Corpus } from '../src/corpus.js';
+import { open, type Box, type Corpus } from '../src/corpus.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
@@ -103,7 +103,7 @@ beforeAll(async () => {
       return conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
     };
     opened[layout] = {
-      corpus: await openCorpus(dir, { query }),
+      corpus: await open(dir, { query }),
       bill: () => files,
       reset: () => {
         files = 0;

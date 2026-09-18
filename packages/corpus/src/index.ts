@@ -8,10 +8,10 @@
  * materialises rows in JS.
  *
  * ```ts
- * import { openCorpus } from '@fossil-lang/corpus';
+ * import { open } from '@fossil-lang/corpus';
  * import wasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url'; // Vite
  *
- * const corpus = await openCorpus(url, { query, wasmUrl });
+ * const corpus = await open(url, { query, wasmUrl });
  * corpus.types                                  // what is inside
  * await corpus.frame({ ...box, pixels })        // a rectangle at a resolution, ready to draw
  * await corpus.node(iri)
@@ -23,7 +23,7 @@
  * *«There is no second reference»* is the repo's rule and this package has now enforced it against
  * itself three times — `createGraphClient` is not exported, the `./address` subpath was deleted
  * because its only justification forced a second implementation of the addressing, and
- * **`resolveCorpus` is gone into {@link openCorpus}**, which is the one that had survived two
+ * **`resolveCorpus` is gone into {@link open}**, which is the one that had survived two
  * previous passes.
  *
  * It survived them because the objection to removing it was real and is still real: it needed no
@@ -32,9 +32,9 @@
  * The capability is what the CALLER brings, so it is an argument:
  *
  * ```ts
- * await openCorpus(url,  { query, wasmUrl })          // Corpus — the door
- * await openCorpus(url,  { readText, wasmUrl })       // CorpusAddressing — manifests only
- * await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
+ * await open(url,  { query, wasmUrl })          // Corpus — the door
+ * await open(url,  { readText, wasmUrl })       // CorpusAddressing — manifests only
+ * await open(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
  * ```
  *
  * Three rungs, one name, and `corpus.addressing` is still what the first rung already resolved for
@@ -46,15 +46,15 @@
  *
  * - **`initFossilGraphWasm`** — the biggest leak of implementation into a surface whose claim is
  *   that a corpus is a URL: a consumer had to know there is a wasm module and had to sequence two
- *   calls in the right order. {@link openCorpus} awaits it, and
- *   `OpenCorpusOptions.wasmUrl` is the one thing about it a caller can still need to say, because
+ *   calls in the right order. {@link open} awaits it, and
+ *   `OpenOptions.wasmUrl` is the one thing about it a caller can still need to say, because
  *   only the caller knows how its bundler resolves an asset.
  * - **`GRAPH_INFO_PATH`** — the index's file name is the door's business and not a consumer's.
  *   **That reasoning did not extend to the engine-free route and it was applied there anyway**,
  *   which is what made a hand-written scan of the index's `vertices:`/`edges:` lists the price of
  *   addressing a corpus you had not already fetched — three copies of it, one of them in another
  *   repository. The file name stays off the surface and the SEQUENCE is published instead, as
- *   `OpenCorpusOptions.readText`: lend the package a text reader and it reads the index, the
+ *   `OpenOptions.readText`: lend the package a text reader and it reads the index, the
  *   per-type manifests and nothing else. See {@link ReadTextFn}.
  * - **`export type *`** — an unbounded star publishes whatever the codegen makes, now and later,
  *   with nobody deciding. The fourteen the surviving surface names are re-exported below; the
@@ -79,7 +79,7 @@
 // surface for. `CorpusManifestError` is the manifest failing to address itself before a byte of
 // payload is read; `CorpusReadError` is the bytes disagreeing with what the manifest promised. A
 // caller can retry one of those against a different corpus and never the other.
-export { CorpusManifestError, CorpusReadError, openCorpus } from './corpus.js';
+export { CorpusManifestError, CorpusReadError, open } from './corpus.js';
 
 // Which levels of detail a type has, and which of them the writer spent bytes on.
 //
@@ -131,7 +131,7 @@ export type {
   Neighbourhood,
   NeighboursParams,
   NodeParams,
-  OpenCorpusOptions,
+  OpenOptions,
   Pixels,
   PlacedEdge,
   PlacedVertex,
@@ -142,7 +142,7 @@ export type {
 } from './corpus.js';
 
 // What `Corpus.addressing` is — and, since the collapse, what the two engine-free rungs of
-// `openCorpus` answer with. Named here because the member is: a public member whose type cannot be
+// `open` answer with. Named here because the member is: a public member whose type cannot be
 // written down is worse than no member.
 //
 // **`Container` is on this list and was not, which was the same omission one layer down.**
@@ -152,7 +152,7 @@ export type {
 // row group IS the tile, under `files` the file is — which lived in `/docs/format` prose and now
 // lives on the type, where the reader that needs it already is.
 //
-// `ResolveCorpusOptions` is NOT replaced by another name: `OpenCorpusOptions` is what it became.
+// `ResolveCorpusOptions` is NOT replaced by another name: `OpenOptions` is what it became.
 export type {
   AddressedTiles,
   Container,

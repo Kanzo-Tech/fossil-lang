@@ -30,7 +30,7 @@
  *
  * ## Which half of the corpus answers which question
  *
- * `openCorpus` in `@fossil-lang/corpus` is explicit that the manifest's vocabulary and the
+ * `open` in `@fossil-lang/corpus` is explicit that the manifest's vocabulary and the
  * payload's are two different lists — three declared properties against seven columns on disk for the bench corpus — and the
  * split runs straight through this file:
  *

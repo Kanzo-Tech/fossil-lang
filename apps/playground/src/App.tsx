@@ -137,7 +137,7 @@ export default function App() {
       await corpus.stage(result.files);
 
       // The door: does the manifest address itself, and can the reader open it? This is the
-      // corpus half of the claim — `openCorpus` computes every tile URL by arithmetic before
+      // corpus half of the claim — `open` computes every tile URL by arithmetic before
       // its first request, and it cannot tell that the tiles live in a worker's memory
       // rather than behind HTTP. A refusal here is worth reading: it names the exact file it
       // addressed and why, which is how the container mismatch above was found.
@@ -146,14 +146,14 @@ export default function App() {
         const described = opened.types.vertices
           .map((v) => `${v.type} ×${v.count}${v.indexed ? ' (indexed)' : ''} [${v.fields.map((f) => f.name).join(' ')}]`)
           .join('; ');
-        say(`openCorpus opened: ${described || 'no vertex types'}`);
+        say(`open() → ${described || 'no vertex types'}`);
         const first = opened.types.vertices[0];
         if (first?.identity) {
           const one = await opened.node('https://example.org/user/3');
           say(`corpus.node("…/user/3") → ${one ? JSON.stringify(one.fields) : 'null'}`);
         }
       } catch (cause) {
-        say(`openCorpus refused: ${String(cause)}`);
+        say(`open() refused: ${String(cause)}`);
       }
 
       const type = result.report.vertices[0]?.type;

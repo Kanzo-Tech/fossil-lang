@@ -3,7 +3,7 @@
  *
  * `expected.json` is two tables. `cases` is the ADDRESSING: what a reader must compose from a
  * manifest and what it must refuse to compose, and nothing in it opens a byte. `answers` is what
- * the reference API returns over the one case that has bytes — the four members of `openCorpus`,
+ * the reference API returns over the one case that has bytes — the four members of `open`,
  * whose numbers come from a **full scan**, every tile read with no addressing at all and filtered
  * in SQL. That is a third thing neither implementation wrote, and it is what makes the block worth
  * having: both readers PRUNE, and both must land where an unpruned read already is.
@@ -34,13 +34,13 @@
  * that skipped itself quietly would be a conformance suite passing over nothing.
  *
  * The `answers` half is executed here through `./answers.mjs` and, on the published side, by
- * `openCorpus` itself. The first bug it caught was in this side: an adjacency tile filtered by
+ * `open` itself. The first bug it caught was in this side: an adjacency tile filtered by
  * `src_dense OR dst_dense` rather than by the column the orientation is aligned on, which read
  * **153** edges where the scan says **152** — edges whose source was outside the window, dragged in
  * by an `OR` that answered a question nobody asked.
  *
  * The reader itself is `./reader.mjs` — written from the conventions and from nothing else, and
- * sharing with the published `openCorpus` only the fact that both read the same four manifest
+ * sharing with the published `open` only the fact that both read the same four manifest
  * fields. This
  * file is a *harness* over it, and it is one of two: `writer.mjs` points the same reader at a
  * corpus `fossil run` has just written, which is the question a table cannot ask, because a table

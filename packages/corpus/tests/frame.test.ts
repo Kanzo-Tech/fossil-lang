@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
 import { levelsOf, rowsAt, strideOf } from '../src/address.js';
-import { openCorpus, type Corpus, type Frame } from '../src/corpus.js';
+import { open, type Corpus, type Frame } from '../src/corpus.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 /**
@@ -76,7 +76,7 @@ beforeAll(async () => {
   conn.query(`SET temp_directory = '${spill}'`);
   query = async (sql: string): Promise<QueryRow[]> =>
     conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
-  corpus = await openCorpus(CORPUS, { query });
+  corpus = await open(CORPUS, { query });
 }, 60_000);
 
 /** The whole corpus as a rectangle, from the footers rather than from a constant. */

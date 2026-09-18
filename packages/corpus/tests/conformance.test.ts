@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import './boot.js';
 import type { Direction, CorpusAddressing } from '../src/address.js';
-import { openCorpus } from '../src/corpus.js';
+import { open } from '../src/corpus.js';
 
 /**
  * The conformance corpus, executed against the published module.
@@ -127,7 +127,7 @@ describe('the conformance corpus', () => {
   for (const expected of table.cases) {
     const root = join(CONFORMANCE, expected.root);
 
-    // **`async` because the door is.** The addressing is the shallowest rung of `openCorpus` now,
+    // **`async` because the door is.** The addressing is the shallowest rung of `open` now,
     // so resolving costs an `await` — and this suite resolves at COLLECTION time, to generate a
     // test per subject of the corpus rather than per row of a static table. Vitest awaits a suite
     // factory, which is what makes that legal; the alternative is deriving the subject list from
@@ -136,14 +136,14 @@ describe('the conformance corpus', () => {
     describe(expected.name, async () => {
       if (expected.resolve_throws) {
         it('refuses a manifest that addresses nothing', async () => {
-          await expect(openCorpus('', { manifestFiles: manifestFiles(root) })).rejects.toThrow(
+          await expect(open('', { manifestFiles: manifestFiles(root) })).rejects.toThrow(
             expected.resolve_throws,
           );
         });
         return;
       }
 
-      const corpus: CorpusAddressing = await openCorpus('', {
+      const corpus: CorpusAddressing = await open('', {
         manifestFiles: manifestFiles(root),
       });
 
@@ -353,7 +353,7 @@ describe('the conformance corpus', () => {
   it('prepends the base and does nothing else to it', async () => {
     const { base, case: name, path, url } = table.base_join;
     const target = table.cases.find((c) => c.name === name)!;
-    const corpus = await openCorpus(base, {
+    const corpus = await open(base, {
       manifestFiles: manifestFiles(join(CONFORMANCE, target.root)),
     });
     const tile = Number(path.replace(/^.*chunk(\d+)\.parquet$/, '$1'));

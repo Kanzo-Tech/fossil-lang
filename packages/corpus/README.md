@@ -2,7 +2,7 @@
 
 The query layer for whatever draws the graph. **Fossil ships no viewer.**
 
-**One door, and it is one function.** `openCorpus(url, { query, wasmUrl })`
+**One door, and it is one function.** `open(url, { query, wasmUrl })`
 returns discovery, the camera (`extent`, `frame`, `rows`, `node`, `neighbours`)
 and the five bounded verbs (`read`, `expand`, `path`, `aggregate`, `schema`) on
 one object. No tiles, no `dense_id`, no Morton, no `by_source`, no prefixes, no
@@ -13,9 +13,9 @@ engine-free route was a second function, `resolveCorpus`, and is now the shallow
 end of the same call:
 
 ```ts
-await openCorpus(url,  { query, wasmUrl })          // Corpus — the whole door
-await openCorpus(url,  { readText, wasmUrl })       // CorpusAddressing — manifests only
-await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
+await open(url,  { query, wasmUrl })          // Corpus — the whole door
+await open(url,  { readText, wasmUrl })       // CorpusAddressing — manifests only
+await open(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
 ```
 
 `query` is the engine; `readText` is `(url) => text` and buys only the
@@ -33,8 +33,8 @@ Everything else that was on the barrel is reachable through the door or not at
 all:
 
 - `createGraphClient` — the in-process transport the verbs dispatch through.
-  `openCorpus` already holds the two things it took.
-- `GRAPH_INFO_PATH` — the index's file name is the door's business. `openCorpus`
+  `open` already holds the two things it took.
+- `GRAPH_INFO_PATH` — the index's file name is the door's business. `open`
   takes a corpus URL and reads whatever is under it. **That was applied to the
   engine-free route too, and it should not have been**: a caller with no engine
   cannot read anything for itself, so it was left hand-writing a scan of the
@@ -42,7 +42,7 @@ all:
   repository. The file name stays off the surface and the *sequence* is
   published instead, as `readText`: lend a text reader and the package reads the
   index, the manifests it names, and nothing else.
-- `initFossilGraphWasm` — the boot, awaited inside `openCorpus`. A consumer
+- `initFossilGraphWasm` — the boot, awaited inside `open`. A consumer
   should not have to know there is a wasm module, let alone sequence two calls
   against it. `wasmUrl` is what survives, because only the caller knows how its
   bundler resolves an asset.
@@ -75,7 +75,7 @@ So the TypeScript reader is gone and the addressing asks the Rust one, through
 
 - **The module has to be up before anything resolves**, exactly as for a verb.
   Composing a URL was arithmetic over bytes the host already held and is now a
-  call into an instantiated module. `openCorpus` awaits the boot itself, on
+  call into an instantiated module. `open` awaits the boot itself, on
   every rung.
 - **There is no WASM-free path, and there will not be one.** A second
   implementation is what a WASM-free path is.
@@ -88,21 +88,21 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
 @fossil-lang/corpus (this package)
   ├─ pkg/            fossil-graph-wasm, wasm-bindgen --target web (built, gitignored)
   ├─ src/generated.ts   verb Params/Result types — codegen'd from schemars JSON Schema
-  ├─ src/load.ts        the memoised wasm boot (internal; openCorpus awaits it)
+  ├─ src/load.ts        the memoised wasm boot (internal; open awaits it)
   ├─ src/client.ts      the verb transport, dispatched through by the door (not exported)
   ├─ src/query.ts       QueryFn + ReadTextFn — what a host lends, and how deep each one reaches
   ├─ src/manifest.ts    graph.graph.yml, scanned for the paths to fetch next
   ├─ src/address.ts     addressManifests + levelsOf — the binding, not the reader
-  └─ src/corpus.ts      openCorpus(url, { query | readText | manifestFiles }) — THE DOOR
+  └─ src/corpus.ts      open(url, { query | readText | manifestFiles }) — THE DOOR
 ```
 
 ## Usage
 
 ```ts
-import { openCorpus } from '@fossil-lang/corpus';
+import { open } from '@fossil-lang/corpus';
 import wasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url'; // Vite
 
-const corpus = await openCorpus('https://data.example/graph', {
+const corpus = await open('https://data.example/graph', {
   // Adapt the host's DuckDB-WASM to row objects. In keasy this wraps the Mosaic
   // coordinator; the binding stays free of an Arrow/Mosaic dependency.
   query: async (sql) => {
@@ -193,7 +193,7 @@ it. `crates/fossil-mcp` does the identical thing for the identical reason.
 **A verb reads the manifest's vocabulary; the camera reads the bytes.** A verb
 composes SQL before it has seen a byte, so its column list is the payload
 projection's declared `properties`;
-`openCorpus` had a round trip to spend and spent it on a `DESCRIBE`. On the
+`open` had a round trip to spend and spent it on a `DESCRIBE`. On the
 conformance corpus that is **three** declared properties against **seven**
 columns on disk, so `read` answers with `subject`, `birth_year` and `postcode`
 while `corpus.types` reports all seven — the four the manifest never names are
@@ -212,9 +212,9 @@ vocabulary does not. Neither is wrong and they are not the same question.
   `vertex_type` for its per-field statistics, and a `field` for its samples;
   a bare call runs no per-field query.
 - **`executeSql`** — the escape hatch, for the question the other five cannot
-  shape. **Withheld unless the host asks**: `openCorpus(url, { query })` returns
+  shape. **Withheld unless the host asks**: `open(url, { query })` returns
   a `Corpus` with no `executeSql` member and a `read` that refuses a `where`;
-  `openCorpus(url, { query, sql: 'allowed' })` returns a `SqlCorpus` with both.
+  `open(url, { query, sql: 'allowed' })` returns a `SqlCorpus` with both.
 
   One option, two consequences, no second knob — `crates/fossil-graph`'s
   `Verb::reaches_raw_sql()` is `["read", "execute_sql"]`, so deleting the hatch
@@ -242,7 +242,7 @@ already built while it was opening, so a drawing path that fetches its own tiles
 reaches it through the corpus it already has:
 
 ```ts
-const { addressing } = await openCorpus(url, { query, wasmUrl });
+const { addressing } = await open(url, { query, wasmUrl });
 
 addressing.vertexType().tileUrl(10);
 // '/bench/1000000/vertex/Person/chunk10.parquet'
@@ -260,13 +260,13 @@ same name for the same object, by lending less:
 
 ```ts
 // The package reads the index and the manifests it names. You supply the reader.
-const addressing = await openCorpus(base, {
+const addressing = await open(base, {
   readText: async (url) => (await fetch(url)).text(),
   wasmUrl,
 });
 
 // Or, with the manifests already in hand, nothing is read at all.
-const same = await openCorpus(base, { manifestFiles, wasmUrl });
+const same = await open(base, { manifestFiles, wasmUrl });
 ```
 
 `container` on every address says which number a footer hands you is the tile:

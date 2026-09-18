@@ -3,7 +3,7 @@
  *
  * This is one of the two implementations the conformance corpus exists to hold. The other is
  * `fossil_graph::plan`, in Rust, which the suite enters three ways: natively, as wasm32 through
- * `./wasm-reader.mjs`, and through the published `@fossil-lang/corpus`, whose `openCorpus` is a
+ * `./wasm-reader.mjs`, and through the published `@fossil-lang/corpus`, whose `open` is a
  * binding over that same wasm rather than a reader of its own. This one is plain Node with no npm
  * and no build, and it shares no line with any of them. The YAML scan comes from
  * `../guards/manifest.mjs`,

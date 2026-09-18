@@ -2,7 +2,7 @@
  * The aggregate index, scanned for the one thing a host has to know before it can fetch anything.
  *
  * A corpus cannot be discovered by listing a directory — over HTTP there is no listing — so it has
- * one entry point, `graph.graph.yml`, and everything else is reached from there. `openCorpus`
+ * one entry point, `graph.graph.yml`, and everything else is reached from there. `open`
  * fetches that file, and this is what tells it which per-type manifests to fetch next. That is the
  * whole job: **the manifests themselves are read by `fossil-graph`**, through
  * `fossil-graph-wasm`'s `Corpus`, and this module reads none of them.

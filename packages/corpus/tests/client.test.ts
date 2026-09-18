@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 // The transport, imported by module rather than through the barrel: `createGraphClient` is not a
-// public export any more — `openCorpus` is the door — and this file is what still tests it as one.
+// public export any more — `open` is the door — and this file is what still tests it as one.
 import './boot.js';
 import { createGraphClient } from '../src/client.js';
 import type { QueryRow } from '../src/query.js';
