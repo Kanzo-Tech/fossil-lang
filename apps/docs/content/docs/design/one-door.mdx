@@ -203,9 +203,10 @@ on the table were two: a member of the existing door, or a second function takin
 arguments.
 
 **This package already made that mistake once and corrected it.** `createGraphClient` took
-`{ query, manifestFiles }` and returned the verbs; `open` took `(url, { query })` and returned
-discovery plus the camera. Two entry points over one manifest with no rule for choosing between
-them is how one question came to have two answers, in two languages, over two SQL generators. It was
+`{ query, manifestFiles }` and returned the verbs; `openCorpus` — the door's name then — took
+`(url, { query })` and returned discovery plus the camera. Two entry points over one manifest with
+no rule for choosing between them is how one question came to have two answers, in two languages,
+over two SQL generators. It was
 folded in for exactly this reason, and the note survives at the seam: the verbs section of
 `packages/corpus/src/corpus.ts` records that it *is the transport now, and this is the door*.
 Adding `frame` as a third would have re-run the argument that removal settled.
@@ -214,9 +215,9 @@ Adding `frame` as a third would have re-run the argument that removal settled.
 `resolveCorpus` needed no engine and spent no round trip, so deleting it looked like withdrawing a
 capability rather than removing a duplicate — which is why it outlived both subpaths. What the
 objection never established is that the capability needs a name: it is what the CALLER brings, so
-it is an argument. `open(base, { manifestFiles })` and `open(url, { readText })` answer
-with the addressing, `open(url, { query })` answers with the corpus, and the rule for
-choosing is no longer a rule — it is which capability the caller has. The price was the synchronous
+it is an argument. `open(base, { manifestFiles })` and `open(url, { readText })` answer with the
+addressing, `open(url, { query })` answers with the corpus, and the rule for choosing is no longer
+a rule — it is which capability the caller has. The price was the synchronous
 form, which had no production consumer: every rung is `await`ed now.
 
 `frame` and `rows` are **two members and not two doors**, and the invariant that keeps them one

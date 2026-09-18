@@ -30,11 +30,11 @@
  * host rather than growing one. It sits **on** this module and does not absorb it.
  *
  * **Nothing here is on the barrel except the shapes and {@link levelsOf}.** `resolveCorpus` was,
- * and it was a second name for a depth of `open`: both took a corpus and answered about it,
- * and which one a caller wanted was decided by whether it had an engine to lend. That is now an
- * argument rather than an import — `open(base, { manifestFiles })` is this module's answer
- * and `open(url, { query })` is the door's, out of one name. {@link addressManifests} is the
- * resolution itself, reached only from `./corpus.ts`.
+ * and it was a second name for a depth of the door — `openCorpus` as the door was spelled then.
+ * Both took a corpus and answered about it, and which one a caller wanted was decided by whether
+ * it had an engine to lend. That is now an argument rather than an import — `open(base,
+ * { manifestFiles })` is this module's answer and `open(url, { query })` is the door's, out of one
+ * name. {@link addressManifests} is the resolution itself, reached only from `./corpus.ts`.
  *
  * @see {@link CorpusAddressing}
  */
@@ -721,11 +721,11 @@ function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress 
  * Resolve a corpus's manifest set into the addresses a reader composes URLs from — **the shallow
  * half of `open`, and not a door of its own.**
  *
- * This was `resolveCorpus`, exported beside `open`, and the two were one question asked at
- * two depths: give the door an engine and it reads bytes, hand this the manifests and it names
- * URLs. Which one a caller wanted was decided by what the caller had, which is an argument and not
- * an import — so `open(base, { manifestFiles })` is how this is reached and the module
- * surface has one name on it. `./corpus.ts` is the only caller.
+ * This was `resolveCorpus`, exported beside the door — `openCorpus` as it was spelled then — and
+ * the two were one question asked at two depths: give the door an engine and it reads bytes, hand
+ * this the manifests and it names URLs. Which one a caller wanted was decided by what the caller
+ * had, which is an argument and not an import — so `open(base, { manifestFiles })` is how this is
+ * reached and the module surface has one name on it. `./corpus.ts` is the only caller.
  *
  * **It is synchronous and stays synchronous**, because the boot is the caller's problem one layer
  * up: `open` awaits `wasmUrl` before it gets here, exactly as it does for a verb.

@@ -693,8 +693,8 @@ export type SqlPolicy = 'withheld' | 'allowed';
  * | {@link readText} | read the manifests, and nothing else | {@link CorpusAddressing} |
  * | {@link manifestFiles} | nothing; the bytes are already in hand | {@link CorpusAddressing} |
  *
- * This was two exported functions — `open(url, { query })` and
- * `resolveCorpus({ manifestFiles, base })` — and they were one question at two depths. See
+ * This was two exported functions — `openCorpus(url, { query })`, as the door was spelled then,
+ * and `resolveCorpus({ manifestFiles, base })` — and they were one question at two depths. See
  * {@link open}.
  */
 export interface OpenOptions {

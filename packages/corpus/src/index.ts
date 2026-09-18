@@ -116,6 +116,20 @@ export type { QueryFn, QueryRow, ReadTextFn } from './query.js';
 // The door's own types. `SqlCorpus` is what `sql: 'allowed'` widens the answer to — see
 // `SqlPolicy` for why one option decides both raw-SQL doors, and `crates/fossil-mcp/src/tools.rs`
 // for the native surface this is the port of.
+//
+// **`OpenOptions` is the one exported type with no `Corpus` in its name, and that is decided
+// rather than overlooked.** The prefix on every other name here is doing real work — `Corpus`,
+// `CorpusTypes`, `CorpusField`, `CorpusAddressing` all name the ARTEFACT or a part of it, and a
+// consumer holds them. This one names the CALL: it appears in exactly one position, the second
+// argument of `open`, never in a return type and never in a field, and an options bag whose name
+// does not track its function is how `ResolveCorpusOptions` outlived `resolveCorpus` in another
+// repository's import list. The type follows the function — that is the rule, and it is the same
+// rule that renamed `ResolveCorpusOptions` when `resolveCorpus` was folded in.
+//
+// It is also the spelling that costs a consumer least, measured rather than supposed:
+// `@kanzo-tech/graph` exports an `OpenCorpusOptions` of its own for its own opener, so keeping
+// ours under that name would have forced an import alias in the one external file that binds this
+// door. **Do not "restore" the prefix.**
 export type {
   Answer,
   Box,

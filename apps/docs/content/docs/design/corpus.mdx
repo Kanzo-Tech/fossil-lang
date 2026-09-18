@@ -600,7 +600,7 @@ is left in the file is the mapping between two vocabularies. Nothing in it knows
 a buffer, and nothing in the renderer knows what a corpus is.
 
 **The division is: the renderer owns the contract and the picture, fossil owns the address.** That
-package ships a fossil reader of its own — `open`, on its `duckdb` subpath — and the
+package ships a fossil reader of its own — `openCorpus`, on its `duckdb` subpath — and the
 playground does not call it, for a reason that is a 404 rather than a preference: it composes
 `chunk{k}.parquet` and `by_source/tile{k}.parquet`, which is `container: files`, and fossil's writer
 emits `container: rowgroups`. It also re-derives the addressing from a line scan over six manifest
