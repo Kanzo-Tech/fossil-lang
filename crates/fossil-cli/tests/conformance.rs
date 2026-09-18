@@ -23,11 +23,15 @@
 //! **What this cannot prove, and where the rest of it is now.** This is one
 //! writer read by one engine. The cross-implementation half is real and it is
 //! not here: `apps/corpus/conformance/expected.json` is a table of addresses
-//! executed by three readers that none of them wrote — plain Node
-//! (`conformance/reader.mjs`), the published TypeScript (`resolveCorpus`), and
-//! `fossil_graph::plan`, natively in `crates/fossil-graph/tests/conformance.rs`
-//! and as wasm32 through `conformance/wasm-reader.mjs`. This paragraph said two
-//! of those three lived in another repository. All three are in this one.
+//! executed by three legs that none of them wrote — plain Node
+//! (`conformance/reader.mjs`), `fossil_graph::plan` natively in
+//! `crates/fossil-graph/tests/conformance.rs`, and the same plan at wasm32
+//! through `conformance/wasm-reader.mjs`, which is the build the published
+//! TypeScript binds as `openCorpus` in
+//! `packages/corpus/tests/conformance.test.ts`. Three legs over **two**
+//! implementations: the published reader stopped being a third of its own when
+//! it became a binding. This paragraph said two of those three lived in another
+//! repository. All three are in this one.
 //!
 //! What still has one side is the seam between the two: that table resolves
 //! against a checked-in corpus, and the corpus THIS file writes is read back by

@@ -11,7 +11,7 @@
 //!
 //! - `chunk_size: 1024`, from before `c416e07` made a tile 4,096 rows;
 //! - **no `vertex_count` and no `edge_count` at all**, from before those fields
-//!   existed — and `vertex_count` is the field `resolveCorpus` needs to know how
+//!   existed — and `vertex_count` is the field `openCorpus` needs to know how
 //!   many tiles a type has, so the TS tests passed by never asking;
 //! - `dense_id` marked `is_primary`, which `0b2f9a6` had just settled the other
 //!   way.
