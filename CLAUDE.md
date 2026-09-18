@@ -231,7 +231,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
   corpus/                  ONE door over one manifest, and every part of it needs the gitignored
                            `pkg/`. The addressing is no longer a second implementation: it is
-                           `fossil_graph::plan` compiled to wasm32, and `resolveCorpus` is a
+                           `fossil_graph::plan` compiled to wasm32, and the package is a
                            binding over it. The subpath `@fossil-lang/corpus/address` existed so a
                            caller could address a corpus WITHOUT wasm, and it is deleted with its
                            standalone test — composing a URL now costs loading the module, which is
@@ -241,10 +241,12 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            sits beside it in the playground's `package.json`. The Rust crates
                            keep their names — `fossil-graph` IS a verb surface over a property
                            graph, and a crate name is not in npm's import space.
-                           TWO doors: `openCorpus` is the engine-bearing route, `resolveCorpus`
-                           the engine-free one over manifests already in hand, and
-                           `corpus.addressing` is what the first already resolved. The boot is
-                           the `wasmUrl` option on both and is internal otherwise
+                           ONE name at three depths, because the capability the caller brings
+                           decides how deep the answer is: `{ query }` is the whole corpus,
+                           `{ readText }` the manifests alone, `{ manifestFiles }` no request at
+                           all. `resolveCorpus` is gone rather than renamed and all three are
+                           ASYNC; `corpus.addressing` is what the first already resolved. The
+                           boot is the `wasmUrl` option on every depth and is internal otherwise
   draw/                    the half of drawing a corpus that is NOT a renderer — no canvas, no
                            GPU, no camera, and fossil still ships no viewer. What a corpus is
                            drawn WITH (the `channels:` block, its three states, the derivation
