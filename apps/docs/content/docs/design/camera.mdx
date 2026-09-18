@@ -77,7 +77,7 @@ never sees a tile's bytes and has nothing to cache. So the 3.3× is not this lay
 the engine's, which is precisely what `directIO = false` is there for.
 
 What this thread can hold is **answers** — a rectangle already asked about, and the rows that came
-back. That is what `apps/playground/src/residency.ts` holds, and the measured win is the one
+back. That is what `packages/draw/src/residency.ts` holds, and the measured win is the one
 latency predicted rather than the one bytes did: a rectangle already held settles in 3 ms against
 175, and the frames in between get an interim in 8 to 18 ms.
 </Callout>

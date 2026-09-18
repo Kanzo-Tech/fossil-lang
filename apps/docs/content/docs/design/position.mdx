@@ -417,7 +417,7 @@ question twice over.* The sentence is retracted, and what retracts it is not an 
 the field already exists and is the wrong one.
 
 <Callout type="warn" title="The declaration is already being made, by a privacy field and by a generated constant nobody reads">
-`apps/playground/src/encoding.ts, encodingFor` picks the column whose distribution it offers to
+`packages/draw/src/encoding.ts, encodingFor` picks the column whose distribution it offers to
 brush by ranking the numeric columns and preferring the ones `quasi_identifiers` names. That field
 is specified on [privacy](/docs/format/conventions/privacy) as *the one field a reader cannot
 derive, and the one the whole bound turns on* — a disclosure-control vocabulary, doing encoding work
@@ -431,7 +431,7 @@ And the honest statement existed on the other side, unread. `corpus.bnf` marks `
 one**, and wrote the string `cluster_id` itself instead.
 
 Counted at the time: the name was written down in `corpus.bnf`, in the generated TypeScript, in
-`apps/playground/src/encoding.ts, categoricalOf`, in `packages/corpus/src/corpus.ts` as
+`packages/draw/src/encoding.ts, categoricalOf`, in `packages/corpus/src/corpus.ts` as
 `FrameParams.fill`'s default, in `crates/fossil-graph/src/manifest.rs`, and at eight script call
 sites. Six statements of one fact, and the only machine-readable one had no consumer. Two of the six
 are now reads of it — the door's default and the app's fallback both resolve `PAYLOAD_CATEGORICAL`,
@@ -540,8 +540,8 @@ block does is make the row's number checkable from the artefact instead of from 
 - **The reader collapsing to a read.** `categoricalOf`'s preference-then-first-integral derivation
   becomes *read what is declared*, with today's rule kept as what an undeclared corpus gets. Not
   deleted: a corpus written before the field has to keep drawing. **Done**, in
-  `apps/playground/src/encoding.ts, categoricalOf` — with the derivation intact beneath it, and
-  `apps/playground/src/encoding.ts, readChannels` as the scanner over the block.
+  `packages/draw/src/encoding.ts, categoricalOf` — with the derivation intact beneath it, and
+  `packages/draw/src/encoding.ts, readChannels` as the scanner over the block.
 - **A flat block.** `apps/corpus/guards/manifest.mjs` scans lines, reads one level of
   sequence-of-mappings, and silently skips anything deeper. A `channels:` entry that nests is a
   `channels:` entry half its readers cannot see.

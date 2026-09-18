@@ -449,7 +449,7 @@ the sample.
 
 **Nobody clicks.** There is no click handler, no hover, no tooltip, no bookmark and no deep link
 anywhere on the coarse path in this repository. `Frame` carries `denseIds`, positions, categories
-and links, and no `subject` — `apps/playground/src/encoding.ts` says so with a measurement beside
+and links, and no `subject` — `packages/draw/src/encoding.ts` says so with a measurement beside
 it, `Slice.subjects` costing 1.87× the tile, and `apps/playground/src/crossfilter.ts` excludes the
 column from its view for the same reason. The identity verbs take an IRI *in* and know nothing about
 levels. This page already conceded the other half of it above: there is no level of detail for the
@@ -462,7 +462,7 @@ working:
 | what it does | why a cell cannot serve it |
 | --- | --- |
 | `apps/playground/src/crossfilter.ts` paints a `Uint8Array` mask indexed by `dense_id`, on every brush, at whatever level the camera settled at | a cell has no `dense_id`, so there is no index entry to paint — the mask is not wrong, it is impossible |
-| `apps/playground/src/residency.ts` pools answers taken at *different* levels into one interim picture and dedupes them by `dense_id` | coherent only because level `k+1`'s rows are a **subset** of level `k`'s. Rung `k+1`'s cells are a disjoint space from rung `k`'s, with no containment a set can see |
+| `packages/draw/src/residency.ts` pools answers taken at *different* levels into one interim picture and dedupes them by `dense_id` | coherent only because level `k+1`'s rows are a **subset** of level `k`'s. Rung `k+1`'s cells are a disjoint space from rung `k`'s, with no containment a set can see |
 | `packages/corpus/src/corpus.ts` exempts `pinned` from the level and pays a second payload read to serve it | there is nothing to exempt over an artefact whose rows are not addressable |
 
 So a coarse mark has to **be** a row, even though nothing in this tree ever names one.

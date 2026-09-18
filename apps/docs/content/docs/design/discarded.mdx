@@ -259,7 +259,7 @@ sparse cloud with holes rather than a cheaper version of the same picture. No en
 number.
 
 **Nor is the 3.29× tile ratio, and it is not residency's either.**
-`apps/playground/src/residency.ts` exists and is wired, and the reads it would avoid are issued from
+`packages/draw/src/residency.ts` exists and is wired, and the reads it would avoid are issued from
 inside DuckDB's Worker where this thread never sees them. Residency buys latency, not fetches — so
 *swap after residency lands and re-measure* is the wrong option twice over: the re-measurement does
 not move the column an engine choice operates on, and the licence is exactly as prohibitive then.
