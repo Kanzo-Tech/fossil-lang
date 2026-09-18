@@ -128,6 +128,30 @@ for (const [layout, dir] of Object.entries(pristine)) {
   );
 }
 
+console.log("\nThe guards that could pass over nothing say how much they read");
+{
+  // A guard whose every query sits behind a `continue` is the same green whether it read
+  // something or skipped everything, so it now reports a count on every run, zero included, and
+  // this is an assertion about the NUMBER rather than about which notes happen to be present —
+  // an absent note and a zero note read identically to a parser.
+  const results = runAll(inspect(pristine.rowgroups));
+  const measure = (id, pattern) => {
+    const { notes } = results.find((r) => r.guard.id === id);
+    const found = pattern.exec(notes.find((note) => pattern.test(note)) ?? "");
+    assert(found !== null, `${id} reports what it examined`, found?.[0] ?? "no count at all");
+    return found === null ? 0 : Number(found[1]);
+  };
+
+  // The surviving half of `exactly-once`, whose edge half was deleted for having never run: its
+  // one remaining query is behind `type.files.length === 0`, and nothing said so.
+  const read = measure("exactly-once", /(\d+) payload set\(s\) read/);
+  assert(
+    read > 0,
+    "the fixture writes a vertex payload and `exactly-once` counts its ids",
+    read > 0 ? `${read} payload set(s) read` : "0 payload set(s) read",
+  );
+}
+
 console.log("\nEvery guard declares what it cannot prove");
 {
   const ids = new Set(GUARDS.map((g) => g.id));

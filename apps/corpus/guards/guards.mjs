@@ -1045,54 +1045,60 @@ export const GUARDS = [
     id: "exactly-once",
     title: "Every row is in the corpus exactly once",
     proves:
-      "A vertex payload set holds each `dense_id` once, and the edge tiles hold exactly the " +
-      "relation they cut — no row dropped, none written twice, checked as a symmetric difference " +
-      "rather than a count. It also asserts that the staged single-file vertex Parquet a layout " +
-      "pass consumes is *gone*: left behind it is a second, stale copy of every vertex, the kind a " +
-      "reader picks up by globbing and never questions.",
+      "A vertex payload set holds each `dense_id` once — across every tile of the type, so a row " +
+      "copied from one tile into another is a failure and not a rounding. It also asserts that the " +
+      "staged single-file vertex Parquet a layout pass consumes is *gone*: left behind it is a " +
+      "second, stale copy of every vertex, the kind a reader picks up by globbing and never " +
+      "questions.\n\n" +
+      "**Two numbers, reported on every run and zero included.** How many vertex types this " +
+      "corpus declares, and how many payload sets were actually read — because a corpus with no " +
+      "type to read violates nothing and passes here, which is exactly how a corpus whose payload " +
+      "the inspector failed to find passes too. An absent note and a zero note read identically to " +
+      "whoever is reading the output, and only one of them is a measurement.",
     cannotProve:
       "That the rows are the right rows. Splitting a file is where rows are silently dropped, and " +
-      "this catches that; a file that was split correctly from wrong content passes.",
+      "this catches a row written twice; a file that was split correctly from wrong content " +
+      "passes.\n\n" +
+      "**Nothing at all about the edge tiles.** This guard once diffed each orientation's tiles " +
+      "against the uncut `by_source.parquet` they were cut from, which is the only way to assert " +
+      "that a cut preserved a MULTISET. No writer publishes that file — a corpus carries an " +
+      "orientation one way, as tiles — so the comparison had no second document and had never once " +
+      "run. What covers the ground it claimed is `declared-count` per orientation and " +
+      "`one-relation-twice` between them; what neither covers is recorded in " +
+      "`/docs/design/discarded`.",
     run(corpus) {
       const failures = [];
+      const notes = [];
+      // What this run looked at, counted where it was looked at. A type whose payload the
+      // inspector found no tiles for is skipped below, so `corpus.types.length` is not it.
+      let read = 0;
       for (const type of corpus.types) {
         if (existsSync(type.staged)) {
           failures.push(`${type.name}: the staged ${type.prefix}.parquet is a second copy of every vertex`);
         }
-        if (type.files.length === 0) continue;
-        const bad = scalar(
-          `SELECT count(*) - count(DISTINCT dense_id) FROM read_parquet(${fileList(type.files)})`,
-        );
-        failures.push(...violations(bad, `${type.name}: a dense_id appears in more than one payload file`));
-      }
-      for (const edge of corpus.edges) {
-        for (const side of [edge.bySource, edge.byTarget]) {
-          if (side.relation.length === 0 || side.tiles.length === 0) continue;
-          const relation = fileList(side.relation);
-          const tiles = fileList(side.tiles);
-          const counts = query(
-            `SELECT (SELECT count(*) FROM read_parquet(${relation})) AS relation,
-                    (SELECT count(*) FROM read_parquet(${tiles})) AS tiles`,
-          )[0];
-          if (Number(counts.relation) !== Number(counts.tiles)) {
-            failures.push(
-              `${edge.rel} ${side.name}: the tiles hold ${counts.tiles} edges against ${counts.relation} in the file they cut`,
-            );
-          }
-          const bad = scalar(
-            `SELECT count(*) FROM (
-               (SELECT src_dense, dst_dense FROM read_parquet(${relation})
-                EXCEPT SELECT src_dense, dst_dense FROM read_parquet(${tiles}))
-               UNION ALL
-               (SELECT src_dense, dst_dense FROM read_parquet(${tiles})
-                EXCEPT SELECT src_dense, dst_dense FROM read_parquet(${relation})))`,
-          );
-          failures.push(
-            ...violations(bad, `${edge.rel} ${side.name}: the tiles and the file they cut disagree about which edges exist`),
-          );
+        if (type.files.length === 0) {
+          notes.push(`${type.name}: no payload tiles, so there is no row to count twice`);
+          continue;
         }
+        read += 1;
+        const counted = query(
+          `SELECT count(*) AS rows, count(DISTINCT dense_id) AS distinct_ids
+             FROM read_parquet(${fileList(type.files)})`,
+        )[0];
+        const bad = Number(counted.rows) - Number(counted.distinct_ids);
+        failures.push(...violations(bad, `${type.name}: a dense_id appears in more than one payload file`));
+        notes.push(
+          `${type.name}: ${counted.rows} row(s) over ${type.files.length} payload file(s), ` +
+            `${counted.distinct_ids} distinct dense_id(s)` +
+            (existsSync(type.staged) ? "" : ` — and no staged ${type.prefix}.parquet beside them`),
+        );
       }
-      return result(failures);
+      // First, and present on every run. A guard that says nothing when it examined nothing is
+      // indistinguishable from a guard that examined something and found it well-formed.
+      return result(failures, [
+        `${corpus.types.length} vertex type(s), ${read} payload set(s) read`,
+        ...notes,
+      ]);
     },
   },
 
