@@ -413,8 +413,9 @@ it.** GraphAr failed that in practice — its own reader cannot open a fossil co
 Zarr meets the condition on the half above and fails it on the half below, and the split is clean:
 
 - **Its addressing model is this one.** A metadata document plus chunks addressed by a key computed
-  from the index, no server, store-agnostic. That is `resolveCorpus`, spelled differently — and its
-  `multiscales` convention is the level pyramid described above, already standardised.
+  from the index, no server, store-agnostic. That is the engine-free depth of `openCorpus`, spelled
+  differently — and its `multiscales` convention is the level pyramid described above, already
+  standardised.
 - **Its data model is not.** Zarr is dense N-dimensional arrays. A tile here is a typed table with a
   subject IRI and, load-bearing, **footer statistics**: a chunk of Zarr carries none, so adopting
   the container means building an explicit spatial index to replace what Parquet gives for free.
@@ -458,8 +459,8 @@ directory rename that would have been tidier happened**: `apps/corpus/` keeps it
 
 <Callout type="info">
   The rename touched no arithmetic. What changed the count of readers of
-  `conformance/expected.json` was the commit after it, in which `resolveCorpus` stopped being a
-  second implementation of `fossil_graph::plan` and [became a binding over
+  `conformance/expected.json` was the commit after it, in which the published TypeScript stopped
+  being a second implementation of `fossil_graph::plan` and [became a binding over
   it](#conformance-is-a-round-trip-and-what-it-rests-on-is-not-a-headcount).
 </Callout>
 
@@ -578,8 +579,9 @@ and that it is tiled by the same shift as the vertices it addresses. There is st
 
 The verbs do not draw and the corpus is addressed rather than queried, which leaves one thing
 unstated: *something* has to put a million points on a screen, and fossil does not ship it. What
-fossil publishes is the address — `resolveCorpus`, one reader, no bytes — and what draws is
-`@kanzo-tech/graph`, a bounded WebGL canvas over cosmos.gl whose whole data contract is one method:
+fossil publishes is the address — `openCorpus` with no engine lent to it, one reader, no bytes — and
+what draws is `@kanzo-tech/graph`, a bounded WebGL canvas over cosmos.gl whose whole data contract
+is one method:
 
 ```ts
 interface BoundedSource {
@@ -679,7 +681,7 @@ graph LR
   R[["recipe · provenance.mjs"]] --> C
   C --> JS["reader.mjs · from the conventions alone"]
   C --> RS["fossil_graph::plan · native, usize 64"]
-  C --> WS["the same plan · wasm32, usize 32<br/>re-entered from JS as resolveCorpus"]
+  C --> WS["the same plan · wasm32, usize 32<br/>re-entered from JS as openCorpus"]
   JS --> D{"diff"}
   RS --> D
   WS --> D
@@ -708,8 +710,8 @@ DuckDB point release would teach everyone to regenerate the fixture instead of r
 **This said three readers, and there are two.** The reader in Rust exists because **both readers
 used to be JavaScript**, and a mistake they share is invisible to a diff of the two — a shift taken
 as signed, a count that went through a `Number`, exactly the borders `vectors.json` publishes.
-Then the second JavaScript one went: `resolveCorpus` was a thousand lines that agreed with the Rust
-because people kept making it agree, nothing compared the two, and it is a binding over
+Then the second JavaScript one went: the published TypeScript was a thousand lines that agreed with
+the Rust because people kept making it agree, nothing compared the two, and it is a binding over
 `fossil_graph::plan` now. So `packages/corpus/tests/conformance.test.ts` is not a second
 implementation diffed against the first — it is **the same reader re-entered at wasm32 width**.
 `apps/corpus/conformance/reader.mjs` carries the independence.

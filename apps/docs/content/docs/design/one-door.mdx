@@ -5,9 +5,9 @@ direction:
   summary: "`frame` takes a rectangle and a resolution and depends on nothing else — the same rectangle at the same level is the same answer, however the camera got there."
 ---
 
-A consumer that wanted a picture out of a corpus used to order three concepts by hand —
-`resolveCorpus`, `openCorpus` and a renderer's source contract — and sew them together with SQL of
-its own. That is the arithmetic `@fossil-lang/corpus` exists to publish, being re-derived by its own
+A consumer that wanted a picture out of a corpus used to order three concepts by hand — the
+addressing, the door and a renderer's source contract — and sew them together with SQL of its own.
+The first two were two exported functions then and are one name at two depths now. That is the arithmetic `@fossil-lang/corpus` exists to publish, being re-derived by its own
 consumer. There is one call now:
 
 ```ts
@@ -209,6 +209,15 @@ them is how one question came to have two answers, in two languages, over two SQ
 folded in for exactly this reason, and the note survives at the seam: the verbs section of
 `packages/corpus/src/corpus.ts` records that it *is the transport now, and this is the door*.
 Adding `frame` as a third would have re-run the argument that removal settled.
+
+**And it made it a second time, with the entry point that had survived two passes.**
+`resolveCorpus` needed no engine and spent no round trip, so deleting it looked like withdrawing a
+capability rather than removing a duplicate — which is why it outlived both subpaths. What the
+objection never established is that the capability needs a name: it is what the CALLER brings, so
+it is an argument. `openCorpus(base, { manifestFiles })` and `openCorpus(url, { readText })` answer
+with the addressing, `openCorpus(url, { query })` answers with the corpus, and the rule for
+choosing is no longer a rule — it is which capability the caller has. The price was the synchronous
+form, which had no production consumer: every rung is `await`ed now.
 
 `frame` and `rows` are **two members and not two doors**, and the invariant that keeps them one
 contract is asserted rather than asserted-about: `frame` at level 0 selects what `rows` selects over
