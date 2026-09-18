@@ -8,8 +8,8 @@ use arrow_schema::DataType;
 use fossil_sinks::generated::{CELL_COLUMNS, QUOTIENT_COLUMNS};
 use fossil_sinks::manifest::{
     Cardinality, CellRung, CellTree, CoordinateSystem, DEFAULT_CHUNK_SIZE,
-    DEFAULT_VERTICES_PER_CELL, EdgeInfo, GRAPHAR_VERSION, Projection, Property, Provenance,
-    VertexInfo, data_type_name, declared_properties,
+    DEFAULT_VERTICES_PER_CELL, EdgeInfo, Projection, Property, Provenance, VertexInfo,
+    data_type_name, declared_properties,
 };
 
 fn person_vertex() -> VertexInfo {
@@ -98,24 +98,19 @@ fn quotient_columns() -> Vec<Property> {
 }
 
 fn knows_edge() -> EdgeInfo {
-    EdgeInfo {
-        src_type: "Person".to_string(),
-        edge_type: "knows".to_string(),
-        iri: String::new(),
-        dst_type: "Person".to_string(),
-        cardinality: Some(Cardinality::Multi),
-        edge_count: 19_998,
-        chunk_size: DEFAULT_CHUNK_SIZE,
-        src_chunk_size: DEFAULT_CHUNK_SIZE,
-        dst_chunk_size: DEFAULT_CHUNK_SIZE,
-        directed: true,
-        prefix: "edge/person_knows_person/".to_string(),
-        projections: vec![
+    EdgeInfo::new(
+        "Person",
+        "knows",
+        "Person",
+        19_998,
+        DEFAULT_CHUNK_SIZE,
+        "edge/person_knows_person/",
+        vec![
             Projection::payload("by_source/", endpoints()).aligned_by("src", true),
             Projection::payload("by_target/", endpoints()).aligned_by("dst", true),
         ],
-        version: GRAPHAR_VERSION.to_string(),
-    }
+    )
+    .with_cardinality(Cardinality::Multi)
 }
 
 /// The two columns every adjacency tile carries — the pair that IS the edge.

@@ -1734,6 +1734,81 @@ impl VertexInfo {
 }
 
 impl EdgeInfo {
+    /// Construct an `EdgeInfo` with the [`GRAPHAR_VERSION`] preset.
+    ///
+    /// The third of these, and the last to get one. [`VertexInfo::new`] and
+    /// [`GraphInfo::new`] have preset the version since they were written;
+    /// `EdgeInfo` was a bare struct literal at every site, so **every author
+    /// retyped the field** — and when the version stopped being a literal and
+    /// became a constant, all five sites that had to be repaired were this
+    /// struct's. A struct with no constructor does not have five offenders by
+    /// coincidence; it has however many authors it has had.
+    ///
+    /// `chunk_size` is **one number for three fields**, because an edge tile is
+    /// addressed by a vertex tile and the invariant [`Self::chunk_size`] states
+    /// — equal to [`Self::src_chunk_size`] — is not enforceable when the caller
+    /// spells all three. A relation between two types whose tile sizes genuinely
+    /// differ assigns [`Self::dst_chunk_size`] after; the fields are public, and
+    /// that is the same escape the `iri` below takes.
+    ///
+    /// # What is preset, and how to vary it
+    ///
+    /// - `iri` is empty, exactly as in [`VertexInfo::new`], and a writer that
+    ///   has one assigns the field — which is what every caller of
+    ///   `VertexInfo::new` that has an IRI already does.
+    /// - `cardinality` is `None`, which is "nothing declared it" and not
+    ///   "many". [`Self::with_cardinality`] is how a writer that read a shape
+    ///   says so, for [`VertexInfo::with_index`]'s reason: the caller that knows
+    ///   is the one that can say.
+    /// - `directed` is `true`, for the reason [`GraphInfo::new`] gives for
+    ///   presetting `privacy` — an argument every caller passes the same value
+    ///   to is a way of getting it wrong once, and fossil writes no undirected
+    ///   relation. A producer of one assigns the field.
+    ///
+    /// None of this constrains what a *document* may say: `EdgeInfo` is also the
+    /// deserialization target for manifests other writers produced, and those
+    /// carry `directed: false` and unequal chunk sizes. This is the producer's
+    /// door, not the parser's.
+    #[must_use]
+    pub fn new(
+        src_type: impl Into<String>,
+        edge_type: impl Into<String>,
+        dst_type: impl Into<String>,
+        edge_count: u64,
+        chunk_size: u64,
+        prefix: impl Into<String>,
+        projections: Vec<Projection>,
+    ) -> Self {
+        Self {
+            src_type: src_type.into(),
+            edge_type: edge_type.into(),
+            iri: String::new(),
+            dst_type: dst_type.into(),
+            cardinality: None,
+            edge_count,
+            chunk_size,
+            src_chunk_size: chunk_size,
+            dst_chunk_size: chunk_size,
+            directed: true,
+            prefix: prefix.into(),
+            projections,
+            version: GRAPHAR_VERSION.to_string(),
+        }
+    }
+
+    /// Declare how many of these edges one source vertex may have. See
+    /// [`Cardinality`].
+    ///
+    /// A separate method and not a `new` parameter, for
+    /// [`VertexInfo::with_index`]'s reason: the number comes from a shape, a
+    /// writer that read no shape has nothing to say, and `None` is that silence
+    /// rather than a default of "many".
+    #[must_use]
+    pub const fn with_cardinality(mut self, cardinality: Cardinality) -> Self {
+        self.cardinality = Some(cardinality);
+        self
+    }
+
     /// Append the projections of the SOURCE type's level plan, source-aligned
     /// and carrying `properties` — both endpoints' ids and their coordinates.
     ///
@@ -1956,24 +2031,19 @@ mod tests {
     }
 
     fn knows_edge() -> EdgeInfo {
-        EdgeInfo {
-            src_type: "Person".to_string(),
-            edge_type: "knows".to_string(),
-            iri: String::new(),
-            dst_type: "Person".to_string(),
-            cardinality: Some(Cardinality::Multi),
-            edge_count: 19_998,
-            chunk_size: DEFAULT_CHUNK_SIZE,
-            src_chunk_size: DEFAULT_CHUNK_SIZE,
-            dst_chunk_size: DEFAULT_CHUNK_SIZE,
-            directed: true,
-            prefix: "edge/person_knows_person/".to_string(),
-            projections: vec![
+        EdgeInfo::new(
+            "Person",
+            "knows",
+            "Person",
+            19_998,
+            DEFAULT_CHUNK_SIZE,
+            "edge/person_knows_person/",
+            vec![
                 Projection::payload("by_source/", endpoint_columns()).aligned_by("src", true),
                 Projection::payload("by_target/", endpoint_columns()).aligned_by("dst", true),
             ],
-            version: GRAPHAR_VERSION.to_string(),
-        }
+        )
+        .with_cardinality(Cardinality::Multi)
     }
 
     /// The two columns every adjacency tile carries — the pair that IS the edge.

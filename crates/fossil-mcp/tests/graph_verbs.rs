@@ -14,8 +14,8 @@ use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
 use fossil_graph::{GraphError, Operation, RawSql, RawSqlAccess, Result, dispatch};
 use fossil_mcp::ConnectionExecutor;
 use fossil_sinks::manifest::{
-    Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Projection,
-    Property, VertexInfo,
+    Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
+    VertexInfo,
 };
 
 /// In-memory manifest source mirroring the writer's on-disk layout.
@@ -61,21 +61,16 @@ fn manifest() -> Manifest {
         )],
     );
     person.iri = "http://example.org/Person".into();
-    let edge = EdgeInfo {
-        src_type: "Person".into(),
-        edge_type: "knows".into(),
-        iri: "http://example.org/knows".into(),
-        dst_type: "Person".into(),
-        edge_count: 2,
-        chunk_size: DEFAULT_CHUNK_SIZE,
-        src_chunk_size: DEFAULT_CHUNK_SIZE,
-        dst_chunk_size: DEFAULT_CHUNK_SIZE,
-        directed: true,
-        prefix: "edge/Person_knows_Person/".into(),
-        projections: vec![],
-        version: GRAPHAR_VERSION.to_string(),
-        cardinality: None,
-    };
+    let mut edge = EdgeInfo::new(
+        "Person",
+        "knows",
+        "Person",
+        2,
+        DEFAULT_CHUNK_SIZE,
+        "edge/Person_knows_Person/",
+        vec![],
+    );
+    edge.iri = "http://example.org/knows".into();
     let graph = GraphInfo::new(
         "graph",
         "",

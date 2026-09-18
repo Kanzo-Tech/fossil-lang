@@ -978,8 +978,8 @@ mod tests {
     use crate::manifest::{GRAPH_INFO_PATH, ManifestSource};
     use crate::operations::raw_sql::RawSqlAccess;
     use fossil_sinks::manifest::{
-        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo,
-        Projection, Property, VertexInfo,
+        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
+        VertexInfo,
     };
     use std::collections::HashMap;
 
@@ -1034,21 +1034,16 @@ mod tests {
 
     fn fixture() -> Manifest {
         let person = person_info();
-        let edge = EdgeInfo {
-            src_type: "Person".into(),
-            edge_type: "knows".into(),
-            iri: "http://example.org/knows".into(),
-            dst_type: "Person".into(),
-            edge_count: 2,
-            chunk_size: DEFAULT_CHUNK_SIZE,
-            src_chunk_size: DEFAULT_CHUNK_SIZE,
-            dst_chunk_size: DEFAULT_CHUNK_SIZE,
-            directed: true,
-            prefix: "edge/Person_knows_Person/".into(),
-            projections: vec![],
-            version: GRAPHAR_VERSION.to_string(),
-            cardinality: None,
-        };
+        let mut edge = EdgeInfo::new(
+            "Person",
+            "knows",
+            "Person",
+            2,
+            DEFAULT_CHUNK_SIZE,
+            "edge/Person_knows_Person/",
+            vec![],
+        );
+        edge.iri = "http://example.org/knows".into();
         let graph = GraphInfo::new(
             "graph",
             "",

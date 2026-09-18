@@ -202,8 +202,8 @@ fn parse_yaml<T: serde::de::DeserializeOwned>(bytes: &[u8], path: &str) -> Resul
 mod tests {
     use super::*;
     use fossil_sinks::manifest::{
-        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo,
-        Projection, Property, VertexInfo,
+        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
+        VertexInfo,
     };
 
     /// In-memory manifest source: the test analogue of httpfs/fs. Proves the
@@ -269,27 +269,21 @@ mod tests {
     }
 
     fn einfo(src: &str, edge: &str, dst: &str) -> EdgeInfo {
-        EdgeInfo {
-            src_type: src.into(),
-            edge_type: edge.into(),
-            iri: String::new(),
-            dst_type: dst.into(),
-            // `None` on purpose: this fixture is the corpus that declares no
-            // cardinality -- one written by another writer, or before the field
-            // existed -- and the reader has to stay correct over it.
-            cardinality: None,
-            edge_count: 2,
-            chunk_size: DEFAULT_CHUNK_SIZE,
-            src_chunk_size: DEFAULT_CHUNK_SIZE,
-            dst_chunk_size: DEFAULT_CHUNK_SIZE,
-            directed: true,
-            prefix: format!("edge/{src}_{edge}_{dst}/"),
-            projections: vec![
+        // No `with_cardinality`, on purpose: this fixture is the corpus that
+        // declares no cardinality -- one written by another writer, or before
+        // the field existed -- and the reader has to stay correct over it.
+        EdgeInfo::new(
+            src,
+            edge,
+            dst,
+            2,
+            DEFAULT_CHUNK_SIZE,
+            format!("edge/{src}_{edge}_{dst}/"),
+            vec![
                 Projection::payload("by_source/", vec![]).aligned_by("src", true),
                 Projection::payload("by_target/", vec![]).aligned_by("dst", true),
             ],
-            version: GRAPHAR_VERSION.to_string(),
-        }
+        )
     }
 
     /// Two vertex types + one edge, serialised to YAML and indexed by `rel_path`

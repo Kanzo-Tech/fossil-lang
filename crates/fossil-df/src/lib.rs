@@ -90,8 +90,8 @@ use fossil_locator::SourceAnchor;
 use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
-    Container, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Privacy,
-    Projection, Property, VertexIndex, VertexInfo, VertexLevels, data_type_name,
+    Container, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Privacy, Projection,
+    Property, VertexIndex, VertexInfo, VertexLevels, data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -2242,25 +2242,13 @@ fn edge_level_columns() -> Vec<Property> {
 /// type's count, and it is here for one reason: the levels of a relation are the
 /// levels of the vertices in it.
 fn edge_info(edge: &GraphEdge, rows: u64, source_rows: u64) -> EdgeInfo {
-    let info = EdgeInfo {
-        src_type: edge.source.clone(),
-        edge_type: edge.label.clone(),
-        iri: edge.iri.clone().unwrap_or_default(),
-        dst_type: edge.destination.clone(),
-        // The one line this function was missing. It has taken the whole
-        // `EdgeType` since it was written and read every field of it but this
-        // one, so a `{1,1}` edge and a `*` edge produced byte-identical
-        // manifests and every reader downstream had to re-derive from the data
-        // what the shape had already said -- when it can be re-derived at all,
-        // which it cannot: an edge type whose every source happens to have one
-        // destination today is not a functional relation.
-        cardinality: Some(edge.cardinality),
-        edge_count: rows,
-        chunk_size: DEFAULT_CHUNK_SIZE,
-        src_chunk_size: DEFAULT_CHUNK_SIZE,
-        dst_chunk_size: DEFAULT_CHUNK_SIZE,
-        directed: true,
-        prefix: format!(
+    let mut info = EdgeInfo::new(
+        edge.source.clone(),
+        edge.label.clone(),
+        edge.destination.clone(),
+        rows,
+        DEFAULT_CHUNK_SIZE,
+        format!(
             "edge/{}/",
             edge_dir(&edge.source, &edge.label, &edge.destination)
         ),
@@ -2269,12 +2257,20 @@ fn edge_info(edge: &GraphEdge, rows: u64, source_rows: u64) -> EdgeInfo {
         // column addresses this half — and `path` gives it the URL, so a hop out
         // of a `dense_id` is derived from the manifest and never agreed between
         // two repositories.
-        projections: vec![
+        vec![
             Projection::payload("by_source/", endpoint_columns()).aligned_by("src", true),
             Projection::payload("by_target/", endpoint_columns()).aligned_by("dst", true),
         ],
-        version: GRAPHAR_VERSION.to_string(),
-    };
+    )
+    // The one line this function was missing. It has taken the whole
+    // `EdgeType` since it was written and read every field of it but this
+    // one, so a `{1,1}` edge and a `*` edge produced byte-identical
+    // manifests and every reader downstream had to re-derive from the data
+    // what the shape had already said -- when it can be re-derived at all,
+    // which it cannot: an edge type whose every source happens to have one
+    // destination today is not a functional relation.
+    .with_cardinality(edge.cardinality);
+    info.iri = edge.iri.clone().unwrap_or_default();
     // The pyramid of edges, when the source type earned one — more entries on
     // the same list, declared here and written by the layout pass, the same
     // split the vertex levels have. Derived from `VertexLevels::planned` over
