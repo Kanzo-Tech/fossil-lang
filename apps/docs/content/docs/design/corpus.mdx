@@ -189,8 +189,9 @@ reaches for GraphAr's reader and it throws on `dense_id` — the first property 
 writes — which is the first row of the table above. **The string is the only line of a fossil
 manifest that contradicts the page specifying it.**
 
-That is the same defect as [the name of the cell pyramid](/docs/design/cells#the-name-promises-a-nesting-this-does-not-have):
-a borrowed name promising a contract the artefact does not honour. It is not a tenth divergence —
+That is the same defect as the one [the cell pyramid's old name](/docs/design/cells#the-name-promised-a-nesting-this-does-not-have-and-the-name-is-gone)
+carried, and that one has been paid off: a borrowed name promising a contract the artefact does not
+honour. It is not a tenth divergence —
 a divergence is a place where fossil does something else on purpose, and this is a place where the
 manifest says something untrue about all nine.
 
@@ -218,7 +219,7 @@ does not change the string* in three crates. Whatever is decided, that is a defe
 one name for the version and six places that state it.
 </Callout>
 
-So the compatibility question that makes [the pyramid's name](/docs/design/cells#the-name-promises-a-nesting-this-does-not-have)
+So the compatibility question that made [the pyramid's rename](/docs/design/cells#the-name-promised-a-nesting-this-does-not-have-and-the-name-is-gone)
 expensive **does not arise here**, and it is worth being precise about why. A manifest key is read
 by name, so renaming one changes what a reader finds. A manifest *value* nobody reads is inert: an
 old corpus keeps saying `gar/v1`, a new one says something else, and every reader in this tree

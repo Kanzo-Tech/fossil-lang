@@ -31,7 +31,7 @@
 //! `0` and `none` both disable it, and the default is
 //! [`fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL`] — so the command in the
 //! line above still measures what it measured, pyramid included. `0` is not a
-//! base the pass would accept anyway (`HolonTree::base_bits` refuses anything
+//! base the pass would accept anyway (`CellTree::base_bits` refuses anything
 //! that is not a power of four), which is what makes it free to spell «off»:
 //! there is no base it takes away.
 //!

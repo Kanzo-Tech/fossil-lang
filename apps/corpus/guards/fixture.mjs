@@ -34,7 +34,7 @@ import { execute, lit, scalar } from "./duck.mjs";
 import { TILE_ROWS, mortonOf } from "./arithmetic.mjs";
 
 /**
- * The base a holon tree declares, in vertices per cell.
+ * The base a cell tree declares, in vertices per cell.
  *
  * Sixteen, which is `fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL` — a power of four, because
  * a cell id is a SHIFT of a `dense_id` and a base that is not one makes the finest rung a division.
@@ -480,8 +480,8 @@ export function write(
       // not have. A tree with no rungs has no bytes — which is exactly what a writer that
       // published none declares — and what is frozen here is the reference's spelling, which is
       // what `mode-names-a-channel` reads.
-      "holons:",
-      "  prefix: holon/",
+      "cells:",
+      "  prefix: cell/",
       `  vertices_per_cell: ${VERTICES_PER_CELL}`,
       // The relations the partition would be over, without which the mass a rung conserves is not
       // a defined quantity. Required, and required even of a tree that publishes no rung.

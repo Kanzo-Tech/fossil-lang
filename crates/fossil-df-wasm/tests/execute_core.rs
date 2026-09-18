@@ -167,7 +167,7 @@ fn program_sources_lists_each_distinct_source_with_its_format() {
 /// `RunReport::of` snapshots `graph.manifest()`, so a report built at the wrong
 /// moment states the manifest as it was THEN: every key declared afterwards is
 /// simply absent from the JSON, with nothing anywhere going red. That is how the
-/// browser came to omit `holons:` and then `channels:` — the report was built
+/// browser came to omit `cells:` and then `channels:` — the report was built
 /// before `declare_pyramids`/`declare_channels`, so the tab handed its host an
 /// account of a corpus missing two measured facts the YAML it uploaded beside it
 /// carried, while `fossil run --output-json` carried both. A test naming those

@@ -34,7 +34,7 @@ listing over HTTP and the format asks for none.
 *aggregates* into synthetic rows that no scale describes. They draw different pictures rather than
 being two prices for one, which is why `crates/fossil-layout/tests/level_vs_rung.rs` weighs them on
 ONE corpus: two instruments over two graphs compare two graphs.
-[Holons](/docs/design/cells) is the argument for the cell pyramid being a third artefact.
+[Cells](/docs/design/cells) is the argument for the cell pyramid being a third artefact.
 
 ## What the writer is
 
@@ -102,14 +102,14 @@ to: **a document carries a fact exactly when a reader cannot recover it from the
 
 | the field | why the document carries it |
 | --- | --- |
-| `HolonTree::vertices_per_cell` | the base of the pyramid is a choice about what a screen can draw, and a set of points is never full, so no writer derives it from the data |
+| `CellTree::vertices_per_cell` | the base of the pyramid is a choice about what a screen can draw, and a set of points is never full, so no writer derives it from the data |
 | `Channel::domain` | a categorical's distinct-value count is in no footer and costs a scan; a quantitative channel carries none, because Parquet's per-row-group min and max already are one |
 | `CoordinateSystem::provenance` | a latitude and a drawing algorithm's output are both two `float32` columns, and nothing but a declaration tells them apart |
 
 **The absences are the same rule read the other way.** A cell row carries no `parent`, because a cell
 of rung `k` covers a fixed interval of the `dense_id` axis and the parent is `r >> 2`; and no
 `subject`, because a cell is not an entity and no bookmark keys on one.
-`crates/fossil-sinks/src/manifest.rs, HolonTree` carries no `chunk_size` of its own, because a rung's
+`crates/fossil-sinks/src/manifest.rs, CellTree` carries no `chunk_size` of its own, because a rung's
 ids are a shift of the payload's and there is no second number to declare. And `corpus.bnf` declares
 no prefix, no file name and neither shift: those are addressing, and addressing already has one
 implementation in `crates/fossil-graph/src/plan.rs`.
@@ -123,12 +123,12 @@ only one without a page of its own. The other four have one: a declared budget b
 ([streaming](/docs/design/streaming)), a read is bounded and reports what it read
 ([one door](/docs/design/one-door)), addressing is arithmetic
 ([addressing](/docs/format/conventions/addressing)), and a reader never holds the graph
-([holons](/docs/design/cells), [the reference viewer](/docs/design/reference-viewer)).
+([cells](/docs/design/cells), [the reference viewer](/docs/design/reference-viewer)).
 
 It is what decided the pyramid against the holarchy. A holarchy's extents are **measured** — they are
 wherever Louvain's sweeps stopped — so addressing one means fetching a heuristic's boundaries into
 the read path, where every reader pays for them and no reader can check them.
-[Holons](/docs/design/cells) carries that argument and this page does not repeat it.
+[Cells](/docs/design/cells) carries that argument and this page does not repeat it.
 
 **Its first measured violation was a dependency edge and not a format decision**, which is why it
 belongs here rather than on the format. `fossil-layout`'s pass wrote tiles through a Parquet encoder

@@ -29,20 +29,20 @@ coordinates:
   y: y
   provenance: derived
   derived_by: louvain+phyllotaxis
-holons:
-  prefix: holon/
+cells:
+  prefix: cell/
   vertices_per_cell: 16
   relations:
   - knows
   coordinates:
-  - name: holon
+  - name: cell
     x: x
     y: y
     provenance: derived
     derived_by: cell-member-centroid
   rungs:
   - path: r1/
-    holon_count: 625
+    cell_count: 625
     properties:
     - name: cell_id
       data_type: uint32
@@ -99,7 +99,7 @@ holons:
         is_nullable: false
         cardinality: single
   - path: r2/
-    holon_count: 157
+    cell_count: 157
     properties:
     - name: cell_id
       data_type: uint32

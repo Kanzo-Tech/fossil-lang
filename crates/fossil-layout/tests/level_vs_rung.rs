@@ -4,14 +4,14 @@
 //! `levels.rs` already measures half of this: `level_cost_against_the_whole_type`
 //! reports a level's bytes against the payload's, and
 //! `what_the_pixel_floor_leaves_of_a_coarse_view` reports what a level read can
-//! actually draw. Neither one has anything to say about `holon/r{k}/`, and the
+//! actually draw. Neither one has anything to say about `cell/r{k}/`, and the
 //! two artefacts have to be weighed against each other on the SAME corpus or the
 //! comparison is between two graphs.
 //!
 //! So this writes one corpus and measures THREE arms on it:
 //!
 //! - the level pyramid — `chunks/l{k}/` and the edge levels at `l{k}/`;
-//! - the cell pyramid — `chunks/holon/r{k}/` and `chunks/holon/r{k}/quotient/`;
+//! - the cell pyramid — `chunks/cell/r{k}/` and `chunks/cell/r{k}/quotient/`;
 //! - **a stride**, which stores nothing: `dense_id % 2^k = 0` evaluated per
 //!   query over the Morton-ordered payload. It is what `frame` falls back to
 //!   where no `l{k}/` is written, and the only thing the production consumer
@@ -68,7 +68,7 @@ use std::path::{Path, PathBuf};
 use common::{dir, fixture, over};
 use duckdb::Connection;
 use fossil_layout::layout::enrich_layout;
-use fossil_sinks::manifest::{HOLON_PREFIX, HolonTree, QUOTIENT_PREFIX, VertexLevels};
+use fossil_sinks::manifest::{CELL_PREFIX, CellTree, QUOTIENT_PREFIX, VertexLevels};
 use parquet::file::reader::{FileReader, SerializedFileReader};
 
 /// The same size and the same mean degree the two `levels.rs` instruments use,
@@ -415,7 +415,7 @@ struct Corpus {
     root: PathBuf,
     chunk: u64,
     vertex_count: u64,
-    tree: HolonTree,
+    tree: CellTree,
 }
 
 fn write_corpus(name: &str) -> Corpus {
@@ -622,7 +622,7 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
     );
 
     // ============================ 2. RUNGS ============================
-    let holon = chunks.join(HOLON_PREFIX.trim_end_matches('/'));
+    let cell = chunks.join(CELL_PREFIX.trim_end_matches('/'));
     println!("\n=== 2. WHAT A RUNG COSTS ===");
     println!(
         "{:<4} {:>9} {:>7} {:>10} {:>7} {:>10} {:>11} {:>10} {:>8} {:>10} {:>9}",
@@ -641,7 +641,7 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
     let mut rung_view = Vec::new();
     for (index, rung) in c.tree.rungs.iter().enumerate() {
         let k = index + 1;
-        let rdir = holon.join(rung.path.trim_end_matches('/'));
+        let rdir = cell.join(rung.path.trim_end_matches('/'));
         let cfile = rdir.join("tiles.parquet");
         let qfile = rdir
             .join(QUOTIENT_PREFIX.trim_end_matches('/'))
@@ -652,20 +652,20 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
         let qd = projected(&qfile, QUOTIENT_DRAW).unwrap_or(0);
         let qrows = rung.quotient.as_ref().map_or(0, |q| q.edge_count);
         let view = cd + qd;
-        rung_view.push((k as u32, rung.holon_count, view, cd, qb, qrows));
+        rung_view.push((k as u32, rung.cell_count, view, cd, qb, qrows));
         println!(
             "r{k:<3} {:>9} {:>7} {:>10.1} {:>6.2}% {:>10.1} {qrows:>11} {:>10.1} {:>7.2}% {:>10.1} {:>8.1}x",
-            rung.holon_count,
-            rung.holon_count.div_ceil(c.chunk),
+            rung.cell_count,
+            rung.cell_count.div_ceil(c.chunk),
             kb(cb),
             pct(cb, payload_bytes),
             kb(cd),
             kb(qb),
             // How full the quotient is against the complete graph on this
-            // rung's holons. A rung whose quotient IS the complete graph
+            // rung's cells. A rung whose quotient IS the complete graph
             // carries no structure left to draw, whatever its byte count says.
             {
-                let n = rung.holon_count;
+                let n = rung.cell_count;
                 let possible = n.saturating_mul(n.saturating_sub(1)) / 2;
                 pct(qrows, possible.max(1))
             },
@@ -679,7 +679,7 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
         .iter()
         .enumerate()
         .map(|(i, r)| {
-            let rdir = holon.join(r.path.trim_end_matches('/'));
+            let rdir = cell.join(r.path.trim_end_matches('/'));
             let _ = i;
             bytes(&rdir.join("tiles.parquet"))
                 + bytes(
@@ -696,7 +696,7 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
     );
 
     // ========================= 3. HEAD TO HEAD =========================
-    // A rung's holon count and a level's mark count are the same arithmetic one
+    // A rung's cell count and a level's mark count are the same arithmetic one
     // octave apart: a base of 16 makes rung k = V/(16·4^(k-1)) = V/4^(k+1),
     // which is level k+1. So they are paired by MARKS and not by index.
     println!("\n=== 3. HEAD TO HEAD, at the scales where both answer ===");
@@ -873,7 +873,7 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
     }
     for (index, rung) in c.tree.rungs.iter().enumerate() {
         let k = index + 1;
-        let rdir = holon.join(rung.path.trim_end_matches('/'));
+        let rdir = cell.join(rung.path.trim_end_matches('/'));
         let cfile = lit(&rdir.join("tiles.parquet"));
         let qfile = rdir
             .join(QUOTIENT_PREFIX.trim_end_matches('/'))
@@ -884,7 +884,7 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
             &format!("SELECT coalesce(sum(count), 0) FROM read_parquet('{cfile}')"),
         );
         // The lines a rung read draws: its quotient edges past the same floor,
-        // at the holon positions the rung itself carries. Both ends are in the
+        // at the cell positions the rung itself carries. Both ends are in the
         // rung file by construction, so there is no anchor to miss.
         let drawn = if qfile.is_file() {
             let q = lit(&qfile);
@@ -907,7 +907,7 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
             .map_or(0, |&(_, _, v, _, _, _)| v);
         println!(
             "r{k:<5} {:>9} {:>8.2}% {drawn:>12} {:>8.2}% {:>12} {:>9} {:>11.1} {:>10}",
-            rung.holon_count,
+            rung.cell_count,
             pct(u64::try_from(covered).unwrap_or(0), big),
             (drawn as f64 / today as f64) * 100.0,
             "same",
@@ -918,12 +918,12 @@ fn report(c: &Corpus, vertex_count: u64, shape: &str) {
     }
     println!(
         "\n  deepest level: l{} at {} marks (the one-tile floor, chunk_size {});\n  \
-         deepest rung:  r{} at {} holons",
+         deepest rung:  r{} at {} cells",
         plan.levels.last().copied().unwrap_or(0),
         level_view.last().map_or(0, |&(_, m, _, _, _)| m),
         c.chunk,
         c.tree.rungs.len(),
-        c.tree.rungs.last().map_or(0, |r| r.holon_count),
+        c.tree.rungs.last().map_or(0, |r| r.cell_count),
     );
 
     // ================== 5. THE THIRD ARM, AT TWO RECTANGLES ==================
@@ -1015,16 +1015,16 @@ fn level_arms(
 /// Every rung at one rectangle: its cells by their own `x`/`y` footers, its
 /// quotient by the `cell_id` runs those footers chose.
 fn rung_arms(db: &Connection, c: &Corpus, r: Rect) -> Vec<Arm> {
-    let holon = c
+    let cell = c
         .root
         .join("chunks")
-        .join(HOLON_PREFIX.trim_end_matches('/'));
+        .join(CELL_PREFIX.trim_end_matches('/'));
     c.tree
         .rungs
         .iter()
         .enumerate()
         .map(|(index, rung)| {
-            let rdir = holon.join(rung.path.trim_end_matches('/'));
+            let rdir = cell.join(rung.path.trim_end_matches('/'));
             let cfile = rdir.join("tiles.parquet");
             let qfile = rdir
                 .join(QUOTIENT_PREFIX.trim_end_matches('/'))
@@ -1340,7 +1340,7 @@ fn fidelity_row(name: &str, stride: &str, marks: u64, bins: usize, dist: f64, no
 /// - a **stride**: `dense_id % 2^k = 0` over the payload, one point each — and
 ///   where `2^k` is `4^j` that is the SAME SET as level `j`, which is the first
 ///   thing the table says;
-/// - a **rung**: the cell centroids of `holon/r{k}/tiles.parquet`, each weighted
+/// - a **rung**: the cell centroids of `cell/r{k}/tiles.parquet`, each weighted
 ///   by its `count`. That is the honest comparison: a rung row is synthetic and
 ///   stands for that many members, so rasterising it unweighted would measure a
 ///   different quantity from the other two.
@@ -1354,7 +1354,7 @@ fn fidelity(
     extent: Rect,
 ) {
     let chunks = c.root.join("chunks");
-    let holon = chunks.join(HOLON_PREFIX.trim_end_matches('/'));
+    let cell = chunks.join(CELL_PREFIX.trim_end_matches('/'));
     let mut bases = Bases::new(db, payload, extent);
 
     println!(
@@ -1418,14 +1418,7 @@ fn fidelity(
         } else {
             "stride".to_string()
         };
-        fidelity_row(
-            &name,
-            &stride.to_string(),
-            marks,
-            grid * grid,
-            dist,
-            noise,
-        );
+        fidelity_row(&name, &stride.to_string(), marks, grid * grid, dist, noise);
     }
 
     // The levels, read off their own files rather than off the predicate — a
@@ -1459,15 +1452,15 @@ fn fidelity(
     }
 
     // The rungs: centroids weighted by `count`, against the real vertices. The
-    // null is the unstructured subsample of the same SIZE — the rung's holon
+    // null is the unstructured subsample of the same SIZE — the rung's cell
     // count expressed as the stride that draws that many.
     for (index, rung) in c.tree.rungs.iter().enumerate() {
         let k = index + 1;
-        let cfile = holon
+        let cfile = cell
             .join(rung.path.trim_end_matches('/'))
             .join("tiles.parquet");
-        let stride = (big / rung.holon_count.max(1)).next_power_of_two().max(1);
-        let marks = rung.holon_count;
+        let stride = (big / rung.cell_count.max(1)).next_power_of_two().max(1);
+        let marks = rung.cell_count;
         let grid = fitted_grid(marks);
         let arm = density_on(db, &cfile, "TRUE", "\"count\"", extent, grid);
         let null = density_on(
@@ -1705,7 +1698,7 @@ struct SweepArm {
 /// a stride's row is identical to the level's at the same `4^k` and the table
 /// has to stay narrow enough to read five times over.
 fn sweep_arms(c: &Corpus, big: u64, chunks: &Path, plan: &VertexLevels) -> Vec<SweepArm> {
-    let holon = chunks.join(HOLON_PREFIX.trim_end_matches('/'));
+    let cell = chunks.join(CELL_PREFIX.trim_end_matches('/'));
     let mut arms = Vec::new();
     for &k in &plan.levels {
         let path = chunks.join(plan.level_prefix(k)).join("tiles.parquet");
@@ -1721,13 +1714,13 @@ fn sweep_arms(c: &Corpus, big: u64, chunks: &Path, plan: &VertexLevels) -> Vec<S
     for (index, rung) in c.tree.rungs.iter().enumerate() {
         arms.push(SweepArm {
             name: format!("rung r{}", index + 1),
-            marks: rung.holon_count,
-            path: holon
+            marks: rung.cell_count,
+            path: cell
                 .join(rung.path.trim_end_matches('/'))
                 .join("tiles.parquet"),
             predicate: "TRUE",
             weight: "\"count\"",
-            null_stride: (big / rung.holon_count.max(1)).next_power_of_two().max(1),
+            null_stride: (big / rung.cell_count.max(1)).next_power_of_two().max(1),
         });
     }
     arms
@@ -1920,7 +1913,7 @@ fn fitted_grid(marks: u64) -> usize {
 ///   marks on a 920×400 window, drops the frame two levels and draws 250,000
 ///   points where 15,625 were asked for. So this is a budget and not a ceiling
 ///   on one.
-/// - **[`SCREEN_MARKS`]**, the number `HolonTree::vertices_per_cell` picks the
+/// - **[`SCREEN_MARKS`]**, the number `CellTree::vertices_per_cell` picks the
 ///   *base* of the pyramid with: *«a megapixel canvas draws about fifteen
 ///   thousand marks comfortably»*. The smallest of the three, so it is the one
 ///   that decides.
@@ -1959,14 +1952,14 @@ fn asked_for(c: &Corpus, big: u64) {
     let mut deepest: Option<String> = None;
     for (index, rung) in c.tree.rungs.iter().enumerate() {
         let name = format!("r{}", index + 1);
-        let reached = rung.holon_count >= floor;
+        let reached = rung.cell_count >= floor;
         if reached {
             deepest = Some(name.clone());
         }
         println!(
             "{name:<10} {:>10} {:>11.2}x {:>10}",
-            rung.holon_count,
-            rung.holon_count as f64 / floor as f64,
+            rung.cell_count,
+            rung.cell_count as f64 / floor as f64,
             if reached { "yes" } else { "no" },
         );
     }

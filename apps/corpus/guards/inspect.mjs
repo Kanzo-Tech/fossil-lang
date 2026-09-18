@@ -171,7 +171,7 @@ function channelsOf(info) {
 }
 
 /**
- * The holon tree a vertex type declares, or `null` when it declares none.
+ * The cell tree a vertex type declares, or `null` when it declares none.
  *
  * **Two fields, and the second is the one a guard reads.** `declared` is whether the block is there
  * at all; `modeChannel` is the name the tree gives the channel its rungs' `mode` summarises, or
@@ -185,8 +185,8 @@ function channelsOf(info) {
  * and would have to be guessed at. Nothing in this directory opens a rung either: what is checked
  * is the reference, and the bytes under it are `crates/fossil-layout/tests/cells.rs`'s to evaluate.
  */
-function holonsOf(info) {
-  const declared = info.holons;
+function cellsOf(info) {
+  const declared = info.cells;
   if (declared === undefined) return null;
   // A key with an empty value and no `k: v` child scans as `[]`, which carries nothing; a tree
   // written that way has declared no field this reads.
@@ -290,11 +290,11 @@ export function inspect(root) {
        */
       channels: channelsOf(info),
       /**
-       * The holon tree this type declares, or `null` for a type with none — see {@link holonsOf}.
+       * The cell tree this type declares, or `null` for a type with none — see {@link cellsOf}.
        * Its `modeChannel` is a reference into `channels` above, and `mode-names-a-channel` is what
        * holds the two together: nothing in either block can see the other.
        */
-      holons: holonsOf(info),
+      cells: cellsOf(info),
       /**
        * Every projection this type declares, the payload included — see {@link projectionsOf}.
        *

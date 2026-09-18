@@ -132,8 +132,8 @@ fn a_rungs_membership_and_parents_agree_with_each_other() {
         .expect("a rung above a rung has parents");
 
     assert_eq!(parents.len(), finest.groups() as usize);
-    // The obligation `/docs/design/cells` states first: a vertex's holon at the
-    // coarser rung IS the parent of its holon at the finer one. Composed two
+    // The obligation `/docs/design/cells` states first: a vertex's cell at the
+    // coarser rung IS the parent of its cell at the finer one. Composed two
     // ways, from the vertices and from the groups, and they are the same map.
     for v in 0..vertex_count as usize {
         assert_eq!(

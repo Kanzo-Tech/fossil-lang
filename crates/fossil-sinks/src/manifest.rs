@@ -12,7 +12,7 @@
 //!
 //! **Two artefacts are NOT projections**, and each of them says why in its own
 //! doc: [`VertexIndex`] is a second ORDER over the same rows, so the Morton cut
-//! does not address it, and [`HolonTree`] is a tree of SYNTHETIC rows, so no
+//! does not address it, and [`CellTree`] is a tree of SYNTHETIC rows, so no
 //! `scale` describes what one of them stands for. Everything else — payload,
 //! vertex levels, adjacency, edge levels — is the one sequence read at some
 //! scale.
@@ -318,10 +318,10 @@ pub struct VertexInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channels: Option<Vec<Channel>>,
     /// **The tree of summary rows over this type** — the corpus's third
-    /// artefact, for the graph that does not fit on the GPU. See [`HolonTree`].
+    /// artefact, for the graph that does not fit on the GPU. See [`CellTree`].
     ///
     /// Not a [`Self::projections`] entry and that is the load-bearing part: a
-    /// projection is a subset of real rows at a `scale`, and a holon is a
+    /// projection is a subset of real rows at a `scale`, and a cell is a
     /// synthetic row that no scale describes. `/docs/design/reference-viewer`
     /// makes the ruling and `/docs/design/cells` carries it.
     ///
@@ -332,7 +332,7 @@ pub struct VertexInfo {
     /// written before this field existed, and a default would have told every
     /// one of their readers something about a partition nobody computed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub holons: Option<HolonTree>,
+    pub cells: Option<CellTree>,
     /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
     pub version: String,
 }
@@ -359,7 +359,7 @@ pub struct CoordinateSystem {
     ///
     /// `None` on a derived system says the writer did not record it, and that
     /// is weaker than a name rather than equivalent to one: re-deriving a
-    /// position is how a reader checks that a holon's referent has not moved,
+    /// position is how a reader checks that a cell's referent has not moved,
     /// and it cannot re-run what nothing names. It is `None` rather than
     /// required because a measured system has nothing to put here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -460,7 +460,7 @@ pub struct Channel {
     ///
     /// This is the one field here a reader cannot recover, which is the whole
     /// test for whether it belongs in a document —
-    /// [`HolonTree::vertices_per_cell`] is in the manifest under the same rule.
+    /// [`CellTree::vertices_per_cell`] is in the manifest under the same rule.
     /// A quantitative channel's domain is a *range*, and Parquet already writes
     /// min and max per row group: declaring it would be a second statement of
     /// what the footers carry, and the second statement is the one that goes
@@ -729,9 +729,9 @@ impl VertexLevels {
     }
 }
 
-/// The prefix a holon tree lives under, relative to the vertex type's own
-/// [`VertexInfo::prefix`]. See [`HolonTree`].
-pub const HOLON_PREFIX: &str = "holon/";
+/// The prefix a cell tree lives under, relative to the vertex type's own
+/// [`VertexInfo::prefix`]. See [`CellTree`].
+pub const CELL_PREFIX: &str = "cell/";
 
 /// **The base of the pyramid a writer takes when nothing tells it otherwise** —
 /// sixteen vertices per cell.
@@ -739,13 +739,13 @@ pub const HOLON_PREFIX: &str = "holon/";
 /// The screen picks it. A megapixel canvas draws about fifteen thousand marks
 /// comfortably, and a base of roughly twenty vertices per cell is the one that
 /// fills it on a corpus the size of com-DBLP; sixteen is the power of four
-/// nearest twenty, which is what [`HolonTree::base_bits`] requires. The whole
+/// nearest twenty, which is what [`CellTree::base_bits`] requires. The whole
 /// pyramid then costs `1/16 · 4/3` = **8.3% of the type**, against 25.7% at a
 /// base of five and 1.6% at a base of 83.
 ///
 /// **A default and not a constant of the format.** It is data-dependent by
 /// construction — where cells start to touch is a property of *this* point set —
-/// and which number a corpus used is in its own [`HolonTree::vertices_per_cell`]
+/// and which number a corpus used is in its own [`CellTree::vertices_per_cell`]
 /// rather than read off a spec. `/docs/design/cells` ends on whether it should
 /// be declared per corpus or once globally; declaring it per vertex type is the
 /// shape the block already has, and what would settle it is a second corpus of a
@@ -753,23 +753,23 @@ pub const HOLON_PREFIX: &str = "holon/";
 pub const DEFAULT_VERTICES_PER_CELL: u64 = 16;
 
 /// The filename stem of one **rung**, under a tree's own
-/// [`HolonTree::prefix`]: rung `k` lives under `<prefix>r{k}/`, and inside it
-/// the container rules apply unchanged. See [`HolonRung`].
+/// [`CellTree::prefix`]: rung `k` lives under `<prefix>r{k}/`, and inside it
+/// the container rules apply unchanged. See [`CellRung`].
 pub const RUNG_PREFIX_STEM: &str = "r";
 
-/// Where a rung's quotient lives, under the rung's own [`HolonRung::path`].
+/// Where a rung's quotient lives, under the rung's own [`CellRung::path`].
 /// A second artefact beside the rows and not a column on one, because a row is
-/// one holon and a quotient edge is a pair of them. See [`HolonQuotient`].
+/// one cell and a quotient edge is a pair of them. See [`CellQuotient`].
 pub const QUOTIENT_PREFIX: &str = "quotient/";
 
 /// **The tree of summary rows a type carries — the corpus's third artefact.**
 ///
 /// A [`Projection`] is the same sequence at some scale and a [`VertexIndex`] is
 /// the same rows in another order; both are the corpus's real vertices. **A
-/// holon is a synthetic row by construction** — a group a partitioning
+/// cell is a synthetic row by construction** — a group a partitioning
 /// algorithm returned, which exists nowhere in the source — so it is neither.
 /// `/docs/design/reference-viewer` is where that ruling is made and
-/// `/docs/design/cells` is what it decides here: a holon tree could not be an
+/// `/docs/design/cells` is what it decides here: a cell tree could not be an
 /// entry in [`VertexLevels`] without making `scale` mean two different things
 /// in one document, which is the failure the one-contract rule exists to
 /// prevent. Its own block, its own prefix, its own name.
@@ -778,9 +778,9 @@ pub const QUOTIENT_PREFIX: &str = "quotient/";
 /// field left out.** A projection's scale is arithmetic a reader spends: rows
 /// are `count.div_ceil(scale)` and a tile address is a shift by `log2(scale)`.
 /// A rung's contraction is not any of that — it is a number the document states
-/// rather than a shift a reader spends. So a rung declares **how many holons it
+/// rather than a shift a reader spends. So a rung declares **how many cells it
 /// has** and a reader divides if it wants a ratio; see
-/// [`HolonRung::holon_count`] and [`Self::contracts_by_at_least`].
+/// [`CellRung::cell_count`] and [`Self::contracts_by_at_least`].
 ///
 /// This paragraph carried a second argument and it belonged to a writer that no
 /// longer exists: *on com-DBLP the published rungs contract by 5.69×, 6.02× and
@@ -789,7 +789,7 @@ pub const QUOTIENT_PREFIX: &str = "quotient/";
 /// `Pyramid` replaced. Measured on com-DBLP with the writer that is here —
 /// `crates/fossil-layout/tests/level_vs_rung.rs` — the rungs contract by
 /// **exactly 4.00× at every step**, 317,080 → 19,818 → 4,955 → … → 1, because
-/// [`Self::holons_at`] is `ceil(V / 4^k)` and `Pyramid::write` asserts against
+/// [`Self::cells_at`] is `ceil(V / 4^k)` and `Pyramid::write` asserts against
 /// it. The field survives the correction: a declared count is still not a
 /// spendable scale, and it is now also the only place the ratio is stated at
 /// all.
@@ -808,8 +808,8 @@ pub const QUOTIENT_PREFIX: &str = "quotient/";
 /// trusting the writer — every way of getting a summary wrong produces a
 /// pyramid that opens, addresses and draws.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HolonTree {
-    /// Path prefix for the whole tree, e.g. `"holon/"`, relative to the vertex
+pub struct CellTree {
+    /// Path prefix for the whole tree, e.g. `"cell/"`, relative to the vertex
     /// type's own [`VertexInfo::prefix`] and with the trailing separator.
     /// Declared rather than conventional for [`Projection::path`]'s reason: it
     /// is the one part of a tile's URL a reader cannot compute, and there is no
@@ -840,7 +840,7 @@ pub struct HolonTree {
     /// sequence, so it slices at its own number — and the premise it rested on
     /// is gone: a rung's ids are a shift of the payload's, so its tiles are the
     /// payload's arithmetic with a wider shift and there is no second number to
-    /// declare. See the callout on [`HolonRung::holon_count`].
+    /// declare. See the callout on [`CellRung::cell_count`].
     pub vertices_per_cell: u64,
     /// **Which relations the partition was computed over, by
     /// [`EdgeInfo::edge_type`] label** — both of whose endpoints are this vertex
@@ -848,7 +848,7 @@ pub struct HolonTree {
     ///
     /// The field the mass conservation check cannot be stated without. Every
     /// edge of these relations is somewhere in every rung — as a quotient edge,
-    /// or absorbed into the internal weight of the holon holding both its ends —
+    /// or absorbed into the internal weight of the cell holding both its ends —
     /// so *cross weight plus internal weight equals the edge count below, at
     /// every rung* is a property a stranger can evaluate. Without the list there
     /// is no population to conserve: a type may be the source of several
@@ -859,15 +859,15 @@ pub struct HolonTree {
     /// nobody can name, and it does not deserialise rather than deserialising to
     /// «all of them».
     pub relations: Vec<String>,
-    /// **Where a holon's position came from, and which columns hold it.**
+    /// **Where a cell's position came from, and which columns hold it.**
     ///
-    /// Counts sum and edges sum; where a holon goes on the plane is a *choice* —
+    /// Counts sum and edges sum; where a cell goes on the plane is a *choice* —
     /// a centroid weighted somehow, or something else — and no amount of
     /// checking makes a choice correct. So it is declared exactly as a vertex's
     /// is, in the same type and with the same three answers available: see
-    /// [`CoordinateSystem`] and [`Provenance`]. A holon's is [`Provenance::Derived`]
+    /// [`CoordinateSystem`] and [`Provenance`]. A cell's is [`Provenance::Derived`]
     /// by construction, which makes [`CoordinateSystem::derived_by`] the part
-    /// that earns its keep — re-deriving is how a reader checks that a holon's
+    /// that earns its keep — re-deriving is how a reader checks that a cell's
     /// referent has not moved, and nothing can re-run what nothing names.
     ///
     /// A list and not a value, for [`VertexInfo::coordinates`]'s reason: a type
@@ -886,7 +886,7 @@ pub struct HolonTree {
     ///
     /// A cell row carries a `mode` and a `purity` and the `mode` is a bare
     /// `uint32`. Nothing in the document said what it was the mode OF: this
-    /// field's own [`HolonRung::properties`] called it *the payload's
+    /// field's own [`CellRung::properties`] called it *the payload's
     /// categorical* and `corpus.bnf` called it *a categorical*, so a reader
     /// colouring a rung by it could not know which palette the values belong to
     /// or how many of them there are. That is the defect [`Channel::domain`]
@@ -927,14 +927,14 @@ pub struct HolonTree {
     /// described the dendrogram-cut writer that `Pyramid` replaced — *the cut
     /// ends where the dendrogram stops delivering a quarter-step, not at one
     /// group*. A quaternary partition has no such stopping point:
-    /// [`HolonTree::planned`] breaks on `holon_count <= 1` **inclusive**, so the
-    /// single-holon rung is written and is the last one. Measured on com-DBLP,
+    /// [`CellTree::planned`] breaks on `cell_count <= 1` **inclusive**, so the
+    /// single-cell rung is written and is the last one. Measured on com-DBLP,
     /// nine rungs ending at one — which is the 1×1 level a mipmap has, and what
-    /// [`HolonTree::planned`]'s own doc already says it is for.
-    pub rungs: Vec<HolonRung>,
+    /// [`CellTree::planned`]'s own doc already says it is for.
+    pub rungs: Vec<CellRung>,
 }
 
-/// **One rung: a path, how many holons it has, what a row of it carries, and
+/// **One rung: a path, how many cells it has, what a row of it carries, and
 /// the quotient beside it.**
 ///
 /// A rung is *not* a level of [`VertexLevels`] under another name. A level is
@@ -944,38 +944,38 @@ pub struct HolonTree {
 /// which is why the three obligations of `/docs/design/cells` are checks
 /// against that level rather than against a predicate over ids.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HolonRung {
+pub struct CellRung {
     /// Where this rung's tiles are, relative to the tree's own
-    /// [`HolonTree::prefix`] and with the trailing separator — `"r1/"` for the
+    /// [`CellTree::prefix`] and with the trailing separator — `"r1/"` for the
     /// finest. Inside it the corpus's [`Container`] decides the filenames
     /// exactly as it does for a payload, because a rung is tiled and is not a
     /// different kind of thing from anything else that is.
     pub path: String,
-    /// **How many holons this rung has** — every row of every tile under
+    /// **How many cells this rung has** — every row of every tile under
     /// [`Self::path`], summed.
     ///
     /// The sibling of [`VertexInfo::vertex_count`] and required for its reason:
     /// a hole in the middle is caught by the addressing and a missing tail is
-    /// caught by nothing, so `tiles = holon_count.div_ceil(chunk_size)` is what
+    /// caught by nothing, so `tiles = cell_count.div_ceil(chunk_size)` is what
     /// tells a truncated rung from a short one. It is also the number the
     /// declared branching floor is checked with — see
-    /// [`HolonTree::contracts_by_at_least`] — which no ratio field could be,
+    /// [`CellTree::contracts_by_at_least`] — which no ratio field could be,
     /// because a ratio recorded beside the rows is a second statement of what
     /// the rows already say.
     ///
     /// **Declared and derivable, which is what made the whole block writable.**
-    /// It is `ceil(vertex_count / 4^k)` — see [`HolonTree::holons_at`] — so a
+    /// It is `ceil(vertex_count / 4^k)` — see [`CellTree::cells_at`] — so a
     /// manifest can state the entire tree in front of the pass, exactly as
     /// [`VertexLevels::planned`] plans the level pyramid before a byte is
     /// written. This page's obstacle used to be that a rung's count was
     /// something only a completed pass could report; under a quaternary
     /// partition it is arithmetic, and a field that repeats arithmetic is a
     /// second thing to check rather than a second source of truth.
-    pub holon_count: u64,
-    /// The columns a holon row carries: its cell id, its position, its member
+    pub cell_count: u64,
+    /// The columns a cell row carries: its cell id, its position, its member
     /// count, the internal weight that absorbed the edges between its own
     /// children, and the mode and purity of **the channel
-    /// [`HolonTree::mode_channel`] names**.
+    /// [`CellTree::mode_channel`] names**.
     ///
     /// That last clause read *the payload's categorical* while the tree had no
     /// field to say which one, which is a definite article over a set the
@@ -1001,7 +1001,7 @@ pub struct HolonRung {
     /// fold the count into the member set and the check becomes a tautology no
     /// corruption can fail.
     pub properties: Vec<Property>,
-    /// **The quotient beside this rung's rows** — the edges between its holons,
+    /// **The quotient beside this rung's rows** — the edges between its cells,
     /// or `None` where this rung publishes none.
     ///
     /// `Option` and per rung, because whether the aggregated edge set is worth
@@ -1015,25 +1015,25 @@ pub struct HolonRung {
     /// the complete graph from the sixth down. A writer answers that rung by rung, and
     /// `None` says it wrote none rather than that there are none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub quotient: Option<HolonQuotient>,
+    pub quotient: Option<CellQuotient>,
 }
 
-/// The edges between one rung's holons — **a separate artefact, and that is the
+/// The edges between one rung's cells — **a separate artefact, and that is the
 /// arity argument rather than a preference.**
 ///
-/// A holon row is one holon; a quotient edge is a pair of them. The same reason
+/// A cell row is one cell; a quotient edge is a pair of them. The same reason
 /// a corpus writes its vertices and its relations as separate artefacts rather
-/// than as one wide table, and the reason a holon row carries an internal weight
+/// than as one wide table, and the reason a cell row carries an internal weight
 /// instead of a self-loop: **an edge whose two ends share a parent is not an
 /// edge of that parent**, it is absorbed. On the planted fixture
-/// `crates/fossil-layout/tests/holons.rs` evaluates, 1,088 of 1,095 edges are
+/// `crates/fossil-layout/tests/aggregation.rs` evaluates, 1,088 of 1,095 edges are
 /// absorbed and the aggregate quotient has seven — so a writer that relabels the
 /// children's edge set and keeps it is not wrong in an edge case, it is wrong
 /// about the overwhelming majority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HolonQuotient {
+pub struct CellQuotient {
     /// Where the quotient's tiles are, relative to the rung's own
-    /// [`HolonRung::path`] and with the trailing separator — [`QUOTIENT_PREFIX`]
+    /// [`CellRung::path`] and with the trailing separator — [`QUOTIENT_PREFIX`]
     /// as the writer spells it.
     pub path: String,
     /// **How many quotient edges this rung has** — the rows, not their summed
@@ -1049,21 +1049,21 @@ pub struct HolonQuotient {
     /// edge count below — and a total recorded in the manifest would be a third
     /// place to disagree rather than a fourth thing to check.
     pub edge_count: u64,
-    /// The columns a quotient edge carries: the two holons it joins and its
-    /// weight. Declared for [`HolonRung::properties`]'s reason — these columns
+    /// The columns a quotient edge carries: the two cells it joins and its
+    /// weight. Declared for [`CellRung::properties`]'s reason — these columns
     /// exist nowhere else in the corpus, and a reader that cannot see the list
     /// cannot open the file.
     pub properties: Vec<Property>,
 }
 
-impl HolonRung {
+impl CellRung {
     /// The `k`th rung, finest first, at its canonical path `r{k}/` — the shape
     /// `l{k}/` already has, and the one place the spelling is written down.
     #[must_use]
-    pub fn at(rung: u32, holon_count: u64, properties: Vec<Property>) -> Self {
+    pub fn at(rung: u32, cell_count: u64, properties: Vec<Property>) -> Self {
         Self {
             path: format!("{RUNG_PREFIX_STEM}{rung}/"),
-            holon_count,
+            cell_count,
             properties,
             // No quotient, and that is an answer rather than a stub: writing one
             // is a second artefact over a different arity, which the caller that
@@ -1075,7 +1075,7 @@ impl HolonRung {
     /// Declare that this rung publishes a quotient, at [`QUOTIENT_PREFIX`].
     #[must_use]
     pub fn with_quotient(mut self, edge_count: u64, properties: Vec<Property>) -> Self {
-        self.quotient = Some(HolonQuotient {
+        self.quotient = Some(CellQuotient {
             path: QUOTIENT_PREFIX.to_string(),
             edge_count,
             properties,
@@ -1084,7 +1084,7 @@ impl HolonRung {
     }
 }
 
-impl HolonTree {
+impl CellTree {
     /// A tree over `relations`, based at `vertices_per_cell`, publishing
     /// `rungs`.
     ///
@@ -1097,13 +1097,13 @@ impl HolonTree {
     /// arithmetic — a dendrogram cut is the case — and for the fixtures that
     /// lock the document's spelling.
     #[must_use]
-    pub fn new(vertices_per_cell: u64, relations: Vec<String>, rungs: Vec<HolonRung>) -> Self {
+    pub fn new(vertices_per_cell: u64, relations: Vec<String>, rungs: Vec<CellRung>) -> Self {
         Self {
-            prefix: HOLON_PREFIX.to_string(),
+            prefix: CELL_PREFIX.to_string(),
             vertices_per_cell,
             relations,
             // Not declared, which is neither "derived" nor "none". A writer that
-            // knows where it put its holons says so with `with_coordinates`; one
+            // knows where it put its cells says so with `with_coordinates`; one
             // that does not must not be made to look as though it did.
             coordinates: None,
             // Nor which channel the rungs summarise, and here there is no third
@@ -1159,9 +1159,9 @@ impl HolonTree {
     /// `ceil(vertex_count / 2^shift)`.
     ///
     /// The sibling of [`VertexLevels::rows_at`], and the reason
-    /// [`HolonRung::holon_count`] can be declared in front of the pass.
+    /// [`CellRung::cell_count`] can be declared in front of the pass.
     #[must_use]
-    pub fn holons_at(vertex_count: u64, vertices_per_cell: u64, rung: u32) -> Option<u64> {
+    pub fn cells_at(vertex_count: u64, vertices_per_cell: u64, rung: u32) -> Option<u64> {
         let shift = Self::shift_at(vertices_per_cell, rung)?;
         let cells = 1u64.checked_shl(shift).unwrap_or(u64::MAX);
         Some(vertex_count.div_ceil(cells).max(1))
@@ -1202,7 +1202,7 @@ impl HolonTree {
     /// power of four — see [`Self::base_bits`].
     ///
     /// No quotients. Whether a rung publishes one is a measurement and not a
-    /// plan — see [`HolonRung::with_quotient`] — which is the one part of this
+    /// plan — see [`CellRung::with_quotient`] — which is the one part of this
     /// document the writer fills in after the fact.
     #[must_use]
     pub fn planned(
@@ -1217,9 +1217,9 @@ impl HolonTree {
         }
         let mut rungs = Vec::new();
         for rung in 1u32.. {
-            let holon_count = Self::holons_at(vertex_count, vertices_per_cell, rung)?;
-            rungs.push(HolonRung::at(rung, holon_count, properties.to_vec()));
-            if holon_count <= 1 {
+            let cell_count = Self::cells_at(vertex_count, vertices_per_cell, rung)?;
+            rungs.push(CellRung::at(rung, cell_count, properties.to_vec()));
+            if cell_count <= 1 {
                 break;
             }
         }
@@ -1260,26 +1260,26 @@ impl HolonTree {
     ///
     /// The floor is [`VertexLevels::stride`] at one and never a literal four:
     /// the octave is the tile pyramid's, written down in exactly one place, and
-    /// a holon tree on it inherits that arithmetic instead of inventing one.
+    /// a cell tree on it inherits that arithmetic instead of inventing one.
     ///
     /// **A floor and not a target.** It is what removes Louvain's 2.5× and 1.2×
     /// rungs — 690 groups becoming 595 while modularity moves by 0.0001 — and
     /// getting *nearer* to four would need levels between the ones a dendrogram
-    /// holds. A rung of no holons fails it: a tree cannot contract to nothing.
+    /// holds. A rung of no cells fails it: a tree cannot contract to nothing.
     ///
     /// It is checkable from the document alone, which is the whole reason
-    /// [`HolonRung::holon_count`] is a declared field: a reader weighing a
+    /// [`CellRung::cell_count`] is a declared field: a reader weighing a
     /// descent does not open a rung to find out it was not worth opening.
     ///
     /// # It divides, where it used to multiply, and that was a defect
     ///
-    /// The test was `holon_count * 4 <= below`, which is the floor as prose and
+    /// The test was `cell_count * 4 <= below`, which is the floor as prose and
     /// is **false for a perfectly quartered tree at the top**: five cells become
     /// `ceil(5/4)` = two, and `2 * 4 = 8` is not `<= 5`. Nothing noticed while
     /// nothing wrote a tree; the first planned pyramid fails it at every rung
     /// where the division does not come out even.
     ///
-    /// `holon_count <= below.div_ceil(4)` is the same statement without the
+    /// `cell_count <= below.div_ceil(4)` is the same statement without the
     /// rounding error, and it keeps every verdict the old form got right: a cut
     /// contracting by 5.69× clears it, and Louvain's 690 → 595 stall — 1.16× —
     /// still fails, because 595 is not `<= 173`.
@@ -1288,8 +1288,8 @@ impl HolonTree {
         let factor = VertexLevels::stride(1);
         let mut below = leaves;
         self.rungs.iter().all(|rung| {
-            let clears = rung.holon_count > 0 && rung.holon_count <= below.div_ceil(factor);
-            below = rung.holon_count;
+            let clears = rung.cell_count > 0 && rung.cell_count <= below.div_ceil(factor);
+            below = rung.cell_count;
             clears
         })
     }
@@ -1628,11 +1628,11 @@ impl VertexInfo {
             // which channels its rows carry says so with `with_channels`, and
             // silence stays silence.
             channels: None,
-            // No holon tree, and for `index`'s reason rather than
+            // No cell tree, and for `index`'s reason rather than
             // `coordinates`': writing one is a partition of the type plus a
             // quotient per rung, which the caller that decides to pay for it
-            // declares with `with_holons`.
-            holons: None,
+            // declares with `with_cells`.
+            cells: None,
             version: GRAPHAR_VERSION.to_string(),
         }
     }
@@ -1669,14 +1669,14 @@ impl VertexInfo {
         self
     }
 
-    /// Declare that this type carries a holon tree. See [`HolonTree`].
+    /// Declare that this type carries a cell tree. See [`CellTree`].
     ///
     /// A separate method and not a `new` parameter, for [`Self::with_index`]'s
     /// reason: a tree is a second pass over the rows producing rows that are not
     /// in them, and the caller that has the partition is the one that can say so.
     #[must_use]
-    pub fn with_holons(mut self, holons: HolonTree) -> Self {
-        self.holons = Some(holons);
+    pub fn with_cells(mut self, cells: CellTree) -> Self {
+        self.cells = Some(cells);
         self
     }
 
@@ -2531,23 +2531,23 @@ version: gar/v1
     /// the format has.
     #[test]
     fn a_base_is_a_power_of_four() {
-        assert_eq!(HolonTree::base_bits(4), Some(2));
-        assert_eq!(HolonTree::base_bits(16), Some(4));
-        assert_eq!(HolonTree::base_bits(DEFAULT_VERTICES_PER_CELL), Some(4));
+        assert_eq!(CellTree::base_bits(4), Some(2));
+        assert_eq!(CellTree::base_bits(16), Some(4));
+        assert_eq!(CellTree::base_bits(DEFAULT_VERTICES_PER_CELL), Some(4));
         assert_eq!(
-            HolonTree::base_bits(4_096),
+            CellTree::base_bits(4_096),
             Some(12),
             "the tile, which is 4^6"
         );
 
-        assert_eq!(HolonTree::base_bits(8), None);
-        assert_eq!(HolonTree::base_bits(32), None);
-        assert_eq!(HolonTree::base_bits(20), None);
-        assert_eq!(HolonTree::base_bits(0), None);
+        assert_eq!(CellTree::base_bits(8), None);
+        assert_eq!(CellTree::base_bits(32), None);
+        assert_eq!(CellTree::base_bits(20), None);
+        assert_eq!(CellTree::base_bits(0), None);
         // One cell per vertex is a pyramid whose base is the payload, which is
         // the degenerate answer rather than an error — `planned` is what refuses
         // a type with nothing to summarise.
-        assert_eq!(HolonTree::base_bits(1), Some(0));
+        assert_eq!(CellTree::base_bits(1), Some(0));
     }
 
     /// **A rung's count is `ceil(count below / 4)` at every step**, which is the
@@ -2560,14 +2560,14 @@ version: gar/v1
     fn a_rungs_count_is_a_quarter_of_the_one_below_it() {
         let base = DEFAULT_VERTICES_PER_CELL;
         let v = 317_080; // com-DBLP, which is the corpus the base was measured on
-        let mut below = HolonTree::holons_at(v, base, 1).expect("a valid base");
+        let mut below = CellTree::cells_at(v, base, 1).expect("a valid base");
         assert_eq!(
             below,
             v.div_ceil(base),
             "the finest rung is V over the base"
         );
         for rung in 2..=12 {
-            let here = HolonTree::holons_at(v, base, rung).expect("a valid base");
+            let here = CellTree::cells_at(v, base, rung).expect("a valid base");
             assert_eq!(here, below.div_ceil(4), "rung {rung} of {below}");
             below = here;
         }
@@ -2577,16 +2577,16 @@ version: gar/v1
     /// The tree runs to **one** cell, where a level pyramid stops at the level
     /// that fits one tile. A level is a transport optimisation; a rung is
     /// arithmetic — `ceil(V / 4^k)` answers for every `k` a reader can compute,
-    /// with no data-dependent tail — which is the reason [`HolonTree::planned`]
+    /// with no data-dependent tail — which is the reason [`CellTree::planned`]
     /// gives, and it is not the picture argument this doc used to make: no
     /// reader here can ask for four marks, the smallest budget anything spends
     /// being 15,000.
     #[test]
     fn a_planned_tree_runs_to_a_single_cell() {
         let props = Vec::new();
-        let tree = HolonTree::planned(20_000, DEFAULT_VERTICES_PER_CELL, Vec::new(), &props)
+        let tree = CellTree::planned(20_000, DEFAULT_VERTICES_PER_CELL, Vec::new(), &props)
             .expect("twenty thousand is more than one cell");
-        let counts: Vec<u64> = tree.rungs.iter().map(|r| r.holon_count).collect();
+        let counts: Vec<u64> = tree.rungs.iter().map(|r| r.cell_count).collect();
         assert_eq!(counts, vec![1_250, 313, 79, 20, 5, 2, 1]);
         assert_eq!(
             tree.rungs
@@ -2600,47 +2600,47 @@ version: gar/v1
         assert_eq!(counts.iter().sum::<u64>(), 1_670);
 
         // Nothing to summarise when the type IS one cell.
-        assert!(HolonTree::planned(16, 16, Vec::new(), &props).is_none());
-        assert!(HolonTree::planned(1, 16, Vec::new(), &props).is_none());
-        assert!(HolonTree::planned(17, 16, Vec::new(), &props).is_some());
+        assert!(CellTree::planned(16, 16, Vec::new(), &props).is_none());
+        assert!(CellTree::planned(1, 16, Vec::new(), &props).is_none());
+        assert!(CellTree::planned(17, 16, Vec::new(), &props).is_some());
         // And a base the addressing cannot shift by is refused rather than
         // rounded.
-        assert!(HolonTree::planned(20_000, 20, Vec::new(), &props).is_none());
+        assert!(CellTree::planned(20_000, 20, Vec::new(), &props).is_none());
     }
 
     /// **The branching floor divides, and the old form multiplied.**
     ///
-    /// `holon_count * 4 <= below` is the floor as prose and is false for a
+    /// `cell_count * 4 <= below` is the floor as prose and is false for a
     /// perfectly quartered tree wherever the division is not even: five cells
     /// become two, and eight is not at most five. This is the case that was red
     /// and that nothing had run, because nothing wrote a tree.
     #[test]
     fn a_perfectly_quartered_tree_clears_the_branching_floor() {
         let props = Vec::new();
-        let tree = HolonTree::planned(20_000, DEFAULT_VERTICES_PER_CELL, Vec::new(), &props)
+        let tree = CellTree::planned(20_000, DEFAULT_VERTICES_PER_CELL, Vec::new(), &props)
             .expect("a tree");
         assert!(
             tree.contracts_by_at_least(20_000),
             "the rungs are {:?}",
-            tree.rungs.iter().map(|r| r.holon_count).collect::<Vec<_>>(),
+            tree.rungs.iter().map(|r| r.cell_count).collect::<Vec<_>>(),
         );
 
         // The verdicts the old form got right are unchanged: a cut that
         // contracts by 5.69× clears it, and Louvain's 690 → 595 stall does not.
-        let stalled = HolonTree::new(
+        let stalled = CellTree::new(
             DEFAULT_VERTICES_PER_CELL,
             Vec::new(),
             vec![
-                HolonRung::at(1, 690, props.clone()),
-                HolonRung::at(2, 595, props.clone()),
+                CellRung::at(1, 690, props.clone()),
+                CellRung::at(2, 595, props.clone()),
             ],
         );
         assert!(!stalled.contracts_by_at_least(317_080));
         // A rung of nothing is not a contraction either.
-        let empty = HolonTree::new(
+        let empty = CellTree::new(
             DEFAULT_VERTICES_PER_CELL,
             Vec::new(),
-            vec![HolonRung::at(1, 0, props)],
+            vec![CellRung::at(1, 0, props)],
         );
         assert!(!empty.contracts_by_at_least(317_080));
     }
@@ -2807,9 +2807,9 @@ version: gar/v1
         assert!(yaml.contains("  properties:\n  - name: id\n"), "{yaml}");
     }
 
-    /// A column of a holon row or of a quotient edge. The names are the
+    /// A column of a cell row or of a quotient edge. The names are the
     /// fixture's and the model reserves none: what a rung carries is the list
-    /// it declares, which is the whole reason [`HolonRung::properties`] is a
+    /// it declares, which is the whole reason [`CellRung::properties`] is a
     /// field.
     fn column(name: &str, data_type: &str) -> Property {
         Property {
@@ -2821,12 +2821,12 @@ version: gar/v1
         }
     }
 
-    /// What a holon row holds, from `/docs/design/cells`: a group, its
+    /// What a cell row holds, from `/docs/design/cells`: a group, its
     /// position, how many members it has, its parent — and the internal weight
     /// the edges between its own children were absorbed into.
-    fn holon_columns() -> Vec<Property> {
+    fn cell_columns() -> Vec<Property> {
         vec![
-            column("holon_id", "uint32"),
+            column("cell_id", "uint32"),
             column("x", "float"),
             column("y", "float"),
             column("member_count", "uint32"),
@@ -2835,12 +2835,12 @@ version: gar/v1
         ]
     }
 
-    /// A quotient edge: the pair and its weight. A different arity from a holon
+    /// A quotient edge: the pair and its weight. A different arity from a cell
     /// row, which is why it is a different artefact.
     fn quotient_columns() -> Vec<Property> {
         vec![
-            column("src_holon", "uint32"),
-            column("dst_holon", "uint32"),
+            column("src_cell", "uint32"),
+            column("dst_cell", "uint32"),
             column("weight", "int64"),
         ]
     }
@@ -2848,21 +2848,20 @@ version: gar/v1
     /// The com-DBLP tree as `crates/fossil-layout/src/layout/community.rs, Cut`
     /// measured it: three rungs of Louvain's five, 55,712 / 9,248 / 1,696
     /// groups over 317,080 authors.
-    fn dblp_tree() -> HolonTree {
-        HolonTree::new(
+    fn dblp_tree() -> CellTree {
+        CellTree::new(
             DEFAULT_CHUNK_SIZE,
             vec!["coauthored".to_string()],
             vec![
                 // The quotient at the finest rung is the one measured saving:
                 // 159,413 edges against the graph's 1,049,866.
-                HolonRung::at(1, 55_712, holon_columns())
-                    .with_quotient(159_413, quotient_columns()),
-                HolonRung::at(2, 9_248, holon_columns()),
-                HolonRung::at(3, 1_696, holon_columns()),
+                CellRung::at(1, 55_712, cell_columns()).with_quotient(159_413, quotient_columns()),
+                CellRung::at(2, 9_248, cell_columns()),
+                CellRung::at(3, 1_696, cell_columns()),
             ],
         )
         .with_coordinates(vec![CoordinateSystem::derived(
-            "holon",
+            "cell",
             "x",
             "y",
             "louvain-cut+member-centroid",
@@ -2871,16 +2870,16 @@ version: gar/v1
 
     const DBLP_AUTHORS: u64 = 317_080;
 
-    /// **The ruling, as a test.** A holon tree adds no projection and no scale:
+    /// **The ruling, as a test.** A cell tree adds no projection and no scale:
     /// it is a third artefact, and `scale:` keeps meaning exactly one thing in
     /// the document — how many `dense_id`s one row of a projection stands for.
     /// A tree admitted as a projection would answer a different question under
     /// the same name, which is what the one-contract invariant forbids.
     #[test]
-    fn a_holon_tree_is_not_a_projection() {
+    fn a_cell_tree_is_not_a_projection() {
         let plan = VertexLevels::planned(1_000_000, DEFAULT_CHUNK_SIZE).expect("over one tile");
         let bare = person_vertex().with_levels(&plan);
-        let with = bare.clone().with_holons(dblp_tree());
+        let with = bare.clone().with_cells(dblp_tree());
 
         assert_eq!(with.projections, bare.projections);
         assert_eq!(with.payload(), bare.payload());
@@ -2900,8 +2899,8 @@ version: gar/v1
             .take_while(|l| l.starts_with("- ") || l.starts_with("  "))
             .copied()
             .collect();
-        assert!(!block.iter().any(|l| l.contains("holon")), "{yaml}");
-        assert!(yaml.contains("\nholons:\n"), "{yaml}");
+        assert!(!block.iter().any(|l| l.contains("cell")), "{yaml}");
+        assert!(yaml.contains("\ncells:\n"), "{yaml}");
     }
 
     /// **A rung declares a count because a contraction is not a scale**, and the
@@ -2917,7 +2916,7 @@ version: gar/v1
     #[test]
     fn a_rung_declares_a_count_and_clears_the_floor_without_meeting_it() {
         let tree = dblp_tree();
-        let counts: Vec<u64> = tree.rungs.iter().map(|r| r.holon_count).collect();
+        let counts: Vec<u64> = tree.rungs.iter().map(|r| r.cell_count).collect();
         assert_eq!(counts, vec![55_712, 9_248, 1_696]);
         assert!(tree.contracts_by_at_least(DBLP_AUTHORS));
 
@@ -2937,14 +2936,14 @@ version: gar/v1
     /// is catchable without opening a file.
     #[test]
     fn the_declared_floor_rejects_the_levels_the_cut_dropped() {
-        let emitted = HolonTree::new(
+        let emitted = CellTree::new(
             DEFAULT_CHUNK_SIZE,
             vec!["coauthored".to_string()],
             [55_712u64, 9_248, 1_696, 690, 595]
                 .into_iter()
                 .enumerate()
                 .map(|(i, groups)| {
-                    HolonRung::at(
+                    CellRung::at(
                         u32::try_from(i).expect("five rungs") + 1,
                         groups,
                         Vec::new(),
@@ -2953,11 +2952,11 @@ version: gar/v1
                 .collect(),
         );
         assert!(!emitted.contracts_by_at_least(DBLP_AUTHORS));
-        // And a rung of no holons is not a contraction to nothing.
-        let empty = HolonTree::new(
+        // And a rung of no cells is not a contraction to nothing.
+        let empty = CellTree::new(
             DEFAULT_CHUNK_SIZE,
             vec!["coauthored".to_string()],
-            vec![HolonRung::at(1, 0, Vec::new())],
+            vec![CellRung::at(1, 0, Vec::new())],
         );
         assert!(!empty.contracts_by_at_least(DBLP_AUTHORS));
     }
@@ -2967,29 +2966,29 @@ version: gar/v1
     /// field existed, and it declares **nothing** rather than declaring that it
     /// has no tree. The pattern `coordinates` is held to, one artefact along.
     #[test]
-    fn a_vertex_written_before_the_holon_block_existed_declares_nothing() {
+    fn a_vertex_written_before_the_cell_block_existed_declares_nothing() {
         let old = "type: Person\nvertex_count: 5\nchunk_size: 4096\n\
                    prefix: vertex/Person/\nprojections: []\nversion: gar/v1\n";
         let parsed: VertexInfo = serde_yaml_ng::from_str(old).expect("deserialize");
-        assert_eq!(parsed.holons, None);
+        assert_eq!(parsed.cells, None);
     }
 
-    /// Undeclared is absent, not `holons: null` — so a corpus that declares no
+    /// Undeclared is absent, not `cells: null` — so a corpus that declares no
     /// tree is byte-for-byte the corpus it was before the block landed.
     #[test]
     fn an_undeclared_tree_is_absent_from_the_yaml() {
         let yaml = person_vertex().to_yaml().expect("serialize");
-        assert!(!yaml.contains("holons"), "{yaml}");
+        assert!(!yaml.contains("cells"), "{yaml}");
     }
 
     #[test]
-    fn a_holon_tree_round_trips_through_yaml() {
-        let original = person_vertex().with_holons(dblp_tree());
+    fn a_cell_tree_round_trips_through_yaml() {
+        let original = person_vertex().with_cells(dblp_tree());
         let yaml = original.to_yaml().expect("serialize");
-        assert!(yaml.contains("prefix: holon/"), "{yaml}");
+        assert!(yaml.contains("prefix: cell/"), "{yaml}");
         assert!(yaml.contains("- path: r1/"), "{yaml}");
         assert!(yaml.contains("path: quotient/"), "{yaml}");
-        assert!(yaml.contains("holon_count: 55712"), "{yaml}");
+        assert!(yaml.contains("cell_count: 55712"), "{yaml}");
         assert!(yaml.contains("edge_count: 159413"), "{yaml}");
         let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
         assert_eq!(original, parsed);
@@ -3004,7 +3003,7 @@ version: gar/v1
     #[test]
     fn a_tree_that_names_no_relation_is_not_a_tree() {
         let yaml = person_vertex()
-            .with_holons(dblp_tree())
+            .with_cells(dblp_tree())
             .to_yaml()
             .expect("serialize");
         assert!(yaml.contains("  relations:\n  - coauthored\n"), "{yaml}");
@@ -3027,7 +3026,7 @@ version: gar/v1
         assert!(tree.rungs[0].quotient.is_some());
         assert_eq!(tree.rungs[1].quotient, None);
         let yaml = person_vertex()
-            .with_holons(tree)
+            .with_cells(tree)
             .to_yaml()
             .expect("serialize");
         assert_eq!(yaml.matches("quotient:").count(), 1, "{yaml}");
@@ -3035,10 +3034,10 @@ version: gar/v1
 
     /// Counts sum and edges sum; a position is a **choice**, and the obligation
     /// on it is that it is declared in the same field a vertex's is — with the
-    /// deriver named, because re-deriving is how a reader checks that a holon's
+    /// deriver named, because re-deriving is how a reader checks that a cell's
     /// referent has not moved and nothing can re-run what nothing names.
     #[test]
-    fn a_holons_position_is_declared_rather_than_derived_in_silence() {
+    fn a_cells_position_is_declared_rather_than_derived_in_silence() {
         let declared = dblp_tree().coordinates.expect("a declared system");
         assert_eq!(declared.len(), 1);
         assert_eq!(declared[0].provenance, Provenance::Derived);
@@ -3050,7 +3049,7 @@ version: gar/v1
 
         // And a tree whose writer recorded no provenance says nothing, which is
         // weaker than saying `derived` rather than equivalent to it.
-        let silent = HolonTree::new(
+        let silent = CellTree::new(
             DEFAULT_CHUNK_SIZE,
             vec!["coauthored".to_string()],
             Vec::new(),
@@ -3077,24 +3076,24 @@ version: gar/v1
         // Absent from the document rather than `mode_channel: null`, so a tree
         // written before the field is byte-for-byte the tree it was.
         let quiet = person_vertex()
-            .with_holons(silent)
+            .with_cells(silent)
             .to_yaml()
             .expect("serialize");
         assert!(!quiet.contains("mode_channel"), "{quiet}");
         let old: VertexInfo = serde_yaml_ng::from_str(&quiet).expect("deserialize");
-        assert_eq!(old.holons.expect("a tree").mode_channel, None);
+        assert_eq!(old.cells.expect("a tree").mode_channel, None);
 
-        // A scalar under `holons:`, which is the grammar the line scanners over
+        // A scalar under `cells:`, which is the grammar the line scanners over
         // this document read — one level of mapping, and anything deeper is
         // skipped rather than seen.
         let yaml = person_vertex()
-            .with_holons(named.clone())
+            .with_cells(named.clone())
             .to_yaml()
             .expect("serialize");
         assert!(yaml.contains("\n  mode_channel: community\n"), "{yaml}");
         let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
         assert_eq!(
-            parsed.holons.expect("a tree").mode_channel,
+            parsed.cells.expect("a tree").mode_channel,
             named.mode_channel
         );
     }
@@ -3110,7 +3109,7 @@ version: gar/v1
                 Channel::categorical("community", "cluster_id", 1_229).derived_by("louvain-cut"),
                 Channel::quantitative("age", "birth_year"),
             ])
-            .with_holons(dblp_tree().with_mode_channel("community"));
+            .with_cells(dblp_tree().with_mode_channel("community"));
         let yaml = declared.to_yaml().expect("serialize");
         // One domain in the document, and it is on the channel rather than on
         // the tree: a second statement of a measured count is what a copied
@@ -3119,7 +3118,7 @@ version: gar/v1
 
         let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
         let named = parsed
-            .holons
+            .cells
             .as_ref()
             .and_then(|tree| tree.mode_channel.as_deref())
             .expect("a named channel");

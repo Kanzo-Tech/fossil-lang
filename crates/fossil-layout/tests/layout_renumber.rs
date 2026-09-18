@@ -311,9 +311,9 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
 
     // ONE Parquet in the prefix, and it is the payload. Two containers at once
     // is one too many — a reader that globs finds both — which is the convention
-    // `apps/corpus`'s `declared-tiling` fires on. `index/`, `l1/` and `holon/`
+    // `apps/corpus`'s `declared-tiling` fires on. `index/`, `l1/` and `cell/`
     // are not a second one: they are directories. The list is exhaustive so that
-    // a fifth entry cannot appear unremarked — and `holon/` is the entry that
+    // a fifth entry cannot appear unremarked — and `cell/` is the entry that
     // proved it works, having appeared here the moment the pass grew a pyramid.
     let mut emitted: Vec<String> = fs::read_dir(&chunks)
         .expect("read the tile prefix")
@@ -324,7 +324,7 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     assert_eq!(
         emitted,
         vec![
-            "holon".to_string(),
+            "cell".to_string(),
             "index".to_string(),
             "l1".to_string(),
             "tiles.parquet".to_string(),
@@ -338,7 +338,7 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     // tile set in it. Asserted by listing rather than by opening, because what
     // the rungs HOLD is `tests/cells.rs`, evaluated against the predicate; this
     // is the assertion that they are where the manifest will say they are.
-    let mut rungs: Vec<String> = fs::read_dir(chunks.join("holon"))
+    let mut rungs: Vec<String> = fs::read_dir(chunks.join("cell"))
         .expect("read the tree prefix")
         .filter_map(Result::ok)
         .filter_map(|e| e.file_name().to_str().map(str::to_owned))
@@ -348,7 +348,7 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     for rung in &rungs {
         assert!(
             chunks
-                .join("holon")
+                .join("cell")
                 .join(rung)
                 .join("tiles.parquet")
                 .exists(),

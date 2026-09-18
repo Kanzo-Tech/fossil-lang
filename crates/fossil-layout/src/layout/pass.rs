@@ -26,7 +26,7 @@ use fossil_mem_probe::Probe;
 use fossil_tile_writer::TileWriter;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
-use fossil_sinks::manifest::{Channel, HOLON_PREFIX, HolonTree, TILES_FILE, VertexLevels};
+use fossil_sinks::manifest::{CELL_PREFIX, CellTree, Channel, TILES_FILE, VertexLevels};
 
 /// `row_of_dense[d]` when no row of the vertex file carries `dense_id` `d`.
 ///
@@ -236,13 +236,13 @@ impl AdjacencyTarget<'_> {
 pub struct LayoutReport {
     /// One entry per vertex type that earned a pyramid, keyed by
     /// [`VertexLayoutTarget::type_name`] — the argument to
-    /// `VertexInfo::with_holons`.
+    /// `VertexInfo::with_cells`.
     ///
     /// A type with no pyramid is **absent** rather than present and empty, which
     /// is the difference between a manifest that declares no tree and one that
     /// declares an empty one. The first is what a corpus written before the
     /// block existed reads as.
-    pub pyramids: Vec<(String, HolonTree)>,
+    pub pyramids: Vec<(String, CellTree)>,
     /// One entry per vertex type the pass **partitioned**, keyed by
     /// [`VertexLayoutTarget::type_name`] — the argument to
     /// `VertexInfo::with_channels`.
@@ -1492,7 +1492,7 @@ pub fn enrich_layout_with(
             })
             .collect();
 
-        let prefix = format!("{}{HOLON_PREFIX}", target.chunk_prefix);
+        let prefix = format!("{}{CELL_PREFIX}", target.chunk_prefix);
         io.ensure_prefix(&prefix)?;
         let tree = pyramid.write(io, &prefix, target.chunk_size, counts[index], &edges)?;
         report.pyramids.push((target.type_name.clone(), tree));

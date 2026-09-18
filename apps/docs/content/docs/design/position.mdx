@@ -127,8 +127,8 @@ the answer to.
 
 A provenance of `derived` names an algorithm, and naming an algorithm is only worth anything if the
 algorithm can be re-run. A position labelled *derived by X* that X does not reproduce is a label
-with nothing behind it — and downstream, a holon whose referent moves between writes is not
-navigable, which is why [holons](/docs/design/cells) treats this as its first property rather than
+with nothing behind it — and downstream, a cell whose referent moves between writes is not
+navigable, which is why [cells](/docs/design/cells) treats this as its first property rather than
 its last.
 
 The reasoning was already in the code and had never been run as an experiment. `local_moving`
@@ -253,7 +253,7 @@ the other half — running out of colours — while leaving this one exactly whe
 And the repair is one rule, not two — but it is not the rule this page used to name. *The placement
 partition **is** the base rung of the cell pyramid* was written before the pyramid was, and the
 pyramid that got written partitions the `dense_id` axis at a declared base of sixteen vertices per
-cell — `crates/fossil-sinks/src/manifest.rs, HolonTree` — which over com-DBLP is 19,818 cells
+cell — `crates/fossil-sinks/src/manifest.rs, CellTree` — which over com-DBLP is 19,818 cells
 against the placement's 55,712 groups. They are not the same partition, and neither bends into the
 other without giving up the gapless numbering or the arithmetic addressing. So the repair is not a
 second artefact at all: it is a change to where the groups go, and it is the section below.
@@ -325,7 +325,7 @@ and encodes the graph nowhere. What the packing trades is not signal for uniform
 The rejected row is about *encoding*: choosing area to mean population in a picture where area could
 have meant something a layout found. This is about *packing*, and the signal the coarse view carries
 is unchanged either way — a cell's `count` is `4^k` by construction at every rung and always was, so
-what a mark says is its mode and its purity, which is what [holons](/docs/design/cells) already
+what a mark says is its mode and its purity, which is what [cells](/docs/design/cells) already
 argues it says.
 
 The row comes back the day a placement exists whose extent means something — a force layout over a
@@ -475,7 +475,7 @@ writes min/max statistics per row group, which is what
 out of the footers. Declaring it would be a second statement of something the bytes carry.
 
 A categorical's domain is a count of distinct values, and **no footer holds one**. It is the same
-test `crates/fossil-sinks/src/manifest.rs, HolonTree` applies to `vertices_per_cell` — *the one
+test `crates/fossil-sinks/src/manifest.rs, CellTree` applies to `vertices_per_cell` — *the one
 number a reader cannot recover and a writer must therefore declare* — and it gives the same answer
 for the same reason. A field that repeats what a reader can compute is a second thing to check; a
 field that carries what nobody can recover is the only kind worth writing.

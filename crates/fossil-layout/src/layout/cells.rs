@@ -74,7 +74,7 @@ use arrow::array::{ArrayRef, Float32Array, RecordBatch, UInt32Array, UInt64Array
 use arrow::datatypes::{Field, Schema, SchemaRef};
 use fossil_sinks::generated::{CELL_COLUMNS, QUOTIENT_COLUMNS, WriterColumn};
 use fossil_sinks::manifest::{
-    CoordinateSystem, HolonRung, HolonTree, QUOTIENT_PREFIX, TILES_FILE, arrow_type,
+    CellRung, CellTree, CoordinateSystem, QUOTIENT_PREFIX, TILES_FILE, arrow_type,
     declared_properties,
 };
 
@@ -109,7 +109,7 @@ pub(crate) struct Pyramid {
     /// constant here, and that is the point: this module never learns which
     /// column it is tallying, so the only thing it could invent is a second
     /// spelling of a name the pass has already declared. See
-    /// `fossil_sinks::manifest::HolonTree::mode_channel`.
+    /// `fossil_sinks::manifest::CellTree::mode_channel`.
     mode_channel: String,
     /// Finest first, which is the order a manifest lists rungs in.
     rungs: Vec<Rung>,
@@ -142,15 +142,15 @@ struct Rung {
 }
 
 impl Rung {
-    fn new(shift: u32, holons: usize) -> Self {
+    fn new(shift: u32, cells: usize) -> Self {
         Self {
             shift,
-            count: vec![0; holons],
-            sum_x: vec![0.0; holons],
-            sum_y: vec![0.0; holons],
-            mode: vec![0; holons],
-            purity: vec![0.0; holons],
-            internal: vec![0; holons],
+            count: vec![0; cells],
+            sum_x: vec![0.0; cells],
+            sum_y: vec![0.0; cells],
+            mode: vec![0; cells],
+            purity: vec![0.0; cells],
+            internal: vec![0; cells],
         }
     }
 
@@ -193,9 +193,9 @@ impl Pyramid {
     /// it by accident**: the mode this writes is the mode of *that array*, and
     /// the name is what the pass declared the array as. A constant here would
     /// be a second spelling of it, which is the failure the declaration exists
-    /// to remove — see [`HolonTree::mode_channel`].
+    /// to remove — see [`CellTree::mode_channel`].
     ///
-    /// The plan comes from [`HolonTree`] and not from arithmetic here, which is
+    /// The plan comes from [`CellTree`] and not from arithmetic here, which is
     /// the same rule the level pyramid is written under: one function chooses
     /// the rungs and both the writer and the manifest call it.
     pub(crate) fn summarise(
@@ -207,16 +207,16 @@ impl Pyramid {
         clusters: &[u32],
         mode_channel: &str,
     ) -> Option<Self> {
-        HolonTree::base_bits(vertices_per_cell)?;
+        CellTree::base_bits(vertices_per_cell)?;
         if vertex_count <= vertices_per_cell {
             return None;
         }
 
         let mut rungs = Vec::new();
         for rung in 1u32.. {
-            let holons = HolonTree::holons_at(vertex_count, vertices_per_cell, rung)?;
-            let shift = HolonTree::shift_at(vertices_per_cell, rung)?;
-            let mut here = Rung::new(shift, usize::try_from(holons).unwrap_or(usize::MAX));
+            let cells = CellTree::cells_at(vertex_count, vertices_per_cell, rung)?;
+            let shift = CellTree::shift_at(vertices_per_cell, rung)?;
+            let mut here = Rung::new(shift, usize::try_from(cells).unwrap_or(usize::MAX));
 
             // One linear scan. A cell is a contiguous run of rows because
             // `new_dense` ascends — it is the write order and the address at
@@ -243,7 +243,7 @@ impl Pyramid {
             }
 
             rungs.push(here);
-            if holons <= 1 {
+            if cells <= 1 {
                 break;
             }
         }
@@ -258,13 +258,13 @@ impl Pyramid {
     /// **Write every rung and every quotient, and hand back the declaration.**
     ///
     /// `prefix` is the tree's own — the vertex type's prefix plus
-    /// `HOLON_PREFIX` — and each rung lands under `<prefix>r{k}/` with the
+    /// `CELL_PREFIX` — and each rung lands under `<prefix>r{k}/` with the
     /// quotient, where there is one, under `<prefix>r{k}/quotient/`. Tiled at
     /// the type's own `chunk_size`, because a rung's ids are a shift of the
     /// payload's and there is no second number to declare.
     ///
     /// **One call returns the bytes and the document**, and that is the phase
-    /// order made a signature. A rung's `holon_count` is arithmetic and a
+    /// order made a signature. A rung's `cell_count` is arithmetic and a
     /// manifest could state it in front of the pass; a rung's *quotient edge
     /// count* is a measurement, and nothing can plan it. So the writer declares
     /// what it wrote, and the plan is the part it checks itself against rather
@@ -281,7 +281,7 @@ impl Pyramid {
         chunk_size: u64,
         vertex_count: u64,
         edges: &[Edges<'_>],
-    ) -> Result<HolonTree, LayoutError> {
+    ) -> Result<CellTree, LayoutError> {
         let cell_schema = schema_of(CELL_COLUMNS, "a cell row");
         let quotient_schema = schema_of(QUOTIENT_COLUMNS, "a quotient edge");
         let tile = usize::try_from(chunk_size).unwrap_or(usize::MAX).max(1);
@@ -292,7 +292,7 @@ impl Pyramid {
         let mut declared = Vec::with_capacity(self.rungs.len());
         for index in 0..self.rungs.len() {
             let at = u32::try_from(index + 1).unwrap_or(u32::MAX);
-            let here = format!("{prefix}{}", HolonTree::rung_prefix(at));
+            let here = format!("{prefix}{}", CellTree::rung_prefix(at));
             io.ensure_prefix(&here)?;
 
             // **The edges, one rung at a time.** The quotient is a run-length of
@@ -331,7 +331,7 @@ impl Pyramid {
 
             // The rung, as the manifest states it: the count it holds, and a
             // quotient only where one was written.
-            let mut entry = HolonRung::at(at, rows as u64, declared_properties(CELL_COLUMNS));
+            let mut entry = CellRung::at(at, rows as u64, declared_properties(CELL_COLUMNS));
             if let Some(count) = quotient {
                 entry = entry.with_quotient(count, declared_properties(QUOTIENT_COLUMNS));
             }
@@ -344,14 +344,14 @@ impl Pyramid {
         // rungs `ceil(V / 4^k)` names have to be the same list, and the writer
         // is the only place that can notice they are not.
         debug_assert_eq!(
-            HolonTree::planned(
+            CellTree::planned(
                 vertex_count,
                 self.vertices_per_cell,
                 Vec::new(),
                 &declared_properties(CELL_COLUMNS),
             )
-            .map(|plan| plan.rungs.iter().map(|r| r.holon_count).collect::<Vec<_>>()),
-            Some(declared.iter().map(|r| r.holon_count).collect::<Vec<_>>()),
+            .map(|plan| plan.rungs.iter().map(|r| r.cell_count).collect::<Vec<_>>()),
+            Some(declared.iter().map(|r| r.cell_count).collect::<Vec<_>>()),
             "the pyramid this wrote is not the pyramid the arithmetic names",
         );
 
@@ -370,9 +370,9 @@ impl Pyramid {
         // referent is nowhere in the column, so the channel it summarises is
         // NAMED — the name the pass declared the partition under, carried here
         // since `summarise` rather than spelled a second time.
-        Ok(HolonTree::new(self.vertices_per_cell, relations, declared)
+        Ok(CellTree::new(self.vertices_per_cell, relations, declared)
             .with_coordinates(vec![CoordinateSystem::derived(
-                "holon", "x", "y", DERIVED_BY,
+                "cell", "x", "y", DERIVED_BY,
             )])
             .with_mode_channel(self.mode_channel.clone()))
     }
@@ -514,7 +514,7 @@ impl Rung {
     /// cells are the same cell is mass that stops being an edge. **Not a
     /// self-loop on the quotient** — an edge whose ends share a cell is not an
     /// edge of that cell — and on the planted fixture
-    /// `crates/fossil-layout/tests/holons.rs` evaluates, 1,088 of 1,095 edges
+    /// `crates/fossil-layout/tests/aggregation.rs` evaluates, 1,088 of 1,095 edges
     /// are absorbed, so a writer that kept them would be wrong about the
     /// overwhelming majority rather than in an edge case.
     fn absorb_runs(&mut self, pairs: &[u64]) {

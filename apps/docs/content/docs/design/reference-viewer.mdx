@@ -422,8 +422,8 @@ tree over the graph — the tree is the one the positions already induce — it 
 one can ask of a node in it. Which is also why the summary does not inherit
 `crates/fossil-sinks/src/manifest.rs, VertexLevels`' block: a level declares a `scale` a reader
 spends as arithmetic, and a summary declares a count, for the reasons
-`crates/fossil-sinks/src/manifest.rs, HolonTree` is a block of its own and not a `Projection`.
-[Holons](/docs/design/cells) is the page that rules on that, and the grouping it rules over is
+`crates/fossil-sinks/src/manifest.rs, CellTree` is a block of its own and not a `Projection`.
+[Cells](/docs/design/cells) is the page that rules on that, and the grouping it rules over is
 Louvain's rather than the plane's; what is measured below is the plane's.
 
 ### The level files are a cache, and the question is whether a reader still wants the sample
@@ -476,8 +476,9 @@ the others is — and the quotient is not a substitute in kind: its edges are sy
 one substitution [what was discarded](/docs/design/discarded) refuses outright, because replacing a
 line with the path it stands for moves every line on screen.
 
-**Nothing reads a rung.** `crates/fossil-graph` — the read surface the format exists for — contains
-no occurrence of `holon`, `rung`, `cell` or `quotient`; neither does `packages/corpus`; no guard
+**Nothing reads a rung.** `crates/fossil-graph` — the read surface the format exists for — has no
+verb, no plan and no type that names a rung, a cell or a quotient, and `packages/corpus` says it of
+itself in `packages/corpus/src/corpus.ts`: *nothing on this side writes or reads a rung*. No guard
 opens one; the conformance corpus declares `rungs: []`. The cell pyramid today is a writer and a
 manifest block. Retiring the levels would therefore not move a capability from one artefact to the
 other. **It would leave the coarse read path with no implementation on either side of the wasm
@@ -602,7 +603,7 @@ scale, measured on the same corpus:
 
 At 240 cells four in five of the possible pairs have an edge, which is a filled square and not a
 picture. And it is **denser than the community quotient at comparable counts**, which stays around
-23 on the same graph — [holons](/docs/design/cells) has that table. Grouping by position is worse
+23 on the same graph — [cells](/docs/design/cells) has that table. Grouping by position is worse
 for edges than grouping by community, and grouping by community is already too dense to lay out.
 **No coarse quotient of a real graph is drawable**, and no choice of grouping rescues it.
 

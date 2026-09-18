@@ -74,7 +74,7 @@ use std::time::Instant;
 use fossil_layout::layout::cluster_layout;
 use fossil_layout::layout::community::{Cut, Dendrogram, order_by_hierarchy};
 use fossil_layout::layout::morton::{morton_codes, morton_ranks};
-use fossil_sinks::manifest::{DEFAULT_CHUNK_SIZE, DEFAULT_VERTICES_PER_CELL, HolonTree};
+use fossil_sinks::manifest::{CellTree, DEFAULT_CHUNK_SIZE, DEFAULT_VERTICES_PER_CELL};
 
 /// One community's aggregate over the ORIGINAL graph, which is what modularity
 /// is defined against — a level's quality is a statement about the graph it
@@ -365,11 +365,10 @@ fn plane_report(label: &str, positions: &[(f32, f32)], placement: &[u32]) {
         "rung", "celdas", "área mín", "área p50", "área p99", "área máx", "máx/mín"
     );
     for rung in 1u32..=6 {
-        let Some(shift) = HolonTree::shift_at(DEFAULT_VERTICES_PER_CELL, rung) else {
+        let Some(shift) = CellTree::shift_at(DEFAULT_VERTICES_PER_CELL, rung) else {
             break;
         };
-        let Some(cells) = HolonTree::holons_at(vertex_count, DEFAULT_VERTICES_PER_CELL, rung)
-        else {
+        let Some(cells) = CellTree::cells_at(vertex_count, DEFAULT_VERTICES_PER_CELL, rung) else {
             break;
         };
         let mut boxes = vec![Bbox::EMPTY; cells as usize];
@@ -880,11 +879,10 @@ fn sibling_report(label: &str, placement: &[u32], edges: &[(u32, u32)], chunk: u
         "rung", "celdas", "q-aristas", "densidad", "área mín", "área máx", "máx/mín"
     );
     for rung in 1u32..=6 {
-        let Some(shift) = HolonTree::shift_at(DEFAULT_VERTICES_PER_CELL, rung) else {
+        let Some(shift) = CellTree::shift_at(DEFAULT_VERTICES_PER_CELL, rung) else {
             break;
         };
-        let Some(cells) = HolonTree::holons_at(vertex_count, DEFAULT_VERTICES_PER_CELL, rung)
-        else {
+        let Some(cells) = CellTree::cells_at(vertex_count, DEFAULT_VERTICES_PER_CELL, rung) else {
             break;
         };
         let mut boxes = vec![Bbox::EMPTY; cells as usize];

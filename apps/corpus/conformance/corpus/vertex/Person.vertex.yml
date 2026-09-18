@@ -37,8 +37,8 @@ channels:
 - name: age
   column: birth_year
   scale: quantitative
-holons:
-  prefix: holon/
+cells:
+  prefix: cell/
   vertices_per_cell: 16
   relations:
   - knows

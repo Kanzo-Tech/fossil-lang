@@ -1600,9 +1600,9 @@ export const GUARDS = [
   },
   {
     id: "mode-names-a-channel",
-    title: "A holon tree's `mode` names a channel the type declares",
+    title: "A cell tree's `mode` names a channel the type declares",
     proves:
-      "That the reference a holon tree makes RESOLVES: the channel it names its rungs' `mode` " +
+      "That the reference a cell tree makes RESOLVES: the channel it names its rungs' `mode` " +
       "after is one of the entries in that same vertex type's `channels:`, and that entry is " +
       "categorical. A cell row's `mode` is a bare `uint32` and the column says nothing about what " +
       "it is the mode OF — which palette the values belong to, or how many of them there are — so " +
@@ -1623,7 +1623,7 @@ export const GUARDS = [
       "**Two numbers, reported on every run and zero included.** How many trees this corpus " +
       "declares, and how many references were followed into a channel — because a corpus " +
       "declaring no tree violates nothing and passes here, which is exactly how a corpus that " +
-      "SHOULD carry one and lost it passes too. `holons:` is optional on the way in and no " +
+      "SHOULD carry one and lost it passes too. `cells:` is optional on the way in and no " +
       "manifest struct refuses a key it does not know, so a writer and a reader spelling that key " +
       "differently produce a document with the tree ABSENT, and nothing in it distinguishes that " +
       "from a document whose writer never had a pyramid to declare. An absent note and a zero " +
@@ -1650,12 +1650,12 @@ export const GUARDS = [
       let trees = 0;
       let followed = 0;
       for (const type of corpus.types) {
-        if (type.holons === null) {
-          notes.push(`${type.name}: declares no holon tree, so there is no reference to resolve`);
+        if (type.cells === null) {
+          notes.push(`${type.name}: declares no cell tree, so there is no reference to resolve`);
           continue;
         }
         trees += 1;
-        const named = type.holons.modeChannel;
+        const named = type.cells.modeChannel;
         if (named === null) {
           notes.push(
             `${type.name}: a tree whose \`mode\` names no channel — the writer did not say, which is a corpus and not a claim`,
@@ -1697,7 +1697,7 @@ export const GUARDS = [
       // First, and present on every run. A guard that says nothing when it examined nothing is
       // indistinguishable from a guard that examined something and found it well-formed.
       return result(failures, [
-        `${corpus.types.length} vertex type(s), ${trees} holon tree(s) declared, ` +
+        `${corpus.types.length} vertex type(s), ${trees} cell tree(s) declared, ` +
           `${followed} reference(s) resolved`,
         ...notes,
       ]);

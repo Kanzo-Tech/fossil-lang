@@ -1,12 +1,12 @@
-//! Integration: **a holon and the level below it say the same thing.**
+//! Integration: **a cell and the level below it say the same thing.**
 //!
-//! A holon is a summary row — a group, how many members it has, its edges, and
+//! A cell is a summary row — a group, how many members it has, its edges, and
 //! its parent — and `/docs/design/cells` states its whole contract as three
 //! obligations against the level underneath: its members are *exactly* the
 //! children that name it as parent, its count is the sum of its children's
 //! counts, and its edges are the aggregation of its children's edges.
 //!
-//! **Nothing else in the tree can catch a divergence.** A holon level is
+//! **Nothing else in the tree can catch a divergence.** A cell level is
 //! well-formed on its own terms whatever it holds: an aggregate that dropped a
 //! child, or counted one twice, or summed the edges of the level below but not
 //! the ones *between* siblings, is a tree that opens, addresses, draws, and
@@ -19,7 +19,7 @@
 //! So this is `levels.rs`'s standard applied one artefact along:
 //! `a_level_file_holds_exactly_what_the_level_predicate_selects` compares a
 //! written level against the predicate that defines it rather than trusting the
-//! writer, and these compare a holon against the aggregation that defines it.
+//! writer, and these compare a cell against the aggregation that defines it.
 //! The comparison is **symmetric difference in both directions** for the same
 //! reason it is there: one direction passes over an aggregate that is a strict
 //! subset of the truth, and equality of counts passes over an aggregate that
@@ -28,7 +28,7 @@
 //! corruption that only that obligation can see**, because a check that has
 //! never failed is a check whose failure path is a guess.
 //!
-//! **There is no holon writer yet**, so what stands in for one is a `Holon`
+//! **There is no cell writer yet**, so what stands in for one is a `Cell`
 //! whose fields are independent the way a written row's are: the count is a
 //! field and not `members.len()`, which is the whole of what "not what the
 //! writer recorded separately" means. Evaluated over a planted two-tier
@@ -62,7 +62,7 @@ const LINKS: u32 = 4;
 /// Here it buys something that file does not need — **the answer is known
 /// before the code runs**. Clique `c` is vertices `c * SIZE ..`, super-group `s`
 /// is cliques `s * PER_SUPER ..`, and every edge is one of three kinds, so what
-/// each holon must hold is arithmetic rather than a measurement.
+/// each cell must hold is arithmetic rather than a measurement.
 fn planted() -> (u32, Vec<(u32, u32)>) {
     let cliques = SUPERS * PER_SUPER;
     let base = |s: u32, c: u32| (s * PER_SUPER + c) * SIZE;
@@ -112,31 +112,31 @@ fn stated() -> (Dendrogram, Vec<(u32, u32)>) {
 /// and the two can disagree. Fold it into the set and the check becomes a
 /// tautology that no corruption can fail.
 ///
-/// `edges` is keyed by the ordered pair, and a holon carries every edge it is an
-/// **endpoint** of — so a cross edge appears in both of its holons, and
+/// `edges` is keyed by the ordered pair, and a cell carries every edge it is an
+/// **endpoint** of — so a cross edge appears in both of its cells, and
 /// [`edge_union`] checks that the two agree about what it weighs. `internal` is
 /// the weight with both ends inside, which is not a decoration: it is where the
-/// edges between a holon's own children go.
+/// edges between a cell's own children go.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct Holon {
+struct Cell {
     members: BTreeSet<u32>,
     count: u64,
     edges: BTreeMap<(u32, u32), u64>,
     internal: u64,
 }
 
-/// The holon rows at one level, **straight from the graph** — every vertex
+/// The cell rows at one level, **straight from the graph** — every vertex
 /// placed by `membership`, every edge counted once.
 ///
 /// This is the recorded side of every diff below. It never consults the level
 /// underneath, which is what makes it an independent witness of what
 /// [`aggregate`] claims.
-fn holons_at(membership: &[u32], groups: usize, edges: &[(u32, u32)]) -> Vec<Holon> {
-    let mut out = vec![Holon::default(); groups];
+fn cells_at(membership: &[u32], groups: usize, edges: &[(u32, u32)]) -> Vec<Cell> {
+    let mut out = vec![Cell::default(); groups];
     for (v, &g) in (0u32..).zip(membership) {
-        let holon = &mut out[g as usize];
-        holon.members.insert(v);
-        holon.count += 1;
+        let cell = &mut out[g as usize];
+        cell.members.insert(v);
+        cell.count += 1;
     }
     for &(u, v) in edges {
         let (a, b) = (membership[u as usize], membership[v as usize]);
@@ -156,13 +156,13 @@ fn holons_at(membership: &[u32], groups: usize, edges: &[(u32, u32)]) -> Vec<Hol
 /// Both endpoints record the same edge, so this is also the one place that
 /// checks they agree about it — a level whose two halves disagree is not a
 /// level, and aggregating it would silently pick one of the two answers.
-fn edge_union(holons: &[Holon]) -> BTreeMap<(u32, u32), u64> {
+fn edge_union(cells: &[Cell]) -> BTreeMap<(u32, u32), u64> {
     let mut all: BTreeMap<(u32, u32), u64> = BTreeMap::new();
-    for (h, holon) in (0u32..).zip(holons) {
-        for (&key, &weight) in &holon.edges {
+    for (h, cell) in (0u32..).zip(cells) {
+        for (&key, &weight) in &cell.edges {
             assert!(
                 key.0 == h || key.1 == h,
-                "holon {h} carries {key:?}, an edge it is not an endpoint of",
+                "cell {h} carries {key:?}, an edge it is not an endpoint of",
             );
             if let Some(&seen) = all.get(&key) {
                 assert_eq!(seen, weight, "the two endpoints of {key:?} disagree");
@@ -180,13 +180,13 @@ fn edge_union(holons: &[Holon]) -> BTreeMap<(u32, u32), u64> {
 /// parent at all; it is absorbed into its `internal` weight. A writer that
 /// takes the children's edge set and relabels it keeps those as self-loops or
 /// drops them, and either way the aggregate is wrong in a way no count notices.
-fn aggregate(children: &[Holon], parents: &[u32], groups: usize) -> Vec<Holon> {
-    let mut out = vec![Holon::default(); groups];
+fn aggregate(children: &[Cell], parents: &[u32], groups: usize) -> Vec<Cell> {
+    let mut out = vec![Cell::default(); groups];
     for (child, &parent) in children.iter().zip(parents) {
-        let holon = &mut out[parent as usize];
-        holon.members.extend(child.members.iter().copied());
-        holon.count += child.count;
-        holon.internal += child.internal;
+        let cell = &mut out[parent as usize];
+        cell.members.extend(child.members.iter().copied());
+        cell.count += child.count;
+        cell.internal += child.internal;
     }
     let mut cross: BTreeMap<(u32, u32), u64> = BTreeMap::new();
     for ((a, b), weight) in edge_union(children) {
@@ -205,19 +205,19 @@ fn aggregate(children: &[Holon], parents: &[u32], groups: usize) -> Vec<Holon> {
 }
 
 /// Obligation 1, both directions. Empty means the sets are equal.
-fn membership_diff(recorded: &[Holon], defined: &[Holon]) -> Vec<String> {
+fn membership_diff(recorded: &[Cell], defined: &[Cell]) -> Vec<String> {
     let mut findings = width(recorded, defined);
     for (h, (r, d)) in (0u32..).zip(recorded.iter().zip(defined)) {
         let missing: Vec<u32> = d.members.difference(&r.members).copied().collect();
         let invented: Vec<u32> = r.members.difference(&d.members).copied().collect();
         if !missing.is_empty() {
             findings.push(format!(
-                "holon {h}: members its children have and it does not: {missing:?}"
+                "cell {h}: members its children have and it does not: {missing:?}"
             ));
         }
         if !invented.is_empty() {
             findings.push(format!(
-                "holon {h}: members it has and no child of it does: {invented:?}"
+                "cell {h}: members it has and no child of it does: {invented:?}"
             ));
         }
     }
@@ -225,13 +225,13 @@ fn membership_diff(recorded: &[Holon], defined: &[Holon]) -> Vec<String> {
 }
 
 /// Obligation 2. Independent of obligation 1 only because the count is a
-/// recorded field; see [`Holon`].
-fn count_diff(recorded: &[Holon], defined: &[Holon]) -> Vec<String> {
+/// recorded field; see [`Cell`].
+fn count_diff(recorded: &[Cell], defined: &[Cell]) -> Vec<String> {
     let mut findings = width(recorded, defined);
     for (h, (r, d)) in (0u32..).zip(recorded.iter().zip(defined)) {
         if r.count != d.count {
             findings.push(format!(
-                "holon {h}: records {} members, its children sum to {}",
+                "cell {h}: records {} members, its children sum to {}",
                 r.count, d.count,
             ));
         }
@@ -241,13 +241,13 @@ fn count_diff(recorded: &[Holon], defined: &[Holon]) -> Vec<String> {
 
 /// Obligation 3, both directions and over weights as well as keys — a quotient
 /// with the right neighbours and the wrong weights is a different graph.
-fn edge_diff(recorded: &[Holon], defined: &[Holon]) -> Vec<String> {
+fn edge_diff(recorded: &[Cell], defined: &[Cell]) -> Vec<String> {
     let mut findings = width(recorded, defined);
     for (h, (r, d)) in (0u32..).zip(recorded.iter().zip(defined)) {
         for (key, weight) in &d.edges {
             if r.edges.get(key) != Some(weight) {
                 findings.push(format!(
-                    "holon {h}: {key:?} aggregates to {weight} and it records {:?}",
+                    "cell {h}: {key:?} aggregates to {weight} and it records {:?}",
                     r.edges.get(key),
                 ));
             }
@@ -255,13 +255,13 @@ fn edge_diff(recorded: &[Holon], defined: &[Holon]) -> Vec<String> {
         for (key, weight) in &r.edges {
             if !d.edges.contains_key(key) {
                 findings.push(format!(
-                    "holon {h}: records {key:?} at {weight}, which no child of it has"
+                    "cell {h}: records {key:?} at {weight}, which no child of it has"
                 ));
             }
         }
         if r.internal != d.internal {
             findings.push(format!(
-                "holon {h}: records {} internal weight, its children aggregate to {}",
+                "cell {h}: records {} internal weight, its children aggregate to {}",
                 r.internal, d.internal,
             ));
         }
@@ -269,15 +269,15 @@ fn edge_diff(recorded: &[Holon], defined: &[Holon]) -> Vec<String> {
     findings
 }
 
-/// The one finding that makes every per-holon comparison below meaningless, so
+/// The one finding that makes every per-cell comparison below meaningless, so
 /// every obligation opens with it: two levels of different widths are not
 /// zippable and a zip would quietly check the shorter one.
-fn width(recorded: &[Holon], defined: &[Holon]) -> Vec<String> {
+fn width(recorded: &[Cell], defined: &[Cell]) -> Vec<String> {
     if recorded.len() == defined.len() {
         Vec::new()
     } else {
         vec![format!(
-            "{} holons recorded against {} the level below defines",
+            "{} cells recorded against {} the level below defines",
             recorded.len(),
             defined.len(),
         )]
@@ -287,16 +287,16 @@ fn width(recorded: &[Holon], defined: &[Holon]) -> Vec<String> {
 /// Every edge of the graph, counted exactly once from the rows of one level —
 /// cross weight plus internal weight. A level that loses an edge somewhere in
 /// the aggregation is caught here even if it lost it consistently at both ends.
-fn mass(holons: &[Holon]) -> u64 {
-    let cross: u64 = edge_union(holons).values().sum();
-    cross + holons.iter().map(|h| h.internal).sum::<u64>()
+fn mass(cells: &[Cell]) -> u64 {
+    let cross: u64 = edge_union(cells).values().sum();
+    cross + cells.iter().map(|h| h.internal).sum::<u64>()
 }
 
 /// The recorded and defined sides of one level, which is what every obligation
 /// is a comparison of.
 struct Pair {
-    recorded: Vec<Holon>,
-    defined: Vec<Holon>,
+    recorded: Vec<Cell>,
+    defined: Vec<Cell>,
 }
 
 /// The top of the planted hierarchy: the super-groups, recorded straight from
@@ -305,14 +305,14 @@ fn super_groups() -> Pair {
     let (tree, edges) = stated();
     let cliques = (SUPERS * PER_SUPER) as usize;
     let supers = SUPERS as usize;
-    let children = holons_at(
+    let children = cells_at(
         &tree.membership(0).expect("the clique level"),
         cliques,
         &edges,
     );
     let parents = tree.parents(0, 1).expect("a clique's super-group");
     Pair {
-        recorded: holons_at(
+        recorded: cells_at(
             &tree.membership(1).expect("the super level"),
             supers,
             &edges,
@@ -325,14 +325,14 @@ fn super_groups() -> Pair {
 ///
 /// Every obligation below compares two computations, and two computations can
 /// agree on a wrong answer. This is the one test that does not diff: it states
-/// what the planting rule puts in each holon — which vertices, how many, which
+/// what the planting rule puts in each cell — which vertices, how many, which
 /// neighbours at what weight — and checks the recorded rows against arithmetic
 /// nothing in the crate performed.
 #[test]
 fn a_planted_two_tier_hierarchy_summarises_exactly_what_construction_says() {
     let (tree, edges) = stated();
     let supers = SUPERS as usize;
-    let holons = holons_at(
+    let cells = cells_at(
         &tree.membership(1).expect("the super level"),
         supers,
         &edges,
@@ -349,16 +349,13 @@ fn a_planted_two_tier_hierarchy_summarises_exactly_what_construction_says() {
         "the fixture is the graph this test's arithmetic is about",
     );
 
-    for (s, holon) in (0u32..).zip(&holons) {
+    for (s, cell) in (0u32..).zip(&cells) {
         let first = s * PER_SUPER * SIZE;
         let expected: BTreeSet<u32> = (first..first + PER_SUPER * SIZE).collect();
+        assert_eq!(cell.members, expected, "super-group {s} is its own cliques");
+        assert_eq!(cell.count, u64::from(PER_SUPER * SIZE));
         assert_eq!(
-            holon.members, expected,
-            "super-group {s} is its own cliques"
-        );
-        assert_eq!(holon.count, u64::from(PER_SUPER * SIZE));
-        assert_eq!(
-            holon.internal, per_super,
+            cell.internal, per_super,
             "super-group {s} holds every edge of its cliques and the links between them",
         );
         // The path: one edge to each neighbouring super-group, and nothing else.
@@ -369,20 +366,20 @@ fn a_planted_two_tier_hierarchy_summarises_exactly_what_construction_says() {
         if s + 1 < SUPERS {
             neighbours.insert((s, s + 1), 1);
         }
-        assert_eq!(holon.edges, neighbours, "super-group {s}'s own edges");
+        assert_eq!(cell.edges, neighbours, "super-group {s}'s own edges");
     }
-    assert_eq!(mass(&holons), edges.len() as u64, "every edge, once");
+    assert_eq!(mass(&cells), edges.len() as u64, "every edge, once");
 }
 
 /// **Obligation 1** — and the corruption it exists for.
 ///
-/// The red half swaps one member between two holons. Both counts are still
-/// right, both holons still hold the number of vertices their children add up
+/// The red half swaps one member between two cells. Both counts are still
+/// right, both cells still hold the number of vertices their children add up
 /// to, and the tree summarises a graph in which two vertices changed community.
 /// That is the case a count cannot see and the reason the comparison is a
 /// symmetric difference of sets.
 #[test]
-fn a_holons_members_are_exactly_the_children_that_name_it_as_parent() {
+fn a_cells_members_are_exactly_the_children_that_name_it_as_parent() {
     let Pair { recorded, defined } = super_groups();
     assert!(
         membership_diff(&recorded, &defined).is_empty(),
@@ -409,7 +406,7 @@ fn a_holons_members_are_exactly_the_children_that_name_it_as_parent() {
     assert_eq!(
         membership_diff(&swapped, &defined).len(),
         4,
-        "one vertex missing and one invented, in each of two holons",
+        "one vertex missing and one invented, in each of two cells",
     );
 }
 
@@ -420,7 +417,7 @@ fn a_holons_members_are_exactly_the_children_that_name_it_as_parent() {
 /// which is the shape of every count that was computed once and reused after
 /// the thing it counted changed.
 #[test]
-fn a_holons_count_is_the_sum_of_its_childrens_counts() {
+fn a_cells_count_is_the_sum_of_its_childrens_counts() {
     let Pair { recorded, defined } = super_groups();
     assert!(
         count_diff(&recorded, &defined).is_empty(),
@@ -445,7 +442,7 @@ fn a_holons_count_is_the_sum_of_its_childrens_counts() {
 /// internal to a super-group. The red half drops one edge from one endpoint,
 /// which is what a relabelling that deduplicates by key looks like from outside.
 #[test]
-fn a_holons_edges_are_the_aggregation_of_its_childrens_edges() {
+fn a_cells_edges_are_the_aggregation_of_its_childrens_edges() {
     let Pair { recorded, defined } = super_groups();
     assert!(
         edge_diff(&recorded, &defined).is_empty(),
@@ -461,7 +458,7 @@ fn a_holons_edges_are_the_aggregation_of_its_childrens_edges() {
     );
     assert_eq!(mass(&recorded), mass(&defined));
     // The absorbed edges, positively: the cliques inside a super-group are
-    // joined, and none of those joins survives as an edge of the holon.
+    // joined, and none of those joins survives as an edge of the cell.
     let internal: u64 = recorded.iter().map(|h| h.internal).sum();
     assert_eq!(internal, edges.len() as u64 - u64::from(SUPERS - 1));
 
@@ -505,7 +502,7 @@ fn the_three_obligations_hold_up_a_cut_of_a_partition_nobody_designed() {
 fn obligations_up(tree: &Dendrogram, cut: &Cut, edges: &[(u32, u32)]) -> Vec<String> {
     let vertex_count = tree.vertex_count();
     let identity: Vec<u32> = (0..vertex_count).collect();
-    let mut children = holons_at(&identity, vertex_count as usize, edges);
+    let mut children = cells_at(&identity, vertex_count as usize, edges);
     let mut below: Option<usize> = None;
     let mut findings = Vec::new();
 
@@ -521,7 +518,7 @@ fn obligations_up(tree: &Dendrogram, cut: &Cut, edges: &[(u32, u32)]) -> Vec<Str
                     .expect("a rung above a rung")
             },
         );
-        let recorded = holons_at(&membership, groups, edges);
+        let recorded = cells_at(&membership, groups, edges);
         let defined = aggregate(&children, &parents, groups);
 
         let level = rung.level();
@@ -550,20 +547,20 @@ fn obligations_up(tree: &Dendrogram, cut: &Cut, edges: &[(u32, u32)]) -> Vec<Str
 
 /// Determinism is the property `/docs/design/cells` puts first, and it is a
 /// property of the rows and not only of the partition: the same corpus gives
-/// the same holons, bit for bit, or a bookmark does not resolve tomorrow.
+/// the same cells, bit for bit, or a bookmark does not resolve tomorrow.
 ///
 /// `tests/dendrogram.rs` holds the cut to that standard. This holds the rows to
 /// it — two independent evaluations, nothing shared, compared whole. It is the
 /// assertion that nothing in the aggregation above reached for a hash.
 #[test]
-fn the_same_graph_gives_the_same_holon_rows_twice() {
+fn the_same_graph_gives_the_same_cell_rows_twice() {
     let first = rows_of_every_rung();
     let second = rows_of_every_rung();
     assert_eq!(first, second);
     assert!(!first.is_empty(), "a cut with no rungs proves nothing");
 }
 
-fn rows_of_every_rung() -> Vec<Vec<Holon>> {
+fn rows_of_every_rung() -> Vec<Vec<Cell>> {
     let (vertex_count, edges) = planted();
     let tree = Dendrogram::of(vertex_count, &edges);
     tree.cut(4)
@@ -571,29 +568,29 @@ fn rows_of_every_rung() -> Vec<Vec<Holon>> {
         .iter()
         .map(|rung| {
             let membership = tree.membership(rung.level()).expect("a rung is a level");
-            holons_at(&membership, rung.groups() as usize, &edges)
+            cells_at(&membership, rung.groups() as usize, &edges)
         })
         .collect()
 }
 
 /// **And the one thing above that is not checked.**
 ///
-/// Counts sum and edges aggregate; where a holon goes on the plane is a choice,
+/// Counts sum and edges aggregate; where a cell goes on the plane is a choice,
 /// and there is no diff that makes a choice correct. So the obligation on a
 /// position is not that it verifies — it is that it is **declared**, in the same
 /// field a vertex's position is declared in and with the same three answers
 /// available: `crates/fossil-sinks/src/manifest.rs, Provenance`.
 ///
-/// A holon's position is `Derived` by construction — something chose it because
+/// A cell's position is `Derived` by construction — something chose it because
 /// a picture needed coordinates — so its density is a fact about the choosing.
 /// What makes the declaration worth anything is `derived_by`: re-deriving is how
-/// a reader checks that a holon's referent has not moved, and nothing can re-run
+/// a reader checks that a cell's referent has not moved, and nothing can re-run
 /// what nothing names. `None` there is a weaker statement than a name, not an
 /// equivalent one, which is why this asserts the name is present rather than
 /// asserting the position.
 #[test]
-fn a_holons_position_is_declared_rather_than_derived_in_silence() {
-    let declared = CoordinateSystem::derived("holon", "x", "y", "louvain-cut+member-centroid");
+fn a_cells_position_is_declared_rather_than_derived_in_silence() {
+    let declared = CoordinateSystem::derived("cell", "x", "y", "louvain-cut+member-centroid");
     assert_eq!(declared.provenance, Provenance::Derived);
     assert!(
         !declared.is_data(),

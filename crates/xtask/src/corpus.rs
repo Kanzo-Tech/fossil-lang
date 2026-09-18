@@ -100,7 +100,7 @@ pub enum Role {
     /// A summed edge weight.
     Weight,
     /// The majority value, over the rows summarised, of the channel the tree
-    /// names — `HolonTree::mode_channel`, and never «a categorical»: the column
+    /// names — `CellTree::mode_channel`, and never «a categorical»: the column
     /// is a bare ordinal and carries no referent.
     Mode,
     /// What fraction of the rows summarised carry the mode.

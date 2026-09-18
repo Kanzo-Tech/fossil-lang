@@ -886,7 +886,7 @@ impl Dendrogram {
     }
 
     /// Which group of level `to` each group of level `from` belongs to — the
-    /// parent column a holon row carries.
+    /// parent column a cell row carries.
     ///
     /// `from` is strictly finer than `to`; `None` if either level is absent or
     /// they are the wrong way round. The walk is the same lookup composition as
@@ -978,7 +978,7 @@ impl Dendrogram {
 
 /// A chosen sequence of levels, finest first.
 ///
-/// The rungs are the levels a holon tree would publish; everything the
+/// The rungs are the levels a cell tree would publish; everything the
 /// dendrogram holds between them is what the cut refused.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Cut {
@@ -1023,7 +1023,7 @@ impl Cut {
     /// **The branching factor, as the pyramid declares it.**
     ///
     /// `VertexLevels::stride(1)` and not a literal: the exponent lives in
-    /// `crates/fossil-sinks/src/manifest.rs, VertexLevels` and a holon tree on
+    /// `crates/fossil-sinks/src/manifest.rs, VertexLevels` and a cell tree on
     /// the same octave inherits that arithmetic instead of inventing one.
     #[must_use]
     pub const fn declared_branching() -> u64 {

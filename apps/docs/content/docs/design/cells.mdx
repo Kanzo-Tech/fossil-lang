@@ -1,6 +1,6 @@
 ---
-title: Holons
-description: The second reader — a mipmap over the corpus that does not fit on the GPU; why a holon is a texel and not a community, why the partition is arbitrary while the aggregation is exact, why the base of the pyramid has to be declared because no writer can derive it, the three properties a rung has to hold, and why the corpus carries one multiscale structure rather than two.
+title: Cells
+description: The second reader — a mipmap over the corpus that does not fit on the GPU; why a cell is a texel and not a community, why the partition is arbitrary while the aggregation is exact, why the base of the pyramid has to be declared because no writer can derive it, the three properties a rung has to hold, and why the corpus carries one multiscale structure rather than two.
 direction:
   summary: A corpus too large to draw carries exactly one mipmap of summary rows — the cell pyramid, on the same quaternary addressing its tiles already use — with the base declared rather than derived, every aggregate verifiable against the level below by symmetric difference, and only the position declared rather than derived.
 ---
@@ -11,35 +11,35 @@ There are two ways to read a graph you cannot see all of, and the decision here 
 | | what it is | when |
 | --- | --- | --- |
 | **cosmos.gl** | the whole graph on the GPU, pan and zoom freely | it fits |
-| **holons** | a mipmap of aggregates, you descend and ascend | it does not |
+| **cells** | a mipmap of aggregates, you descend and ascend | it does not |
 
 A mode that switches between the two as the camera zooms was built far enough to be rejected, and
 [what was discarded](/docs/design/discarded) carries why. The short form: the zoom level at which
 the reader is most lost is the one where the interaction changes under them.
 
 The corpus serves both without knowing about either — cosmos.gl reads the payload,
-a holon reader reads the tree. This page is the second one.
+a cell reader reads the tree. This page is the second one.
 
 ## The partition is arbitrary. The aggregation is exact.
 
 That sentence governs everything below, and it is narrower than the one this page used to make.
 
 **A reader may not conclude *these vertices belong together*.** Whatever put two vertices in the same
-holon — a community detection run, a grid, a sort — is a choice made by a writer, and nothing in the
+cell — a community detection run, a grid, a sort — is a choice made by a writer, and nothing in the
 corpus certifies it as structure in the world.
 
 **A reader may conclude *this region holds exactly N vertices and M edges leave it*.** That is an
 arithmetic fact about the rows below, it is falsifiable against them, and it is the only thing a
-holon is allowed to assert.
+cell is allowed to assert.
 
 The weaker promise is what makes the three obligations further down **necessary rather than
 optional**. If the grouping carried meaning, a reader could take the writer's word for the counts as
 well; because it carries none, the counts are the entire content of a rung, and a rung whose counts
 do not reconcile against the level below is not a coarser view of anything.
-`crates/fossil-layout/tests/holons.rs` does not change a line for this page's change of mind, and
+`crates/fossil-layout/tests/aggregation.rs` does not change a line for this page's change of mind, and
 that is the test: what it checks is the aggregation, which is the half that was never arbitrary.
 
-## A holon is a texel, and the corpus is already a mipmap
+## A cell is a texel, and the corpus is already a mipmap
 
 The format did not have to be argued into this shape. It is in it.
 
@@ -109,7 +109,7 @@ And the pyramid is already the other half of a mipmap. A level in
 `4^k` — one **representative** per block. A rung is the **aggregate** of the same block. Same
 address, two answers to two questions, which is why one cannot be spelled as the other.
 
-## A holon is not an entity, and no reader is in a position to ask
+## A cell is not an entity, and no reader is in a position to ask
 
 The attractive version of this gives each community a type and an IRI — `Person@l1`, addressable,
 shaped, a first-class subject. It is rejected, and the page used to reject it on identity: a
@@ -119,23 +119,23 @@ a counter is not stable across reorderings, and every reference dangles.
 That argument still holds, and under *the partition is arbitrary* it no longer has to be made.
 **Nothing but the camera reads the tree.** `crates/fossil-graph/src/operations/mod.rs, Verb` is the
 six-verb surface, and none of them descends a rung: `read`, `expand` and `path` return **vertices**,
-because a holon is not one, and a verb that returned a holon would be answering a question about the
+because a cell is not one, and a verb that returned a cell would be answering a question about the
 plane in a language about the graph. That is the split the door already draws between its addressed
 half and its queried half — the camera computes addresses and asks for bytes, the verbs run SQL —
 and `crates/fossil-graph/src/lib.rs` states it as *no verb draws; the camera is addressed, not
 queried*. [One door](/docs/design/one-door) is where the seam itself is argued.
 
-So the question *is a holon an entity?* disappears without being answered, which is where the
+So the question *is a cell an entity?* disappears without being answered, which is where the
 identity argument in [what was discarded](/docs/design/discarded) ran aground: it had to say what a
-holon **is**, and there was no answer that survived an incremental write. Saying who reads it costs
+cell **is**, and there was no answer that survived an incremental write. Saying who reads it costs
 nothing and settles the same thing.
 
 What survives is the small version, and it is enough: **a row** carrying a group, its position, how
 many members it has, and its parent. No IRI, no shape, no new vertex type, nothing that pretends to
 be a thing in the world. [Identity](/docs/design/identity) is the page that says what a subject is
-here, and a holon is deliberately not one.
+here, and a cell is deliberately not one.
 
-The row's columns are declared per rung, in `crates/fossil-sinks/src/manifest.rs, HolonRung`, and
+The row's columns are declared per rung, in `crates/fossil-sinks/src/manifest.rs, CellRung`, and
 **the model reserves no spelling for any of them**. A payload property is carried through opaquely,
 so a reader never has to know its name; these are roles a reader acts on — descend by the parent,
 size a mark by the member count, check mass with the internal weight — and what says which is the
@@ -143,8 +143,8 @@ declared list rather than a convention a second writer could spell differently.
 
 ## It is a third artefact, and the tree already ruled on that
 
-The obvious home for a holon tree is `levels:` — the pyramid is already a hierarchy, the addressing
-is already arithmetic, and a holon level looks like a coarse level. It cannot go there, and the
+The obvious home for a cell tree is `levels:` — the pyramid is already a hierarchy, the addressing
+is already arithmetic, and a cell level looks like a coarse level. It cannot go there, and the
 ruling is not made on this page. [The reference viewer](/docs/design/reference-viewer) states the
 model's one load-bearing decision and what contradicts it:
 
@@ -155,35 +155,35 @@ model's one load-bearing decision and what contradicts it:
 
 A level in `crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex whose `dense_id` is a
 multiple of `4^k`. Every row is a real vertex at the position the payload gives it; nothing is
-synthesised. A holon is a synthetic row by construction. Putting one in a `Projection` would make
+synthesised. A cell is a synthetic row by construction. Putting one in a `Projection` would make
 `scale:` mean two different things in the same document, which is exactly the failure the
 one-contract rule exists to prevent. **Being a texel over the same cells does not soften that** — it
 sharpens it, because now the two blocks would share an address and disagree about what a row is.
 
 So: its own block, its own prefix, its own name. It is
-`crates/fossil-sinks/src/manifest.rs, HolonTree`, and it hangs off a vertex type beside `index:` and
+`crates/fossil-sinks/src/manifest.rs, CellTree`, and it hangs off a vertex type beside `index:` and
 `coordinates:` rather than inside `projections:`. A type declares one with
-`crates/fossil-sinks/src/manifest.rs, with_holons`.
+`crates/fossil-sinks/src/manifest.rs, with_cells`.
 
 | the block declares | because |
 | --- | --- |
 | a `prefix`, and a `path` per rung | a tile's URL is the one part a reader cannot compute, and there is no listing over HTTP |
-| a `chunk_size` of its own | tile `k` of a rung is the `k`th run of **holon** rows, and a rung is not as long as the payload — the number that slices it is its own even where the two arithmetics agree |
-| a `holon_count` per rung | the sibling of `vertex_count`: a hole in the middle is caught by the addressing and a missing tail is caught by nothing |
+| a `chunk_size` of its own | tile `k` of a rung is the `k`th run of **cell** rows, and a rung is not as long as the payload — the number that slices it is its own even where the two arithmetics agree |
+| a `cell_count` per rung | the sibling of `vertex_count`: a hole in the middle is caught by the addressing and a missing tail is caught by nothing |
 | the `relations` it was computed over | mass conservation has no population without them, and a type may be the source of several |
 | `properties` per rung | a group id, a position, a member count, a parent and an internal weight are columns that exist nowhere else in the corpus |
-| `coordinates` | the one thing on a holon that is chosen rather than aggregated |
+| `coordinates` | the one thing on a cell that is chosen rather than aggregated |
 
 <Callout type="warn">
-**That second row said *a holon id is not a `dense_id`*, and the premise it rested on is gone.** The
+**That second row said *a cell id is not a `dense_id`*, and the premise it rested on is gone.** The
 argument was `crates/fossil-sinks/src/manifest.rs, VertexIndex`'s, one artefact along: an index is a
 second **order** over the payload's rows, so its tile `k` has nothing to do with the payload's tile
 `k`, and reusing the payload's number would read as an alignment that does not exist. Carried across
-to a holon, it assumed group ids are whatever a partitioning algorithm handed back — arbitrary
+to a cell, it assumed group ids are whatever a partitioning algorithm handed back — arbitrary
 labels with no relation to the id space.
 
-Under a quaternary partition they are not arbitrary. **Holon `r` of rung `k` covers exactly
-`[r·4^k, (r+1)·4^k)`**, so a holon id is `dense_id >> 2k` — `tile_of` with a different shift — and
+Under a quaternary partition they are not arbitrary. **Cell `r` of rung `k` covers exactly
+`[r·4^k, (r+1)·4^k)`**, so a cell id is `dense_id >> 2k` — `tile_of` with a different shift — and
 the alignment the argument denied is the whole mechanism. What survives is the weaker reason the row
 now gives: a rung is a different *length* from the payload, so it slices at its own number.
 
@@ -193,7 +193,7 @@ not.
 
 **And no `scale`, which is the difference doing work rather than a field left out.** A projection's
 scale is arithmetic a reader spends — rows are `count.div_ceil(scale)` and a tile address is a shift
-by `log2(scale)`. A rung declares **how many holons it has** and a reader divides if it wants a
+by `log2(scale)`. A rung declares **how many cells it has** and a reader divides if it wants a
 ratio, which is what lets one manifest describe a tree cut out of a dendrogram (where the
 contraction is measured after the fact, and is 5.69× where the exponent says 4) and a tree over
 cells (where it is 4 exactly) without the document meaning two things.
@@ -243,7 +243,7 @@ where the algorithm's sweeps happened to stop.
 ## The corpus carries one multiscale structure, and it is the cell pyramid
 
 The question this page has carried open — a pyramid of cells, or a holarchy cut out of the
-dendrogram — is closed. **A corpus publishes the cell pyramid under `holon/r{k}/` and does not
+dendrogram — is closed. **A corpus publishes the cell pyramid under `cell/r{k}/` and does not
 publish a holarchy beside it.** [What was discarded](/docs/design/discarded) carries the holarchy
 with what it would have bought and what would bring it back.
 
@@ -255,7 +255,7 @@ reader has to stay arithmetic.**
 A cell is `dense_id >> shift` and nothing else —
 `crates/fossil-layout/src/layout/cells.rs, Pyramid` — so a reader holding a vertex holds its cell at
 every rung with no listing, no fetch and no table, and
-`crates/fossil-sinks/src/manifest.rs, holons_at` declares `ceil(V / 4^k)` for the whole tree before
+`crates/fossil-sinks/src/manifest.rs, cells_at` declares `ceil(V / 4^k)` for the whole tree before
 a byte is written. **A holarchy's groups have measured extents.** They are wherever Louvain's sweeps
 stopped, they are different for every corpus, and no arithmetic over `vertex_count` produces them —
 so a reader that wanted to address one would first have to fetch the boundaries a heuristic found.
@@ -416,17 +416,17 @@ saturation is where *this* point set's cells start to touch, and no reader can r
 `vertex_count` — so a writer that does not record it has published a pyramid whose bottom step is
 unknown.
 
-Once it is declared, the rest is arithmetic: **rung `k` has `ceil(base_count / 4^k)` holons.** That
+Once it is declared, the rest is arithmetic: **rung `k` has `ceil(base_count / 4^k)` cells.** That
 is not a projection of the measurement, it *is* the measurement — 61,210 → 15,303 → 3,826 → 957 →
 240 → 60 is `ceil(n/4)` at every step, and every one of those numbers is in the table two sections
-down. So `holon_count` per rung is derivable from one declared number, exactly as
+down. So `cell_count` per rung is derivable from one declared number, exactly as
 `crates/fossil-sinks/src/manifest.rs, rows_at` derives a level's rows from `vertex_count` and
 `crates/fossil-sinks/src/manifest.rs, planned` plans the whole pyramid before a byte is written.
 
 **This dissolved the obstacle this page used to name, and the tree is written.** The block was
 declarable and unfillable — *nothing writes one yet* — because a rung's count was something only a
 completed pass could report. It is not:
-`crates/fossil-sinks/src/manifest.rs, holons_at` is `ceil(vertex_count / 4^k)`, so the entire tree
+`crates/fossil-sinks/src/manifest.rs, cells_at` is `ceil(vertex_count / 4^k)`, so the entire tree
 is arithmetic from one declared number.
 
 What writes it is `crates/fossil-layout/src/layout/cells.rs, Pyramid`, and the base is declared **per
@@ -452,7 +452,7 @@ written, and only a measured one has an order.
 
 ### 1 · Deterministic — and this one is measured
 
-Same corpus, same holons, bit for bit. A holon whose referent moves between writes is not
+Same corpus, same cells, bit for bit. A cell whose referent moves between writes is not
 navigable: a reader who descends, pans and ascends must arrive back where they were, and a bookmark
 must still resolve tomorrow.
 
@@ -475,8 +475,8 @@ A spatial partition inherits it for free and for a duller reason — a cell id i
 the payload already fixed — which is one more thing the texel reading costs nothing.
 
 A measurement is not a guard, though, and for a while nothing kept the property holding.
-`crates/fossil-layout/tests/holons.rs, the_same_graph_gives_the_same_holon_rows_twice` keeps the
-**holon rows** reproducible, which is a narrower claim one artefact along: the rows come out of
+`crates/fossil-layout/tests/aggregation.rs, the_same_graph_gives_the_same_cell_rows_twice` keeps the
+**cell rows** reproducible, which is a narrower claim one artefact along: the rows come out of
 `Dendrogram` in memory, and the measurement above was of `enrich_layout` writing Parquet across two
 processes. `crates/fossil-layout/tests/cells.rs` narrowed the gap without closing it — it evaluates
 every obligation against the written rungs, so a *wrong* summary is caught, and the same corpus
@@ -496,7 +496,7 @@ those are the inputs a summariser reaches for by accident.
 
 It was run red twice before it was believed, and the second time is what says what it is for: a
 per-process order over the quotient's runs, every run and every weight intact, leaves all five
-obligations green and is caught here alone, at `payload/holon/r1/quotient/tiles.parquet` byte 18.
+obligations green and is caught here alone, at `payload/cell/r1/quotient/tiles.parquet` byte 18.
 
 What the guard does not carry is the row above's **scale** — 4,000 vertices against 200,000 — so
 what runs on every PR is the property, and the corpus it was first measured on stays a measurement.
@@ -505,7 +505,7 @@ what runs on every PR is the property, and the corpus it was first measured on s
 
 Every published step contracts by at least four — the same octave the tile pyramid already uses.
 `VertexLevels` fixes that exponent in one place and says why a second spelling of it is the bug the
-constant exists to prevent; a holon tree on the same octave inherits that arithmetic instead of
+constant exists to prevent; a cell tree on the same octave inherits that arithmetic instead of
 inventing one.
 
 Over cells the rule is met **with equality**, which is what a mipmap is: 61,210 → 15,303 → 3,826 is
@@ -565,15 +565,15 @@ the manifest — every rung against the one below it, the finest against the typ
 one and never a literal four, so the octave keeps the single spelling that constant exists to
 enforce. A reader weighing a descent finds out it is not worth taking before it pays for the rung.
 
-### 3 · A holon is defined against the level below, so it is checkable
+### 3 · A cell is defined against the level below, so it is checkable
 
 This is the half the change of mind does not touch. The bar is the one `levels.rs` already clears —
-evaluate the definition against the data and diff, rather than trusting the writer. For a holon
+evaluate the definition against the data and diff, rather than trusting the writer. For a cell
 there are three obligations and all three are falsifiable by symmetric difference:
 
 <div className="fd-steps">
 
-**Membership.** The members of a holon are *exactly* the children that name it as parent. Not a
+**Membership.** The members of a cell are *exactly* the children that name it as parent. Not a
 superset, not what the writer recorded separately.
 
 **Count.** Its member count is the sum of its children's counts — and this is an obligation on the
@@ -587,7 +587,7 @@ parents. A child edge whose two ends have the **same** parent is not an edge of 
 </div>
 
 **None of the three mentions how the partition was chosen**, which is why
-`crates/fossil-layout/tests/holons.rs, the_three_obligations_hold_up_a_cut_of_a_partition_nobody_designed`
+`crates/fossil-layout/tests/aggregation.rs, the_three_obligations_hold_up_a_cut_of_a_partition_nobody_designed`
 already ran them over a partition with no design behind it and they held. A grid is such a partition.
 *The partition is arbitrary, the aggregation is exact* is the sentence those tests were written
 under before the page had it.
@@ -597,12 +597,12 @@ under before the page had it.
 false as a union.** It reads as *relabel the endpoints and keep the set*, which emits self-loops
 where a quotient has none — and on a graph with any community structure it is not an edge case but
 the overwhelming majority. Measured on the planted fixture
-`crates/fossil-layout/tests/holons.rs` uses — 256 vertices, 1,095 edges — **1,088 of the 1,095 are
+`crates/fossil-layout/tests/aggregation.rs` uses — 256 vertices, 1,095 edges — **1,088 of the 1,095 are
 absorbed** and the aggregate quotient has **seven**.
 
 The check that catches both mistakes is **mass conservation per rung**: cross weight plus internal
 weight equals the edge count of the level below, at every rung. A writer that drops sibling edges
-and one that keeps them as self-loops both fail it, and no count of holons notices either.
+and one that keeps them as self-loops both fail it, and no count of cells notices either.
 </Callout>
 
 **The base case has to be stated or the chain does not reach the graph.** *Defined against the
@@ -610,11 +610,11 @@ level below* bottoms out at the finest rung, whose children are the vertices the
 quotient is the raw edge list. Without that, the obligations relate each published level to another
 published level and nothing anchors the sequence to the corpus.
 
-**And the quotient is an artefact beside the rows, not a column on one.** A holon row is one holon;
+**And the quotient is an artefact beside the rows, not a column on one.** A cell row is one cell;
 a quotient edge is a pair of them, which is a different arity — the same reason a corpus writes its
 vertices and its relations as separate artefacts rather than as one wide table.
 
-In the manifest it is `crates/fossil-sinks/src/manifest.rs, HolonQuotient`, under the rung's own
+In the manifest it is `crates/fossil-sinks/src/manifest.rs, CellQuotient`, under the rung's own
 path, declaring its edge count for the reason a relation declares one — a tile with no rows is not
 written, so a 404 reads as *no edges here* and as *never uploaded* alike. It is **optional per
 rung**, and the next section is what a writer answers that with. What is deliberately *not* in the
@@ -669,7 +669,7 @@ Which says where edges go. **They are drawn at the bottom**, where the quotient 
 and density 0.010% — which is where a three-pixel floor is already drawing them, because at that
 scale the marks are far enough apart to have something between them. And the quotient at a coarse
 rung is kept **to be measured against**: it is what makes mass conservation checkable per rung. It
-stops being an input to a renderer, which is a demotion and not a deletion — `HolonQuotient` is
+stops being an input to a renderer, which is a demotion and not a deletion — `CellQuotient` is
 still optional per rung, and a writer that publishes one is publishing evidence rather than a
 picture.
 
@@ -762,16 +762,16 @@ payload's columns this is true of.
 
 **That constant is a fact about fossil's writer, not about the corpus in front of you**, and until
 the channel was declared it was the closest thing to an answer the document had. A cell row's `mode`
-is a bare `uint32`. `crates/fossil-sinks/src/manifest.rs, HolonRung` said *the mode and purity of the
+is a bare `uint32`. `crates/fossil-sinks/src/manifest.rs, CellRung` said *the mode and purity of the
 payload's categorical* in prose, `corpus.bnf`'s `mode` role said *the majority value of a categorical
 over the rows summarised*, and neither named **which** categorical — because until
 [`channels:`](/docs/design/position) there was nothing to name. So a reader colouring a rung by
 `mode` had to guess which palette the values belonged to, and could not know the domain at all. That
 is the same defect the `domain` field closed one level down, and it survived at this one.
 
-`crates/fossil-sinks/src/manifest.rs, HolonTree` names it now — `mode_channel:`, a scalar sitting
+`crates/fossil-sinks/src/manifest.rs, CellTree` names it now — `mode_channel:`, a scalar sitting
 between `coordinates:` and `rungs:` — and the shape comes from the field this tree already carries
-for the same reason. A holon's position is declared rather than derived in silence, and the section
+for the same reason. A cell's position is declared rather than derived in silence, and the section
 below notes that it *does a second job while it is there: it names which columns hold the position*.
 The mode had no such field. It has one, and what it holds is the **name** of a channel, resolved
 against the vertex type's own `channels:` list.
@@ -817,168 +817,148 @@ At and below the saturation scale a cell is **pure by construction** — it hold
 mode is not a summary but the value. It decays smoothly from there, and the decay is the useful
 signal: a cell whose mode holds 94% of it draws solid, one at 27% draws desaturated, and the picture
 then shows **where the structure is sharp and where the reader is looking at a blur**. Which is
-strictly more than a colour would have carried, and it costs one extra column on a holon row.
+strictly more than a colour would have carried, and it costs one extra column on a cell row.
 
 ## And the one thing that is not an exact aggregate
 
-Counts sum. Edges sum. **Where a holon goes on the plane is a choice** — and a spatial partition
+Counts sum. Edges sum. **Where a cell goes on the plane is a choice** — and a spatial partition
 narrows that choice without closing it. A cell's extent is known from its id alone, so the two
 candidates are the cell's own centre and the members' centroid; they are different pictures, the
 first regular and the second following the data, and no amount of checking makes either correct.
 
 So it is declared rather than derived in silence, exactly as a vertex's position is:
-[where x and y come from](/docs/design/position) is the field, and a holon's position carries a
+[where x and y come from](/docs/design/position) is the field, and a cell's position carries a
 provenance in it like any other. Everything else here is verified; this one is declared.
 
 It is the same type and not a second one — `crates/fossil-sinks/src/manifest.rs, CoordinateSystem`
 on the tree, with `crates/fossil-sinks/src/manifest.rs, Provenance`'s three answers available — and
-it does a second job while it is there: it names *which columns* hold the position. A holon's is
+it does a second job while it is there: it names *which columns* hold the position. A cell's is
 `derived` by construction, which makes the deriver the part that earns its keep, because re-deriving
-is how a reader checks that a holon's referent has not moved and nothing can re-run what nothing
+is how a reader checks that a cell's referent has not moved and nothing can re-run what nothing
 names. A tree whose writer recorded none reads back as **not declared**, which is weaker than
 `derived` rather than equivalent to it — the rule a corpus written before the block existed is
 already held under, and the reason the whole block is optional rather than defaulted.
 
-## The name promises a nesting this does not have
+## The name promised a nesting this does not have, and the name is gone
 
-**«Holon» is Koestler's**, and the word means a thing that is simultaneously a whole and a part —
+**«Holon» was Koestler's**, and the word means a thing that is simultaneously a whole and a part —
 semantic nesting, a level of organisation that is *about* something. That is exactly what the
-sentence at the top of this page gives up. If the partition carries no meaning, a name that promises
-meaning works against every reader who looks it up.
+sentence at the top of this page gives up. The partition is cut on `dense_id` and carries no
+meaning, so a name that promises meaning worked against every reader who looked it up; the argument
+was never about taste, and [prior art](/docs/design/prior-art) keeps the source cited for that
+reason. The pyramid is spelled **`cell`** now, everywhere — a region of the plane, summarised —
+which is what `corpus.bnf` had been calling its columns all along.
 
-The candidate is `holon` → **`cell`**, which says what it is: a region of the plane, summarised.
-`pyramid:` is then free as a block name if the rungs are ever retired into the level machinery.
-Against it: a cost, which stood here as an estimate — *a manifest block, a crate's public types, a
-test file and this page* — and is counted below instead. **The estimate was wrong in both
-directions**, and the decision is still not taken, because what is left is not arithmetic about the
-word.
+The rename waited on one condition, and the condition was met before it was taken: *a writer that
+partitions spatially, so that nothing in the tree is a community any more*. That writer exists — the
+pass writes `crates/fossil-layout/src/layout/cells.rs, Pyramid`, and
+`crates/fossil-layout/src/layout/community.rs, Cut` is reached only from tests and from
+`crates/fossil-layout/examples/hierarchy_stats.rs, main`. So nothing in a written tree is a
+community, and the old name described a thing that no longer exists in the artefact.
 
-**The condition this paragraph named has been met, and the paragraph is rewritten rather than
-annotated.** It said the rename waited on *a writer that partitions spatially, so that nothing in
-the tree is a community any more*, and until one existed the old name was still describing what
-`crates/fossil-layout/src/layout/community.rs, Cut` emits. That writer exists — the pass writes
-`crates/fossil-layout/src/layout/cells.rs, Pyramid`, and `Cut` is reached only from tests and from
-`crates/fossil-layout/examples/hierarchy_stats.rs, main` — and the decision above closes the
-question the writer was waiting on. So nothing in a written tree is a community, and the name
-describes a thing that no longer exists in the artefact.
+The three sections below are what it cost, and they are kept because two of the three estimates this
+page made before taking it were wrong.
 
-What is left holding the rename is its cost, and the three sections below are that cost measured.
-**It is not a scheduling question.** Half of it is already paid; the half that is left is a manifest
-key whose rename fails *silently* rather than loudly; and the exit this page had assumed was
-disqualifying turns out not to be.
-
-### Half of it is already paid, and the half that is paid is the half a reader sees
+### Half of it was already paid, and the half that was paid is the half a reader sees
 
 `corpus.bnf` writes this pyramid's columns as `cell_id`, `count`, `internal`, `mode` and `purity`,
 in a container it names `cell`, and the quotient's as `src_cell` and `dst_cell`. Both generated
 projections of that file — `crates/fossil-sinks/src/generated.rs` and
-`packages/corpus/src/vocabulary.generated.ts` — carry **zero** occurrences of `holon`. So the column
-vocabulary a reader meets in a Parquet file is already `cell`, and it never said `holon`: what
-`cargo xtask corpus` generates cannot be part of this rename because it was never part of the old
-name.
+`packages/corpus/src/vocabulary.generated.ts` — carried **zero** occurrences of the old word. So the
+column vocabulary a reader meets in a Parquet file already said `cell`, and what `cargo xtask
+corpus` generates was never part of the rename, because it was never part of the old name.
 
-What is left is the manifest block, the Rust types above it, the prose around it, and one directory
-name.
+What was left was the manifest block, the Rust types above it, the prose around it, and one
+directory name.
 
-### The rest, counted
+### The rest, counted — and the count this page published was low
 
-**561 occurrences in 36 files**, case-insensitively, over everything `git ls-files` lists. Split by
-what a rename would actually have to do to each:
+**604 occurrences in 39 files**, case-insensitively, over everything `git ls-files` lists. This
+page said 561 in 36, which was an undercount of 43 in three files, and the shape of the miss is
+worth more than the correction: **56 of the 604 were this page's own route**, which no count of the
+word in prose reaches, because a route is not the word — it is the word inside a path. Splitting the
+remaining 548 by what a rename actually had to do to each:
 
-| where the word is | occurrences | files | what a rename is there |
+| where the word was | occurrences | files | what the rename was there |
 | --- | --- | --- | --- |
-| Rust code — `HolonTree`, `HolonRung`, `HolonQuotient`, `HOLON_PREFIX`, `holon_count`, `holons_at`, `with_holons` and the test fns | 260 | 11 | mechanical, and the compiler finds every one |
-| Rust doc and line comments | 162 | 19 | prose, and the compiler finds none of it |
-| design pages on this site | 109 | 6 | prose |
-| guard code under `apps/corpus/guards/` | 11 | 3 | **two of these read the manifest key** |
-| TypeScript and JavaScript comments | 8 | 5 | prose |
+| Rust code — `CellTree`, `CellRung`, `CellQuotient`, `CELL_PREFIX`, `cell_count`, `cells_at`, `with_cells` and the test fns | 260 | 11 | mechanical, and the compiler found every one |
+| Rust doc and line comments | 137 | 15 | prose, and the compiler found none of it |
+| design pages on this site | 116 | 7 | prose |
+| guard code under `apps/corpus/guards/` | 22 | 4 | **two of these read the manifest key** |
 | a corpus on disk — the conformance manifest and one snapshot | 7 | 2 | **the format change, and the whole of it** |
-| `corpus.bnf` | 3 | 1 | prose; its columns are already `cell` |
+| TypeScript and JavaScript comments | 3 | 3 | prose |
+| `corpus.bnf` | 2 | 1 | prose; its columns already said `cell` |
 | `apps/docs/content/docs/design/meta.json` | 1 | 1 | this page's slug |
 
-**And one more that no count of the word reaches: this page's own route.** `/docs/design/cells` is
-cited **50 times in 20 files**. Twenty-two of them, in six files, are pages of this site, where
-`content.test.ts` fails the build on a `/docs/…` link that does not resolve. The other **28, in
-fourteen files**, are in Rust doc comments, in `corpus.bnf` and in `packages/corpus/src/corpus.ts`,
-and nothing in either half of the tree checks those. A rename that moves the page and not the route
-is the exact failure this site's guards were built out of, one directory along.
+**The route moved first, and in its own commit.** `docs/design/holons` — named here without its
+leading slash, because `content.test.ts` now reads a route out of any file in the tree and a dead one
+fails the build wherever it is written — was cited **56 times in 22 files**, and only nineteen of those files are MDX, where `content.test.ts` had been failing the
+build on a `/docs/…` link that does not resolve since the format site was folded in. The rest — Rust
+doc comments, `corpus.bnf`, `packages/corpus/src/corpus.ts` — were held by nothing at all, which is
+why the guard was widened to read the whole tree before a single citation moved. Moving a page and
+leaving its route behind is the exact failure this site's guards were built out of, one directory
+along.
 
-### The wire is four spellings, and only two of them are a compatibility question
+**One collision the count did not predict.** `cell` is a name Rust's own standard library uses:
+`crates/fossil-graph/src/executor.rs` holds a `std::cell::RefCell`, and three pages carried the
+claim that `crates/fossil-graph` *contains no occurrence of* `holon`, `rung`, `cell` or `quotient`.
+That claim was already false before the rename — `packages/corpus`, named in the same sentence,
+carries `cell_id` in its generated vocabulary — and the rename made it false twice over. It is
+restated on [the reference viewer](/docs/design/reference-viewer) and in [what was
+discarded](/docs/design/discarded) as what it always meant: no verb, no plan and no type in that
+crate names a rung, a cell or a quotient. A grep over a four-letter word is not evidence about a
+read surface.
 
-Four spellings reach a corpus on disk. Two are keys — `holons:` on the vertex info and `holon_count:`
-on a rung — and two are values: the `holon/` prefix and the `holon` coordinate system.
+### The wire was four spellings, and the two keys broke in opposite directions
 
-**The values are not a compatibility question at all.**
-`crates/fossil-sinks/src/manifest.rs, HOLON_PREFIX` is *written into* `prefix:`, and every reader
+Four spellings reach a corpus on disk. Two are keys — `cells:` on the vertex info and `cell_count:`
+on a rung — and two are values: the `cell/` prefix and the `cell` coordinate system.
+
+**The values were not a compatibility question at all.**
+`crates/fossil-sinks/src/manifest.rs, CELL_PREFIX` is *written into* `prefix:`, and every reader
 takes the declared prefix rather than the constant — which is what `Projection::path`'s own
-paragraph means by declared rather than conventional. A corpus written last month keeps resolving
-its tiles under `holon/` however the writer spells the next one, and a corpus is free to carry a
-directory whose name matches nothing in any crate.
+paragraph means by declared rather than conventional. A corpus written before the rename keeps
+resolving its tiles under `holon/` however the writer spells the next one, and a corpus is free to
+carry a directory whose name matches nothing in any crate.
 
-**The keys are, and they break in opposite directions — which is the finding.**
+**The keys were, and they break in opposite directions — which is the finding.**
 
-<Callout type="warn" title="Renaming `holons:` does not stop an old corpus loading. It stops it saying anything.">
+<Callout type="warn" title="The rename does not stop an old corpus loading. It stops it saying anything.">
 `crates/fossil-sinks/src/manifest.rs, VertexInfo` carries the block behind
 `#[serde(default, skip_serializing_if = "Option::is_none")]`, and **no struct in the manifest model
 sets `deny_unknown_fields`**. So a corpus written before the rename deserialises *cleanly* under the
 new name, with the pyramid **silently absent** — not an error, not a state a reader can tell apart
 from a corpus that genuinely declares no tree, because
-`crates/fossil-sinks/src/manifest.rs, a_vertex_written_before_the_holon_block_existed_declares_nothing`
+`crates/fossil-sinks/src/manifest.rs, a_vertex_written_before_the_cell_block_existed_declares_nothing`
 asserts that absence is legal and means *declares nothing*. The rungs are still on disk under
 `holon/` and nothing points at them.
 
-`holon_count` is the opposite — required, no default, so a stale rung fails loudly with a missing
+`cell_count` is the opposite — required, no default, so a stale rung fails loudly with a missing
 field. **Under a rename with no alias that failure is unreachable**, because the block above it was
 dropped in silence first. The loud half is the half that never fires.
 
 **This tree has already paid that exact failure once.** `crates/fossil-df-wasm/src/lib.rs` carries
-the account: the browser's report of a run silently lost `holons:` and then `channels:` — two fields
-present in the YAML the very same call emitted — and what caught it was somebody reading both, not a
-test.
+the account: the browser's report of a run silently lost the pyramid block and then `channels:` —
+two fields present in the YAML the very same call emitted — and what caught it was somebody reading
+both, not a test.
 </Callout>
 
-The guards inherit the silence rather than catching it. `apps/corpus/guards/inspect.mjs, holonsOf`
-reads `info.holons` and returns `null` for an absent key, and the `mode-names-a-channel` guard in
-`apps/corpus/guards/guards.mjs` reads that `null` as *declares no holon tree, so there is no
-reference to resolve* — a **note, not a failure**. A rename with no alias turns that guard vacuous
-over every corpus written before it, and vacuously passing is how a guard stops guarding.
+**It was taken with no alias, and what stands in for one is a guard rather than an attribute.**
+`#[serde(alias = "holons")]` would have made the break loud-free, and it is refused on
+[what was discarded](/docs/design/discarded) for the reason an alias always costs: two spellings of
+one key legal forever is a statement about the *format*, and this site does not say anywhere whether
+that is allowed. Nothing is released and no corpus written by anyone else exists, so what an alias
+buys is a property of a set with nothing in it.
 
-### The two exits, and the first is cheaper than this page assumed
+What holds the two halves together instead is the guard, and it was made to hold *before* the
+rename rather than after. `apps/corpus/guards/inspect.mjs, cellsOf` is the one function in the tree
+that reads the key; `mode-names-a-channel` in `apps/corpus/guards/guards.mjs` counts the trees it
+examined, and `apps/corpus/guards/self-test.mjs` asserts that count is non-zero against a fixture
+that writes one. A writer that renames the key and a reader that does not now produces *zero trees
+examined* and a red self-test naming the missing pyramid — which is what a silent `null` would
+otherwise have been reported as a note. That exchange is the whole answer to the callout above: the
+silence is still there in `serde`, and the thing that breaks on it is a guard that counts.
 
-**`#[serde(alias = "holons")]` does not leave the document saying the old name.** That objection is
-the obvious one and it is false for the mechanism actually available: `alias` is **read-only**. The
-writer emits the new key from the first corpus after the change; only the reader still accepts the
-old one. What keeps the old spelling is one attribute per renamed key and the corpora already
-written — which are exactly the set no rename can reach. The cost is two attributes, and what it
-buys is that the silent-absence failure above cannot happen.
-
-Its real price is the one an alias always has: **two spellings of one key are legal forever**, which
-is a statement about the format and not about a crate, and this site does not say anywhere whether
-that is allowed. `apps/corpus/guards/inspect.mjs, holonsOf` is the one function in the tree that
-reads the key, so it is the only place the duality would have to live — but a conformance corpus
-then has to decide whether a document spelling the old key is conformant, and that is a question for
-`/docs/format`, not for this page.
-
-**A migration costs the alias plus a tool that does not exist.** Nothing in the tree rewrites a
-written manifest: `crates/fossil-cli/src/main.rs, Commands` has four subcommands and none of them
-opens a corpus to edit it. So «what does a reader do with a corpus written last month» has, today,
-exactly one answer — *nothing, in silence* — and a migration is the option that has to build the
-answer rather than choose one.
-
-### What this needs in order to be taken
-
-Not a further measurement of the word. Three things, and the first is the whole of it:
-
-1. **A ruling on whether two spellings of a manifest key may be legal at once.** If yes, the alias is
-   two attributes and the rename is otherwise mechanical. If no, the rename waits on a migration
-   tool and is a format change with a version bump behind it.
-2. **Whether the page route moves with the block.** 28 of its 50 citations are outside this site and
-   nothing checks them, so moving the route and moving the key are separable decisions that have
-   been treated as one.
-3. **Somewhere for the format policy to be stated**, because 1 is not a fact about this pyramid. The
-   same question is open one artefact along for
-   [`version: gar/v1`](/docs/design/corpus#the-version-string-names-a-format-this-page-declares-non-conformant),
-   and answering it twice differently is the thing to avoid.
 
 ## What this does not settle
 
@@ -1031,7 +1011,7 @@ settle it is a second corpus of a different shape, measured the same way.
 **Which level a reader opens on.** The tree makes every level addressable and says nothing about
 where a reader starts. The screen picks the base; nothing yet picks the entry point.
 
-**How a holon tree is written incrementally.** Everything above assumes one pass over a finished
+**How a cell tree is written incrementally.** Everything above assumes one pass over a finished
 corpus, and a spatial partition makes this harder rather than easier in one specific way: a new
 vertex outside the current bounding box requantises every position and renumbers every `dense_id`.
 

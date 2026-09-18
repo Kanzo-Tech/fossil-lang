@@ -207,7 +207,7 @@ pub async fn execute_core(
     // after it: not an error, not a `None` a reader can interrogate, just a key
     // that is absent from the JSON while it is present in the YAML the very same
     // call emits below. It WAS built first, and the browser's account of a run
-    // silently lost `holons:` and then `channels:` — two measured facts about a
+    // silently lost `cells:` and then `channels:` — two measured facts about a
     // corpus the tab had just written, missing from the tab's own report of
     // writing it, while `fossil run --output-json` carried both.
     //

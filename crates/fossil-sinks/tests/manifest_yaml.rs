@@ -7,9 +7,9 @@
 use arrow_schema::DataType;
 use fossil_sinks::generated::{CELL_COLUMNS, QUOTIENT_COLUMNS};
 use fossil_sinks::manifest::{
-    Cardinality, CoordinateSystem, DEFAULT_CHUNK_SIZE, DEFAULT_VERTICES_PER_CELL, EdgeInfo,
-    GRAPHAR_VERSION, HolonRung, HolonTree, Projection, Property, Provenance, VertexInfo,
-    data_type_name, declared_properties,
+    Cardinality, CellRung, CellTree, CoordinateSystem, DEFAULT_CHUNK_SIZE,
+    DEFAULT_VERTICES_PER_CELL, EdgeInfo, GRAPHAR_VERSION, Projection, Property, Provenance,
+    VertexInfo, data_type_name, declared_properties,
 };
 
 fn person_vertex() -> VertexInfo {
@@ -49,10 +49,10 @@ fn person_vertex() -> VertexInfo {
     // that publishes a quotient and one that does not. A single-rung fixture
     // would freeze the block without freezing the choice the block exists to
     // leave open.
-    .with_holons(holon_tree())
+    .with_cells(cell_tree())
 }
 
-/// Two rungs over the same type, finest first — the shape a holon block is
+/// Two rungs over the same type, finest first — the shape a cell block is
 /// emitted in, which is what the snapshot beside this is a lock on. The line
 /// scanners over this document read a nested mapping one level deep and skip
 /// what is deeper, so the rungs have to nest where they nest and nowhere else.
@@ -62,18 +62,18 @@ fn person_vertex() -> VertexInfo {
 /// cell, which would make the snapshot a table of `div_ceil` rather than a
 /// picture of the block, and it publishes no quotient — where this fixture
 /// deliberately carries both shapes, one rung with and one without.
-/// `HolonTree::planned`'s own unit tests are where the counts are checked.
-fn holon_tree() -> HolonTree {
-    HolonTree::new(
+/// `CellTree::planned`'s own unit tests are where the counts are checked.
+fn cell_tree() -> CellTree {
+    CellTree::new(
         DEFAULT_VERTICES_PER_CELL,
         vec!["knows".to_string()],
         vec![
-            HolonRung::at(1, 625, cell_columns()).with_quotient(5_012, quotient_columns()),
-            HolonRung::at(2, 157, cell_columns()),
+            CellRung::at(1, 625, cell_columns()).with_quotient(5_012, quotient_columns()),
+            CellRung::at(2, 157, cell_columns()),
         ],
     )
     .with_coordinates(vec![CoordinateSystem::derived(
-        "holon",
+        "cell",
         "x",
         "y",
         "cell-member-centroid",

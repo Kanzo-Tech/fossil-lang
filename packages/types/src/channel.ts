@@ -41,7 +41,7 @@ export interface Channel {
    * How many distinct values a **categorical** has.
    *
    * The one number a reader cannot recover: a distinct count is in no Parquet footer, which is the
-   * same test `HolonTree`'s `vertices_per_cell` passes. Absent on a quantitative channel, whose
+   * same test `CellTree`'s `vertices_per_cell` passes. Absent on a quantitative channel, whose
    * domain is a range — and the range is already in the footers' per-row-group min/max, so
    * declaring it would be a second statement of what the bytes carry.
    *

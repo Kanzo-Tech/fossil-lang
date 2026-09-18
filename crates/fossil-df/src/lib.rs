@@ -134,7 +134,7 @@ pub struct GraphArData {
     /// A type absent from this list declares no tree, which is what a corpus
     /// written before the block existed reads as — weaker than an empty one
     /// rather than equivalent to it.
-    pub pyramids: Vec<(String, fossil_sinks::manifest::HolonTree)>,
+    pub pyramids: Vec<(String, fossil_sinks::manifest::CellTree)>,
     /// **The channels each vertex type's rows can be drawn with**, keyed by its
     /// label — and the third field here that is not data.
     ///
@@ -1860,7 +1860,7 @@ impl GraphArData {
     /// quotient, and [`Self::manifests`] is what states it. Replaces rather than
     /// appends, for [`fossil_sinks::manifest::VertexInfo::with_coordinates`]'s
     /// reason — the list **is** the declaration.
-    pub fn declare_pyramids(&mut self, pyramids: Vec<(String, fossil_sinks::manifest::HolonTree)>) {
+    pub fn declare_pyramids(&mut self, pyramids: Vec<(String, fossil_sinks::manifest::CellTree)>) {
         self.pyramids = pyramids;
     }
 
@@ -1969,7 +1969,7 @@ impl GraphArData {
                 if let Some((_, tree)) =
                     self.pyramids.iter().find(|(label, _)| *label == node.label)
                 {
-                    info = info.with_holons(tree.clone());
+                    info = info.with_cells(tree.clone());
                 }
                 // **And the channels the pass measured a domain for**, attached
                 // the same way and for the same reason: `domain` is a count of

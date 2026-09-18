@@ -243,7 +243,7 @@ export interface EdgeDrops {
  * interface derived from the Rust by hand only until something generates it.
  *
  * **It is partial, and the absences are deliberate rather than the wire's.** A
- * `VertexInfo` on the wire also carries `holons:` — the pyramid of summary rows,
+ * `VertexInfo` on the wire also carries `cells:` — the pyramid of summary rows,
  * its rungs, their quotients and the channel its `mode` names — and this
  * interface does not, because transcribing that tree by hand for no consumer is
  * the kind of speculative mirror that drifts, which is what the paragraph above

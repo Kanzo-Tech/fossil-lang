@@ -301,7 +301,7 @@ export interface RowsAnswer extends Answer {
  *   `levelsOf`'s `written` is that cache's index rather than a second contract. The payload at
  *   stride 1 is `sampled` too — it is the sample that leaves everything in, which is why level 0
  *   needs no face of its own.
- * - **`aggregated`** — a rung, `holon/r{k}/`: synthetic summary cells carrying `count`, `mode` and
+ * - **`aggregated`** — a rung, `cell/r{k}/`: synthetic summary cells carrying `count`, `mode` and
  *   `purity`, no real `dense_id` behind any of them, and **no drawable lines** —
  *   `/docs/design/cells` argues, measured, that no coarse quotient of a real graph is drawable.
  *   A summary OF THE FIELD, which is a different picture from a sample of the graph and not a

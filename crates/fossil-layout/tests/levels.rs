@@ -29,7 +29,7 @@ use std::path::Path;
 use common::{dir, fixture};
 use duckdb::Connection;
 use fossil_layout::layout::enrich_layout;
-use fossil_sinks::manifest::{HOLON_PREFIX, LEVEL_PREFIX_STEM, VertexLevels};
+use fossil_sinks::manifest::{CELL_PREFIX, LEVEL_PREFIX_STEM, VertexLevels};
 
 /// Rows in the fixture, and a tile size that buys a five-level pyramid without
 /// making the test a benchmark. A type earns levels the moment it is over one
@@ -240,12 +240,12 @@ fn the_levels_on_disk_are_the_levels_the_plan_names() {
 ///
 /// **The cell pyramid is not held to the same floor, and the difference is
 /// argued rather than accidental.** This test used to assert that no directory
-/// but `index` appeared at all, and `fossil_sinks::manifest::HolonTree` made it
-/// red by writing a `holon/` beside it: a level is a transport optimisation, so
+/// but `index` appeared at all, and `fossil_sinks::manifest::CellTree` made it
+/// red by writing a `cell/` beside it: a level is a transport optimisation, so
 /// one tile is already one range request and coarser buys nothing, while a rung
 /// is arithmetic — `ceil(V / 4^k)` names an artefact for every `k` a reader can
 /// compute, so the tree has no data-dependent tail and no *this rung was not
-/// written* branch for a reader to carry. That is the floor `HolonTree::planned`
+/// written* branch for a reader to carry. That is the floor `CellTree::planned`
 /// argues for in its own doc. It is NOT that *a reader zoomed all the way out
 /// wants four marks rather than two hundred*, which that doc used to say and
 /// this one cited: no reader in this tree can ask for four marks, the smallest
@@ -280,9 +280,9 @@ fn a_small_type_writes_no_levels_at_all() {
 
     // And the rung pyramid IS there, at the floor that is its own: 200 rows over
     // a base of sixteen is a tree, where 200 rows in one tile is not a pyramid.
-    let holon = HOLON_PREFIX.trim_end_matches('/');
+    let cell = CELL_PREFIX.trim_end_matches('/');
     assert!(
-        dirs.iter().any(|name| name == holon),
+        dirs.iter().any(|name| name == cell),
         "the cell pyramid a type of 200 earns is not there: {dirs:?}",
     );
 }

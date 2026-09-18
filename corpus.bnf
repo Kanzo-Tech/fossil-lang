@@ -96,7 +96,7 @@
    weight       a summed edge weight.
    mode         the majority value, over the rows summarised, of the channel the
                 tree NAMES — `crates/fossil-sinks/src/manifest.rs,
-                HolonTree::mode_channel`. The referent is not in this column and
+                CellTree::mode_channel`. The referent is not in this column and
                 cannot be: the value is a bare ordinal. This read «a
                 categorical» for as long as there was nothing to name, which is
                 an indefinite article over a set the document did not
@@ -175,7 +175,7 @@ col purity   = in cell ; type float   ; role purity .
 
    An edge whose two ends share a cell is NOT an edge of that cell — it is
    absorbed into the cell's `internal`. On the planted fixture
-   `crates/fossil-layout/tests/holons.rs` evaluates, 1,088 of 1,095 edges are
+   `crates/fossil-layout/tests/aggregation.rs` evaluates, 1,088 of 1,095 edges are
    absorbed and the quotient has seven, so a writer that relabels the endpoints
    and keeps the set is not wrong in an edge case. *)
 

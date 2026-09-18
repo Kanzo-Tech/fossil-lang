@@ -10,7 +10,7 @@
 //!
 //! So this is `levels.rs`'s standard one artefact along — compare the written
 //! bytes against the definition rather than trusting the writer — and
-//! `tests/holons.rs` is the same three obligations over an in-memory `Cut`,
+//! `tests/aggregation.rs` is the same three obligations over an in-memory `Cut`,
 //! where what stands in for a writer is a struct. This is the writer.
 //!
 //! **The assertions are `DuckDB` and the pass under test is not.** A second
@@ -60,7 +60,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use common::tree;
 use duckdb::Connection;
 use fossil_layout::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget, enrich_layout};
-use fossil_sinks::manifest::HolonTree;
+use fossil_sinks::manifest::CellTree;
 
 /// Vertices, and a base small enough that four thousand of them span a pyramid
 /// rather than one rung.
@@ -218,7 +218,7 @@ fn scalar(db: &Connection, sql: &str) -> i64 {
 fn rung(root: &Path, at: u32) -> String {
     lit(&root
         .join("payload")
-        .join("holon")
+        .join("cell")
         .join(format!("r{at}"))
         .join("tiles.parquet"))
 }
@@ -227,7 +227,7 @@ fn rung(root: &Path, at: u32) -> String {
 fn quotient(root: &Path, at: u32) -> String {
     lit(&root
         .join("payload")
-        .join("holon")
+        .join("cell")
         .join(format!("r{at}"))
         .join("quotient")
         .join("tiles.parquet"))
@@ -292,25 +292,25 @@ fn every_rung_says_what_the_level_below_it_says() {
     );
 
     // The plan the manifest declares is the plan the arithmetic names. Asserted
-    // against `holons_at` rather than against a list, because what a reader
+    // against `cells_at` rather than against a list, because what a reader
     // reproduces is the division.
     for (index, declared) in tree.rungs.iter().enumerate() {
         let at = u32::try_from(index + 1).expect("a rung index");
         assert_eq!(
-            declared.holon_count,
-            HolonTree::holons_at(u64::from(ROWS), PER_CELL, at).expect("a valid base"),
+            declared.cell_count,
+            CellTree::cells_at(u64::from(ROWS), PER_CELL, at).expect("a valid base"),
             "rung {at} declares a count the base does not name",
         );
     }
     assert_eq!(
-        tree.rungs.last().map(|r| r.holon_count),
+        tree.rungs.last().map(|r| r.cell_count),
         Some(1),
         "the tree runs to a single cell",
     );
 
     for (index, declared) in tree.rungs.iter().enumerate() {
         let at = u32::try_from(index + 1).expect("a rung index");
-        let shift = HolonTree::shift_at(PER_CELL, at).expect("a valid base");
+        let shift = CellTree::shift_at(PER_CELL, at).expect("a valid base");
         let rows = rung(&root, at);
 
         // **Obligation 1 — a cell holds exactly the rows whose id shifts to it.**
@@ -337,7 +337,7 @@ fn every_rung_says_what_the_level_below_it_says() {
         );
         assert_eq!(
             scalar(&db, &format!("SELECT count(*) FROM read_parquet('{rows}')")),
-            i64::try_from(declared.holon_count).expect("a row count"),
+            i64::try_from(declared.cell_count).expect("a row count"),
             "rung {at}: the file and the manifest disagree about how many cells there are",
         );
         // The ids are a gapless `0..n` in file order, which is what makes a cell
@@ -356,7 +356,7 @@ fn every_rung_says_what_the_level_below_it_says() {
 
         // **Obligation 4 — the position is the members' centroid.**
         //
-        // Declared rather than derived, which is why it is checked: a holon's
+        // Declared rather than derived, which is why it is checked: a cell's
         // `derived_by` says `cell-member-centroid`, and re-deriving is how a
         // reader finds out the referent has not moved. Compared with a tolerance
         // because the corpus stores `f32` and the mean is taken in `f64`.
@@ -591,7 +591,7 @@ fn a_cluster_is_one_run_of_dense_id() {
 /// **A type no bigger than one cell gets no pyramid**, and the report says so by
 /// omission rather than by an empty tree.
 ///
-/// The difference matters in the document: a manifest with no `holons:` block is
+/// The difference matters in the document: a manifest with no `cells:` block is
 /// what a corpus written before the block existed reads as, and one with an
 /// empty tree is a writer claiming a summary of nothing.
 #[test]
@@ -607,7 +607,7 @@ fn a_type_that_is_one_cell_earns_no_pyramid() {
         "four vertices at four per cell is one cell, and one cell is not a summary",
     );
     assert!(
-        !root.join("payload").join("holon").exists(),
+        !root.join("payload").join("cell").exists(),
         "no tree was declared, so no tree may be on disk",
     );
 
@@ -626,9 +626,9 @@ const CHILD: &str = "one_corpus_written_where_the_parent_asked";
 /// **The same graph writes the same pyramid in a second process, byte for byte.**
 ///
 /// `/docs/design/cells` puts determinism first of the three properties it puts
-/// on a holon, and names this gap in the same breath: everything above catches a
+/// on a cell, and names this gap in the same breath: everything above catches a
 /// *wrong* summary, and what nothing caught is the same corpus summarising
-/// *differently* twice. A holon whose referent moves between writes is not
+/// *differently* twice. A cell whose referent moves between writes is not
 /// navigable — a reader who descends, pans and ascends has to arrive back where
 /// they were, and a bookmark has to still resolve tomorrow.
 ///
@@ -643,7 +643,7 @@ const CHILD: &str = "one_corpus_written_where_the_parent_asked";
 /// differ.
 ///
 /// **And a second process, which is the load-bearing half.**
-/// `tests/holons.rs, the_same_graph_gives_the_same_holon_rows_twice` evaluates
+/// `tests/aggregation.rs, the_same_graph_gives_the_same_cell_rows_twice` evaluates
 /// the aggregation twice inside one process, which cannot rule out anything drawn
 /// **once per process and then reused** — the pid, a seed behind a `OnceLock`, an
 /// address the allocator settled on, a clock read at startup. Two calls in one
@@ -661,10 +661,10 @@ fn the_same_graph_writes_byte_identical_rungs_in_a_second_process_worth_of_work(
     // it. Without this the test is green on a walk that reached neither: two
     // identical payloads and no rung between them would report the summary
     // deterministic without having read one.
-    let holon = Path::new("payload").join("holon").join("r1");
+    let cell = Path::new("payload").join("cell").join("r1");
     let wanted = [
-        holon.join("tiles.parquet"),
-        holon.join("quotient").join("tiles.parquet"),
+        cell.join("tiles.parquet"),
+        cell.join("quotient").join("tiles.parquet"),
     ];
     for path in &wanted {
         let path = path.to_string_lossy();
