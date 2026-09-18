@@ -303,7 +303,7 @@ export interface RowsAnswer extends Answer {
  *   needs no face of its own.
  * - **`aggregated`** — a rung, `holon/r{k}/`: synthetic summary cells carrying `count`, `mode` and
  *   `purity`, no real `dense_id` behind any of them, and **no drawable lines** —
- *   `/docs/design/holons` argues, measured, that no coarse quotient of a real graph is drawable.
+ *   `/docs/design/cells` argues, measured, that no coarse quotient of a real graph is drawable.
  *   A summary OF THE FIELD, which is a different picture from a sample of the graph and not a
  *   second price for the same one. A pin in an `aggregated` answer draws as its own cell,
  *   `dense_id >> shift`: arithmetic, never a second read.

@@ -1,7 +1,7 @@
 //! Integration: **a holon and the level below it say the same thing.**
 //!
 //! A holon is a summary row — a group, how many members it has, its edges, and
-//! its parent — and `/docs/design/holons` states its whole contract as three
+//! its parent — and `/docs/design/cells` states its whole contract as three
 //! obligations against the level underneath: its members are *exactly* the
 //! children that name it as parent, its count is the sum of its children's
 //! counts, and its edges are the aggregation of its children's edges.
@@ -548,7 +548,7 @@ fn obligations_up(tree: &Dendrogram, cut: &Cut, edges: &[(u32, u32)]) -> Vec<Str
     findings
 }
 
-/// Determinism is the property `/docs/design/holons` puts first, and it is a
+/// Determinism is the property `/docs/design/cells` puts first, and it is a
 /// property of the rows and not only of the partition: the same corpus gives
 /// the same holons, bit for bit, or a bookmark does not resolve tomorrow.
 ///

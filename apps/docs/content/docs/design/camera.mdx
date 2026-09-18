@@ -176,14 +176,14 @@ difference is not evidence of anything. **The quantity that says which regime yo
 
 The table above is safe on that rule with room to spare: its coarsest row draws 3,907 marks into
 2,304 bins, **0.59 bins per mark**. A coarse *summary* is exactly the artefact that breaks it. A cell
-of [the pyramid](/docs/design/holons) at rung 4 on com-DBLP delivers 310 marks — 7.43 bins per mark —
+of [the pyramid](/docs/design/cells) at rung 4 on com-DBLP delivers 310 marks — 7.43 bins per mark —
 and read on this grid it scores 0.8431 against a null of 0.8415 and appears to fail. It does not:
 re-measured at about `sqrt(marks)` bins per axis, where nothing is asked to fill more bins than it
 has points, the same rung on the same file beats the same null by **+0.1470** — a wider margin than
 rung 1 gets at 48×48.
 
 **This was published as a fact about the pyramid before it was recognised as a fact about the grid**,
-and the retraction is on [holons](/docs/design/holons#the-quotient-saturates-down-the-pyramid-and-the-marks-do-not).
+and the retraction is on [holons](/docs/design/cells#the-quotient-saturates-down-the-pyramid-and-the-marks-do-not).
 The tell was in the numbers the whole time: a gap that collapses from ~0.1 to ~0.002 and then holds at
 ~0.002 for six rungs running is a saturated statistic, not six artefacts losing information at six
 different scales. `crates/fossil-layout/tests/level_vs_rung.rs, resolution_sweep` is the instrument

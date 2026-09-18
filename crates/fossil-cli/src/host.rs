@@ -622,7 +622,7 @@ fn enrich_written_layout(
             // **The base of the cell pyramid, declared per vertex type**, which
             // is the shape the manifest block has. It is a default and not a
             // constant of the format — the right base is data-dependent, and
-            // `/docs/design/holons` ends on whether it should be declared per
+            // `/docs/design/cells` ends on whether it should be declared per
             // corpus or globally. Nothing in the language sets it yet, which is
             // why every type gets the same one.
             vertices_per_cell: Some(fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL),

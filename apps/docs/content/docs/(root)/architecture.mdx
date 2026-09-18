@@ -34,7 +34,7 @@ listing over HTTP and the format asks for none.
 *aggregates* into synthetic rows that no scale describes. They draw different pictures rather than
 being two prices for one, which is why `crates/fossil-layout/tests/level_vs_rung.rs` weighs them on
 ONE corpus: two instruments over two graphs compare two graphs.
-[Holons](/docs/design/holons) is the argument for the cell pyramid being a third artefact.
+[Holons](/docs/design/cells) is the argument for the cell pyramid being a third artefact.
 
 ## What the writer is
 
@@ -123,12 +123,12 @@ only one without a page of its own. The other four have one: a declared budget b
 ([streaming](/docs/design/streaming)), a read is bounded and reports what it read
 ([one door](/docs/design/one-door)), addressing is arithmetic
 ([addressing](/docs/format/conventions/addressing)), and a reader never holds the graph
-([holons](/docs/design/holons), [the reference viewer](/docs/design/reference-viewer)).
+([holons](/docs/design/cells), [the reference viewer](/docs/design/reference-viewer)).
 
 It is what decided the pyramid against the holarchy. A holarchy's extents are **measured** — they are
 wherever Louvain's sweeps stopped — so addressing one means fetching a heuristic's boundaries into
 the read path, where every reader pays for them and no reader can check them.
-[Holons](/docs/design/holons) carries that argument and this page does not repeat it.
+[Holons](/docs/design/cells) carries that argument and this page does not repeat it.
 
 **Its first measured violation was a dependency edge and not a format decision**, which is why it
 belongs here rather than on the format. `fossil-layout`'s pass wrote tiles through a Parquet encoder

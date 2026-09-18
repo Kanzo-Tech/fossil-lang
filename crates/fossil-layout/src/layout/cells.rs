@@ -7,7 +7,7 @@
 //! walk. Cell `r` of rung `k` is `[r·4^k, (r+1)·4^k)`, a cell id is
 //! `dense_id >> shift`, and a cell's parent is `r >> 2`.
 //!
-//! `/docs/design/holons` is the argument. Three sentences of it are load-bearing
+//! `/docs/design/cells` is the argument. Three sentences of it are load-bearing
 //! here:
 //!
 //! - **The partition is arbitrary; the aggregation is exact.** Nothing below

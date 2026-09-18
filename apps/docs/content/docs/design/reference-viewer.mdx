@@ -423,7 +423,7 @@ one can ask of a node in it. Which is also why the summary does not inherit
 `crates/fossil-sinks/src/manifest.rs, VertexLevels`' block: a level declares a `scale` a reader
 spends as arithmetic, and a summary declares a count, for the reasons
 `crates/fossil-sinks/src/manifest.rs, HolonTree` is a block of its own and not a `Projection`.
-[Holons](/docs/design/holons) is the page that rules on that, and the grouping it rules over is
+[Holons](/docs/design/cells) is the page that rules on that, and the grouping it rules over is
 Louvain's rather than the plane's; what is measured below is the plane's.
 
 ### The level files are a cache, and the question is whether a reader still wants the sample
@@ -539,7 +539,7 @@ per axis by `crates/fossil-layout/tests/level_vs_rung.rs, fidelity`, rung 4 beat
 **+0.1470** and rung 7 by **+0.3341**, a margin that grows rather than decays down the pyramid.
 [A fidelity measure has a resolution](/docs/design/camera#a-fidelity-measure-has-a-resolution-and-below-one-bin-per-mark-it-is-measuring-itself)
 is the general rule the mistake violated, and
-[the quotient saturates down the pyramid](/docs/design/holons#the-quotient-saturates-down-the-pyramid-and-the-marks-do-not)
+[the quotient saturates down the pyramid](/docs/design/cells#the-quotient-saturates-down-the-pyramid-and-the-marks-do-not)
 carries the full retraction.
 
 **What this bullet can honestly claim is the complement, and the reason is not fidelity at all:** a
@@ -548,7 +548,7 @@ repository ever asks for one.** A camera spends a budget in marks and the smalle
 here spends is 15,000; `apps/playground/src/tiles.ts` spends 20,000. Only rung 1, at 19,818, is above
 that. So the cell pyramid's depth is not capped by what it can draw; it is uncapped and unvisited.
 Whether the writer should keep emitting rungs nothing asks for is
-[open](/docs/design/holons#what-this-does-not-settle).
+[open](/docs/design/cells#what-this-does-not-settle).
 </Callout>
 
 Invariant 3 is unchanged and now carries its reason: a written `l{k}/` is an optimisation of
@@ -602,7 +602,7 @@ scale, measured on the same corpus:
 
 At 240 cells four in five of the possible pairs have an edge, which is a filled square and not a
 picture. And it is **denser than the community quotient at comparable counts**, which stays around
-23 on the same graph — [holons](/docs/design/holons) has that table. Grouping by position is worse
+23 on the same graph — [holons](/docs/design/cells) has that table. Grouping by position is worse
 for edges than grouping by community, and grouping by community is already too dense to lay out.
 **No coarse quotient of a real graph is drawable**, and no choice of grouping rescues it.
 

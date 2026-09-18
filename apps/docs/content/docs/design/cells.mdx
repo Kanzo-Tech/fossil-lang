@@ -327,7 +327,7 @@ group's extent is measured, and no depth measurement moves that.
 
 It cannot be cut differently into something deeper. The cut chooses out of the partitions the
 dendrogram already holds, and getting nearer to four would need levels *between* Louvain's —
-[the branching factor is declared, not inherited](/docs/design/holons#2-the-branching-factor-is-declared-not-inherited)
+[the branching factor is declared, not inherited](/docs/design/cells#2-the-branching-factor-is-declared-not-inherited)
 is where that is argued, and why it is not a tuning knob.
 
 ### And the level it would publish is not a level of detail
@@ -553,9 +553,9 @@ whole question. The manifest does not need to know; a reader descending does, be
 ends at 1,696 groups is a coarse view that stops existing above the level pyramid's own floor of
 1,239 marks, where a quaternary keeps quartering the mark count past it — all the way to one, and
 measurably rather than on paper, which is
-[six rungs further and not one](/docs/design/holons#the-holarchy-does-not-reach-further-and-the-margin-is-six-rungs-nothing-asks-for).
+[six rungs further and not one](/docs/design/cells#the-holarchy-does-not-reach-further-and-the-margin-is-six-rungs-nothing-asks-for).
 That the six are below any budget anything spends is the same section's second half.
-[One multiscale structure](/docs/design/holons#the-corpus-carries-one-multiscale-structure-and-it-is-the-cell-pyramid)
+[One multiscale structure](/docs/design/cells#the-corpus-carries-one-multiscale-structure-and-it-is-the-cell-pyramid)
 is where that is weighed.
 
 **And the floor is checkable from the document alone.** Because a rung declares a count rather than
@@ -751,7 +751,7 @@ rung's advantage is a coarse-scale advantage, and it widens exactly as the pictu
 
 What this does **not** settle is whether the writer should stop emitting the deep rungs — not because
 they carry nothing, which is now measured false, but because nothing ever asks for them.
-[What this does not settle](/docs/design/holons#what-this-does-not-settle) carries that, with what it
+[What this does not settle](/docs/design/cells#what-this-does-not-settle) carries that, with what it
 would cost.
 
 ## A categorical channel gets a mode and a purity
@@ -896,7 +896,7 @@ what a rename would actually have to do to each:
 | `corpus.bnf` | 3 | 1 | prose; its columns are already `cell` |
 | `apps/docs/content/docs/design/meta.json` | 1 | 1 | this page's slug |
 
-**And one more that no count of the word reaches: this page's own route.** `/docs/design/holons` is
+**And one more that no count of the word reaches: this page's own route.** `/docs/design/cells` is
 cited **50 times in 20 files**. Twenty-two of them, in six files, are pages of this site, where
 `content.test.ts` fails the build on a `/docs/…` link that does not resolve. The other **28, in
 fourteen files**, are in Rust doc comments, in `corpus.bnf` and in `packages/corpus/src/corpus.ts`,
@@ -1012,7 +1012,7 @@ arithmetic. A reader computes `ceil(base_count / 4^k)` and knows the rung is the
 *this rung was not written* path, and a corpus fossil wrote always has the artefact its own
 arithmetic names. A writer that stopped at a measured floor would make the tree's tail
 data-dependent — exactly the property
-[the decision above](/docs/design/holons#the-corpus-carries-one-multiscale-structure-and-it-is-the-cell-pyramid)
+[the decision above](/docs/design/cells#the-corpus-carries-one-multiscale-structure-and-it-is-the-cell-pyramid)
 refused to pay for in a holarchy — and a budget is a worse floor to cut at than a fidelity score
 would have been, because it is a property of a *reader* and not of the corpus: the writer would be
 choosing what to emit out of a constant living on the other side of the wasm boundary. The tension is

@@ -323,7 +323,7 @@ pub struct VertexInfo {
     /// Not a [`Self::projections`] entry and that is the load-bearing part: a
     /// projection is a subset of real rows at a `scale`, and a holon is a
     /// synthetic row that no scale describes. `/docs/design/reference-viewer`
-    /// makes the ruling and `/docs/design/holons` carries it.
+    /// makes the ruling and `/docs/design/cells` carries it.
     ///
     /// `Option`, and **`None` is a statement about the writer**: a corpus with
     /// no tree reads back as "not declared", never as "none". The same rule
@@ -746,7 +746,7 @@ pub const HOLON_PREFIX: &str = "holon/";
 /// **A default and not a constant of the format.** It is data-dependent by
 /// construction — where cells start to touch is a property of *this* point set —
 /// and which number a corpus used is in its own [`HolonTree::vertices_per_cell`]
-/// rather than read off a spec. `/docs/design/holons` ends on whether it should
+/// rather than read off a spec. `/docs/design/cells` ends on whether it should
 /// be declared per corpus or once globally; declaring it per vertex type is the
 /// shape the block already has, and what would settle it is a second corpus of a
 /// different shape measured the same way.
@@ -769,7 +769,7 @@ pub const QUOTIENT_PREFIX: &str = "quotient/";
 /// holon is a synthetic row by construction** — a group a partitioning
 /// algorithm returned, which exists nowhere in the source — so it is neither.
 /// `/docs/design/reference-viewer` is where that ruling is made and
-/// `/docs/design/holons` is what it decides here: a holon tree could not be an
+/// `/docs/design/cells` is what it decides here: a holon tree could not be an
 /// entry in [`VertexLevels`] without making `scale` mean two different things
 /// in one document, which is the failure the one-contract rule exists to
 /// prevent. Its own block, its own prefix, its own name.
@@ -912,7 +912,7 @@ pub struct HolonTree {
     /// points into, so a name that resolves to no entry is a well-formed
     /// document and a dangling reference is the failure this introduces.
     /// `apps/corpus/guards`' `mode-names-a-channel` is where the two are held
-    /// together, and `/docs/design/holons` is the argument.
+    /// together, and `/docs/design/cells` is the argument.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode_channel: Option<String>,
     /// **The rungs, finest first** — the same order [`VertexInfo::projections`]
@@ -941,7 +941,7 @@ pub struct HolonTree {
 /// every vertex whose `dense_id` is a multiple of `4^k` — real rows, a predicate
 /// a reader can evaluate, nothing synthesised. A rung is a partition's groups,
 /// and the only thing that relates it to the rung below is an **aggregation**,
-/// which is why the three obligations of `/docs/design/holons` are checks
+/// which is why the three obligations of `/docs/design/cells` are checks
 /// against that level rather than against a predicate over ids.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HolonRung {
@@ -1005,7 +1005,7 @@ pub struct HolonRung {
     /// or `None` where this rung publishes none.
     ///
     /// `Option` and per rung, because whether the aggregated edge set is worth
-    /// writing at every rung is the open question `/docs/design/holons` ends on:
+    /// writing at every rung is the open question `/docs/design/cells` ends on:
     /// a quotient at the finest rung of com-DBLP is **274,647** edges against the
     /// graph's 1,049,866 — a real saving — while a coarse one is dense enough
     /// that drawing it is a hairball. That figure read 159,413 and is not
@@ -2821,7 +2821,7 @@ version: gar/v1
         }
     }
 
-    /// What a holon row holds, from `/docs/design/holons`: a group, its
+    /// What a holon row holds, from `/docs/design/cells`: a group, its
     /// position, how many members it has, its parent — and the internal weight
     /// the edges between its own children were absorbed into.
     fn holon_columns() -> Vec<Property> {

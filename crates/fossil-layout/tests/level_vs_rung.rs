@@ -37,7 +37,7 @@
 //! because a level file is a copy of the payload and carries the subject IRI that
 //! is most of it.
 //!
-//! **The screen is the unit `/docs/design/holons` uses**: about fifteen thousand
+//! **The screen is the unit `/docs/design/cells` uses**: about fifteen thousand
 //! marks on a megapixel canvas. The pixel floor is `levels.rs`'s own — three
 //! device pixels at 1,200, in the corpus units the written extent puts them in.
 //!
@@ -77,7 +77,7 @@ const BIG: u32 = 300_000;
 const DEGREE: u32 = 14;
 const CANVAS_PX: f64 = 1_200.0;
 const MIN_LINK_PX: f64 = 3.0;
-/// The marks a megapixel canvas draws comfortably — the unit `/docs/design/holons`
+/// The marks a megapixel canvas draws comfortably — the unit `/docs/design/cells`
 /// picks `DEFAULT_VERTICES_PER_CELL` with.
 const SCREEN_MARKS: u64 = 15_000;
 
@@ -489,7 +489,7 @@ fn what_a_level_costs_and_what_a_rung_costs_on_a_planted_corpus() {
 
 /// The same measurement over **com-DBLP** — 317,080 real vertices and the
 /// 2,099,732 directed rows of `apps/playground/bench/dblp/data/links.csv`, which
-/// is the graph `/docs/design/holons` already quotes.
+/// is the graph `/docs/design/cells` already quotes.
 ///
 /// A second graph of a different shape is exactly what
 /// `DEFAULT_VERTICES_PER_CELL`'s doc says would settle the base, and it is what

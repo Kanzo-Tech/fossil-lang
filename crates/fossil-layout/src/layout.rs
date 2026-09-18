@@ -38,7 +38,7 @@
 //! **The public API is unchanged**: every name below was `layout::<name>` before
 //! the split and still is. The file was 3,540 lines holding four subjects, and
 //! the thing that forced the cut is that the dendrogram has no API — a caller
-//! that wants to cut it at chosen sizes, which is what `/docs/design/holons`
+//! that wants to cut it at chosen sizes, which is what `/docs/design/cells`
 //! asks for, had nowhere to reach.
 
 // This is deliberate numeric code: dense ids / cluster counts cast to/from `f32`

@@ -136,7 +136,7 @@ col dst_dense = in adjacency ; type uint32 ; role endpoint ; aligns dst .
 
 (* ------------------------------------------------------------- the pyramid *)
 (* A cell row is one texel: a region of the plane, summarised. One rung of the
-   pyramid is a set of them, and `/docs/design/holons` is the argument for why it
+   pyramid is a set of them, and `/docs/design/cells` is the argument for why it
    is a third artefact and not a coarse `Projection`.
 
    «A region of the plane» is a claim about the PLACEMENT and not about anything

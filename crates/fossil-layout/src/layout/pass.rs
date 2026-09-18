@@ -99,7 +99,7 @@ pub struct VertexLayoutTarget<'a> {
     /// Declared per vertex type, which is the shape the manifest block already
     /// has — it hangs off a type beside `index:` and `coordinates:`. The
     /// alternative is a constant of the format, and the measurements say the
-    /// right base is data-dependent: `/docs/design/holons` ends on that
+    /// right base is data-dependent: `/docs/design/cells` ends on that
     /// question, and what would settle it is a second corpus of a different
     /// shape measured the same way.
     ///

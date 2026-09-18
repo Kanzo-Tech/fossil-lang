@@ -1,6 +1,6 @@
 //! Integration: **a cell and the level below it say the same thing.**
 //!
-//! `/docs/design/holons` states a summary row's whole contract as obligations
+//! `/docs/design/cells` states a summary row's whole contract as obligations
 //! against the level underneath, and the reason they have to be *evaluated* is
 //! that every way of getting one wrong produces a corpus that opens, addresses
 //! and draws. An aggregate that dropped a child, or counted one twice, or kept
@@ -625,7 +625,7 @@ const CHILD: &str = "one_corpus_written_where_the_parent_asked";
 
 /// **The same graph writes the same pyramid in a second process, byte for byte.**
 ///
-/// `/docs/design/holons` puts determinism first of the three properties it puts
+/// `/docs/design/cells` puts determinism first of the three properties it puts
 /// on a holon, and names this gap in the same breath: everything above catches a
 /// *wrong* summary, and what nothing caught is the same corpus summarising
 /// *differently* twice. A holon whose referent moves between writes is not

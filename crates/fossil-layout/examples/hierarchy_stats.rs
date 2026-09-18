@@ -44,7 +44,7 @@
 //! **And then it cuts.** The table above is what Louvain emitted; the table at
 //! the end is what `Dendrogram::cut` publishes out of it — the levels whose
 //! group counts fall by at least the factor the tile pyramid declares, which is
-//! the whole of `/docs/design/holons`'s second property. The two tables side by
+//! the whole of `/docs/design/cells`'s second property. The two tables side by
 //! side are the argument: the levels the cut refuses are exactly the ones whose
 //! contraction had collapsed.
 //!

@@ -86,7 +86,7 @@ const TYPE_GUTTER: f32 = CELL_UNIT * 4.0;
 /// ([`super::morton::morton_ranks`]), so a plane carrying one vertex per unit of
 /// area makes the rank axis an area axis: an interval of `n` ids covers `n`
 /// blocks of plane wherever on the plane it is taken. That is the whole
-/// precondition of the cell pyramid — `/docs/design/holons` calls a cell row a
+/// precondition of the cell pyramid — `/docs/design/cells` calls a cell row a
 /// texel, and what is equal across a texel is area. Under the uniform pitch it
 /// was not: sixteen consecutive ids inside com-DBLP's 20,459-member group are a
 /// patch 85 units across, and sixteen out at the median group are five whole

@@ -6,7 +6,7 @@
 //! contrast it is tested against, and no longer what the layout uses.
 //!
 //! The output is reproducible, and that is load-bearing rather than incidental —
-//! `/docs/design/holons` is the page that depends on it and carries the
+//! `/docs/design/cells` is the page that depends on it and carries the
 //! measurement.
 
 use fossil_sinks::manifest::VertexLevels;
@@ -743,7 +743,7 @@ fn densify(community: &mut [u32]) {
 /// and the write path reads exactly two of them — the finest as the placement,
 /// and the one [`flatten_to_budget`] picks as `cluster_id` — freeing everything
 /// between. That is why a caller wanting to cut the tree at chosen sizes, which
-/// is what `/docs/design/holons` asks for, had nowhere to reach: the levels are
+/// is what `/docs/design/cells` asks for, had nowhere to reach: the levels are
 /// a `Vec<Vec<u32>>` with the arithmetic for walking them living in whichever
 /// function needed it.
 ///
@@ -1510,7 +1510,7 @@ mod dendrogram_tests {
         );
     }
 
-    /// Determinism is the property `/docs/design/holons` puts first, and a cut
+    /// Determinism is the property `/docs/design/cells` puts first, and a cut
     /// must not be where it is lost: every walk above is over `Vec`s in index
     /// order, so the same levels give the same rungs.
     #[test]
