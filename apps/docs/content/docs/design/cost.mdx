@@ -257,23 +257,54 @@ estimated, which is the only reason it belonged on this page — and it is what 
 
 ## How a claim on this page stays true
 
-The one capability this package asks a host for is a `query` callback, so everything a reader does
-passes through one function and counting is a decorator around it rather than instrumentation
-inside anything:
+**A reader counts nothing, because an answer arrives with its own bill.**
+`packages/corpus/src/corpus.ts, FrameCost` is a field on every answer `frame` returns, and there is
+nothing to install around the host's engine to get it:
 
 ```ts
-const counted = counting(query);          // queries, parquet paths, rows, ms
-const corpus = await open(url, { query: counted });
-await corpus.rows(box);
-counted.report();                         // { queries: 3, files: 2, rows: 3152, ms: 64.7 }
+const corpus = await open(url, { query });
+const view = await corpus.frame({ x, y, w, h, pixels: { w: 920, h: 400 } });
+view.cost;   // { requests, bytes, ms, tiles, ofTiles }
 ```
 
-An obligation is then two corpora an order of magnitude apart and one comparison, which is what
-`packages/corpus/tests/cost.test.ts` is. It writes both with the checker's own fixture — JavaScript
-against the published conventions, importing nothing of ours — at 20 and 196 tiles, and asks the
-same rectangle of each: fixed ground, ten times the density.
+`requests` is `Range` requests — maximal runs of tiles whose bytes abut, which is what a run costs
+— and `bytes` is what those runs hold. `ms` is the clock over the queries that one answer issued.
+`tiles` and `ofTiles` are the working: what the rectangle and the pins selected, against every tile
+the artefact that answered has.
 
-Four assertions, and not one of them compares against a recorded figure:
+**Per answer, and therefore no state between them.** A session total is the sum of the bills
+already in hand; nothing has to be reset between windows, and two readers of one corpus cannot
+contaminate each other's count. And `ofTiles` is the reason this is not a wrapper counting calls to
+`query`: a wrapper sees statements and file names, and **the denominator R1 is stated over is not
+in either of them.** `tiles / ofTiles` is the share of the corpus a rectangle opened, which is the
+one number that says whether a bounded read bounded anything.
+
+**Two things the ledger is not, said before anything is drawn from it.** `bytes` is footer
+arithmetic — `sum(total_compressed_size)` out of `parquet_metadata`, over the columns the read
+projects and the row groups it selects — and **not bytes weighed on a wire**: the engine reads
+inside its own process, a Worker in the browser, where the caller cannot see them. And **`rows`
+carries no bill at all.** It answers with the tiles its vertices turned out to live in, `complete`
+and `gaps`, and nothing about cost — so an obligation stated over `rows` has to be asserted through
+the seam rather than read off the answer, which is what the next two paragraphs are.
+
+**The ledger itself is asserted by `packages/corpus/tests/frame.test.ts` and
+`packages/corpus/tests/frame-levels.test.ts`**, and not one assertion compares against a recorded
+figure: `requests` is at most `tiles`, a written level opens strictly fewer bytes and strictly
+fewer tiles than striding the payload for a *finer* one, and a pin that brought a vertex back off
+the payload shows up as bytes on the bill rather than as a fetch nobody was charged for. That last
+one is the property a ledger is for — an omission is invisible in the answer, and `FrameCost`
+undercounted by 38% at a million vertices for exactly as long as it weighed the vertex tiles and
+not the adjacency it was also opening.
+
+**R1 itself is asserted through the seam, by `packages/corpus/tests/cost.test.ts`**, because the
+rectangle it reads with is `rows`. The one capability this package asks a host for is a `query`
+callback, so everything a reader does passes through one function and the test counts the
+statements that reach *its own* host — a closure in the test file, not a mechanism this package
+publishes. Two corpora an order of magnitude apart and one comparison: it writes both with the
+checker's own fixture — JavaScript against the published conventions, importing nothing of ours —
+at 20 and 196 tiles, and asks the same rectangle of each, fixed ground and ten times the density.
+
+Four assertions, and not one of them compares against a recorded figure either:
 
 - the vertex statement **never names every tile in the corpus**
 - it opens the tiles its own answer landed in, and about one more — the overshoot is a tile whose
@@ -284,6 +315,14 @@ Four assertions, and not one of them compares against a recorded figure:
 Three of the four go red when the defect is put back; the fourth does not, because it never changed
 the number of statements. That is worth stating: each assertion covers a different property, and a
 guard nobody has watched fail is a sentence rather than a guard.
+
+**And one bench, which is not a test.** `apps/playground/scripts/measure-frame.mjs` walks ten
+written-down rectangles over a bench corpus and reports the door's ledger per frame — carried
+forward onto `apps/playground/src/tiles.ts, SliceCost`, which adds what was drawn to what was read.
+Each frame is asked three times and **every cost column but the clock must be identical across the
+repeats or the script exits 1 naming the frame that moved**, because a bench that flaps is not
+evidence. What it cannot see is anything after the upload: no fps, no draw call, no overdraw. It
+hands a decision the floor, and the gap left over belongs to whoever is drawing.
 
 The write half has its probe already — `FOSSIL_MEM_PROBE=1` and the two examples under
 `fossil-layout` — and what it lacks is the same discipline: W1 is `peak(10N) === peak(N)`, and it is
