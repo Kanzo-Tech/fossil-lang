@@ -561,11 +561,39 @@ console.log("\nThe tree's `mode` resolves into the list rather than being guesse
   // is the assertion that it RESOLVED, and it names the entry it resolved to rather than the
   // string it read.
   const [{ failures, notes }] = runAll(inspect(pristine.rowgroups), ["mode-names-a-channel"]);
-  const resolved = notes.find((note) => note.includes("resolved, not derived"));
+  // The guard's OWN count, parsed off the note it reports on every run — not inferred from which
+  // notes happen to be present. A guard that examined nothing and a guard that examined something
+  // and liked it both come back green with an empty `failures`, and an absent note reads exactly
+  // like a zero one. So the number is read, and the two below are assertions about the number.
+  const measured = /(\d+) holon tree\(s\) declared, (\d+) reference\(s\) resolved/.exec(
+    notes.find((note) => note.includes("reference(s) resolved")) ?? "",
+  );
   assert(
-    failures.length === 0 && resolved !== undefined,
+    measured !== null,
+    "the guard says how much it looked at, whatever that turns out to be",
+    measured === null ? "the guard reported no count at all" : measured[0],
+  );
+  const trees = measured === null ? 0 : Number(measured[1]);
+  const followed = measured === null ? 0 : Number(measured[2]);
+  // The one that turns red on a rename of the manifest key. `holons:` is optional on the way in
+  // and no manifest struct refuses a key it does not know, so a writer emitting `cell:` against a
+  // reader looking for `holons:` yields a document with the tree ABSENT — which the guard is right
+  // to pass on, and which this is wrong to. The fixture writes a pyramid; if the guard did not see
+  // one, the two disagree about its spelling and nothing else here would say so.
+  assert(
+    trees > 0,
+    "the fixture writes a holon tree and the guard reads one",
+    trees > 0
+      ? `${trees} tree(s) declared`
+      : "0 holon tree(s) declared — the pyramid `fixture.mjs` writes is MISSING from the manifest " +
+        "this guard read, so every assertion it makes about a reference ran over nothing",
+  );
+  assert(
+    failures.length === 0 && followed > 0,
     "the fixture names a channel for its `mode` and the guard resolves it",
-    resolved ?? "nothing resolved",
+    followed > 0
+      ? `${followed} reference(s) resolved · ${notes.find((n) => n.includes("resolved, not derived")) ?? ""}`
+      : "0 reference(s) resolved",
   );
   // And the hop is worth making: what the name resolves to carries the column AND the domain, so a
   // reader that followed it has both without a scan and without a second copy in the tree.

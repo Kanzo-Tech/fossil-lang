@@ -1619,7 +1619,18 @@ export const GUARDS = [
       "No `mode_channel` is a tree whose writer did not say — every tree written before the field " +
       "is one — and it is reported rather than failed. There is no empty state to tell apart: a " +
       "rung's `mode` always holds the mode of something, so «declares none» is not an answer a " +
-      "reference can give.",
+      "reference can give.\n\n" +
+      "**Two numbers, reported on every run and zero included.** How many trees this corpus " +
+      "declares, and how many references were followed into a channel — because a corpus " +
+      "declaring no tree violates nothing and passes here, which is exactly how a corpus that " +
+      "SHOULD carry one and lost it passes too. `holons:` is optional on the way in and no " +
+      "manifest struct refuses a key it does not know, so a writer and a reader spelling that key " +
+      "differently produce a document with the tree ABSENT, and nothing in it distinguishes that " +
+      "from a document whose writer never had a pyramid to declare. An absent note and a zero " +
+      "note read identically to whoever is reading the output, and only one of them is a " +
+      "measurement — so the count is stated rather than implied by the notes that happen to be " +
+      "there. What makes a zero loud is not this guard: it is `self-test.mjs`, which requires the " +
+      "corpus `fixture.mjs` writes to make both numbers non-zero.",
     cannotProve:
       "That the rungs' `mode` values ARE that column's mode. This corpus publishes no rungs, and " +
       "the claim is about bytes rather than about a document: it is evaluated where the rungs are " +
@@ -1634,11 +1645,16 @@ export const GUARDS = [
     run(corpus) {
       const failures = [];
       const notes = [];
+      // What this run looked at, counted where it was looked at and never derived from
+      // `notes.length` — a note is prose and several of them say a reference was NOT followed.
+      let trees = 0;
+      let followed = 0;
       for (const type of corpus.types) {
         if (type.holons === null) {
           notes.push(`${type.name}: declares no holon tree, so there is no reference to resolve`);
           continue;
         }
+        trees += 1;
         const named = type.holons.modeChannel;
         if (named === null) {
           notes.push(
@@ -1671,13 +1687,20 @@ export const GUARDS = [
           );
           continue;
         }
+        followed += 1;
         notes.push(
           `${type.name}: \`mode\` is \`${named}\` over ${resolved.column}` +
             (resolved.domain === null ? "" : `, ${resolved.domain} value(s) wide`) +
             " — resolved, not derived",
         );
       }
-      return result(failures, notes);
+      // First, and present on every run. A guard that says nothing when it examined nothing is
+      // indistinguishable from a guard that examined something and found it well-formed.
+      return result(failures, [
+        `${corpus.types.length} vertex type(s), ${trees} holon tree(s) declared, ` +
+          `${followed} reference(s) resolved`,
+        ...notes,
+      ]);
     },
   },
 ];
