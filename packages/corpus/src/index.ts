@@ -33,10 +33,11 @@
  *
  * ```ts
  * await openCorpus(url,  { query, wasmUrl })          // Corpus — the door
- * await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no engine, no request
+ * await openCorpus(url,  { readText, wasmUrl })       // CorpusAddressing — manifests only
+ * await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
  * ```
  *
- * Two rungs, one name, and `corpus.addressing` is still what the first rung already resolved for
+ * Three rungs, one name, and `corpus.addressing` is still what the first rung already resolved for
  * a caller who paid for it. What it cost: the call is now always asynchronous — the synchronous
  * form had no production consumer, measured, and both engine-free call sites in this repository
  * already awaited it.
@@ -48,8 +49,13 @@
  *   calls in the right order. {@link openCorpus} awaits it, and
  *   `OpenCorpusOptions.wasmUrl` is the one thing about it a caller can still need to say, because
  *   only the caller knows how its bundler resolves an asset.
- * - **`GRAPH_INFO_PATH`** — the index's file name is the door's business and not a consumer's;
- *   `openCorpus` takes a corpus URL and reads whatever is under it.
+ * - **`GRAPH_INFO_PATH`** — the index's file name is the door's business and not a consumer's.
+ *   **That reasoning did not extend to the engine-free route and it was applied there anyway**,
+ *   which is what made a hand-written scan of the index's `vertices:`/`edges:` lists the price of
+ *   addressing a corpus you had not already fetched — three copies of it, one of them in another
+ *   repository. The file name stays off the surface and the SEQUENCE is published instead, as
+ *   `OpenCorpusOptions.readText`: lend the package a text reader and it reads the index, the
+ *   per-type manifests and nothing else. See {@link ReadTextFn}.
  * - **`export type *`** — an unbounded star publishes whatever the codegen makes, now and later,
  *   with nobody deciding. The fourteen the surviving surface names are re-exported below; the
  *   ten `./generated.ts` also holds (`Operation`, `FossilGraphSchemas`, the row and summary
@@ -69,7 +75,7 @@
  * was written and is a published package now, which makes the reason stronger rather than weaker.
  */
 
-// The door — one name, two depths — and the two errors an `instanceof` is a legitimate part of a
+// The door — one name, three depths — and the two errors an `instanceof` is a legitimate part of a
 // surface for. `CorpusManifestError` is the manifest failing to address itself before a byte of
 // payload is read; `CorpusReadError` is the bytes disagreeing with what the manifest promised. A
 // caller can retry one of those against a different corpus and never the other.
@@ -103,8 +109,9 @@ export {
   PAYLOAD_IDENTITY,
 } from './vocabulary.generated.js';
 
-// The one capability a host supplies, for every member of the door.
-export type { QueryFn, QueryRow } from './query.js';
+// The capabilities a host supplies — the engine for every member of the door, and the text reader
+// for the rung that has no engine to lend. See `./query.ts` for why the second exists at all.
+export type { QueryFn, QueryRow, ReadTextFn } from './query.js';
 
 // The door's own types. `SqlCorpus` is what `sql: 'allowed'` widens the answer to — see
 // `SqlPolicy` for why one option decides both raw-SQL doors, and `crates/fossil-mcp/src/tools.rs`
@@ -134,13 +141,21 @@ export type {
   SqlPolicy,
 } from './corpus.js';
 
-// What `Corpus.addressing` is — and, since the collapse, what the engine-free rung of
-// `openCorpus` answers with. Named here because the member is: a public member whose type cannot
-// be written down is worse than no member.
+// What `Corpus.addressing` is — and, since the collapse, what the two engine-free rungs of
+// `openCorpus` answer with. Named here because the member is: a public member whose type cannot be
+// written down is worse than no member.
+//
+// **`Container` is on this list and was not, which was the same omission one layer down.**
+// `CorpusAddressing.container`, `VertexAddress.container`, `IndexAddress.container` and
+// `ProjectionAddress.container` are all public members of that type, and a consumer could read the
+// discriminant and not name it. It carries the rule a footer reader needs — under `rowgroups` the
+// row group IS the tile, under `files` the file is — which lived in `/docs/format` prose and now
+// lives on the type, where the reader that needs it already is.
 //
 // `ResolveCorpusOptions` is NOT replaced by another name: `OpenCorpusOptions` is what it became.
 export type {
   AddressedTiles,
+  Container,
   CorpusAddressing,
   Direction,
   EdgeAddress,

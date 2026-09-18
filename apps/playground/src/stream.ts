@@ -11,9 +11,9 @@
  *
  * ## The three steps, and which of them costs anything
  *
- * 1. **Address.** `openCorpus`, given the manifests and no engine, turns them into tile URLs.
- *    Costs the three small YAML manifests, and nothing else — no engine, and no request beyond
- *    them. (It costs a WASM module too: the addressing is `fossil_graph::plan` compiled to
+ * 1. **Address.** `openCorpus`, given a text reader and no engine, turns the manifests into tile
+ *    URLs. Costs the three small YAML manifests, and nothing else — no engine, and no request
+ *    beyond them. (It costs a WASM module too: the addressing is `fossil_graph::plan` compiled to
  *    wasm32, so that there is one implementation of it rather than one per language.)
  * 2. **Read the footer, once.** Which tiles a *rectangle* touches is not arithmetic — it comes
  *    from the per-row-group `x`/`y` statistics in the Parquet footer, and reading a footer

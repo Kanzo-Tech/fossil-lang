@@ -8,20 +8,22 @@ and the five bounded verbs (`read`, `expand`, `path`, `aggregate`, `schema`) on
 one object. No tiles, no `dense_id`, no Morton, no `by_source`, no prefixes, no
 footers.
 
-**Two depths on that one name, and the depth is what the caller brings.** The
+**Three depths on that one name, and the depth is what the caller brings.** The
 engine-free route was a second function, `resolveCorpus`, and is now the shallow
 end of the same call:
 
 ```ts
 await openCorpus(url,  { query, wasmUrl })          // Corpus — the whole door
-await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no engine, no request
+await openCorpus(url,  { readText, wasmUrl })       // CorpusAddressing — manifests only
+await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
 ```
 
-`query` is the engine; `manifestFiles` is for a caller that already holds the
-manifests, where `base` is what every address is prepended with. Exactly one is
-required, and giving neither is a `TypeError` that names them.
-`corpus.addressing` is neither — it is what the first rung already resolved, for
-a caller who paid for it.
+`query` is the engine; `readText` is `(url) => text` and buys only the
+manifests; `manifestFiles` is for a caller that already holds them, where `base`
+is what every address is prepended with. Exactly one is required, and giving
+none is a `TypeError` that names the three. `corpus.addressing` is none of the
+three — it is what the first rung already resolved, for a caller who paid for
+it.
 
 The capability was always the real difference between the two functions, and a
 capability is an argument. The call is now always asynchronous; the synchronous
@@ -33,7 +35,13 @@ all:
 - `createGraphClient` — the in-process transport the verbs dispatch through.
   `openCorpus` already holds the two things it took.
 - `GRAPH_INFO_PATH` — the index's file name is the door's business. `openCorpus`
-  takes a corpus URL and reads whatever is under it.
+  takes a corpus URL and reads whatever is under it. **That was applied to the
+  engine-free route too, and it should not have been**: a caller with no engine
+  cannot read anything for itself, so it was left hand-writing a scan of the
+  index's `vertices:`/`edges:` lists — three copies of it, one in another
+  repository. The file name stays off the surface and the *sequence* is
+  published instead, as `readText`: lend a text reader and the package reads the
+  index, the manifests it names, and nothing else.
 - `initFossilGraphWasm` — the boot, awaited inside `openCorpus`. A consumer
   should not have to know there is a wasm module, let alone sequence two calls
   against it. `wasmUrl` is what survives, because only the caller knows how its
@@ -82,10 +90,10 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
   ├─ src/generated.ts   verb Params/Result types — codegen'd from schemars JSON Schema
   ├─ src/load.ts        the memoised wasm boot (internal; openCorpus awaits it)
   ├─ src/client.ts      the verb transport, dispatched through by the door (not exported)
-  ├─ src/query.ts       QueryFn — the one capability a host supplies, for both depths
+  ├─ src/query.ts       QueryFn + ReadTextFn — what a host lends, and how deep each one reaches
   ├─ src/manifest.ts    graph.graph.yml, scanned for the paths to fetch next
   ├─ src/address.ts     addressManifests + levelsOf — the binding, not the reader
-  └─ src/corpus.ts      openCorpus(url, { query | manifestFiles }) — THE DOOR
+  └─ src/corpus.ts      openCorpus(url, { query | readText | manifestFiles }) — THE DOOR
 ```
 
 ## Usage
@@ -248,11 +256,23 @@ const { vertexUrls, edgeUrls, complete, gaps } = addressing.tilesFor({
 ```
 
 **And it is not a second function either.** A caller with no engine asks the
-same name for the same object, by bringing less:
+same name for the same object, by lending less:
 
 ```ts
-const addressing = await openCorpus(base, { manifestFiles, wasmUrl });
+// The package reads the index and the manifests it names. You supply the reader.
+const addressing = await openCorpus(base, {
+  readText: async (url) => (await fetch(url)).text(),
+  wasmUrl,
+});
+
+// Or, with the manifests already in hand, nothing is read at all.
+const same = await openCorpus(base, { manifestFiles, wasmUrl });
 ```
+
+`container` on every address says which number a footer hands you is the tile:
+under `rowgroups` the row group **is** the tile, under `files` the file is. That
+rule used to live only in `/docs/format`, so a footer reader had the
+discriminant and not the rule.
 
 **It never composes an address the corpus does not publish.** An edge type with
 no projection at `scale: 1` for a direction, or one declaring it with no `path`,

@@ -1,5 +1,11 @@
 /**
- * The one capability this package asks a host for: run SQL, hand back rows.
+ * The capabilities this package asks a host for — **run SQL and hand back rows, or, for a caller
+ * that only wants addresses, read one text file.**
+ *
+ * {@link QueryFn} is the engine and it is the only thing the door needs. {@link ReadTextFn} buys
+ * strictly less: it cannot answer a verb, cannot read a footer and cannot decode a byte of Parquet,
+ * and it exists because the manifests are text and the engine-free route had no way to say so. See
+ * its own doc for the measured reason it is a capability rather than a documented file name.
  *
  * It lived in `client.ts` as the verb surface's `QueryFn`, reachable only through a barrel that
  * static-imports the wasm-bindgen output. {@link openCorpus} needs the same thing and must not need
@@ -67,3 +73,40 @@ export type QueryRow = Record<string, unknown>;
  * width, and the corpus API coerces it at the boundary rather than trusting any of them.
  */
 export type QueryFn = (sql: string) => Promise<QueryRow[]>;
+
+/**
+ * The host's text reader: given an absolute URL, hand back what is at it.
+ *
+ * ```ts
+ * const addressing = await openCorpus(base, {
+ *   readText: async (url) => (await fetch(url)).text(),
+ *   wasmUrl,
+ * });
+ * ```
+ *
+ * **It exists because the engine-free route could not say which files to read, and three readers
+ * paid for that.** `openCorpus(base, { manifestFiles })` takes the manifests already in hand, and
+ * to have them in hand you must know that the index is `graph.graph.yml` and that its `vertices:`
+ * and `edges:` lists name the rest. That file name came off the barrel on the grounds that *«the
+ * index's file name is the door's business»* — true of the engine-bearing route, which reads it
+ * itself, and false of the other one, which was left to hand-write a twelve-line scan of the two
+ * lists. `apps/playground/src/bench.ts` wrote it, `apps/playground/scripts/verify-canvas.mjs`
+ * wrote it, and a third reader outside this repository wrote it again, which is the second
+ * reference the rule names. Both copies here are deleted and pass this instead.
+ *
+ * **Why a capability and not an exported `GRAPH_INFO_PATH` plus a `manifestPathsOf(index)`.** That
+ * pair is the same two facts published as data for the caller to re-assemble: it hands back a list
+ * of paths, and every caller then writes the same join, the same fetch loop and the same error
+ * when one is missing. The door already owns that sequence — it is step 1 of `openCorpus` — and
+ * what the engine-free caller was missing was not the file name but the SEQUENCE. So it lends the
+ * one thing it has that the package does not, and gets the sequence back. It is also what keeps
+ * the index's file name off the surface, which was the right half of the original decision.
+ *
+ * **It is not a second `query`.** A host with an engine passes `query` and never this; a host with
+ * neither passes `manifestFiles`. The three are one ladder — engine, fetcher, bytes in hand — and
+ * `openCorpus` takes exactly one rung.
+ *
+ * Synchronous is accepted, for a host reading off a local disk (`readFileSync`) — which is what
+ * every verifier script under `apps/playground/scripts` is.
+ */
+export type ReadTextFn = (url: string) => Promise<string> | string;

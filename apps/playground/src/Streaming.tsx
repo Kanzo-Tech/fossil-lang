@@ -10,7 +10,7 @@
  *
  *   1. **Every URL, before any request.** The manifests are three small YAML files; from them
  *      `openCorpus` names all 245 tiles with no engine and nothing further off the wire — the
- *      engine-free rung of the door, reached by handing it manifests and no `query`.
+ *      engine-free rung of the door, reached by lending it a text reader and nothing else.
  *      The panel prints the count and the milliseconds it took, and lists the URLs a given window
  *      resolves to — before fetching.
  *   2. **The footer, bought once.** Which tiles a rectangle touches comes from the Parquet

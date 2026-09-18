@@ -2,8 +2,8 @@
  * The large corpus, addressed — the half of streaming that costs nothing.
  *
  * `scripts/bench-corpus.mjs` writes a million-vertex corpus into this app's `public/` at build
- * time; this module opens it the way any reader would: fetch the manifests, hand them to
- * `openCorpus`, and get back every URL the corpus can produce.
+ * time; this module opens it the way any reader would: lend `openCorpus` a `fetch`, and get back
+ * every URL the corpus can produce.
  *
  * ## What addressing costs now
  *
@@ -19,10 +19,16 @@
  * `openCorpus` takes — rather than a call sequenced before it, and it is memoised for the rest of
  * the session.
  *
- * **There is one door and the capability decides how deep it goes.** This module is why that is a
- * capability rather than a preference: there is no `query` here to give it and nothing to run one
- * against, so `openCorpus` is handed the manifests and answers with the addressing alone. It was
- * a second function called `resolveCorpus`; it is the same name at a shallower depth now.
+ * **The capability is what decides the depth, and this module is why that is a capability rather
+ * than a preference**: there is no `query` here to give the door and nothing to run one against, so
+ * `openCorpus` is handed a text reader and answers with the addressing alone. It was a second
+ * function called `resolveCorpus`; it is the same name at a shallower depth now.
+ *
+ * **What this module no longer contains is the twelve-line scan of the index's `vertices:`/`edges:`
+ * lists.** It had one, `scripts/verify-canvas.mjs` had the same one, and a third reader outside
+ * this repository wrote it again — because the package published `manifestFiles` as a requirement
+ * and nothing that said which files those are. `readText` is that sequence published: lend a
+ * reader, and the package asks for the index and then for what the index names.
  */
 import { openCorpus, type CorpusAddressing } from '@fossil-lang/corpus';
 
@@ -89,38 +95,15 @@ export interface Bench {
   /**
    * Milliseconds spent fetching manifests, and milliseconds spent addressing them.
    *
-   * `resolveMs` covers the reader's one-time boot as well as the arithmetic, because the boot is
-   * an option on the call rather than a step before it. It is memoised per session, so a second
-   * corpus in the same tab pays the arithmetic alone — and neither number is a request for a byte
-   * of payload, which is the claim the panel beside them makes.
+   * The two are separated by the `readText` callback, which is the only place a request happens:
+   * whatever is not inside it is the boot and the arithmetic. `resolveMs` covers the reader's
+   * one-time WASM boot as well, because the boot is an option on the call rather than a step
+   * before it; it is memoised per session, so a second corpus in the same tab pays the arithmetic
+   * alone — and neither number is a request for a byte of payload, which is the claim the panel
+   * beside them makes.
    */
   fetchMs: number;
   resolveMs: number;
-}
-
-/**
- * Pull the manifest paths out of the index.
- *
- * A three-line reader for two list keys rather than a YAML dependency: the engine-free rung needs
- * the manifest FILES, and to know which files those are you have to read the index's
- * `vertices:` and `edges:` lists first. The door does exactly this and for exactly this
- * reason. Anything subtler about the manifests is the reader's job, not this function's —
- * it is looking for filenames, and a filename that is not there produces a
- * `CorpusManifestError` from the real reader, which is a better error than one invented here.
- */
-function manifestPaths(index: string): string[] {
-  const paths: string[] = [];
-  let inList = false;
-  for (const raw of index.split('\n')) {
-    if (/^(vertices|edges):\s*$/.test(raw)) {
-      inList = true;
-      continue;
-    }
-    const item = /^-\s+(\S+)\s*$/.exec(raw);
-    if (inList && item) paths.push(item[1]!);
-    else if (!/^\s*$/.test(raw) && !item) inList = false;
-  }
-  return paths;
 }
 
 /** Where the build script leaves its record. Absent in a checkout where it never ran. */
@@ -148,26 +131,44 @@ export async function openBench(): Promise<Bench | null> {
   // app served from anything but the root would resolve the dataset against the wrong directory.
   const base = new URL(stamp.dir, document.baseURI).href.replace(/\/+$/, '');
 
+  // The whole of the addressing, on one call and with no engine. Every tile URL of a
+  // million-vertex corpus becomes available here — the `wasmUrl` boots the reader (memoised), the
+  // callback below is every request that happens, and nothing under it is a byte of payload.
+  //
+  // **Which files get asked for is not this module's decision any more.** It used to scan the
+  // index's `vertices:`/`edges:` lists itself to find out; `openCorpus` knows, because the index
+  // is its business, and all this lends it is a `fetch`.
+  const manifestFiles: Record<string, string> = {};
+  let fetchMs = 0;
+  let indexText: string | null = null;
+  let ungenerated = false;
+
   const started = performance.now();
-  const index = await fetch(`${base}/graph.graph.yml`);
-  if (!index.ok) return null;
-  const indexText = await index.text();
-
-  const paths = manifestPaths(indexText);
-  const rest = await Promise.all(
-    paths.map(async (path) => [path, await (await fetch(`${base}/${path}`)).text()] as const),
-  );
-  const fetchMs = performance.now() - started;
-
-  const manifestFiles: Record<string, string> = { 'graph.graph.yml': indexText };
-  for (const [path, text] of rest) manifestFiles[path] = text;
-
-  // The whole of the addressing, on one line and with no engine. Every tile URL of a
-  // million-vertex corpus becomes available here, with no further request — the `wasmUrl` boots
-  // the reader (memoised) and the arithmetic runs against manifests already in hand.
-  const resolveStarted = performance.now();
-  const addressing = await openCorpus(base, { manifestFiles, wasmUrl: CORPUS_WASM_URL });
-  const resolveMs = performance.now() - resolveStarted;
+  let addressing: CorpusAddressing;
+  try {
+    addressing = await openCorpus(base, {
+      wasmUrl: CORPUS_WASM_URL,
+      readText: async (url) => {
+        const at = performance.now();
+        const response = await fetch(url);
+        // The FIRST file asked for is the index, and a 404 on it means this checkout never ran
+        // `bench-corpus.mjs` — the `null` the doc above promises, and not a corpus that is wrong.
+        if (!response.ok) {
+          ungenerated = indexText === null;
+          throw new Error(`${url} — ${response.status}`);
+        }
+        const text = await response.text();
+        fetchMs += performance.now() - at;
+        indexText ??= text;
+        manifestFiles[url.slice(base.length + 1)] = text;
+        return text;
+      },
+    });
+  } catch (cause) {
+    if (ungenerated) return null;
+    throw cause;
+  }
+  const resolveMs = performance.now() - started - fetchMs;
 
   const manifestBytes = Object.values(manifestFiles).reduce((a, t) => a + new Blob([t]).size, 0);
 
@@ -175,7 +176,8 @@ export async function openBench(): Promise<Bench | null> {
     stamp,
     base,
     addressing,
-    indexText,
+    // Non-null by construction: `openCorpus` answered, so it read the index.
+    indexText: indexText!,
     manifestTexts: manifestFiles,
     manifestBytes,
     manifestCount: Object.keys(manifestFiles).length,

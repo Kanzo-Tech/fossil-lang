@@ -9,10 +9,10 @@
  * camera grew this object rather than opening a fourth beside it.
  *
  * **`resolveCorpus` was the last of the three and it is this function's shallowest rung.** The
- * engine-free route is a capability the caller lacks, not a door of its own:
- * `openCorpus(base, { manifestFiles })` answers with the addressing and never touches an engine,
- * and `openCorpus(url, { query })` is the whole corpus. See {@link openCorpus} and
- * {@link OpenCorpusOptions}.
+ * engine-free route is a capability the caller lacks, not a door of its own: `openCorpus(base,
+ * { manifestFiles })` and `openCorpus(url, { readText })` answer with the addressing and never
+ * touch an engine, and `openCorpus(url, { query })` is the whole corpus. See {@link openCorpus}
+ * and {@link OpenCorpusOptions}.
  *
  * **The object has two halves and the line between them is not a spelling.** `extent`, `rows`,
  * `node` and `neighbours` compute which FILES to open and open those; `schema`, `read`, `expand`,
@@ -107,7 +107,7 @@ import type {
 } from './generated.js';
 import { initFossilGraphWasm } from './load.js';
 import { join, paths, scan } from './manifest.js';
-import type { QueryFn, QueryRow } from './query.js';
+import type { QueryFn, QueryRow, ReadTextFn } from './query.js';
 
 export { CorpusManifestError } from './address.js';
 export type { Direction, Gap, GapReason } from './address.js';
@@ -684,12 +684,13 @@ export type SqlPolicy = 'withheld' | 'allowed';
 /**
  * What {@link openCorpus} takes.
  *
- * **Exactly one of `query` and `manifestFiles` is required, and which one decides how deep the
- * answer is.** They are a ladder of capability, not two ways to say one thing:
+ * **Exactly one of `query`, `readText` and `manifestFiles` is required, and which one decides how
+ * deep the answer is.** They are a ladder of capability, not three ways to say one thing:
  *
  * | given | what it can do | what comes back |
  * |---|---|---|
  * | {@link query} | read manifests, footers and payload | {@link Corpus} — the whole door |
+ * | {@link readText} | read the manifests, and nothing else | {@link CorpusAddressing} |
  * | {@link manifestFiles} | nothing; the bytes are already in hand | {@link CorpusAddressing} |
  *
  * This was two exported functions — `openCorpus(url, { query })` and
@@ -704,6 +705,15 @@ export interface OpenCorpusOptions {
    * member of the door needs bytes, so a caller with no engine has nothing to give one.
    */
   query?: QueryFn;
+  /**
+   * The host's text reader, for the engine-free route: `(url) => text`.
+   *
+   * Given without {@link query}, `openCorpus` reads the index and the per-type manifests through
+   * it and answers with the addressing alone — the position every engine-free reader was in, which
+   * until now had to hand-write the scan of the index's `vertices:`/`edges:` lists to know which
+   * files to ask for. See {@link ReadTextFn} for the three copies that cost.
+   */
+  readText?: ReadTextFn;
   /**
    * The manifest YAMLs, keyed by dataset-relative path, when the host already holds them — the
    * same shape the verbs take. They are small: one index plus one file per type.
@@ -885,7 +895,8 @@ function text(row: QueryRow, column: string): string {
  *
  * ```ts
  * await openCorpus(url,  { query, wasmUrl })          // Corpus — the door, 1 + N round trips
- * await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no engine, no request
+ * await openCorpus(url,  { readText, wasmUrl })       // CorpusAddressing — the manifests, no payload
+ * await openCorpus(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
  * ```
  *
  * **This absorbed `resolveCorpus`, which was the third and last of the entry points over one
@@ -894,7 +905,7 @@ function text(row: QueryRow, column: string): string {
  * implementation of `fossil_graph::plan`), and this is the one that survived longest because the
  * capability really is different — `resolveCorpus` needed no engine and spent no round trip, which
  * is a withdrawn capability rather than a removed duplicate if you delete it. It is not deleted: it
- * is the second line above. What went is the NAME, because the thing it named was a
+ * is the second and third lines above. What went is the NAME, because the thing it named was a
  * depth of this call and not a second door, and *«there is no second reference»* is about how many
  * places state a fact, not about how many capabilities exist.
  *
@@ -942,8 +953,8 @@ function text(row: QueryRow, column: string): string {
  * why one option decides both.
  *
  * @throws {CorpusManifestError} when the manifest cannot address itself, or declares no row count.
- * @throws {TypeError} when neither `query` nor `manifestFiles` is given — there is then nothing
- *   to open the corpus with.
+ * @throws {TypeError} when none of `query`, `readText` and `manifestFiles` is given — there is
+ *   then nothing to open the corpus with.
  */
 export function openCorpus(
   url: string,
@@ -958,11 +969,12 @@ export async function openCorpus(
   url: string,
   options: OpenCorpusOptions,
 ): Promise<Corpus | CorpusAddressing> {
-  const { query, manifestFiles: held } = options;
-  if (typeof query !== 'function' && held === undefined) {
+  const { query, readText: readOne, manifestFiles: held } = options;
+  if (typeof query !== 'function' && typeof readOne !== 'function' && held === undefined) {
     throw new TypeError(
       'openCorpus needs one of: query (the host brings the engine, and the answer is the whole ' +
-        'corpus), or manifestFiles (the host already holds them)',
+        'corpus), readText (the host reads text, and the answer is the addressing), or ' +
+        'manifestFiles (the host already holds them)',
     );
   }
   // The policy, read once. Both consequences come off this one binding — the hatch below and
@@ -973,20 +985,40 @@ export async function openCorpus(
   // boot is memoised, so a second corpus in the same process costs the check and nothing else.
   if (options.wasmUrl !== undefined) await initFossilGraphWasm({ wasmUrl: options.wasmUrl });
 
-  // The manifests, read through the engine when there is one. Which files those are is not the
-  // caller's decision: `GRAPH_INFO_PATH` and the index's own two lists decide, here.
+  // The manifests, by whichever rung of the ladder the caller stood on. The engine reads the whole
+  // set in ONE round trip because `read_text` takes a list; a plain text reader pays one request
+  // per file, which for one index plus one file per type is the difference this seam is allowed to
+  // have. Neither of them decides WHICH files: that is `GRAPH_INFO_PATH` and the index's own two
+  // lists, and it is the sequence three engine-free readers were re-implementing.
   const readText = async (relative: readonly string[]): Promise<Record<string, string>> => {
     if (relative.length === 0) return {};
     const urls = relative.map((path) => join(url, path));
-    const rows = await query!(`SELECT filename, content FROM read_text(${list(urls)})`);
-    const byUrl = new Map(rows.map((row) => [text(row, 'filename'), text(row, 'content')]));
     const out: Record<string, string> = {};
-    for (const [index, path] of relative.entries()) {
-      const content = byUrl.get(urls[index]!);
-      if (content === undefined) {
-        throw new CorpusManifestError(`${urls[index]!} is named by the manifest and did not read`);
+    const missing = (at: number): never => {
+      throw new CorpusManifestError(`${urls[at]!} is named by the manifest and did not read`);
+    };
+    if (query !== undefined) {
+      const rows = await query(`SELECT filename, content FROM read_text(${list(urls)})`);
+      const byUrl = new Map(rows.map((row) => [text(row, 'filename'), text(row, 'content')]));
+      for (const [index, path] of relative.entries()) {
+        out[path] = byUrl.get(urls[index]!) ?? missing(index);
       }
-      out[path] = content;
+      return out;
+    }
+    const read = await Promise.all(
+      urls.map(async (target, index) => {
+        try {
+          return await readOne!(target);
+        } catch (cause) {
+          throw new CorpusManifestError(
+            `${urls[index]!} is named by the manifest and did not read ` +
+              `(${cause instanceof Error ? cause.message : String(cause)})`,
+          );
+        }
+      }),
+    );
+    for (const [index, path] of relative.entries()) {
+      out[path] = typeof read[index] === 'string' ? read[index]! : missing(index);
     }
     return out;
   };

@@ -73,6 +73,21 @@ export type Direction = 'src' | 'dst';
  *
  * It is a manifest field and not something a reader works out, because working it out means listing
  * a directory and there is no listing over HTTP.
+ *
+ * **What it decides for a reader that opens footers**, which is the rule `/docs/format` states in
+ * prose and which travelled nowhere near the addressing that publishes the discriminant:
+ *
+ * - Under **`rowgroups`**, a payload set is one file and the **row group IS the tile** — row group
+ *   `k` of `tiles.parquet` is tile `k`, so the footer's row-group ordinal is the tile number and
+ *   nothing else has to be matched. The one exception is an adjacency, where a tile whose vertices
+ *   have no edges contributes no row group to be numbered; there the footer's box on
+ *   {@link ProjectionAddress.column} is what locates it. {@link ProjectionAddress.tileUrl} says the
+ *   same from the other side.
+ * - Under **`files`**, the **file is the tile**: `chunk{k}.parquet` holds tile `k` entire, and a
+ *   footer read inside it names row groups the addressing has no opinion about.
+ *
+ * So `container` is not decoration on an address — it says which of the two numbers a footer hands
+ * back is the one {@link CorpusAddressing.tilesFor} takes.
  */
 export type Container = 'files' | 'rowgroups';
 

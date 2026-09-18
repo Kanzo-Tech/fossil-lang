@@ -123,30 +123,24 @@ const ok = (label, condition, detail = '') => {
 const note = (text) => console.log(`  ..   ${text}`);
 
 // ---- the addressing, exactly as `bench.ts` builds it, with the filesystem as the base ----
-const indexText = readFileSync(join(root, 'graph.graph.yml'), 'utf8');
-const manifestPaths = [];
-{
-  let inList = false;
-  for (const raw of indexText.split('\n')) {
-    if (/^(vertices|edges):\s*$/.test(raw)) {
-      inList = true;
-      continue;
-    }
-    const item = /^-\s+(\S+)\s*$/.exec(raw);
-    if (inList && item) manifestPaths.push(item[1]);
-    else if (!/^\s*$/.test(raw) && !item) inList = false;
-  }
-}
-const manifestFiles = { 'graph.graph.yml': indexText };
-for (const path of manifestPaths) manifestFiles[path] = readFileSync(join(root, path), 'utf8');
-
+//
 // A local directory is a legitimate base for the duckdb CLI: every `tileUrl` it composes is a
-// path the binary can open, which is the same string a browser would have fetched.
+// path the binary can open, which is the same string a browser would have fetched — and the same
+// string `readFileSync` opens, which is why the whole engine-free half of this script is a
+// `readFileSync` lent to the door.
+//
+// **The scan of the index's `vertices:`/`edges:` lists that used to be here is gone.** It was a
+// copy of the one in `src/bench.ts`, which was a copy of the one inside `openCorpus`, and it
+// existed because the package asked for `manifestFiles` and published nothing that said which
+// files those are. Now it lends a reader and is told nothing about the layout at all.
 //
 // `wasmUrl` because the addressing is `fossil_graph::plan` at wasm32: arithmetic, but not
-// free-standing. The door below is given the same value and the boot is memoised, so this is one
-// boot rather than two — and it is the same function, at the rung that needs no engine.
-const addressing = await openCorpus(root, { manifestFiles, wasmUrl: CORPUS_WASM });
+// free-standing. `openCorpus` below is given the same value and the boot is memoised, so this is
+// one boot rather than two.
+const addressing = await openCorpus(root, {
+  readText: (url) => readFileSync(url, 'utf8'),
+  wasmUrl: CORPUS_WASM,
+});
 const type = addressing.vertexType();
 
 // ---- the host's one capability, counted ----

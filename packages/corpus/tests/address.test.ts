@@ -345,6 +345,52 @@ describe('openCorpus — the engine-free rung', () => {
     expect(corpus.tilesFor({ tiles: [7] }).vertexUrls).toEqual(['vertex/Person/tiles.parquet']);
   });
 
+  /**
+   * **The gap that made a third copy, closed and held closed.**
+   *
+   * `manifestFiles` is the rung for a caller that already holds the bytes — and to hold them you
+   * have to know that the index is `graph.graph.yml` and that its `vertices:` and `edges:` lists
+   * name the rest. The package published neither, so every engine-free reader hand-wrote the scan:
+   * `apps/playground/src/bench.ts`, `apps/playground/scripts/verify-canvas.mjs`, and a third
+   * outside this repository. What is asserted here is that the caller now supplies a text reader
+   * and NOTHING ELSE — no file name, no list, no order — and that the package asks for exactly the
+   * manifests and never a byte of payload.
+   */
+  it('reads the index and the manifests it names through a lent text reader, and nothing else', async () => {
+    const asked: string[] = [];
+    const corpus = await openCorpus('/bench/1000000', {
+      readText: (url) => {
+        asked.push(url);
+        const text = manifestFiles[url.replace('/bench/1000000/', '')];
+        if (text === undefined) throw new Error(`no such file: ${url}`);
+        return text;
+      },
+    });
+
+    // The index FIRST, because nothing else is knowable until it is read — that ordering is the
+    // sequence the three copies were re-implementing.
+    expect(asked[0]).toBe('/bench/1000000/graph.graph.yml');
+    expect(new Set(asked)).toEqual(
+      new Set(Object.keys(manifestFiles).map((path) => `/bench/1000000/${path}`)),
+    );
+    // And not one byte of payload. An engine-free rung that opened a tile would be the door
+    // wearing a different capability.
+    expect(asked.filter((url) => url.endsWith('.parquet'))).toEqual([]);
+
+    expect(corpus.vertexType().tileUrl(0)).toBe('/bench/1000000/vertex/Person/tiles.parquet');
+  });
+
+  it('names the file a lent reader could not read, as the manifest error it is', async () => {
+    await expect(
+      openCorpus('/bench/1000000', {
+        readText: (url) => {
+          if (url.endsWith('graph.graph.yml')) return manifestFiles['graph.graph.yml']!;
+          throw new Error('404');
+        },
+      }),
+    ).rejects.toThrow(CorpusManifestError);
+  });
+
   it('refuses a vertex type the manifest does not declare, and names the ones it does', async () => {
     // The refusal has one author. A second copy of the type list on this side of the boundary is
     // what the whole change removed, so the sentence comes back from the reader.
