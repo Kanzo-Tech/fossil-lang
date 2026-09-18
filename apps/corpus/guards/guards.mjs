@@ -817,10 +817,20 @@ export const GUARDS = [
       "file, and what a written one changes is a byte count. Nor WHICH levels a writer ought to " +
       "have written: that is a policy, and `fossil_sinks::manifest::VertexLevels::planned` is its " +
       "one implementation. A corpus is free to declare a different set as long as the files hold " +
-      "what they say.",
+      "what they say.\n\n" +
+      "Nor can it tell you, from a green result alone, that it ran. Both loops below start by " +
+      "skipping a type or a relation that declares nothing above scale 1, so a corpus with no " +
+      "pyramid anywhere satisfies every sentence above having opened no file — which is why the " +
+      "count is stated rather than implied by the notes that happen to be there. What makes a " +
+      "zero loud is not this guard: it is `self-test.mjs`, which requires the corpus " +
+      "`fixture.mjs` writes to make it non-zero.",
     run(corpus) {
       const failures = [];
       const notes = [];
+      // What this run looked at, counted where the diff is actually issued and never derived from
+      // `notes.length` — a note is prose, and a level that failed its diff reports through
+      // `failures` and leaves none.
+      let diffed = 0;
       for (const type of corpus.types) {
         // The pyramid is the projections above scale one; the payload is the one AT it, and it is
         // the same list. `scale` is read off the manifest and never derived — the exponent lives in
@@ -884,6 +894,7 @@ export const GUARDS = [
               );
             }
           }
+          diffed += 1;
           notes.push(
             `${type.name}: scale ${set.scale} is ${scalar(`SELECT count(*) FROM read_parquet(${level})`)} row(s) over ${set.files.length} file(s)`,
           );
@@ -943,12 +954,19 @@ export const GUARDS = [
               `${edge.rel} scale ${set.scale}: edges carrying coordinates the payload disagrees with`,
             ),
           );
+          diffed += 1;
           notes.push(
             `${edge.rel}: scale ${set.scale} is ${scalar(`SELECT count(*) FROM read_parquet(${held})`)} edge(s), both ends placed as the payload places them`,
           );
         }
       }
-      return result(failures, notes);
+      // First, and present on every run. A guard that says nothing when it examined nothing is
+      // indistinguishable from a guard that examined something and found it well-formed.
+      return result(failures, [
+        `${corpus.types.length} vertex type(s) and ${corpus.edges.length} relation(s), ` +
+          `${diffed} level set(s) diffed against the predicate`,
+        ...notes,
+      ]);
     },
   },
 

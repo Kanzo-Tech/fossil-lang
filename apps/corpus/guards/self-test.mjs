@@ -113,10 +113,23 @@ function failing(dir) {
 // ── 1. non-vacuity ──────────────────────────────────────────────────────────────────────────────
 
 console.log("\nA conforming corpus, in both containers");
+/**
+ * The pyramid the pristine corpus carries, **told and never derived** — `fixture.mjs`'s header is
+ * explicit that which levels exist is a policy with one implementation, and that implementation is
+ * `fossil_sinks::manifest::VertexLevels::planned`. This is its answer for 70,000 vertices at 4,096
+ * rows a tile: the complete list `1..=coarsest`, where the coarsest is the finest level that fits
+ * one tile — `ceil(70000/4^3) = 1094 <= 4096` and `ceil(70000/4^2) = 4375` does not.
+ *
+ * It is here because the fixture's default is no pyramid at all, and a corpus with none satisfies
+ * `a-level-is-the-predicate` having opened no file: both of that guard's loops skip a type or a
+ * relation declaring nothing above scale 1. Part 1's whole claim is that every guard passes on a
+ * conforming corpus, and it was covering that guard with nothing.
+ */
+const PRISTINE_LEVELS = [1, 2, 3];
 /** What the fixture reports it wrote, kept so a later block can hold a guard against it. */
 const written = {};
 for (const [layout, dir] of Object.entries(pristine)) {
-  written[layout] = write(dir, { layout });
+  written[layout] = write(dir, { layout, levels: PRISTINE_LEVELS });
   const results = runAll(inspect(dir));
   const broke = results.filter((r) => r.failures.length > 0);
   assert(
@@ -130,10 +143,10 @@ for (const [layout, dir] of Object.entries(pristine)) {
 
 console.log("\nThe guards that could pass over nothing say how much they read");
 {
-  // A guard whose every query sits behind a `continue` is the same green whether it read
-  // something or skipped everything, so it now reports a count on every run, zero included, and
-  // this is an assertion about the NUMBER rather than about which notes happen to be present —
-  // an absent note and a zero note read identically to a parser.
+  // Two guards whose every query sits behind a `continue`, so an empty `failures` is the same
+  // green whether they diffed a pyramid or skipped one. Each now reports a count on every run,
+  // zero included, and these are assertions about the NUMBER rather than about which notes
+  // happen to be present — an absent note and a zero note read identically to a parser.
   const results = runAll(inspect(pristine.rowgroups));
   const measure = (id, pattern) => {
     const { notes } = results.find((r) => r.guard.id === id);
@@ -142,8 +155,19 @@ console.log("\nThe guards that could pass over nothing say how much they read");
     return found === null ? 0 : Number(found[1]);
   };
 
-  // The surviving half of `exactly-once`, whose edge half was deleted for having never run: its
-  // one remaining query is behind `type.files.length === 0`, and nothing said so.
+  // Red on a pristine corpus told no levels: the guard's two loops skip a type and a relation
+  // that declare nothing above scale 1, and part 1 was asserting it passed on exactly that.
+  const diffed = measure("a-level-is-the-predicate", /(\d+) level set\(s\) diffed/);
+  assert(
+    diffed > 0,
+    "the fixture writes a pyramid and the level guard diffs it against the predicate",
+    diffed > 0
+      ? `${diffed} level set(s) diffed`
+      : "0 level set(s) diffed — the pristine corpus declares no projection above scale 1, so " +
+        "every sentence this guard makes about a level ran over nothing",
+  );
+  // The same question of the surviving half of `exactly-once`, whose edge half was deleted for
+  // having never run: its one remaining query is behind `type.files.length === 0`.
   const read = measure("exactly-once", /(\d+) payload set\(s\) read/);
   assert(
     read > 0,
