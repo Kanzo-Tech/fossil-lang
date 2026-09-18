@@ -44,6 +44,11 @@ fn is_ignored(root: &Path, name: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+// The guard asks the question the repository actually has: is this one of the
+// lowercase `.md` files a contributor just added at the root. `Path::extension`
+// would answer a different one — it matches `.MD` too, and misses a file named
+// exactly `.md` — so taking the suggestion would widen what this test forbids.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
 #[test]
 fn the_root_holds_no_prose_but_its_own_front_door() {
     let root = repo_root();

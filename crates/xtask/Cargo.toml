@@ -36,3 +36,6 @@ fossil-hir = { path = "../fossil-hir" }
 # line existed, and no shipped artefact links it, since `xtask` is nobody's
 # dependency and this is a dev-dependency of it.
 toml = "0.9"
+
+[lints]
+workspace = true

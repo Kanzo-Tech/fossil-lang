@@ -55,7 +55,7 @@
 //! - **That any of the declared crates SHOULD link an engine.** It proves the
 //!   list is complete, not that it is right. `fossil-layout` was the example:
 //!   in the wasm closure, described everywhere as linking no engine, and
-//!   reaching DataFusion through `fossil-df` for a Parquet writer that is now
+//!   reaching `DataFusion` through `fossil-df` for a Parquet writer that is now
 //!   `fossil-tile-writer`. This guard is what made that visible, and it had no
 //!   opinion about it — the repair came from reading its table, not from it.
 //! - **Anything about a feature-gated edge.** `cargo metadata`'s resolve graph

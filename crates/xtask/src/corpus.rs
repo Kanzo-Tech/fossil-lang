@@ -200,11 +200,9 @@ pub fn parse(text: &str) -> Vec<Column> {
             other => panic!("corpus.bnf: expected a word, found {other:?}"),
         }
     };
-    let punct = |pos: &mut usize, p: &str| {
-        match toks.get(*pos) {
-            Some(Tok::Punct(q)) if *q == p => *pos += 1,
-            other => panic!("corpus.bnf: expected `{p}`, found {other:?}"),
-        };
+    let punct = |pos: &mut usize, p: &str| match toks.get(*pos) {
+        Some(Tok::Punct(q)) if *q == p => *pos += 1,
+        other => panic!("corpus.bnf: expected `{p}`, found {other:?}"),
     };
 
     while pos < toks.len() {

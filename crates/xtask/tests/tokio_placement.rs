@@ -103,21 +103,21 @@ impl Hold {
     /// naming, not its last one — `fossil-df` has both a gated normal
     /// dependency and an ungated dev one, and it is the normal one that
     /// decides.
-    fn worse(self, other: Hold) -> Hold {
+    fn worse(self, other: Self) -> Self {
         match (&self, &other) {
-            (Hold::Reaches { .. }, _) => self,
-            (_, Hold::Reaches { .. }) => other,
-            (Hold::NativeGated, _) | (_, Hold::NativeGated) => Hold::NativeGated,
-            _ => Hold::OffArtefact,
+            (Self::Reaches { .. }, _) => self,
+            (_, Self::Reaches { .. }) => other,
+            (Self::NativeGated, _) | (_, Self::NativeGated) => Self::NativeGated,
+            _ => Self::OffArtefact,
         }
     }
 
     fn describe(&self) -> String {
         match self {
-            Hold::NativeGated => format!("normal, gated `{NATIVE_GATE}`"),
-            Hold::OffArtefact => "dev/build only".to_string(),
-            Hold::Reaches { gate: None } => "normal, UNGATED".to_string(),
-            Hold::Reaches { gate: Some(g) } => format!("normal, gated `{g}` (unreadable)"),
+            Self::NativeGated => format!("normal, gated `{NATIVE_GATE}`"),
+            Self::OffArtefact => "dev/build only".to_string(),
+            Self::Reaches { gate: None } => "normal, UNGATED".to_string(),
+            Self::Reaches { gate: Some(g) } => format!("normal, gated `{g}` (unreadable)"),
         }
     }
 }
@@ -253,6 +253,11 @@ fn table(holders: &BTreeMap<String, Hold>, closure: &BTreeSet<String>) -> String
         .join("\n")
 }
 
+// The `match gate` inside the `Some` arm is the guard's message, and its two
+// cases — an ungated dependency and a cfg this test cannot evaluate — are
+// different findings that must stay separately named. `map_or_else` would put
+// the unreadable-cfg case in a closure argument ahead of the ungated one.
+#[allow(clippy::option_if_let_else)]
 #[test]
 fn tokio_never_reaches_a_wasm_build() {
     let meta = metadata();
@@ -351,10 +356,15 @@ fn the_tokio_rule_names_no_crate() {
 mod fires {
     use super::*;
 
+    // Fixture builders. Taking the `Value`s by reference would only move a
+    // clone inside, and these exist so a test reads as the JSON `cargo
+    // metadata` emits.
+    #[allow(clippy::needless_pass_by_value)]
     fn dep(name: &str, kind: Value, target: Value) -> Value {
         serde_json::json!({ "name": name, "kind": kind, "target": target })
     }
 
+    #[allow(clippy::needless_pass_by_value)] // as `dep` above
     fn pkg(deps: Vec<Value>) -> Value {
         serde_json::json!({ "dependencies": deps })
     }

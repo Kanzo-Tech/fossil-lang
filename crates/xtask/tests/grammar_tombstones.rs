@@ -190,6 +190,11 @@ fn banner(line: &str) -> Option<String> {
         .then(|| t.split(['(', '—']).next().unwrap_or(t).trim().to_string())
 }
 
+// The scanner is a two-state machine, and both arms of `match &mut open` are
+// written in the same shape — find the delimiter, or do the not-found thing.
+// Only the `Some` arm is large enough to trip the lint; rewriting just that one
+// as `if let` would leave the two halves of one state machine looking unrelated.
+#[allow(clippy::single_match_else)]
 fn comments(src: &str) -> Vec<Comment> {
     let mut out = Vec::new();
     let mut section = String::from("(preamble)");

@@ -208,6 +208,10 @@ mod tests {
         );
     }
 
+    // The two expected sets in this test are read side by side — one crate under
+    // `Linking`, two under `Any` — and that comparison is the test. Writing the
+    // first as `std::iter::once` would hide it behind a different construction.
+    #[allow(clippy::iter_on_single_items)]
     #[test]
     fn a_dev_edge_is_not_a_link_and_nothing_behind_it_is_either() {
         // `fossil-layout`'s shape under `salsa` since `39d0fb8`, exactly: the

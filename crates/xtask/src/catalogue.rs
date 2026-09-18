@@ -249,7 +249,7 @@ impl SigTy {
     /// Public because the round-trip guard derives `Debug`'s spelling from it
     /// rather than carrying a second table of the same twelve names.
     #[must_use]
-    pub fn rust_path(self) -> &'static str {
+    pub const fn rust_path(self) -> &'static str {
         match self {
             Self::String => "SigTy::Scalar(ScalarTy::String)",
             Self::Integer => "SigTy::Scalar(ScalarTy::Integer)",
@@ -300,7 +300,7 @@ pub enum Arity {
 }
 
 impl Arity {
-    fn rust_path(self) -> &'static str {
+    const fn rust_path(self) -> &'static str {
         match self {
             Self::One => "Arity::One",
             Self::OneOrMore => "Arity::OneOrMore",
@@ -400,7 +400,7 @@ impl Row {
 
     /// Does this row's behaviour have to be linked by a crate that owns a
     /// shape-language parser? See the module doc.
-    fn needs_a_decoder(&self) -> bool {
+    const fn needs_a_decoder(&self) -> bool {
         self.decodes.is_some()
     }
 
@@ -486,10 +486,9 @@ fn variant_of(table_fn: &str) -> String {
         .filter(|part| !part.is_empty())
         .map(|part| {
             let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
-                None => String::new(),
-            }
+            chars.next().map_or_else(String::new, |first| {
+                first.to_ascii_uppercase().to_string() + chars.as_str()
+            })
         })
         .collect()
 }
@@ -734,6 +733,11 @@ fn extensions_literal(extensions: &[String]) -> String {
 }
 
 /// Emit one `pub static NAME: Provider = …`.
+// `reads_types` is one of a run of `match`es over the same two option fields, each
+// emitting the Rust text of an `Option`, and they are read as a column. Only the
+// two-arm one trips the lint; `map_or_else` would break the run and would print the
+// `None` text ahead of the `Some` text it is generating.
+#[allow(clippy::option_if_let_else)]
 fn emit_row(out: &mut String, row: &Row) {
     let reads_rows = match &row.reads {
         Some(Reads::Native(f)) => {

@@ -10,7 +10,7 @@
 //! more spelling, in a crate that cannot see this one, adds a three-arm `match`
 //! rather than a dependency. The same shape happened here before —
 //! `fossil_graph_schema::local_name` exists because three copies of a
-//! three-line function had accumulated in the MIR lowering, the ShEx descriptor
+//! three-line function had accumulated in the MIR lowering, the `ShEx` descriptor
 //! and the SHACL decoder.
 //!
 //! A second table does not fail anything. It disagrees at one spelling, in one
@@ -40,7 +40,7 @@
 //!   literal, a `phf` map, a chain of `if`s, or a `starts_with` cascade pairs
 //!   the same names with the same variants and does not go through `=>`. This
 //!   catches the shape the tree actually keeps writing, not every possible one.
-//! - **Anything outside Rust.** `packages/introspect` carries a DuckDB →
+//! - **Anything outside Rust.** `packages/introspect` carries a `DuckDB` →
 //!   primitive table, which is a different source vocabulary and a different
 //!   agreement — `packages/introspect/tests/rust-parity.test.ts` is what holds
 //!   that one. If an XSD table ever appears in TypeScript, this guard is blind

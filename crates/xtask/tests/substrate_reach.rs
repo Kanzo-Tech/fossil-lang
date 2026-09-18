@@ -277,6 +277,11 @@ mod fires {
         .collect()
     }
 
+    // The expectation is a TABLE that happens to hold one row today, and it is
+    // written in the same `[…].into_iter().collect()` shape as its multi-row
+    // siblings on purpose: `std::iter::once` would make a one-row expectation
+    // look like a different kind of assertion from a two-row one.
+    #[allow(clippy::iter_on_single_items)]
     #[test]
     fn a_bullet_naming_the_crate_declares_its_subject() {
         let md = "\
@@ -336,6 +341,9 @@ mod fires {
         );
     }
 
+    // As above: `subjects` and `linkers` are the same kind of table, and the one
+    // that happens to hold a single row keeps the shape of the one that does not.
+    #[allow(clippy::iter_on_single_items)]
     #[test]
     fn the_table_says_which_side_each_name_came_from() {
         let subjects = [("fossil-layout".to_string(), 42usize)]

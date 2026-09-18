@@ -19,8 +19,9 @@ publish = false
 # eight pedantic findings surfaced only when code MOVED out of this crate into
 # one that does inherit the table, so the alternative — leaving it off and
 # letting the destination crate catch them — is a finding that waits for a
-# refactor. `fossil-graph-schema`, `fossil-policy` and `xtask` are still without
-# it, which is the same gap and not a policy.
+# refactor. The three crates that were still without it — `fossil-graph-schema`,
+# `fossil-policy` and `xtask` — now inherit it too, so
+# `grep -L lints crates/*/Cargo.toml` is empty and this is a policy again.
 [lints]
 workspace = true
 
