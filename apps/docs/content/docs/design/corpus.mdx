@@ -180,6 +180,73 @@ reader that is not ours and already speaks it** — because a specification nobo
 interoperability.
 </Callout>
 
+### The version string names a format this page declares non-conformant
+
+**Nine divergences up, and then `version: gar/v1`.** The paragraph above says this is not a
+GraphAr-conformant corpus and does not claim to be; the manifest it describes opens with GraphAr's
+own version string, which is a claim of exactly that. A reader who takes the string at its word
+reaches for GraphAr's reader and it throws on `dense_id` — the first property of every corpus fossil
+writes — which is the first row of the table above. **The string is the only line of a fossil
+manifest that contradicts the page specifying it.**
+
+That is the same defect as [the name of the cell pyramid](/docs/design/holons#the-name-promises-a-nesting-this-does-not-have):
+a borrowed name promising a contract the artefact does not honour. It is not a tenth divergence —
+a divergence is a place where fossil does something else on purpose, and this is a place where the
+manifest says something untrue about all nine.
+
+<Callout title="Nothing in this tree keys on it, and that is the fact the decision turns on">
+`gar/v1` appears **69 times in 34 files**, and **not one of them reads it**. There is no comparison,
+no `match`, no branch, no rejection path, no version gate — in the crates, in
+`apps/corpus/conformance/corpus/graph.graph.yml` and its siblings, in the guards, or in the
+TypeScript. `packages/executor/src/index.ts, GraphInfo` carries `version` as an opaque `string` and
+nothing ever looks at it.
+
+| what the 69 are | count | files |
+| --- | --- | --- |
+| a corpus or a fixture on disk | 27 | 25 |
+| a test asserting the writer emitted the string | 10 | 6 |
+| doc comments and fixture literals | 18 | 5 |
+| `crates/fossil-sinks/src/manifest.rs, GRAPHAR_VERSION` and its five uses by the writer | 6 | 3 |
+| the string hard-coded past that constant | 5 | 5 |
+| prose on this site | 2 | 2 |
+| **a reader that decides anything on it** | **0** | **0** |
+
+**The five that bypass the constant are their own finding.** `crates/fossil-graph/src/manifest.rs`,
+`crates/fossil-graph/src/executor.rs`, `crates/fossil-mcp/src/lib.rs` and two examples/tests beside
+them write `"gar/v1"` as a literal rather than reading `GRAPHAR_VERSION`, so *changing the constant
+does not change the string* in three crates. Whatever is decided, that is a defect today: there is
+one name for the version and six places that state it.
+</Callout>
+
+So the compatibility question that makes [the pyramid's name](/docs/design/holons#the-name-promises-a-nesting-this-does-not-have)
+expensive **does not arise here**, and it is worth being precise about why. A manifest key is read
+by name, so renaming one changes what a reader finds. A manifest *value* nobody reads is inert: an
+old corpus keeps saying `gar/v1`, a new one says something else, and every reader in this tree
+behaves identically on both because none of them looks. The cost of changing it is the cost of
+rewriting a string in six write sites, 25 fixture files and 10 assertions — mechanical, and the
+compiler and the test suite find all of it.
+
+**What each option costs, and what it forecloses.**
+
+| option | cost | what it forecloses |
+| --- | --- | --- |
+| **Keep `gar/v1`** | nothing | the manifest keeps making a claim this page denies, and the denial lives only here. A third party reading the corpus and not this page has no way to learn it |
+| **A fossil string** — `fossil/v1`, or a version that carries the divergence set | six write sites, 25 fixtures, 10 assertions, and a paragraph on `/docs/format` saying what the string means | conformance as a *later* option: a corpus that once said `gar/v1` and now says `fossil/v1` has said two things, and a reader that cached the first is a reader this format has not thought about |
+| **Keep the string and state the claim** — a second field naming what is borrowed | one new optional key, which is a format change with all of a format change's obligations | nothing, and it also fixes nothing: a reader that does not read `version` will not read its annotation either |
+
+**What this needs in order to be taken.** Not a measurement — the measurement is above and it is
+`0`. Two things:
+
+1. **Whether the version string is for a reader or for a human.** Nothing reads it, so today it is
+   for a human, and a string that is for a human and says the wrong thing has no defence. If it is
+   ever to be for a reader, the thing to decide is not its spelling but whether a reader may reject
+   a corpus on it — and [one clock, running one way](#the-artifact-is-the-api) says that decision is
+   cheap exactly until a corpus reaches somebody who cannot regenerate it.
+2. **The same ruling the cell pyramid waits on**, about whether two spellings of one thing may be
+   legal at once. Answering it differently in the same manifest is the outcome to avoid.
+
+The five hard-coded literals are worth fixing either way, and do not wait on any of this.
+
 ## The width of an address, and what actually runs out first
 
 The first divergence in that table is a width, and a width is the most expensive kind of decision
