@@ -1,12 +1,16 @@
 /**
  * The third reader, adapted to the shape the other two are executed in.
  *
- * `reader.mjs` is plain Node written from the conventions. `resolveCorpus` in
- * `@fossil-lang/corpus/address` is the published TypeScript. Both are JavaScript, and a mistake they
- * share — a shift taken as signed, a count that went through a `Number` — is invisible to a diff of
- * the two. This one is `fossil_graph::plan`, compiled to wasm32 and reached through
- * `fossil-graph-wasm`'s `Corpus`: a different language, a different integer width, and the build
- * that actually ships to a browser.
+ * `reader.mjs` is plain Node written from the conventions. The third leg is the published
+ * `@fossil-lang/corpus`, whose `openCorpus` is a binding over exactly the module this file loads —
+ * so the table is executed by three legs over **two** implementations, and this one is the entry
+ * the other two share a language boundary with rather than a reader of its own.
+ *
+ * It was two legs and both were JavaScript, and a mistake they shared — a shift taken as signed, a
+ * count that went through a `Number` — was invisible to a diff of the two. This one is
+ * `fossil_graph::plan`, compiled to wasm32 and reached through `fossil-graph-wasm`'s `Corpus`: a
+ * different language from `reader.mjs`, a different integer width from the native leg in
+ * `crates/fossil-graph/tests/conformance.rs`, and the build that actually ships to a browser.
  *
  * # This is the one thing here that is not `node` plus a `duckdb` binary
  *

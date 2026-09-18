@@ -40,7 +40,8 @@
  * by an `OR` that answered a question nobody asked.
  *
  * The reader itself is `./reader.mjs` — written from the conventions and from nothing else, and
- * sharing with `resolveCorpus` only the fact that both read the same four manifest fields. This
+ * sharing with the published `openCorpus` only the fact that both read the same four manifest
+ * fields. This
  * file is a *harness* over it, and it is one of two: `writer.mjs` points the same reader at a
  * corpus `fossil run` has just written, which is the question a table cannot ask, because a table
  * is written by whoever read the conventions last and the writer never sees it.
