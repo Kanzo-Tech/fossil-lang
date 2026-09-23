@@ -63,10 +63,15 @@ jobs:
       # is not one — the failure is `unknown target triple 'wasm32-unknown-unknown'` out of
       # `cc-rs`, and it happens deep in a dependency build where it reads as nonsense.
       # CONTRIBUTING.md carries the same two variables for the local invocation.
+      #
+      # `llvm` and not `lld`: the second is the linker, and `AR_wasm32_unknown_unknown`
+      # below names `llvm-ar`, which only the first ships. Declaring the variable while
+      # installing the other package is how this job read `failed to find tool "llvm-ar"`
+      # from inside a zstd-sys build — the other three workflows always said `llvm`.
       - name: Install wasm-capable LLVM
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld
+          sudo apt-get install -y clang llvm
           echo "CC_wasm32_unknown_unknown=clang" >> "$GITHUB_ENV"
           echo "AR_wasm32_unknown_unknown=llvm-ar" >> "$GITHUB_ENV"
 
