@@ -400,12 +400,18 @@ export interface EdgeAddress {
   projectionFiles(scale: number | bigint, direction: Direction): readonly string[];
 }
 
-/** Why an orientation is missing from an answer. Both reasons are honest; they are not the same. */
+/** Why an orientation is missing from an answer. The three reasons are honest; they are not the same. */
 export type GapReason =
   /** The caller did not ask for this direction. */
   | 'not-requested'
   /** The manifest does not publish an address for it, so no URL exists to ask for. */
-  | 'not-declared';
+  | 'not-declared'
+  /**
+   * The relation's other end is a different vertex type, so its far ends are numbered in another
+   * `dense_id` space. Only a {@link Drawing} reports it: a window over the incident set wants that
+   * relation, and gets it.
+   */
+  | 'other-space';
 
 /** One orientation of one edge type that a window did not read, and why. */
 export interface Gap {
@@ -451,6 +457,32 @@ export interface AddressedTiles {
 }
 
 /**
+ * **Which relations a picture of one vertex type may draw**, and which of the ones incident to it
+ * it may not, with the reason.
+ *
+ * A picture is one type's `dense_id` space: every mark is a row of that type's payload, every far
+ * end is placed in the same numbering, and an edge row's two endpoint columns are compared against
+ * it. A relation that LEAVES the type has its far ends numbered in another type's space, both
+ * spaces are dense from zero, and `BIGINT` compares against `BIGINT` without complaining — so the
+ * comparison matches and draws a line between two vertices with nothing between them.
+ *
+ * **It is not {@link AddressedTiles} narrowed, and that is the point.** `tilesFor` with `['src']`
+ * is the out-edge read, and the out-edges of an `Author` include the ones landing on a `Paper`:
+ * right for incidence, unusable for a picture. Two questions, two calls.
+ */
+export interface Drawing {
+  /** The vertex type every mark, every far end and both ends of every line are numbered in. */
+  readonly type: string;
+  /** The relations a picture of this type may draw, in declaration order. */
+  readonly relations: readonly EdgeAddress[];
+  /**
+   * The relations incident to this type that the picture leaves out, and why. Source-aligned,
+   * because the drawing read is.
+   */
+  readonly undrawn: readonly Gap[];
+}
+
+/**
  * A corpus resolved to addresses.
  *
  * **It was `ResolvedCorpus`, one import away from `Corpus`, and neither name said what differed.**
@@ -469,13 +501,15 @@ export interface CorpusAddressing {
   vertexType(name?: string): VertexAddress;
   /** The edge types incident to `type` — as source, as destination, or both on a self-edge. */
   incident(type: string): readonly EdgeAddress[];
+  /** Which relations a picture of `type` may draw, and why it leaves each of the others out. */
+  drawing(type?: string): Drawing;
   /**
    * The URLs a set of vertex tiles addresses.
    *
-   * `directions` defaults to `['src']`, which is the drawing read: it fetches the out-edges of
-   * every vertex in the set and returns `complete: false` with a `not-requested` gap, because a
-   * set of drawn vertices has in-edges it did not ask for. Pass `['src', 'dst']` for the incident
-   * set.
+   * `directions` defaults to `['src']`, the out-edge read: it fetches the out-edges of every vertex
+   * in the set and returns `complete: false` with a `not-requested` gap, because a set of drawn
+   * vertices has in-edges it did not ask for. Pass `['src', 'dst']` for the incident set. Neither
+   * is the set a picture may DRAW — see {@link CorpusAddressing.drawing}.
    *
    * **It was `window`, and that name belonged to the other layer.** `Corpus.rows` takes a
    * rectangle in the corpus's own coordinates and answers with vertices and edges; this takes tile
@@ -546,6 +580,19 @@ interface EdgeSnapshot {
   readonly projections: readonly ProjectionSnapshot[];
 }
 
+interface GapSnapshot {
+  readonly edge_type: string;
+  readonly direction: Direction;
+  readonly reason: GapReason;
+}
+
+interface DrawingSnapshot {
+  readonly type: string;
+  /** Indices into the plan's `edges`: a label would not attribute two relations that share one. */
+  readonly relations: readonly number[];
+  readonly undrawn: readonly GapSnapshot[];
+}
+
 interface WindowSnapshot {
   readonly type: string;
   readonly tiles: readonly number[];
@@ -557,11 +604,7 @@ interface WindowSnapshot {
   }>;
   readonly edge_urls: readonly string[];
   readonly complete: boolean;
-  readonly gaps: ReadonlyArray<{
-    readonly edge_type: string;
-    readonly direction: Direction;
-    readonly reason: GapReason;
-  }>;
+  readonly gaps: readonly GapSnapshot[];
 }
 
 /**
@@ -760,6 +803,18 @@ export function addressManifests(
     edges,
     vertexType,
     incident: (type) => edges.filter((e) => e.srcType === type || e.dstType === type),
+    drawing: (type) => {
+      const drawing = asked(() => reader.drawing(type) as DrawingSnapshot);
+      return {
+        type: drawing.type,
+        relations: drawing.relations.map((index) => edges[index]!),
+        undrawn: drawing.undrawn.map((g) => ({
+          edgeType: g.edge_type,
+          direction: g.direction,
+          reason: g.reason,
+        })),
+      };
+    },
     tilesFor: ({ type, tiles, directions = ['src'] }) => {
       const window = asked(
         () =>

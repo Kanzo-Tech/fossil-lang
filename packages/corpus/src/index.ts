@@ -172,6 +172,7 @@ export type {
   Container,
   CorpusAddressing,
   Direction,
+  Drawing,
   EdgeAddress,
   EdgeTiles,
   Gap,

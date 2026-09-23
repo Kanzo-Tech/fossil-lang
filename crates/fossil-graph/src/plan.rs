@@ -120,8 +120,8 @@ impl Direction {
     }
 }
 
-/// Why an orientation is missing from a window. Both reasons are honest; they
-/// are not the same.
+/// Why an orientation is missing from an answer. The three reasons are honest;
+/// they are not the same.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum GapReason {
@@ -129,6 +129,11 @@ pub enum GapReason {
     NotRequested,
     /// The manifest does not publish an address for it, so no URL exists to ask for.
     NotDeclared,
+    /// The relation's other end is a different vertex type, so its far ends are
+    /// numbered in another `dense_id` space. A [`Window`] over the incident set
+    /// wants that relation and never reports this; a [`Drawing`] cannot place
+    /// one of its ends and always does.
+    OtherSpace,
 }
 
 /// The shift that addresses a tile of `rows` rows, or `None` if no shift does.
@@ -531,6 +536,11 @@ pub struct EdgeTiles {
 /// *incidence*. So `complete` is about incidence and `gaps` says which
 /// orientations are missing from it, separating the caller not asking from the
 /// corpus not publishing.
+///
+/// **Which relations are drawable at all is [`Drawing`] and is not here.** CSR
+/// being enough for the drawable ones says nothing about which ones those are,
+/// and a window over `Author` legitimately addresses `Author authored Paper` —
+/// those edges are incident to the windowed authors. Their far ends are Papers.
 #[derive(Debug, Clone, Serialize)]
 pub struct Window {
     /// The vertex type the tile numbers are in the `dense_id` space of.
@@ -548,6 +558,41 @@ pub struct Window {
     pub complete: bool,
     /// Which orientations are missing from the incident set, and why.
     pub gaps: Vec<Gap>,
+}
+
+/// **Which relations a picture of one vertex type may draw** — and which of the
+/// ones incident to it it may not, with the reason.
+///
+/// A drawing is one type's `dense_id` space: every mark is a row of that type's
+/// payload, every far end has to be placed in the same numbering, and the two
+/// endpoint columns of an edge row are compared against it. A relation that
+/// LEAVES the type has its far ends numbered in another type's space, and the
+/// two spaces are both dense from zero — so the comparison matches, silently,
+/// and draws a line between two vertices with nothing between them.
+///
+/// **It is not a filter over a [`Window`], and that is the point.** A window is
+/// the incident set and a cross-type relation belongs in it: `by_source` of
+/// `Author authored Paper` is tiled by `Author`'s own `dense_id`, it holds
+/// exactly the out-edges of the windowed authors, and a reader walking a
+/// neighbourhood wants it. What it cannot do is place the far end, so the same
+/// address that answers incidence correctly answers drawing wrongly, and the
+/// two questions are asked with two calls rather than with one argument.
+#[derive(Debug, Clone, Serialize)]
+pub struct Drawing {
+    /// The vertex type every mark, every far end and both ends of every line
+    /// are numbered in.
+    #[serde(rename = "type")]
+    pub vertex_type: String,
+    /// Indices into [`ReadPlan::edges`] of the relations a picture of this type
+    /// may draw, in declaration order. An index rather than a label, because a
+    /// corpus may declare two relations sharing one label and an answer named by
+    /// label could not be attributed to either.
+    pub relations: Vec<usize>,
+    /// The relations incident to this type that the picture leaves out, and why.
+    /// Source-aligned, because the drawing read is: a level of a relation is
+    /// which vertices are in it, and the source type's pyramid is what says
+    /// which.
+    pub undrawn: Vec<Gap>,
 }
 
 /// A corpus resolved into what a reader needs to read it: the addresses, and the
@@ -601,12 +646,66 @@ impl ReadPlan {
             .collect()
     }
 
+    /// Which relations a picture of one vertex type may draw, and why it leaves
+    /// each of the others out. See [`Drawing`].
+    ///
+    /// **The rule is structural and not a check**: a relation is drawable when
+    /// BOTH of its endpoints are the drawn type, so nothing numbered in another
+    /// type's space is ever addressed and no comparison between two `dense_id`
+    /// spaces can be reached. `fossil-layout` states the same rule on the
+    /// writing side — a cell is an interval of ONE type's ids, and the placement
+    /// it computes is over the relations whose two ends are both in it — and
+    /// this is the reading side of it.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::InvalidManifest`] when the index declares no such vertex
+    /// type, or none at all.
+    pub fn drawing(&self, vertex_type: Option<&str>) -> Result<Drawing> {
+        let vertex = self.vertex_type(vertex_type)?;
+        let mut relations = Vec::new();
+        let mut undrawn = Vec::new();
+        for (index, edge) in self.edges.iter().enumerate() {
+            let incident =
+                edge.src_type == vertex.vertex_type || edge.dst_type == vertex.vertex_type;
+            if !incident {
+                continue;
+            }
+            let reason =
+                if edge.src_type != vertex.vertex_type || edge.dst_type != vertex.vertex_type {
+                    GapReason::OtherSpace
+                } else if edge.adjacency(Direction::Src).is_none() {
+                    GapReason::NotDeclared
+                } else {
+                    relations.push(index);
+                    continue;
+                };
+            undrawn.push(Gap {
+                edge_type: edge.edge_type.clone(),
+                direction: Direction::Src,
+                reason,
+            });
+        }
+        Ok(Drawing {
+            vertex_type: vertex.vertex_type.clone(),
+            relations,
+            undrawn,
+        })
+    }
+
     /// The URLs a set of vertex tiles addresses.
     ///
-    /// `directions` of `[Src]` is the drawing read: it fetches the out-edges of
-    /// every vertex in the window and reports `complete: false` with a
-    /// `not-requested` gap, because a window of drawn vertices has in-edges it did
-    /// not ask for. Both orientations is the incident set.
+    /// `directions` of `[Src]` fetches the out-edges of every vertex in the
+    /// window and reports `complete: false` with a `not-requested` gap, because
+    /// a window of drawn vertices has in-edges it did not ask for. Both
+    /// orientations is the incident set.
+    ///
+    /// **`[Src]` is not «the drawing read», and it read that way here for as
+    /// long as the bug lasted.** The out-edges of an `Author` include the ones
+    /// that land on a `Paper`, which is what makes this answer right for
+    /// incidence and unusable for a picture: those rows carry a `dst_dense` in
+    /// `Paper`'s numbering. Which relations a picture may draw is
+    /// [`ReadPlan::drawing`].
     pub fn window(
         &self,
         vertex_type: Option<&str>,

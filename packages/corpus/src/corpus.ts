@@ -110,7 +110,7 @@ import { join, paths, scan } from './manifest.js';
 import type { QueryFn, QueryRow, ReadTextFn } from './query.js';
 
 export { CorpusManifestError } from './address.js';
-export type { Direction, Gap, GapReason } from './address.js';
+export type { Direction, Drawing, Gap, GapReason } from './address.js';
 
 /**
  * Raised when the bytes disagree with what the manifest promised, or when the corpus is shaped in a
@@ -250,9 +250,10 @@ export interface RowsParams extends Box {
   type?: string;
   /**
    * Which orientations to read. Defaults to **both**, which is the answer that is complete for
-   * incidence — the addressing's `tilesFor` defaults to `['src']` instead, because that is the drawing
-   * read and a drawing read pays for nothing it cannot paint. The reference API's default is the
-   * honest one and the drawing path opts down to it.
+   * incidence — the addressing's `tilesFor` defaults to `['src']` instead, because a picture pays
+   * for nothing it cannot paint. The reference API's default is the honest one and the drawing path
+   * opts down to it. Which RELATIONS a picture can paint is a separate question and a separate
+   * call: `addressing.drawing`.
    */
   directions?: readonly Direction[];
 }
@@ -453,6 +454,16 @@ export interface Frame {
   readonly marks: number;
   /** Pairs of row indices into {@link Frame.positions}. At least one end of each is a mark. */
   readonly links: Uint32Array;
+  /**
+   * The relations incident to {@link Frame.type} that no line here came out of, and why.
+   *
+   * **A picture that quietly leaves a relation out is a picture of a graph that does not exist**,
+   * and the reason matters: `other-space` is a relation whose far end is a different vertex type,
+   * which one type's `dense_id` numbering cannot place — those edges are real and this is the wrong
+   * question to ask for them, {@link Corpus.rows} being the right one. `not-declared` is a relation
+   * the corpus publishes no source-aligned half of, so nothing addresses it.
+   */
+  readonly undrawn: readonly Gap[];
   readonly cost: FrameCost;
 }
 
@@ -1747,6 +1758,8 @@ export async function open(
     readonly columns: readonly string[];
     /** Whether an edge row positions both of its endpoints on its own. */
     readonly positioned: boolean;
+    /** The relations incident to the drawn type that no line came out of, and why. */
+    readonly undrawn: readonly Gap[];
   }
 
   /**
@@ -1837,21 +1850,29 @@ export async function open(
      */
     const levelSet = address.projection(stride);
     /**
+     * **The relations this frame may draw**, out of the addressing and never out of a filter here.
+     *
+     * A frame is one type's `dense_id` space — every mark, every far end and both ends of every
+     * line — so a relation it can draw is one whose two endpoints are that type. This asked
+     * `tilesFor` for `['src']` instead, and that is the out-edge read: the out-edges of an `Author`
+     * include the ones landing on a `Paper`, so the frame joined a `dst_dense` in `Paper`'s
+     * numbering against `Author`'s. Two `dense_id` spaces are both dense from zero and both
+     * `BIGINT`, so the join matched, and half the lines it drew joined vertices with nothing
+     * between them. `ReadPlan::drawing` states the rule once, on the same side of the wasm boundary
+     * every other address comes from, and `fossil-layout` states it for the writer.
+     */
+    const drawable = addressing.drawing(address.type);
+    /**
      * The relations whose own level `k` is written, when every relation this frame draws is.
      *
      * **All or none, deliberately.** A frame drawing the edges of two relations out of one and the
      * payload out of the other would be reading two artefacts in one answer and reporting one
      * number for it.
      *
-     * **The relations a frame draws are the ones its type is the SOURCE of**, and that is the
-     * payload path's own rule rather than a second one: it asks `tilesFor` for `['src']`, and
-     * `crates/fossil-graph/src/plan.rs, ReadPlan::window` drops an orientation whose `dense_id`
-     * space is not the window's. A level of a relation is source-aligned, so a relation this type
-     * is only the DESTINATION of is tiled by ranges of ANOTHER type's `dense_id`: the tile numbers
-     * this frame holds name different vertices there, and two `dense_id` spaces compare without
-     * complaint, so reading it would draw lines between vertices that are not related rather than
-     * fail. A type that is the source of nothing draws no lines either way, so an empty set is a
-     * cache hit and not a fallback.
+     * Source-aligned, always: a level of a relation is *which vertices are in it*, and the source
+     * type's own pyramid is what says which. On a drawable relation the source type IS the drawn
+     * type. A type that draws no relation has an empty set, which is a cache hit and not a
+     * fallback.
      *
      * **Why asking for links is part of the cache lookup.** A vertex level holds the level's rows
      * and nothing else, so the far end of a mark-incident edge is not in it — and the camera keeps
@@ -1862,10 +1883,7 @@ export async function open(
      * not a cache of a view that asked for links; the PAIR is.
      */
     const edgeLevels = (() => {
-      const drawn = addressing.edges.filter((e) => e.srcType === address.type);
-      // Source-aligned, always: a level of a relation is *which vertices are in it*, and the source
-      // type's own pyramid is what says which.
-      const sets = drawn.map((e) => e.projection(stride, 'src'));
+      const sets = drawable.relations.map((e) => e.projection(stride, 'src'));
       return sets.every((s) => s !== null) ? (sets as NonNullable<(typeof sets)[number]>[]) : null;
     })();
     /**
@@ -1939,21 +1957,22 @@ export async function open(
     // against the payload's footers and added to the ledger the sample's own runs opened.
     const pinTiles = whole ? [] : [...new Set(address.tilesOf(pins).map(Number))].sort((a, b) => a - b);
 
-    // The `src` orientations of every incident edge type, addressed by the tiles already chosen.
-    // The addressing decides which orientations exist and why one is missing; reproducing that rule
-    // here is how the two halves of a read drift apart.
+    // **One composition for both shapes of the read**, off the projections of the relations this
+    // frame may draw. The scale is the only difference: a hit reads the relation's own level set,
+    // whose tiles carry the same ordinals the vertex level's do — both are `src_dense` shifted by
+    // the source's shift plus `k`, from one plan — and a miss reads the adjacency, which is the
+    // projection at scale 1. So the tiles already selected address either with no new arithmetic.
     //
-    // Under a hit the lines come from the relation's OWN level set, whose tiles carry the same
-    // ordinals the vertex level's do — both are `src_dense` shifted by the source's shift plus `k`,
-    // from one plan — so the tiles already selected address them with no new arithmetic.
+    // The miss arm asked `tilesFor` for `['src']` and flattened its `edgeUrls`, which is where the
+    // cross-type file got in: that answer is the out-edge set and it is right about it. A file of
+    // another `dense_id` space now has no route to the query at all, rather than a predicate
+    // downstream that would have to recognise it.
+    const drawn = positioned
+      ? edgeLevels!
+      : drawable.relations.map((relation) => relation.adjacency('src')!);
     const edgeUrls = !wantLinks
       ? []
-      : positioned
-        ? distinct(edgeLevels!.flatMap((set) => held.map((tile) => set.tileUrl(tile))))
-        : distinct([
-            ...addressing.tilesFor({ type: address.type, tiles: held, directions: ['src'] })
-              .edgeUrls,
-          ]);
+      : distinct(drawn.flatMap((set) => held.map((tile) => set.tileUrl(tile))));
 
     return {
       all: source.all,
@@ -1974,6 +1993,7 @@ export async function open(
           ? ['src_dense', 'dst_dense', 'src_x', 'src_y', 'dst_x', 'dst_y']
           : ['src_dense', 'dst_dense'],
         positioned,
+        undrawn: drawable.undrawn,
       },
       matchedAt: cached ? level : 0,
     };
@@ -2057,8 +2077,8 @@ export async function open(
      *
      * **`complete` is about incidence.** With both orientations it is `true`: every edge touching a
      * vertex in the box is in the answer. With `['src']` it is `false` with a `not-requested` gap,
-     * because that is the drawing read — every drawable edge has its source on screen, and the
-     * edges whose destination is drawn and whose source is off it render identically to nothing.
+     * because every drawable edge has its source on screen, and the edges whose destination is
+     * drawn and whose source is off it render identically to nothing.
      * An orientation the corpus does not publish is a `not-declared` gap, which is a different fact
      * and is not reported as the same one.
      *
@@ -2184,6 +2204,7 @@ export async function open(
         marks: 0,
         matchedAt: read.matchedAt,
         links: new Uint32Array(0),
+        undrawn: read.lines.undrawn,
         cost: { requests: 0, bytes: 0, ms: 0, tiles: 0, ofTiles: read.all.length },
       };
       if (urls.length === 0) return empty;
@@ -2366,6 +2387,7 @@ export async function open(
         categories,
         marks,
         links: edges,
+        undrawn: read.lines.undrawn,
         cost: {
           requests: runs.length + pinRuns.length,
           bytes: bytes + edgeBytes,

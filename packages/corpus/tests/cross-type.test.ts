@@ -211,6 +211,13 @@ it.each([0, 1])(
     expect(control.links.length).toBeGreaterThan(0);
     expect(drawn.marks).toBe(control.marks);
     expect(linksOf(drawn)).toEqual(linksOf(control));
+
+    // And it is left out LOUDLY: a picture that quietly drops a relation is a picture of a graph
+    // that does not exist.
+    expect(control.undrawn).toEqual([]);
+    expect(drawn.undrawn).toEqual([
+      { edgeType: 'authored', direction: 'src', reason: 'other-space' },
+    ]);
   },
   120_000,
 );
@@ -224,4 +231,7 @@ it('draws nothing at all for a type whose only relation leaves it', async () => 
   });
   expect(drawn.links.length).toBe(0);
   expect(drawn.marks).toBe(VERTEX_COUNT);
+  expect(drawn.undrawn).toEqual([
+    { edgeType: 'authored', direction: 'src', reason: 'other-space' },
+  ]);
 });

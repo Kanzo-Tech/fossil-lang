@@ -250,7 +250,7 @@ addressing.vertexType().tileUrl(10);
 
 const { vertexUrls, edgeUrls, complete, gaps } = addressing.tilesFor({
   tiles: [10, 11],          // from the host's own footer read — see below
-  directions: ['src'],      // the drawing read
+  directions: ['src'],      // out-edges only; see `drawing` for what a picture may draw
 });
 // complete: false
 // gaps: [{ edgeType: 'knows', direction: 'dst', reason: 'not-requested' }]

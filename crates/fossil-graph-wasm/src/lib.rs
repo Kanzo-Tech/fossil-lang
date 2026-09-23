@@ -496,9 +496,25 @@ impl Corpus {
             .map_err(|e| to_js_error(&e))
     }
 
+    /// Which relations a picture of one vertex type may draw — both endpoints in
+    /// its own `dense_id` space — and which of the incident ones it leaves out,
+    /// with the reason. `relations` are indices into the plan's `edges`.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest.
+    pub fn drawing(&self, vertex_type: Option<String>) -> Result<JsValue, JsError> {
+        self.inner
+            .drawing(vertex_type.as_deref())
+            .map_err(|e| to_js_error(&e))?
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(JsError::from)
+    }
+
     /// The URLs a set of vertex tiles addresses, and what that set is complete
-    /// for. `directions` of `["src"]` is the drawing read; both orientations is
-    /// the incident set.
+    /// for. `directions` of `["src"]` is the out-edge read and both orientations
+    /// is the incident set — neither is the set a picture may DRAW, which is
+    /// `drawing` above.
     ///
     /// # Errors
     ///
