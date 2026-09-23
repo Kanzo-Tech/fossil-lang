@@ -264,7 +264,8 @@ describe('open — the engine-free rung', () => {
     expect(2 ** person.shift).toBe(declared);
     // The fixture declares `container: rowgroups`, which is what fossil writes: every tile of the
     // set names one file and the footer's box on `dense_id` says which row groups are the tile.
-    // The ordinal-in-the-name half of the claim is `containers.test.ts`'s and the vector table's.
+    // The ordinal-in-the-name half of the claim is `apps/corpus/integration/containers.test.ts`'s
+    // and the vector table's.
     expect(person.tileUrl(0)).toBe('/bench/1000000/vertex/Person/tiles.parquet');
     // The boundary is what the shift is FOR, so it is asserted at the boundary
     // wherever the fixture puts it.

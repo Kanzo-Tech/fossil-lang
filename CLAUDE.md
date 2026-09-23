@@ -22,9 +22,11 @@ Keep it under 200 lines, rules-not-context.
   behind a maintainers' divider,
   `/docs/design` is where an argument lives, with `design/discarded` for every rejected
   alternative and what would bring it back, and `design/prior-art` for every source named.
-- `apps/corpus/` — the artifact's contract, executable: `guards/` and `conformance/`. Its prose
-  is `/docs/format`; the two server components that render `guards.mjs` and `vectors.json` live
-  on the docs side and read across, so renaming either file breaks the docs build on purpose.
+- `apps/corpus/` — the artifact's contract, executable: `guards/`, `conformance/` and
+  `integration/`. Its prose is `/docs/format`; the two server components that render `guards.mjs`
+  and `vectors.json` live on the docs side and read across, so renaming either file breaks the
+  docs build on purpose. `integration/` is the one directory here that needs `pnpm install`, and
+  `pnpm test:integration` is the only script that reaches it.
 - `apps/docs/programs/` — the conformance programs. Documentation transcludes them; nothing
   retypes a program into prose. No number here: `crates/fossil-cli/tests/programs.rs` walks
   the directory, and the count in this line was already wrong.
@@ -290,8 +292,15 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
                            format, and the design argument behind a maintainers' divider.
                            `apps/docs/CLAUDE.md` has the editorial rules
   corpus/                  NOT a site — it was one, and it is now `docs/content/docs/format/`.
-                           What is left executes: the guards, the conformance corpus, and a
-                           reader that shares no code with them
+                           What is left executes: the guards, the conformance corpus, a reader
+                           that shares no code with them, and `integration/` — the four vitest
+                           suites that need the `duckdb` BINARY, which is why they are here and
+                           not in `packages/corpus/tests/`. They were there, reaching backwards
+                           over `../../../apps/corpus/guards/`, and a published package that
+                           imports out of a private app is a package the release gate's
+                           `--filter "./packages/*"` cannot isolate — `v0.3.0-alpha.4` is what
+                           that cost. `pnpm-ci.yml` runs them; it is the job that has both a
+                           `duckdb` binary and `packages/corpus/pkg/`
   playground/              the architectural claim, clickable: check → run → query in one
                            browser tab, no server. It imports `examples/hello.fossil` rather
                            than copying it, and produces the same five subjects the walking

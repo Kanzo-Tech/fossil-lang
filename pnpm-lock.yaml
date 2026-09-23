@@ -30,7 +30,14 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)(happy-dom@15.11.7)(lightningcss@1.32.0)
 
-  apps/corpus: {}
+  apps/corpus:
+    devDependencies:
+      '@duckdb/duckdb-wasm':
+        specifier: 1.32.0
+        version: 1.32.0
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.41)(happy-dom@15.11.7)(lightningcss@1.32.0)
 
   apps/docs:
     dependencies:

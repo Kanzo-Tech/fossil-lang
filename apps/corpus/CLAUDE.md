@@ -6,7 +6,9 @@ The repository rules are in `../../CLAUDE.md`. These are true only here.
 
 The **executable** half of the corpus contract. `guards/` checks that a corpus on disk satisfies the
 conventions; `conformance/` checks that three independent readers address it the same way, and that
-the corpus they address reproduces from a recorded recipe.
+the corpus they address reproduces from a recorded recipe; `integration/` writes a corpus with the
+guards' own fixture and reads it back through `packages/corpus/src`, which is where the addressing
+cost, the container comparison, the cost model and the pyramid read are measured.
 
 The prose half was a second Next.js site living beside this directory. It is gone: the pages are
 `apps/docs/content/docs/format/`, and what it cost was nine runtime dependencies identical version
@@ -30,8 +32,9 @@ It was two, and **both were JavaScript**: a mistake they shared — a shift take
 that went through a `Number` — was invisible to a diff of the two, which is the shape of blindness
 `GraphAr`'s fourth implementation landed through.
 
-The wasm leg is the one thing here that needs more than `node` and a `duckdb` binary, and it is
-therefore **refused explicitly rather than skipped**. `verify.mjs --without-wasm` is the opt-out and
+The wasm leg is the one thing in THIS pair that needs more than `node` and a `duckdb` binary —
+`integration/` next door needs more than both, which is why it is a separate directory with a
+separate script — and it is therefore **refused explicitly rather than skipped**. `verify.mjs --without-wasm` is the opt-out and
 `corpus.yml` is where it is passed; without it a missing `packages/corpus/pkg/` is a failure. Do not
 change that default: a leg that vanishes with its dependency is how this stops being evidence
 without anybody noticing.
@@ -53,8 +56,12 @@ third party who has neither this repository nor Rust nor pnpm — that is why it
 when every other README in `crates/` was deleted. Adding an npm dependency changes what the contract
 costs to check, which changes who can check it.
 
-The rule is on `guards/`. `conformance/wasm-reader.mjs` reaches out of this app into
-`packages/corpus/pkg/`, and it is the only file here that does; nothing under `guards/` may.
+The rule is on `guards/`, and on `guards/` alone. Two other places here reach out of this app into
+`packages/corpus/`: `conformance/wasm-reader.mjs` into the gitignored `pkg/`, and every file under
+`integration/` into `src/` and `tests/boot.ts`. **Nothing under `guards/` may**, and that is the
+line — an app reaching a package is the direction dependencies run in, and the reverse is what put
+four suites of the published package inside this directory's `duckdb` dependency and broke a
+release.
 
 `pnpm test` writes a conforming corpus in both containers, requires every guard to pass, and then
 requires every guard to **fire** against a corpus broken in exactly one way. A guard nobody has seen

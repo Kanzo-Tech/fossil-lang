@@ -465,7 +465,7 @@ to fetch it, a parser, a guard, a code path, a fallback for corpora written befo
 on the cost report whose entire content was which of the two indexes had answered.
 [`design/discarded`](/docs/design/discarded) carries the measurement and what would bring it back.
 
-`packages/corpus/tests/address-cost.test.ts` is what the surviving path costs, in tiles, in `Range`
+`apps/corpus/integration/address-cost.test.ts` is what the surviving path costs, in tiles, in `Range`
 requests and in kilobytes, against a denominator DuckDB supplies: the tiles that actually hold a
 vertex inside the rectangle, so a path answering with fewer has not read less, it has drawn a wrong
 picture.
@@ -800,7 +800,7 @@ That obligation has been discharged once, and the shape of it is what to copy. T
 [row-group container](/docs/format/conventions/addressing#two-containers-one-address) is a change of
 format; both readers were moved to it and diffed **while the writer still emitted only the old one**,
 which is the only window in which two containers of one corpus exist at the same time to be compared.
-`apps/corpus/conformance/containers.mjs` and `packages/corpus/tests/containers.test.ts` are that diff:
+`apps/corpus/conformance/containers.mjs` and `apps/corpus/integration/containers.test.ts` are that diff:
 the same graph written both ways, every answer required to match. After the writer moves there is
 one container and nothing left to compare against.
 

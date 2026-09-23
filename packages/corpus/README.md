@@ -162,16 +162,17 @@ the `frontier` its depth bound stopped at.
 whether one is a file (`chunk{k}.parquet`) or a row group inside a single
 `tiles.parquet` is a second question — the one `graph.graph.yml`'s `container`
 answers, because a reader over HTTP has no directory to list and cannot work it
-out. **Both are read.** `tests/containers.test.ts` writes the same graph in each
-and asserts the answers back are identical — extent, window, `node`,
-`neighbours` — and that the row-group container names strictly fewer files for
-the same window (over HTTP, 5.6 requests per window against 22.3 at five million
-vertices). Reading only the file-per-tile container `fossil run` writes and
-refusing the other by name is what this paragraph used to claim, and it is the
-one thing the reader must not do: the row-group container is the measured winner
-and the one fossil does not write yet, so refusing it would refuse the corpus
-this package exists to read. Neither is globbed, because a glob picks up the
-staged single-file copy beside the tiles and counts every row twice.
+out. **Both are read.** `apps/corpus/integration/containers.test.ts` writes
+the same graph in each and asserts the answers back are identical — extent,
+window, `node`, `neighbours` — and that the row-group container names strictly
+fewer files for the same window (over HTTP, 5.6 requests per window against 22.3
+at five million vertices). Reading only the file-per-tile container `fossil run`
+writes and refusing the other by name is what this paragraph used to claim, and
+it is the one thing the reader must not do: the row-group container is the
+measured winner and the one fossil does not write yet, so refusing it would
+refuse the corpus this package exists to read. Neither is globbed, because a
+glob picks up the staged single-file copy beside the tiles and counts every row
+twice.
 
 ## The verbs
 

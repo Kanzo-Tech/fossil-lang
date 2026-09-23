@@ -288,7 +288,7 @@ and `gaps`, and nothing about cost — so an obligation stated over `rows` has t
 the seam rather than read off the answer, which is what the next two paragraphs are.
 
 **The ledger itself is asserted by `packages/corpus/tests/frame.test.ts` and
-`packages/corpus/tests/frame-levels.test.ts`**, and not one assertion compares against a recorded
+`apps/corpus/integration/frame-levels.test.ts`**, and not one assertion compares against a recorded
 figure: `requests` is at most `tiles`, a written level opens strictly fewer bytes and strictly
 fewer tiles than striding the payload for a *finer* one, and a pin that brought a vertex back off
 the payload shows up as bytes on the bill rather than as a fetch nobody was charged for. That last
@@ -296,7 +296,7 @@ one is the property a ledger is for — an omission is invisible in the answer, 
 undercounted by 38% at a million vertices for exactly as long as it weighed the vertex tiles and
 not the adjacency it was also opening.
 
-**R1 itself is asserted through the seam, by `packages/corpus/tests/cost.test.ts`**, because the
+**R1 itself is asserted through the seam, by `apps/corpus/integration/cost.test.ts`**, because the
 rectangle it reads with is `rows`. The one capability this package asks a host for is a `query`
 callback, so everything a reader does passes through one function and the test counts the
 statements that reach *its own* host — a closure in the test file, not a mechanism this package

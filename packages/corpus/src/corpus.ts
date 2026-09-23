@@ -1737,7 +1737,8 @@ export async function open(
    * carries `src_x`…`dst_y` beside the two ids and draws its own far ends; a relation's projection
    * at `scale: 1` is the ADJACENCY, which carries the two ids and nothing else, so its far ends
    * have to be joined out of vertex tiles that were opened anyway. Same lines either way where
-   * both ends are held — see `frame-levels.test.ts` — and two shapes of SQL to get them.
+   * both ends are held — see `apps/corpus/integration/frame-levels.test.ts` — and two shapes of SQL
+   * to get them.
    */
   interface SampledLines {
     /** The files the edge rows come out of. Empty when the caller asked for no links. */

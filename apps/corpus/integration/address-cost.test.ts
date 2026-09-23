@@ -3,8 +3,8 @@
  *
  * **The footers ARE the index** — `footer-is-the-index` — and this is the measurement of the one
  * path that survives that convention: every tile whose Parquet-footer `x`/`y` box intersects the
- * rectangle, which is what `intersecting` in `../src/corpus.ts` does with the boxes `open`
- * reads once. Both halves of the question are here: it must MISS nothing, and what it over-reads
+ * rectangle, which is what `intersecting` in `packages/corpus/src/corpus.ts` does with the boxes
+ * `open` reads once. Both halves of the question are here: it must MISS nothing, and what it over-reads
  * for that is reported in tiles, in `Range` requests and in kilobytes.
  *
  * The denominator is not a model. DuckDB is asked for the tiles that actually hold a vertex inside
@@ -28,11 +28,15 @@
  * the same reason. Point `FOSSIL_ADDRESS_CORPUS` at a corpus directory (with
  * `FOSSIL_ADDRESS_COUNT`) to run the same windows over a bigger one.
  *
- * Needs the `duckdb` binary, and skips without one rather than failing — the guards next door make
- * the same trade for the same reason.
+ * It needs the `duckdb` binary, which is why it lives in `apps/corpus/integration/` beside the
+ * guards that speak to it and not in `packages/corpus/tests/`. The dependency is DECLARED —
+ * `pnpm --filter @fossil-lang/corpus-contract test:integration` is the script that has it, and the
+ * package's own `pnpm test` no longer does. It is not probed and this file does not skip:
+ * `describe.skipIf` skips the TESTS and runs the describe BODY, so the probe it was guarding
+ * never guarded the fixture write, and a suite that vanishes with its dependency reads as
+ * covered while asserting nothing.
  */
 
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -41,16 +45,14 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
 // conventions ask for, and it must not import a type of ours to be one.
-import { write } from '../../../apps/corpus/guards/fixture.mjs';
+import { write } from '../guards/fixture.mjs';
 // @ts-expect-error — same reason: the guards reach a corpus through the `duckdb` binary and nothing
 // of ours, so a measurement that uses them measures what a stranger would see.
-import { query } from '../../../apps/corpus/guards/duck.mjs';
+import { query } from '../guards/duck.mjs';
 // @ts-expect-error — and the tile size this fixture is written at comes from there too. It used to
-// come from `TILE_SHIFT` in `../src/address.js`, which was a second implementation of the reader
-// and is deleted; the guards' copy is the one a third party actually reads.
-import { TILE_ROWS, TILE_SHIFT } from '../../../apps/corpus/guards/arithmetic.mjs';
-
-const hasDuckdb = spawnSync('duckdb', ['-c', 'select 1'], { encoding: 'utf8' }).status === 0;
+// come from `TILE_SHIFT` in `packages/corpus/src/address.ts`, which was a second implementation of
+// the reader and is deleted; the guards' copy is the one a third party actually reads.
+import { TILE_ROWS, TILE_SHIFT } from '../guards/arithmetic.mjs';
 
 /** The corpus's own `chunk_size`, and the shift that addresses it. */
 const SHIFT = Number(TILE_SHIFT);
@@ -81,7 +83,7 @@ interface TileBox extends Rect {
   bytes: number;
 }
 
-describe.skipIf(!hasDuckdb)('what the footers cost, window for window', () => {
+describe('what the footers cost, window for window', () => {
   const fromEnv = process.env.FOSSIL_ADDRESS_CORPUS;
   let root: string;
   let count: number;

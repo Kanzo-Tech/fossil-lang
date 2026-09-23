@@ -22,9 +22,16 @@
  * somewhere else — 300 rows written at `ROW_GROUP_SIZE 64` come back as one row group of 300. It is
  * a limit of the tool that writes the fixture, not of the format, and it is why the checked-in
  * conformance corpus (`chunk_size` 64) cannot be repacked into the other container.
+ *
+ * It needs the `duckdb` binary, which is why it lives in `apps/corpus/integration/` beside the
+ * guards that speak to it and not in `packages/corpus/tests/`. The dependency is DECLARED —
+ * `pnpm --filter @fossil-lang/corpus-contract test:integration` is the script that has it, and the
+ * package's own `pnpm test` no longer does. It is not probed and this file does not skip:
+ * `describe.skipIf` skips the TESTS and runs the describe BODY, so the probe it was guarding
+ * never guarded the fixture write, and a suite that vanishes with its dependency reads as
+ * covered while asserting nothing.
  */
 
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -33,17 +40,15 @@ import { dirname, join, resolve } from 'node:path';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import './boot.js';
-import { open, type Box, type Corpus } from '../src/corpus.js';
-import type { QueryFn, QueryRow } from '../src/query.js';
+import '../../../packages/corpus/tests/boot.js';
+import { open, type Box, type Corpus } from '../../../packages/corpus/src/corpus.js';
+import type { QueryFn, QueryRow } from '../../../packages/corpus/src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
 // conventions ask for, and it must not import a type of ours to be one.
-import { write } from '../../../apps/corpus/guards/fixture.mjs';
+import { write } from '../guards/fixture.mjs';
 
 const require = createRequire(import.meta.url);
-
-const hasDuckdb = spawnSync('duckdb', ['-c', 'select 1'], { encoding: 'utf8' }).status === 0;
 
 const CHUNK = 4096;
 const COUNT = 20_000;
@@ -69,7 +74,6 @@ afterAll(() => {
 });
 
 beforeAll(async () => {
-  if (!hasDuckdb) return;
   const dist = dirname(require.resolve('@duckdb/duckdb-wasm'));
   const db = await createDuckDB(
     {
@@ -118,7 +122,7 @@ const ordered = <T extends { denseId?: bigint; src?: bigint; dst?: bigint }>(row
     String([a.denseId, a.src, a.dst]) < String([b.denseId, b.src, b.dst]) ? -1 : 1,
   );
 
-describe.skipIf(!hasDuckdb)('one corpus, two containers', () => {
+describe('one corpus, two containers', () => {
   it('declares the container it was written in, and they are not the same one', () => {
     expect(opened.files.corpus.addressing.container).toBe('files');
     expect(opened.rowgroups.corpus.addressing.container).toBe('rowgroups');

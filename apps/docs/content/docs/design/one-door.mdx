@@ -46,7 +46,7 @@ choosing the level inside the read was never ergonomic: refinement is a statemen
 `frame(R, k+1)` against `frame(R, k)` and path independence one about `frame(R, k)` reached two
 ways, so *the same rectangle at the same level* has to stay expressible or neither has a left-hand
 side. **It does.** `level` survives as a parameter — named outright it wins, and the canvas is not
-consulted — and `packages/corpus/tests/frame-levels.test.ts` still spells both properties that way.
+consulted — and `apps/corpus/integration/frame-levels.test.ts` still spells both properties that way.
 
 What changed underneath is that **the pyramid is complete**: level *k* is `dense_id % strideOf(k) =
 0`, which needs no bytes on disk, so every level up to the single-vertex one is answerable and
@@ -161,8 +161,9 @@ strideOf(matchedAt)` is the caller's own arithmetic if it wants an estimate, and
 the decimation is uniform in `dense_id`, not in the rectangle.
 
 The writer's half lives in `crates/fossil-layout` and `crates/fossil-sinks`, and the reader's in
-`packages/corpus` — `tests/frame-levels.test.ts` builds the corpus the assertion needs, because the
-conformance one is three orders under the floor at which a writer spends bytes on a level.
+`packages/corpus` — `apps/corpus/integration/frame-levels.test.ts` builds the corpus the assertion
+needs, because the conformance one is three orders under the floor at which a writer spends bytes
+on a level.
 
 ## The relational work is two clauses, and the SQL still cannot go
 

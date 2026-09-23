@@ -2,7 +2,7 @@
  * What a window costs, as a shape rather than a number.
  *
  * `window` was handed every tile URL in the corpus and pruned with a `WHERE` for as long as it
- * existed. It answered correctly every time, and the eighty-eight tests beside this file never saw
+ * existed. It answered correctly every time, and the eighty-eight tests beside it never saw
  * it: **a window returning the right answer looks exactly like a window returning it cheaply.** It
  * was found from outside the repository by timing one rectangle against two corpus sizes.
  *
@@ -13,8 +13,8 @@
  *
  * The seam it measures through is the one the package already has. `open` asks a host for a
  * single `query` callback, so everything a reader does passes through one function and counting is
- * a decorator around it: no instrumentation inside `corpus.ts`, and nothing here can drift from
- * what a real host would see.
+ * a decorator around it: no instrumentation inside `packages/corpus/src/corpus.ts`, and nothing
+ * here can drift from what a real host would see.
  *
  * **Two corpora, written by the checker's own fixture** — `apps/corpus/guards/fixture.mjs`, which
  * is JavaScript against the published conventions and imports nothing of ours. Ten times the
@@ -22,11 +22,15 @@
  * clusters on a grid of fixed spacing: the same rectangle covers the same ground at both sizes and
  * only the density changes. That is what makes "the same window" mean something across two corpora.
  *
- * It needs the `duckdb` binary for the fixture, and skips without one rather than failing — the
- * guards next door make the same trade for the same reason.
+ * It needs the `duckdb` binary, which is why it lives in `apps/corpus/integration/` beside the
+ * guards that speak to it and not in `packages/corpus/tests/`. The dependency is DECLARED —
+ * `pnpm --filter @fossil-lang/corpus-contract test:integration` is the script that has it, and the
+ * package's own `pnpm test` no longer does. It is not probed and this file does not skip:
+ * `describe.skipIf` skips the TESTS and runs the describe BODY, so the probe it was guarding
+ * never guarded the fixture write, and a suite that vanishes with its dependency reads as
+ * covered while asserting nothing.
  */
 
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -35,18 +39,15 @@ import { dirname, join, resolve } from 'node:path';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import './boot.js';
-import { open, type Corpus } from '../src/corpus.js';
-import type { QueryFn, QueryRow } from '../src/query.js';
+import '../../../packages/corpus/tests/boot.js';
+import { open, type Corpus } from '../../../packages/corpus/src/corpus.js';
+import type { QueryFn, QueryRow } from '../../../packages/corpus/src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
 // conventions ask for, and it must not import a type of ours to be one.
-import { write } from '../../../apps/corpus/guards/fixture.mjs';
+import { write } from '../guards/fixture.mjs';
 
 const require = createRequire(import.meta.url);
-
-/** Whether a corpus can be written here at all. */
-const hasDuckdb = spawnSync('duckdb', ['-c', 'select 1'], { encoding: 'utf8' }).status === 0;
 
 /** Rows per tile, small enough that ten times the corpus is ten times the tiles and still cheap. */
 const CHUNK = 1024;
@@ -73,7 +74,6 @@ afterAll(() => {
 });
 
 beforeAll(async () => {
-  if (!hasDuckdb) return;
 
   const dist = dirname(require.resolve('@duckdb/duckdb-wasm'));
   const db = await createDuckDB(
@@ -145,7 +145,7 @@ async function windowed(entry: (typeof corpora)[number]) {
   return { answer, bill: entry.bill() };
 }
 
-describe.skipIf(!hasDuckdb)('what a window costs', () => {
+describe('what a window costs', () => {
   it('never names every tile in the corpus', async () => {
     for (const entry of corpora) {
       const { answer, bill } = await windowed(entry);

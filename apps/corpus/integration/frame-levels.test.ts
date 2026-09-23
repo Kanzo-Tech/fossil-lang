@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -9,21 +8,21 @@ import { fileURLToPath } from 'node:url';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import './boot.js';
-import { levelsOf, rowsAt, strideOf } from '../src/address.js';
-import { open, type Corpus } from '../src/corpus.js';
-import type { QueryFn, QueryRow } from '../src/query.js';
+import '../../../packages/corpus/tests/boot.js';
+import { levelsOf, rowsAt, strideOf } from '../../../packages/corpus/src/address.js';
+import { open, type Corpus } from '../../../packages/corpus/src/corpus.js';
+import type { QueryFn, QueryRow } from '../../../packages/corpus/src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
 // conventions ask for, and it must not import a type of ours to be one.
-import { write } from '../../../apps/corpus/guards/fixture.mjs';
+import { write } from '../guards/fixture.mjs';
 
 /**
  * **The read side of the pyramid**, against a corpus that has one.
  *
- * `frame.test.ts` cannot ask any of this: the conformance corpus is 300 vertices in 5 tiles and
- * writes no `l{k}/`, deliberately, because giving it one would mean growing the artefact every
- * implementation of this format is checked against.
+ * `packages/corpus/tests/frame.test.ts` cannot ask any of this: the conformance corpus is 300
+ * vertices in 5 tiles and writes no `l{k}/`, deliberately, because giving it one would mean growing
+ * the artefact every implementation of this format is checked against.
  *
  * **The corpus here is written by `apps/corpus/guards/fixture.mjs`, and this file writes no
  * Parquet of its own.** It used to: it built a payload and a pyramid out of inline SQL, which made
@@ -50,14 +49,16 @@ import { write } from '../../../apps/corpus/guards/fixture.mjs';
  * nothing else. Asking for links used to be the control, and it stopped being one the day the
  * fixture began writing the relation's levels too.
  *
- * Needs the `duckdb` binary for the fixture, and skips without one rather than failing — the guards
- * next door make the same trade for the same reason.
+ * It needs the `duckdb` binary, which is why it lives in `apps/corpus/integration/` beside the
+ * guards that speak to it and not in `packages/corpus/tests/`. The dependency is DECLARED —
+ * `pnpm --filter @fossil-lang/corpus-contract test:integration` is the script that has it, and the
+ * package's own `pnpm test` no longer does. It is not probed and this file does not skip:
+ * `describe.skipIf` skips the TESTS and runs the describe BODY, so the probe it was guarding
+ * never guarded the fixture write, and a suite that vanishes with its dependency reads as
+ * covered while asserting nothing.
  */
 
 const require = createRequire(import.meta.url);
-
-/** Whether a corpus can be written here at all. */
-const hasDuckdb = spawnSync('duckdb', ['-c', 'select 1'], { encoding: 'utf8' }).status === 0;
 
 /** The corpus this file reads: 600 vertices at 16 to a tile is 38 tiles. */
 const ROWS = 600;
@@ -82,7 +83,6 @@ afterAll(() => {
 });
 
 beforeAll(async () => {
-  if (!hasDuckdb) return;
   const dist = dirname(require.resolve('@duckdb/duckdb-wasm'));
   const db = await createDuckDB(
     {
@@ -132,7 +132,7 @@ async function everything() {
   };
 }
 
-describe.skipIf(!hasDuckdb)('a corpus that declares a pyramid', () => {
+describe('a corpus that declares a pyramid', () => {
   it('reports exactly the written levels, and every other level as answerable anyway', () => {
     const written = levelsOf(corpus.addressing, 'Person').filter((l) => l.written);
     expect(written.map((l) => l.level)).toEqual(LEVELS);
@@ -150,7 +150,7 @@ describe.skipIf(!hasDuckdb)('a corpus that declares a pyramid', () => {
   });
 });
 
-describe.skipIf(!hasDuckdb)('a level read answers with what the predicate selects', () => {
+describe('a level read answers with what the predicate selects', () => {
   it('is the same rows as striding the payload, at every written level', async () => {
     const box = await everything();
     const entire = await corpus.rows({ ...box });

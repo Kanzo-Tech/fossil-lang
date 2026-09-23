@@ -300,7 +300,7 @@ level file — which carries both endpoints' coordinates, so no vertex tile is o
 them — and `Frame.matchedAt` reports *k* rather than `0`. Where any of them is missing it, the read
 is the payload's, all or none, because a frame drawing one relation off level *k* and another off
 the payload would be two reads reported as one number.
-`packages/corpus/tests/frame-levels.test.ts` holds it against a fixture corpus with a pyramid and
+`apps/corpus/integration/frame-levels.test.ts` holds it against a fixture corpus with a pyramid and
 the identical corpus without one.
 
 What is left of this item is not a byte the writer owes; it is what a caller may ask for.

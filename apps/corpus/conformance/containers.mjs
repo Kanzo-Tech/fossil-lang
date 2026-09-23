@@ -21,8 +21,8 @@
  * open to answer the same window — and that is printed rather than asserted, because the ratio is a
  * property of the corpus and not of the format.
  *
- * The published module's half of this is `packages/corpus/tests/containers.test.ts`, which asks the
- * same question of `open`. Neither shares a line with the other.
+ * The published module's half of this is `apps/corpus/integration/containers.test.ts`, which asks
+ * the same question of `open`. Neither shares a line with the other.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";

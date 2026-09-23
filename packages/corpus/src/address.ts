@@ -155,8 +155,9 @@ export interface LevelInfo {
  * something the addressing does not already say. The rejected alternative was deleting it outright:
  * `Frame.matchedAt` reports a level and is only interpretable against which levels are WRITTEN, so
  * with nothing answering that, eight assertions in `tests/frame.test.ts` and
- * `tests/frame-levels.test.ts` would have had to re-derive these three calls themselves — a second
- * statement of the arithmetic, which is the rule the door was being narrowed for. Moved, not
+ * `apps/corpus/integration/frame-levels.test.ts` would have had to re-derive these three calls
+ * themselves — a second statement of the arithmetic, which is the rule the door was being narrowed
+ * for. Moved, not
  * deleted — and re-exported from the barrel after all, because two consumers outside this package
  * do name a level file: `apps/playground/scripts/measure-frame.mjs` and `measure-pyramid.mjs` both
  * report which levels a corpus WROTE beside what a frame cost, and neither is in a position to
