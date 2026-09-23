@@ -1,0 +1,6 @@
+type { Person, City } := io.shex("personas.shex")
+
+type := io.csv("type.csv")
+
+Users : Person from type
+    @subject = type.id

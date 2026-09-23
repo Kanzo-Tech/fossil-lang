@@ -1,0 +1,20 @@
+# The output contract of
+# `rdf_source.rs::io_rdf_shex_descriptor_yields_typed_multivalued_edges`, in
+# ShExC. The test carries the same schema inline as `KB_SHEX` (ShExJ); both
+# lower to the same constraint table, which `fossil-descriptors-output`'s
+# `shexc_and_shexj_of_one_schema_decode_equal` is the guard for.
+#
+# `ex:hasProject @ex:Project *` is the multi-valued shape-ref: it is what makes
+# `hasProject` a KB→Project EDGE (leaving KB's columns as just `label`) and what
+# makes kb/1's two targets UNNEST into two edge rows.
+PREFIX ex:  <https://ex.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+ex:KB {
+  ex:label      xsd:string ;
+  ex:hasProject @ex:Project *
+}
+
+ex:Project {
+  ex:title xsd:string
+}

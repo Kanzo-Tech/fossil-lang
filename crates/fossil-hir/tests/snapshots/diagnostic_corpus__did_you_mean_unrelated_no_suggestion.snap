@@ -1,10 +1,10 @@
 ---
 source: crates/fossil-hir/tests/diagnostic_corpus.rs
-expression: "run_csvw_fixture(\"did_you_mean\", \"unrelated_no_suggestion\")"
+expression: "run_db_wired_fixture(\"did_you_mean\", \"unrelated_no_suggestion\")"
 ---
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: did_you_mean
-Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
-  at 0..0
-Error: unknown column `zzqwxyv`
-  at 69..77
+Error: `zzqwxyv` is not a field of `users`
+  at 92..99
+  label 92..99 (MappingRelative): here
+  label 42..70 (FileAbsolute): `users` has the fields id, name, age

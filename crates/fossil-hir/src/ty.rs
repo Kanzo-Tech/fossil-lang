@@ -1,25 +1,30 @@
-//! Type ADT — Phase 2 (CORE-03) expansion to all 11 kinds.
+//! Type ADT.
 //!
-//! 10 surface kinds (type-system.md §2) + 1 internal `Unknown(InferenceId)`
-//! kind for bidirectional checker state (per Phase 2 RESEARCH.md §Q4 — the
-//! "11th kind" interpretation). The internal kind is never exposed in surface
-//! diagnostics; it appears only during checking-in-flight.
+//! Every kind here is a kind a PROGRAM can have, and there is no checker-state
+//! kind: «no type» has a spelling already — `synth_ty` returns `Option<Ty>` and
+//! every caller reads it. There is no count to quote either, deliberately.
 //!
-//! Interning strategy per RESEARCH.md §Q4:
+//! Interning strategy:
 //! - `Ty<'db>` itself is `#[salsa::interned]` so structural equality → pointer eq.
 //! - `Record<'db>` is separately interned (many distinct field sets).
-//! - `FnSig<'db>` is separately interned (many distinct function signatures).
 //! - All other kinds inline in `TyKind` directly.
 //!
-//! `'db` lifetime per Salsa 0.20+ (ADR-0003 + RESEARCH.md §Q7).
+//! `'db` lifetime per Salsa 0.20+.
 
 use fossil_base::ErrorGuaranteed;
+// The primitive lattice is NOT the type system's to own: the schema contract, the
+// descriptors and the checker all speak it, so it lives in the leaf they share
+// (`fossil-graph-schema`) and is imported here like any other type. Salsa is fine
+// with a foreign type: the `Update` derive falls back to `PartialEq` comparison
+// for anything that is not `salsa::Update` itself.
+use fossil_graph_schema::Primitive;
 use smol_str::SmolStr;
 
 /// Type pretty-printing.
 ///
-/// The single source of truth for rendering Fossil types (promoted here from
-/// `fossil-ide::hover` in Phase 3 plan 03-05).
+/// The single source of truth for rendering Fossil types. It lives here and
+/// not in `fossil-ide::hover`, where it was written, because the checker's
+/// diagnostics render types too and the checker is below the IDE.
 pub mod display;
 
 /// Interned type handle. Two equal-shaped types share a single `Ty<'db>` id —
@@ -30,61 +35,250 @@ pub struct Ty<'db> {
     pub kind: TyKind<'db>,
 }
 
-/// All 11 type kinds.
+/// Every type kind the compiler can build.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum TyKind<'db> {
-    /// Primitive types per type-system.md §2 line 41-42 (9 variants).
+    /// Primitive types — the lattice [`fossil_graph_schema::Primitive`]
+    /// declares, and the only one in the tree.
     Primitive(Primitive),
-    /// `T?` — nullable wrapper, type-system.md §2.
-    Optional(Ty<'db>),
-    /// `T*` — sequence / repeated, type-system.md §2.
+    /// `T*` — sequence / repeated.
     Seq(Ty<'db>),
     /// Tabular row type — interned separately for fast equality.
     Record(Record<'db>),
-    /// An IRI value (RDF resource).
-    Iri,
-    /// An IRI template — backtick string with `${...}` placeholders.
-    IriTemplate,
-    /// Satisfies `ShEx` shape S. [`ShapeId`] is a stub in Phase 2; Phase 3
-    /// resolves it via `fossil-descriptors-output`.
-    Shape(ShapeId),
-    /// Function signature — interned separately for fast equality.
-    Fn(FnSig<'db>),
-    /// RDF 1.2 quoted triple-as-term, type-system.md §2 + §4.10.
-    TripleTerm,
+    /// The type of `null`, and of nothing else.
+    ///
+    /// **Comparable with everything, assignable to nothing.** The rule lives in
+    /// `check`'s `Eq`/`Ne` arm and NOT in `subtypes`, which is what keeps this
+    /// from being `Optional` coming back through the door it left by: a bottom
+    /// type that subtypes everything would make `name = null` type against
+    /// `xsd:string`, and a property written from nothing is not the question
+    /// `Employee.left_on == null` asks.
+    Null,
+    /// A relation: the named rows a `from` clause or a pipeline puts in scope.
+    ///
+    /// It was not a type at all. `RowScope` lived in `crate::infer`, beside the
+    /// type system, so `seq.where` — a catalogue row on a `Relation` receiver —
+    /// had the signature `p("rows", S::String)` under a comment reading
+    /// «higher-order arguments collapse to scalar placeholders», and the only
+    /// checking a pipeline stage got was a hand-written walk for the column
+    /// NAMES its predicate mentions. `Row.celsius > "abc"` passed clean two
+    /// lines above a call that was refused for the same mismatch.
+    ///
+    /// A list of named rows and not one flat record, because a join keeps both
+    /// sides addressable — see [`Rows`].
+    Relation(Rows<'db>),
+    /// A reference to a node of one of the named shapes — `@shop:Person` in a
+    /// shape document, `Person(User.email)` in a program.
+    ///
+    /// **It was `Iri`, and being RDF vocabulary is what left it untyped.** An
+    /// IRI is an IRI, so every reference had one type and the check a graph
+    /// language exists to make did not happen: `shop.shex` declares
+    /// `shop:buyer @shop:Person`, a program wrote `buyer = Order(Purchase.id)`,
+    /// and the compiler said `ok — no errors`. Both producers held the answer
+    /// and dropped it — `expected_value_ty` knows the constraint's `targets`,
+    /// `synth_edge` knows the shape it is minting an identity for.
+    ///
+    /// That an identity is SPELLED as an IRI is the shape decoder's business
+    /// and the materialiser's. The core concept is the reference.
+    ///
+    /// A SET and not one name, because `targets` is a `Vec`: `@<A> OR @<B>`
+    /// (`ShEx`) and `sh:or` (SHACL) are legal and emit one edge type per
+    /// destination. Subtyping is set inclusion — a reference to `A` satisfies a
+    /// slot that accepts `A` or `B`, which is how a member type is assignable
+    /// to a union in `GraphQL` and how `sh:or` reads. Canonicalised by
+    /// [`Ty::reference`] so two spellings of one set intern to one `Ty`.
+    Ref(Vec<SmolStr>),
     /// Type-check failure taint. Carries [`ErrorGuaranteed`] directly (Phase 2
-    /// promotion of Phase 1's local taint-wrapper newtype — see ADR-0004 +
-    /// RESEARCH.md §Q6).
+    /// promotion of a local taint-wrapper newtype).
     Error(ErrorGuaranteed),
-    /// Internal inference-state placeholder. Used by bidirectional checker
-    /// during synthesis-mode descent; never exposed in surface diagnostics.
-    /// Phase 3 fills this in with real inference logic. Phase 2 ships the
-    /// variant + cheap newtype.
-    Unknown(InferenceId),
 }
 
-/// All 9 primitive types per type-system.md §2 line 41-42 (xsd-aligned).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
-pub enum Primitive {
-    /// `xsd:string`.
-    String,
-    /// `xsd:integer`.
-    Integer,
-    /// `xsd:float` / `xsd:double`.
-    Float,
-    /// `xsd:boolean`.
-    Bool,
-    /// `xsd:date`.
-    Date,
-    /// `xsd:dateTime`.
-    DateTime,
-    /// `xsd:time`.
-    Time,
-    /// `xsd:gYear` (capitalisation: `GYear` in Rust style; XSD spelling
-    /// preserved in docs).
-    GYear,
-    /// `xsd:anyURI`.
-    AnyURI,
+impl<'db> Ty<'db> {
+    /// A reference to a node of any of `shapes`, canonicalised.
+    ///
+    /// Sorted and deduplicated so that `@<A> OR @<B>` and `@<B> OR @<A>` are one
+    /// interned `Ty` — the set is the type, and the order a document happened to
+    /// write it in is not part of it.
+    #[must_use]
+    pub fn reference(
+        db: &'db dyn salsa::Database,
+        shapes: impl IntoIterator<Item = SmolStr>,
+    ) -> Self {
+        let mut names: Vec<SmolStr> = shapes.into_iter().collect();
+        names.sort_unstable();
+        names.dedup();
+        Self::new(db, TyKind::Ref(names))
+    }
+
+    /// The shapes this type references, or `None` when it is not a reference.
+    #[must_use]
+    pub fn referenced_shapes(self, db: &'db dyn salsa::Database) -> Option<&'db [SmolStr]> {
+        match self.kind(db) {
+            TyKind::Ref(names) => Some(names),
+            _ => None,
+        }
+    }
+}
+
+/// The rows a relation makes addressable, each under the name of the BINDING
+/// that introduced it.
+///
+/// This is the consequence of names `grammar.bnf` spells out under
+/// `SourceDef`: *«a mapping body writes `User.name` and never
+/// `Adults.name`, even when it draws `from Adults`»*. A binding ties the type
+/// and the relation together, so a relation DERIVED from `User` — by `where`, by
+/// `select`, by `distinct`, by standing on the left of a `join` — keeps handing
+/// back rows that are addressed as `User`. The derived name (`Adults`,
+/// `Reachable`, `Joined`) names the relation and never a row.
+///
+/// `union` is the one verb that breaks that, and `grammar.bnf` says so under
+/// `SourceDef`: its rows come from two bindings with nothing to say which, so
+/// neither name identifies them and the pipeline's own is what a body writes.
+///
+/// Which is why this is a LIST and not one record. A join brings a second
+/// binding into the same relation, and its columns stay under their own name:
+/// `Purchase.amount` and `User.email` are two rows of one relation, and two
+/// columns called `id` — one per side — are two distinct entries here even
+/// though the flattened [`Self::flat`] record can only find the first. This is
+/// what keeps a join from needing a name-collision rule.
+///
+/// The row is an `Option` because a binding whose source declares no schema is
+/// still a row a body may name: `hello.fossil` addresses columns of a source
+/// with no descriptor at all. So membership (does this relation have a row
+/// called `Contact`?) and typing (what is `Contact.email`?) are two different
+/// questions, and only the first has an answer for every program.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub struct Rows<'db> {
+    rows: Vec<NamedRow<'db>>,
+}
+
+/// One row of a relation, under the binding name that introduced it.
+///
+/// A named struct and not a `(SmolStr, Option<Ty>)`, for the reason
+/// [`crate::provenance::ExprTypeEntry`] already records: tuples do not
+/// auto-implement `salsa::Update`, and this has to, because it rides inside a
+/// [`TyKind`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub struct NamedRow<'db> {
+    /// The binding a body addresses these columns by — `User` and not the
+    /// `Adults` that filtered it. A `union` is the exception and it is the only
+    /// one: its result is neither side, so it answers to the pipeline's name.
+    pub binding: SmolStr,
+    /// The row itself, or `None` when the source declares no schema.
+    pub row: Option<Ty<'db>>,
+}
+
+impl<'db> Rows<'db> {
+    /// A relation over rows already built — what the row algebra hands back
+    /// after a `select` has narrowed each one.
+    #[must_use]
+    pub(crate) const fn of(rows: Vec<NamedRow<'db>>) -> Self {
+        Self { rows }
+    }
+
+    /// Every row, in written order.
+    pub fn iter(&self) -> impl Iterator<Item = &NamedRow<'db>> {
+        self.rows.iter()
+    }
+
+    /// The scope of a binding that reads a file: itself, and nothing else.
+    #[must_use]
+    pub fn one(binding: &str, row: Option<Ty<'db>>) -> Self {
+        Self {
+            rows: vec![NamedRow {
+                binding: SmolStr::from(binding),
+                row,
+            }],
+        }
+    }
+
+    /// The binding names this relation makes addressable, left to right.
+    pub fn bindings(&self) -> impl Iterator<Item = &SmolStr> {
+        self.rows.iter().map(|r| &r.binding)
+    }
+
+    /// Is there a row under this name — the question the qualified-reference
+    /// diagnostic asks. TRUE with an untyped row; absence is not "no schema".
+    #[must_use]
+    pub fn has(&self, binding: &str) -> bool {
+        self.rows.iter().any(|r| r.binding == binding)
+    }
+
+    /// The row a binding contributes. `None` both when the name is not in scope
+    /// and when it is but its source declares no schema — ask [`Self::has`]
+    /// first, because those two are different answers.
+    #[must_use]
+    pub fn row_of(&self, binding: &str) -> Option<Ty<'db>> {
+        self.rows
+            .iter()
+            .find(|r| r.binding == binding)
+            .and_then(|r| r.row)
+    }
+
+    /// Every column of every row, left to right, as one flat `Record` — what
+    /// the checker resolves a BARE name against and what the row algebra prints
+    /// in its refusals.
+    ///
+    /// `None` when any row in the scope is untyped: a record missing one side's
+    /// columns would answer "unknown column" for a column that exists.
+    #[must_use]
+    pub fn flat(&self, db: &'db dyn salsa::Database) -> Option<Ty<'db>> {
+        let fields = self.fields(db)?;
+        Some(Ty::new(db, TyKind::Record(Record::new(db, fields))))
+    }
+
+    /// [`Self::flat`]'s fields, before they are interned.
+    pub(crate) fn fields(&self, db: &'db dyn salsa::Database) -> Option<Vec<RecordField<'db>>> {
+        let mut out = Vec::new();
+        for r in &self.rows {
+            out.extend(record_fields(db, r.row?)?);
+        }
+        Some(out)
+    }
+
+    /// The columns of ONE row, for a per-binding message.
+    pub(crate) fn fields_of(
+        &self,
+        db: &'db dyn salsa::Database,
+        binding: &str,
+    ) -> Option<Vec<RecordField<'db>>> {
+        record_fields(db, self.row_of(binding)?)
+    }
+
+    /// Both sides of a join, in written order.
+    pub(crate) fn concat(mut self, other: Self) -> Self {
+        self.rows.extend(other.rows);
+        self
+    }
+
+    /// A whole scope under ONE name — `Node as Other`, the right side of a
+    /// self-join, and the result of a `union`, which is neither of its sides.
+    ///
+    /// The scope collapses to one row, because the name is one name: its
+    /// columns become reachable through that name and through nothing else.
+    pub(crate) fn rename_to(self, db: &'db dyn salsa::Database, alias: &SmolStr) -> Self {
+        let row = self.flat(db);
+        Self {
+            rows: vec![NamedRow {
+                binding: alias.clone(),
+                row,
+            }],
+        }
+    }
+}
+
+/// The columns of one row, or `None` when it is not a record.
+///
+/// The one spelling: `crate::infer` had a copy, and the two answered the same
+/// question about the same type.
+pub(crate) fn record_fields<'db>(
+    db: &'db dyn salsa::Database,
+    row: Ty<'db>,
+) -> Option<Vec<RecordField<'db>>> {
+    match row.kind(db) {
+        TyKind::Record(rec) => Some(rec.fields(db).clone()),
+        _ => None,
+    }
 }
 
 /// One named field of a [`Record`].
@@ -102,35 +296,27 @@ pub struct Record<'db> {
     pub fields: Vec<RecordField<'db>>,
 }
 
-/// Function signature — `(τ₁, ..., τₙ) → τ_r`. Interned so many distinct
-/// signatures (from the function registry) share storage.
-#[salsa::interned(debug)]
-pub struct FnSig<'db> {
-    #[returns(ref)]
-    pub params: Vec<Ty<'db>>,
-    pub return_ty: Ty<'db>,
-}
+// `FnSig` stood here, interned, and it was the SECOND half of the same finding
+// that removed `TyKind::Fn`. The checker reads `crate::stdlib::SigSpec`
+// directly — `param.ty.to_ty(db)` in `synth_call` — so a materialised signature
+// was a bridge with nobody on it: `RegistryEntry::signature` and
+// `SigSpec::to_fn_sig` had one caller between them in the whole tree, and it
+// was the test asserting that the bridge worked.
+//
+// A language with no `FunctionDecl` and no `LambdaExpr` cannot write a
+// function-typed VALUE down, so nothing downstream can need one.
 
-/// Shape identifier — newtype around a raw `u32`. Resolved by
-/// `fossil-descriptors-output` in Phase 3 (`ShEx` integration); Phase 2 ships
-/// the variant + a `placeholder` constructor for test fixtures.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ShapeId(pub u32);
-
-impl ShapeId {
-    /// Placeholder shape id used by Phase 2 tests; Phase 3 will replace with
-    /// real `ShEx` resolution via the `OutputDescriptor` trait.
-    #[must_use]
-    pub const fn placeholder(raw: u32) -> Self {
-        Self(raw)
-    }
-}
-
-/// Inference variable id — used internally by the bidirectional checker for
-/// not-yet-resolved synthesis positions. Fresh per check run; never stable
-/// across query invocations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
-pub struct InferenceId(pub u32);
+// `ShapeId` stood here — a `u32` minted from a mapping's INDEX, so two mappings
+// targeting one shape had two ids, which its own docblock recorded as the thing
+// to fix. It is deleted rather than fixed: nothing read it. `TypeckOutput`
+// carried a `target_shape` field with no reader in the workspace, and
+// `BlamePos::ShapeProperty` carried it beside a `property` name into the one
+// arm that matches the variant with `{ .. }`.
+//
+// What identifies a shape is its IRI, and that is what `TyKind::Ref` carries.
+// `BlamePos` itself is gone now (see `crate::check`), and the `property` name
+// came back as a parameter — it had a reader the moment the message stopped
+// debug-printing a span at the author. The `ShapeId` did not.
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -138,7 +324,8 @@ mod tests {
     use std::sync::Arc;
 
     fn db() -> fossil_base::FossilDb {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         fossil_base::FossilDb::new(system)
     }
 
@@ -153,23 +340,16 @@ mod tests {
     }
 
     #[test]
-    fn all_eleven_ty_kinds_exist() {
+    fn every_ty_kind_exists() {
         let db = db();
         let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
         let _: TyKind<'_> = TyKind::Primitive(Primitive::String);
-        let _: TyKind<'_> = TyKind::Optional(int_ty);
         let _: TyKind<'_> = TyKind::Seq(int_ty);
         let rec = Record::new(&db, vec![]);
         let _: TyKind<'_> = TyKind::Record(rec);
-        let _: TyKind<'_> = TyKind::Iri;
-        let _: TyKind<'_> = TyKind::IriTemplate;
-        let _: TyKind<'_> = TyKind::Shape(ShapeId::placeholder(0));
-        let sig = FnSig::new(&db, vec![int_ty], int_ty);
-        let _: TyKind<'_> = TyKind::Fn(sig);
-        let _: TyKind<'_> = TyKind::TripleTerm;
+        let _: TyKind<'_> = TyKind::Ref(vec![SmolStr::new_static("https://example.org/Person")]);
         // Reference the helper so the dead-code lint doesn't flag it.
         let _ = _ty_error_variant_exists as fn(&TyKind<'_>);
-        let _: TyKind<'_> = TyKind::Unknown(InferenceId(0));
     }
 
     #[test]
@@ -183,13 +363,12 @@ mod tests {
         let seq_int_b = Ty::new(&db, TyKind::Seq(b));
         assert_eq!(seq_int_a, seq_int_b);
 
-        let opt_seq_a = Ty::new(&db, TyKind::Optional(seq_int_a));
-        let opt_seq_b = Ty::new(&db, TyKind::Optional(seq_int_b));
-        assert_eq!(opt_seq_a, opt_seq_b);
+        let seq_seq_a = Ty::new(&db, TyKind::Seq(seq_int_a));
+        let seq_seq_b = Ty::new(&db, TyKind::Seq(seq_int_b));
+        assert_eq!(seq_seq_a, seq_seq_b, "nesting interns structurally too");
 
         // Different shape → different id.
-        let opt_int = Ty::new(&db, TyKind::Optional(a));
-        assert_ne!(opt_int, opt_seq_a);
+        assert_ne!(seq_int_a, seq_seq_a);
     }
 
     #[test]
@@ -224,32 +403,5 @@ mod tests {
             ],
         );
         assert_eq!(r1, r2); // structural eq → same interned id
-    }
-
-    #[test]
-    fn fnsig_interning_dedupes_equal_signatures() {
-        let db = db();
-        let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
-        let sig_a = FnSig::new(&db, vec![int_ty, int_ty], int_ty);
-        let sig_b = FnSig::new(&db, vec![int_ty, int_ty], int_ty);
-        assert_eq!(sig_a, sig_b);
-    }
-
-    #[test]
-    fn all_nine_primitive_variants_exist() {
-        // Compile-time enumeration check: every variant per
-        // type-system.md §2 line 41-42 must be present.
-        let vs = [
-            Primitive::String,
-            Primitive::Integer,
-            Primitive::Float,
-            Primitive::Bool,
-            Primitive::Date,
-            Primitive::DateTime,
-            Primitive::Time,
-            Primitive::GYear,
-            Primitive::AnyURI,
-        ];
-        assert_eq!(vs.len(), 9);
     }
 }

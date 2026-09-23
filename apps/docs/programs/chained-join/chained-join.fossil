@@ -1,0 +1,19 @@
+type { Order } := io.shex("chained-join.shex")
+
+Purchase := io.csv("data/orders.csv")
+User     := io.csv("data/users.csv")
+Region   := io.csv("data/regions.csv")
+
+// #region derived
+Adults := User.where(User.age >= 18)
+// #endregion derived
+
+// #region chain
+Both := Purchase.join(Adults, on = Purchase.user_id == User.id)
+Tri  := Both.join(Region, on = User.region_id == Region.id)
+// #endregion chain
+
+Orders : Order from Tri
+    @subject = "https://shop.example/order/{Purchase.id}"
+    amount   = Purchase.amount
+    region   = Region.label

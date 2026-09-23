@@ -8,67 +8,97 @@
 //! ```text
 //!         fossil-graph (this crate)        ← verbs + schemas
 //!                  ▲
-//!   ┌──────────────┼──────────────┬────────────────┐
-//!   │              │              │                │
-//! fossil-mcp   fossil-http   fossil-cli   @fossil-lang/graph
-//!   (stdio       (HTTP+SSE      (terminal      (in-process TS,
-//!    JSON-RPC      for          for             DuckDB-WASM)
-//!    for AI        keasy        scripting)
-//!    agents)       proxy)
+//!         ┌────────┴────────┐
+//!         │                 │
+//!   fossil-mcp        fossil-graph-wasm
+//!    (stdio            (wasm-bindgen; and
+//!     JSON-RPC          @fossil-lang/corpus
+//!     for AI            on top of it —
+//!     agents)           in-process TS,
+//!                       DuckDB-WASM)
 //! ```
 //!
-//! The pattern follows fossil's existing split between logic and protocol
-//! (ADR-0001: `fossil-ide` carries IDE features, `fossil-lsp` carries the
-//! LSP wire). Per ADR-0039: MCP is one transport, not the protocol; calling
-//! the entire surface "MCP" would lock fossil into an AI-agent framing when
-//! the same verbs serve dashboards, federation, tests, and the CLI.
+//! **Two bindings, and the list is derived rather than remembered**: the crates
+//! whose `[dependencies]` name this one are exactly `fossil-mcp` and
+//! `fossil-graph-wasm`. This figure used to draw four — it named `fossil-cli`,
+//! which does not depend on this crate at all (its subcommands are `check`,
+//! `run`, `providers`, `refs`, and none of them is a verb), and an `HTTP+SSE`
+//! transport "for the keasy proxy" whose only occurrence anywhere in the tree
+//! was this diagram, and no crate manifest declares an HTTP server. The ASCII
+//! had drifted with it: four stems, three names, four captions.
 //!
-//! ## Verbs (14)
+//! The pattern follows fossil's existing split between logic and protocol —
+//! `fossil-ide` carries IDE features, `fossil-lsp` carries the LSP wire.
+//! **MCP is one transport, not the protocol**: calling the entire surface
+//! "MCP" would lock fossil into an AI-agent framing when the same verbs already
+//! serve the browser through the other binding, and are exercised by tests that
+//! speak neither wire (`crates/fossil-mcp/tests/graph_verbs.rs`).
+//!
+//! ## Verbs (6)
 //!
 //! ```text
-//! Schema:       list_vertex_types · list_edge_types · describe_field
-//! Discovery:    search_by_label · find_neighbors · find_path
-//! Aggregation:  aggregate · histogram · top_k
-//! GraphRAG:     summarize_cluster · answer_with_communities
-//! Viewport:     viewport · set_selection
-//! Escape:       execute_sql                              ← text2sql lives HERE
+//! Read:         read · expand{into|all} · path
+//! Aggregation:  aggregate            ← binning included; it is a grouping
+//! Introspect:   schema               ← the lists, and field stats on request
+//! Escape:       execute_sql          ← text2sql lives HERE
 //! ```
 //!
-//! Each verb is a unit-struct or unit-variant on [`Operation`]; the
-//! `Params` and `Result` shapes are pure data with no transport coupling.
-//! Transport bindings implement `dispatch(op, ctx) → Result` by matching on
-//! the enum.
+//! Each verb is a variant on [`Operation`]; the `Params` and `Result` shapes
+//! are pure data with no transport coupling. Transport bindings implement
+//! `dispatch(op, ctx) → Result` by matching on the enum.
 //!
-//! ## Native-only (for now)
+//! **No verb draws. The camera is addressed, not queried** — the LOD is a
+//! different RELATION and not a filter, and a `WHERE` cannot change which table
+//! it reads. This said *a level-3 tile holds supernodes that do not exist at
+//! level 0*, and that is not what was built: a level is the DECIMATION
+//! `dense_id % scale == 0`, every row a real vertex sharing the payload's own
+//! numbering, because a synthetic centroid cannot nest. What makes it a
+//! different relation is still the point — a level is its own
+//! [`plan::ProjectionAddress`], as the payload and each adjacency are — and what
+//! makes it addressable is that the numbering is shared: a projection's tile is
+//! the payload's shift plus `log2(scale)`.
 //!
-//! This crate currently depends on [`fossil_sinks`] (manifest types — WASM
-//! clean) and will gain a `DuckExecutor` trait in W2 for execution. The
-//! native impl lives in `fossil-runtime`; the WASM impl in `fossil-wasm`
-//! (TS-side calls a DuckDB-WASM connection). For W1 the impls are stubs
-//! (`todo!()`), and the crate carries NO wasm32 tripwire because the verb
-//! logic itself is WASM-safe.
+//! **The exponent does not reach this crate.** `4^k` is chosen once, by
+//! `fossil_sinks::manifest::VertexLevels`, and what crosses into a manifest is
+//! the product — so a reader divides a count by `scale` and shifts by its
+//! trailing zeros, and there is no `4` on this side of the document. The camera
+//! computes a scale and tile addresses and asks for bytes; no bbox, no SQL, no
+//! `DuckDB` on that path. A filter that must change the picture answers with ids
+//! and the canvas masks its resident tiles with them — one mechanism, not a
+//! second renderer.
 //!
-//! ## Larger-than-RAM contract (W3+)
+//! ## The executor is a trait, and both impls exist
 //!
-//! Verbs that scan the vertex/edge tables MUST emit SQL that `DuckDB` can
-//! satisfy via predicate-pushdown over morton-sorted Parquet row groups.
-//! Anti-patterns explicitly banned from the query path:
+//! This crate depends on [`fossil_sinks`] (manifest types — WASM clean) and on
+//! nothing else of fossil's; `apps/docs/content.test.ts` fails if that list is
+//! ever anything but `["fossil-sinks"]`. It carries no wasm32 tripwire, because
+//! the verb logic is WASM-safe.
 //!
-//! - `row_number() OVER ()` without `PARTITION BY` — materialises the whole
-//!   table to sort.
-//! - JOINs whose hash-build side scans the whole vertex/edge table — must
-//!   filter the build side first (`WHERE id IN (SELECT … FROM viewport)`).
+//! The native `DuckExecutor` impl is `fossil-mcp`'s `ConnectionExecutor`
+//! (`crates/fossil-mcp/src/executor.rs`), NOT `fossil-layout`: that crate is the
+//! layout post-pass and does not depend on this one. The browser impl is
+//! `fossil-graph-wasm`'s `JsExecutor`, not `fossil-wasm`, which does not depend
+//! on this crate at all.
 //!
-//! The writer (`fossil-sinks` W1+W3) is the upstream that lets these
-//! restrictions be observed — it pre-computes `dense_id`, `x/y`, `cluster_id`,
-//! `embedding`, and morton-sorts the Parquet so query SQL only needs to
-//! WHERE+LIMIT.
+//! ## What bounds a verb
+//!
+//! Every verb here is bounded by a `LIMIT` or by a `GROUP BY` whose
+//! cardinality is capped, so cost is a function of the answer rather than of
+//! the corpus. What is NOT available is pruning by predicate: `DuckDB`
+//! evaluates a range predicate per row instead of skipping row groups —
+//! measured, and both spellings lost to not pruning at all (a range join
+//! against the id runs, 237 ms; 179 `BETWEEN … OR …` predicates, 189 ms;
+//! the unpruned join, 5 ms) — so a window expressed as a `WHERE` reads the
+//! whole file. **Pruning is which bytes are read, and that is the tiles' job,
+//! not a verb's.**
 
 pub mod error;
-pub mod exec;
+pub mod executor;
 pub mod manifest;
 pub mod operations;
+pub mod plan;
 
 pub use error::{GraphError, Result};
-pub use exec::{ColumnedRows, DuckExecutor, dispatch};
-pub use operations::Operation;
+pub use executor::{DuckExecutor, QueryResult, dispatch};
+pub use operations::{Operation, RawSql, RawSqlAccess, Verb};
+pub use plan::{Container, Direction, ReadPlan, resolve as resolve_corpus};

@@ -1,0 +1,16 @@
+── type bindings ──
+Spend ← group-by.shex = https://shop.example/voc#Spend
+
+── source bindings ──
+Order := io.csv(data/orders.csv)
+PerCustomer := Order.group_by(Order.customer, total = math.sum(Order.amount))
+
+── mappings ──
+Spending: 3 written, 3 lowered
+    @subject
+    customer
+    total
+
+── run ──
+vertex Spend (https://shop.example/voc#Spend) × 3 — dense_id, subject, customer, total, x, y, cluster_id
+NO EDGE TYPE was written

@@ -6,8 +6,15 @@ $schema: "http://json-schema.org/draft-07/schema#"
 title: AggregateResult
 type: object
 required:
+  - edges
   - rows
 properties:
+  edges:
+    description: "Bin boundaries, `rows.len() + 1` of them, low to high. **Empty unless the call set `bins`** — a grouping over values has no axis to draw."
+    type: array
+    items:
+      type: number
+      format: double
   rows:
     type: array
     items:
@@ -19,7 +26,8 @@ definitions:
       - group
       - value
     properties:
-      group: true
+      group:
+        description: "The group's key: the column's value, or the bin's ordinal when the call was binned (pair it with `AggregateResult::edges` for the range)."
       value:
         type: number
         format: double

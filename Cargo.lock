@@ -929,9 +929,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -1082,6 +1082,7 @@ dependencies = [
  "datafusion-expr-common",
  "datafusion-functions",
  "datafusion-functions-aggregate",
+ "datafusion-functions-nested",
  "datafusion-functions-table",
  "datafusion-functions-window",
  "datafusion-optimizer",
@@ -1441,6 +1442,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "datafusion-functions-nested"
+version = "54.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f3e3f9ee8ca59bf70518802107de6f1b88a9509efdc629fadc5de9d6b2d5ef5"
+dependencies = [
+ "arrow",
+ "arrow-ord",
+ "datafusion-common",
+ "datafusion-doc",
+ "datafusion-execution",
+ "datafusion-expr",
+ "datafusion-expr-common",
+ "datafusion-functions",
+ "datafusion-functions-aggregate",
+ "datafusion-functions-aggregate-common",
+ "datafusion-macros",
+ "datafusion-physical-expr-common",
+ "hashbrown 0.17.1",
+ "itertools 0.14.0",
+ "itoa",
+ "log",
+ "memchr",
+]
+
+[[package]]
 name = "datafusion-functions-table"
 version = "54.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1672,7 +1698,6 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
- "subtle",
 ]
 
 [[package]]
@@ -1856,7 +1881,9 @@ dependencies = [
 name = "fossil-base"
 version = "0.1.0"
 dependencies = [
+ "fossil-base",
  "fossil-descriptors-input",
+ "fossil-graph-schema",
  "salsa",
  "smol_str",
  "thiserror 1.0.69",
@@ -1869,13 +1896,29 @@ dependencies = [
  "clap",
  "duckdb",
  "fossil-base",
- "fossil-engine",
- "fossil-registry",
- "fossil-run-status",
- "fossil-runtime",
+ "fossil-descriptors-input",
+ "fossil-descriptors-output",
+ "fossil-df",
+ "fossil-graph-schema",
+ "fossil-hir",
+ "fossil-introspect",
+ "fossil-layout",
+ "fossil-lineage",
+ "fossil-locator",
+ "fossil-mir",
+ "fossil-policy",
+ "fossil-sinks",
+ "fossil-syntax",
  "insta",
  "miette",
+ "regex",
+ "salsa",
+ "secrecy",
+ "serde",
  "serde_json",
+ "serde_yaml_ng",
+ "smol_str",
+ "tempfile",
  "thiserror 1.0.69",
  "tracing",
  "tracing-subscriber",
@@ -1885,6 +1928,7 @@ dependencies = [
 name = "fossil-descriptors-input"
 version = "0.1.0"
 dependencies = [
+ "fossil-graph-schema",
  "fossil-shex",
  "indexmap",
  "serde",
@@ -1900,6 +1944,8 @@ dependencies = [
  "fossil-base",
  "fossil-graph-schema",
  "fossil-shex",
+ "oxrdf",
+ "oxttl",
 ]
 
 [[package]]
@@ -1911,16 +1957,26 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-kanon",
+ "fossil-locator",
+ "fossil-mem-probe",
  "fossil-mir",
- "fossil-run-status",
+ "fossil-policy",
+ "fossil-shex",
  "fossil-sinks",
+ "log",
  "oxrdf",
  "oxttl",
  "parquet",
+ "serde",
+ "serde_json",
  "serde_yaml_ng",
+ "slug",
+ "smol_str",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -1933,7 +1989,11 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-output",
  "fossil-df",
- "fossil-run-status",
+ "fossil-graph-schema",
+ "fossil-hir",
+ "fossil-layout",
+ "fossil-shex",
+ "fossil-sinks",
  "getrandom 0.3.4",
  "js-sys",
  "object_store",
@@ -1944,32 +2004,6 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "fossil-engine"
-version = "0.1.0"
-dependencies = [
- "duckdb",
- "fossil-base",
- "fossil-descriptors-input",
- "fossil-descriptors-output",
- "fossil-df",
- "fossil-hir",
- "fossil-ide",
- "fossil-mir",
- "fossil-registry",
- "fossil-resolver",
- "fossil-run-status",
- "fossil-runtime",
- "fossil-sinks",
- "miette",
- "regex",
- "secrecy",
- "serde",
- "serde_json",
- "smol_str",
- "tracing",
 ]
 
 [[package]]
@@ -1998,6 +2032,7 @@ name = "fossil-graph-wasm"
 version = "0.1.0"
 dependencies = [
  "fossil-graph",
+ "fossil-sinks",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
@@ -2012,14 +2047,13 @@ version = "0.1.0"
 dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
- "fossil-descriptors-output",
+ "fossil-graph-schema",
+ "fossil-locator",
  "fossil-syntax",
  "indexmap",
  "insta",
  "rowan",
- "rudof_iri",
  "salsa",
- "shex_ast",
  "smol_str",
  "strsim",
  "thiserror 1.0.69",
@@ -2032,10 +2066,9 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
+ "fossil-graph-schema",
  "fossil-hir",
- "fossil-ide-db",
- "fossil-registry",
- "fossil-run-status",
+ "fossil-mir",
  "fossil-syntax",
  "insta",
  "lsp-types",
@@ -2045,13 +2078,69 @@ dependencies = [
 ]
 
 [[package]]
-name = "fossil-ide-db"
+name = "fossil-introspect"
+version = "0.1.0"
+dependencies = [
+ "duckdb",
+ "fossil-base",
+ "fossil-descriptors-input",
+ "fossil-graph-schema",
+ "fossil-locator",
+ "fossil-resolver",
+ "miette",
+ "regex",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "smol_str",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "fossil-kanon"
+version = "0.1.0"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "insta",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "fossil-layout"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "bytes",
+ "duckdb",
+ "fossil-df",
+ "fossil-hir",
+ "fossil-mem-probe",
+ "fossil-sinks",
+ "fossil-tile-writer",
+ "parquet",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "fossil-lineage"
 version = "0.1.0"
 dependencies = [
  "fossil-base",
- "fossil-syntax",
- "smol_str",
+ "fossil-hir",
+ "schemars 0.8.22",
+ "serde",
 ]
+
+[[package]]
+name = "fossil-locator"
+version = "0.1.0"
 
 [[package]]
 name = "fossil-lsp"
@@ -2062,14 +2151,20 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
+ "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
+ "fossil-introspect",
+ "fossil-locator",
+ "fossil-mir",
+ "fossil-wasm",
  "lsp-server",
  "lsp-types",
  "salsa",
  "serde",
  "serde_json",
  "smol_str",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2081,10 +2176,8 @@ dependencies = [
  "duckdb",
  "fossil-graph",
  "fossil-resolver",
- "fossil-runtime",
  "fossil-sinks",
  "rmcp",
- "schemars 1.2.1",
  "secrecy",
  "serde",
  "serde_json",
@@ -2092,14 +2185,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fossil-mem-probe"
+version = "0.1.0"
+
+[[package]]
 name = "fossil-mir"
 version = "0.1.0"
 dependencies = [
  "fossil-base",
- "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
- "fossil-registry",
  "fossil-syntax",
  "insta",
  "salsa",
@@ -2107,13 +2202,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "fossil-registry"
+name = "fossil-policy"
 version = "0.1.0"
 dependencies = [
- "fossil-base",
- "fossil-hir",
- "salsa",
- "smol_str",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2122,43 +2216,6 @@ version = "0.1.0"
 dependencies = [
  "secrecy",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "fossil-run-status"
-version = "0.1.0"
-dependencies = [
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "utoipa",
-]
-
-[[package]]
-name = "fossil-runtime"
-version = "0.1.0"
-dependencies = [
- "duckdb",
- "fossil-base",
- "fossil-descriptors-output",
- "fossil-graph",
- "fossil-hir",
- "fossil-mir",
- "fossil-registry",
- "fossil-resolver",
- "fossil-sinks",
- "hmac",
- "salsa",
- "serde",
- "serde_json",
- "sha2",
- "slug",
- "smol_str",
- "tempfile",
- "thiserror 1.0.69",
- "unicode-normalization",
- "uuid",
- "voca_rs",
 ]
 
 [[package]]
@@ -2176,8 +2233,11 @@ name = "fossil-sinks"
 version = "0.1.0"
 dependencies = [
  "arrow-schema",
+ "fossil-graph-schema",
+ "fossil-policy",
  "insta",
  "serde",
+ "serde_json",
  "serde_yaml_ng",
 ]
 
@@ -2195,6 +2255,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fossil-tile-writer"
+version = "0.1.0"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "parquet",
+ "tempfile",
+]
+
+[[package]]
 name = "fossil-wasm"
 version = "0.1.0"
 dependencies = [
@@ -2202,11 +2272,11 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
+ "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
+ "fossil-lineage",
  "fossil-mir",
- "fossil-registry",
- "fossil-run-status",
  "fossil-syntax",
  "getrandom 0.3.4",
  "js-sys",
@@ -2457,15 +2527,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "hmac"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
-dependencies = [
- "digest",
-]
 
 [[package]]
 name = "http"
@@ -3840,6 +3901,8 @@ dependencies = [
  "rand_chacha 0.9.0",
  "rand_xorshift",
  "regex-syntax",
+ "rusty-fork",
+ "tempfile",
  "unarray",
 ]
 
@@ -3862,6 +3925,12 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
+
+[[package]]
+name = "quick-error"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quick-xml"
@@ -4380,9 +4449,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.40"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "once_cell",
  "ring",
@@ -4443,9 +4512,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -4457,6 +4526,18 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
+
+[[package]]
+name = "rusty-fork"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc6bf79ff24e648f6da1f8d1f011e9cac26491b619e6b9280f2b47f1774e6ee2"
+dependencies = [
+ "fnv",
+ "quick-error",
+ "tempfile",
+ "wait-timeout",
+]
 
 [[package]]
 name = "ryu"
@@ -4976,12 +5057,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
-name = "stfu8"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e51f1e89f093f99e7432c491c382b88a6860a5adbe6bf02574bf0a08efff1978"
-
-[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5127,7 +5202,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -5621,29 +5696,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
-name = "utoipa"
-version = "5.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bde15df68e80b16c7d16b9616e80770ad158988daa56a27dccd1e55558b0160"
-dependencies = [
- "indexmap",
- "serde",
- "serde_json",
- "utoipa-gen",
-]
-
-[[package]]
-name = "utoipa-gen"
-version = "5.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ba0b99ee52df3028635d93840c797102da61f8a7bb3cf751032455895b52ef8"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "uuid"
 version = "1.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5667,17 +5719,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "voca_rs"
-version = "1.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e44efbf25e32768d5ecd22244feacc3d3b3eca72d318f5ef0a4764c2c158e18"
-dependencies = [
- "regex",
- "stfu8",
- "unicode-segmentation",
-]
-
-[[package]]
 name = "vte"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5685,6 +5726,15 @@ checksum = "231fdcd7ef3037e8330d8e17e61011a2c244126acc0a982f4040ac3f9f0bc077"
 dependencies = [
  "arrayvec 0.7.6",
  "memchr",
+]
+
+[[package]]
+name = "wait-timeout"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -6290,7 +6340,9 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "fossil-hir",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

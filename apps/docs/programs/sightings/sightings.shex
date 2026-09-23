@@ -1,0 +1,12 @@
+PREFIX bird: <https://birds.example/voc#>
+PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+
+bird:Station {
+  bird:name      xsd:string ;
+  bird:elevation xsd:integer
+}
+
+bird:Sighting {
+  bird:species xsd:string ;
+  bird:count   xsd:integer
+}

@@ -1,20 +1,20 @@
 //! Typed AST views over the lossless CST.
 //!
-//! Phase 1 ships only the wrappers downstream `fossil-hir` needs to walk
-//! the program: `PrefixDecl`, `SourceDef`, `Mapping`, `MappingHeader`,
-//! `MappingBody`, `Property`. Each is a thin newtype around `SyntaxNode`
-//! with `cast` (kind-checking constructor) + `syntax` (back-edge accessor)
-//! and a few convenience accessors for child tokens.
+//! Only the wrappers a downstream consumer needs to walk the program:
+//! `SourceDef`, `Mapping`, `MappingHeader`, `MappingBody`, `Property` for
+//! `fossil-hir`, and `PolicyDef` for the HOSTS — the policy document is the one
+//! thing a program names that the compiler never opens, so its only consumer is
+//! the side that writes the corpus. Each is
+//! a thin newtype around `SyntaxNode` with `cast` (kind-checking constructor) +
+//! `syntax` (back-edge accessor) and a few convenience accessors for child
+//! tokens. A view is added when a consumer needs it, never ahead of one.
 //!
 //! All AST nodes deliberately keep the underlying [`SyntaxNode`] public via
-//! `syntax()` so consumers can drop down to the lossless tree when needed
-//! (offsets, trivia, error recovery in later phases).
+//! `syntax()` so consumers can drop down to the lossless tree when needed —
+//! offsets, trivia and error recovery are only visible there.
 
 pub mod items;
-pub use items::{
-    AnnotationBlock, Definition, ExportedDefinition, Import, InClause, IriExpr, RecordLiteral,
-    ShapeExpr,
-};
+pub use items::ShapeExpr;
 
 use crate::kind::{SyntaxKind, SyntaxNode};
 
@@ -41,48 +41,45 @@ macro_rules! ast_node {
     };
 }
 
-ast_node!(PrefixDecl, PREFIX_DECL);
 ast_node!(SourceDef, SOURCE_DEF);
+ast_node!(PolicyDef, POLICY_DEF);
 ast_node!(Mapping, MAPPING);
 ast_node!(MappingHeader, MAPPING_HEADER);
 ast_node!(MappingBody, MAPPING_BODY);
 ast_node!(Property, PROPERTY);
-
-impl PrefixDecl {
-    /// The local name of the prefix (e.g. `ex` in `prefix ex: <...>`).
-    #[must_use]
-    pub fn name(&self) -> Option<smol_str::SmolStr> {
-        self.0
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .find(|t| t.kind() == SyntaxKind::IDENT)
-            .map(|t| smol_str::SmolStr::from(t.text()))
-    }
-
-    /// The IRI text with the surrounding `<>` stripped.
-    #[must_use]
-    pub fn iri(&self) -> Option<smol_str::SmolStr> {
-        self.0
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .find(|t| t.kind() == SyntaxKind::ABS_IRI)
-            .map(|t| {
-                smol_str::SmolStr::from(t.text().trim_start_matches('<').trim_end_matches('>'))
-            })
-    }
-}
 
 impl SourceDef {
     /// The bound name on the LHS of `:=` (e.g. `users` in `users := io.csv(...)`).
     #[must_use]
     pub fn name(&self) -> Option<smol_str::SmolStr> {
         // The first IDENT child token is the binding name; the call expression
-        // contributes its own IDENT tokens nested inside CALL_EXPR.
+        // contributes its own IDENT tokens nested inside its EXPR subtree.
         self.0
             .children_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
             .find(|t| t.kind() == SyntaxKind::IDENT)
             .map(|t| smol_str::SmolStr::from(t.text()))
+    }
+}
+
+impl PolicyDef {
+    /// The document reference as the program wrote it, unquoted — the
+    /// `people.jsonld` of `policy := "people.jsonld"`.
+    ///
+    /// It is what was WRITTEN and not a path: `@conn` aliases, schemes and
+    /// absolute paths all reach a caller verbatim, because turning a written
+    /// reference into something a reader can open is `fossil-locator`'s one
+    /// rule and there is no second one. A caller that anchored this itself
+    /// would be the fourth.
+    #[must_use]
+    pub fn document(&self) -> Option<smol_str::SmolStr> {
+        self.0
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|t| t.kind() == SyntaxKind::STRING)
+            .map(|t| {
+                smol_str::SmolStr::from(t.text().trim_start_matches('"').trim_end_matches('"'))
+            })
     }
 }
 
@@ -106,7 +103,7 @@ impl MappingBody {
 
 impl MappingHeader {
     /// The header's mapping name (the `IDENT` immediately before the
-    /// `SHAPE_SEP` — `User` in `User : ex:Person from users`).
+    /// `SHAPE_SEP` — `People` in `People : Person from User`).
     #[must_use]
     pub fn name(&self) -> Option<smol_str::SmolStr> {
         self.0
@@ -116,21 +113,15 @@ impl MappingHeader {
             .map(|t| smol_str::SmolStr::from(t.text()))
     }
 
-    /// The header's `ShapeExpr` (`ex:Person` or `ex:Person & ex:Employee`).
-    /// Plan 02-04's `ItemTree` consumes this to build `Mapping.shape_id`.
+    /// The header's `ShapeExpr` (`Person` in `Users : Person from Adults`).
+    /// `fossil_hir`'s `ItemTree` consumes this to build `Mapping.shape_id`.
     #[must_use]
     pub fn shape_expr(&self) -> Option<items::ShapeExpr> {
         self.0.children().find_map(items::ShapeExpr::cast)
     }
 
-    /// The optional `in <IriExpr>` clause (`in ex:Graph`).
-    #[must_use]
-    pub fn in_clause(&self) -> Option<items::InClause> {
-        self.0.children().find_map(items::InClause::cast)
-    }
-
     /// The expression on the right of `from` — the source-binding
-    /// reference (`users` in the Phase 1 hello.fossil case). Returned as a
+    /// reference (`User` in `examples/hello.fossil`). Returned as a
     /// raw [`SyntaxNode`] kept at `EXPR` kind because the upstream Pratt
     /// parser already wraps every right-hand side in an EXPR composite.
     #[must_use]

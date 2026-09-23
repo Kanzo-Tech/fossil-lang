@@ -1,0 +1,94 @@
+---
+title: Identity
+description: Why the subject's identity is a slot the language owns rather than an attribute argument, and why every mapping that produces a type has to mint the same one.
+---
+
+Every node in an RDF graph is an IRI, and an IRI is not in your CSV. Somebody has to mint it. Where
+that instruction lives is the hardest question in the language's surface, and it is the one place
+where both documents a program is written against — the source and the shape — are silent.
+
+## The shape document cannot declare it
+
+A shape document describes the predicates of a node. In RDF the subject **is** the node, not one of
+its properties, so there is no slot in the document to assign an identity to. That is not an
+oversight in ShEx or in SHACL, and choosing the other one does not fix it.
+
+The comparison that makes it clear is with the schema languages that *do* declare identity —
+`identifier: true` in LinkML, `@id` in Prisma, `@key` in GraphQL. All three describe property graphs,
+and in a property graph identity is **signalled**: one of the fields you already have is the one that
+identifies. In RDF identity is **constructed**, out of a row, as an IRI that exists nowhere in the
+source.
+
+So the instruction lives in the program, and the question is what shape it takes there.
+
+## Not an attribute argument
+
+The attractive form is an attribute — `@subject(iri = "…/{User.email}")` — because an attribute is
+where metadata goes and this is metadata. It does not survive contact with the prior art: seven
+languages, no exception, none of which admits a per-instance expression in an attribute argument, and
+one of which calls the restriction a deliberate device in its own specification. The seven and the
+control experiment are the [identity table in prior art](/docs/design/prior-art#identity); the
+alternative and what would bring it back are [discarded](/docs/design/discarded).
+
+The prior art also prescribes the exit, and it is never *widen the attribute slot*: give the thing
+its own named construct, as SQL does with `GENERATED ALWAYS AS` and Django with `GeneratedField`. The
+rule behind that is sharp enough to apply mechanically — an attribute that can be omitted implies a
+derived fallback, and a derived identity is one nobody wrote down; an attribute that cannot be
+omitted is syntax with brackets, and then the spelling does not matter.
+
+## The slot, and why `@`
+
+fossil takes the prescribed exit. Identity is a slot the language owns, written as an assignment on
+the first line of a mapping body:
+
+<Program src="shop/shop.fossil" region="identity" title="shop.fossil" />
+
+Its right-hand side is the ordinary expression grammar — the same expressions, the same checking, the
+same completion. There is no second mini-language to keep in sync with the first, which is the whole
+reason the string-in-an-attribute form is dangerous.
+
+The `@` marks the language's own namespace against the bare names a shape document declares. Property
+keys are the last segment of a predicate IRI, and a vocabulary is free to declare a predicate called
+`subject`; without a reserved marker the language and the user's vocabulary compete for the same
+word. JSON-LD reserves `@`-prefixed keywords for exactly this reason. The mechanism generalises: a
+second language-owned slot, the named graph a triple belongs to for instance, enters through the same
+door instead of opening another.
+
+(`#` was the other candidate and is disqualified three times over: it is the comment character in
+both Turtle and SPARQL, it is the fragment separator in half the RDF vocabularies in existence, and a
+bare `#` is not lexable in this grammar at all.)
+
+## Two obligations no other property has
+
+Because an IRI *denotes*, the identity slot carries two rules no ordinary property carries.
+
+**It is deterministic and bounded to the row.** An identity that depends on anything that is not the
+data is not reproducible, and a corpus you cannot regenerate is not a corpus. This is a check, not a
+style guide.
+
+**Every mapping that produces a type writes the same one.** Two mappings producing `Person` with
+different identity templates is an error, and the diagnostic names both mappings and both templates:
+
+<Program src="errors/two-identities/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+Error rather than warning, because of what happens when the warning is ignored: two entities in the
+graph where there was one, discovered by whoever queries it. A warning is an appropriate response to
+something the user might have meant. Nobody means this.
+
+Nothing else in the mapping world checks it, and the one system that shipped the check removed it —
+both of those are answered in [discarded](/docs/design/discarded), where the reversal conditions live
+too. The short version is that the removal is correct there for a reason that argues *for* the check
+here: those subgraphs deploy separately and nobody ever holds the whole set, while fossil compiles a
+whole program at once.
+
+## The cost
+
+Two sources describing **disjoint populations of the same type with different identity schemes** stop
+being expressible. A legacy export keyed by account number and a current export keyed by email cannot
+both produce `Person` in one program without agreeing on how a `Person` is named. That is a real
+restriction, accepted knowingly.
+
+One piece of Linked Data guidance plays against the design and should be said rather than omitted:
+its unit of minting policy is the **publisher**, not the type. fossil chooses the type because the
+compiler is the single authority over a program, which is an argument from topology rather than from
+that literature.

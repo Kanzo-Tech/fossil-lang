@@ -1,34 +1,29 @@
-//! `textDocument/codeAction` — the three SC#5 quick-fixes.
+//! `textDocument/codeAction` — the quick-fixes.
 //!
 //! [`code_actions`] turns a request's `(file, range, diagnostics)` into a
-//! `Vec<lsp_types::CodeAction>` (the `lsp-types`-direct shape confirmed
-//! WASM-clean by 06-01 Spike A), one `QuickFix` per matching diagnostic. The
-//! three actions Phase 6 SC#5 requires:
+//! `Vec<lsp_types::CodeAction>` (`lsp-types` is itself WASM-clean, so the
+//! structs cross the boundary untranslated), one `QuickFix` per matching
+//! diagnostic. The actions:
 //!
 //! 1. **did-you-mean** — a diagnostic carrying the structured
-//!    [`fossil_base::DidYouMean`] candidate (Phase 3's `strsim` Levenshtein
-//!    nearest, surfaced STRUCTURALLY by plan 06-08 Task 1) yields a `QuickFix`
+//!    `fossil_base::DidYouMean` candidate (the `strsim` Levenshtein nearest,
+//!    surfaced STRUCTURALLY rather than in the message text) yields a `QuickFix`
 //!    whose `WorkspaceEdit` replaces the typo's `wrong_span` with the
 //!    `replacement`. Read from the typed field — NOT parsed from the message
-//!    string (Research §code actions, ADR-0006 Approach A).
-//! 2. **auto-import prefix** — an unknown-prefix diagnostic yields a `QuickFix`
-//!    inserting a `prefix xx: <iri>` declaration at the top of the file. The
-//!    IRI comes from [`fossil_ide_db::WELL_KNOWN_PREFIXES`] for rdf/rdfs/xsd/owl
-//!    (via the 06-03 [`fossil_ide_db::PrefixIndex`]); an unknown prefix gets a
-//!    `<>` placeholder the user fills in.
-//! 3. **split-mapping** — a target `ShEx` `OneOf` diagnostic ALREADY carries the
+//!    string, which is prose and free to change.
+//! 2. **split-mapping** — a target `ShEx` `OneOf` diagnostic ALREADY carries the
 //!    generated split-into-N-mappings snippet in
-//!    [`fossil_base::Diagnostic::suggestion_source`] (Phase 3
-//!    `generate_split_suggestion`, proven to re-compile by plan 03-08). The
-//!    `QuickFix` reads `suggestion_source` DIRECTLY (Research `Don't-Hand-Roll`
-//!    — never regenerate it) and replaces the offending mapping's range with it.
+//!    [`fossil_base::Diagnostic::suggestion_source`], produced by
+//!    `generate_split_suggestion` and proven to re-compile. The
+//!    `QuickFix` reads `suggestion_source` DIRECTLY — never regenerating it —
+//!    and replaces the offending mapping's range with it.
 //!
 //! # Domain + WASM boundary
 //!
 //! Returns `lsp_types::CodeAction` directly — no stdio / JSON-RPC. All edits use
-//! UTF-16 LSP ranges (06-05 [`crate::line_index::LineIndex`]); the byte spans on
+//! UTF-16 LSP ranges (via [`crate::line_index::LineIndex`]); the byte spans on
 //! the incoming diagnostics are converted via the FILE-keyed line index, so no
-//! new per-mapping Salsa query is added (Research Pitfall #3). No `Box<dyn>`; no
+//! new per-mapping Salsa query is added. No `Box<dyn>`; no
 //! `TyKind::Unknown` ever reaches a title or edit (the action text is built from
 //! the structured candidate / the pre-generated snippet, never from a type).
 
@@ -36,7 +31,6 @@ use std::collections::HashMap;
 use std::str::FromStr as _;
 
 use fossil_base::{Diagnostic, SourceFile, Span};
-use fossil_ide_db::WELL_KNOWN_PREFIXES;
 use lsp_types::{
     CodeAction, CodeActionKind, Diagnostic as LspDiagnostic, Position, Range, TextEdit, Uri,
     WorkspaceEdit,
@@ -45,14 +39,21 @@ use lsp_types::{
 use crate::line_index::{LineIndex, Utf16Position};
 use crate::position::line_index;
 
-/// Compute the SC#5 code actions for the diagnostics overlapping `range`.
+/// Compute the code actions for the diagnostics overlapping `range`.
 ///
 /// `diagnostics` is the set the LSP `textDocument/codeAction` request passes in
 /// the request params (the diagnostics the host already published for `file`);
-/// each is matched against the three action triggers by the STRUCTURED fields it
-/// carries (`did_you_mean`, the `undeclared prefix` message + span, and
-/// `suggestion_source`). Only diagnostics whose span intersects `range` are
-/// considered, mirroring the LSP "actions for the current selection" contract.
+/// each is matched against the two action triggers by the STRUCTURED fields it
+/// carries — `did_you_mean` and `suggestion_source`. Only diagnostics whose span
+/// intersects `range` are considered, mirroring the LSP "actions for the current
+/// selection" contract.
+///
+/// It said THREE, and named «the `undeclared prefix` message + span» as the
+/// middle one. Prefixes left the language — `grammar.bnf` carries the tombstone
+/// («`prefix` was a keyword and is gone with the CURIE») — and the action went
+/// with them; the two comments below are what is left of it. The stale third
+/// trigger was also the only one that was not a structured field, which is the
+/// other half of why it is gone: it parsed a message.
 ///
 /// `range` is a UTF-16 LSP range; all produced edits are UTF-16 too.
 #[must_use]
@@ -75,9 +76,6 @@ pub fn code_actions(
         if let Some(a) = did_you_mean_action(&index, &uri, diag) {
             actions.push(a);
         }
-        if let Some(a) = auto_import_action(db, file, &index, &uri, diag) {
-            actions.push(a);
-        }
         if let Some(a) = split_mapping_action(&index, &uri, diag) {
             actions.push(a);
         }
@@ -86,7 +84,7 @@ pub fn code_actions(
 }
 
 /// Action 1: did-you-mean rename quick-fix. Reads the structured
-/// [`fossil_base::DidYouMean`] candidate and replaces its `wrong_span` with the
+/// `fossil_base::DidYouMean` candidate and replaces its `wrong_span` with the
 /// `replacement` — no message parsing.
 fn did_you_mean_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Option<CodeAction> {
     let dym = diag.did_you_mean.as_ref()?;
@@ -103,40 +101,14 @@ fn did_you_mean_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Optio
     ))
 }
 
-/// Action 2: auto-import an unknown prefix. Triggered by the "undeclared
-/// prefix" diagnostic (the message `lower.rs` emits). Inserts a
-/// `prefix xx: <iri>` line at the top of the file — the canonical IRI for a
-/// well-known prefix, a `<>` placeholder otherwise.
-fn auto_import_action(
-    db: &dyn fossil_base::Db,
-    file: SourceFile,
-    index: &LineIndex,
-    uri: &Uri,
-    diag: &Diagnostic,
-) -> Option<CodeAction> {
-    let prefix = unknown_prefix_name(&diag.message)?;
-    // Don't offer the import if the file already declares the prefix (a stale
-    // diagnostic after the user fixed it manually).
-    let prefixes = fossil_ide_db::PrefixIndex::build(db, file);
-    if prefixes.is_declared(&prefix) {
-        return None;
-    }
-    let iri = WELL_KNOWN_PREFIXES
-        .iter()
-        .find(|(p, _)| *p == prefix)
-        .map_or(String::new(), |(_, iri)| (*iri).to_string());
-    let line = format!("prefix {prefix}: <{iri}>\n");
-    let edit = TextEdit::new(byte_span_to_range(index, Span::new(0, 0)), line);
-    Some(quick_fix(
-        format!("Import prefix `{prefix}:`"),
-        uri.clone(),
-        vec![edit],
-        diag,
-        true,
-    ))
-}
+// `auto_import_action` was action 2: an «undeclared prefix» diagnostic yielded a
+// top-of-file `prefix xx: <iri>` insertion, with the canonical IRI for
+// rdf/rdfs/xsd/owl and a `<>` placeholder otherwise. `lower.rs` emits no such
+// diagnostic any more and the line it inserted is not a production, so the
+// action, its `unknown_prefix_name` message parser and the `WELL_KNOWN_PREFIXES`
+// table it read all went together.
 
-/// Action 3: split-mapping. Reads the pre-generated split snippet from
+/// Action 2: split-mapping. Reads the pre-generated split snippet from
 /// [`fossil_base::Diagnostic::suggestion_source`] (never regenerated) and
 /// replaces the offending mapping's span with it.
 fn split_mapping_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Option<CodeAction> {
@@ -149,24 +121,6 @@ fn split_mapping_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Opti
         diag,
         true,
     ))
-}
-
-/// Parse the prefix name out of the "undeclared prefix" diagnostic message
-/// `lower.rs` emits. The STRUCTURED trigger is "this is an unknown-prefix
-/// diagnostic"; the prefix name is the only datum the import line needs, and
-/// `lower.rs` spells it in backticks immediately after the marker text.
-fn unknown_prefix_name(message: &str) -> Option<String> {
-    const MARKER: &str = "undeclared prefix `";
-    let rest = message.strip_prefix(MARKER).or_else(|| {
-        let idx = message.find(MARKER)?;
-        Some(&message[idx + MARKER.len()..])
-    })?;
-    // The name runs up to the trailing `:` `` ` `` pair (`xx:` ).
-    let name: String = rest
-        .chars()
-        .take_while(|c| *c != ':' && *c != '`')
-        .collect();
-    if name.is_empty() { None } else { Some(name) }
 }
 
 /// Build a `quick fix` [`CodeAction`] resolving `diag` with one document's
@@ -210,8 +164,8 @@ fn lsp_diagnostic_stub(diag: &Diagnostic) -> LspDiagnostic {
     }
 }
 
-/// Build the `file:` [`Uri`] for a source file from its interned path. The LSP
-/// (06-08 `fossil-lsp`) keys its open-document table by the URI string; the
+/// Build the `file:` [`Uri`] for a source file from its interned path.
+/// `fossil-lsp` keys its open-document table by the URI string; the
 /// path stored on the `SourceFile` is that same string (or a bare filename in
 /// tests), so we round-trip it through `Uri::from_str`, prepending the `file://`
 /// scheme when the path is schemeless.
@@ -268,7 +222,8 @@ const fn spans_overlap(a: Span, b: Span) -> bool {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use fossil_base::{NativeSystem, Severity, System};
+    use fossil_base::test_support::NativeSystem;
+    use fossil_base::{Severity, System};
     use std::sync::Arc;
 
     fn db() -> fossil_base::FossilDb {
@@ -290,7 +245,6 @@ mod tests {
     #[test]
     fn did_you_mean_produces_a_replace_edit() {
         let db = db();
-        // `.naem` typo at bytes 38..42 in the field-ref line.
         let src = "User : ex:Person from users\n    ex:n = .naem\n";
         let f = file(&db, src);
         let typo_start = u32::try_from(src.find("naem").unwrap()).unwrap();
@@ -310,58 +264,6 @@ mod tests {
         let edits = edits_of(a);
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].new_text, "name");
-    }
-
-    #[test]
-    fn auto_import_inserts_well_known_prefix_line() {
-        let db = db();
-        // `xsd` used but undeclared.
-        let src = "User : ex:Person from users\n    ex:age = xsd:integer\n";
-        let f = file(&db, src);
-        let diag = Diagnostic::new(
-            Severity::Error,
-            "undeclared prefix `xsd:` in IRI expression `xsd:integer`",
-            Span::new(0, 5),
-        );
-        let actions = code_actions(&db, f, whole(&db, f), &[diag]);
-        let a = actions
-            .iter()
-            .find(|a| a.title.contains("xsd"))
-            .expect("an auto-import action must be offered");
-        let edits = edits_of(a);
-        assert_eq!(edits.len(), 1);
-        assert!(
-            edits[0]
-                .new_text
-                .contains("prefix xsd: <http://www.w3.org/2001/XMLSchema#>"),
-            "auto-import must insert the canonical xsd decl; got {:?}",
-            edits[0].new_text,
-        );
-        // Inserted at the very top of the file.
-        assert_eq!(edits[0].range.start, Position::new(0, 0));
-    }
-
-    #[test]
-    fn auto_import_unknown_prefix_uses_placeholder() {
-        let db = db();
-        let src = "User : ex:Person from users\n";
-        let f = file(&db, src);
-        let diag = Diagnostic::new(
-            Severity::Error,
-            "undeclared prefix `foo:` in IRI expression `foo:bar`",
-            Span::new(0, 5),
-        );
-        let actions = code_actions(&db, f, whole(&db, f), &[diag]);
-        let a = actions
-            .iter()
-            .find(|a| a.title.contains("foo"))
-            .expect("an auto-import action for the unknown prefix must be offered");
-        let edits = edits_of(a);
-        assert!(
-            edits[0].new_text.contains("prefix foo: <>"),
-            "an unknown prefix must get a `<>` placeholder; got {:?}",
-            edits[0].new_text,
-        );
     }
 
     #[test]

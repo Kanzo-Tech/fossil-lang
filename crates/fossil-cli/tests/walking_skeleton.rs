@@ -1,13 +1,13 @@
 //! Workspace-level walking-skeleton e2e integration test.
 //!
-//! The canonical gate (ROADMAP.md sequencing rule #6): `fossil run
+//! The canonical gate: `fossil run
 //! examples/hello.fossil --dest <tmp>` produces a valid `GraphAr` dataset
 //! end-to-end through every compiler+runtime crate. The output descriptor is
 //! program-resident (synthesised from the typed mapping — no `--shape`).
 //!
 //! This test goes deeper than mere existence — it asserts the **content** of
-//! the produced `vertex/Person.parquet` matches the mapping verbatim (5 Person
-//! vertices with the expanded subject IRIs `https://example.org/user/{1..5}`
+//! the produced `vertex/Person/tiles.parquet` matches the mapping verbatim (5
+//! Person vertices with the expanded subject IRIs `https://example.org/user/{1..5}`
 //! and the five names from `examples/users.csv` on the `name` property column).
 //! It is the strongest form of the walking-skeleton invariant: any regression
 //! that silently changes the produced graph (wrong template substitution,
@@ -15,13 +15,16 @@
 //! caught here before it can land.
 //!
 //! Once this test passes, every subsequent commit must keep it green per the
-//! walking-skeleton invariant (CLAUDE.md "Hard Rules" + ROADMAP.md rule #6).
+//! walking-skeleton invariant (`CLAUDE.md`, "Hard Rules"): a refactor that
+//! breaks it for more than three days is reverted and broken into smaller steps.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
+
+mod common;
 
 /// Locate the repo root from `CARGO_MANIFEST_DIR` (= `.../crates/fossil-cli`).
 /// Walks up two levels.
@@ -34,48 +37,40 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Build the `fossil` binary once per test process via `cargo build`.
-/// Memoised through `OnceLock` so a future second test in this file does not
-/// pay the build cost. Cargo's `--quiet` no-op rebuild is cheap when the binary
-/// is already up-to-date from a sibling test run.
+/// The `fossil` binary this test drives — cargo's own path for it.
+///
+/// Never a hard-coded `target/debug/fossil`: with `CARGO_TARGET_DIR` set the
+/// build lands elsewhere, so that path holds whatever was left there last and
+/// the test passes against a binary it did not build. `CARGO_BIN_EXE_<name>`
+/// is cargo's answer — the binary of THIS build, already built before the
+/// test runs, with no path to guess and no `cargo build` from inside a test.
 fn fossil_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "--quiet", "-p", "fossil-cli", "--bin", "fossil"])
-            .status()
-            .expect("spawn cargo build");
-        assert!(status.success(), "cargo build -p fossil-cli failed");
-
-        let bin = repo_root().join("target").join("debug").join("fossil");
-        assert!(
-            bin.exists(),
-            "fossil binary not found at {} after cargo build",
-            bin.display(),
-        );
-        bin
-    })
+    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil")))
 }
 
-/// Materialise a fresh per-test working directory containing
-/// `examples/hello.fossil` + `examples/users.csv`. Distinct test-name prefix
-/// so concurrent test runs do not stomp on each other's artefacts in
-/// `std::env::temp_dir()`.
+/// Materialise a fresh per-test working directory holding everything the
+/// program NAMES: `hello.fossil`, the `users.csv` it reads, and the
+/// `hello.shex` that is its output contract. The path is unique per process —
+/// see `common::unique_workdir`, which explains why the test name alone was not
+/// enough.
+///
+/// **The shape document is not optional and its absence is silent.** Ruling 3
+/// of 2026-08-11 makes a property key the last segment of a predicate IRI the
+/// shape declares, so a workdir without `hello.shex` gives the mapping no
+/// output contract, `name` resolves to nothing, and the run writes a `Person`
+/// with no `name` column — five vertices, no error, and the content assertions
+/// below are the only thing that would catch it. The list is spelled out here
+/// rather than globbed because a file this test needs and does not copy is
+/// exactly that failure.
 fn fresh_workdir(test_name: &str) -> PathBuf {
     let root = repo_root();
-    let tmp = std::env::temp_dir().join(format!("fossil-walking-skeleton-{test_name}"));
-    let _ = std::fs::remove_dir_all(&tmp);
+    let tmp = common::unique_workdir("fossil-walking-skeleton", test_name);
     std::fs::create_dir_all(tmp.join("examples")).expect("create examples subdir");
-    std::fs::copy(
-        root.join("examples").join("hello.fossil"),
-        tmp.join("examples").join("hello.fossil"),
-    )
-    .expect("copy hello.fossil");
-    std::fs::copy(
-        root.join("examples").join("users.csv"),
-        tmp.join("examples").join("users.csv"),
-    )
-    .expect("copy users.csv");
+    for f in ["hello.fossil", "users.csv", "hello.shex"] {
+        std::fs::copy(root.join("examples").join(f), tmp.join("examples").join(f))
+            .unwrap_or_else(|e| panic!("copy {f}: {e}"));
+    }
     tmp
 }
 
@@ -104,12 +99,26 @@ fn walking_skeleton_run_writes_5_person_vertices_with_expected_content() {
 
     // The `Person` vertex type name is derived from the mapping's shape IRI
     // (`User : ex:Person` → local name `Person`), not the mapping name.
-    let parquet = dest.join("vertex/Person.parquet");
+    //
+    // A vertex is TILES, not a file: `c416e07` made the layout pass emit one per
+    // 4,096-row `dense_id` range under `vertex/<Type>/` and delete the single
+    // staged `vertex/<Type>.parquet`. This asserted the deleted path and had been
+    // red since — the last of the five failures that commit left behind.
+    //
+    // `818218c` then moved the file boundary between the tiles: they are the row
+    // groups of ONE `tiles.parquet` under that prefix. So the path below is an
+    // address a reader composes from the manifest, where it used to be a
+    // `*.parquet` glob — a directory listing, and there is no listing over HTTP.
+    let tiles = dest.join("vertex/Person/tiles.parquet");
     let manifest = dest.join("vertex/Person.vertex.yml");
     assert!(
-        parquet.exists(),
-        "vertex/Person.parquet missing at {}",
-        parquet.display()
+        tiles.is_file(),
+        "vertex payload missing at {}",
+        tiles.display()
+    );
+    assert!(
+        !dest.join("vertex/Person.parquet").exists(),
+        "the staged single file survived — readers would see it and the tiles"
     );
     assert!(
         manifest.exists(),
@@ -135,7 +144,7 @@ fn walking_skeleton_run_writes_5_person_vertices_with_expected_content() {
     // 3. Parquet content. Open via DuckDB native. Build the path as a Display so
     //    platform-specific separators round-trip through the SQL string literal.
     let conn = duckdb::Connection::open_in_memory().expect("open in-memory duckdb");
-    let parquet_path = parquet.display().to_string().replace('\'', "''");
+    let parquet_path = tiles.display().to_string().replace('\'', "''");
 
     // 3a. Row count == 5 (one Person per row of users.csv).
     let count: i64 = conn

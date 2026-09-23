@@ -3,16 +3,137 @@ source: crates/fossil-sinks/tests/manifest_yaml.rs
 expression: "person_vertex().to_yaml().expect(\"vertex serialization\")"
 ---
 type: Person
-chunk_size: 1024
+vertex_count: 10000
+chunk_size: 4096
 prefix: vertex/person/
-property_groups:
-- file_type: parquet
+projections:
+- path: ''
+  scale: 1
+  file_type: parquet
   properties:
   - name: id
     data_type: int64
     is_primary: true
     is_nullable: false
+    cardinality: single
   - name: name
     data_type: string
     is_primary: false
+coordinates:
+- name: geo
+  x: lon
+  y: lat
+  provenance: geographic
+- name: layout
+  x: x
+  y: y
+  provenance: derived
+  derived_by: louvain+phyllotaxis
+cells:
+  prefix: cell/
+  vertices_per_cell: 16
+  relations:
+  - knows
+  coordinates:
+  - name: cell
+    x: x
+    y: y
+    provenance: derived
+    derived_by: cell-member-centroid
+  rungs:
+  - path: r1/
+    cell_count: 625
+    properties:
+    - name: cell_id
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: x
+      data_type: float
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: y
+      data_type: float
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: count
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: internal
+      data_type: uint64
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: mode
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: purity
+      data_type: float
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    quotient:
+      path: quotient/
+      edge_count: 5012
+      properties:
+      - name: src_cell
+        data_type: uint32
+        is_primary: false
+        is_nullable: false
+        cardinality: single
+      - name: dst_cell
+        data_type: uint32
+        is_primary: false
+        is_nullable: false
+        cardinality: single
+      - name: weight
+        data_type: uint64
+        is_primary: false
+        is_nullable: false
+        cardinality: single
+  - path: r2/
+    cell_count: 157
+    properties:
+    - name: cell_id
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: x
+      data_type: float
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: y
+      data_type: float
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: count
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: internal
+      data_type: uint64
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: mode
+      data_type: uint32
+      is_primary: false
+      is_nullable: false
+      cardinality: single
+    - name: purity
+      data_type: float
+      is_primary: false
+      is_nullable: false
+      cardinality: single
 version: gar/v1

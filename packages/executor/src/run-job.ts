@@ -9,7 +9,7 @@ import type {
   ConnectionRefs,
   ExecutorResult,
   FossilExecutor,
-  RunStatus,
+  RunReport,
   SourceInput,
 } from './index.js';
 
@@ -32,7 +32,11 @@ export interface JobTransport {
 /** The completion payload the host PATCHes back. */
 export interface CompletePayload {
   status: 'completed' | 'failed';
-  manifest?: RunStatus;
+  /**
+   * The manifest of what was uploaded. The field was already called this and
+   * carried a `RunStatus` that was not one; it is the manifest now.
+   */
+  manifest?: RunReport;
   error?: string;
 }
 
@@ -47,7 +51,7 @@ export interface RunJobOptions {
 }
 
 /**
- * Run a fossil mapping in the browser, end-to-end. Returns the `RunStatus` on
+ * Run a fossil mapping in the browser, end-to-end. Returns the `RunReport` on
  * success; on any failure reports a `failed` completion (best-effort) and
  * rethrows. Does NOT `free()` the executor — the caller owns its lifecycle.
  */
@@ -56,7 +60,7 @@ export async function runJob(
   program: string,
   transport: JobTransport,
   opts: RunJobOptions = {},
-): Promise<RunStatus> {
+): Promise<RunReport> {
   const doFetch = opts.fetchImpl ?? fetch;
   try {
     // 1. Resolve `@conn` aliases, then enumerate what to fetch.
@@ -74,8 +78,8 @@ export async function runJob(
       }),
     );
 
-    // 3. Execute on DataFusion-WASM → GraphAr files + RunStatus.
-    const { files, runStatus }: ExecutorResult = await exec.run(
+    // 3. Execute on DataFusion-WASM → GraphAr files + the manifest.
+    const { files, report }: ExecutorResult = await exec.run(
       program,
       sources,
       opts.dest ?? '',
@@ -107,8 +111,8 @@ export async function runJob(
     );
 
     // 5. Report success (server stamps the authoritative dest).
-    await transport.complete({ status: 'completed', manifest: runStatus });
-    return runStatus;
+    await transport.complete({ status: 'completed', manifest: report });
+    return report;
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     await transport.complete({ status: 'failed', error }).catch(() => {});

@@ -1,0 +1,33 @@
+[package]
+name = "fossil-lineage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Parse-only source lineage + provider introspection, projected onto the host wire types"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# `providers` is a projection of `fossil_base::providers` and `source_refs`
+# walks the def map. What keeps this out of `fossil-hir` is the other end: the
+# result types are what a HOST reads, and they are declared here, beside the two
+# functions that fill them.
+fossil-hir = { path = "../fossil-hir" }
+fossil-base = { path = "../fossil-base" }
+# `ProviderInfo` / `SourceRefInfo` cross to a host as JSON (the CLI's stdout) or
+# as a JS value (`serde-wasm-bindgen`), and `schemars` publishes the same shape
+# for TS codegen. Both pure Rust, WASM-clean.
+serde = { workspace = true }
+schemars = { workspace = true }
+
+[dev-dependencies]
+# The reference `DecodeTypes` — a row that reads types, with no schema language
+# behind it, so the `ProviderKind::Schema` projection can be tested without this
+# crate learning one.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }

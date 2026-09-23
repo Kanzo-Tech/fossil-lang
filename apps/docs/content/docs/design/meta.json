@@ -1,0 +1,31 @@
+{
+  "title": "The design of fossil",
+  "description": "Why fossil is like this, what was discarded, and with what measurement.",
+  "pages": [
+    "index",
+    "algebra",
+    "expressions",
+    "types",
+    "typing",
+    "type-providers",
+    "shapes",
+    "the-dot",
+    "identity",
+    "streaming",
+    "cost",
+    "one-engine",
+    "tooling-for-humans",
+    "tooling-for-machines",
+    "corpus",
+    "one-door",
+    "camera",
+    "reference-viewer",
+    "position",
+    "cells",
+    "privacy",
+    "three-hosts",
+    "anonymity",
+    "discarded",
+    "prior-art"
+  ]
+}

@@ -1,0 +1,16 @@
+── type bindings ──
+Person ← union.shex = https://shop.example/voc#Person
+
+── source bindings ──
+Staff := io.csv(data/staff.csv)
+Contractor := io.csv(data/contractors.csv)
+Everyone := Staff.union(Contractor)
+
+── mappings ──
+People: 2 written, 2 lowered
+    @subject
+    name
+
+── run ──
+vertex Person (https://shop.example/voc#Person) × 5 — dense_id, subject, name, x, y, cluster_id
+NO EDGE TYPE was written

@@ -1,0 +1,33 @@
+// SNAP com-dblp, through fossil's own pipeline.
+//
+// The point of running the real graph through `fossil run` rather than
+// writing its Parquet directly is that the LAYOUT PASS is the thing under
+// measurement: Louvain finds communities, the placement separates them in
+// the plane, Morton ranks the plane, and `dense_id` IS that rank. A corpus
+// assembled any other way has a `cluster_id` and an `(x, y)` that came from
+// somewhere else, and answers a different question.
+//
+//     scripts/realkg-prepare.mjs        # fetch + symmetrise -> data/links.csv
+//     fossil run bench/dblp/dblp.fossil --dest file://<dir>
+//
+// `data/` is gitignored: 27 MB of derived CSV, reproducible from the two
+// SNAP archives whose URL, size and SHA-256 the prepare script pins.
+
+type { Person } := io.shex("dblp.shex")
+
+// One row per DIRECTED co-authorship. The prepare script emits both
+// orientations of each undirected SNAP edge, which is what makes every one
+// of the 317,080 authors appear at least once as `src` — and therefore what
+// makes this single mapping enough to mint every vertex.
+Link := io.csv("data/links.csv")
+
+// One mapping, because `EmitVertex` carries `dedup: true` unconditionally
+// (`fossil-mir/src/lower.rs`) and the vertex phase collapses the 2,099,732
+// rows to one Person per distinct subject before `dense_id` is assigned. The
+// edge phase does no such collapse, so all 2,099,732 edges survive — which is
+// what makes `dblp.shex`'s single-valued `coauthor` a workable stand-in for
+// the `*` that crashes the writer. That defect is documented there.
+Authors : Person from Link
+    @subject = "https://dblp.example/author/{Link.src}"
+    aid      = Link.src
+    coauthor = Person(Link.dst)

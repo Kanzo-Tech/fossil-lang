@@ -1,0 +1,6 @@
+order_id,customer,amount
+10,alice,100
+11,bob,250
+12,alice,75
+13,carol,300
+14,alice,25

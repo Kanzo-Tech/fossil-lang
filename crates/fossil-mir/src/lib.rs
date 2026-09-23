@@ -1,42 +1,39 @@
 //! `fossil-mir` — Mid-level IR (typed operator algebra).
 //!
-//! Phase 4 (CORE-08..10) ships the complete 11-operator typed algebra
-//! (`Source`, `Project`, `Extend`, `Rename`, `Filter`, `Join`, `Union`,
-//! `GroupBy`, `Aggregate`, `Distinct`, `TripleEmit`, `Sink`) plus an
-//! [`op::Op::Empty`] node (R9 target) and a typed [`op::Expr`] ADT (replacing
-//! the Phase 1 untyped `ExprLowered`). The HIR → MIR lowering
-//! [`lower::lower_to_mir`] lowers only the 4 source-reachable operators
-//! (`Source`, `Extend`, `TripleEmit`, `Sink`) from `.fossil` source — the
-//! other 7 are exercised via direct `MirGraph` construction (ADR-0009). The
-//! codegen crate (`fossil-codegen`) consumes the [`graph::MirGraph`] and emits
-//! `DuckDB` SQL.
+//! Ships the complete typed algebra and a typed [`op::Expr`] ADT. [`op::Op`] is
+//! the list of operators and its variants' doc comments are the signatures; no
+//! second copy of that list is written here.
 //!
-//! # Phase 2-9 contract (locked)
+//! The HIR → MIR lowering [`lower::lower_to_mir_pg`] reaches every operator but
+//! [`op::Op::Extend`], [`op::Op::Rename`] and [`op::Op::Empty`], which have no
+//! surface syntax and are exercised by direct `MirGraph` construction.
+//! `fossil-df` consumes the [`graph::MirGraph`] and executes it on `DataFusion`.
 //!
-//! Public Salsa query signature ([`lower::lower_to_mir`]) and
-//! [`graph::MirGraph`] are stable for downstream phases. Phase 4 ADDED the 7
-//! remaining operators + `Op::Empty` + the typed `Expr` ADT and generalised
-//! the lowering body; the locked query signature is unchanged.
+//! # Failure discipline
 //!
-//! See `operator-algebra.md` for the full algebra spec.
+//! Lowering never substitutes a default for something it could not resolve, and
+//! never panics (the LSP lowers on every keystroke). It taints instead — see
+//! [`graph::MirGraph::error`].
+//!
+//! The algebra is Min Oo & Hartig's operational semantics for knowledge-graph
+//! construction (arXiv 2503.10385; ESWC 2025) with a type on every operator's
+//! schema; `/docs/design/algebra` is the page that argues it, and
+//! [`op::Op`]'s own doc comments are the signatures.
 
-pub mod erase;
-pub mod eval;
+pub mod diagnostics;
 pub mod graph;
 pub mod lower;
 pub mod op;
-pub mod rewrite;
 pub mod schema;
-pub mod skeleton;
 
 // Type re-exports follow the rust-analyzer convention used by `fossil-hir`:
 // types at the crate root, query functions stay under their module path
-// (`fossil_mir::lower::lower_to_mir`) to avoid name shadowing with modules.
-pub use erase::erase_types;
-pub use eval::{partial_eval, static_truth};
+// (`fossil_mir::lower::lower_to_mir_pg`) to avoid name shadowing with modules.
+pub use diagnostics::program_diagnostics;
+pub use fossil_hir::stdlib::AggFn;
 pub use graph::MirGraph;
 pub use lower::{apply_output_shape, lower_to_mir_pg};
-pub use op::{AggFn, AggSpec, CmpOp, Expr, JoinKind, Op, SinkRef, SourceFormat, VProp};
-pub use rewrite::rewrite;
+pub use op::{
+    AggSpec, Expr, JoinKind, JoinSide, Op, ProjectedColumn, SinkRef, SourceFormat, VProp,
+};
 pub use schema::{free_cols, schema_of};
-pub use skeleton::{subject_template_skeleton, template_skeleton};

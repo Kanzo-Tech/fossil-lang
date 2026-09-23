@@ -1,0 +1,80 @@
+[package]
+name = "fossil-layout"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The layout post-pass — Louvain communities and Morton tiling over Parquet through arrow-rs. Compiles for wasm32"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+# This crate compiles for wasm32, and says so beside itself rather than in a
+# hand-kept list — `xtask::wasm_closure` treats the key as a gate root. Remove it
+# the day the crate stops being true to it, never to make a red gate go green.
+[package.metadata.fossil]
+wasm = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Both on the workspace pin (58) — the single arrow line `datafusion` resolves
+# to, so a `RecordBatch` built here is the type `fossil-df` encodes.
+#
+# Default features on purpose, and the one that matters is snappy: everything
+# the write path emits is uncompressed, but a Parquet handed to this pass by
+# anything else (a `DuckDB` COPY, in the fixtures) is snappy by that engine's
+# default, and a reader that cannot decode it is a trap rather than a policy.
+arrow = { workspace = true }
+parquet = { workspace = true }
+
+# `Bytes` is the currency of `parquet`'s `ChunkReader`, and `src/io.rs`'s
+# in-memory filesystem is a `ChunkReader` — the browser half of the seam that
+# lets this pass run without a disk under it. `parquet` already brings the crate
+# transitively; this makes the edge direct because a `pub` type in `io` is one.
+bytes = { workspace = true }
+
+# The row-group container the pass emits tiles through, rather than a second
+# writer of its own, so the row-group-per-tile property that makes the footer a
+# reader's index is stated in exactly one place. It was `fossil_df::files` and
+# this line cost `datafusion`, `fossil-hir`, `fossil-mir`,
+# `fossil-descriptors-output`, `fossil-base` and `salsa` — a compiler substrate
+# under a pass that resolves no name — for a struct `fossil-df` never called.
+fossil-tile-writer = { path = "../fossil-tile-writer" }
+
+# The manifest model, for the tile file names: declared in the same crate as the
+# `container:` field that selects them, so the writer and the manifest cannot
+# spell them two ways.
+fossil-sinks = { path = "../fossil-sinks" }
+
+thiserror = { workspace = true }
+
+
+# `FOSSIL_MEM_PROBE`. Regular dep, not dev: the instrument has to be in the
+# binary that writes ten million vertices, which is the only place the number
+# exists. A dependency-free leaf because both halves of the write path report
+# through it and neither may depend on the other.
+fossil-mem-probe = { path = "../fossil-mem-probe" }
+
+# None of these reach the wasm gate: `cargo xtask wasm-check` runs without
+# `--all-targets`, so no `tests/` target is built for wasm32 at all.
+[dev-dependencies]
+serde_json = { workspace = true }
+# DEV, and that demotion is what took `salsa` and `DataFusion` out of this
+# crate's normal closure: the only thing left here that needs the engine side is
+# `examples/compaction_pass.rs`, which measures the tiling against
+# `batches_to_parquet` — the baseline encoder the phase inversion left behind.
+# An example links dev-dependencies, so the bench keeps its baseline and the
+# library links no engine.
+fossil-df = { path = "../fossil-df" }
+# DEV, and the demotion is the whole point: the library links no DuckDB, and the
+# tests bring one to read back what the library wrote — `one-engine.mdx` calls
+# that «a test convenience, not a dependency of the language». Non-test builds
+# stop compiling DuckDB's C++, which is what lets this crate target wasm32.
+duckdb = { workspace = true }
+sha2 = { workspace = true }
+# tests/builtin_smoke.rs drives a `SELECT <duckdb_name>(…)` per pure_sql Builtin
+# from the catalog, so a renamed or removed builtin fails CI on native DuckDB.
+fossil-hir = { path = "../fossil-hir" }

@@ -1,0 +1,5 @@
+{
+  "edge/Person_knows_Person/Person_knows_Person.edge.yml": "src_type: Person\nedge_type: knows\niri: http://example.org/knows\ndst_type: Person\nedge_count: 2\nchunk_size: 4096\nsrc_chunk_size: 4096\ndst_chunk_size: 4096\ndirected: true\nprefix: edge/Person_knows_Person/\nprojections: []\nversion: gar/v1\n",
+  "graph.graph.yml": "name: graph\nprefix: ''\ncontainer: rowgroups\nprivacy:\n  bound: undeclared\nvertices:\n- vertex/Person.vertex.yml\nedges:\n- edge/Person_knows_Person/Person_knows_Person.edge.yml\nversion: gar/v1\n",
+  "vertex/Person.vertex.yml": "type: Person\niri: http://example.org/Person\nvertex_count: 3\nchunk_size: 4096\nprefix: vertex/Person/\nprojections:\n- path: ''\n  scale: 1\n  file_type: parquet\n  properties:\n  - name: dense_id\n    data_type: uint32\n    is_primary: false\n    is_nullable: false\n  - name: age\n    data_type: int64\n    is_primary: false\n  - name: name\n    data_type: string\n    is_primary: false\nversion: gar/v1\n"
+}

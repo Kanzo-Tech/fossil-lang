@@ -1,0 +1,61 @@
+[package]
+name = "fossil-introspect"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "What a native host does before compiling: DESCRIBE each source's columns, and hold the credentials that let it."
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Two salsa-free halves of the substrate, and no third. The `System` seam this
+# fills: `descriptors()` is a host-owned cache, and this is the native host's
+# way of filling it. And `providers::DATA` — the `io.` rows, which
+# `extract_source_refs` builds its alternation and its option list from and
+# `pre_introspect_and_register` picks a reader off; `Provider::options` says in
+# as many words that it is here so THIS crate can reach it without the stdlib
+# registry. Nothing here names `Db`, a query, an accumulator or a diagnostic,
+# so the `salsa` this puts in the normal closure is the host seam's and not the
+# compiler's — and cutting it is a split of `fossil-base`, not a change here.
+fossil-base = { path = "../fossil-base" }
+# The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
+# It depends on nothing, so this edge costs a `std::path` join and no build time.
+fossil-locator = { path = "../fossil-locator" }
+# `InferredDescriptor` / `InferredColumn` — the cache's element type.
+fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+# `Primitive`, the lattice a DuckDB column type maps onto.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+# `ResolvedPath::create_secret_sql` — the ONE place a `CREATE SECRET` is
+# rendered. It is native-only by intent (cloud credentials must not cross the
+# wasm boundary) and that tripwire is half of why this crate exists: an engine
+# that parses credentials cannot be wasm-clean.
+fossil-resolver = { path = "../fossil-resolver" }
+
+# The engine that DESCRIBES, on this side of the seam. The browser's side is the
+# host's DuckDB-WASM, reached through `@fossil-lang/introspect` — same engine,
+# same dialect, which is what keeps `rust-parity.test.ts` meaningful.
+duckdb = { workspace = true }
+
+# The source-binding scrape. A regex placeholder for an AST walk, and the
+# TypeScript half compiles the same pattern — see `extract_source_refs`.
+regex = { workspace = true }
+smol_str = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# Credentials never ride argv/env — kept off Debug via SecretString.
+secrecy = { workspace = true }
+miette = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# `NativeSystem` — a `System` with a descriptor cache and nothing else. It is
+# what lets these tests have a host without depending on one: `fossil-cli`
+# would be a cycle, because it depends on this crate.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }
+tempfile = { workspace = true }

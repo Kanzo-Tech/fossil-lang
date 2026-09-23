@@ -1,0 +1,191 @@
+{
+  "//": "The published test vectors of a fossil corpus. This file is the deliverable, not the prose beside it: a second implementation is checked against this table and not against a sentence. It is read by `check.mjs` (guard tile-of) and rendered by the addressing page, so the documented table and the executed one cannot drift apart. Every value is a border.",
+  "tile_of": {
+    "formula": "tile = dense_id >> 12",
+    "input": "unsigned 64-bit dense_id",
+    "shift": "logical, 12 bits",
+    "output": "unsigned 64-bit tile number",
+    "vectors": [
+      { "dense_id": "0", "tile": "0", "why": "the first id of the first tile" },
+      { "dense_id": "4095", "tile": "0", "why": "the last id of tile 0" },
+      { "dense_id": "4096", "tile": "1", "why": "the first id of tile 1" },
+      { "dense_id": "8191", "tile": "1", "why": "the last id of tile 1" },
+      {
+        "dense_id": "2147483647",
+        "tile": "524287",
+        "why": "2^31 − 1, the last id a signed 32-bit reading agrees on"
+      },
+      {
+        "dense_id": "2147483648",
+        "tile": "524288",
+        "why": "2^31, where a port that took the shift as signed gives a negative tile"
+      },
+      {
+        "dense_id": "4294967295",
+        "tile": "1048575",
+        "why": "2^32 − 1, the largest id the declared uint32 column can carry. The arithmetic is 64-bit and the column is not, on purpose: a port checked here already agrees past the storage ceiling, so widening the column moves no reader"
+      },
+      {
+        "dense_id": "9007199254740992",
+        "tile": "2199023255552",
+        "why": "2^53, where a port that ran the id through a JavaScript Number stops being exact"
+      }
+    ]
+  },
+  "declared_count": {
+    "formula": "tiles = (count + chunk_size − 1) >> shift; tail_rows = count − (tiles − 1)·chunk_size",
+    "counts": "rows in the logical table — every row of every tile of one vertex type, or every row of one orientation of one edge type. The two orientations of an edge are one relation stored twice, so `edge_count` covers both and each of them separately has to add up to it. It is NOT the largest `dense_id` (that is `count − 1`, because the ids are a gapless `0..count−1`) and it is NOT a number of tiles.",
+    "input": "unsigned 64-bit count; chunk_size a power of two, so the ceiling is a shift and not a division",
+    "output": "unsigned 64-bit tile count; every tile but the last holds exactly chunk_size rows, and a tile with no rows is not written",
+    "vectors": [
+      {
+        "count": "0",
+        "chunk_size": 4096,
+        "tiles": "0",
+        "tail_rows": "0",
+        "why": "an empty type is zero tiles and not one empty one. A reader that assumed at least one pays a request to be told 404"
+      },
+      { "count": "1", "chunk_size": 4096, "tiles": "1", "tail_rows": "1", "why": "one row is one tile" },
+      {
+        "count": "4095",
+        "chunk_size": 4096,
+        "tiles": "1",
+        "tail_rows": "4095",
+        "why": "one short of the tile — still one tile, and the tail is short"
+      },
+      {
+        "count": "4096",
+        "chunk_size": 4096,
+        "tiles": "1",
+        "tail_rows": "4096",
+        "why": "a count that exactly fills one tile is ONE tile. The off-by-one here writes an empty tile 1 and addresses a file that is not there"
+      },
+      {
+        "count": "4097",
+        "chunk_size": 4096,
+        "tiles": "2",
+        "tail_rows": "1",
+        "why": "one row over: the tail tile holds a single row. That tile is what a truncated corpus loses, and without the count nothing else in the format notices — a hole in the middle breaks the addressing, a missing tail breaks nothing"
+      },
+      {
+        "count": "300",
+        "chunk_size": 64,
+        "tiles": "5",
+        "tail_rows": "44",
+        "why": "the conformance corpus itself, and a chunk_size that is not the default: the shift comes from the manifest, never from 4096"
+      },
+      {
+        "count": "9007199254740993",
+        "chunk_size": 4096,
+        "tiles": "2199023255553",
+        "tail_rows": "1",
+        "why": "2^53 + 1 — in a JavaScript Number the count is 2^53, the division comes out one tile short, and the tail tile disappears from a reader that never asks for it"
+      }
+    ]
+  },
+  "tile_url": {
+    "formula": "files: <prefix><stem>{tile}.parquet · rowgroups: <prefix>tiles.parquet",
+    "container": "`container` on `graph.graph.yml`, and absent is `files`. It is a declaration and not something a reader works out: working it out means listing a directory, and there is no listing over HTTP.",
+    "stem": "the manifest's own spelling of the set — `chunk` for a vertex payload, `tile` for an identity index and for an adjacency orientation. It is not a naming preference: a reader that used one where the other belongs composes a name nothing wrote.",
+    "input": "a dataset-relative prefix with a trailing separator, and an unsigned 64-bit tile number",
+    "output": "one dataset-relative path. Under `rowgroups` many tiles share it, and a list that names it once per tile reads the set once per tile.",
+    "vectors": [
+      {
+        "container": "files",
+        "prefix": "vertex/Person/",
+        "stem": "chunk",
+        "tile": "0",
+        "url": "vertex/Person/chunk0.parquet",
+        "why": "the first tile of a vertex payload, and the first file a reader opens in either container"
+      },
+      {
+        "container": "files",
+        "prefix": "vertex/Person/",
+        "stem": "chunk",
+        "tile": "7",
+        "url": "vertex/Person/chunk7.parquet",
+        "why": "the address is in the name, so a file boundary sits between tile 7 and tile 8 and a request cannot cross it"
+      },
+      {
+        "container": "rowgroups",
+        "prefix": "vertex/Person/",
+        "stem": "chunk",
+        "tile": "0",
+        "url": "vertex/Person/tiles.parquet",
+        "why": "the same set, one file. The stem is ignored, and a port that kept composing it addresses a corpus that is not there"
+      },
+      {
+        "container": "rowgroups",
+        "prefix": "vertex/Person/",
+        "stem": "chunk",
+        "tile": "7",
+        "url": "vertex/Person/tiles.parquet",
+        "why": "the row that separates the containers: EVERY tile of a set is this one file, and which of its row groups the tile is comes from the footer. A reader that passes the same path once per tile scans the relation once per tile — measured at 9,240 vertices where a window holds 1,848, exactly five times over five tiles"
+      },
+      {
+        "container": "files",
+        "prefix": "edge/Person_knows_Person/by_source/",
+        "stem": "chunk",
+        "tile": "3",
+        "url": "edge/Person_knows_Person/by_source/chunk3.parquet",
+        "why": "an adjacency orientation, and it spells its files the way EVERY projection does: an adjacency is the projection at `scale: 1`, not a different kind of artefact with a stem of its own. The prefix is the one the projection's `path` declares, never the convention that names it. The identity index is the only set spelled `tile{k}`, because it is the only artefact that is not a projection"
+      },
+      {
+        "container": "rowgroups",
+        "prefix": "edge/Person_knows_Person/by_source/",
+        "stem": "chunk",
+        "tile": "3",
+        "url": "edge/Person_knows_Person/by_source/tiles.parquet",
+        "why": "one file per ORIENTATION and not per corpus: `by_target` has its own, because they are one relation stored twice and a reader filtering the wrong one answers a question nobody asked"
+      },
+      {
+        "container": "files",
+        "prefix": "vertex/Person/",
+        "stem": "chunk",
+        "tile": "9007199254740993",
+        "url": "vertex/Person/chunk9007199254740993.parquet",
+        "why": "2⁵³ + 1, where a composer that puts the tile through a JavaScript Number writes `chunk9007199254740992.parquet` — a file nothing wrote, composed with no error and no warning"
+      }
+    ]
+  },
+  "morton2": {
+    "formula": "morton = spread(x) | (spread(y) << 1)",
+    "input": "two unsigned 16-bit quantised coordinates",
+    "output": "unsigned 32-bit code; the shift result must be coerced back to unsigned",
+    "vectors": [
+      { "x": 0, "y": 0, "morton": 0, "why": "the origin" },
+      { "x": 1, "y": 0, "morton": 1, "why": "x occupies the even bits" },
+      { "x": 0, "y": 1, "morton": 2, "why": "y occupies the odd bits" },
+      { "x": 1, "y": 1, "morton": 3, "why": "the first cell of the second row" },
+      { "x": 34, "y": 17, "morton": 1542, "why": "an interior value with no symmetry to hide behind" },
+      { "x": 4096, "y": 4096, "morton": 50331648, "why": "a power of two on both axes" },
+      {
+        "x": 32768,
+        "y": 0,
+        "morton": 1073741824,
+        "why": "bit 30 — the last one a signed 32-bit accumulator survives"
+      },
+      {
+        "x": 0,
+        "y": 32768,
+        "morton": 2147483648,
+        "why": "bit 31, which is negative in a signed 32-bit reading and is where a port that omits the unsigned coercion sorts the top half of the plane first"
+      },
+      { "x": 65535, "y": 0, "morton": 1431655765, "why": "every even bit set" },
+      { "x": 0, "y": 65535, "morton": 2863311530, "why": "every odd bit set" },
+      { "x": 65535, "y": 65535, "morton": 4294967295, "why": "the last code" }
+    ]
+  },
+  "quantize": {
+    "formula": "q = round(clamp((v − lo) / (hi − lo), 0, 1) × 65535)",
+    "width": "binary32 — the subtraction, the division, the multiply by 65535 and the rounding are all single-precision, and the width is part of the contract",
+    "extent": "the bounding box of one vertex type's own positions",
+    "vectors": [
+      { "v": 0, "lo": 0, "hi": 100, "q": 0, "why": "the low edge" },
+      { "v": 50, "lo": 0, "hi": 100, "q": 32768, "why": "the midpoint rounds up, not down" },
+      { "v": 100, "lo": 0, "hi": 100, "q": 65535, "why": "the high edge" },
+      { "v": 5, "lo": 5, "hi": 5, "q": 0, "why": "a degenerate axis maps to 0 rather than dividing by zero" },
+      { "v": 147, "lo": 0, "hi": 167, "q": 57687, "why": "the width, and the only kind of border the four rows above cannot express: every one of them is exact in both float widths, so a table without this row passes against an implementation that quantises in binary64. Here binary32 rounds up to 57687 and binary64 rounds down to 57686 — one unit, which is a different Morton code, a different rank, a different `dense_id` and a different tile" }
+    ]
+  }
+}

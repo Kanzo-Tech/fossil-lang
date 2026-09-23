@@ -1,0 +1,13 @@
+type: Paper
+vertex_count: 576
+chunk_size: 128
+prefix: vertex/Paper/
+projections:
+- path: ''
+  scale: 1
+  file_type: parquet
+  properties:
+  - name: subject
+    data_type: string
+    is_primary: true
+version: gar/v1

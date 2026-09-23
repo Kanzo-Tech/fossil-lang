@@ -1,0 +1,5 @@
+id,name,email,phone,flagged,tier,balance
+1,Ana Ruiz,ana@shop.example,,y,silver,0
+2,Bea Soler,,+34600111222,n,gold,120
+3,Cesar Mota,cesar@shop.example,+34600333444,n,gold,0
+4,Dora Lima,,,n,silver,55

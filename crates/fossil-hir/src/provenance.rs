@@ -1,22 +1,21 @@
-//! Type provenance side table (CORE-11) + `expr_types` / `ty_origin` queries.
+//! Type provenance side table + `expr_types` / `ty_origin` queries.
 //!
-//! Per Phase 2 RESEARCH.md §Q5: provenance is recorded in a SEPARATE Salsa
+//! Provenance is recorded in a SEPARATE Salsa
 //! tracked struct keyed by `(MappingLoc, ExprId)`, NOT baked into [`Ty<'db>`].
 //! Baking provenance into `Ty` would defeat structural interning (one entry per
 //! AST position instead of one per shape; ~50-100× cardinality blow-up for a
 //! 200-line fixture). The side-table approach preserves "structural equality →
 //! pointer equality" at the type layer while still recording per-expression
-//! origin spans for Phase 3's two-span diagnostic blame.
+//! origin spans for the two-span diagnostic blame.
 //!
 //! # Public surface
 //!
 //! - [`Provenance`] + [`ProvenanceKind`]: where a synthesised type came from.
 //! - [`ExprTypeEntry`]: `(expr_id, ty, provenance)` triple.
 //! - [`ExprTypes`]: per-mapping interned vector of [`ExprTypeEntry`].
-//! - [`expr_types`]: `MappingLoc -> ExprTypes` Salsa query, populates the
-//!   Phase 2 literal subset (`StringLit` / `Template` / `PrefixedName`);
-//!   `FieldRef` returns None (deferred to Phase 3 — needs source-row type
-//!   from CSVW).
+//! - [`expr_types`]: `MappingLoc -> ExprTypes` Salsa query, the projection of
+//!   [`crate::check::typecheck_mapping`]'s per-expression types. A `FieldRef`
+//!   gets an entry only where the source has a row type to resolve it against.
 //! - [`ty_origin`]: convenience lookup `(MappingLoc, ExprId) -> Option<ExprTypeEntry>`.
 //!
 //! # Why `Option<ExprTypeEntry<'db>>` and not `Option<(Ty, Provenance)>`
@@ -26,28 +25,21 @@
 //! NOT automatically satisfy this bound. Reusing the existing
 //! [`ExprTypeEntry`] struct (which derives [`salsa::Update`]) cleanly
 //! satisfies the bound — and downstream consumers (the hover handler in
-//! `fossil-ide` + the [`crate::check::compatible`] stub) destructure
-//! `ExprTypeEntry { ty, provenance, .. }` cleanly. (Per planner checker
-//! Blocker 5.)
+//! `fossil-ide` + [`crate::check::compatible`]) destructure
+//! `ExprTypeEntry { ty, provenance, .. }` cleanly.
 //!
-//! # Phase 2 simplification: provenance is `'db`-free
+//! # Provenance is `'db`-free
 //!
 //! [`ProvenanceKind`] uses [`smol_str::SmolStr`] for descriptor variants
 //! (source name, shape IRI text, property IRI text) instead of `'db`-interned
-//! ids. Phase 3 may refactor to interned ids once `OutputDescriptor` /
-//! `InputDescriptor` resolution exists. This keeps Phase 2 provenance simple
-//! and avoids threading `'db` through [`crate::body::HirBody`] →
-//! [`ExprTypes`] → [`Provenance`].
+//! ids. That keeps provenance out of the interning story and avoids threading
+//! `'db` through [`crate::body::HirBody`] → [`ExprTypes`] → [`Provenance`].
 //!
-//! # Phase 3 plan 03-04: real spans land (ADR-0008)
+//! # The spans are real byte ranges
 //!
-//! Phase 2 shipped zero-width `Span { start: 0, end: 0 }` placeholders for
-//! every literal-subset entry — the blame STRUCTURE was in place but the
-//! byte ranges weren't useful for diagnostics. Phase 3 plan 03-04 lands
-//! the [`crate::spans::Spans`] side table (ADR-0008) and this module now
-//! populates [`Provenance::span`] from real `rowan::TextRange`s read via
-//! [`crate::spans::spans`]. The Phase 2 limitation comment that previously
-//! lived here is discharged.
+//! [`Provenance::span`] is populated from real `rowan::TextRange`s read via
+//! [`crate::spans::spans`], so the blame STRUCTURE and the ranges it points at
+//! are both in place — an entry never carries a zero-width placeholder.
 
 use fossil_base::Span;
 use smol_str::SmolStr;
@@ -56,18 +48,12 @@ use crate::body::ExprId;
 use crate::def_map::{MappingLoc, def_map};
 use crate::ty::Ty;
 
-#[cfg(test)]
-use crate::lower::HirExpr;
-#[cfg(test)]
-use crate::ty::{Primitive, TyKind};
-
 /// Where a synthesised [`Ty`] came from. Carries a source [`Span`] (where the
 /// type was synthesised) + a categorical [`ProvenanceKind`] (semantic reason).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Provenance {
-    /// Source span the type was synthesised from. Phase 2 ships zero-width
-    /// spans (`Span { start: 0, end: 0 }`); Phase 3 populates real ranges via
-    /// the lowering arena.
+    /// Source span the type was synthesised from, resolved through
+    /// [`crate::spans::spans`].
     pub span: Span,
     /// Categorical origin — discriminates "from an input descriptor field"
     /// from "synthesised by an operator" from "literal" etc.
@@ -76,17 +62,16 @@ pub struct Provenance {
 
 /// Categorical type-origin reason.
 ///
-/// Covers the seven Phase 2 provenance channels per RESEARCH.md §Q5. Phase 3
-/// may refactor `InputDescriptor` / `OutputDescriptor` to carry interned ids
-/// instead of [`SmolStr`].
+/// One variant per channel a type can reach an expression through — a
+/// descriptor on either side, a literal, an operator, or a closure.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum ProvenanceKind {
-    /// Type came from an input source descriptor (e.g. a CSVW column).
+    /// Type came from an input source descriptor — a source-row column.
     InputDescriptor {
         source_name: SmolStr,
         column: SmolStr,
     },
-    /// Type came from an output shape descriptor (e.g. a `ShEx` property
+    /// Type came from the output shape document (e.g. a property
     /// shape).
     OutputDescriptor {
         shape_iri: SmolStr,
@@ -105,30 +90,27 @@ pub enum ProvenanceKind {
     /// Type came from the LHS of a pipeline (`x |> f` — `x`'s type flows into
     /// `f`'s expected param).
     PipelineLhs,
-    /// Type was synthesised inside an IMPLICIT closure body (CORE-07,
-    /// type-system.md §7). The closure was implicitly created because the
+    /// Type was synthesised inside an IMPLICIT closure body. The closure was
+    /// implicitly created because the
     /// surrounding function-arg position expected `Fn(Record<R> -> τ)` and the
     /// arg expression contains free `.field` references (Fossil has no surface
     /// lambda syntax — implicit closure synthesis is the ONLY lambda form).
     ///
     /// `rendering` is the displayable form of the closure, e.g.
     /// `(row: Record<{id: String, name: String, age: Integer}>) => row.age >= 18`.
-    /// LSP hover (plan 03-07) renders this above the field type so the synthesis
-    /// is NEVER hidden from the user (RESEARCH.md §Pitfall 6).
+    /// LSP hover renders this above the field type so the synthesis
+    /// is NEVER hidden from the user.
     ///
-    /// CRITICAL (Risk Register): `rendering` MUST NEVER contain the substring
-    /// `Unknown` or `InferenceId` — it is built via [`crate::render_ty_kind`]
-    /// (the shared `TyDisplay`), never raw `{:?}` Debug. The internal
-    /// `TyKind::Unknown(InferenceId)` synthesis-state placeholder normalises to
-    /// `?` at the display boundary.
+    /// CRITICAL: it is built via [`crate::render_ty_kind`], never raw `{:?}`
+    /// Debug, so no `TyKind` variant reaches the user under its Rust spelling.
     SynthesizedClosureRendering { rendering: SmolStr },
 }
 
 /// Per-mapping interned table of `(expr_id, ty, provenance)` triples.
 ///
-/// Salsa-tracked so structural-equality re-derives memoise. Only Phase 2
-/// literal-subset expressions populate entries; FieldRef and other non-
-/// literal forms are absent (their `ty_origin` returns `None`).
+/// Salsa-tracked so structural-equality re-derives memoise. The rows are the
+/// ones the checker synthesised: an expression it could give no type to has no
+/// entry, and its `ty_origin` returns `None`.
 #[salsa::tracked(debug)]
 pub struct ExprTypes<'db> {
     #[returns(ref)]
@@ -147,23 +129,22 @@ pub struct ExprTypeEntry<'db> {
     pub provenance: Provenance,
 }
 
-/// Per-mapping type table — Phase 3 thin accessor over [`typecheck_mapping`].
+/// Per-mapping type table — a thin accessor over [`typecheck_mapping`].
 ///
-/// Phase 3 (plan 03-05) INVERTS the Phase 2 dependency direction: the
-/// bidirectional checker's [`crate::check::typecheck_mapping`] is now the
-/// SOURCE OF TRUTH for per-expression types (over the full `HirExpr` space,
-/// including `FieldRef` resolved against the CSVW source row). `expr_types` is
+/// The dependency runs one way only: the bidirectional checker's
+/// [`crate::check::typecheck_mapping`] is the SOURCE OF TRUTH for
+/// per-expression types (over the full `HirExpr` space, including `FieldRef`
+/// resolved against the source row). `expr_types` is
 /// the projection — it returns `typecheck_mapping(db, mapping)?.expr_types(db)`,
 /// or an empty table if the mapping had a type error (the error already
-/// emitted ≥1 diagnostic per P-CRIT-4).
+/// emitted ≥1 diagnostic).
 ///
-/// Phase 2's literal-subset behaviour is preserved as a strict widening: a
-/// `Template` RHS still synthesises `IriTemplate`, a `StringLit` still
-/// synthesises `String`, etc. — the new path additionally resolves `FieldRef`
-/// when a CSVW schema is declared (otherwise `FieldRef` synthesises no entry,
-/// matching Phase 2).
+/// The literal cases are the simple ones and behave as they read: a `StringLit`
+/// synthesises `String`, an `Interpolation` a `String` unless something above it
+/// expects a reference. A `FieldRef` resolves only where the mapping's source
+/// has a row; without one it synthesises no entry at all.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn expr_types<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> ExprTypes<'db> {
     match crate::check::typecheck_mapping(db, mapping) {
         Ok(out) => out.expr_types(db),
@@ -178,7 +159,7 @@ pub fn expr_types<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -
 /// level "Why `Option<ExprTypeEntry<'db>>`" section. Downstream consumers
 /// destructure `entry.ty` and `entry.provenance` directly.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn ty_origin<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
@@ -191,58 +172,13 @@ pub fn ty_origin<'db>(
         .cloned()
 }
 
-/// Phase 2 literal-subset type synthesis — span-free form.
-///
-/// Phase 3 plan 03-05 moved the production path into
-/// [`crate::check::Checker::synth`] (the bidirectional checker is now the
-/// source of truth). This helper is retained `#[cfg(test)]`-only for the
-/// plan 02-06 `ty_origin_returns_iri_for_iri_literal_in_property` test, which
-/// synthesises a `HirExpr::PrefixedName` directly.
-#[cfg(test)]
-fn infer_literal_type_kind<'db>(
-    db: &'db dyn fossil_base::Db,
-    expr: &HirExpr,
-) -> Option<(Ty<'db>, ProvenanceKind)> {
-    match expr {
-        HirExpr::StringLit(_) => Some((
-            Ty::new(db, TyKind::Primitive(Primitive::String)),
-            ProvenanceKind::Literal,
-        )),
-        HirExpr::Template(_) => Some((Ty::new(db, TyKind::IriTemplate), ProvenanceKind::Literal)),
-        HirExpr::PrefixedName { .. } => Some((Ty::new(db, TyKind::Iri), ProvenanceKind::Literal)),
-        HirExpr::FieldRef(_) => None,
-    }
-}
-
-/// Test-only wrapper retained for Phase 2 plan-02-06's
-/// `ty_origin_returns_iri_for_iri_literal_in_property` test, which
-/// constructs a synthetic `HirExpr::PrefixedName` and calls this helper
-/// directly (sidestepping `lower_expr`). New callers should use
-/// [`infer_literal_type_kind`] and read the real span from
-/// [`crate::spans::spans`].
-#[cfg(test)]
-fn infer_literal_type<'db>(
-    db: &'db dyn fossil_base::Db,
-    expr: &HirExpr,
-) -> Option<(Ty<'db>, Provenance)> {
-    infer_literal_type_kind(db, expr).map(|(ty, kind)| {
-        (
-            ty,
-            Provenance {
-                span: Span { start: 0, end: 0 },
-                kind,
-            },
-        )
-    })
-}
-
 /// Look up the [`MappingLoc`] for the `n`th MAPPING in a file.
 ///
 /// Used by the hover handler in `fossil-ide` to bridge CST position →
 /// `MappingLoc` for the [`ty_origin`] query. Public-but-crate so tests in
 /// this module can reuse it.
 #[must_use]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn mapping_at<'db>(
     db: &'db dyn fossil_base::Db,
     file: fossil_base::SourceFile,
@@ -258,68 +194,59 @@ mod tests {
     use std::sync::Arc;
 
     const HELLO: &str = "\
-prefix ex: <https://example.org/>
-users := io.csv(\"x.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+type { Person } := io.shex(\"personas.shex\")
+User := io.csv(\"x.csv\")
+Users : Person from User
+    @subject = \"https://example.org/u/{User.id}\"
+    name = User.name
 ";
 
     fn db_with_text(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "test.fossil".to_string());
         (db, file)
     }
 
-    /// Property 0 of `hello.fossil` is the `iri = ...` template — a
-    /// `Template` RHS. Phase 2 synthesises `IriTemplate` with `Literal`
-    /// provenance.
+    /// Property 0 of `hello.fossil` is the `@subject = "…{…}…"` identity — an
+    /// interpolated-string RHS. It synthesises a REFERENCE to the shape the
+    /// mapping targets, with `Literal` provenance: the expression is a literal
+    /// with holes, and what it is FOR is the expectation it is checked against.
     #[test]
-    fn expr_types_returns_iri_template_for_iri_property() {
+    fn expr_types_returns_a_reference_for_the_identity() {
         let (db, file) = db_with_text(HELLO);
         let m = mapping_at(&db, file, 0).expect("hello has one mapping");
         let entry =
-            ty_origin(&db, m, ExprId(0)).expect("property 0 (iri = template) must have an entry");
-        assert_eq!(entry.ty.kind(&db), &TyKind::IriTemplate);
+            ty_origin(&db, m, ExprId(0)).expect("property 0 (the identity) must have an entry");
+        assert_eq!(entry.ty, crate::ty::Ty::reference(&db, std::iter::empty()));
         assert_eq!(entry.provenance.kind, ProvenanceKind::Literal);
         assert_eq!(entry.expr_id, ExprId(0));
     }
 
-    /// Property 1 of `hello.fossil` is `ex:name = .name` — the RHS is a
-    /// `FieldRef`. Phase 2 returns `None` (deferred to Phase 3 — needs
-    /// source-row type).
+    /// Property 1 of `hello.fossil` is `name = User.name` — the RHS is a
+    /// qualified reference, where it was the leading-dot `.name`. No descriptor
+    /// is registered for `User`'s URI, so there is no source row to resolve the
+    /// field against and no type is synthesised.
     #[test]
     fn ty_origin_returns_none_for_field_ref() {
         let (db, file) = db_with_text(HELLO);
         let m = mapping_at(&db, file, 0).expect("hello has one mapping");
         assert!(
             ty_origin(&db, m, ExprId(1)).is_none(),
-            "FieldRef RHS must not synthesise a type in Phase 2 (deferred to Phase 3)"
+            "a FieldRef RHS must not synthesise a type with no source row to resolve it against"
         );
     }
 
-    /// `HirExpr::PrefixedName` synthesises [`TyKind::Iri`] with `Literal`
-    /// provenance. Tested at the [`infer_literal_type`] helper layer (rather
-    /// than via the end-to-end Salsa query) because the Phase 1 lowering of
-    /// `EXPR > IRI_EXPR > IDENT SHAPE_SEP IDENT` returns `None` (the
-    /// `IRI_EXPR` branch of `lower_expr` currently expects an `ABS_IRI` token; the
-    /// prefixed-name form is a pre-existing limitation tracked separately and
-    /// outside the plan-02-06 scope boundary). Synthesising the `HirExpr`
-    /// directly tests the type-inference layer regardless.
-    #[test]
-    fn ty_origin_returns_iri_for_iri_literal_in_property() {
-        let (db, _file) = db_with_text(HELLO);
-        let expr = HirExpr::PrefixedName {
-            iri: smol_str::SmolStr::from("https://example.org/Foo"),
-        };
-        let (ty, prov) =
-            infer_literal_type(&db, &expr).expect("PrefixedName must synthesise an Iri type");
-        assert_eq!(ty, Ty::new(&db, TyKind::Iri));
-        assert_eq!(prov.kind, ProvenanceKind::Literal);
-    }
+    // `ty_origin_returns_iri_for_iri_literal_in_property` lived here, and with
+    // it the two `#[cfg(test)]` helpers it was the only caller of. It built a
+    // `HirExpr::PrefixedName` by hand because the lowering of `IDENT SHAPE_SEP
+    // IDENT` returned `None` — a limitation its own doc-comment called
+    // pre-existing and tracked elsewhere. It was not tracked: it was decided.
+    // The CURIE is gone, so the variant is gone, so the only test that could
+    // reach it was a test of a form the language does not have.
 
-    /// Compile-time confirmation per planner checker Blocker 5: `ty_origin`
+    /// Compile-time confirmation that `ty_origin`
     /// returns `Option<ExprTypeEntry<'_>>` (NOT `Option<(Ty, Provenance)>`).
     /// The destructure pattern compiles iff the return type is the struct.
     #[test]
@@ -335,7 +262,7 @@ User : ex:Person from users
             expr_id: _,
         }) = ty_origin(&db, m, ExprId(0))
         {
-            // Reachable for property 0 (Template → IriTemplate).
+            // Reachable for property 0, the identity.
         }
     }
 

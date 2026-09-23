@@ -7,13 +7,16 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "ShEx schema resolution (rudof) — the shared decode behind Fossil's input + output descriptors"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-# rudof crates per workspace inheritance + the Phase 0 WASM spike
-# (`decisions/rudof-wasm.md`, Path (a) Clean WASM). This crate is the neutral
+# rudof crates per workspace inheritance, on the WASM-clean path the original
+# spike proved (byte-stream input only, never `Schema::from_iri`, which would
+# pull `reqwest`/`tokio` into the WASM build). This crate is the neutral
 # home for the ShEx → resolved-constraint-table decode: the OUTPUT descriptor
 # consumes it for backward shape checking, the INPUT descriptor consumes the
 # same table to derive source column types (compile-time, always). AST-only —

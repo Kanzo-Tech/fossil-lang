@@ -1,0 +1,61 @@
+// workspace_peer.fossil — the SECOND buffer of the workspace measurement.
+//
+// `canonical_200.fossil` is one open program, and every keystroke number this
+// repository has was measured on it alone. This is the peer that makes the
+// workspace a workspace: a DIFFERENT program, with its own sources, its own
+// shape document and — the point — a different number of mappings.
+//
+// FOUR mappings against canonical_200's fifteen. Two points on the mapping axis
+// is what turns «the walk is 82 memos» into «the walk is 5 per mapping plus 7»,
+// which is a shape a guard can hold. One point is a constant nobody can tell
+// apart from a coincidence.
+//
+// It shares no name with canonical_200: no mapping head, no source binding, no
+// shape. That is deliberate — the question the measurement asks is whether a
+// second open buffer costs the first one anything, and a shared name would be
+// an answer to a different question.
+//
+// The sources do not exist on disk, exactly as canonical_200's do not:
+// `LspState::introspect` skips what it cannot `stat`, so both fixtures are
+// checked without input descriptors and the two numbers are comparable.
+//
+// Comment lines use `//`. A bare `#` is unlexable and MUST NOT appear.
+
+type { Employee, Department, Assignment, Office } := io.shex("workspace_peer.shex")
+
+Staff := io.csv("staff.csv")
+
+Depts := io.csv("departments.csv")
+
+Offices := io.csv("offices.csv")
+
+// ─── Mapping 1: employees ────────────────────────────────────────────────────
+
+Employees : Employee from Staff
+    @subject = "https://example.org/employee/{Staff.id}"
+    name = str.trim(Staff.full_name)
+    email = Staff.email
+    grade = Staff.grade
+
+// ─── Mapping 2: departments ──────────────────────────────────────────────────
+
+Units : Department from Depts
+    @subject = "https://example.org/department/{Depts.dept_id}"
+    name = Depts.dept_name
+    costCentre = Depts.cost_centre
+
+// ─── Mapping 3: employee → department link ───────────────────────────────────
+
+Postings : Assignment from Staff
+    @subject = "https://example.org/assignment/{Staff.id}/{Staff.dept_id}"
+    assignee = "https://example.org/employee/{Staff.id}"
+    unit = "https://example.org/department/{Staff.dept_id}"
+    since = Staff.started_at
+
+// ─── Mapping 4: offices ──────────────────────────────────────────────────────
+
+Rooms : Office from Offices
+    @subject = "https://example.org/office/{Offices.office_id}"
+    label = str.upper(Offices.label)
+    floor = Offices.floor
+    capacity = Offices.capacity

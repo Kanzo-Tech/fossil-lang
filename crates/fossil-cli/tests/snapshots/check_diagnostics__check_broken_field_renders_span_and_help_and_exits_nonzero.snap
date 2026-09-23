@@ -2,26 +2,21 @@
 source: crates/fossil-cli/tests/check_diagnostics.rs
 expression: normalised
 ---
-Error:   × type-checking failed: 2 error(s)
+Error:   × type-checking failed: 1 error(s)
 
 Error: 
-  × D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is
-  │ deprecated; types will be inferred from the file directly. Remove the
-  │ `schema = "..."` argument.
-   ╭─[<FIXTURE>/mapping.fossil:1:1]
- 1 │ prefix ex: <https://example.org/>
-   · ▲
-   · ╰── here
- 2 │ users := io.csv("users.csv", schema = "descriptor.csvw.json")
+  × `naem` is not a field of `users`
+   ╭─[<FIXTURE>/mapping.fossil:2:1]
+ 1 │ type { Person } := io.shex("person.shex")
+ 2 │ users := io.csv("users.csv")
+   · ──────────────┬─────────────
+   ·               ╰── `users` has the fields id, name, age
+ 3 │ 
    ╰────
-
-Error: 
-  × unknown column `naem` — did you mean `name`?
-   ╭─[<FIXTURE>/mapping.fossil:2:39]
- 1 │ prefix ex: <https://example.org/>
- 2 │ users := io.csv("users.csv", schema = "descriptor.csvw.json")
-   ·                                       ──┬──
-   ·                                         ╰── here
- 3 │ User : ex:Person from users
+   ╭─[<FIXTURE>/mapping.fossil:6:18]
+ 5 │     @subject = "https://example.org/u/{users.id}"
+ 6 │     name = users.naem
+   ·                  ──┬─
+   ·                    ╰── here
    ╰────
   help: did you mean `name`?

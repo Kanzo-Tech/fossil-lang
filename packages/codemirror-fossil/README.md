@@ -1,97 +1,105 @@
 # @fossil-lang/codemirror-fossil
 
-CodeMirror 6 language extension for Fossil. Syntactic highlighting +
-`@`-prefixed connector autocomplete. Standalone-importable — does NOT require
-`@fossil-lang/playground`, React, DuckDB-WASM, or any LSP machinery.
+The fossil language layer for CodeMirror 6. Five halves by now, and every one is an
+answer `@fossil-lang/wasm` already had:
 
-## Why a separate package
+| half | what drives it | what you see |
+|---|---|---|
+| highlighting | `tokenize()` + `tokenKinds()` | the compiler's own lexer, coloured by the host's own theme |
+| diagnostics | `check()` → `@codemirror/lint` | squiggles, with the checker's messages verbatim |
+| hover | `hover()` → `hoverTooltip` | the type of what you wrote AND the type the target shape demands of it |
+| completion | `completions()` → `@codemirror/autocomplete` | the receiver's members, spelled bare — `trim`, not `str.trim` |
+| go to definition | `gotoDefinition()` → a keymap | `F12`, `Alt-.`, Mod-click; a target in the shape document goes to the host |
 
-Per ADR-0028 (Playground as React Library) + ADR-0030 (WASM-Exported
-Tokenizer), the editor language extension is its own publishable package
-so consumers (e.g. Keasy's existing CodeMirror editor) can migrate off
-their hand-rolled `StreamLanguage` lexer onto the single grammar source of
-truth without pulling in the entire React playground bundle.
+There is no TypeScript lexer here and there will not be one. `grammar.bnf` is
+normative, `crates/fossil-syntax` implements it, and a second implementation in
+another language drifts — that is not a hypothetical, it is what the discriminant
+table in this package's predecessor did.
 
-## Install
+## Extensions, not an editor
 
-```bash
-pnpm add @fossil-lang/codemirror-fossil @fossil-lang/wasm \
-         @codemirror/state @codemirror/view @codemirror/language \
-         @codemirror/autocomplete @codemirror/lint
-```
+Everything exported is an `Extension`. No component, no `EditorView`, and no
+colours — the one `baseTheme` sets the margins of the hover tooltip's own markup,
+at the lowest precedence CodeMirror has. The editor is the host's decision:
 
-All `@codemirror/*` packages are `peerDependencies` to avoid the duplicate
-CodeMirror state crash (RESEARCH.md Pitfall 10 — `@codemirror/state` keeps
-private identity-comparison maps that crash if two copies coexist in the
-dep tree). `@fossil-lang/wasm` is also a peer (the host installs it once,
-shares it across editor + LSP + run path).
-
-## Use
-
-```typescript
-import { EditorView } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
+```ts
 import { fossil } from '@fossil-lang/codemirror-fossil';
-import { initFossilWasm } from '@fossil-lang/wasm';
+import { FossilPlayground, initFossilWasm, tokenize, tokenKinds } from '@fossil-lang/wasm';
+import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
 
-await initFossilWasm({ wasmUrl: '/path/to/fossil_wasm_bg.wasm' });
+await initFossilWasm({ wasmUrl });
+const pg = new FossilPlayground();
+const handle = pg.openFile('hello.fossil', program);
 
-new EditorView({
-  state: EditorState.create({
-    doc: 'prefix ex: <https://example.org/>',
-    extensions: [
-      // Optional resolver — drives `@`-autocomplete. Omit to disable.
-      fossil({ resolver: myConnectionResolver }),
-    ],
-  }),
-  parent: document.body,
+const sync = (text: string) => { pg.updateFile(handle, text); };
+
+const extensions = fossil({
+  tokenize,
+  tokenKinds,
+  uri: 'hello.fossil',
+  check: (text) => { sync(text); return pg.check(); },
+  hover: (text, line, ch) => { sync(text); return pg.hover(handle, line, ch); },
+  complete: (text, line, ch) => { sync(text); return pg.completions(handle, line, ch); },
+  definition: (text, line, ch) => { sync(text); return pg.gotoDefinition(handle, line, ch); },
+  onNavigate: (target) => console.log(target),
 });
 ```
 
-### What `fossil()` includes (v0.1)
+**Every source takes the text, and that repetition is the design.** The workspace answers
+about the text of the last `updateFile`; the checker is debounced, hover fires on
+mouse-move and completion on nearly every keystroke, so three of the four run between two
+checks. A source taking only a position would let a host query text it had not pushed and
+get a range one keystroke wrong. What the push costs is the host's to decide — comparing
+against what it last sent skips the call in the common case, which is what
+`apps/playground/src/check.ts` does.
 
-- **Syntactic highlighting** via `@fossil-lang/wasm` `tokenize()` (the
-  canonical Rust lexer, ADR-0030). No TS-side lexer reimplementation.
-- **`@`-prefixed autocomplete** sourced from `resolver.list()` (the
-  ADR-0029 IoC contract). Stage 1 — connector-name completion. Stage 2
-  (per-connector path completion) returns null in v0.1; deferred until
-  resolvers grow a `listPaths()` capability.
+`@kanzo-tech/ui`'s `CodeEditor` takes exactly that as its `extensions` prop and
+holds it in a live-reconfigured `Compartment`. So does a bare `EditorView`.
 
-### What `fossil()` does NOT include
+## `kind` is a number and the legend is the contract
 
-- **LSP diagnostics, hover, goto-definition, semantic-tokens overlay,
-  completion-from-LSP** — these are wired in 08-09's
-  `@fossil-lang/playground` via `@codemirror/lsp-client` (ADR-0032).
-  This package provides the language foundation; the LSP integration
-  layers on top via the playground composition.
-- **React** — this is a pure CodeMirror extension. The React wrapper is in
-  `@fossil-lang/playground`.
+`TokenRow.kind` is `fossil_syntax::lexer::Token as u32` — a variant discriminant,
+which any reorder of the enum remaps with nothing going red.
 
-## Architectural notes
+The version of this package deleted in `873cbc0` hard-copied that table:
 
-- `fossilStreamParser` re-tokenizes the full document on each first-of-line
-  call after a change — O(n) per change for n-byte input. For Fossil's
-  typical <500 LOC mappings this is <2ms; acceptable for v0.1. Switching
-  to a true Lezer parser with incremental re-parsing is out of scope for
-  Phase 8.
-- `FossilKind` mirrors `fossil_syntax::lexer::Token` declaration order.
-  Per ADR-0030 § Negative consequences, reordering Rust `Token` variants
-  is a BREAKING CHANGE for this package — bump major in lockstep.
-  Appending new variants is backwards-compatible (unknown kinds fall
-  through to `null`, no crash).
-- `Ident` tokens map to `null` (no opinionated syntactic highlight) on
-  purpose: the LSP semantic-tokens overlay in 08-09 paints these as
-  `variable`/`function`/`type`/`property` based on HIR resolution. The
-  syntactic layer doesn't have enough information to do better.
+```ts
+export enum FossilKind { Whitespace = 0, Newline = 1, Comment = 2, KwPrefix = 3, … }
+```
 
-## ADR cross-references
+under a comment saying it «MUST stay in sync with
+`crates/fossil-syntax/src/lexer.rs` — reorders are a breaking change». Nothing
+enforced it, and by the time the package went it named nine variants the lexer no
+longer had (`KwPrefix`, `KwIn`, `KwUse`, `KwAs`, `KwIri`, `Template`, `AbsIri`,
+`EnvVar`, `Pipe`), was missing three it had gained (`True`, `False`, `Null`), and
+every discriminant from 3 upwards pointed at the wrong token.
 
-- [ADR-0027 — CodeMirror over Monaco](../../decisions/0027-codemirror-over-monaco.md)
-- [ADR-0028 — Playground as React Library](../../decisions/0028-playground-as-react-library.md)
-- [ADR-0029 — Two-Tier Source Resolution](../../decisions/0029-two-tier-source-resolution.md)
-- [ADR-0030 — WASM-Exported Tokenizer](../../decisions/0030-wasm-exported-tokenizer.md)
-- [ADR-0032 — LSP Client Choice](../../decisions/0032-lsp-client-choice.md)
+So `fossil-wasm` now ships `tokenKinds()`, a legend of variant names indexed by
+the discriminant, and `src/tags.ts` maps **names**. A reorder moves both sides at
+once. The guard is `token_kinds_legend_indexes_by_kind` in
+`crates/fossil-wasm/tests/tokenize.rs`, which compares the legend against the
+lexer itself — on the side that knows.
 
-## License
+## What it does not do
 
-Apache-2.0
+- **Semantic highlighting.** `semanticLegend()` is on the main thread but the
+  tokens are not — they still come back only over the Worker. This is why `Ident`
+  carries no tag: the lexer cannot tell a type from a binding from a column, and
+  guessing would only have to be undone by the overlay that can.
+- **Code actions.** `fossil-ide` has two quick fixes and both hang off a
+  diagnostic. `@codemirror/lint`'s `Diagnostic.actions` is where they go, and they
+  need the structured diagnostic that the `CheckRow` wire form flattens.
+- **Indentation.** Fossil is INDENT/DEDENT. An `indentService` needs the parser's
+  view of block openers, not the lexer's.
+
+## Peers
+
+All required — this package is the wiring between them and fossil, so a consumer
+with none of them has no use for it.
+
+`@codemirror/autocomplete`, `@codemirror/language`, `@codemirror/lint`,
+`@codemirror/state`, `@codemirror/view`, `@fossil-lang/wasm`.
+
+`@fossil-lang/wasm` is a peer rather than a dependency because the host owns when
+the module is instantiated, and two copies of the wasm-bindgen glue is the
+duplication that `packages/wasm/src/client.ts` was split to prevent.

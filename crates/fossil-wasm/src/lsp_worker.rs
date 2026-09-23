@@ -5,24 +5,44 @@
 //! and posts the JSON-RPC response back. Notifications produce no
 //! response but trigger `textDocument/publishDiagnostics`.
 //!
-//! Architectural seam: ADR-0024 (`fossil-wasm` IS the LSP worker — NOT a
-//! recompiled `fossil-lsp`; the cfg-tripwire on `fossil-lsp` stays). The
-//! Phase-6 LSP capabilities + handlers (`fossil-lsp/src/main.rs`) are the
-//! 1:1 model; the only difference is the wire channel (postMessage vs
-//! stdio).
+//! Architectural seam: `fossil-wasm` IS the LSP worker — NOT a recompiled
+//! `fossil-lsp`, and the cfg-tripwire on `fossil-lsp` stays.
+//!
+//! ## What is shared with `fossil-lsp`, and what is not
+//!
+//! **This said «the LSP capabilities + handlers in `fossil-lsp/src/main.rs` are
+//! the 1:1 model; the only difference is the wire channel», and it was three
+//! defects wrong.** Both sides dropped `d.labels` on the floor and both were
+//! fixed separately. The `fossil_base::claimed` guard — a `.shex` buffer is an
+//! input, not a program — landed here in `353228c` and there in `470a13b`, a day
+//! later, so for a day an editor put twenty-one squiggles down the length of the
+//! user's `ShEx` and the browser did not. And this file's
+//! `publishDiagnostics` republished the playground's [`CheckRow`] verbatim, so
+//! the payload carried `related` where LSP says `relatedInformation` and a flat
+//! `uri`/`range` where LSP says a nested `location`: a client reading the spec
+//! found nothing there.
+//!
+//! What is actually shared is the ANSWERS, as `fossil-ide` free functions both
+//! transports call — including the diagnostics now
+//! ([`fossil_ide::lsp_diagnostics`], drain and rendering in one place). What is
+//! NOT shared is this file: a `postMessage` channel instead of stdio, and a host
+//! with no filesystem. `crates/fossil-lsp/tests/transport_parity.rs` drives both
+//! over the same buffers, compares the JSON, and carries the whole list of
+//! declared differences. `fossil-lsp`'s module docs name the three, all of which
+//! are the HOST and not the wire.
 //!
 //! ## Cancellation
 //!
-//! Same revision-bump trigger as `fossil-lsp` (ADR-0022) — no new
+//! Same revision-bump trigger as `fossil-lsp` — no new
 //! mechanism. `update_file` calls `set_text` via the Salsa `Setter`; any
 //! in-flight analysis observes the new revision at its next cooperative
 //! checkpoint.
 //!
-//! ## Per-file diagnostics drain (B3 fix — mandatory)
+//! ## Per-file diagnostics drain
 //!
 //! [`publish_diagnostics`] takes `(&FossilPlayground, &str)` and returns
-//! `Option<serde_json::Value>` — drains the Salsa accumulator for the SINGLE
-//! file named by `uri` (never all open files) and constructs the LSP
+//! `Option<serde_json::Value>` — drains for the SINGLE file named by `uri`
+//! (never all open files) and constructs the LSP
 //! `textDocument/publishDiagnostics` notification. The caller (the
 //! `onmessage` closure) posts it to the Worker scope. Returns `None` if the
 //! URI is not currently open.
@@ -55,7 +75,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
-use crate::{CheckRow, FossilPlayground};
+use crate::FossilPlayground;
 
 // ---------- JSON-RPC wire types ----------
 
@@ -97,7 +117,7 @@ pub(crate) struct LspError {
 /// Result of [`dispatch`]: optional response (None for notifications) plus
 /// any `textDocument/publishDiagnostics` notifications the caller must post
 /// to the Worker scope separately. Per-file drain — one notification per
-/// affected URI (B3 fix per the 07-03 plan revision).
+/// affected URI.
 pub(crate) struct DispatchOutput {
     pub response: Option<LspResponse>,
     pub diagnostics: Vec<serde_json::Value>,
@@ -183,7 +203,7 @@ fn post<T: serde::Serialize>(g: &DedicatedWorkerGlobalScope, v: &T) -> Result<()
 
 /// Route one decoded LSP message to the right handler. Returns the response
 /// (None for notifications) plus any `publishDiagnostics` notifications the
-/// caller must post out-of-band. Per-file drain (B3 fix).
+/// caller must post out-of-band. Per-file drain.
 ///
 /// Test-reachable from native via `__dispatch_for_test` in the crate root.
 pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOutput {
@@ -213,11 +233,8 @@ pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOu
         "textDocument/documentSymbol" => handle_document_symbol(pg, params),
         "textDocument/semanticTokens/full" => handle_semantic_tokens_full(pg, params),
         "textDocument/codeAction" => handle_code_action(pg, params),
-        // Custom fossil/* methods (B2 — wired in 07-06; the dispatch routes
-        // are listed here so the plan-stated method-not-found surface is
-        // accurate. 07-06 fills in the handlers.)
+        // Custom fossil/* methods.
         "fossil/checkAll" => handle_check_all(pg),
-        "fossil/setTargetShex" => handle_set_target_shex(pg, params),
         "fossil/registerInferredDescriptor" => handle_register_inferred_descriptor(pg, &params),
         other => Err(LspError {
             code: -32601, // MethodNotFound
@@ -245,8 +262,8 @@ pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOu
     }
 }
 
-/// Handle the four LSP notifications (`initialized`, `exit`, didOpen,
-/// didChange, didClose). Returns `Some(diagnostics)` when `method` was a
+/// Handle the LSP notifications (`initialized`, `exit`, didOpen, didChange,
+/// didClose). Returns `Some(diagnostics)` when `method` was a
 /// notification — the per-file `publishDiagnostics` notifications the
 /// caller must post (empty for `initialized` / `exit`). Returns `None`
 /// when `method` is not a notification — caller falls through to request
@@ -275,7 +292,7 @@ fn handle_notification(
                 if let Some(handle) = pg.lookup_handle_by_uri(&uri) {
                     // LSP `TextDocumentSyncKind::FULL` — the last content
                     // change carries the full document text; intermediate
-                    // changes (if any) are dropped (matches fossil-lsp 06-09).
+                    // changes (if any) are dropped (matches `fossil-lsp`).
                     if let Some(change) = p.content_changes.into_iter().next_back() {
                         let _ = pg.update_file_native(handle, change.text);
                     }
@@ -310,9 +327,9 @@ fn handle_notification(
 // ---------- Capability surface ----------
 
 fn server_capabilities() -> serde_json::Value {
-    // Mirror fossil-lsp/src/main.rs `server_capabilities` 1:1 — construct an
+    // Mirror fossil-lsp/src/lib.rs `server_capabilities` 1:1 — construct an
     // `lsp_types::ServerCapabilities` and serialize it, so the shape stays
-    // in sync with the typed Phase-6 surface.
+    // in sync with the typed surface `fossil-lsp` advertises.
     let caps = ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -335,20 +352,35 @@ fn server_capabilities() -> serde_json::Value {
     serde_json::to_value(&caps).unwrap_or(serde_json::Value::Null)
 }
 
-// ---------- Per-file diagnostics drain (B3 fix) ----------
+// ---------- Per-file diagnostics drain ----------
 
-/// Drain Salsa diagnostics for the SINGLE file identified by `uri` (per-file
-/// drain — NOT all open files). Returns the constructed
+/// Drain diagnostics for the SINGLE file identified by `uri` (per-file drain —
+/// NOT all open files). Returns the constructed
 /// `textDocument/publishDiagnostics` notification as a `serde_json::Value`;
 /// the dispatch caller posts it to the `DedicatedWorkerGlobalScope`. Returns
 /// `None` if the URI is not currently open.
+///
+/// # This published a shape that was not an LSP diagnostic
+///
+/// It sent [`crate::CheckRow`] — the playground's `check()` row — straight into
+/// `params.diagnostics`, and that type's own docblock said it «mirrors the LSP
+/// `Diagnostic` shape exactly so the LSP Worker can republish each row as-is».
+/// It did not: every entry carried an extra `uri` the spec has no field for, and
+/// the labels came out under `related`, as `{ uri, range, message }`, where LSP
+/// says `relatedInformation` with a nested `location`. A client following the
+/// spec read no related information at all.
+///
+/// `CheckRow` is a fine shape for what it is — a flat workspace-wide array for
+/// a playground panel, keyed by whatever path the host opened a buffer under,
+/// which in the browser is not always a URI. It is not the wire, and this is the
+/// wire: [`fossil_ide::lsp_diagnostics`], the same call `fossil-lsp` makes.
 pub(crate) fn publish_diagnostics(pg: &FossilPlayground, uri: &str) -> Option<serde_json::Value> {
-    let handle = pg.lookup_handle_by_uri(uri)?;
-    let rows: Vec<CheckRow> = pg.diagnostics_for_rows(handle)?;
+    let file = pg.lookup_file_by_uri(uri)?;
+    let diagnostics = fossil_ide::lsp_diagnostics(pg.base_db(), file);
     Some(serde_json::json!({
         "jsonrpc": "2.0",
         "method": "textDocument/publishDiagnostics",
-        "params": { "uri": uri, "diagnostics": rows }
+        "params": { "uri": uri, "diagnostics": diagnostics }
     }))
 }
 
@@ -368,7 +400,7 @@ fn handle_hover(
     let Some(file) = pg.lookup_file_by_uri(&uri) else {
         return Ok(serde_json::Value::Null);
     };
-    let info = fossil_ide::hover_bidirectional(pg.hir_db(), file, pos.line, pos.character);
+    let info = fossil_ide::hover_bidirectional(pg.base_db(), file, pos.line, pos.character);
     let payload = info.map(|hi| {
         let index = fossil_ide::line_index(pg.base_db(), file);
         Hover {
@@ -431,7 +463,7 @@ fn handle_completion(
     };
     let files = pg.open_source_files();
     let items = fossil_ide::completions(
-        pg.hir_db(),
+        pg.base_db(),
         &files,
         file,
         p.position.line,
@@ -510,7 +542,7 @@ fn handle_code_action(
         return Ok(serde_json::Value::Null);
     };
     // Re-derive the structured `Diagnostic` carriers (the wire form drops
-    // `did_you_mean` / `suggestion_source`). Mirrors fossil-lsp 06-09.
+    // `did_you_mean` / `suggestion_source`). Mirrors `fossil-lsp`.
     let diagnostics = pg.drain_diagnostics_for_file(file);
     let actions = fossil_ide::code_actions(pg.base_db(), file, p.range, &diagnostics);
     let payload: Vec<CodeActionOrCommand> = actions
@@ -520,7 +552,7 @@ fn handle_code_action(
     Ok(serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null))
 }
 
-// ---------- Custom fossil/* methods (B2) ----------
+// ---------- Custom fossil/* methods ----------
 
 // Uniform handler signature for the dispatch routing table — `check_all`
 // cannot fail today, but the `Result` keeps the handler-shape symmetry with
@@ -531,26 +563,10 @@ fn handle_check_all(pg: &FossilPlayground) -> Result<serde_json::Value, LspError
     Ok(serde_json::to_value(&rows).unwrap_or(serde_json::Value::Null))
 }
 
-fn handle_set_target_shex(
-    pg: &mut FossilPlayground,
-    params: serde_json::Value,
-) -> Result<serde_json::Value, LspError> {
-    #[derive(serde::Deserialize)]
-    struct SetTargetShexParams {
-        text: String,
-    }
-    let p: SetTargetShexParams = serde_json::from_value(params).map_err(|e| invalid_params(&e))?;
-    pg.set_target_shex_native(&p.text).map_err(|e| LspError {
-        code: -32000,
-        message: e,
-    })?;
-    Ok(serde_json::Value::Null)
-}
-
 /// `fossil/registerInferredDescriptor` — host-injected source schema (the
-/// connection's catalog). Mirrors [`handle_set_target_shex`]: the symmetric
-/// input-side counterpart to the output-side target-shape. `params` IS the
-/// `InferredDescriptorJson` object (`{ source_name, columns, content_hash }`);
+/// connection's catalog): the columns the playground introspected with
+/// DuckDB-WASM, which the program cannot name for itself. `params` IS the
+/// `InferredDescriptorJson` object (`{ uri, columns, freshness_token }`);
 /// the native API takes the JSON string, so we re-serialise the already-parsed
 /// value rather than threading a second param shape. Once registered on the
 /// worker's `FossilPlayground`, source-field completion + forward type-check
@@ -612,20 +628,20 @@ mod tests {
 
     /// `fossil/registerInferredDescriptor` dispatch registers the catalog on
     /// the worker's own `FossilPlayground` — the instance that drives editor
-    /// completion (layer 2 of decision (b)).
+    /// completion.
     #[test]
     fn register_inferred_descriptor_dispatch_registers_on_worker_pg() {
         let pg = FossilPlayground::new();
         let params = serde_json::json!({
-            "source_name": "u",
-            "columns": [{ "name": "name", "primitive": "String" }],
-            "content_hash": ""
+            "uri": "u.csv",
+            "columns": [{ "name": "name", "primitive": "string" }],
+            "freshness_token": ""
         });
         handle_register_inferred_descriptor(&pg, &params).expect("dispatch ok");
         let desc = pg
-            .inferred_descriptor_native("u")
+            .inferred_descriptor_native("u.csv")
             .expect("descriptor registered on the worker's playground");
-        assert_eq!(desc.source_name.as_str(), "u");
+        assert_eq!(desc.uri.as_str(), "u.csv");
         assert_eq!(desc.columns.len(), 1);
     }
 
@@ -633,7 +649,7 @@ mod tests {
     #[test]
     fn register_inferred_descriptor_dispatch_rejects_malformed() {
         let pg = FossilPlayground::new();
-        let bad = serde_json::json!({ "source_name": "u" }); // missing `columns`
+        let bad = serde_json::json!({ "uri": "u.csv" }); // missing `columns`
         assert!(handle_register_inferred_descriptor(&pg, &bad).is_err());
     }
 }

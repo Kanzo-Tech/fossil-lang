@@ -6,25 +6,25 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Input descriptors (CSVW, JSON Schema, Parquet, XSD) for forward type propagation"
+# ShEx and the host-inferred schema are the two that exist. CSV, JSON and
+# Parquet arrive as `Inferred` because the HOST runs `DESCRIBE
+# read_csv_auto(...)` — there is no JSON Schema, Parquet or XSD descriptor
+# here, and the description claimed all three for a long time.
+description = "Input descriptors (ShEx and host-inferred schemas) for forward type propagation"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-# Phase 1: trait + minimal CSV stub. csv / roxmltree / jsonschema stay deferred
-# to Phase 5 STDL-06 (already declared at workspace level for inheritance).
-#
-# Phase 3 plan 03-02 (CORE-05): consumes serde + serde_json for the CSVW thin
-# parser at `src/csvw.rs`. Per the Serious N2 fix to the Wave-1 plan layout,
-# the consumer crate owns its dep declarations; plan 03-01 owns the
-# workspace-level `serde` + `serde_json` entries in the root Cargo.toml.
+# `serde` + `serde_json` are the `InferredDescriptor` JSON round-trip: a host
+# sends the introspected column list over a wire.
 indexmap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# `serde` feature on smol_str opt-in for `InferredDescriptor` JSON round-trip
-# (ADR-0037 + plan 13-01). Other consumers of smol_str in the workspace remain
-# unaffected — Cargo feature unification merges features additively.
+# The `serde` feature on smol_str, for the same round-trip. Other consumers of
+# smol_str are unaffected — Cargo feature unification merges additively.
 smol_str = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 
@@ -33,3 +33,8 @@ thiserror = { workspace = true }
 # Used to derive RDF source column types from a declared shape at compile time
 # (`io.rdf(path, schema: "x.shex")`). AST-only — no runtime ShEx validation.
 fossil-shex = { path = "../fossil-shex" }
+# The primitive lattice (`Primitive`) — a column's datatype IS the enum the
+# checker types against, not the name of one. The crate is serde-only, so this
+# adds no weight and no WASM risk; it is what lets the datatype-as-string chain
+# go — a column's type is never carried as its spelling.
+fossil-graph-schema = { path = "../fossil-graph-schema" }

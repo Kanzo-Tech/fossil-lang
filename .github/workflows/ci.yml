@@ -12,8 +12,20 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
   RUST_BACKTRACE: 1
+
+# `RUSTFLAGS` is NOT set here, and that is deliberate. Cargo does not merge the
+# environment variable with `.cargo/config.toml` — the variable REPLACES
+# `target.wasm32-unknown-unknown.rustflags`, which is where
+# `--cfg getrandom_backend="wasm_js"` lives. A workflow-level `-D warnings`
+# therefore silently deleted that cfg, and the wasm gate this file runs was not
+# the build anybody had run locally. Proven with two `cargo check --target
+# wasm32-unknown-unknown -v` runs: the cfg is on the rustc line without the
+# variable and gone with it.
+#
+# Warnings are still denied. `clippy` denies them on its own command line below,
+# which is the lint gate; a warning that only `cargo check` sees and clippy does
+# not is not a thing this workspace has.
 
 jobs:
   fmt:
@@ -39,6 +51,22 @@ jobs:
           components: clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  # A citation written as an intra-doc link is a citation no grep of this tree
+  # can check, and eight of them named a `feedback_*` document that is not in
+  # the repository at all. rustdoc already knows how to find them; nothing was
+  # running it.
+  rustdoc:
+    name: rustdoc (intra-doc links)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.90"
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
+
   native:
     name: native (cargo check + test)
     runs-on: ubuntu-latest
@@ -49,18 +77,19 @@ jobs:
           toolchain: "1.90"
       - run: cargo check --workspace --all-targets
       - run: cargo test --workspace
-      # SC#2 (ADR-0021): the HARD didChange-budget gate. A margined wall-clock
+      # The HARD didChange-budget gate. A margined wall-clock
       # correctness test — catches algorithmic blow-up in the per-keystroke
       # analysis round-trip without flaking on CI noise (the design goal is
       # <100ms; the gate budget has margin). Run explicitly so a regression here
       # is attributed, not buried in the workspace test summary.
-      - name: SC#2 didChange budget (hard gate)
+      - name: didChange budget (hard gate)
         run: cargo test -p fossil-lsp --test didchange_budget -- --nocapture
       # ADVISORY: the Criterion didChange benchmark. Informational on shared CI
       # (the 20%-regression comparison is reliable only on a pinned/self-hosted
-      # runner — see ADR-0021); `--no-run` here just proves the harness compiles
+      # runner, because shared-runner noise swamps the signal); `--no-run` here
+      # just proves the harness compiles
       # so the bench cannot rot. Full timing runs on a controlled runner.
-      - name: SC#2 didChange benchmark (advisory — compile only on shared CI)
+      - name: didChange benchmark (advisory — compile only on shared CI)
         run: cargo bench -p fossil-lsp --no-run
         continue-on-error: true
 
@@ -73,6 +102,18 @@ jobs:
         with:
           toolchain: "1.90"
           target: wasm32-unknown-unknown
+      # `fossil-df` is in the gate's closure by two edges — `fossil-df-wasm`'s
+      # cdylib, and `fossil-layout`'s `wasm = true` — and it pulls datafusion,
+      # which hardcodes `arrow-ipc[zstd]`, so the wasm32 zstd-sys C build needs a
+      # wasm-capable clang. `crates/fossil-df/Cargo.toml` says so in the
+      # imperative; `pnpm-ci.yml` and `playground.yml` both install it and this
+      # job did not, which is the one place the sentence was addressed to.
+      - name: Install LLVM for the wasm32 zstd-sys C build
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang llvm
+          echo "CC_wasm32_unknown_unknown=clang" >> "$GITHUB_ENV"
+          echo "AR_wasm32_unknown_unknown=llvm-ar" >> "$GITHUB_ENV"
       # The wasm-safe crate set is DERIVED from the cdylib dependency closure by
       # `cargo xtask wasm-check` (crates/xtask) — no hand-maintained `-p …` list
       # to drift out of sync (it had: ci.yml listed 9, the .cargo alias 6).

@@ -1,5 +1,6 @@
-prefix ex: <https://example.org/>
-users := io.csv("users.csv", schema = "descriptor.csvw.json")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .zzqwxyv
+type { Person } := io.shex("person.shex")
+users := io.csv("users.csv")
+
+User : Person from users
+    @subject = "https://example.org/u/{users.id}"
+    name = users.zzqwxyv

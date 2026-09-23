@@ -1,11 +1,35 @@
 # cargo-deny configuration — RUSTSEC + license + duplicate audit.
 # Run locally: `cargo deny check`
-# CI: see .github/workflows/ci.yml `deny` job (hard gate; no continue-on-error).
+# CI: `.github/workflows/ci.yml` `deny` job — `EmbarkStudios/cargo-deny-action@v2`,
+# a hard gate with no continue-on-error. The action runs `cargo-deny 0.20.2`
+# (pinned in its Dockerfile) with `--all-features`; locally we are on 0.19.6 with
+# default features. Both read THIS file, and both produced the same verdict every
+# time they were compared. There is no local-vs-CI config skew, and there never
+# was one — see the ignore list below for the one thing `--all-features` changes.
 
 [advisories]
 db-path = "$CARGO_HOME/advisory-dbs"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
+# Each entry states what makes it safe TODAY and what would make it fail again.
+# `reason` is not decoration: an entry whose condition no longer holds is a bug,
+# and the condition is the only way to notice. Delete on sight when it lapses.
+ignore = [
+    # RUSTSEC-2026-0204 (crossbeam-epoch) lived here and was deleted by its own expiry
+    # condition: it named `cargo update -p crossbeam-epoch` as the outright fix, that update
+    # was run, and 0.9.20 is in the lockfile. An entry whose reason says how to delete it is
+    # the only kind worth writing — the rest of this list is entries that cannot yet say it.
+
+    # --- Unreachable code paths in a transitive RDF stack ---
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.37.5: quadratic time checking a start tag for duplicate attribute names — a DoS on hostile XML. Reached only as oxrdfxml/sparesults inside oxigraph, pulled in wholesale by rudof_rdf <- shex_ast <- fossil-shex. Nothing in `crates/` parses RDF/XML or SPARQL results: `grep -rn 'rdf.\\?xml\\|quick_xml\\|oxigraph\\|sparql' crates/*/src` finds one unrelated comment. Not a lockfile fix — the patch is quick-xml >=0.41 and oxigraph 0.5.8 requires ^0.37, so it lands when oxigraph bumps. FAILS AGAIN / DELETE ME: the day any crate here reads RDF/XML or SPARQL-results XML, or oxigraph ships the bump." },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.37.5: unbounded namespace-declaration allocation in `NsReader`, memory-exhaustion DoS. Same crate, same unreachable path, same expiry as RUSTSEC-2026-0194 above — the two are one dependency bump apart." },
+    { id = "RUSTSEC-2026-0189", reason = "rmcp 0.16.0: DNS rebinding in the Streamable HTTP server transport. The advisory itself states stdio and child-process transports are NOT affected, and `fossil-mcp` is stdio only — the workspace enables `features = [\"server\", \"macros\", \"transport-io\"]` and `main.rs` calls `.serve(stdio())`. No HTTP listener is compiled, let alone bound. FAILS AGAIN / DELETE ME: the instant a `transport-streamable-http-server` or `transport-sse-server` feature appears in the rmcp dep line, or `fossil-mcp` grows an HTTP transport; the clean fix is rmcp >=1.4.0, a major bump this change does not own." },
+
+    # --- Unmaintained, compile-time only, and there is no upgrade to take ---
+    { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 unmaintained. A proc-macro: it runs at compile time and contributes no code to any shipped binary or wasm module, so `unmaintained` here is a supply-chain concern, not a runtime one. RUSTSEC lists no safe upgrade. Two independent paths — `parquet` 58 and the rudof stack — so no single dependency choice of ours removes it. FAILS AGAIN / DELETE ME: when `cargo tree -i paste` comes back empty, i.e. when both parquet and rudof have dropped it." },
+    { id = "RUSTSEC-2020-0163", reason = "term_size 0.3.2 unmaintained (superseded by `terminal_size`). Unlike the two proc-macros above this one IS linked, but all it does is ask the tty for its width — it arrives as a direct dependency of `shex_ast`, whose CLI-facing formatting we never call, and it has no unsafe surface an attacker reaches. RUSTSEC lists no safe upgrade; the only fix is upstream. FAILS AGAIN / DELETE ME: when `cargo tree -i term_size` comes back empty, i.e. when shex_ast moves to `terminal_size`." },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 2.0.1 unmaintained. Same shape as paste: a proc-macro dependency of `tabled_derive` <- `tabled` <- `rudof_rdf`/`shex_ast`, compile-time only, no safe upgrade published. We do not depend on `tabled` — it arrives with rudof's CLI-facing formatting. FAILS AGAIN / DELETE ME: when `cargo tree -i proc-macro-error2` comes back empty, or when rudof drops `tabled`." },
+]
 
 [licenses]
 allow = [
@@ -21,16 +45,113 @@ allow = [
     "CC0-1.0",
 ]
 confidence-threshold = 0.93
+# Scoped, not added to `allow` above. CDLA-Permissive-2.0 is a DATA licence, and
+# these two crates are data: Mozilla's root-certificate store compiled into Rust.
+# Allowing it globally would also allow it for a crate shipping code, which is a
+# different question we have not answered. Both arrive transitively (rustls via
+# oxhttp/oxigraph, and via reqwest under libduckdb-sys' build script).
+exceptions = [
+    { name = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+    { name = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] },
+]
 
 [bans]
 multiple-versions = "warn"
+# Every intra-workspace dependency is a bare `{ path = "..." }` with no version,
+# which `wildcards = "deny"` rejects. `allow-wildcard-paths` exempts exactly the
+# crates that cannot be published anyway — cargo-deny will not apply it to a crate
+# without `publish = false`, because crates.io itself forbids path deps outside
+# dev-dependencies. So the two halves are one statement: every manifest under
+# `crates/` now carries `publish = false`, and that is what makes the wildcards
+# legitimate rather than merely tolerated. Adding a crate WITHOUT `publish = false`
+# turns this check red again, which is the review we want.
 wildcards = "deny"
+allow-wildcard-paths = true
 deny = [
-    # Strike-from-stack list per .planning/research/STACK.md
+    # Strike-from-stack list. Each entry carries the reason it is banned.
     { name = "serde_yml", reason = "RUSTSEC-2025-0068; use serde_yaml_ng" },
-    { name = "tower-lsp", reason = "Unmaintained ~3 years; use lsp-server (per ADR-0001)" },
+    { name = "tower-lsp", reason = "Unmaintained ~3 years; use lsp-server, as all three reference implementations do" },
     { name = "wasm-pack", reason = "Archived July 2025; use wasm-bindgen-cli + Vite" },
     { name = "sqlx", reason = "Not WASM-compatible; out of MVP scope" },
+
+    # The engine guard. A crate may depend on its own layer and lower ones,
+    # never on an engine its ring does not declare — so the engines are denied
+    # workspace-wide and the crates that reach one are named as wrappers. The
+    # list IS the ring boundary: adding a name here is declaring that crate
+    # native, and that is the review the rule exists to force.
+    #
+    # These are ratchets over ground already held, not a migration to finish.
+    # The design this replaced believed six crates reached `duckdb` and that the
+    # reader layer got there transitively via `fossil-ide -> fossil-engine`.
+    # Measured, that edge runs the other way and the reader layer was already
+    # clean. `cargo tree -e normal -i <engine> --workspace` is the authority
+    # here, never prose.
+    #
+    # ## THE LIST IS WIDER THAN cargo-deny CHECKS, AND THAT IS THE POINT
+    #
+    # `cargo deny check bans` matches `wrappers` against the DIRECT parents of
+    # the banned crate. Everything one hop further away is invisible to it, so
+    # for eight months the review this comment claims to force could be skipped
+    # by adding the dependency to a crate that already had a native sibling.
+    # Measured 2026-08-25, with `fossil-lsp` freshly given a `fossil-introspect`
+    # dependency: `cargo tree -e normal -i duckdb --workspace` showed the editor
+    # linking a bundled database, and `cargo deny check bans` printed `bans ok`.
+    # `datafusion` had three such crates and had had them far longer.
+    #
+    # `crates/xtask/tests/engine_reach.rs` closes it: every workspace member
+    # from which an engine is reachable over NORMAL edges must appear in that
+    # engine's list here, and the test derives both halves — the policy from this
+    # file, the truth from `cargo metadata`. It writes no crate name down. A name
+    # here that cargo-deny does not recognise as a direct parent is not an error
+    # to it; a linker missing from here is now an error to the test.
+    #
+    # So each list below is direct parents (what cargo-deny needs) UNION
+    # transitive linkers (what the rule always meant), and the reason says which
+    # is which.
+    #
+    # ## THE `unused-wrapper` WARNINGS ARE THE TRANSITIVE NAMES. LEAVE THEM.
+    #
+    # `cargo deny check bans` prints `warning[unused-wrapper]` for each name that
+    # is not a direct parent — `fossil-lsp` under `duckdb`, and the last two
+    # under `datafusion`. It still exits 0 and CI's `deny` job still passes; the
+    # action runs no `--deny warnings` and adding one would suppress the
+    # diagnostic globally, which is how a genuinely stale entry would go quiet.
+    #
+    # Deleting those names silences the warnings AND reopens the hole, and
+    # `engine_reach.rs` is what goes red if anyone tries. There is no config key
+    # for the level: cargo-deny 0.19.6 offers it only as the CLI flag
+    # `--allow unused-wrapper`, which is not scoped to an entry.
+    { name = "duckdb", wrappers = [
+        # Links it, directly. DESCRIBE opens a connection — `fbd1102` moved that
+        # out of the native host, and naming this crate is the review the rule
+        # exists to force.
+        "fossil-introspect",
+        "fossil-mcp",
+        # Links it TRANSITIVELY, through `fossil-introspect`. Both are hosts, and
+        # a host is where introspection belongs. `fossil-cli` is ALSO a direct
+        # parent by a dev edge, to read written Parquet back — it absorbed
+        # `fossil-engine`, which held that edge and is gone.
+        "fossil-cli",
+        "fossil-lsp",
+        # A direct parent by a DEV edge only — to bring an engine to a test. Not
+        # a ring crossing, and cargo-deny still counts it as a direct parent.
+        "fossil-layout",
+    ], reason = "The engine layer, plus the hosts that introspect a source before compiling it. The language layer may not link a database: it must start in milliseconds and it must compile to wasm32, and `fossil-base`/`-syntax`/`-hir`/`-mir`/`-ide` are none of them here. `fossil-lsp` is the fourth host beside `fossil-cli`, `fossil-mcp` and `fossil-wasm` — a native-only binary outside every wasm closure — and it reaches `duckdb` through `fossil-introspect` for the same reason `fossil check` does: without the columns a DESCRIBE finds, the editor is silent on every diagnostic whose evidence is a source's schema, which was measured on 2026-08-23 and is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`. It reads only what it can `stat`, never the network. The previous reason string said `fossil-cli` kept `duckdb` as a dev-dependency; `cargo tree -e normal` says it links it through `fossil-introspect`, which is exactly the transitive edge this list could not see." },
+    { name = "datafusion", wrappers = [
+        # Links it, directly.
+        "fossil-df",
+        "fossil-df-wasm",
+        # Links it TRANSITIVELY, through `fossil-df`. Not new — it was
+        # undeclared for as long as the check could not see it, and it is
+        # recorded here rather than changed. `fossil-engine` was a second and is
+        # gone: `fossil-cli` absorbed it.
+        "fossil-cli",
+        # A parent by a DEV edge only, and it was a linker until the tile writer
+        # left `fossil_df::files`. `examples/compaction_pass.rs` is what keeps
+        # the name here: it measures the tiling against `batches_to_parquet`, the
+        # baseline encoder, and a bench's dependency is not the library's.
+        "fossil-layout",
+    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — compiling the engine to the browser asserts the opposite of a camera that is addressed rather than queried. `fossil-cli` reaches it through `fossil-df` and is recorded, not endorsed. `fossil-layout` was the other, for exactly two symbols — `files::TileWriter` and `files::batches_to_parquet`, neither of which is a DataFusion type — and this entry said retiring the edge meant moving `fossil_df::files` below the executor, a change to two crates it does not own. That change was made: `TileWriter` is `fossil-tile-writer` now, a leaf over `arrow` and `parquet`, and the layout pass reaches `fossil-df` on a dev edge alone for the bench's baseline encoder. `cargo tree -p fossil-layout -e normal -i datafusion` prints nothing. `crates/xtask/tests/engine_reach.rs` is what made the edge visible; it has no opinion about it." },
 ]
 
 [sources]

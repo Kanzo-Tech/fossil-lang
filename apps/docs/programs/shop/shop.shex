@@ -1,0 +1,17 @@
+PREFIX shop: <https://shop.example/voc#>
+PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+
+# #region person
+shop:Person {
+  shop:email xsd:string ;
+  shop:name  xsd:string ;
+  shop:phone xsd:string ?
+}
+# #endregion person
+
+# #region order
+shop:Order {
+  shop:total xsd:float ;
+  shop:buyer @shop:Person
+}
+# #endregion order

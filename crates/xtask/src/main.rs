@@ -6,20 +6,85 @@
 //!                is DERIVED from the resolved graph — there is no hand-maintained
 //!                list to drift (the old hardcoded `-p …` lists in `ci.yml` and the
 //!                `.cargo` alias had already diverged: 9 crates vs 6).
+//!   catalogue    Regenerate every projection of the catalogue: the provider
+//!                statics from `catalogue.bnf`, and the reference page's tables
+//!                from that file plus `fossil_hir::stdlib`'s registry. `--check`
+//!                fails instead of writing, which is what CI runs.
+//!   corpus       The same, one data file along: the writer's column table from
+//!                `corpus.bnf`, projected into Rust and TypeScript. Two data
+//!                files, two commands, one generator loop.
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::process::{Command, exit};
 
+use xtask::{catalogue, corpus};
+
 fn main() {
-    match std::env::args().nth(1).as_deref() {
+    let mut args = std::env::args().skip(1);
+    match args.next().as_deref() {
         Some("wasm-check") => wasm_check(),
+        Some("catalogue") => generate(
+            "catalogue.bnf",
+            "catalogue",
+            catalogue::generated(),
+            args.next().as_deref() == Some("--check"),
+        ),
+        Some("corpus") => generate(
+            "corpus.bnf",
+            "corpus",
+            corpus::generated(),
+            args.next().as_deref() == Some("--check"),
+        ),
         other => {
             if let Some(c) = other {
                 eprintln!("xtask: unknown command {c:?}");
             }
-            eprintln!("usage: cargo xtask wasm-check");
+            eprintln!("usage: cargo xtask <wasm-check | catalogue [--check] | corpus [--check]>");
             exit(2);
         }
+    }
+}
+
+/// Write — or, under `--check`, prove current — every file generated from one
+/// data file.
+///
+/// One loop for both data files rather than one per command: what a generator
+/// command does is identical and only the source and the fix-it line differ, so
+/// a second copy of this would be a second place for the `--check` semantics to
+/// drift. The check mode names the file and the command that fixes it, because
+/// the failure a generator produces is read by somebody who did not run it.
+fn generate(source: &str, command: &str, targets: Vec<(std::path::PathBuf, String)>, check: bool) {
+    let root = catalogue::repo_root();
+    let mut stale = Vec::new();
+    for (path, want) in targets {
+        let shown = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        let have = std::fs::read_to_string(&path).unwrap_or_default();
+        if have == want {
+            continue;
+        }
+        if check {
+            stale.push(shown);
+        } else {
+            std::fs::create_dir_all(path.parent().expect("a file has a parent"))
+                .expect("create the generated file's directory");
+            std::fs::write(&path, want).expect("write the generated file");
+            eprintln!("xtask: wrote {shown}");
+        }
+    }
+    if !stale.is_empty() {
+        eprintln!(
+            "xtask: {} generated file(s) do not match `{source}`:",
+            stale.len()
+        );
+        for s in &stale {
+            eprintln!("  {s}");
+        }
+        eprintln!("run `cargo xtask {command}` and commit the result");
+        exit(1);
     }
 }
 
@@ -42,7 +107,28 @@ fn wasm_check() {
 }
 
 /// The workspace crates reachable from the cdylib (WASM) crates in the resolved
-/// dependency graph — exactly the set that compiles to wasm32.
+/// dependency graph — plus any crate that DECLARES it compiles to wasm32.
+///
+/// # Why there is a second root, and why it is not a list
+///
+/// The cdylib closure answers "what does a wasm artefact already pull in". It
+/// cannot answer "what is wasm-CAPABLE", and those differ the moment a crate
+/// stops linking a native engine before anything wasm consumes it —
+/// `fossil-layout` is exactly that: the layout pass compiles for wasm32 now,
+/// and no cdylib depends on it, so the gate would not have noticed a dependency
+/// putting it back.
+///
+/// The claim therefore lives **in the crate that makes it**:
+///
+/// ```toml
+/// [package.metadata.fossil]
+/// wasm = true
+/// ```
+///
+/// which is a declaration beside the thing declared, not the hand-maintained
+/// `-p …` list this gate exists to have deleted. Nothing here names a crate; a
+/// crate that adds the key joins the gate, and one that removes it leaves —
+/// which is the same shape as the cdylib rule, read from a different field.
 fn wasm_closure() -> BTreeSet<String> {
     let meta = cargo_metadata();
 
@@ -69,7 +155,10 @@ fn wasm_closure() -> BTreeSet<String> {
                     .is_some_and(|cts| cts.iter().any(|c| c.as_str() == Some("cdylib")))
             })
         });
-        if is_cdylib {
+        // `[package.metadata.fossil] wasm = true` — a crate declaring itself
+        // wasm-capable is a root even with no cdylib above it. See the header.
+        let declares_wasm = p["metadata"]["fossil"]["wasm"].as_bool() == Some(true);
+        if is_cdylib || declares_wasm {
             roots.push(id);
         }
     }

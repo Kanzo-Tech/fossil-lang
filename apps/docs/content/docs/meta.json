@@ -1,0 +1,12 @@
+{
+  "title": "fossil",
+  "root": true,
+  "pages": [
+    "(root)/index",
+    "book",
+    "format",
+    "---For maintainers---",
+    "(root)/architecture",
+    "design"
+  ]
+}

@@ -6,7 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "wasm-bindgen binding for the fossil-graph verb surface — the WASM core of @fossil-lang/graph. Runs verb→SQL in WASM and delegates SQL execution to a host-provided DuckDB-WASM async callback."
+description = "wasm-bindgen binding for the fossil-graph verb surface — the WASM core of @fossil-lang/corpus. Runs verb→SQL in WASM and delegates SQL execution to a host-provided DuckDB-WASM async callback."
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -18,6 +20,12 @@ workspace = true
 # The verb surface (WASM-clean). This crate adds only the wasm-bindgen glue:
 # the verb→SQL logic and dispatch live in fossil-graph, single-source.
 fossil-graph = { path = "../fossil-graph" }
+
+# `VertexLevels::stride`, `::stride_bits` and `::rows_at` — the pyramid's base,
+# spelled once. Already in this crate's dependency closure through fossil-graph
+# (`plan.rs` addresses a level with it); named here so the binding can export it
+# rather than let a caller respell `4^k` on the far side of the boundary.
+fossil-sinks = { path = "../fossil-sinks" }
 
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) to match
 # wasm-bindgen-cli. The async dispatch awaits a JS Promise via JsFuture.

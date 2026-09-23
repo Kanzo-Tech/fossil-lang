@@ -9,21 +9,24 @@
  * the `wasm` binding in one instance while these functions read `undefined` from
  * another (→ `Cannot read properties of undefined (reading '__wbindgen_malloc…')`,
  * seen when the codemirror tokenizer calls `tokenize` on the main thread).
- * Mirrors `@fossil-lang/graph`'s `client.ts` split, the known-good shape.
+ * Mirrors `@fossil-lang/corpus`'s `client.ts` split, the known-good shape.
  */
 import {
   FossilPlayground as RawFossilPlayground,
   FileHandle as RawFileHandle,
   tokenize as rawTokenize,
   semantic_legend as rawSemanticLegend,
+  tokenKinds as rawTokenKinds,
   start_lsp_worker as rawStartLspWorker,
   refs as rawRefs,
   providers as rawProviders,
 } from '../pkg/fossil_wasm.js';
-import type { TokenRow, SemanticTokensLegend } from '@fossil-lang/types';
+import type { TokenRow, TokenKindLegend, SemanticTokensLegend } from '@fossil-lang/types';
 import type {
   CheckRow,
-  StdlibClass,
+  CompletionRow,
+  DefinitionRow,
+  HoverRow,
   InferredDescriptorJson,
   SourceRefInfo,
   ProviderInfo,
@@ -32,8 +35,10 @@ import type {
 /**
  * Install the LSP-over-postMessage dispatcher on the current Worker scope.
  *
- * Per ADR-0024 (`fossil-wasm` IS the LSP server-side) + Phase 7 plan 07-03
- * (the 16-route dispatch loop). The Rust function (re-exported from
+ * `fossil-wasm` IS the LSP server-side in the browser: `fossil-lsp` is
+ * native-only (it speaks stdio over crossbeam and does not compile to
+ * `wasm32`), so the Worker gets an equivalent 16-route dispatch loop over the
+ * same `fossil-ide` free functions. The Rust function (re-exported from
  * `crates/fossil-wasm/src/lsp_worker.rs`) installs `self.onmessage` on the
  * Worker scope and owns LSP JSON-RPC dispatch from that point forward.
  *
@@ -56,8 +61,8 @@ export type FileHandle = RawFileHandle;
 
 /**
  * Tokenize a Fossil source string. Returns the byte-range tokens from the
- * canonical Rust lexer (`fossil_syntax::lexer::raw_lex`) — single grammar
- * source of truth per ADR-0030.
+ * canonical Rust lexer (`fossil_syntax::lexer::raw_lex`) — the single grammar
+ * source of truth, so no editor ever reimplements the lexer in TS and drifts.
  *
  * MUST be called after {@link initFossilWasm} has resolved; otherwise the
  * underlying wasm-bindgen function throws (the wasm module is not yet
@@ -69,6 +74,27 @@ export function tokenize(text: string): TokenRow[] {
   // `serde_wasm_bindgen::to_value`, so the shape matches `{ kind, start, end }`
   // exactly. Cast is safe because the Rust ↔ JS contract is enforced upstream.
   return rawTokenize(text) as TokenRow[];
+}
+
+/**
+ * The legend for {@link TokenRow.kind}: every lexer variant NAME, indexed by the
+ * discriminant a row carries. `tokenKinds()[row.kind]` is `"Comment"`,
+ * `"KwFrom"`, `"String"`, …
+ *
+ * **This is the contract, and the numbers are not.** `kind` is a variant
+ * discriminant of `fossil_syntax::lexer::Token`, so any reorder of that enum
+ * remaps every value with nothing going red. The predecessor of this package
+ * hard-coded the table (`enum FossilKind { Whitespace = 0, … }`) under a comment
+ * saying it had to be updated in lockstep; it was wrong in nine places by the
+ * time it was deleted. Keying on the name is what makes a reorder a non-event.
+ *
+ * An index past the end of the legend is a variant appended by a compiler newer
+ * than this host: `undefined`, and a host styles it as plain text.
+ *
+ * MUST be called after {@link initFossilWasm} has resolved.
+ */
+export function tokenKinds(): TokenKindLegend {
+  return rawTokenKinds() as string[];
 }
 
 /**
@@ -88,7 +114,7 @@ export function semanticLegend(): SemanticTokensLegend {
  * (every data URI + `schema =` argument, each tagged with its `@conn` alias and
  * role). keasy's client-compute job runner reads this to derive a job's
  * connections WITHOUT subprocessing `fossil` / a server round-trip. Identical
- * shape to the native `fossil refs` (the SAME `fossil_run_status::SourceRefInfo`
+ * shape to the native `fossil refs` (the SAME `fossil_lineage::SourceRefInfo`
  * struct), so the browser and the CLI never diverge.
  *
  * MUST be called after {@link initFossilWasm} has resolved.
@@ -109,7 +135,7 @@ export function providers(): ProviderInfo[] {
 }
 
 /**
- * Workspace API class (ADR-0024). Thin TS wrapper around the wasm-bindgen
+ * Workspace API class. Thin TS wrapper around the wasm-bindgen
  * `FossilPlayground` that exposes camelCase method names for JS idiom + better
  * TS inference (the raw bindings use snake_case from the Rust impl block).
  *
@@ -135,14 +161,6 @@ export class FossilPlayground {
   }
 
   /**
-   * Return the stdlib classification manifest (STDL-07). The playground reads
-   * this once at startup to render `native_udf_only` functions as disabled.
-   */
-  classification(): StdlibClass[] {
-    return this._inner.classification() as StdlibClass[];
-  }
-
-  /**
    * Open a file in the workspace. Returns the {@link FileHandle} subsequent
    * `updateFile` / `closeFile` / `diagnosticsFor` calls key on.
    */
@@ -152,8 +170,9 @@ export class FossilPlayground {
 
   /**
    * Apply an edit to an open file. Mutates the SAME `SourceFile` via the Salsa
-   * `Setter` (`set_text`) — bumps the revision (ADR-0022) for incremental
-   * invalidation rather than a full recompute.
+   * `Setter` (`set_text`) — bumps the revision for incremental
+   * invalidation rather than a full recompute, and that revision bump is also
+   * what cancels any analysis still running on an older snapshot.
    */
   updateFile(handle: FileHandle, contents: string): void {
     this._inner.update_file(handle, contents);
@@ -184,20 +203,70 @@ export class FossilPlayground {
   }
 
   /**
-   * Install a user-supplied ShEx schema as the active output descriptor. On
-   * parse failure the previously-installed descriptor is RETAINED.
+   * What is under the cursor — `{ markdown, range }`, or `null` when nothing
+   * there has a type.
+   *
+   * `line` / `character` are LSP: zero-based, `character` in UTF-16 code units.
+   * A CodeMirror or Monaco host already counts in those units, so a document
+   * offset converts with `doc.lineAt(pos)` and no byte arithmetic — unlike
+   * {@link tokenize}, whose offsets ARE bytes.
+   *
+   * ## Push the buffer before you ask
+   *
+   * This reads the text of the last {@link updateFile}. Hover fires on
+   * mouse-move and the checker is debounced, so a hover mid-debounce answers
+   * about text one keystroke old and its range lands one keystroke wrong. The
+   * three read-only methods take a SHARED borrow on the Rust side and cannot
+   * poison the workspace the way a re-entered `updateFile` once could — see the
+   * `ide` module in `crates/fossil-wasm` — but staleness is not a borrow
+   * problem and nothing here can fix it for you.
    */
-  setTargetShex(text: string): void {
-    this._inner.set_target_shex(text);
+  hover(handle: FileHandle, line: number, character: number): HoverRow | null {
+    // `serde_wasm_bindgen` writes `None` as `undefined`; a host reading this
+    // should have one falsy answer to check, not two.
+    return (this._inner.hover(handle, line, character) as HoverRow | null | undefined) ?? null;
   }
 
   /**
-   * Register an {@link InferredDescriptorJson} for a source binding name BEFORE
-   * invoking {@link check}. The Rust compiler reads from this during forward
-   * type propagation.
+   * The completion candidates at a position, already narrowed by the receiver:
+   * `str.` offers string members and no reader, a property-key position offers
+   * the target shape's predicates and no catalogue row at all.
+   *
+   * `kind` is the LSP `CompletionItemKind` **by name** (`"function"`,
+   * `"field"`) rather than by number. The numbers never cross this boundary —
+   * `packages/codemirror-fossil`'s deleted predecessor is what happens when
+   * they do.
+   *
+   * The same staleness note as {@link hover} applies, and harder: completion
+   * fires on nearly every keystroke.
+   */
+  completions(handle: FileHandle, line: number, character: number): CompletionRow[] {
+    return this._inner.completions(handle, line, character) as CompletionRow[];
+  }
+
+  /**
+   * Where the name under the cursor is defined. Empty when nothing there has a
+   * definition.
+   *
+   * `uri` is the key the buffer was opened under, verbatim — and two of the
+   * four positions this recognises resolve into the **shape document**, so a
+   * host with a single editor pane has to read `uri` before it moves a cursor.
+   */
+  gotoDefinition(handle: FileHandle, line: number, character: number): DefinitionRow[] {
+    return this._inner.gotoDefinition(handle, line, character) as DefinitionRow[];
+  }
+
+  /**
+   * Register an {@link InferredDescriptorJson} under the source URI the program
+   * wrote, BEFORE invoking {@link check}. The Rust compiler reads from this
+   * during forward type propagation.
+   *
+   * The compiler never introspects a source itself: it performs no network or
+   * file IO — that would break the WASM gate and Salsa's determinism alike —
+   * so a host that wants column types must run the `DESCRIBE` and push the
+   * result in here.
    *
    * @throws Error if the descriptor JSON fails to deserialise on the Rust side.
-   * @see ADR-0037
    */
   registerInferredDescriptor(descriptor: InferredDescriptorJson): void {
     // The wasm-bindgen wrapper accepts a JSON string; serialise here so callers

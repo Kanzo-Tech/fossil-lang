@@ -1,3 +1,0 @@
-prefix ex: <https://example.org/>
-User : ex:Person in ex:Graph from users
-    iri = .id

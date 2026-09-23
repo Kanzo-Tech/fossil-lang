@@ -1,13 +1,12 @@
-//! Native-side smoke of the LSP-over-postMessage dispatch loop (plan
-//! 07-03, WASM-02 / PLAY-01). Exercises the JSON-RPC routing layer
+//! Native-side smoke of the LSP-over-postMessage dispatch loop. Exercises the
+//! JSON-RPC routing layer
 //! WITHOUT a Web Worker — the worker entrypoint (`start_lsp_worker`) is
 //! wasm32-only; this file targets the pure-Rust `dispatch` fn through the
 //! `__dispatch_for_test` hook.
 //!
-//! The full node-driven end-to-end exercise lives in `playground/`
-//! integration tests (07-05 onward); this file is the per-PR cargo-test
-//! mirror that catches dispatch-routing regressions without requiring
-//! wasm-bindgen + node toolchain.
+//! A node-driven end-to-end exercise would need a host that runs the worker;
+//! this file is the per-PR cargo-test mirror that catches dispatch-routing
+//! regressions without requiring the wasm-bindgen + node toolchain.
 
 // Test helpers consume their JSON params (moved into the constructed
 // envelope) — clippy's `needless_pass_by_value` lint flags this even
@@ -119,7 +118,7 @@ fn unknown_method_returns_method_not_found() {
 
 #[test]
 fn did_open_emits_per_file_publish_diagnostics() {
-    // B3 fix verification: publish_diagnostics is per-file. didOpen on uri B
+    // publish_diagnostics is per-file. didOpen on uri B
     // must emit publishDiagnostics scoped to B's uri ONLY — never carrying
     // diagnostics from a previously-opened A.
     let mut pg = FossilPlayground::new();
@@ -132,7 +131,7 @@ fn did_open_emits_per_file_publish_diagnostics() {
                     "uri": "file:///a.fossil",
                     "languageId": "fossil",
                     "version": 1,
-                    "text": "prefix ex: <https://example.org/>\n"
+                    "text": "users := io.csv(\"u.csv\")\n"
                 }
             }),
         ),
@@ -172,7 +171,7 @@ fn did_open_emits_per_file_publish_diagnostics() {
 fn did_change_invokes_set_text_revision_bump() {
     // Behavioral assertion: after didOpen + didChange, documentSymbol on
     // the new content path must succeed (proves set_text path took effect
-    // and the file revision bumped — ADR-0022).
+    // and the file revision bumped).
     let mut pg = FossilPlayground::new();
     let _ = fossil_wasm::__dispatch_for_test(
         &mut pg,
@@ -183,7 +182,7 @@ fn did_change_invokes_set_text_revision_bump() {
                     "uri": "file:///a.fossil",
                     "languageId": "fossil",
                     "version": 1,
-                    "text": "prefix ex: <https://example.org/>\n"
+                    "text": "users := io.csv(\"u.csv\")\n"
                 }
             }),
         ),
@@ -195,7 +194,7 @@ fn did_change_invokes_set_text_revision_bump() {
             serde_json::json!({
                 "textDocument": { "uri": "file:///a.fossil", "version": 2 },
                 "contentChanges": [
-                    { "text": "prefix ex: <https://example.org/>\n// edit\n" }
+                    { "text": "users := io.csv(\"u.csv\")\n// edit\n" }
                 ]
             }),
         ),
@@ -232,7 +231,7 @@ fn did_close_publishes_empty_diagnostics() {
                     "uri": "file:///a.fossil",
                     "languageId": "fossil",
                     "version": 1,
-                    "text": "prefix ex: <https://example.org/>\n"
+                    "text": "users := io.csv(\"u.csv\")\n"
                 }
             }),
         ),
@@ -282,54 +281,6 @@ fn shutdown_request_responds_null() {
     let out = fossil_wasm::__dispatch_for_test(&mut pg, req("shutdown", 99, serde_json::json!({})));
     let resp = out.response.expect("shutdown must respond");
     assert!(resp.error.is_none());
-    assert_eq!(resp.result, Some(serde_json::Value::Null));
-}
-
-/// 07-06 Task 1 — the third custom LSP request (`fossil/setTargetShex`)
-/// routes through `dispatch` to `FossilPlayground::set_target_shex_native`.
-/// Without this route, the SC#5 "testable from a browser headless test" half
-/// cannot be discharged (07-10 SC#5 browser spec exercises this path).
-#[test]
-fn fossil_set_target_shex_routes() {
-    // The descriptor is parsed via `ShExDescriptor::from_reader`, which
-    // accepts ShExJ (JSON-LD), NOT ShExC. Use a minimal valid ShExJ
-    // schema — one ShapeDecl with one TripleConstraint.
-    const SHEXJ: &str = r#"{
-      "@context": "http://www.w3.org/ns/shex.jsonld",
-      "type": "Schema",
-      "shapes": [
-        {
-          "type": "ShapeDecl",
-          "id": "http://example.org/S",
-          "shapeExpr": {
-            "type": "Shape",
-            "expression": {
-              "type": "TripleConstraint",
-              "predicate": "http://example.org/p",
-              "valueExpr": {
-                "type": "NodeConstraint",
-                "datatype": "http://www.w3.org/2001/XMLSchema#string"
-              }
-            }
-          }
-        }
-      ]
-    }"#;
-    let mut pg = FossilPlayground::new();
-    let out = fossil_wasm::__dispatch_for_test(
-        &mut pg,
-        req(
-            "fossil/setTargetShex",
-            1,
-            serde_json::json!({ "text": SHEXJ }),
-        ),
-    );
-    let resp = out.response.expect("fossil/setTargetShex must respond");
-    assert!(
-        resp.error.is_none(),
-        "fossil/setTargetShex must not error: {:?}",
-        resp.error,
-    );
     assert_eq!(resp.result, Some(serde_json::Value::Null));
 }
 

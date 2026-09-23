@@ -1,48 +1,44 @@
-//! `textDocument/documentSymbol` — the document outline (SC#5).
+//! `textDocument/documentSymbol` — the document outline.
 //!
 //! Produces the hierarchical-capable symbol list a client renders in its
-//! outline / breadcrumb panel: one entry per top-level Fossil definition
-//! (prefix decl, mapping, function, shape ref). v0.1 emits a **flat** list (no
-//! nesting) — adequate for the playground outline; per-mapping property children
-//! are a v2 refinement.
+//! outline / breadcrumb panel: one entry per [`crate::SymbolIndex`] entry. The
+//! list is **flat** (no nesting) — per-mapping property children would be the
+//! refinement.
 //!
-//! # Source: the 06-03 [`SymbolIndex`], translated to LSP coordinates
+//! # Source: the [`SymbolIndex`], translated to LSP coordinates
 //!
 //! The heavy lifting (the CST walk that finds named definitions + their byte
-//! ranges) already lives in `fossil-ide-db`'s [`fossil_ide_db::SymbolIndex`]
-//! (FILE-keyed, no per-mapping Salsa key — Research Pitfall #3). This module is a
-//! thin adapter: it builds that index, maps each Fossil [`fossil_ide_db::SymbolKind`]
+//! ranges) already lives in [`crate::SymbolIndex`]
+//! (FILE-keyed, no per-mapping Salsa key). This module is a
+//! thin adapter: it builds that index, maps each Fossil [`crate::SymbolKind`]
 //! to an LSP [`lsp_types::SymbolKind`], and converts each byte range to a UTF-16
-//! [`lsp_types::Range`] via the 06-05 [`LineIndex`] (Research Pitfall #4 — Monaco
+//! [`lsp_types::Range`] via the [`LineIndex`] (Monaco
 //! counts UTF-16, so a byte range would mis-highlight after a multi-byte char).
 //!
-//! # Kind mapping (Research §Outline)
+//! # Kind mapping
 //!
 //! | Fossil           | LSP `SymbolKind` | rationale                          |
 //! |------------------|------------------|------------------------------------|
-//! | `Prefix`         | `NAMESPACE`      | a `prefix ex: <iri>` is a namespace |
 //! | `Mapping`        | `CLASS`          | a mapping produces typed subjects   |
-//! | `Function`       | `FUNCTION`       | a `@export f := …` definition       |
 //! | `Shape`          | `INTERFACE`      | a `ShEx` shape is a structural type |
+//! | `Source`         | `VARIABLE`       | a `:=` binds a name to a value      |
 //!
-//! WASM-clean: returns `lsp_types::DocumentSymbol` directly (06-01 Spike A:
-//! lsp-types is wasm32-clean), so the playground consumes it with no translation.
+//! WASM-clean: returns `lsp_types::DocumentSymbol` directly (`lsp-types` itself
+//! is wasm32-clean), so the playground consumes it with no translation.
 
+use crate::{SymbolEntry, SymbolIndex, SymbolKind as FossilSymbolKind};
 use fossil_base::SourceFile;
-use fossil_ide_db::{SymbolEntry, SymbolIndex, SymbolKind as FossilSymbolKind};
 use lsp_types::{DocumentSymbol, Position, Range, SymbolKind as LspSymbolKind};
 
 use crate::line_index::LineIndex;
 use crate::position::line_index;
 
 /// Build the document outline for `file`: a flat `Vec<DocumentSymbol>` in source
-/// order, one entry per top-level definition (prefix / mapping / function /
-/// shape).
+/// order, one entry per top-level definition (source / mapping / shape).
 ///
-/// Each symbol's `range` and `selection_range` are the (UTF-16) range of the
-/// defining node — v0.1 uses the same range for both (the whole declaration is
-/// also the selection target). Returns an empty `Vec` for a file with no
-/// top-level definitions.
+/// Each symbol's `range` and `selection_range` are the same (UTF-16) range of
+/// the defining node — the whole declaration is also the selection target.
+/// Returns an empty `Vec` for a file with no top-level definitions.
 #[must_use]
 pub fn document_symbols(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<DocumentSymbol> {
     let index = SymbolIndex::build(db, file);
@@ -75,10 +71,13 @@ fn to_document_symbol(entry: &SymbolEntry, li: &LineIndex) -> DocumentSymbol {
 /// module table).
 const fn map_kind(kind: FossilSymbolKind) -> LspSymbolKind {
     match kind {
-        FossilSymbolKind::Prefix => LspSymbolKind::NAMESPACE,
         FossilSymbolKind::Mapping => LspSymbolKind::CLASS,
-        FossilSymbolKind::Function => LspSymbolKind::FUNCTION,
         FossilSymbolKind::Shape => LspSymbolKind::INTERFACE,
+        // A `:=` binding is a name bound to a value, which is what `VARIABLE`
+        // is for; `OBJECT` and `FILE` were the two alternatives and both say
+        // something about what the right-hand side READS, which the index does
+        // not know — `Adults := User.where(…)` opens no file.
+        FossilSymbolKind::Source => LspSymbolKind::VARIABLE,
     }
 }
 
@@ -104,30 +103,28 @@ mod tests {
     use std::sync::Arc;
 
     fn db_file(src: &str) -> (fossil_base::FossilDb, SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         (db, file)
     }
 
     const FIXTURE: &str = "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"person.shex\")
 
 users := io.csv(\"users.csv\")
 
-User : ex:Person from users
-    ex:name = .name
+User : Person from users
+    name = users.name
 ";
 
+    /// A NAMESPACE for the `ex` prefix was the third thing asserted here. There
+    /// is no prefix declaration, so there is no namespace to outline.
     #[test]
-    fn outline_has_prefix_mapping_and_shape() {
+    fn outline_has_the_mapping_and_the_shape_it_targets() {
         let (db, file) = db_file(FIXTURE);
         let syms = document_symbols(&db, file);
-        assert!(
-            syms.iter()
-                .any(|s| s.kind == LspSymbolKind::NAMESPACE && s.name == "ex"),
-            "expected a NAMESPACE for the `ex` prefix: {syms:?}"
-        );
         assert!(
             syms.iter()
                 .any(|s| s.kind == LspSymbolKind::CLASS && s.name == "User"),
@@ -135,8 +132,8 @@ User : ex:Person from users
         );
         assert!(
             syms.iter()
-                .any(|s| s.kind == LspSymbolKind::INTERFACE && s.name == "ex:Person"),
-            "expected an INTERFACE for the `ex:Person` shape ref: {syms:?}"
+                .any(|s| s.kind == LspSymbolKind::INTERFACE && s.name == "Person"),
+            "expected an INTERFACE for the `Person` shape ref: {syms:?}"
         );
     }
 

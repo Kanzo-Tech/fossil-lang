@@ -1,2 +1,2 @@
-User : ex:Person from users
-    iri = c1 ? a : c2 ? b : d
+Users : Person from User
+    @subject = c1 ? a : c2 ? b : d

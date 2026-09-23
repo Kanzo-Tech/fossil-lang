@@ -1,0 +1,12 @@
+PREFIX ex: <https://example.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# The output contract the mapping beside this file names. `name` — the last
+# segment of `https://example.org/name` — is the key the body writes, and the
+# body misspells the COLUMN it reads it from (`users.naem`), not the key. That
+# is the whole fixture: the did-you-mean fires against the CSV header, and it
+# can only fire once the property key resolves against a shape.
+
+ex:Person {
+  ex:name xsd:string
+}

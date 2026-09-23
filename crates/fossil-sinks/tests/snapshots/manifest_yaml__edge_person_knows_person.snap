@@ -5,14 +5,44 @@ expression: "knows_edge().to_yaml().expect(\"edge serialization\")"
 src_type: Person
 edge_type: knows
 dst_type: Person
-chunk_size: 1024
-src_chunk_size: 1024
-dst_chunk_size: 1024
+cardinality: multi
+edge_count: 19998
+chunk_size: 4096
+src_chunk_size: 4096
+dst_chunk_size: 4096
 directed: true
 prefix: edge/person_knows_person/
-adj_lists:
-- ordered: true
+projections:
+- path: by_source/
+  scale: 1
   aligned_by: src
+  ordered: true
   file_type: parquet
-property_groups: []
+  properties:
+  - name: src_dense
+    data_type: uint32
+    is_primary: false
+    is_nullable: false
+    cardinality: single
+  - name: dst_dense
+    data_type: uint32
+    is_primary: false
+    is_nullable: false
+    cardinality: single
+- path: by_target/
+  scale: 1
+  aligned_by: dst
+  ordered: true
+  file_type: parquet
+  properties:
+  - name: src_dense
+    data_type: uint32
+    is_primary: false
+    is_nullable: false
+    cardinality: single
+  - name: dst_dense
+    data_type: uint32
+    is_primary: false
+    is_nullable: false
+    cardinality: single
 version: gar/v1

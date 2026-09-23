@@ -32,9 +32,9 @@ const sources = await Promise.all(
 );
 
 // 3. Run — get the GraphAr files + the run report.
-const { files, runStatus } = await exec.run(program, sources, jobDest /*, shexText */);
+const { files, report } = await exec.run(program, sources, jobDest /*, shexText */);
 
-// 4. signed-PUT each file.path ← file.bytes, then PATCH the job with runStatus.
+// 4. signed-PUT each file.path ← file.bytes, then PATCH the job with report.
 exec.free();
 ```
 

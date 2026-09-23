@@ -6,7 +6,7 @@ import type {
 } from '@fossil-lang/types';
 
 /**
- * ADR-0029 connector-name validation rule (borrowed from Keasy):
+ * Connector-name validation rule (borrowed from Keasy):
  * `/^[a-z0-9][a-z0-9_-]*$/i` — applied at parseSourceRef time. Resolvers
  * MUST reject invalid names with a clear error rather than silently coercing.
  */
@@ -15,8 +15,9 @@ const CONNECTOR_NAME_REGEX = /^[a-z0-9][a-z0-9_-]*$/i;
 /**
  * Options for {@link createDefaultResolver}.
  *
- * Tier-1 default resolver per ADR-0029 — works standalone, no credentials,
- * suitable for landing/docs/paper-demo hosts. Three independent paths,
+ * The Tier-1 default resolver — works standalone, no credentials, suitable for
+ * landing/docs/paper-demo hosts. (Tier 2 is a host-mediated resolver injected
+ * by a host that has a credentials story of its own.) Three independent paths,
  * each opt-in:
  *
  *  - `examples`: a fixture map keyed by path (`@examples/<path>`). Values
@@ -52,9 +53,10 @@ export interface DefaultResolverHandle extends ConnectionResolver {
 }
 
 /**
- * Construct the default Tier-1 {@link ConnectionResolver} per ADR-0029.
+ * Construct the default Tier-1 {@link ConnectionResolver} — the browser-local
+ * tier, which needs no credentials and no host backend.
  *
- * The returned resolver implements all three Tier-1 paths from the ADR:
+ * The returned resolver implements all three Tier-1 paths:
  *   - Tier 1.a (bundled examples) — `@examples/<path>` → blob URL from `opts.examples`
  *   - Tier 1.b (local uploads)    — `@uploads/<path>` → blob URL from `addUpload`-seeded Map
  *   - Tier 1.c (public CORS HTTP) — `@public/<url>`   → URL passthrough if on allowlist
@@ -70,7 +72,7 @@ export function createDefaultResolver(
 ): DefaultResolverHandle {
   // Module-private upload store. Keys are logical paths; values are Blobs
   // (binary data, never strings). The Blob's contents never enter SQL —
-  // the io/* constructor in the .fossil mapping reads the blob: URL.
+  // the io.* constructor in the .fossil mapping reads the blob: URL.
   const uploads = new Map<string, Blob>();
 
   function inferFormat(path: string): ResolvedSource['format'] {
@@ -137,9 +139,9 @@ export function createDefaultResolver(
  * Parse `@connector/path` text → {@link SourceRef}. Throws on:
  *   - missing leading `@`
  *   - missing `/`
- *   - connector name failing {@link CONNECTOR_NAME_REGEX} (ADR-0029 naming rule)
+ *   - connector name failing {@link CONNECTOR_NAME_REGEX}
  *
- * Per ADR-0029, invalid connector names must produce a clear error rather
+ * An invalid connector name must produce a clear error rather
  * than silently coercing — downstream `@`-autocomplete in the editor relies
  * on the parse contract to surface did-you-mean suggestions.
  */

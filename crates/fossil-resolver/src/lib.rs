@@ -11,18 +11,18 @@
 //!    `read_parquet(url)` / `COPY … TO url` call.
 //!
 //! Fossil itself does NOT know about clouds — the [`PathResolver`] trait is
-//! the host-injection seam (same pattern as `fossil-base::System` for the
-//! filesystem; per ADR-0003). A standalone CLI mounts
-//! [`DefaultPathResolver`] which passes paths through unchanged; a
-//! multi-tenant host like Keasy mounts an implementation that resolves
-//! `@conn-name/path` against the calling org's per-connection credentials.
+//! the host-injection seam — the same pattern as `fossil-base::System` for the
+//! filesystem: the capability is behind a host-supplied object, never on the
+//! Salsa `Db` trait. It is a seam for a multi-tenant host such as Keasy, which
+//! resolves `@conn-name/path` against the calling org's per-connection
+//! credentials; no crate in this workspace mounts a resolver, and what they do
+//! take from here is [`ResolvedPath`] / [`CloudSecret`] (`fossil-introspect`
+//! renders the `CREATE SECRET`, `fossil-mcp` carries the pair).
 //!
 //! ## Design notes (vs the angelip2303 predecessor)
 //!
-//! This crate replaces `fossil_lang::traits::resolver` (the angelip2303
-//! fork's resolver — see auto-memory
-//! `project_fossil_graph_reference_architecture.md`). Three deliberate
-//! divergences:
+//! This crate replaces `fossil_lang::traits::resolver`, the angelip2303 fork's
+//! resolver. Three deliberate divergences:
 //!
 //! - **No Polars.** The predecessor exposed `polars::prelude::PlPath` +
 //!   `CloudOptions` because the angelip2303 runtime drove I/O via Polars
@@ -34,7 +34,7 @@
 //! - **`secrecy::SecretString` values.** Cloud config keys
 //!   (`azure_storage_account_key`, `aws_access_key_secret`, …) are
 //!   secrets. The predecessor used raw `String`, leaking into log frames
-//!   any time the map round-tripped through `Debug`. [`SecretString`]
+//!   any time the map round-tripped through `Debug`. `secrecy::SecretString`
 //!   forbids `Debug`/`Display` and zeroes the inner buffer on drop.
 //! - **Typed [`ResolveError`].** The predecessor returned `Result<_, String>`
 //!   so callers couldn't pattern-match on the failure shape. The new error

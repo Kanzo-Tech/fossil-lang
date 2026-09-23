@@ -2,59 +2,76 @@
 //!
 //! Parses a `.fossil` and emits one `SourceRefInfo` per DISTINCT URI-valued
 //! source argument (data + `schema =`), each tagged with the `@conn` alias it
-//! targets (or `null` for a direct URL/path). keasy consumes this to derive a
-//! job's connections WITHOUT regex-matching `@name/` in the script text — and,
-//! unlike the regex, it sees `@conn` refs in EVERY position, not just the data
-//! URI. A destructuring `{ A, B } := io.rdf(...)` reports its shared data +
-//! schema ONCE (not once per member). Parse-only: no `DuckDB`, no credentials.
+//! targets (or `null` for a direct URL/path). It sees `@conn` refs in EVERY
+//! position, not just the data URI, which is the whole reason a typed answer
+//! beats regex-matching `@name/` in the script text. A destructuring
+//! `{ A, B } := io.rdf(...)` reports its shared data + schema ONCE (not once
+//! per member). Parse-only: no `DuckDB`, no credentials.
+//!
+//! **This verb has no production consumer.** keasy reaches the same lineage
+//! through `@fossil-lang/wasm` and spawns no `fossil` binary, so the live path
+//! is `fossil-wasm`'s `refs_native` and this is the CLI surface beside it. Kept
+//! because the parity is the point — `crates/fossil-wasm/tests/refs.rs` runs the
+//! same program through the browser core.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("CARGO_MANIFEST_DIR has at least two parents")
-        .to_path_buf()
-}
+mod common;
 
+/// The `fossil` binary this test drives — cargo's own path for it.
+///
+/// Never a hard-coded `target/debug/fossil`: with `CARGO_TARGET_DIR` set the
+/// build lands elsewhere, so that path holds whatever was left there last and
+/// the test passes against a binary it did not build. `CARGO_BIN_EXE_<name>`
+/// is cargo's answer — the binary of THIS build, already built before the
+/// test runs, with no path to guess and no `cargo build` from inside a test.
 fn fossil_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "--quiet", "-p", "fossil-cli", "--bin", "fossil"])
-            .status()
-            .expect("spawn cargo build");
-        assert!(status.success(), "cargo build -p fossil-cli failed");
-        let bin = repo_root().join("target").join("debug").join("fossil");
-        assert!(bin.exists(), "fossil binary missing at {}", bin.display());
-        bin
-    })
+    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil")))
 }
 
 // A program mixing `@conn` references (data + schema) in a destructuring io.rdf
 // with a literal local-path csv — exercising both roles and both the aliased and
 // unaliased forms. The two members share one (data, schema) pair.
-const PROGRAM: &str = r#"prefix ex: <https://ex.org/>
+//
+// # What this fixture used to spell, and why it did not go red
+//
+// It opened `prefix ex: <https://ex.org/>` and closed with
+// `KB : ex:KB from KB / iri = .subject / ex:label = .label` — four retired
+// spellings in three lines (`retired::PREFIX_DECL`, `retired::ABSOLUTE_IRI`,
+// `retired::CURIE`, `retired::LEADING_DOT`), and it stayed green through the
+// whole of step 8. The reason is worth writing down rather than fixing
+// quietly: `fossil refs` reads `DefMap::sources` and nothing else, so the only
+// lines it can see are the two `:=` bindings — which were already in the live
+// surface. The retired half was inert scenery. It parsed to errors the command
+// does not consult, `refs` exits 0 regardless, and the assertions below never
+// touched it.
+//
+// So the transcription changes what the program SAYS and not what the test
+// PROVES, which is the point: the mapping is here so the fixture is a whole
+// program, and a whole program written in a language nobody can compile proves
+// less than no mapping at all. `type { … } := io.shex(…)` binds TYPES and takes
+// no `SourceEntry` (`def_map.rs`, the `TYPE_DEF` arm), so adding the binding
+// the bare shape name needs adds no ref — and if that ever changes, the
+// `conns == [data, vocab]` assertion at the foot of each test is what says so.
+const PROGRAM: &str = r#"type { Entry } := io.shex("@vocab/graph.shex")
 
-{ KB, Project } := io.rdf("@data/graph.ttl", schema = "@vocab/graph.shex")
+{ KB, Project } := io.rdf("@data/graph.ttl", schema = io.shex("@vocab/graph.shex"))
 plain := io.csv("local.csv")
 
-KB : ex:KB from KB
-    iri = .subject
-    ex:label = .label
+Entries : Entry from KB
+    @subject = "https://ex.org/kb/{KB.subject}"
+    label = KB.label
 "#;
 
 #[test]
 fn refs_lists_typed_references_with_connection_aliases() {
     let bin = fossil_binary();
-    let dir = std::env::temp_dir().join("fossil-cli-refs");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("create workdir");
+    let dir = common::unique_workdir("fossil-cli-refs", "typed-references");
     let prog = dir.join("p.fossil");
     std::fs::write(&prog, PROGRAM).expect("write program");
 
@@ -95,7 +112,10 @@ fn refs_lists_typed_references_with_connection_aliases() {
         .iter()
         .filter(|r| r["connection"] == "vocab" && r["role"] == "schema")
         .count();
-    assert_eq!(schema_refs, 1, "schema ref deduped across members: {refs:?}");
+    assert_eq!(
+        schema_refs, 1,
+        "schema ref deduped across members: {refs:?}"
+    );
 
     // The literal local path has no connection alias.
     let plain = refs

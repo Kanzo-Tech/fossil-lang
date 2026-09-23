@@ -1,47 +1,19 @@
-//! Native-side smoke of the `ty_wasm`-shaped Workspace surface (plan 07-02,
-//! WASM-02 / SC#5 first half).
+//! Native-side smoke of the `ty_wasm`-shaped Workspace surface.
 //!
 //! The full node-driven end-to-end exercise lives in `test-wasm-workspace.js`
 //! (loaded by `wasm-bindgen --target nodejs` + node ≥18); that script is
-//! manual + CI-job-driven, not per-PR `cargo test` (matches the Phase-1
-//! `test-wasm.js` pattern from `01-RESEARCH.md` Example 18).
+//! manual + CI-job-driven, not per-PR `cargo test`.
 //!
 //! This file is the cargo-test mirror that catches API regressions on every
 //! PR without needing the wasm-bindgen + node toolchain installed. Each test
 //! exercises the lifecycle through the pure-Rust `*_native` / `*_rows` /
 //! `*_result` helpers — the `#[wasm_bindgen]` wrappers (`open_file`,
-//! `update_file`, `close_file`, `check`, `diagnostics_for`, `compile_file`,
-//! `set_target_shex`) merely translate to/from `JsError` + `JsValue` via
-//! wasm-bindgen, which panics on native targets ("cannot call wasm-bindgen
-//! imported functions on non-wasm targets" — wasm-bindgen 0.2 lib.rs:101).
-//! The split mirrors the Phase-5 `classification()` ↔
-//! `stdlib_classification()` precedent.
+//! `update_file`, `close_file`, `check`, `diagnostics_for`)
+//! merely translate to/from `JsError` + `JsValue` via wasm-bindgen, which
+//! panics on native targets ("cannot call wasm-bindgen
+//! imported functions on non-wasm targets" — wasm-bindgen 0.2).
 
 use fossil_wasm::{FossilPlayground, WorkspaceError};
-
-/// Minimal `ShEx` schema in JSON-LD form (`ShExJ` — the format
-/// `ShExDescriptor::from_reader` parses).
-const MINIMAL_SHEX_JSON: &str = r#"{
-  "@context": "http://www.w3.org/ns/shex.jsonld",
-  "type": "Schema",
-  "shapes": [
-    {
-      "type": "ShapeDecl",
-      "id": "http://example.org/Person",
-      "shapeExpr": {
-        "type": "Shape",
-        "expression": {
-          "type": "TripleConstraint",
-          "predicate": "http://example.org/name",
-          "valueExpr": {
-            "type": "NodeConstraint",
-            "datatype": "http://www.w3.org/2001/XMLSchema#string"
-          }
-        }
-      }
-    }
-  ]
-}"#;
 
 /// Read `examples/hello.fossil` from the repo root. The cargo-test cwd is the
 /// crate directory (`crates/fossil-wasm/`), so the fixture is two levels up.
@@ -59,7 +31,7 @@ fn hello_fossil_source() -> String {
     })
 }
 
-/// The full lifecycle: open → update → check → compile → close, plus the
+/// The full lifecycle: open → update → check → close, plus the
 /// close-of-unknown-handle error path.
 #[test]
 fn workspace_lifecycle_smoke() {
@@ -71,13 +43,13 @@ fn workspace_lifecycle_smoke() {
     let h = pg.open_file_native("hello.fossil".to_string(), source.clone());
 
     // update_file_native bumps the Salsa revision via `set_text` — the
-    // EXACT mechanism didChange uses (ADR-0022). No panic, no error.
+    // EXACT mechanism didChange uses. No panic, no error.
     pg.update_file_native(h, source + "\n// edit")
         .expect("update_file_native");
 
     // Workspace-wide drain: we don't assert row count (well-formed
     // hello.fossil under AcceptAll may produce zero or more rows
-    // depending on Phase-2 warnings); what matters is the call returns
+    // depending on which warnings fire); what matters is the call returns
     // and serialization is deferred to the wasm-bindgen wrapper.
     let _rows = pg.check_rows();
 
@@ -102,7 +74,7 @@ fn workspace_lifecycle_smoke() {
 
 /// Two open files, close one, the other still produces a diagnostic stream.
 /// Exercises `OpenFiles::iter` (the workspace-wide drain `check()` uses) +
-/// `diagnostics_for_rows(handle)` (the B3 per-file drain).
+/// `diagnostics_for_rows(handle)` (the per-file drain).
 #[test]
 fn workspace_multi_file_isolation() {
     let mut pg = FossilPlayground::new();
@@ -111,15 +83,14 @@ fn workspace_multi_file_isolation() {
     let h1 = pg.open_file_native("a.fossil".to_string(), source.clone());
     let h2 = pg.open_file_native("b.fossil".to_string(), source);
 
-    // diagnostics_for_rows(h1) — per-file accessor (07-03 LSP Worker's
-    // drain entry point). Returns Some(_) for an open handle.
+    // diagnostics_for_rows(h1) — per-file accessor. Some(_) for an open handle.
     let per_file_a = pg.diagnostics_for_rows(h1);
     assert!(per_file_a.is_some(), "diagnostics_for_rows h1 returns Some");
     let per_file_b = pg.diagnostics_for_rows(h2);
     assert!(per_file_b.is_some(), "diagnostics_for_rows h2 returns Some");
 
     // Every per-file row's `uri` matches the file it was drained from
-    // (proves the B3 per-file scoping).
+    // (proves the per-file scoping).
     for row in per_file_a.unwrap() {
         assert_eq!(row.uri, "a.fossil", "per-file row keyed to its file URI");
     }
@@ -154,28 +125,3 @@ fn workspace_multi_file_isolation() {
         "diagnostics_for_rows of closed handle is None"
     );
 }
-
-/// `set_target_shex_native` happy path + parse-failure path.
-#[test]
-fn workspace_set_target_shex_smoke() {
-    let mut pg = FossilPlayground::new();
-
-    // Happy path — a valid ShExJ schema parses and installs.
-    pg.set_target_shex_native(MINIMAL_SHEX_JSON)
-        .expect("minimal ShEx JSON parses + installs");
-
-    // Failure path — garbage input returns Err. The previously-installed
-    // descriptor is retained (no half-applied state — same contract as
-    // fossil-lsp's load_sibling_shex in 06-09); we can't directly observe
-    // that the old descriptor stayed without reaching into private state,
-    // but a follow-up Ok() install proves the playground isn't wedged.
-    assert!(
-        pg.set_target_shex_native("definitely not shex").is_err(),
-        "garbage ShEx must return Err"
-    );
-
-    // Installing a fresh schema after the failure still works.
-    pg.set_target_shex_native(MINIMAL_SHEX_JSON)
-        .expect("re-install after failure still works");
-}
-

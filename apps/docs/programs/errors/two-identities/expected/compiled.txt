@@ -1,0 +1,14 @@
+── type bindings ──
+Person ← shape.shex = https://shop.example/voc#Person
+
+── source bindings ──
+User := io.csv(data/users.csv)
+Legacy := io.csv(data/legacy.csv)
+
+── mappings ──
+Users: 2 written, 2 lowered
+    @subject
+    name
+Imported: 2 written, 2 lowered
+    @subject
+    name

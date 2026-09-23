@@ -1,7 +1,7 @@
 {
   "name": "@fossil-lang/executor",
   "version": "0.0.0-development",
-  "description": "JS/TS wrapper around the fossil-df-wasm wasm-bindgen artifacts (--target web). The DataFusion executor that runs fossil mappings in the browser — lazy-loaded, separate from the LSP @fossil-lang/wasm.",
+  "description": "JS/TS wrapper around the fossil-df-wasm wasm-bindgen artifacts (--target web). The DataFusion executor that runs fossil mappings in the browser \u2014 lazy-loaded, separate from the LSP @fossil-lang/wasm.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -37,6 +37,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit"
+  },
+  "//dependencies": "`@fossil-lang/types` is a zero-runtime dependency and carries no code into a bundle: this package re-exports `Channel` and `Scale` from it rather than stating the `channels:` wire shape a second time. The rest of the manifest mirror stays here, beside the run that returns it.",
+  "dependencies": {
+    "@fossil-lang/types": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {

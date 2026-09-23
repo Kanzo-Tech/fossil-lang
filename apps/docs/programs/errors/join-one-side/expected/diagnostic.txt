@@ -1,0 +1,13 @@
+  × `join` in `Orders` equates `Purchase.id` with `Purchase.user_id`, and both are columns of the
+  │ left side
+    ╭─[program.fossil:11:1]
+ 10 │ 
+ 11 │ Orders : Order from Purchase.join(User, on = Purchase.id == Purchase.user_id)
+    · ──────────────────────────────────────┬──────────────────────────────────────
+    ·                                       ╰── here
+ 12 │     @subject = "https://shop.example/order/{Purchase.id}"
+    ╰────
+  help: A condition that never names `User` holds or fails for whole relations rather than for a
+        pairing, so every row of one side pairs with every row of the other. That is a filter over
+        their product, not a join.
+

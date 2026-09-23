@@ -1,0 +1,112 @@
+---
+title: Values and expressions
+description: Every expression fossil admits — literals, member access, the two ways to reach one function, string interpolation for identities, the operators and their precedence, and the conditional.
+---
+
+An expression is the right-hand side of a property line, the inside of a `{...}` hole, and the
+argument of `where`. One grammar covers all three.
+
+## Literals
+
+<Program src="expressions/expressions.fossil" region="literals" title="expressions.fossil" />
+
+A string is delimited by `"`. Whole numbers are `Integer`, numbers with a point are `Float`, and
+`true` and `false` are `Bool`.
+
+## Member access
+
+`.` means **member of**, and what is on the left decides what is available on the right.
+
+| on the left | what the dot gives you | example |
+| --- | --- | --- |
+| a reader — `io` | the sources it opens | `io.csv("data/users.csv")` |
+| a type — `User`, `str` | its fields and operations | `User.email` |
+| a relation — `User`, `Adults` | `where`, `select`, `join`, `distinct`, `union` | `User.where(...)` |
+| a value — a `String` | what you can do to it | `User.email.trim()` |
+
+<Program src="expressions/expressions.fossil" region="member-access" title="expressions.fossil" />
+
+There is no second access operator: whether a name is a field, an operation or a reader is a question
+about its type, and the type is known. Every field reference is **qualified** — `Row.station`, never
+a bare `.station`, which is the spelling you will still be writing after a join puts two rows in
+scope.
+
+## Two paths to the same function
+
+`str` is a type, and the operations on a string are its members. You can reach them through the
+value, or through the type:
+
+<Program src="expressions/expressions.fossil" region="two-paths" title="expressions.fossil" />
+
+`x.trim()` is `str.trim(x)` — one catalogue entry reached two ways, the way `s.len()` and
+`str::len(&s)` are one function in Rust. `where`, `select` and `join` are entries in that same
+catalogue rather than special forms. Arguments that would read as a puzzle carry a name:
+
+<Program src="expressions/expressions.fossil" region="named-arguments" title="expressions.fossil" />
+
+A named argument is `name = value`, after the ones that do not need naming, and the name is the
+parameter's own as [the standard library](/docs/book/stdlib) prints it.
+
+## String interpolation
+
+This is how an identity gets built, and it is ordinary string syntax:
+
+<Program src="expressions/expressions.fossil" region="interpolation" title="expressions.fossil" />
+
+Inside `{...}` is an expression — any expression, checked exactly like the ones outside, so there is
+no little language of format specifiers to drift out of step with the checker. `{{` writes a literal
+`{`; a closing `}` outside a hole needs no escape. Braces are safe here because `{` and `}` cannot
+appear in an IRI at all.
+
+## The operators
+
+Arithmetic is `+ - * / %`, comparison is `== != < <= > >=`, and `and`, `or` and `not` combine
+results. Tightest binding first (`grammar.bnf, § OPERATOR PRECEDENCE TABLE`):
+
+| operators | associativity |
+| --- | --- |
+| `.` member, `()` call | left |
+| unary `-`, `not` | right |
+| `* / %` | left |
+| `+ -` | left |
+| `== != < <= > >=` | **non-associative** |
+| `and` | left |
+| `or` | left |
+| `? :` | right |
+
+Parentheses override all of it. Comparison being non-associative is the row to notice: `a < b < c`
+is not an expression, and the parser refuses the second comparison rather than nesting it.
+
+<Program src="expressions/expressions.fossil" region="comparison" title="expressions.fossil" />
+
+`null` is the one thing that compares with anything: a source may have no value for a column, and
+`Row.celsius != null` is how you ask. It compares and it does not assign — `celsius = null` is an
+error, because a column with no value and a property written from nothing are different things and
+only the first is a question. `!= ""` is not that question; it is a comparison against the empty
+string, and it worked for as long as nothing typed it.
+
+`not` and `-` are prefixes, and what they build is an ordinary value rather than something only a
+`where` can hold:
+
+<Program src="negation/negation.fossil" region="not" title="negation.fossil" />
+
+## The conditional
+
+One value or another, decided per row:
+
+<Program src="ternary/ternary.fossil" region="simple" title="ternary.fossil" />
+
+`cond ? a : b`, and both branches have to be the same type — the widening between `Integer` and
+`Float` is the only coercion anywhere in the language. It is right-associative, so a chain reads as a
+ladder without parentheses and each `:` pairs with the `?` to its left:
+
+<Program src="ternary/ternary.fossil" region="chained" title="ternary.fossil" />
+
+That `:` is the same token a mapping header spells its shape with. The `?` is what tells them apart.
+
+## What there is not
+
+There is no way to define a function, no loop and no recursion. An expression is a function of one
+row and it terminates because there is nothing in it that could fail to. The generic, higher-order
+part lives in [the standard library](/docs/book/stdlib) — which is why everything an expression can
+do, it can do to a whole column at once.

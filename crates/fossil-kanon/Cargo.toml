@@ -1,0 +1,75 @@
+# Mondrian strict multidimensional k-anonymity over Arrow arrays.
+#
+# Nothing on crates.io does this. The search was exhaustive and turned up one
+# candidate, `diff-priv` — streaming microaggregation, last published 2022, and
+# it does not build for wasm32. OpenDP is differential privacy, a different
+# guarantee, and vendors OpenSSL. ARX and Amnesia are the reference
+# implementations and are both JVM/Python. So this is a port, and the port is
+# deliberately narrow: one algorithm, stated exactly, rather than a framework.
+[package]
+name = "fossil-kanon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Mondrian strict multidimensional k-anonymity over Arrow arrays — generalisation, suppression, and a report that cannot overstate its guarantee"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+# The whole architectural claim is that this pass runs inside the data holder's
+# browser, so the sensitive table never leaves the machine that holds it. A
+# k-anonymiser that only runs on a server is one that has already been handed
+# the microdata, which is the disclosure it exists to prevent. Nothing wasm
+# depends on this crate yet, so the cdylib closure `cargo xtask wasm-check`
+# derives would not cover it; the claim lives here, beside the crate that makes
+# it, and the gate reads it — see `xtask::wasm_closure`. Remove this key the day
+# the crate stops being true to it; do not remove it to make a red gate go green.
+[package.metadata.fossil]
+wasm = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The two `arrow` sub-crates, not the umbrella. `arrow` 58's default features
+# pull `arrow-ipc`, `arrow-csv`, `arrow-json` and `arrow-cast`'s prettyprint —
+# four readers and a formatter this crate never calls, on the wasm module that
+# has to load in a browser tab. `fossil-sinks` set this precedent for the same
+# reason (SC#5). Both are the workspace pin, 58, which is the single arrow line
+# `datafusion` resolves to, so a `RecordBatch` handed here by `fossil-df` is the
+# same type without a conversion.
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+
+# Generalisation hierarchies are DECLARED DATA, not code. Amnesia ships its
+# hierarchies as files and that is the shape worth copying: a postcode hierarchy
+# is a fact about a country's postcode system, it is revised by statisticians
+# rather than by programmers, and a recompile is the wrong unit of change for
+# it. `hierarchies/` in this crate holds three of them; `serde` is what makes
+# that directory data rather than decoration.
+serde = { workspace = true }
+
+# `Result<T, E>` with a thiserror-style enum, per the workspace style rule for
+# library crates. Every variant here names a column, because a configuration
+# error on the fourth quasi-identifier of nine is unactionable without one.
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The contract of this crate is a property, not a set of examples: for ANY input
+# and ANY k, every released row's anonymity set is at least k. Examples cannot
+# assert that — the failures in this algorithm are the inputs nobody thinks to
+# write down (a median value with k duplicates, a column that is one value
+# repeated, k larger than the table). `tests/invariant.rs` generates them.
+#
+# Already in the lockfile at 1.11.0 via the DataFusion stack, so this costs the
+# workspace no new resolution. A dev edge, and `cargo xtask wasm-check` runs
+# `cargo check` WITHOUT `--all-targets`, so no `tests/` target is built for
+# wasm32 and this never reaches the gate.
+proptest = { workspace = true }
+# The report is a structured value with a dozen fields, and the useful assertion
+# on it is «all of it, exactly», not six `assert_eq!`s that pass while a seventh
+# field silently changes. Same use as `fossil-sinks` and `fossil-graph`.
+insta = { workspace = true }
+serde_json = { workspace = true }

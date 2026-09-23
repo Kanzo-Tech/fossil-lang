@@ -1,4 +1,4 @@
-//! End-to-end smoke test for `textDocument/hover` — Phase 2 plan 02-06.
+//! End-to-end smoke test for `textDocument/hover`.
 //!
 //! Spawns the `fossil-lsp` binary, drives it through `initialize` →
 //! `initialized` → `didOpen` (with a `.fossil` source containing an
@@ -6,265 +6,98 @@
 //! template) → `shutdown` → `exit`. Asserts:
 //!
 //! 1. The hover response is a JSON-RPC Response (matched on `id`).
-//! 2. `result.contents.value` contains the rendered ty (`"IriTemplate"`).
+//! 2. `result.contents.value` contains the rendered ty (a `Ref<…>`).
 //! 3. `result.contents.value` contains the fenced fossil code block
 //!    opener (```` ```fossil ````).
 //! 4. `result.contents.kind` is `"markdown"`.
 //!
-//! Per checker Warning W4: the test binary is built via `cargo build -p
-//! fossil-lsp` BEFORE the test runs (Phase 1 baseline pattern from
-//! `lsp_smoke.rs`'s `fossil_lsp_binary()` helper) so a build error surfaces
-//! distinctly from a test failure ("binary not found" vs. assertion fail).
+//! Pattern mirrors `lsp_smoke.rs`: all frames written upfront, then stdin
+//! dropped, then stdout drained and parsed. Those mechanics are
+//! `tests/common/mod.rs` now, written once for every test that drives the
+//! binary over the wire.
 //!
-//! Pattern mirrors Phase 1's `lsp_smoke.rs`: all frames written upfront,
-//! then stdin dropped, then stdout drained and parsed.
+//! # The program is written to disk, and it has to be
+//!
+//! It used to be an inline `const` opened under `file:///tmp/hover.fossil`,
+//! which was free while a program named no shape document. Ruling 3 of
+//! 2026-08-11 makes naming one MANDATORY — a property key is the last segment
+//! of a predicate IRI the document declares — and `typecheck_mapping` returns
+//! `Err` when the contract does not resolve, which empties the `expr_types`
+//! table hover reads. A hover over an unresolvable program is `null`, so this
+//! test writes BOTH files into a temp directory and opens the program under its
+//! real path, letting the server resolve `io.shex("hover.shex")` beside it the
+//! way it does in an editor.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::io::{Read, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+mod common;
 
-fn repo_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("CARGO_MANIFEST_DIR has at least two parents")
-        .to_path_buf()
-}
-
-/// Build + cache the `fossil-lsp` binary path. Per checker Warning W4, we
-/// build via `cargo build` (NOT `cargo test`) so build errors are reported
-/// distinctly from test failures.
-fn fossil_lsp_binary() -> &'static PathBuf {
-    static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args([
-                "build",
-                "--quiet",
-                "-p",
-                "fossil-lsp",
-                "--bin",
-                "fossil-lsp",
-            ])
-            .status()
-            .expect("spawn cargo build for fossil-lsp");
-        assert!(status.success(), "cargo build -p fossil-lsp failed");
-
-        let bin = repo_root().join("target").join("debug").join("fossil-lsp");
-        assert!(
-            bin.exists(),
-            "fossil-lsp binary not found at {} after cargo build",
-            bin.display(),
-        );
-        bin
-    })
-}
-
-fn frame(body: &str) -> String {
-    format!("Content-Length: {}\r\n\r\n{}", body.len(), body)
-}
-
-fn parse_frames(mut buf: &[u8]) -> Vec<serde_json::Value> {
-    const HEADER: &str = "Content-Length:";
-    let mut out = Vec::new();
-    while !buf.is_empty() {
-        let Some(boundary) = find_subslice(buf, b"\r\n\r\n") else {
-            break;
-        };
-        let header_block = std::str::from_utf8(&buf[..boundary]).unwrap_or("");
-        let len: usize = header_block
-            .lines()
-            .find_map(|line| {
-                let line = line.trim();
-                if line
-                    .to_ascii_lowercase()
-                    .starts_with(&HEADER.to_ascii_lowercase())
-                {
-                    line[HEADER.len()..].trim().parse::<usize>().ok()
-                } else {
-                    None
-                }
-            })
-            .expect("LSP frame missing Content-Length header");
-        let body_start = boundary + 4;
-        let body_end = body_start + len;
-        assert!(
-            body_end <= buf.len(),
-            "frame body truncated: declared {len} bytes, only {} available",
-            buf.len() - body_start,
-        );
-        let body = &buf[body_start..body_end];
-        let val: serde_json::Value =
-            serde_json::from_slice(body).expect("frame body is not valid JSON");
-        out.push(val);
-        buf = &buf[body_end..];
-    }
-    out
-}
-
-fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || hay.len() < needle.len() {
-        return None;
-    }
-    (0..=hay.len() - needle.len()).find(|&i| &hay[i..i + needle.len()] == needle)
-}
+use common::{did_open, drive, notif, req, text_pos};
 
 /// `.fossil` source the hover smoke test opens. Line layout (0-indexed):
-///   0: prefix ex: <https://example.org/>
-///   1: users := io.csv("x.csv")
-///   2: User : ex:Person from users
-///   3:     iri = `${ex:}u/${.id}`
-///   4:     ex:name = .name
+///   0: type { Person } := io.shex("hover.shex")
+///   1: Users := io.csv("x.csv")
+///   2: People : Person from Users
+///   3:     @subject = "<https://example.org/u/{Users.id>}"
+///   4:     name = Users.name
 ///
-/// The hover request targets line 3, character 10 — inside the iri
-/// template property. `ty_origin` synthesises `IriTemplate` for `ExprId(0)`.
+/// The hover request targets line 3, character 10 — inside the identity
+/// property, whose interpolated string synthesises a REFERENCE to the shape the
+/// mapping targets — `Ref<?>` here, since the fixture registers no document.
 const FOSSIL_SRC: &str = "\
-prefix ex: <https://example.org/>
-users := io.csv(\"x.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+type { Person } := io.shex(\"hover.shex\")
+Users := io.csv(\"x.csv\")
+People : Person from Users
+    @subject = \"https://example.org/u/{Users.id}\"
+    name = Users.name
 ";
 
+/// The output contract `FOSSIL_SRC` names, written beside it. One shape, one
+/// predicate whose last segment is the one property the body writes.
+const SHEX_SRC: &str = "\
+PREFIX ex: <https://example.org/>
+
+ex:Person {
+  ex:name .
+}
+";
+
+/// Write the two files into a fresh temp directory and return the program's
+/// `file://` URI. The server resolves the document relative to this path.
+fn write_program() -> String {
+    let dir = std::env::temp_dir().join(format!("fossil-hover-smoke-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    std::fs::write(dir.join("hover.fossil"), FOSSIL_SRC).expect("write program");
+    std::fs::write(dir.join("hover.shex"), SHEX_SRC).expect("write document");
+    format!("file://{}", dir.join("hover.fossil").display())
+}
+
 #[test]
-#[allow(clippy::too_many_lines)]
-fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
-    let bin = fossil_lsp_binary();
+fn lsp_hover_on_the_identity_returns_markdown_naming_a_reference() {
+    let uri = write_program();
 
-    let mut child = Command::new(bin)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn fossil-lsp");
+    // Line 3, character 10 — inside the identity property's iri template.
+    let t = drive(&[
+        req(
+            1,
+            "initialize",
+            serde_json::json!({ "capabilities": {}, "processId": null, "rootUri": null }),
+        ),
+        notif("initialized", serde_json::json!({})),
+        did_open(&uri, FOSSIL_SRC),
+        req(2, "textDocument/hover", text_pos(&uri, 3, 10)),
+        req(3, "shutdown", serde_json::Value::Null),
+        notif("exit", serde_json::Value::Null),
+    ]);
 
-    // ---- Drive the protocol (write all frames upfront) ----
-    {
-        let stdin = child.stdin.as_mut().expect("child stdin");
-
-        // 1. initialize (id=1)
-        let init_req = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": { "capabilities": {}, "processId": null, "rootUri": null }
-        });
-        stdin
-            .write_all(frame(&init_req.to_string()).as_bytes())
-            .expect("write initialize");
-
-        // 2. initialized
-        let init_notif = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "initialized",
-            "params": {}
-        });
-        stdin
-            .write_all(frame(&init_notif.to_string()).as_bytes())
-            .expect("write initialized");
-
-        // 3. didOpen
-        let did_open = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///tmp/hover.fossil",
-                    "languageId": "fossil",
-                    "version": 1,
-                    "text": FOSSIL_SRC,
-                }
-            }
-        });
-        stdin
-            .write_all(frame(&did_open.to_string()).as_bytes())
-            .expect("write didOpen");
-
-        // 4. textDocument/hover (id=2) — line 3, character 10 (inside iri template)
-        let hover_req = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "textDocument/hover",
-            "params": {
-                "textDocument": { "uri": "file:///tmp/hover.fossil" },
-                "position": { "line": 3, "character": 10 }
-            }
-        });
-        stdin
-            .write_all(frame(&hover_req.to_string()).as_bytes())
-            .expect("write hover");
-
-        // 5. shutdown (id=3)
-        let shutdown_req = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "shutdown",
-            "params": null
-        });
-        stdin
-            .write_all(frame(&shutdown_req.to_string()).as_bytes())
-            .expect("write shutdown");
-
-        // 6. exit
-        let exit_notif = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "exit",
-            "params": null
-        });
-        stdin
-            .write_all(frame(&exit_notif.to_string()).as_bytes())
-            .expect("write exit");
-
-        stdin.flush().expect("flush child stdin");
-    }
-    drop(child.stdin.take());
-
-    let mut stdout_buf = Vec::new();
-    child
-        .stdout
-        .as_mut()
-        .expect("child stdout")
-        .read_to_end(&mut stdout_buf)
-        .expect("read child stdout");
-    let mut stderr_buf = Vec::new();
-    child
-        .stderr
-        .as_mut()
-        .expect("child stderr")
-        .read_to_end(&mut stderr_buf)
-        .expect("read child stderr");
-
-    let exit_status = child.wait().expect("fossil-lsp should terminate");
     assert!(
-        exit_status.success(),
-        "fossil-lsp should exit cleanly; got {exit_status:?}\n\
-         stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&stdout_buf),
-        String::from_utf8_lossy(&stderr_buf),
-    );
-
-    let frames = parse_frames(&stdout_buf);
-    assert!(
-        !frames.is_empty(),
+        !t.frames.is_empty(),
         "expected at least one framed response on stdout; got 0 (raw bytes: {})",
-        String::from_utf8_lossy(&stdout_buf),
+        t.stdout,
     );
 
     // The hover response (id=2) MUST be a Markdown Hover.
-    let hover_response = frames
-        .iter()
-        .find(|m| m.get("id").and_then(serde_json::Value::as_i64) == Some(2))
-        .unwrap_or_else(|| {
-            panic!(
-                "missing hover response (id=2); frames were: {frames:#?}\n\
-                 stderr: {}",
-                String::from_utf8_lossy(&stderr_buf),
-            )
-        });
+    let hover_response = t.by_id(2);
     let contents = hover_response
         .pointer("/result/contents")
         .unwrap_or_else(|| panic!("hover response missing result.contents: {hover_response}"));
@@ -281,8 +114,8 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
         .and_then(serde_json::Value::as_str)
         .expect("hover contents missing value");
     assert!(
-        value.contains("IriTemplate"),
-        "expected hover markdown to contain 'IriTemplate' (the rendered Ty); got {value:?}",
+        value.contains("Ref<"),
+        "expected hover markdown to name a reference (the rendered Ty); got {value:?}",
     );
     assert!(
         value.contains("```fossil"),
@@ -294,24 +127,18 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
     );
 
     // The initialize response: id == 1, hover_provider advertised.
-    let init_response = frames
-        .iter()
-        .find(|m| m.get("id").and_then(serde_json::Value::as_i64) == Some(1))
-        .expect("missing initialize response (id=1)");
+    let init_response = t.by_id(1);
     let hover_cap = init_response
         .pointer("/result/capabilities/hoverProvider")
         .expect("initialize response missing capabilities.hoverProvider");
     assert_eq!(
         hover_cap,
         &serde_json::Value::Bool(true),
-        "Phase 2 plan 02-06 must advertise hoverProvider: true; got {hover_cap}",
+        "the server must advertise hoverProvider: true; got {hover_cap}",
     );
 
     // The shutdown response: id == 3, result == null.
-    let shutdown_response = frames
-        .iter()
-        .find(|m| m.get("id").and_then(serde_json::Value::as_i64) == Some(3))
-        .expect("missing shutdown response (id=3)");
+    let shutdown_response = t.by_id(3);
     assert!(
         shutdown_response
             .get("result")
@@ -320,67 +147,79 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
     );
 }
 
-// ── Phase 3 plan 03-07: SC#3 (CORE-07) hover surface ───────────────────────
+// ── The hover surface, and why it is driven in-process ─────────────────────
 //
-// seq.filter decision (plan 03-05-SUMMARY.md, verbatim):
+// No `seq.filter` stub was ever added to `fossil-registry`. Without one, these
+// tests take the DIRECT integration path that BYPASSES the JSON-RPC layer,
+// rather than a full end-to-end through a `seq.filter` surface form.
 //
-//   "Decision: NO `seq.filter` stub was added to `fossil-registry`."
-//
-// Per plan 03-07 Task 2 step 0, NO ⇒ use the DIRECT integration path that
-// BYPASSES the JSON-RPC layer (option (ii)), NOT a full end-to-end through a
-// `seq.filter` surface form. Phase 3 v0.1's `HirExpr` has no `Pipeline` /
-// `Call` variant, so an implicit closure cannot be expressed in surface
-// syntax and the synthesis is unreachable through a `.fossil` document over
-// JSON-RPC. The full JSON-RPC end-to-end SC#3 test is DEFERRED to Phase 6
-// (when the stdlib + Pratt-lowered expression tree land and `seq.filter`
-// gains a real surface form). Plan 03-08's corpus does NOT add this test.
+// The reason recorded at the time was that `HirExpr` had no `Pipeline` / `Call`
+// variant, so an implicit closure could not be expressed in surface syntax at
+// all. `HirExpr::Call` EXISTS now (`fossil-hir/src/lower.rs`), so that reason
+// no longer holds and the JSON-RPC end-to-end is unwritten rather than
+// impossible. Nobody has measured whether it would pass.
 //
 // These two tests exercise `fossil_ide::hover::render_markdown` — the exact
-// rendering function the LSP hover handler (`main.rs::handle_request`) calls
-// on the `ExprTypeEntry` returned by `ty_origin`. The closure synthesis +
-// CSVW forward propagation are driven IN-PROCESS via fossil-hir's public
-// provenance types + fossil-descriptors-input's CSVW descriptor, so the
+// rendering function the LSP hover handler (`fossil_lsp::handle_request`)
+// calls on the `ExprTypeEntry` returned by `ty_origin`. The closure synthesis +
+// forward propagation are driven IN-PROCESS via fossil-hir's public
+// provenance types + fossil-descriptors-input's `InferredDescriptor`, so the
 // integration boundary tested is hover.rs's Markdown body — identical to what
 // `result.contents.value` would carry over JSON-RPC.
 
-use fossil_base::{FossilDb, NativeSystem, Span, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{FossilDb, Span, System};
+use fossil_graph_schema::Primitive;
 use fossil_hir::body::ExprId;
 use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};
-use fossil_hir::ty::{Primitive, Ty, TyKind};
+use fossil_hir::ty::{Ty, TyKind};
 use std::sync::Arc;
 
-const USERS_CSVW: &str = r#"{
-  "@context": "http://www.w3.org/ns/csvw",
-  "tableSchema": {
-    "columns": [
-      { "name": "id", "datatype": "integer" },
-      { "name": "name", "datatype": "string" },
-      { "name": "age", "datatype": "integer" }
-    ]
-  }
-}"#;
+/// The introspected `users` row — `id`/`age` integers, a `name` string.
+fn users_descriptor() -> fossil_descriptors_input::InferredDescriptor {
+    use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+    InferredDescriptor {
+        uri: "users.csv".into(),
+        columns: vec![
+            InferredColumn {
+                name: "id".into(),
+                primitive: Primitive::Integer,
+            },
+            InferredColumn {
+                name: "name".into(),
+                primitive: Primitive::String,
+            },
+            InferredColumn {
+                name: "age".into(),
+                primitive: Primitive::Integer,
+            },
+        ],
+        freshness_token: String::new(),
+    }
+}
 
 fn bare_db() -> FossilDb {
     let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     FossilDb::new(system)
 }
 
-/// SC#3 (CORE-07): hovering on `.age` inside an implicitly-synthesised closure
-/// surfaces BOTH the field type `Integer` AND the closure parameter binding
+/// Hovering on `.age` inside an implicitly-synthesised closure surfaces BOTH
+/// the field type `Integer` AND the closure parameter binding
 /// `(row: Record<...>) => row.age >= 18` — the synthesis is NOT hidden.
 ///
-/// Direct integration (plan 03-05 = NO seq.filter): the
-/// `SynthesizedClosureRendering` provenance plan 03-06 records on the closure
-/// body's `ExprId` (pinned shape from 03-06-SUMMARY) is fed to the public
+/// Direct integration, for the reason above: the `SynthesizedClosureRendering`
+/// provenance recorded on the closure body's `ExprId` is fed to the public
 /// `fossil_ide::hover::render_markdown`, asserting the LSP hover Markdown body.
 #[test]
 fn hover_inside_synthesized_closure_via_typecheck_mapping() {
     let db = bare_db();
     let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
-    // The closure rendering plan 03-06's `render_closure` produces for the
-    // canonical SC#3 predicate `users |> filter(.age >= 18)` (03-06-SUMMARY
-    // §"SC#3-shape acceptance string"). The row Record carries the field names
-    // + types so the user sees what `row` is bound to.
+    // The closure rendering for `users |> filter(.age >= 18)`, written out by
+    // hand because the
+    // function that produced it, `fossil_hir::check::render_closure`, is
+    // deleted along with `synthesize_closure` — so this asserts the RENDERING
+    // of a provenance kind nothing produces. It survives only until
+    // `ProvenanceKind::SynthesizedClosureRendering` itself goes.
     let rendering = smol_str::SmolStr::from("(row: Record<{age: Integer}>) => row.age >= 18");
     let entry = ExprTypeEntry {
         expr_id: ExprId(0),
@@ -424,28 +263,31 @@ fn hover_inside_synthesized_closure_via_typecheck_mapping() {
     );
 }
 
-/// `FieldRef` hover OUTSIDE a closure (Phase 3 widening of Phase 2's
-/// literal-only path): a `.field` resolved against a CSVW source row surfaces
-/// its type.
+/// `FieldRef` hover OUTSIDE a closure: a `.field` resolved against an
+/// introspected source row surfaces its type.
 ///
-/// The `String` type is proven to come from CSVW forward propagation by
-/// resolving the `name` column through `record_from_descriptor` (the same
-/// in-process path `resolve_source_row` uses), then rendering the resulting
+/// The `String` type is proven to come from forward propagation by
+/// resolving the `name` column through `record_from_inferred` (the same
+/// in-process path `resolve_source_scope` uses), then rendering the resulting
 /// `InputDescriptor` entry via the LSP's `render_markdown`.
 #[test]
-fn hover_on_csvw_fieldref_outside_closure() {
+fn hover_on_introspected_fieldref_outside_closure() {
     let db = bare_db();
 
-    // Resolve `.name` against the real CSVW descriptor — proves the `String`
-    // type below is CSVW-derived, not hard-coded.
-    let descriptor =
-        fossil_descriptors_input::CsvwDescriptor::parse(USERS_CSVW.as_bytes()).expect("valid CSVW");
-    let name_kind = descriptor
-        .type_for_column("name")
-        .expect("CSVW `name` column has a type");
-    assert!(
-        name_kind.to_lowercase().contains("string"),
-        "CSVW `name` column must be a string type; got {name_kind:?}",
+    // Resolve `.name` against a real INTROSPECTED descriptor — proves the
+    // `String` type below comes from the descriptor and is not hard-coded: the
+    // inferred descriptor is what a host registers after introspecting the
+    // file.
+    let name_kind = users_descriptor()
+        .columns
+        .iter()
+        .find(|c| c.name == "name")
+        .expect("the introspected row has a `name` column")
+        .primitive;
+    assert_eq!(
+        name_kind,
+        Primitive::String,
+        "the `name` column must be a string type; got {name_kind:?}",
     );
 
     let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
@@ -464,7 +306,7 @@ fn hover_on_csvw_fieldref_outside_closure() {
     let md = fossil_ide::hover::render_markdown(&db, &entry);
     assert!(
         md.contains("String"),
-        "hover on a CSVW FieldRef must show the field type `String`; got {md:?}",
+        "hover on an introspected FieldRef must show the field type `String`; got {md:?}",
     );
     // NOT inside a closure → no closure binding rendered.
     assert!(

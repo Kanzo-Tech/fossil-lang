@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9513e1a38fdcc36b90c13031602c8385d8b44dfc6ed477367cddb1c9accb2675 # shrinks to (ages, posts, dates) = ([None], [None], [None]), k = 2, suppress = false
+cc 91cc324ea2f4dd10a2915ac0a4f06b69a85dd1d0121f3bdfa0f53158fcb5575d # shrinks to (ages, posts, dates) = ([None, Some(0), None, None, None, None, Some(0), None, Some(18)], [None, Some("C1"), Some("A1"), None, None, None, None, None, None], [None, None, None, None, None, None, None, None, None]), k = 8, suppress = false

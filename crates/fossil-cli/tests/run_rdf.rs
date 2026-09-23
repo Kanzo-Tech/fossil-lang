@@ -1,12 +1,12 @@
 //! `fossil run` over an `io.rdf` destructuring program — the single RDF path.
 //!
 //! The ONLY way to load RDF is the destructured form
-//! `{ A, B, ... } := io.rdf("data.ttl", schema = "x.shex")`. The `.ttl` is read
+//! `{ A, B, ... } := io.rdf("data.ttl", schema = io.shex("x.shex"))`. The `.ttl` is read
 //! and parsed ONCE per `io.rdf` call, yielding N typed relations (one per member).
 //! Subject selection is ALWAYS by `rdf:type` (a shape's rows are the subjects
 //! typed with its IRI) — there are NO `ShapeMaps`, no `select=`.
 //!
-//! The OUTPUT descriptor is program-resident: the `io.rdf(schema = "graph.shex")`
+//! The OUTPUT descriptor is program-resident: the `io.rdf(schema = io.shex("graph.shex"))`
 //! shape IS the output graph's shape, so the rich vertex/edge decomposition runs
 //! and the result is a TYPED graph:
 //!   - multi-shape vertices (`KB` + `Project`), each with its own columns;
@@ -19,36 +19,26 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("CARGO_MANIFEST_DIR has at least two parents")
-        .to_path_buf()
-}
+mod common;
 
+/// The `fossil` binary this test drives — cargo's own path for it.
+///
+/// Never a hard-coded `target/debug/fossil`: with `CARGO_TARGET_DIR` set the
+/// build lands elsewhere, so that path holds whatever was left there last and
+/// the test passes against a binary it did not build. `CARGO_BIN_EXE_<name>`
+/// is cargo's answer — the binary of THIS build, already built before the
+/// test runs, with no path to guess and no `cargo build` from inside a test.
 fn fossil_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "--quiet", "-p", "fossil-cli", "--bin", "fossil"])
-            .status()
-            .expect("spawn cargo build");
-        assert!(status.success(), "cargo build -p fossil-cli failed");
-        let bin = repo_root().join("target").join("debug").join("fossil");
-        assert!(bin.exists(), "fossil binary missing at {}", bin.display());
-        bin
-    })
+    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil")))
 }
 
 fn workdir_with_files(test_name: &str, files: &[(&str, &str)]) -> PathBuf {
-    let tmp = std::env::temp_dir().join(format!("fossil-cli-rdf-{test_name}"));
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).expect("create workdir");
+    let tmp = common::unique_workdir("fossil-cli-rdf", test_name);
     for (rel, contents) in files {
         let path = tmp.join(rel);
         if let Some(parent) = path.parent() {
@@ -77,20 +67,30 @@ const GRAPH_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "t
 ] }"#;
 
 // The single path: one destructuring `io.rdf` (read once) binding both members
-// `KB` and `Project` — each member's local-name is a shape in the schema, and
+// `KB` and `Project` — each member's position selects a shape in the schema, and
 // its rows are selected by `rdf:type`. NO `.smap`, no `select=`.
-const CPI_FOSSIL: &str = r#"prefix ex: <https://ex.org/>
+//
+// The document is named TWICE and neither naming is redundant. `io.rdf(schema =
+// …)` types the ROWS that come out of the graph; the `type { … }` binding above
+// it is what puts shape NAMES in scope, and a mapping header takes a name (`from
+// KB` is the relation, `: KBShape` is the shape). A destructuring source binds
+// relations only — spelling `KB : KB from KB` reports «`KB` is not a shape this
+// program declares». The two bindings are deliberately given different names for
+// that reason: one side is rows, the other is the contract they are written
+// against, and the vertex type is still `KB` because it comes from the shape's
+// own IRI (`https://ex.org/KB`), never from the local label.
+const CPI_FOSSIL: &str = r#"type { KBShape, ProjectShape } := io.shex("graph.shex")
 
-{ KB, Project } := io.rdf("graph.ttl", schema = "graph.shex")
+{ KB, Project } := io.rdf("graph.ttl", schema = io.shex("graph.shex"))
 
-KB : ex:KB from KB
-    iri = .subject
-    ex:label = .label
-    ex:hasProject = .hasProject
+KBs : KBShape from KB
+    @subject = KB.subject
+    label = KB.label
+    hasProject = KB.hasProject
 
-Project : ex:Project from Project
-    iri = .subject
-    ex:title = .title
+Projects : ProjectShape from Project
+    @subject = Project.subject
+    title = Project.title
 "#;
 
 #[test]
@@ -131,31 +131,33 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         .iter()
         .find(|v| v["type"] == "KB")
         .expect("KB vertex");
-    assert_eq!(kb["count"].as_i64(), Some(1), "one KB; got: {kb}");
-    let kb_cols: Vec<&str> = kb["columns"]
-        .as_array()
-        .expect("kb columns")
-        .iter()
-        .filter_map(|c| c["name"].as_str())
-        .collect();
-    assert_eq!(kb_cols, vec!["label"], "KB carries its own column; got: {kb_cols:?}");
+    assert_eq!(kb["vertex_count"].as_u64(), Some(1), "one KB; got: {kb}");
+    let kb_cols = declared_columns(kb);
+    assert_eq!(
+        kb_cols,
+        ["dense_id", "subject", "label", "x", "y", "cluster_id"],
+        "KB carries its own column between the identity and the layout ones; got: {kb_cols:?}"
+    );
 
     let project = vertices
         .iter()
         .find(|v| v["type"] == "Project")
         .expect("Project vertex");
-    assert_eq!(project["count"].as_i64(), Some(2), "two Projects; got: {project}");
-    let proj_cols: Vec<&str> = project["columns"]
-        .as_array()
-        .expect("project columns")
-        .iter()
-        .filter_map(|c| c["name"].as_str())
-        .collect();
-    assert_eq!(proj_cols, vec!["title"], "Project carries its own column; got: {proj_cols:?}");
+    assert_eq!(
+        project["vertex_count"].as_u64(),
+        Some(2),
+        "two Projects; got: {project}"
+    );
+    let proj_cols = declared_columns(project);
+    assert_eq!(
+        proj_cols,
+        ["dense_id", "subject", "title", "x", "y", "cluster_id"],
+        "Project carries its own column; got: {proj_cols:?}"
+    );
 
     // The shape-ref `hasProject` is a TYPED edge KB→Project, NOT a column on KB.
     assert!(
-        !kb_cols.contains(&"hasProject"),
+        !kb_cols.iter().any(|c| c == "hasProject"),
         "hasProject is an edge, not a KB column; got: {kb_cols:?}"
     );
     let edges = parsed["edges"].as_array().expect("edges array");
@@ -165,39 +167,75 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         .unwrap_or_else(|| panic!("no KB→Project edge: {parsed}"));
     // Multi-valued: kb/1 references two projects → the LIST UNNESTs to two edges.
     assert_eq!(
-        edge["count"].as_i64(),
+        edge["edge_count"].as_u64(),
         Some(2),
         "multi-valued hasProject unrolls to 2 edges; got: {edge}"
     );
+    // Both objects named a Project the graph carries, so nothing was discarded.
+    assert_eq!(
+        parsed["dropped"]
+            .as_array()
+            .expect("dropped array")
+            .iter()
+            .find(|d| d["prefix"] == edge["prefix"])
+            .and_then(|d| d["dropped"].as_u64()),
+        Some(0),
+        "no endpoint dangled; got: {parsed}"
+    );
 
-    // The GraphAr edge Parquet pair + per-type vertex Parquets exist on disk.
-    assert!(dest.join("vertex/KB.parquet").exists(), "KB vertex Parquet");
-    assert!(
-        dest.join("vertex/Project.parquet").exists(),
-        "Project vertex Parquet"
-    );
-    assert!(
-        dest.join("edge/KB_hasProject_Project/by_source.parquet")
-            .exists(),
-        "edge CSR Parquet"
-    );
+    // The payload sets exist on disk, at the addresses the manifest composes:
+    // one Parquet per set, its row groups the tiles.
+    //
+    // The tiles, not `vertex/<Type>.parquet`: that single file is the layout
+    // pass's input and `c678e63` deletes it once the tiles the manifest has
+    // always declared are written. Asserting it still exists is asserting the
+    // writer leaves a stale second copy of every vertex behind. `818218c` did
+    // the same to the staged adjacency, which used to be published uncut beside
+    // its own cut — so `by_source.parquet` is now `by_source/tiles.parquet`,
+    // and both halves are asserted for the same reason.
+    for tiles in [
+        "vertex/KB/tiles.parquet",
+        "vertex/Project/tiles.parquet",
+        "edge/KB_hasProject_Project/by_source/tiles.parquet",
+    ] {
+        assert!(dest.join(tiles).exists(), "{tiles} is not there");
+    }
+    for staged in [
+        "vertex/KB.parquet",
+        "edge/KB_hasProject_Project/by_source.parquet",
+    ] {
+        assert!(
+            !dest.join(staged).exists(),
+            "the staged {staged} is the layout pass's input and it is removed once tiled"
+        );
+    }
 }
 
 // The `.fossil` for the @conn test: data AND schema are `@conn` references — the
 // data in `@data`, the ShEx in `@vocab` — proving every URI-valued argument
 // resolves uniformly through the connection map (not just the positional data).
-const CPI_FOSSIL_CONN: &str = r#"prefix ex: <https://ex.org/>
+//
+// The `type { … }` binding reads the SAME document by a program-relative path
+// (`vocab/graph.shex`), deliberately and not for want of trying: a `@conn`
+// reference in a TYPE BINDING resolves to nothing today —
+// `fossil check` answers «`KBShape` is declared and bound nothing: its document
+// `@vocab/graph.shex` could not be read (no document is registered at that
+// path)», and the run then fails in the reader with `No field named label`.
+// That is the host's document registry, not this test's subject; what
+// this test is FOR is the `schema =` argument below, which is the reference a
+// regex over the data URI cannot see, and it goes through `@vocab`.
+const CPI_FOSSIL_CONN: &str = r#"type { KBShape, ProjectShape } := io.shex("vocab/graph.shex")
 
-{ KB, Project } := io.rdf("@data/graph.ttl", schema = "@vocab/graph.shex")
+{ KB, Project } := io.rdf("@data/graph.ttl", schema = io.shex("@vocab/graph.shex"))
 
-KB : ex:KB from KB
-    iri = .subject
-    ex:label = .label
-    ex:hasProject = .hasProject
+KBs : KBShape from KB
+    @subject = KB.subject
+    label = KB.label
+    hasProject = KB.hasProject
 
-Project : ex:Project from Project
-    iri = .subject
-    ex:title = .title
+Projects : ProjectShape from Project
+    @subject = Project.subject
+    title = Project.title
 "#;
 
 #[test]
@@ -271,7 +309,7 @@ fn run_rdf_resolves_schema_through_a_connection() {
         vertices
             .iter()
             .find(|v| v["type"] == "KB")
-            .and_then(|v| v["count"].as_i64()),
+            .and_then(|v| v["vertex_count"].as_u64()),
         Some(1),
         "one KB; got: {parsed}"
     );
@@ -279,7 +317,7 @@ fn run_rdf_resolves_schema_through_a_connection() {
         vertices
             .iter()
             .find(|v| v["type"] == "Project")
-            .and_then(|v| v["count"].as_i64()),
+            .and_then(|v| v["vertex_count"].as_u64()),
         Some(2),
         "two Projects; got: {parsed}"
     );
@@ -290,7 +328,7 @@ fn run_rdf_resolves_schema_through_a_connection() {
         .find(|e| e["src_type"] == "KB" && e["dst_type"] == "Project")
         .unwrap_or_else(|| panic!("no KB→Project edge: {parsed}"));
     assert_eq!(
-        edge["count"].as_i64(),
+        edge["edge_count"].as_u64(),
         Some(2),
         "multi-valued hasProject via @conn refs; got: {edge}"
     );
@@ -316,16 +354,20 @@ const LEAF_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "ty
 
 // `Tag` is a property-less member (a leaf edge target) — a subset of the schema's
 // shapes is allowed; here both shapes are bound. One read-once `io.rdf`.
-const LEAF_FOSSIL: &str = r#"prefix ex: <https://ex.org/>
+//
+// `Tags` writes NOTHING but its identity, which is the fixture: `@subject` is a
+// required slot and the body below it may be empty, so a leaf type is spellable
+// at all. Its whole content is the subject the edge has to resolve against.
+const LEAF_FOSSIL: &str = r#"type { ItemShape, TagShape } := io.shex("graph.shex")
 
-{ Item, Tag } := io.rdf("graph.ttl", schema = "graph.shex")
+{ Item, Tag } := io.rdf("graph.ttl", schema = io.shex("graph.shex"))
 
-Item : ex:Item from Item
-    iri = .subject
-    ex:tag = .tag
+Items : ItemShape from Item
+    @subject = Item.subject
+    tag = Item.tag
 
-Tag : ex:Tag from Tag
-    iri = .subject
+Tags : TagShape from Tag
+    @subject = Tag.subject
 "#;
 
 #[test]
@@ -366,7 +408,7 @@ fn run_rdf_resolves_edges_to_a_property_less_leaf_shape() {
         .iter()
         .find(|v| v["type"] == "Tag")
         .unwrap_or_else(|| panic!("no Tag vertex: {parsed}"));
-    assert_eq!(tag["count"].as_i64(), Some(1), "one Tag; got: {tag}");
+    assert_eq!(tag["vertex_count"].as_u64(), Some(1), "one Tag; got: {tag}");
 
     // ...and the edge to it resolves to ITS row, not ZERO (the bug). Before the
     // fix, Tag's `subject` was a NULL placeholder so this inner-joined to 0.
@@ -377,8 +419,28 @@ fn run_rdf_resolves_edges_to_a_property_less_leaf_shape() {
         .find(|e| e["src_type"] == "Item" && e["dst_type"] == "Tag")
         .unwrap_or_else(|| panic!("no Item→Tag edge: {parsed}"));
     assert_eq!(
-        edge["count"].as_i64(),
+        edge["edge_count"].as_u64(),
         Some(1),
         "edge to a property-less leaf shape must resolve (was 0 before the base-relation fix); got: {edge}"
     );
+}
+
+/// Every column one vertex type's manifest entry declares, in order — the
+/// identity pair the writer prepends, the program's own properties, and the
+/// three layout columns it appends. `RunStatus` listed only the middle group;
+/// the manifest declares all of them, and a reader gets all of them.
+fn declared_columns(vertex: &serde_json::Value) -> Vec<String> {
+    vertex["projections"]
+        .as_array()
+        .expect("projections")
+        .iter()
+        .filter(|p| p["scale"] == 1)
+        .flat_map(|g| {
+            g["properties"]
+                .as_array()
+                .expect("properties")
+                .iter()
+                .filter_map(|c| c["name"].as_str().map(ToString::to_string))
+        })
+        .collect()
 }

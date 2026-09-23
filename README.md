@@ -2,80 +2,89 @@
 
 A typed compiler for RDF graph construction. Surface syntax is a small DSL
 (`.fossil`) with bidirectional type checking — forward from input descriptors
-(CSVW, JSON Schema), backward from target shapes (ShEx). Compiles to DuckDB SQL
-that produces typed graphs in [Apache GraphAr](https://graphar.apache.org/) layout.
+(introspected from the source itself), backward from target shapes
+(ShEx). It lowers to a typed operator algebra and executes it, writing a corpus
+of Parquet tiles under YAML manifests: DataFusion runs the mapping, DuckDB does
+source introspection, and the layout post-pass reads the written Parquet back
+through arrow-rs and links no engine at all.
 
-**Status:** pre-v0.1, in active development. Phase 0 (workspace genesis) complete;
-Phase 1 (walking-skeleton "Hello, Fossil") next. See [`.planning/ROADMAP.md`](.planning/ROADMAP.md)
-for the 10-phase plan toward `playground.kanzo.dev` v0.1 (the public Phase 9 deliverable —
-not yet live).
+The manifest borrows [Apache GraphAr](https://graphar.apache.org/)'s field
+names and follows GraphAr as far as GraphAr specifies, which is not far enough
+to make this a GraphAr corpus — `/docs/design/corpus` states the boundary once
+and measures the divergences.
+
+**Status:** pre-v0.1, in active development. Nothing is published; the surface
+is still changing. `playground.kanzo.dev` is not live.
 
 ## Quick look
 
 ```bash
 cargo check --workspace
 cargo test --workspace
+cargo xtask wasm-check   # the WASM gate CI runs; xtask derives the crate set
 ```
 
-WASM target (the playground compiles via this gate from commit #1):
+The WASM gate has no hand-maintained crate list. `crates/xtask` walks the
+dependency closure of the workspace's cdylib crates and checks exactly that
+set against `wasm32-unknown-unknown`, which is what
+`.github/workflows/ci.yml` runs.
 
-```bash
-cargo check --target wasm32-unknown-unknown \
-    -p fossil-base -p fossil-syntax -p fossil-hir \
-    -p fossil-mir -p fossil-codegen -p fossil-wasm
-```
+## The language
 
-## Quick example
-
-The Phase 1 walking skeleton — a minimum end-to-end mapping exercising every
-one of the 15 workspace crates (parser → HIR → MIR → DuckDB SQL → native
-execution → GraphAr Parquet).
-
-The mapping (`examples/hello.fossil`):
+A mapping declares how sources become a typed graph. Shapes come from a ShEx
+document, the source is a constructor, and every reference is qualified by the
+binding it came from:
 
 ```fossil
-prefix ex: <https://example.org/>
+type { Person } := io.shex("hello.shex")
 
-users := io.csv("examples/users.csv")
+User := io.csv("data/people.csv")
 
-User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
+People : Person from User
+    @subject = "https://shop.example/person/{User.id}"
+    name     = User.name
 ```
 
-Compile it:
+That is `apps/docs/programs/hello/hello.fossil` verbatim — one of the programs
+the documentation is written against. The surface is the one [`grammar.bnf`](grammar.bnf)
+specifies, and the grammar is ahead of the parser on purpose — read a page's `today:`
+register before assuming the compiler has arrived there.
+
+## What runs today
+
+`fossil` has four subcommands — `check`, `run`, `providers`, `refs`
+(`crates/fossil-cli/src/main.rs`; `--help` on each is authoritative).
+
+The end-to-end one, against the walking-skeleton fixture in `examples/`:
 
 ```bash
-cargo run --bin fossil -- compile examples/hello.fossil
-# → output.parquet (5 triples) + manifest.yaml in cwd
+cargo run --bin fossil -- run examples/hello.fossil --dest file:///tmp/hello
 ```
 
-Inspect with DuckDB:
+`--dest` is required, and it is a URL (`file:///path`, `s3://bucket/prefix`, …).
+It prints `wrote 1 vertex type(s), 0 edge type(s) to <dest>` and leaves a corpus
+there: `vertex/Person.vertex.yml` declaring the columns, and
+`vertex/Person/*.parquet` holding the rows in 4,096-row tiles. Inspect it with
+DuckDB:
 
 ```bash
-duckdb -c "SELECT * FROM read_parquet('output.parquet')"
-# ┌────────────────────────────┬───────────────────────────┬────────┐
-# │          subject           │         predicate         │ object │
-# ├────────────────────────────┼───────────────────────────┼────────┤
-# │ https://example.org/user/1 │ https://example.org/name  │ Alice  │
-# │ https://example.org/user/2 │ https://example.org/name  │ Bob    │
-# │ https://example.org/user/3 │ https://example.org/name  │ Carol  │
-# │ https://example.org/user/4 │ https://example.org/name  │ Dave   │
-# │ https://example.org/user/5 │ https://example.org/name  │ Eve    │
-# └────────────────────────────┴───────────────────────────┴────────┘
+duckdb -c "SELECT * FROM read_parquet('/tmp/hello/vertex/Person/*.parquet')"
 ```
 
-`playground.kanzo.dev` (Phase 9 deliverable, not yet live) will run the same
-`compile` call entirely in-browser via WASM — same compiler crates, same
-DuckDB engine (DuckDB-WASM), no server round-trip — so the example above
-behaves identically whether you run it locally or in the playground.
+Five `Person` vertices, subjects `https://example.org/user/1` … `/5`.
+`crates/fossil-cli/tests/walking_skeleton.rs` asserts that content — not merely
+that files appeared — and is the test that goes red if it stops holding.
 
-The full grammar, type checker, stdlib, GraphAr-spec sink, LSP features, and
-WASM playground arrive in Phase 2–9 — see [`.planning/ROADMAP.md`](.planning/ROADMAP.md).
+`examples/hello.fossil` is a CLI fixture, not a conformance program: it is the
+one thing that drives the *binary* end to end and asserts the GraphAr dataset on
+disk by content. The language itself is proved by the conformance programs under
+`apps/docs/programs/`, which `crates/fossil-cli/tests/programs.rs` compiles
+and the documentation transcludes.
 
 ## Foundations
 
-- **Operator algebra**: typed extension of [Min Oo & Hartig — *An Algebraic
+- **Operator algebra** (and the rest of the reading, named, is at `/docs/design/prior-art`):
+  typed extension of [Min Oo & Hartig — *An Algebraic
   Foundation for Knowledge Graph Construction*](https://arxiv.org/abs/2503.10385)
   (ESWC 2025 Best Research Award). Fossil's MIR is a conservative typed elaboration
   of their algebra; the untyped projection is operationally equivalent.
@@ -86,16 +95,24 @@ WASM playground arrive in Phase 2–9 — see [`.planning/ROADMAP.md`](.planning
 
 ## Documentation
 
-- [`.planning/PROJECT.md`](.planning/PROJECT.md) — project context, requirements, constraints
-- [`.planning/ROADMAP.md`](.planning/ROADMAP.md) — 10 phases toward v0.1
-- [`.planning/STATE.md`](.planning/STATE.md) — current focus
-- [`decisions/`](decisions/) — ADRs (Nygard format)
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — dev cycle, ADR ritual, commit policy
-- [`CLAUDE.md`](CLAUDE.md) — Claude Code project memory (rules-not-context)
+There is **one** reference, in three pieces:
 
-The five design docs in repo root (`architecture.md`, `grammar.bnf`, `type-system.md`,
-`operator-algebra.md`, `stdlib.md`) are the original v0.1 design corpus. Some specifics
-have been superseded by research synthesis — when in doubt, ADRs win.
+- [`grammar.bnf`](grammar.bnf) — the language's syntax, normative. The parser implements it; it does
+  not describe the parser. Transcluded whole into `/docs/book/grammar`.
+- [`apps/docs/`](apps/docs/) — all of the prose (Next.js + fumadocs). `/docs/book/getting-started`
+  teaches the language, `/docs/format` specifies the corpus, and behind a maintainers' divider `/docs/design`
+  is the argument for why any of it is shaped this way. A page describing something not yet built
+  says so in a `direction:` field rather than in its tone; everything else describes what is there.
+- [`apps/corpus/`](apps/corpus/) — the artifact's contract, executable: the guards that make a
+  convention checkable and the conformance corpus that makes two readers agree. Copy `guards/`
+  somewhere else and it runs — `node` and a `duckdb` binary, no install, no build.
+- [`apps/docs/programs/`](apps/docs/programs/) — the conformance programs. Every program the
+  documentation shows is one of these, read off disk at build time and never retyped into prose.
+  No count here: `crates/fossil-cli/tests/programs.rs` walks the directory, and the number this
+  line used to carry was five behind it.
+
+Plus [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev cycle and commit policy, and
+[`CLAUDE.md`](CLAUDE.md) for project memory.
 
 ## License
 

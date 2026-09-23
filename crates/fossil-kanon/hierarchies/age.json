@@ -1,0 +1,5 @@
+{
+  "kind": "numeric",
+  "buckets": [0, 18, 30, 45, 65, 80],
+  "presentation": "enclosing_bucket"
+}

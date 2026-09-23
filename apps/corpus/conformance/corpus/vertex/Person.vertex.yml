@@ -1,0 +1,47 @@
+type: Person
+vertex_count: 300
+chunk_size: 64
+prefix: vertex/Person/
+projections:
+- path: ''
+  scale: 1
+  file_type: parquet
+  properties:
+  - name: subject
+    data_type: string
+    is_primary: true
+  - name: birth_year
+    data_type: int32
+    is_primary: false
+  - name: postcode
+    data_type: string
+    is_primary: false
+- path: l1/
+  scale: 4
+  file_type: parquet
+  properties: []
+- path: l2/
+  scale: 16
+  file_type: parquet
+  properties: []
+index:
+  prefix: index/
+  ordered_by: subject
+  chunk_size: 64
+channels:
+- name: community
+  column: cluster_id
+  scale: categorical
+  domain: 16
+  derived_by: phyllotaxis-grid
+- name: age
+  column: birth_year
+  scale: quantitative
+cells:
+  prefix: cell/
+  vertices_per_cell: 16
+  relations:
+  - knows
+  mode_channel: community
+  rungs: []
+version: gar/v1

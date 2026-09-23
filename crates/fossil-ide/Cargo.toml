@@ -7,46 +7,57 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Analysis API: hover, goto-def, completion, code actions"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-# Plan 02-06 (Phase 2 plan-06): hover handler needs Salsa db (fossil-base),
-# CST + SyntaxNode/SyntaxToken (fossil-syntax), Ty + ty_origin Salsa query
+# The hover handler needs the Salsa db (fossil-base), the CST +
+# SyntaxNode/SyntaxToken (fossil-syntax), Ty + the ty_origin Salsa query
 # (fossil-hir), and rowan::TextSize for byte-offset lookups.
 fossil-base = { path = "../fossil-base" }
 fossil-syntax = { path = "../fossil-syntax" }
 fossil-hir = { path = "../fossil-hir" }
-# Plan 06-06 (SC#4): goto-def + completion consume the cross-file symbol /
-# prefix infrastructure (06-03) and the stdlib classification catalog (Phase 5).
-# Both are WASM-clean (in / under the 9-crate gate), so fossil-ide stays WASM-clean.
-fossil-ide-db = { path = "../fossil-ide-db" }
-fossil-registry = { path = "../fossil-registry" }
-# WASM-clean wire types (serde + schemars only) — the `source_refs`/`providers`
-# lineage surface (lineage.rs) returns these; shared verbatim with the host.
-fossil-run-status = { path = "../fossil-run-status" }
+# `fossil_mir::program_diagnostics` — the one answer to «what does this file
+# report», which `fossil-cli` also calls. The `diagnostics` module is where
+# both editor hosts ask it, after each having asked it separately and each
+# having been wrong about it separately. WASM-clean: the MIR is an operator
+# algebra, and the backend that executes one is `fossil-df`.
+fossil-mir = { path = "../fossil-mir" }
+# The primitive lattice, for the ONE table that maps a column's `Primitive` to
+# the `ScalarTy` the catalogue hangs its members off — `users.name.` offers
+# `str.*` because `name` is a `Primitive::String`. It was a dev-dependency, and
+# it is already in the wasm closure through fossil-hir, which speaks it too.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+# goto-def + completion consume the stdlib classification catalog, which is
+# WASM-clean, so fossil-ide stays WASM-clean. The cross-file symbol
+# infrastructure used to be `fossil-ide-db` and is now the `symbol_index` /
+# `workspace` modules here.
 rowan = { workspace = true }
 salsa = { workspace = true }
 smol_str = { workspace = true }
-# Plan 06-01 Spike A (Research Open Question #3): does `lsp-types` compile to
-# wasm32-unknown-unknown? If yes, fossil-ide may return `lsp_types` structs
-# directly (recommended downstream API shape); if no, it must return
-# Fossil-domain byte-range structs translated in fossil-lsp. Spike outcome
-# recorded in 06-01-SUMMARY.md + ADR-0020.
+# `lsp-types` compiles to wasm32-unknown-unknown, which is what lets this crate
+# return `lsp_types` structs directly. Had it not, every feature here would have
+# had to return Fossil-domain byte-range structs for fossil-lsp to translate.
 lsp-types = { workspace = true }
 
 [dev-dependencies]
-# Plan 06-05 (SC#4): the bidirectional-hover integration test builds a custom
-# `HirDb` whose `output_descriptor_kind()` returns a real `ShEx` schema, to
-# drive the target-side render path end-to-end (a host-wiring stand-in). Needs
-# `OutputDescriptorKind` + `ShExDescriptor`, plus `salsa` for the custom db.
+# The host with a shape decoder installed, so `shape_documents`' own tests can
+# ask the CHECKER whether the document this host registered reached it — the
+# only question that tells a key mismatch apart from a missing document.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }
+# The completion test's host installs the `SHEX` decoder row on its `System`,
+# the way `fossil-lsp` and `fossil-wasm` do — without it a `.shex` the test can
+# read is still a document nothing decodes, and the shape-property completions
+# quietly disappear.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # Source-field completion (4th source) test: builds an `InferredDescriptor` and
 # registers it on the test `System`, driving the `.<field>` completion path
 # end-to-end the way the host (browser DuckDB-WASM / native CLI) would.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
-# Plan 06-07 (SC#4 / SC#5): semantic-tokens + outline snapshot tests render the
-# (decoded) token stream / document-symbol tree into a stable, reviewable
-# golden file (Research test-map). insta is the workspace snapshot dev-dep.
+# The semantic-tokens + outline snapshot tests render the (decoded) token
+# stream / document-symbol tree into a stable, reviewable golden file. insta is
+# the workspace snapshot dev-dep.
 insta = { workspace = true }

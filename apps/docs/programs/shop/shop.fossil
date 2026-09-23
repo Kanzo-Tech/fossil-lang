@@ -1,0 +1,36 @@
+// #region shapes
+type { Person, Order } := io.shex("shop.shex")
+// #endregion shapes
+
+// #region sources
+User     := io.csv("data/users.csv")
+Purchase := io.csv("data/orders.csv")
+// #endregion sources
+
+// #region derived
+Adults := User.where(User.age >= 18)
+// #endregion derived
+
+// #region first-mapping
+// #region header
+Users : Person from Adults
+// #endregion header
+    // #region identity
+    @subject = "https://shop.example/user/{User.email}"
+    // #endregion identity
+    // #region properties
+    email    = User.email
+    name     = User.name
+    // #endregion properties
+// #endregion first-mapping
+
+// #region second-mapping
+// #region join
+Orders : Order from Purchase.join(User, on = Purchase.user_id == User.id)
+// #endregion join
+    @subject = "https://shop.example/order/{Purchase.id}"
+    total    = Purchase.amount
+    // #region edge
+    buyer    = Person(User.email)
+    // #endregion edge
+// #endregion second-mapping

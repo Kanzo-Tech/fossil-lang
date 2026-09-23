@@ -1,0 +1,605 @@
+---
+title: Where x and y come from
+description: A far view of a graph is worth looking at or worth nothing depending on one fact — whether the positions are data or were invented by an algorithm — so a vertex type declares every coordinate system it carries and where each one came from.
+direction:
+  summary: The layout pass never overwrites a coordinate system it did not derive — today it computes `x`/`y` unconditionally, and the half that has landed is the declaration rather than the refusal.
+---
+
+Zoom far enough out of a million-vertex graph and the individual vertices stop being visible. What
+is left is a distribution — dense here, empty there — and the question this page exists to answer is
+whether that distribution is **about the graph** or about the program that drew it.
+
+It is the second one more often than anybody admits, and nothing on the screen says which.
+
+## The question, and the one fact it turns on
+
+**Does a far view of a graph mean anything?** It depends on one thing and only one: where `x` and
+`y` came from.
+
+<div className="fd-steps">
+
+**If the position is data** — a latitude and a longitude, a coordinate a model learned, anything
+measured or fitted outside the renderer — then the plane is the world. Density is information.
+Two vertices near each other are near each other in whatever space the data is about, a heat map of
+where the vertices are is a statement about the domain, and a reader who zooms out learns something
+true.
+
+**If the position was invented by the layout** — phyllotaxis inside a grid cell, a force
+simulation, anything a drawing algorithm chose because a picture needed coordinates — then the
+density is about the algorithm. The plane is not a space; it is an arrangement. Zooming out
+produces a picture of the arrangement's own regularities, and reading structure into it is reading
+the output of the thing you were trying to see through.
+
+</div>
+
+The distinction is not subtle in its consequences and it is invisible in the artefact. Both cases
+are two `float32` columns called `x` and `y`.
+
+## What it was worth measuring
+
+The far view is not hypothetical, and the case where it works was built and measured rather than
+argued. Over com-DBLP — 317,080 authors, 1,049,866 undirected co-authorship edges — a complete
+pyramid of density rasters is **183 kB across eleven levels**, exact at every level, and opens in
+napari without a line of napari being written.
+
+That is a real answer to a real question, and it is a correct one **only under the first case
+above**. The same 183 kB over derived positions is a beautifully compressed picture of
+`cluster_layout`'s grid.
+
+## The defect, stated plainly
+
+`crates/fossil-layout/src/layout/pass.rs, enrich_layout` computes positions **unconditionally**. It runs
+`crates/fossil-layout/src/layout/community.rs, community_hierarchy` over the adjacency, partitions by the
+finest level, places each community with
+`crates/fossil-layout/src/layout/place.rs, cluster_layout`, and writes `x` and `y`.
+
+A corpus that arrived carrying coordinates gets them overwritten, and no reader is told. The
+manifest had no field in which the difference could be recorded even if the pass were willing to
+record it: `crates/fossil-sinks/src/manifest.rs, VertexInfo` declared a list of properties, and a
+property is a name and a type — `x` and `y` are two `float32` whether they are a latitude or a
+phyllotaxis angle.
+
+So the corpus could not answer the only question that decides whether its own geometry is worth
+drawing far away. That is the whole of the finding, and the half of it that has landed is below.
+
+<Callout type="info">
+**The declaration is in; the refusal is not.** `VertexInfo` carries
+`crates/fossil-sinks/src/manifest.rs, CoordinateSystem` now, and every corpus fossil writes
+declares one: `name: layout`, over `x`/`y`, `provenance: derived`, `derived_by:
+louvain+phyllotaxis`. It is declared in `crates/fossil-df/src/lib.rs, vertex_info` beside the
+properties that make it possible — the same place and the same rule the identity index and the
+pyramid are declared under, *the manifest is the plan and the pass is what fills it*.
+
+What has **not** landed is the pass refusing to overwrite, and the reason is deliberate. Telling
+`crates/fossil-layout/src/layout/pass.rs, enrich_layout` to leave a measured system alone means a
+parameter on `VertexLayoutTarget`, and **nothing can set it**: no fossil program can supply its own
+`x`, so the only corpus with a measured system is one some other writer made. Building the
+parameter now would be [the error this project has made at nine
+scales](/docs/design/discarded) — an extension point with one implementation and no second caller.
+The condition is a producer, and it is a language question before it is a pass question.
+</Callout>
+
+## This is a defect with a precedent, and the precedent is the design
+
+The repair is not novel here, because the identical defect was found and fixed one field over.
+
+`crates/fossil-sinks/src/manifest.rs, Property` used to carry `is_nullable` and nothing about how
+*many* values a predicate admits. A reader needing that answer invented one — *single*, because
+single is the common case — and a corpus written from a shape declaring `+` read back as a
+corpus declaring nothing, which read as a corpus declaring `1..1`. The fix was a declarative
+field whose absence is honest:
+
+> **`None` is a statement about the writer, not about the data.** A corpus whose types were
+> inferred rather than declared has no cardinality to record, and so does one written before this
+> field existed; both read back as "not declared" rather than as "single", which is the answer a
+> default would have invented.
+>
+> — `crates/fossil-sinks/src/manifest.rs, Property`
+
+Position had the same shape of defect and takes the same shape of repair — the same `Option`, the
+same `skip_serializing_if`, the same rule about what absence means. Before it, a reader had to
+invent *derived*, because derived is the common case; a corpus that arrived with latitudes read
+back identically to one the layout pass invented; and the honest third state — **not declared** —
+had nowhere to live.
+
+## `coordinates:` — a list of systems, each with a provenance
+
+A vertex type declares the coordinate systems it carries. Each names its two columns, and each
+names **where it came from**:
+
+| provenance | what it means | is the density information? |
+| --- | --- | --- |
+| `geographic` | A coordinate reference system outside the corpus — latitude/longitude, a projected CRS | yes |
+| `embedded` | A learned or fitted space — an embedding, an MDS solution, a UMAP | yes, about the embedding |
+| `derived` | A drawing algorithm chose it because a picture needed coordinates | **no** |
+
+**A list rather than a field**, and the reason is not symmetry. A corpus can legitimately carry
+both: authors have affiliations with real locations *and* a community layout, and which one a
+reader draws is the reader's business rather than the writer's. OME-NGFF reached the same shape for
+the same reason — its `multiscales` entry carries `coordinateTransformations` as a list because one
+array can sit in more than one space — and [prior art](/docs/design/prior-art) names it.
+
+The cost is a permutation of **4 bytes per row per extra system**, which is a column and not a
+corpus. Against it: the alternative is a corpus that silently answers a question it does not know
+the answer to.
+
+## What `derived` obliges, and the measurement that discharges it
+
+A provenance of `derived` names an algorithm, and naming an algorithm is only worth anything if the
+algorithm can be re-run. A position labelled *derived by X* that X does not reproduce is a label
+with nothing behind it — and downstream, a cell whose referent moves between writes is not
+navigable, which is why [cells](/docs/design/cells) treats this as its first property rather than
+its last.
+
+The reasoning was already in the code and had never been run as an experiment. `local_moving`
+walks `0..n` in order and breaks ties with a strict `>` so the lower community id survives;
+`Weighted::contract` carries a section titled *Why the output is bit-identical* explaining that its
+counting sort is stable by construction; `densify` numbers communities by order of first
+appearance. Every one of those is a comment asserting reproducibility, and none of them is a test.
+
+Measured, 2026-09-11, two processes each, same binary:
+
+| what was run | over | result |
+| --- | --- | --- |
+| `community_hierarchy`, via `crates/fossil-layout/examples/hierarchy_stats.rs, read_edges` | com-DBLP, 317,080 vertices / 1,049,866 edges, 5 levels | all five levels' membership **and** quotient outputs byte-identical |
+| the whole pass — `enrich_layout` — via `crates/fossil-layout/examples/enrich_memory.rs, planted` | 200,000 vertices at mean degree 10, 999,079 edges | the entire written tree byte-identical: the Morton-permuted payload, both adjacency orientations, the identity index, all five tiles and all three level directories |
+
+Two graph shapes — a real co-authorship network and a planted partition — and both halves of the
+pass. **The property holds.** What it does not yet have is a test that keeps it holding, and that is
+the first thing this direction owes.
+
+## What a derived plane turns out to look like
+
+Everything above is about *whether* a coordinate system was derived. These two findings are about
+what a derived one looks like once it is, and both were measured over the same com-DBLP — 317,080
+authors, 1,049,866 undirected co-authorship edges. Neither is an argument against deriving
+positions. Both are the same observation from the other side: a picture of the algorithm is exactly
+what the far view shows, so it is worth knowing which algorithm, and at what resolution.
+
+### 1 · The grid pitch was fixed by the largest group, and 82× of it was spare
+
+`crates/fossil-layout/src/layout/place.rs, cluster_layout` placed the clusters on the cells of a
+grid in Z order and packed each cluster's members in phyllotaxis inside its own cell. The pitch was
+`2 * INTRA_CLUSTER_RADIUS * sqrt(largest) + 100` — **one number for every cell**, and the number was
+the largest group's disc. This is the finding as it was measured; the rule that replaced it is two
+sections down.
+
+The partition that places is the finest level of Louvain, whose median group holds 3 members and
+whose largest holds 20,459. So the disc term is sized for 20,459 in a grid whose median cell holds
+three: √(20,459/3) ≈ **82× more radius than its occupant uses**, and every cell pays it.
+
+| the placement grid | measured over com-DBLP |
+| --- | --- |
+| the pitch | 2·12·√20,459 + 100 ≈ **3,534**, uniform across every cell |
+| the median group's disc | 2·12·√3 ≈ **41.6** |
+| that disc against its own cell | **1.18%** of the width, **0.014%** of the area |
+| every disc summed against the extent it fills | the plane is **0.018% occupied** — 99.98% empty |
+
+The code said why the pitch was uniform, and the reason read like a good one:
+
+> The pitch is uniform rather than per-cluster because a cluster's *cell* must be findable from its
+> id alone — that is what makes the placement a pure function of `cluster_ids` and reproducible
+> without carrying a table.
+
+**Nobody ever asked.** `crates/fossil-layout/src/layout/morton.rs, morton_decode` — the function
+that turns a cluster id into a grid cell — has exactly one caller in the workspace and it is
+`cluster_layout` itself, and a reader locates a group by reading `x` and `y`, which it is opening
+anyway. What the sentence was really protecting is that the placement is a function of
+`cluster_ids` and of nothing else, and that survives a per-group cell untouched: the sizes such a
+cell needs are the ones the function already counts.
+
+Built and measured, both placements over the same partition, by
+`crates/fossil-layout/examples/hierarchy_stats.rs, plane_report`:
+
+| | uniform pitch | a cell per group |
+| --- | --- | --- |
+| extent | 902,220 × 902,343 | **30,687 × 30,700** — 29.4× more compact |
+| occupancy | 0.018% | **15.2%** — 846× of the plane recovered |
+
+<Callout title="These replace an earlier simulation, and the program is the reference">
+This row read *560,176 → 63,640, 8.8× more compact* and *0.046% → 3.5%, 76× of the plane recovered*,
+from a simulation that was never in the tree. Both halves move: the baseline extent is 902,343 and
+not 560,176, and the repair is 29.4× and not 8.8×, because the simulation priced a per-group cell
+while keeping the 100-unit constant margin that the section above is about.
+
+The figures here come out of a program in the repository, run over the corpus it names. It is the
+same correction `hierarchy_stats.rs` records about its own earlier numbers, for the same reason: a
+figure nothing can reproduce is not a measurement.
+</Callout>
+
+**It does not make the pyramid cheaper, and saying so is half the finding.** A rung holds
+`ceil(V / 4^k)` cells whatever the placement does — compacting the plane does not merge a group with
+its neighbour, and the base is declared rather than found. What improves is the picture, and what
+improves more than the picture is what a cell of that pyramid IS: see below.
+
+### 2 · The artefact published one partition and hid the one that drew it
+
+`crates/fossil-layout/src/layout/pass.rs, enrich_layout_with` computes **two** partitions and
+publishes one — which is still true, and stopped being a defect for the reason two sections down. `cluster_id` comes from
+`crates/fossil-layout/src/layout/community.rs, flatten_to_budget` under `CLUSTER_BUDGET`, sized so a
+drawing reader's aggregate stays under its row cap. The placement uses `levels.first()` — the finest
+level — because the budget partition makes every community a root and leaves the ordering nothing to
+put side by side. The pass argues both:
+
+> `cluster_id` is what a drawing reader colours and aggregates by, one super-node per cluster under
+> a row cap, so it must fit `CLUSTER_BUDGET` — which on this corpus means the top of the hierarchy.
+> Placement wants the opposite: the finest level, whose communities are small enough that several
+> fit in one window.
+>
+> — `crates/fossil-layout/src/layout/pass.rs, enrich_layout_with`
+
+Each argument is correct on its own. What fails is that **only the first one reaches the artefact**.
+
+| what a reader has against what drew the picture | measured over the written corpus |
+| --- | --- |
+| distinct `cluster_id` values written | **1,229** |
+| groups the placement actually used | **~55,712**, filling 61,210 cells at cluster-cell scale |
+| cells one written `cluster_id` spans | **14** at p50, **77** at p90, **3,445** at most |
+| cells holding two different `cluster_id` values | **none, at any point in the corpus** |
+| each `cluster_id` split per cell, width / (2·12·√m) | **0.83** at p50, **0.91** at p90 |
+
+That last row is the confirmation rather than a curiosity: 0.83 and 0.91 are what `cluster_layout`
+produces, so every per-cell subgroup is a phyllotaxis disc sized for its own membership. The
+placement partition is not hiding somewhere abstract — it is legible in the coordinates, one cell at
+a time, and the coordinates are the only place it exists at all.
+
+The consequence for a reader was the whole of the finding. Colouring by `cluster_id` coloured
+packets of roughly 45 placement groups scattered across the plane, and nothing in the artefact said
+so.
+**It is not the palette: the colour is not what is on the screen.** The palette row on [what was
+discarded](/docs/design/discarded) asks for a slot per community, and a slot per community solves
+the other half — running out of colours — while leaving this one exactly where it was.
+
+And the repair is one rule, not two — but it is not the rule this page used to name. *The placement
+partition **is** the base rung of the cell pyramid* was written before the pyramid was, and the
+pyramid that got written partitions the `dense_id` axis at a declared base of sixteen vertices per
+cell — `crates/fossil-sinks/src/manifest.rs, CellTree` — which over com-DBLP is 19,818 cells
+against the placement's 55,712 groups. They are not the same partition, and neither bends into the
+other without giving up the gapless numbering or the arithmetic addressing. So the repair is not a
+second artefact at all: it is a change to where the groups go, and it is the section below.
+
+## The repair both findings have, and it is one rule
+
+**Every group gets a cell of its own size.** A group of `m` members is given an aligned square of
+the quaternary whose side is the next power of two above its own packing disc, and the squares are
+handed out by bumping a Z-order frontier — a buddy allocator's addressing, over the allocation order
+the hierarchy has already fixed.
+
+`crates/fossil-layout/src/layout/place.rs, cluster_layout` keeps its signature and its purity. The
+sizes a per-group cell needs are the ones it already counts in order to find `largest`, so the
+placement stays a function of `cluster_ids` and of nothing else — which is what the objection in the
+code was protecting, and it survives intact:
+
+| | as placed | with a cell per group |
+| --- | --- | --- |
+| a group's cell | one of a uniform grid, pitch `2·12·√20,459 + 100` | an aligned square, side `2·12·√m` plus a proportional margin, rounded up to a power of two |
+| where that cell is | `morton_decode(id)` — the id **is** the address | the Z-order frontier, bumped once per group in id order |
+| the gap between two groups | 100 units, whatever the two groups are | a fraction of the disc it surrounds |
+| what finds a group's cell | its id alone | its size, which the placement already counts |
+
+Three decisions sit inside that, and each one is load-bearing.
+
+### The area is the membership, because that is what makes the id axis mean something
+
+A phyllotaxis disc of `m` members has an area proportional to `m`, so a cell sized to its own disc
+puts the same number of vertices under every unit of plane. And `dense_id` is the **rank** of a
+vertex in the Morton order of its position — `crates/fossil-layout/src/layout/morton.rs,
+morton_ranks` — so a rank axis over a plane of uniform density *is* an area axis: an interval of `n`
+ids covers `n/δ` of plane wherever on the plane it is taken.
+
+Under the uniform pitch it covers whatever the emptiness there happens to be, and the spread is not
+a rounding. Measured over com-DBLP at the declared base of sixteen vertices per cell, taking each
+cell's own bounding box:
+
+| cell area, per rung | uniform pitch | a cell per group |
+| --- | --- | --- |
+| rung 1 — 19,818 cells | 4,676 … 4,764,880,428 — **1,019,008×** | 4,911 … 34,618,064 — **7,049×** |
+| rung 3 — 1,239 cells | 133,277 … 28,699,842,262 — **215,340×** | 136,338 … 41,205,301 — **302×** |
+| rung 6 — 20 cells | 67,420,522 … 251,525,735,324 — **3,731×** | 23,578,188 … 256,917,698 — **11×** |
+
+Six orders of magnitude at the fine end, and a texel is an area. Sixteen consecutive ids inside the
+20,459-member group are sixteen members of one phyllotaxis disc, a patch 68 units across; sixteen
+out where the median group is are five whole groups in five whole grid cells, 69,000 units across.
+**Same rung, same count.** That is the whole of why [a cell is claimed to be a region of the
+plane](/docs/design/cells) and was not one.
+
+**What is left after the repair is named rather than swept.** A rung-1 cell still spans 7,049× from
+smallest to largest, and the residue is two things: a group packs at one density inside its disc
+while the disc sits in a block rounded up to a power of four, and the Z-curve makes long jumps at
+the boundaries of the large quads. Both are bounded, and neither is the emptiness. The median says
+the same thing from the other side — 25,426,112 down to 44,823, on a plane 864× smaller.
+
+<Callout type="warn" title="This is the idea that was discarded, and the difference is which layer it is applied at">
+*Area proportional to population* is [a rejected row](/docs/design/discarded), and the evidence
+against it is not retracted: allocating area by count produces a uniform field, which deletes
+exactly the signal a far view is looked at for — where the graph is dense.
+
+It does not bite here, and the reason is the first paragraph of this page. **There is no density
+signal in a derived plane to delete.** Inside a group the members are already packed at one fixed
+density — `INTRA_CLUSTER_RADIUS` is a constant, so a disc's area is already proportional to its
+membership — and outside them the plane is empty margin sized by the largest group. Today's far view
+is a regular lattice of dots on a field that is 99.95% nothing; it encodes population as dot size
+and encodes the graph nowhere. What the packing trades is not signal for uniformity. It is
+**emptiness** for uniformity.
+
+The rejected row is about *encoding*: choosing area to mean population in a picture where area could
+have meant something a layout found. This is about *packing*, and the signal the coarse view carries
+is unchanged either way — a cell's `count` is `4^k` by construction at every rung and always was, so
+what a mark says is its mode and its purity, which is what [cells](/docs/design/cells) already
+argues it says.
+
+The row comes back the day a placement exists whose extent means something — a force layout over a
+level's quotient, say, where a community's spread is a fact about the graph. Packing that into
+buddy blocks would be the discarded idea, and this page would be the one that was wrong.
+</Callout>
+
+### The margin is a ratio, not a constant
+
+The gap it replaces was 100 units of a plane whose unit means
+nothing — every coordinate here is `derived`, which is the whole of this page — and a constant added
+to a side that scales as `√m` is a margin that eats the small end. A per-group cell with the
+constant kept spends **93% of its area on margin at the median group and 26% at the largest**: the
+same defect as the uniform pitch in a smaller denomination, an 11× density difference between the
+two ends of the partition. A ratio spends the same fraction at both ends, and that is what makes the
+rank axis flat rather than nearly flat — `crates/fossil-layout/src/layout/place.rs,
+CLUSTER_MARGIN_RATIO` is the quarter of a disc's radius it is set to, and
+`crates/fossil-layout/src/layout/place.rs, CELL_UNIT` is the block that falls out of it: the side a
+group of one member gets, and the unit every other block is a power of two of.
+
+### The frontier never goes back, and it spreads
+
+A buddy allocator normally reuses the holes its alignment leaves, and that is refused here.
+`crates/fossil-layout/src/layout/community.rs, order_by_hierarchy` numbers the placement groups by a
+depth-first walk of the dendrogram, so **a run of consecutive group ids is a subtree**; a monotone
+frontier turns that into a run of consecutive blocks, hence a run of consecutive Morton codes, hence
+a contiguous interval of `dense_id`. Reusing a hole behind the frontier puts a later group in front
+of an earlier one and breaks exactly that. The price is alignment fragmentation, and it is paid out
+of a plane that is 99.98% empty.
+
+**And the frontier does not pack against the origin, which cost a day to find out.** Packing tight
+leaves the groups in the first part of the Z-curve, and the first half of a Z-curve is the *bottom
+half* of its square. That hands the addressing a 2:1 plane — and
+`crates/fossil-layout/src/layout/morton.rs, morton_codes` quantises the two axes **independently**,
+over whatever extent the positions turned out to have, so a rectangular plane is normalised into a
+square grid and a square block stops mapping onto an aligned square of Morton codes. The measured
+consequence, on a planted fixture of four thousand vertices: an extent of 3,805 × 1,900, and 570 of
+1,603 groups in a single run of `dense_id` — *worse than the uniform pitch*, which got 1,355 by
+being so sparse that each group's members shared one quantised cell.
+
+So the frontier advances over the whole root square instead: the root is the smallest power of four
+that holds the blocks, and each group's place in it is its running total scaled to fit. The same
+fixture then measures **3,807 × 3,812 and 1,590 of 1,603**. The dilution is one factor between one
+and four and it is the *same* factor for every group, which is why it costs the density nothing — a
+uniform scale is invisible to a quantisation that normalises.
+
+### What it makes true, measured
+
+**Every partition in the artefact becomes an interval of `dense_id`.** A group is one interval
+because its members share one block; a `cluster_id` is one because it is a union of consecutive
+groups; every level of the dendrogram between them is one for the same reason. That is the corpus's
+own addressing rule — `/docs/format` has no listings and no discovery because an address is
+arithmetic — reaching the one partition that was outside it.
+
+| over com-DBLP, 55,712 placement groups | uniform pitch | a cell per group |
+| --- | --- | --- |
+| groups that are a single run of `dense_id` | 55,709 | **55,712 — all of them** |
+| the id axis follows the group order | no | **yes** |
+
+It is the second finding's repair, **and it publishes nothing new to get there**. A reader colouring
+by `cluster_id` was colouring 45 placement groups scattered over a 158×158 grid of nearly empty
+cells; it colours one interval now. The colour becomes what is on the screen, which is what that
+finding said it was not, and the partition doing it is the one that was in the manifest all along.
+
+<Callout type="warn" title="It is a budget and not a zero, and the link that is not exact is not the placement's">
+The chain has one link the placement does not own. Blocks map onto the addressing's grid exactly
+when the placement filled a square, and a placement fills its square to within the margins of the
+two groups at its corners — 30,687 against 30,700 over com-DBLP, which is close enough to be exact,
+and 3,807 against 3,812 on the planted fixture, which leaves thirteen groups of 1,603 in two runs
+apiece.
+
+So `crates/fossil-layout/tests/cells.rs, a_cluster_is_one_run_of_dense_id` asserts the **mass** —
+how many ids fall inside a group's range without belonging to that group — against a budget of one
+percent of the corpus. It is not a threshold chosen to pass: taking `order_by_hierarchy` out of the
+pass puts 853 ids on the wrong side of a budget of forty, on the same corpus with only the group
+numbering changed.
+
+What would make it a zero is a **published quantisation box**, so that a reader recomputes codes
+against the square the writer used rather than against the extent it can see. That is a change to
+the format and not to the placement, and it is on [what was
+discarded](/docs/design/discarded) with what would bring it back.
+</Callout>
+
+## `channels:` — a column, a scale, and the one number a reader cannot recover
+
+This page said a writer must not grow a field naming the column a reader colours by: *a default is a
+writer deciding a reader's question, and which column means something to look at is the reader's
+question twice over.* The sentence is retracted, and what retracts it is not an argument. It is that
+the field already exists and is the wrong one.
+
+<Callout type="warn" title="The declaration was already being made, by a privacy field and by a generated constant nobody read">
+`packages/draw/src/encoding.ts, encodingFor` picked the column whose distribution it offers to
+brush by ranking the numeric columns and preferring the ones `quasi_identifiers` names. That field
+is specified on [privacy](/docs/format/conventions/privacy) as *the one field a reader cannot
+derive, and the one the whole bound turns on* — a disclosure-control vocabulary, doing encoding work
+because it was the only writer-side statement in reach.
+
+**That ranking is the defect the block was written to remove, and it is removed.** A declared
+`quantitative` channel now outranks the privacy field, which ranks only where the manifest declares
+none — [what the implementation owes](#what-the-implementation-owes) has the whole of it. The
+paragraph above is the diagnosis and not the behaviour.
+
+And the honest statement existed on the other side, unread. `corpus.bnf` marks `cluster_id`
+`role categorical` — glossed *an ordinal the writer computed, for a reader to colour by* — and
+`cargo xtask corpus` emits it as
+`packages/corpus/src/vocabulary.generated.ts, PAYLOAD_CATEGORICAL`. The door imported
+`PAYLOAD_ADDRESS`, `PAYLOAD_COORDINATES` and `PAYLOAD_IDENTITY` from that file **and not that
+one**, and wrote the string `cluster_id` itself instead.
+
+Counted at the time: the name was written down in `corpus.bnf`, in the generated TypeScript, in
+`packages/draw/src/encoding.ts, categoricalOf`, in `packages/corpus/src/corpus.ts` as
+`FrameParams.fill`'s default, in `crates/fossil-graph/src/manifest.rs`, and at eight script call
+sites. Six statements of one fact, and the only machine-readable one had no consumer. Two of the six
+are now reads of it — the door's default and `packages/draw`'s fallback both resolve
+`PAYLOAD_CATEGORICAL`, and neither of them is in an app any more,
+and the harness assertion that used to compare them is gone with the difference it was measuring.
+</Callout>
+
+**So the question was never whether a writer may declare it.** It is whether the declaration is a
+field that says so, or a privacy vocabulary and a string constant repeated six times.
+
+### The rule
+
+A vertex type declares the channels it carries, as a list, beside `coordinates:` and under the same
+rules — `crates/fossil-sinks/src/manifest.rs, CoordinateSystem` is the precedent and this copies it
+rather than re-deriving it. Each entry names a column, the scale that column is read on, and, where
+a reader cannot recover it, the domain:
+
+| field | what it is |
+| --- | --- |
+| `name` | the writer's, and nothing here reserves any |
+| `column` | the payload column it reads |
+| `scale` | `categorical` or `quantitative` — a closed set, because a reader dispatches on it |
+| `domain` | how many distinct values a **categorical** has. Absent on a quantitative one, and that is the next section |
+| `derived_by` | what computed the column, present exactly when the writer did. Absent means it came from the source |
+
+**Three states, and they are the ones `coordinates:` already has.** No `channels:` key is a corpus
+whose writer said nothing; an empty list is a writer declaring it carries none; a list is the
+declaration. A corpus written before the field reads back as the first, and draws exactly as it
+draws today — which is the whole of what keeps this a declaration rather than a flag day.
+
+### Why only the categorical carries a domain
+
+A quantitative channel's domain is a range, and **the range is already in the corpus**: Parquet
+writes min/max statistics per row group, which is what
+[the camera prunes on](/docs/format/conventions/addressing) and what `Corpus.extent` already reads
+out of the footers. Declaring it would be a second statement of something the bytes carry.
+
+A categorical's domain is a count of distinct values, and **no footer holds one**. It is the same
+test `crates/fossil-sinks/src/manifest.rs, CellTree` applies to `vertices_per_cell` — *the one
+number a reader cannot recover and a writer must therefore declare* — and it gives the same answer
+for the same reason. A field that repeats what a reader can compute is a second thing to check; a
+field that carries what nobody can recover is the only kind worth writing.
+
+<Callout title="It is not called `cardinality`, and the collision is not cosmetic">
+`crates/fossil-sinks/src/manifest.rs, Property` already carries a `cardinality`, and it means SHACL
+multiplicity — whether a predicate admits more than one value. A count of distinct values is a
+different question about the same column, and two fields a spelling apart in one document is how a
+reader comes to answer one with the other.
+</Callout>
+
+### What it costs to measure, which is nothing
+
+`crates/fossil-layout/src/layout/community.rs, group_count` exists, is used, and carries its own
+correctness argument: `max + 1` **is** the distinct count for a level this module produced, because
+`crates/fossil-layout/src/layout/community.rs, densify` relabels the ids to `0..k`. It is not an
+estimate and not a scan. The count is already computed inside `flatten_to_budget` on every iteration
+— to test the partition against `CLUSTER_BUDGET` — and then thrown away with the rest of the loop
+state.
+
+It travels back the way the pyramid's measured counts already travel.
+`crates/fossil-layout/src/layout/pass.rs, LayoutReport` exists precisely for this, and says so:
+
+> rather than `()` because the manifest is emitted after it, and one field of the document is a
+> measurement rather than a plan
+>
+> — `crates/fossil-layout/src/layout/pass.rs, LayoutReport`
+
+A measured domain is the second field of that kind, so it belongs there by the report's own stated
+criterion, and the seam it rides — keyed by type name, into
+`crates/fossil-df/src/lib.rs, declare_pyramids` — already carries one per-type declaration and gets
+a sibling rather than a redesign.
+
+### What it does not buy, and the artefact's own number says so
+
+**It does not add a colour.** A categorical palette has a published capacity, this one is eight, and
+the bench corpus has 128 communities: folded into the capacity by remainder,
+`937,496 of a million vertices` come back sharing seven other communities' slots. A declared domain
+does not change that by one vertex — the fold is a property of the palette and the capacity, and
+`apps/playground/src/Canvas.tsx` reads the capacity off the live cascade where it belongs.
+
+What changes is **when** the mismatch is knowable. Today 128 and 8 are known on two sides of a
+boundary and nowhere together, so the picture is the first place the reader finds out. With the
+domain declared, a reader compares two numbers before it draws a mark, and the class of failure
+*a picture that is right about everything and shows nothing* becomes a thing a reader can say out
+loud rather than a thing it produces.
+
+**And it does not bring back the discarded palette row.** [What was
+discarded](/docs/design/discarded) rejects handing `cluster_id` to the palette as it stands, and
+names its own reversal: a palette with a slot per community. A manifest field is not that, and
+saying it is would be claiming a row back on evidence that does not meet its own condition. What the
+block does is make the row's number checkable from the artefact instead of from a screenshot.
+
+### What the implementation owes
+
+- **The declaration, for the one corpus fossil writes**: `cluster_id`, `categorical`, the measured
+  domain, `derived_by` naming the cut that produced it — and nothing invented for a second channel
+  no writer produces, which is [the error this project has made at nine
+  scales](/docs/design/discarded). **Done**, and measured rather than planned:
+  `crates/fossil-layout/src/layout/community.rs, group_count` is the count the partition already
+  computed to test itself against `CLUSTER_BUDGET`, and it reaches the document by the path the
+  pyramid's measured counts already travel —
+  `crates/fossil-layout/src/layout/pass.rs, LayoutReport` to
+  `crates/fossil-df/src/lib.rs, declare_channels`. The deriver is `louvain-cut` and not
+  `louvain+phyllotaxis`: what produced this column is the modularity pass and the cut of its
+  hierarchy, and phyllotaxis turns a partition into `x`/`y` with no say in which group a vertex
+  is in.
+- **The reader collapsing to a read.** `categoricalOf`'s preference-then-first-integral derivation
+  becomes *read what is declared*, with today's rule kept as what an undeclared corpus gets. Not
+  deleted: a corpus written before the field has to keep drawing. **Done**, in
+  `packages/draw/src/encoding.ts, categoricalOf` — with the derivation intact beneath it, and
+  `packages/draw/src/encoding.ts, readChannels` as the scanner over the block.
+- **The chart's ranking, which is the defect this section opened with.** Which numeric column's
+  distribution is worth a chart was answered by `quasi_identifiers`, and there is a declaration for
+  it now: a declared `quantitative` channel is the chart's column, the privacy field ranks what is
+  left only where the block declares none, and the first numeric column stays the last resort.
+  **Done**, in `packages/draw/src/encoding.ts, encodingFor`. An empty block does not silence the
+  chart the way it silences the colour: `categorical` **is** the colour role, so declaring none of
+  it says there is nothing to colour by, while a histogram over a column nobody called a channel is
+  still a histogram. And the crossfilter's projection lists the brushed column outright now, where
+  it used to be in the view only by being a quasi-identifier — a declared channel need not be one,
+  and a view without the column the histogram bins fails at open, in a browser, with the corpus
+  already fetched.
+- **A flat block.** `apps/corpus/guards/manifest.mjs` scans lines, reads one level of
+  sequence-of-mappings, and silently skips anything deeper. A `channels:` entry that nests is a
+  `channels:` entry half its readers cannot see.
+- **The inverted assertion, reframed rather than deleted.**
+  `apps/playground/scripts/verify-encoding.mjs` asserted that withholding the declaration
+  leaves the colour unchanged — *it never came from the declaration*. That is the invariant this
+  section inverts, and the honest replacement is the three-state one: a corpus that declares nothing
+  draws exactly as it did, and a corpus that declares something is drawn by what it declares.
+  **Done**, and both halves are asserted — the first against the harness's own copy of the old rule
+  rather than against what the module now returns.
+- **What replaces the cross-check that is lost.** That harness also asserted that
+  `frame({fill})` and `frame({})` answer one rectangle with identical categories — a real
+  comparison while `encoding.ts` and `corpus.ts` wrote the name independently, and a tautology once
+  both read `PAYLOAD_CATEGORICAL`. The check that is worth having instead is the one it was standing
+  in for: **the column a corpus declares is a column the corpus has.** **Done**, with the door's own
+  default held to the same rule: a generated constant states what fossil's writer emits and cannot
+  state what a given corpus carries.
+
+## What this does not settle
+
+**Which system a reader draws when a type declares two.** The list makes the choice expressible and
+does not make it. A default ("the first") is a writer deciding a reader's question, which is the
+mistake this page is about; naming one in the manifest is a third thing again.
+
+**What a reader colours by** is settled, and this section used to say the opposite —
+[`channels:`](#channels--a-column-a-scale-and-the-one-number-a-reader-cannot-recover) is above.
+**What a reader sizes by** is not, and it is a limit of the door rather than of the artefact.
+
+`Corpus.frame` carries one categorical per row and no measure, so the streaming path has
+nothing to spend a radius ramp on and the baseline beside it would be the only half of a comparison
+that had one. Every level file already carries every column, so what would change it is a second
+column on `FrameParams` and a second array on `Frame` — a projection, not an artefact — and nothing
+has asked for one.
+
+**Whether `derived` should name a version.** *Derived by Louvain and phyllotaxis* is not
+reproducible across a change to either. A version string is the obvious answer and it is not
+obviously the right one: it goes stale in the opposite direction, marking a corpus as
+irreproducible when nothing that mattered changed. What would settle it is one instance of a
+layout change that moved positions, with somebody needing to know.
+
+**Whether the far view gets a third artefact.** A density raster is not a subset of rows, so it is
+not a level — [the reference viewer](/docs/design/reference-viewer) sets out why a level is a
+decimation and what a summary would have to be instead. The 183 kB above was measured outside the
+corpus, and bringing it inside is a separate decision from this one.

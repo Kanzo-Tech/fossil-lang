@@ -8,7 +8,7 @@
  * `"sideEffects": false`, importing the stateful glue from the entry chunk can
  * duplicate it: `init()` then populates the `wasm` binding in one instance while
  * the class reads `undefined` from another (→ `Cannot read properties of
- * undefined (reading '__wbindgen_malloc…')`). Mirrors `@fossil-lang/graph`'s
+ * undefined (reading '__wbindgen_malloc…')`). Mirrors `@fossil-lang/corpus`'s
  * `client.ts` split, which is the known-good shape.
  */
 import { FossilExecutor as RawFossilExecutor } from '../pkg/fossil_df_wasm.js';
@@ -49,7 +49,8 @@ export class FossilExecutor {
    * `shex` is the optional output schema text.
    *
    * Returns the output files (Parquet + manifest YAML, as bytes) plus the
-   * `RunStatus`. The caller signed-PUTs each file and PATCHes the job.
+   * `RunReport` — the same manifest, already parsed. The caller signed-PUTs each
+   * file and PATCHes the job.
    */
   run(
     program: string,

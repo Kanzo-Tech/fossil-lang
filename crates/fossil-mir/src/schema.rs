@@ -1,10 +1,13 @@
 //! Structural MIR helpers: [`schema_of`] and [`free_cols`].
 //!
 //! These are plain-Rust functions (NOT `#[salsa::tracked]` queries), so they
-//! do NOT affect `MAX_PER_MAPPING_FAN_OUT`. The rewriting engine (plans
-//! 04-02/04-03) and codegen (plans 04-04/04-05) call them to reason about the
+//! do NOT affect `MAX_PER_MAPPING_FAN_OUT` — a function with no Salsa key
+//! cannot be re-executed by an invalidation, which is a property of the
+//! signature and not of the body. `tests/fan_out.rs` measures the fan-out of
+//! [`crate::lower_to_mir_pg`] and does not put these two in its loop, so the
+//! claim is read off the `fn` above, not off a count. They reason about the
 //! column schema flowing through a [`crate::graph::MirGraph`] and the free
-//! column references inside an [`Expr`] (for the R3/R5 `free(p)` guards).
+//! column references inside an [`Expr`].
 //!
 //! # `schema_of` takes `&dyn fossil_base::Db`
 //!
@@ -25,26 +28,33 @@ use crate::op::{Expr, Op};
 
 /// Output column schema of the op at `idx`.
 ///
-/// Computed by structural induction over the topo-ordered DAG
-/// (operator-algebra.md §3). Returns column names in schema order.
+/// Computed by structural induction over the topo-ordered DAG. That induction
+/// is what makes the algebra's preservation property hold: if every operator's
+/// input schema matches its signature, every node in the plan carries a
+/// well-typed output schema. Returns column names in schema order.
 ///
-/// Per-operator rules (operator-algebra.md §3):
+/// Per-operator rules:
 /// - `Source` → field names of `row_type` (deref the interned `Record`)
 /// - `Project` → `cols`
 /// - `Extend` → input schema ∪ `{field}` (field appended if not already present)
 /// - `Rename` → input schema with `old` → `new`
 /// - `Filter` / `Distinct` → input schema unchanged
-/// - `Join` → left schema ∪ right schema (v0.1 unions the names; collisions are
-///   resolved by the `left_name` / `right_name` qualifiers in codegen)
+/// - `Join` → left schema ++ right schema, whole. A shared name used to be a
+///   compile error, and is not any more: the join no longer flattens two rows
+///   into one, every reference is written qualified, so two sources with a
+///   column of the same name are legal. This concatenation can therefore
+///   produce a duplicate name, and nothing here breaks the tie — these are bare
+///   names, and the qualifier that does break the tie lives on the `ColRef`
+///   that reads them, not in this list.
 /// - `Union` → left schema (asserted equal to right in debug builds)
-/// - `GroupBy` → `keys`
-/// - `Aggregate` → input schema ∪ agg `out_field`s
-/// - `TripleEmit` / `Sink` → input schema unchanged (terminal-ish)
+/// - `GroupBy` → `keys` ++ the agg `out_field`s, and nothing else of the input
+/// - `EmitVertex` / `EmitEdge` / `Sink` → input schema unchanged (terminal-ish)
 /// - `Empty` → its declared `schema`
 ///
 /// An out-of-range `idx` (or an input index that points past the slice)
-/// yields an empty schema rather than panicking — callers in the rewriting
-/// engine handle malformed intermediate graphs gracefully.
+/// yields an empty schema rather than panicking: a caller may hold a
+/// half-built or hand-constructed graph, and a panic there would take the LSP
+/// with it.
 #[must_use]
 pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<SmolStr> {
     let Some(op) = ops.get(idx) else {
@@ -52,7 +62,7 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
     };
     match op {
         Op::Source { row_type, .. } => record_field_names(db, *row_type),
-        Op::Project { cols, .. } => cols.clone(),
+        Op::Project { cols, .. } => cols.iter().map(|c| c.column.clone()).collect(),
         Op::Extend { input, field, .. } => {
             let mut schema = schema_of(db, ops, *input);
             if !schema.contains(field) {
@@ -77,12 +87,18 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
         | Op::EmitVertex { input, .. }
         | Op::EmitEdge { input, .. }
         | Op::Sink { input, .. } => schema_of(db, ops, *input),
+        // `fila(izq) ++ fila(der)`, whole. This dropped the right side's copy of
+        // the key between 2026-08-07 and 2026-08-19, because the executor did:
+        // the join was `USING (k)`, so a schema that kept the second `k`
+        // described a column nobody would find. The executor no longer
+        // identifies anything — a join relates two qualified relations and both
+        // keep every column — so neither does this.
         Op::Join { left, right, .. } => {
-            let mut schema = schema_of(db, ops, *left);
-            schema.extend(schema_of(db, ops, *right));
+            let mut schema = schema_of(db, ops, left.input);
+            schema.extend(schema_of(db, ops, right.input));
             schema
         }
-        Op::Union { left, right } => {
+        Op::Union { left, right, .. } => {
             let left_schema = schema_of(db, ops, *left);
             debug_assert_eq!(
                 left_schema,
@@ -91,9 +107,13 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
             );
             left_schema
         }
-        Op::GroupBy { keys, .. } => keys.clone(),
-        Op::Aggregate { input, aggs } => {
-            let mut schema = schema_of(db, ops, *input);
+        // The keys, then the aggregates — and NOT the input's other columns:
+        // a column that is neither grouped nor aggregated has one value per
+        // row and the result has one row per group, so there is nothing for it
+        // to be. This list was `keys` alone, with the aggregates added by a
+        // second operator that read the input's whole schema back in.
+        Op::GroupBy { keys, aggs, .. } => {
+            let mut schema: Vec<SmolStr> = keys.iter().map(|k| k.column.clone()).collect();
             for agg in aggs {
                 if !schema.contains(&agg.out_field) {
                     schema.push(agg.out_field.clone());
@@ -105,7 +125,8 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
     }
 }
 
-/// Free column references in an expression (for the R3/R5 `free(p)` guards).
+/// Free column references in an expression — the columns a predicate reads,
+/// which is what decides whether it may be evaluated against a given schema.
 ///
 /// Walks the [`Expr`] recursively collecting `ColRef.column` names;
 /// `LitString` / `LitBool` contribute nothing; `Concat` / `Call` / `BinOp` /
@@ -119,7 +140,7 @@ pub fn free_cols(expr: &Expr<'_>) -> BTreeSet<SmolStr> {
 
 fn collect_free_cols(expr: &Expr<'_>, acc: &mut BTreeSet<SmolStr>) {
     match expr {
-        Expr::LitString(_) | Expr::LitBool(_) => {}
+        Expr::LitString(_) | Expr::LitBool(_) | Expr::LitInt(_) | Expr::LitFloat(_) => {}
         Expr::ColRef { column, .. } => {
             acc.insert(column.clone());
         }
@@ -127,12 +148,27 @@ fn collect_free_cols(expr: &Expr<'_>, acc: &mut BTreeSet<SmolStr>) {
             collect_free_cols(lhs, acc);
             collect_free_cols(rhs, acc);
         }
+        // The column being tested is read, exactly as it would be by any other
+        // comparison — `IS NULL` is not a way of not reading it.
+        Expr::IsNull { operand, .. } => collect_free_cols(operand, acc),
         Expr::Call { args, .. } => {
             for arg in args {
                 collect_free_cols(arg, acc);
             }
         }
-        Expr::Assert { inner, .. } => collect_free_cols(inner, acc),
+        Expr::Ternary {
+            cond,
+            then,
+            otherwise,
+            ..
+        } => {
+            collect_free_cols(cond, acc);
+            collect_free_cols(then, acc);
+            collect_free_cols(otherwise, acc);
+        }
+        Expr::Assert { inner, .. } | Expr::UnaryOp { operand: inner, .. } => {
+            collect_free_cols(inner, acc);
+        }
     }
 }
 
@@ -149,12 +185,15 @@ fn record_field_names(db: &dyn fossil_base::Db, row_type: Ty<'_>) -> Vec<SmolStr
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::op::{CmpOp, SinkRef, SourceFormat, VProp};
-    use fossil_hir::ty::{Primitive, Record, RecordField};
+    use crate::op::{SinkRef, SourceFormat, VProp};
+    use fossil_graph_schema::Primitive;
+    use fossil_hir::BinOp;
+    use fossil_hir::ty::{Record, RecordField};
     use std::sync::Arc;
 
     fn db() -> fossil_base::FossilDb {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         fossil_base::FossilDb::new(system)
     }
 
@@ -186,7 +225,7 @@ mod tests {
         let ops = vec![
             Op::Source {
                 uri: SmolStr::new_static("users.csv"),
-                format: SourceFormat::Csv,
+                format: SourceFormat::Csv { delimiter: None },
                 row_type,
                 binding: SmolStr::new_static("users"),
             },
@@ -232,8 +271,16 @@ mod tests {
         ];
         // Both Emit ops + Sink pass the input schema (post-Extend) through.
         let after_extend = schema_of(&db, &ops, 1);
-        assert_eq!(schema_of(&db, &ops, 2), after_extend, "EmitVertex passthrough");
-        assert_eq!(schema_of(&db, &ops, 3), after_extend, "EmitEdge passthrough");
+        assert_eq!(
+            schema_of(&db, &ops, 2),
+            after_extend,
+            "EmitVertex passthrough"
+        );
+        assert_eq!(
+            schema_of(&db, &ops, 3),
+            after_extend,
+            "EmitEdge passthrough"
+        );
         assert_eq!(schema_of(&db, &ops, 4), after_extend, "Sink passthrough");
     }
 
@@ -244,7 +291,7 @@ mod tests {
         let ops = vec![
             Op::Source {
                 uri: SmolStr::new_static("u.csv"),
-                format: SourceFormat::Csv,
+                format: SourceFormat::Csv { delimiter: None },
                 row_type,
                 binding: SmolStr::new_static("u"),
             },
@@ -255,7 +302,10 @@ mod tests {
             },
             Op::Project {
                 input: 1,
-                cols: vec![SmolStr::new_static("full_name")],
+                cols: vec![crate::op::ProjectedColumn {
+                    source: SmolStr::new_static("u"),
+                    column: SmolStr::new_static("full_name"),
+                }],
             },
         ];
         assert_eq!(
@@ -274,7 +324,7 @@ mod tests {
         let db = db();
         let bool_ty = Ty::new(&db, TyKind::Primitive(Primitive::Bool));
         let expr = Expr::BinOp {
-            op: CmpOp::Eq,
+            op: BinOp::Eq,
             lhs: Box::new(Expr::ColRef {
                 source: SmolStr::default(),
                 column: SmolStr::new_static("status"),

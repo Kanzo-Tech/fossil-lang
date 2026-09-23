@@ -1,0 +1,23 @@
+# The output contract of `expressions.rs` — one shape declaring every predicate
+# the five programs in that file write.
+#
+# Un-narrowed (`.`) on purpose: those tests are about what the ENGINE computes
+# (a slug, an upper-cased string, a boolean, a per-row branch). Narrowing
+# `senior` to xsd:boolean would make the test prove that the checker agreed with
+# the document rather than that the operator ran.
+#
+# Optional (`?`) on purpose: a ShExC constraint is {1,1} by default and
+# `check_required_properties` errors on a required predicate the body never
+# writes — so one shared document with required predicates would fail four of
+# the five programs for not writing the other four's columns.
+PREFIX ex: <https://example.org/>
+
+ex:Person {
+  ex:slug   . ? ;
+  ex:shout  . ? ;
+  ex:tag    . ? ;
+  ex:senior . ? ;
+  ex:band   . ? ;
+  ex:piped  . ? ;
+  ex:called . ?
+}

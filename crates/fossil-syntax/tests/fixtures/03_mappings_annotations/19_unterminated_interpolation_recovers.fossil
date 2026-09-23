@@ -1,0 +1,2 @@
+Users : Person from User
+    @subject = "user/{User.id"

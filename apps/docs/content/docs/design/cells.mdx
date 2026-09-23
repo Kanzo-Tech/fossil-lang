@@ -1,0 +1,1025 @@
+---
+title: Cells
+description: The second reader — a mipmap over the corpus that does not fit on the GPU; why a cell is a texel and not a community, why the partition is arbitrary while the aggregation is exact, why the base of the pyramid has to be declared because no writer can derive it, the three properties a rung has to hold, and why the corpus carries one multiscale structure rather than two.
+direction:
+  summary: A corpus too large to draw carries exactly one mipmap of summary rows — the cell pyramid, on the same quaternary addressing its tiles already use — with the base declared rather than derived, every aggregate verifiable against the level below by symmetric difference, and only the position declared rather than derived.
+---
+
+There are two ways to read a graph you cannot see all of, and the decision here is to build both and
+**never cross them**.
+
+| | what it is | when |
+| --- | --- | --- |
+| **cosmos.gl** | the whole graph on the GPU, pan and zoom freely | it fits |
+| **cells** | a mipmap of aggregates, you descend and ascend | it does not |
+
+A mode that switches between the two as the camera zooms was built far enough to be rejected, and
+[what was discarded](/docs/design/discarded) carries why. The short form: the zoom level at which
+the reader is most lost is the one where the interaction changes under them.
+
+The corpus serves both without knowing about either — cosmos.gl reads the payload,
+a cell reader reads the tree. This page is the second one.
+
+## The partition is arbitrary. The aggregation is exact.
+
+That sentence governs everything below, and it is narrower than the one this page used to make.
+
+**A reader may not conclude *these vertices belong together*.** Whatever put two vertices in the same
+cell — a community detection run, a grid, a sort — is a choice made by a writer, and nothing in the
+corpus certifies it as structure in the world.
+
+**A reader may conclude *this region holds exactly N vertices and M edges leave it*.** That is an
+arithmetic fact about the rows below, it is falsifiable against them, and it is the only thing a
+cell is allowed to assert.
+
+The weaker promise is what makes the three obligations further down **necessary rather than
+optional**. If the grouping carried meaning, a reader could take the writer's word for the counts as
+well; because it carries none, the counts are the entire content of a rung, and a rung whose counts
+do not reconcile against the level below is not a coarser view of anything.
+`crates/fossil-layout/tests/aggregation.rs` does not change a line for this page's change of mind, and
+that is the test: what it checks is the aggregation, which is the half that was never arbitrary.
+
+## A cell is a texel, and the corpus is already a mipmap
+
+The format did not have to be argued into this shape. It is in it.
+
+`crates/fossil-sinks/src/manifest.rs, TILE_SHIFT` is 12, and 4,096 is 4⁶.
+`crates/fossil-sinks/src/manifest.rs, STRIDE_BITS` is 2, so
+`crates/fossil-sinks/src/manifest.rs, stride` is `4^k` and a level's address is the payload's shift
+plus `2k`. And `dense_id` is not a name a writer chose: it is a vertex's **rank in the Morton order
+of its own position**, which is what `crates/fossil-layout/src/layout/morton.rs, morton_ranks`
+computes and what
+[the order that makes an interval mean something](/docs/format/conventions/addressing#the-order-that-makes-an-interval-mean-something)
+specifies. `crates/fossil-sinks/src/manifest.rs, tile_of` states the consequence in its own doc:
+
+> tile `i` **is** the range `[i·4096, (i+1)·4096)`, its parent is a further shift, and the lowest
+> common ancestor of two vertices is the common prefix of their ids.
+
+So **a cell at any depth is a contiguous interval of `dense_id`** — exactly, not approximately, and
+without a tree on disk to walk. That is a mipmap's addressing, arrived at for a transport reason and
+then true for a rendering one.
+
+What the analogy then demands is a distinction the page did not have a word for:
+
+| | what it holds | what is equal across it | who reads it |
+| --- | --- | --- | --- |
+| **texel** | a summary of a region | **area** | the camera — one mark per texel |
+| **tile** | the rows themselves | **count** | the transport — one range request per tile |
+
+Both are intervals of the same `dense_id` axis, and as the writer cuts them **they nest**: a cell id
+is `dense_id >> shift` and nothing else — `crates/fossil-layout/src/layout/cells.rs, Pyramid` — so a
+cell boundary falls at every `4^k`-th vertex and a tile boundary at every 4,096th, which is `4^6` of
+the same axis. The page said neither nested inside the other, and the tree says otherwise.
+
+Which puts the weight of the table on one word. **A cell is cut by count; what has to make it an
+area is the placement.** Nothing in this pyramid measures a region of the plane — it takes a fixed
+number of consecutive ranks and summarises them — and that is a texel only if the plane those ranks
+came from was filled at one density. A reader that conflates the two rows above gets a mark whose
+size means nothing; a *writer* that fills the plane unevenly gets the same thing, one layer earlier.
+
+## What makes a cell a region of the plane, and it is not this page
+
+The addressing above is exact and the geometry under it is borrowed. `dense_id` is a rank in the
+Morton order of a position, so an interval of ids is an interval of the Z-curve — a compact run,
+always — but the **area** that run covers is whatever the placement put there, and the placement
+today is `crates/fossil-layout/src/layout/place.rs, cluster_layout` on a grid whose pitch is fixed
+by the largest group.
+
+Measured over com-DBLP, that cost the analogy its subject. At the declared base of sixteen vertices
+per cell, a rung-1 cell ran from 4,676 square units to 4,764,880,428 — **1,019,008×, at one rung, at
+one count** — because sixteen consecutive ids inside the 20,459-member group are sixteen members of
+one phyllotaxis disc and sixteen out where the median group is are five whole groups in five whole
+grid cells. A mipmap level whose texels differ in area by six orders of magnitude is not a mipmap
+level, and `corpus.bnf` was calling a cell row *one texel: a region of the plane, summarised* on the
+strength of an addressing argument that never reached the plane.
+
+What repaired it is a change to the placement and to nothing here:
+[a cell per group](/docs/design/position) gives every group a block of its own size, which makes the
+density uniform, which makes a rank interval an area interval. The same rung now runs 4,911 to
+34,618,064 — **7,049×** — and the coarse rungs, where a mark actually stands for a region, land at
+302× by rung 3 and 11× by rung 6. What is left is bounded and named over there: a power-of-four
+rounding, and the Z-curve's own jumps.
+
+**The pyramid does not change shape.** Same base, same `ceil(V / 4^k)` per rung, same files, same
+columns, and the same `dense_id >> shift` computing a cell id. It changes what one of its rows is
+about, which is the only part of it a reader was ever going to see.
+
+And the pyramid is already the other half of a mipmap. A level in
+`crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex whose `dense_id` is a multiple of
+`4^k` — one **representative** per block. A rung is the **aggregate** of the same block. Same
+address, two answers to two questions, which is why one cannot be spelled as the other.
+
+## A cell is not an entity, and no reader is in a position to ask
+
+The attractive version of this gives each community a type and an IRI — `Person@l1`, addressable,
+shaped, a first-class subject. It is rejected, and the page used to reject it on identity: a
+community does not exist in the source, hashing the member set changes the moment one author joins,
+a counter is not stable across reorderings, and every reference dangles.
+
+That argument still holds, and under *the partition is arbitrary* it no longer has to be made.
+**Nothing but the camera reads the tree.** `crates/fossil-graph/src/operations/mod.rs, Verb` is the
+six-verb surface, and none of them descends a rung: `read`, `expand` and `path` return **vertices**,
+because a cell is not one, and a verb that returned a cell would be answering a question about the
+plane in a language about the graph. That is the split the door already draws between its addressed
+half and its queried half — the camera computes addresses and asks for bytes, the verbs run SQL —
+and `crates/fossil-graph/src/lib.rs` states it as *no verb draws; the camera is addressed, not
+queried*. [One door](/docs/design/one-door) is where the seam itself is argued.
+
+So the question *is a cell an entity?* disappears without being answered, which is where the
+identity argument in [what was discarded](/docs/design/discarded) ran aground: it had to say what a
+cell **is**, and there was no answer that survived an incremental write. Saying who reads it costs
+nothing and settles the same thing.
+
+What survives is the small version, and it is enough: **a row** carrying a group, its position, how
+many members it has, and its parent. No IRI, no shape, no new vertex type, nothing that pretends to
+be a thing in the world. [Identity](/docs/design/identity) is the page that says what a subject is
+here, and a cell is deliberately not one.
+
+The row's columns are declared per rung, in `crates/fossil-sinks/src/manifest.rs, CellRung`, and
+**the model reserves no spelling for any of them**. A payload property is carried through opaquely,
+so a reader never has to know its name; these are roles a reader acts on — descend by the parent,
+size a mark by the member count, check mass with the internal weight — and what says which is the
+declared list rather than a convention a second writer could spell differently.
+
+## It is a third artefact, and the tree already ruled on that
+
+The obvious home for a cell tree is `levels:` — the pyramid is already a hierarchy, the addressing
+is already arithmetic, and a cell level looks like a coarse level. It cannot go there, and the
+ruling is not made on this page. [The reference viewer](/docs/design/reference-viewer) states the
+model's one load-bearing decision and what contradicts it:
+
+> The model is one decision deep, and it is the decision to make a level a **subset of real rows**
+> rather than a summary. […] That would be a **third** artefact and not a replacement — a level that
+> answers a different question under a different name, which is the one thing the one-contract
+> invariant forbids doing under the same one.
+
+A level in `crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex whose `dense_id` is a
+multiple of `4^k`. Every row is a real vertex at the position the payload gives it; nothing is
+synthesised. A cell is a synthetic row by construction. Putting one in a `Projection` would make
+`scale:` mean two different things in the same document, which is exactly the failure the
+one-contract rule exists to prevent. **Being a texel over the same cells does not soften that** — it
+sharpens it, because now the two blocks would share an address and disagree about what a row is.
+
+So: its own block, its own prefix, its own name. It is
+`crates/fossil-sinks/src/manifest.rs, CellTree`, and it hangs off a vertex type beside `index:` and
+`coordinates:` rather than inside `projections:`. A type declares one with
+`crates/fossil-sinks/src/manifest.rs, with_cells`.
+
+| the block declares | because |
+| --- | --- |
+| a `prefix`, and a `path` per rung | a tile's URL is the one part a reader cannot compute, and there is no listing over HTTP |
+| a `chunk_size` of its own | tile `k` of a rung is the `k`th run of **cell** rows, and a rung is not as long as the payload — the number that slices it is its own even where the two arithmetics agree |
+| a `cell_count` per rung | the sibling of `vertex_count`: a hole in the middle is caught by the addressing and a missing tail is caught by nothing |
+| the `relations` it was computed over | mass conservation has no population without them, and a type may be the source of several |
+| `properties` per rung | a group id, a position, a member count, a parent and an internal weight are columns that exist nowhere else in the corpus |
+| `coordinates` | the one thing on a cell that is chosen rather than aggregated |
+
+<Callout type="warn">
+**That second row said *a cell id is not a `dense_id`*, and the premise it rested on is gone.** The
+argument was `crates/fossil-sinks/src/manifest.rs, VertexIndex`'s, one artefact along: an index is a
+second **order** over the payload's rows, so its tile `k` has nothing to do with the payload's tile
+`k`, and reusing the payload's number would read as an alignment that does not exist. Carried across
+to a cell, it assumed group ids are whatever a partitioning algorithm handed back — arbitrary
+labels with no relation to the id space.
+
+Under a quaternary partition they are not arbitrary. **Cell `r` of rung `k` covers exactly
+`[r·4^k, (r+1)·4^k)`**, so a cell id is `dense_id >> 2k` — `tile_of` with a different shift — and
+the alignment the argument denied is the whole mechanism. What survives is the weaker reason the row
+now gives: a rung is a different *length* from the payload, so it slices at its own number.
+
+`VertexIndex`'s own argument is untouched, because an index really is a second order and a rung is
+not.
+</Callout>
+
+**And no `scale`, which is the difference doing work rather than a field left out.** A projection's
+scale is arithmetic a reader spends — rows are `count.div_ceil(scale)` and a tile address is a shift
+by `log2(scale)`. A rung declares **how many cells it has** and a reader divides if it wants a
+ratio, which is what lets one manifest describe a tree cut out of a dendrogram (where the
+contraction is measured after the fact, and is 5.69× where the exponent says 4) and a tree over
+cells (where it is 4 exactly) without the document meaning two things.
+
+## What Louvain actually emits is not a holarchy
+
+The tempting shortcut is to publish the levels the community detection already found. Measured over
+com-DBLP — 317,080 authors, 1,049,866 undirected co-authorship edges — those levels are:
+
+| level | communities | contraction vs. below | p50 | p90 | max | modularity | quotient mean degree |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 55,712 | 5.7× | 3 | 8 | 20,459 | 0.6356 | 5.7 |
+| 2 | 9,248 | 6.0× | 13 | 45 | 29,720 | 0.7782 | 11.6 |
+| 3 | 1,696 | 5.5× | 36 | 231 | 30,700 | 0.8057 | 23.5 |
+| 4 | 690 | 2.5× | 12 | 910 | 30,722 | 0.8091 | 26.0 |
+| 5 | 595 | **1.2×** | 10 | 1,355 | 30,722 | 0.8092 | 23.2 |
+
+Four things in that table disqualify it as a navigable tree, and none of them is a flaw in Louvain
+— it was not solving this problem.
+
+**The contraction collapses.** 5.7×, 6.0×, 5.5×, then 2.5×, then 1.2×. The last level buys almost
+nothing: 690 groups become 595, and modularity moves by 0.0001. A reader ascending that tree takes a
+step that changes nothing on screen.
+
+**The levels are wildly unbalanced within themselves.** At level 5, the median group has 10 members
+and the largest has **30,722** — 9.7% of the entire graph in one node, beside groups of ten. That
+is not a level of detail; it is a level of detail for some of the graph and the raw graph for the
+rest.
+
+**The finest level is very nearly the graph itself.** 55,712 groups over 317,080 vertices, median
+size 3, and **53.5% of them have three members or fewer**. Nothing is summarised.
+
+**And it does not break when you zoom, which is the one a reader feels.** Read the `max` column
+downwards — 30,722, 30,722, 30,700, 29,720, 20,459. Descending from the top, the largest group keeps
+**100%, 99.9%, 96.8% and 68.8%** of itself at each step. You zoom into the biggest blob on the
+screen, the one holding 9.7% of the graph, and for four steps nothing happens: the group does not
+break up, it *follows you down*. A cell splits into four. Every time, at every depth, whatever the
+data does. That is the difference between a level of detail and a lucky one, and it is the argument
+that decides between the two partitions rather than a preference between them.
+
+Where the structure genuinely is: modularity climbs from 0.6356 to 0.8092 and the levels whose
+quotient is still sparse enough to lay out are **2 and 3** — 9,248 and 1,696 groups at mean quotient
+degree 11.6 and 23.5. That is the measurement `crates/fossil-layout/examples/hierarchy_stats.rs, read_edges`
+exists to produce, and it says the hierarchy is real and its published levels are an accident of
+where the algorithm's sweeps happened to stop.
+
+## The corpus carries one multiscale structure, and it is the cell pyramid
+
+The question this page has carried open — a pyramid of cells, or a holarchy cut out of the
+dendrogram — is closed. **A corpus publishes the cell pyramid under `cell/r{k}/` and does not
+publish a holarchy beside it.** [What was discarded](/docs/design/discarded) carries the holarchy
+with what it would have bought and what would bring it back.
+
+**The argument is not cost**, and saying so first is most of the value of writing it down. A rung's
+cells and a cut's groups land within an order of magnitude of each other at every comparable scale,
+and neither a byte count nor a row count that close decides anything. What decides it is that **the
+reader has to stay arithmetic.**
+
+A cell is `dense_id >> shift` and nothing else —
+`crates/fossil-layout/src/layout/cells.rs, Pyramid` — so a reader holding a vertex holds its cell at
+every rung with no listing, no fetch and no table, and
+`crates/fossil-sinks/src/manifest.rs, cells_at` declares `ceil(V / 4^k)` for the whole tree before
+a byte is written. **A holarchy's groups have measured extents.** They are wherever Louvain's sweeps
+stopped, they are different for every corpus, and no arithmetic over `vertex_count` produces them —
+so a reader that wanted to address one would first have to fetch the boundaries a heuristic found.
+That pushes the heuristic across the corpus boundary and into the read path, where every reader pays
+for it and no reader can check it. `/docs/format` has no listings and no discovery request for
+exactly that reason, and a second structure that needed one would be the first thing in the corpus
+to break the rule the rest of it is built on.
+
+### Neither partition is blind to the graph, and the question was framed as if one were
+
+This page put the choice as *does it organise by region, blind to the graph, or by community?* **That
+framing is false**, and it is retracted here rather than dropped, because it is the framing a reader
+arrives with. **Both structures cut the same dendrogram.**
+
+`crates/fossil-layout/src/layout/community.rs, order_by_hierarchy` numbers the placement groups by a
+depth-first walk of the hierarchy, so a run of consecutive group ids is a subtree; the buddy frontier
+on [where x and y come from](/docs/design/position) turns that into a run of consecutive Morton
+codes, hence a contiguous interval of `dense_id`. Measured over com-DBLP by
+`crates/fossil-layout/examples/hierarchy_stats.rs, plane_report`: **55,712 of 55,712 placement groups
+fall in a single run of `dense_id`, and the id axis is monotone in group order.** Every coarser level
+of the dendrogram is therefore a contiguous interval as well, and a cell — a fixed count of
+consecutive ranks — is a window onto that same order rather than onto something orthogonal to it.
+
+`corpus.bnf` already says the half of this that reaches the plane, in the comment over the pyramid's
+own columns: a cell «is an area only because every group is placed in a block sized to its own
+membership». The graph is in the addressing before any rung is cut.
+
+**The real difference is where the cut falls — at a fixed count, or at a semantic frontier.** That
+is a far smaller difference than *blind or not*, and it is the one the rest of this section measures.
+
+### The holarchy does not reach further, and the margin is six rungs nothing asks for
+
+If a cut of the dendrogram is not the one that sees the graph, the argument left for it was depth:
+it descends *and* it ends somewhere the data chose. Measured over com-DBLP, it ends soonest of the
+three coarse artefacts this corpus has:
+
+| how far a coarse view descends on com-DBLP | its floor |
+| --- | --- |
+| a holarchy, `crates/fossil-layout/src/layout/community.rs, Cut` at factor 4 and chunk 4,096 | **1,696 groups** — levels 4 and 5 are dropped, neither being a quarter of the one above it |
+| the level pyramid, at its one-tile floor | **1,239 marks** |
+| the cell pyramid, at the rung holding a single cell | **1 cell** — 19,818 → 4,955 → 1,239 → 310 → 78 → 20 → 5 → 2 → 1, and every rung of that list carries a picture |
+
+**The holarchy stops above the level pyramid's own floor**, and six rungs above the cell pyramid's.
+A structure whose remaining attraction was semantic depth reaches the coarse end last of the three.
+
+<Callout type="warn">
+**This paragraph was narrowed to «by one step rather than by the six the emitted rung list appears to
+give», and the narrowing is withdrawn. Six is right.** The narrowing rested on a fidelity
+measurement that was an artefact of its own ruler: total variation was taken on a fixed 48×48 grid,
+where rung 4's 310 marks are asked to fill 2,304 bins, both the rung and its null pin against TV 1,
+and what is left between them is binning noise.
+[A fidelity measure has a resolution, and below one bin per mark it is measuring itself](/docs/design/camera#a-fidelity-measure-has-a-resolution-and-below-one-bin-per-mark-it-is-measuring-itself)
+is the general form of the trap. Re-measured on a grid fitted to each arm — about `sqrt(marks)` bins
+per axis, so nothing fills more bins than it has points —
+`crates/fossil-layout/tests/level_vs_rung.rs, fidelity` puts rung 4 at **0.2230 against a null of
+0.3700**, a margin of **+0.1470**, wider than rung 1 gets on the old ruler (+0.0784). The margin
+**grows** down the pyramid rather than decaying: +0.0956, +0.1168, +0.1318, +0.1470, +0.1814,
++0.2543, +0.3341 through rung 7.
+
+**So reach is restored as a measurement, and it still is not much of an argument — for a reason that
+has nothing to do with fidelity.** A camera spends a budget in *marks*, and the smallest budget
+anything in this tree spends is **15,000** — `SCREEN_MARKS`, the number the base of the pyramid is
+picked with; `apps/playground/src/tiles.ts` spends `BOUNDED_DEFAULTS.limit`'s 20,000, and a 1,200 px
+canvas at three pixels a mark would ask 160,000. Only **rung 1, at 19,818, is above that floor**, and
+the holarchy's 1,696 groups is below it too. The extra six rungs are a margin in a region nothing
+reads. What the decision above rests on is untouched either way: a cell is `dense_id >> shift` and a
+group's extent is measured, and no depth measurement moves that.
+</Callout>
+
+It cannot be cut differently into something deeper. The cut chooses out of the partitions the
+dendrogram already holds, and getting nearer to four would need levels *between* Louvain's —
+[the branching factor is declared, not inherited](/docs/design/cells#2-the-branching-factor-is-declared-not-inherited)
+is where that is argued, and why it is not a tuning knob.
+
+### And the level it would publish is not a level of detail
+
+The level a holarchy would hand a reader as its coarse partition is Louvain's third:
+`crates/fossil-layout/src/layout/community.rs, flatten_to_budget` walks up until a level fits
+`crates/fossil-layout/src/layout/place.rs, CLUSTER_BUDGET`, and 2,048 admits level 3's 1,696 groups
+where level 2's 9,248 do not. Its group sizes, and the two levels above it:
+
+| level | p50 | p90 | max | the max, as a share of the graph |
+| --- | --- | --- | --- | --- |
+| 3 | **36** | 231 | **30,700** | **9.7%** |
+| 4 | 12 | 910 | 30,722 | 9.7% |
+| 5 | 10 | 1,355 | 30,722 | 9.7% |
+
+One mark would stand for a tenth of the whole graph while the median mark stands for thirty-six. And
+ascending does not repair it — **the median falls while the maximum holds**: 36 → 12 → 10 against
+30,700 → 30,722 → 30,722, which is within twenty-two vertices of standing still. So the small groups
+get *smaller* relative to the largest with every step up, which is the opposite of what a level of
+detail does. A rung's cells hold `4^k` vertices each, by
+construction, at every rung and on every corpus.
+
+### What the arithmetic cut already captures, derived rather than measured
+
+The monotonicity above has a consequence worth stating, and worth labelling **derived**: nobody has
+measured the written `purity` column over com-DBLP, and this is not that measurement.
+
+Each of the 1,696 level-3 communities is a contiguous interval of `dense_id`, so the partition has
+**1,695 boundaries**. A cell is impure only if it contains one, and a boundary falls inside at most
+one cell at a given rung — so **impure cells ≤ 1,695, at every rung**, whatever the data does.
+Evaluated against the rung counts:
+
+| rung | cells | perfectly pure, at least |
+| --- | --- | --- |
+| 1 | 19,818 | **91.4%** |
+| 2 | 4,955 | **65.8%** |
+| 3 | 1,239 | the bound is exhausted — 1,239 is fewer than 1,695 |
+
+That is an arithmetic bound on a measured monotonicity and nothing more. The true figure is higher
+wherever a community boundary lands where a cell boundary already is, and the bound says nothing at
+all from rung 3 down. What would replace it is a count over the written Parquet, which is the same
+recount `crates/fossil-layout/tests/cells.rs` already performs on a fixture.
+
+**And this is what `mode` and `purity` are for.** They read as an awkward bridge — a categorical
+summarised by a structure that did not choose it — and they are the opposite: the number that says
+**how much of the semantic partition the arithmetic cut already captured**. A rung that publishes
+them publishes the holarchy's own content, per cell, as a measurement beside the counts rather than
+as a second tree a reader would have to fetch in order to address anything.
+
+## The base of the pyramid is a parameter, not a property
+
+A mipmap over an image needs no such field: level 0 is every pixel, the image is full by
+construction, and each level is a quarter of the one below it all the way down. **A set of points is
+never full**, and the whole difference between the two lives at the base.
+
+Measured over com-DBLP, quantised to 16 bits per axis — a quaternary tree of depth 16 over square
+cells, which is the grid the Morton order already imposes. Read *level k* as cells of side `2^k`, so
+level `k` has at most `4^(16−k)` of them.
+
+Below the scale where cells start to touch, merging four buys almost nothing — the occupied count
+falls by **1.0× to 1.8×** per level, because the cells were nearly all singletons already. **From
+level 9 it is exactly 4.00×.** The turn is at level 8, and it is sharp: 61,210 occupied cells out of
+65,536, an occupancy of **93.4%**. That is saturation, and everything above it behaves like an image.
+
+The cost follows immediately. The whole pyramid, every level from 0 to 16, is **1,375,552 cells —
+4.34× V**, which is not a summary of anything. Taken from the saturation scale instead it is
+61,210 × 4/3 = **81,613**, the `1/4 + 1/16 + …` series that `crates/fossil-sinks/src/manifest.rs, STRIDE_BITS`
+already costs the tile pyramid at a third of the type. The 4/3 rule is exactly right — **once you
+start at the right level**, and nothing in the data says which that is.
+
+So the base is a knob, and here is the whole of what it trades:
+
+| vertices per base cell | base cells | cost of the tree | marks at the finest rung |
+| --- | --- | --- | --- |
+| 5 | 61,210 | 25.7% of V | 61,210 |
+| 21 | 15,303 | 6.4% of V | 15,303 |
+| 83 | 3,826 | 1.6% of V | 3,826 |
+| 331 | 957 | 0.4% of V | 957 |
+
+**And the choice is not an aesthetic one — the screen makes it.** A megapixel canvas draws about
+fifteen thousand marks comfortably, so a base of roughly twenty vertices per cell is the one that
+fills it: the display resolution picks the row, and the corpus pays 6.4% of V for it.
+
+**Which is why the base has to be declared in the manifest.** It is data-dependent by construction —
+saturation is where *this* point set's cells start to touch, and no reader can recover it from
+`vertex_count` — so a writer that does not record it has published a pyramid whose bottom step is
+unknown.
+
+Once it is declared, the rest is arithmetic: **rung `k` has `ceil(base_count / 4^k)` cells.** That
+is not a projection of the measurement, it *is* the measurement — 61,210 → 15,303 → 3,826 → 957 →
+240 → 60 is `ceil(n/4)` at every step, and every one of those numbers is in the table two sections
+down. So `cell_count` per rung is derivable from one declared number, exactly as
+`crates/fossil-sinks/src/manifest.rs, rows_at` derives a level's rows from `vertex_count` and
+`crates/fossil-sinks/src/manifest.rs, planned` plans the whole pyramid before a byte is written.
+
+**This dissolved the obstacle this page used to name, and the tree is written.** The block was
+declarable and unfillable — *nothing writes one yet* — because a rung's count was something only a
+completed pass could report. It is not:
+`crates/fossil-sinks/src/manifest.rs, cells_at` is `ceil(vertex_count / 4^k)`, so the entire tree
+is arithmetic from one declared number.
+
+What writes it is `crates/fossil-layout/src/layout/cells.rs, Pyramid`, and the base is declared **per
+vertex type** — `crates/fossil-sinks/src/manifest.rs, DEFAULT_VERTICES_PER_CELL` is sixteen, the
+power of four nearest the twenty a megapixel of marks asks for, and the whole pyramid then costs 8.3%
+of the type. Per type rather than globally because that is the shape the block has; the question
+below is still open and what would settle it is unchanged.
+
+<Callout title="One field of it is a measurement, and that decided the phase order">
+A rung's cell count can be stated in front of the bytes. **Its quotient edge count cannot** — how
+many edges survive as a quotient at a rung is measured, not planned — and a document written first
+either omits it or guesses.
+
+So the manifest is emitted **last**, over a payload that exists: `fossil_df::materialise` returns a
+value and writes nothing, the layout pass writes the corpus, and
+`crates/fossil-df/src/lib.rs, declare_pyramids` carries what the pass measured into the document.
+That retires *the manifest is the plan and the pass is what fills it* for this block only, and the
+distinction it rested on survives: a count that is arithmetic is **described** whenever it is
+written, and only a measured one has an order.
+</Callout>
+
+## Three properties, in this order
+
+### 1 · Deterministic — and this one is measured
+
+Same corpus, same cells, bit for bit. A cell whose referent moves between writes is not
+navigable: a reader who descends, pans and ascends must arrive back where they were, and a bookmark
+must still resolve tomorrow.
+
+It is the standard the tree already holds itself to elsewhere —
+`crates/fossil-layout/tests/levels.rs, a_level_file_holds_exactly_what_the_level_predicate_selects`
+compares written artefacts against a predicate rather than trusting the writer — and the code
+already claimed it in comments: `local_moving` walks `0..n` and breaks ties strictly so the lower
+community id survives, and `Weighted::contract` carries a section arguing its counting sort makes
+the output bit-identical.
+
+Claimed in comments, never run. Measured 2026-09-11, two processes per row:
+
+| what | over | result |
+| --- | --- | --- |
+| `crates/fossil-layout/src/layout/community.rs, community_hierarchy` | com-DBLP, 5 levels | every level's membership **and** quotient byte-identical |
+| `crates/fossil-layout/src/layout/pass.rs, enrich_layout`, the whole pass | 200,000 vertices, 999,079 edges, via `crates/fossil-layout/examples/enrich_memory.rs, planted` | the entire written tree byte-identical — Morton-permuted payload, both adjacency orientations, identity index, tiles and level directories |
+
+**The property holds.** Had it come out red, the two properties below would not be worth stating.
+A spatial partition inherits it for free and for a duller reason — a cell id is a shift of a number
+the payload already fixed — which is one more thing the texel reading costs nothing.
+
+A measurement is not a guard, though, and for a while nothing kept the property holding.
+`crates/fossil-layout/tests/aggregation.rs, the_same_graph_gives_the_same_cell_rows_twice` keeps the
+**cell rows** reproducible, which is a narrower claim one artefact along: the rows come out of
+`Dendrogram` in memory, and the measurement above was of `enrich_layout` writing Parquet across two
+processes. `crates/fossil-layout/tests/cells.rs` narrowed the gap without closing it — it evaluates
+every obligation against the written rungs, so a *wrong* summary is caught, and the same corpus
+summarising *differently* twice was not.
+
+`crates/fossil-layout/tests/cells.rs, the_same_graph_writes_byte_identical_rungs_in_a_second_process_worth_of_work` is the guard.
+It spawns its own binary twice — `current_exe`, filtered to the one `#[ignore]`d half that writes where
+the parent tells it to — and compares every file of the two corpora as **bytes**, rungs and
+quotients alike.
+
+Bytes because the five obligations beside it are all `count(*)` over a join, and a rung holding
+exactly the right rows in a different *order* satisfies every one of them while being a different
+file: the tiling is the addressing, so rows that moved between tiles are a bookmark that resolves to
+somebody else's cells. Two processes because two calls inside one share every value drawn once per
+process and reused — the pid, a seed behind a `OnceLock`, an address the allocator settled on — and
+those are the inputs a summariser reaches for by accident.
+
+It was run red twice before it was believed, and the second time is what says what it is for: a
+per-process order over the quotient's runs, every run and every weight intact, leaves all five
+obligations green and is caught here alone, at `payload/cell/r1/quotient/tiles.parquet` byte 18.
+
+What the guard does not carry is the row above's **scale** — 4,000 vertices against 200,000 — so
+what runs on every PR is the property, and the corpus it was first measured on stays a measurement.
+
+### 2 · The branching factor is declared, not inherited
+
+Every published step contracts by at least four — the same octave the tile pyramid already uses.
+`VertexLevels` fixes that exponent in one place and says why a second spelling of it is the bug the
+constant exists to prevent; a cell tree on the same octave inherits that arithmetic instead of
+inventing one.
+
+Over cells the rule is met **with equality**, which is what a mipmap is: 61,210 → 15,303 → 3,826 is
+4.00× at every step. What the same rule does below saturation is the more useful half — the 1.0× to
+1.8× steps fail it, so **the floor is what chooses the base**, and a writer that starts too fine
+publishes a tree that does not deserialise as one rather than a tree of useless rungs.
+
+<Callout type="warn">
+**Over a dendrogram the declared factor is a floor and not a target, and that was measured rather
+than intended.** This paragraph said the branching factor would be *about four everywhere*. It is
+not, and it cannot be: a cut chooses out of the partitions the dendrogram already holds, and
+Louvain's own steps on com-DBLP are 5.7×, 6.0× and 5.5×. There is no level near 79,270 or 13,928 to
+take, so the rule that survives is **every published step contracts by at least four** — which is
+what removes the 2.5× and 1.2× rungs, and is the whole of what was wrong with the emitted levels.
+
+Getting nearer to four would need levels *between* Louvain's — undoing part of a pass's merges —
+and that needs a merge ordering `community_hierarchy` does not emit. It is not a tuning knob. Over
+cells the question does not arise, which is the cleanest single difference between the two
+partitions after the zoom one.
+
+`log₄(V/chunk)` is likewise an **upper bound** and not the level count: with steps of at least four
+you get at most that many rungs.
+</Callout>
+
+Measured on com-DBLP at a chunk of 4,096, `crates/fossil-layout/src/layout/community.rs, Cut` keeps
+three of the five levels, and that is the cut that exists in code today:
+
+| rung | groups | ceiling it had to clear | contraction |
+| --- | --- | --- | --- |
+| 1 | 55,712 | 79,270 | 5.69× |
+| 2 | 9,248 | 13,928 | 6.02× |
+| 3 | 1,696 | 2,312 | 5.45× |
+
+Levels 4 and 5 are dropped because neither is a quarter of the one above it — which is exactly the
+1.2× step that moved modularity by 0.0001. **The tree has no root**, and the cut does not invent
+one: it ends where the dendrogram stops delivering.
+`crates/fossil-layout/src/layout/community.rs, flatten_to_budget` is the existing half of this: it
+walks the hierarchy and picks **one** level that fits a budget; `Cut` is the same walk choosing a
+**sequence**. A quaternary tree ends the other way round — at one cell, whose members are the graph.
+
+**Which end a rung sequence has read as immaterial here, and it is the thing that decided the
+question.** This paragraph ended *it is the one thing the manifest block does not need to know,
+because it declares counts and not a method* — true of the manifest, and allowed to stand in for the
+whole question. The manifest does not need to know; a reader descending does, because a cut that
+ends at 1,696 groups is a coarse view that stops existing above the level pyramid's own floor of
+1,239 marks, where a quaternary keeps quartering the mark count past it — all the way to one, and
+measurably rather than on paper, which is
+[six rungs further and not one](/docs/design/cells#the-holarchy-does-not-reach-further-and-the-margin-is-six-rungs-nothing-asks-for).
+That the six are below any budget anything spends is the same section's second half.
+[One multiscale structure](/docs/design/cells#the-corpus-carries-one-multiscale-structure-and-it-is-the-cell-pyramid)
+is where that is weighed.
+
+**And the floor is checkable from the document alone.** Because a rung declares a count rather than
+a scale, `crates/fossil-sinks/src/manifest.rs, contracts_by_at_least` evaluates the whole rule over
+the manifest — every rung against the one below it, the finest against the type's own
+`vertex_count` — without opening a file. The factor it compares with is `VertexLevels::stride` at
+one and never a literal four, so the octave keeps the single spelling that constant exists to
+enforce. A reader weighing a descent finds out it is not worth taking before it pays for the rung.
+
+### 3 · A cell is defined against the level below, so it is checkable
+
+This is the half the change of mind does not touch. The bar is the one `levels.rs` already clears —
+evaluate the definition against the data and diff, rather than trusting the writer. For a cell
+there are three obligations and all three are falsifiable by symmetric difference:
+
+<div className="fd-steps">
+
+**Membership.** The members of a cell are *exactly* the children that name it as parent. Not a
+superset, not what the writer recorded separately.
+
+**Count.** Its member count is the sum of its children's counts — and this is an obligation on the
+**row** rather than on the data. It only has content because the count is recorded beside the
+members: derive it from the member set and the check is a tautology no corruption can fail.
+
+**Edges.** A child edge whose two ends have **different** parents sums into an edge between those
+parents. A child edge whose two ends have the **same** parent is not an edge of that parent at all
+— it is absorbed into the parent's internal weight.
+
+</div>
+
+**None of the three mentions how the partition was chosen**, which is why
+`crates/fossil-layout/tests/aggregation.rs, the_three_obligations_hold_up_a_cut_of_a_partition_nobody_designed`
+already ran them over a partition with no design behind it and they held. A grid is such a partition.
+*The partition is arbitrary, the aggregation is exact* is the sentence those tests were written
+under before the page had it.
+
+<Callout type="warn">
+**That third bullet said "its edges are the aggregation of its children's edges", and that is
+false as a union.** It reads as *relabel the endpoints and keep the set*, which emits self-loops
+where a quotient has none — and on a graph with any community structure it is not an edge case but
+the overwhelming majority. Measured on the planted fixture
+`crates/fossil-layout/tests/aggregation.rs` uses — 256 vertices, 1,095 edges — **1,088 of the 1,095 are
+absorbed** and the aggregate quotient has **seven**.
+
+The check that catches both mistakes is **mass conservation per rung**: cross weight plus internal
+weight equals the edge count of the level below, at every rung. A writer that drops sibling edges
+and one that keeps them as self-loops both fail it, and no count of cells notices either.
+</Callout>
+
+**The base case has to be stated or the chain does not reach the graph.** *Defined against the
+level below* bottoms out at the finest rung, whose children are the vertices themselves and whose
+quotient is the raw edge list. Without that, the obligations relate each published level to another
+published level and nothing anchors the sequence to the corpus.
+
+**And the quotient is an artefact beside the rows, not a column on one.** A cell row is one cell;
+a quotient edge is a pair of them, which is a different arity — the same reason a corpus writes its
+vertices and its relations as separate artefacts rather than as one wide table.
+
+In the manifest it is `crates/fossil-sinks/src/manifest.rs, CellQuotient`, under the rung's own
+path, declaring its edge count for the reason a relation declares one — a tile with no rows is not
+written, so a 404 reads as *no edges here* and as *never uploaded* alike. It is **optional per
+rung**, and the next section is what a writer answers that with. What is deliberately *not* in the
+manifest is a summed weight: mass conservation is a property of the bytes, and a total recorded here
+would be a third place to disagree rather than a fourth thing to check.
+
+## No coarse quotient is drawable, and the partition is not the reason
+
+The page used to end on *whether the aggregated edge set is worth writing at every level*, with a
+hairball at level 5 as the worry. It is not a worry and it is not about Louvain. Measured, spatial
+partition over the same com-DBLP:
+
+| level | cells | edges absorbed | quotient edges | mean degree | density |
+| --- | --- | --- | --- | --- | --- |
+| 6 | 70,462 | 50.2% | 246,412 | 7.0 | 0.010% |
+| 8 | 61,210 | 59.6% | 213,128 | 7.0 | 0.011% |
+| 9 | 15,303 | 64.4% | 153,880 | 20.1 | 0.13% |
+| 10 | 3,826 | 70.0% | 110,621 | 57.8 | 1.51% |
+| 11 | 957 | 74.5% | 70,416 | 147.2 | 15.4% |
+| 12 | 240 | 78.1% | 22,899 | 190.8 | 79.8% |
+| 13 | 60 | 81.5% | 1,770 | 59.0 | 100% |
+
+At level 12 the quotient is **79.8% of a complete graph**, and at 13 it is complete. Nothing drawn
+from it carries information: every node is joined to every other, and the picture is the same
+picture for any graph of sixty nodes.
+
+**And it is worse than the community quotient at every comparable size**, which is the measurement
+that rules out blaming the partition. Against the community rows in the Louvain table — 9,248 groups
+at mean degree 11.6, 1,696 at 23.5, 595 at 23.2 — the spatial cells are **2.5× to 6× denser** at
+comparable counts: 3,826 cells at 57.8 against 1,696 communities at 23.5, and 957 cells at 147.2
+against 595 communities at 23.2. The reason is mechanical. A community hierarchy **nests**, so
+merging two groups absorbs the edges between them — that is what the modularity was maximising.
+Merging four neighbouring cells absorbs only what happens to fall inside, which is why the
+absorbed column climbs so much more slowly than the node count falls.
+
+<Callout type="warn">
+**That sentence said *four **arbitrary** neighbouring cells*, and the word is retracted.** It is the
+same false framing the decision above retracts: a cell is not arbitrary with respect to the graph,
+because the id axis it is cut on is monotone in group order and a group order is a depth-first walk
+of the dendrogram. Nothing in the density measurement depended on the word — what it shows is
+narrower and survives whole: **a merge that maximises modularity absorbs edges on purpose, and a
+fixed-count cut absorbs whatever its boundaries happen to enclose.** Nesting is the mechanism, not
+blindness, and the numbers in the table are unchanged.
+</Callout>
+
+So the conclusion is not about this corpus and not about this partition: **no coarse quotient of a
+real graph is drawable, however it is partitioned.** An image has no edges. A mipmap summarises a
+*field*, and a field is exactly the thing that averages; a relation is not, and a coarse level of a
+relation is a complete graph.
+
+Which says where edges go. **They are drawn at the bottom**, where the quotient has mean degree 7.0
+and density 0.010% — which is where a three-pixel floor is already drawing them, because at that
+scale the marks are far enough apart to have something between them. And the quotient at a coarse
+rung is kept **to be measured against**: it is what makes mass conservation checkable per rung. It
+stops being an input to a renderer, which is a demotion and not a deletion — `CellQuotient` is
+still optional per rung, and a writer that publishes one is publishing evidence rather than a
+picture.
+
+### The quotient saturates down the pyramid, and the marks do not
+
+The table above is over the 16-bit quaternary of positions, which is the tree the Morton order
+imposes rather than the one the writer emits. Over the **written** rungs the same saturation is
+there, and it arrives sooner. Measured on com-DBLP by
+`crates/fossil-layout/tests/level_vs_rung.rs, what_a_level_costs_and_what_a_rung_costs_on_com_dblp`:
+
+| rung | cells | quotient density | bytes per mark, at the whole extent | fidelity: TV against a null of the same mark count, each on a grid fitted to that count |
+| --- | --- | --- | --- | --- |
+| 1 | 19,818 | 0.14% | **69.0** | 0.2624 against 0.3580 — **+0.0956** |
+| 2 | 4,955 | 1.34% | 115.3 | 0.2513 against 0.3681 — **+0.1168** |
+| 3 | 1,239 | **12.24%** | 213.9 | 0.2339 against 0.3657 — **+0.1318** |
+| 4 | 310 | **69.92%** | **285.5** | 0.2230 against 0.3700 — **+0.1470** |
+| 5 | 78 | 98.83% | 144.5 | 0.1754 against 0.3567 — **+0.1814** |
+| 6 | 20 | 100% | 133.9 | 0.1798 against 0.4341 — **+0.2543** |
+| 7 | 5 | 100% | 110.2 | 0.1651 against 0.4992 — **+0.3341** |
+| 8 | 2 | 100% | 183.5 | 0.5742 against 0.4992 — **−0.0751**, the one row above one bin per mark |
+| 9 | 1 | none left | 222.0 | 0.7475 against 0.7475 — a tie on a four-bin grid, which is no reading at all |
+
+**The quotient saturates.** By rung 4 it is seven-tenths of a complete graph and by rung 5 it is the
+complete graph, which is the same thing the table above says at its levels 12 and 13 — a relation
+whose coarse level joins everything to everything. That column is a property of the *edges* and it is
+unaffected by anything below.
+
+**And the bytes go the wrong way while it happens.** Bytes per mark should fall as an artefact
+coarsens — a coarser rung is fewer rows for the same picture. Through rung 4 it climbs instead, 69.0
+→ 115.3 → 213.9 → 285.5, because the quotient is filling in faster than the cell count is falling.
+It only falls again at rung 5, once there is almost nothing left to write.
+
+**What does not go with either of them is the marks**, and the last column is a retraction.
+
+<Callout type="warn">
+**This section used to read «and the deep rungs fail on their own terms, which the quotient already
+predicted», and report rungs 4 through 9 scoring worse than an unstructured subsample of their own
+size. That was a measurement of the ruler.** Total variation was taken on the fixed 48×48 grid
+`/docs/design/camera` states — 2,304 bins, which at rung 4's 310 marks is **7.43 bins per mark**.
+Neither the rung nor its null can reach two thirds of the cells, both distances pin against 1
+(0.8431 and 0.8415), and the −0.0016 between them is binning noise. The signature was already
+visible in the published table: the gap collapsed from ~0.1 to ~0.002 and then held at ~0.002 for six
+rungs running, which is what a saturated statistic looks like and not what losing information looks
+like. [A fidelity measure has a resolution](/docs/design/camera#a-fidelity-measure-has-a-resolution-and-below-one-bin-per-mark-it-is-measuring-itself)
+is the general rule, now stated beside the measure it qualifies.
+
+Re-measured on a grid fitted to each arm, `crates/fossil-layout/tests/level_vs_rung.rs, fidelity`
+gets the column above: **every rung beats its null, and the margin grows down the pyramid** rather
+than decaying — +0.0956 at rung 1 to +0.3341 at rung 7. That is what count-weighted centroids should
+do against an unstructured subsample. A rung carries the exact mass of its members and has no
+sampling noise at all; its null has nothing else, and the null's noise grows as the sample shrinks.
+`crates/fossil-layout/tests/level_vs_rung.rs, resolution_sweep` is the evidence and it is kept
+rather than replaced by its conclusion: across both corpora at five resolutions, **no arm measured
+at one bin per mark or finer fails, and every failure sits at two bins per mark or coarser** — 130
+rows, 72 of them in range, zero counterexamples either way.
+
+**Rung 8 is the one honest failure, and it is the ruler again.** Two marks fit `sqrt(2)`, which
+floors to a 2×2 grid, so rung 8 is measured at exactly **2.00 bins per mark** — the only fitted row
+still out of range. Rung 9 is one mark on four bins and its tie is arithmetic rather than evidence.
+
+**And the two corpora stop disagreeing.** On the old ruler the planted fixture passed rungs 7 and 8 —
+by +0.0019 and +0.0010, which is the noise floor — and failed 4, 5, 6 and 9, where com-DBLP failed
+all six below rung 3; nothing explained the difference and nothing could, because both tables were
+readings of the same saturation. On the fitted grid both corpora pass rungs 1 through 7, both fail
+only rung 8, and both pass rung 9 on a grid too coarse to mean anything. The disagreement was the
+grid.
+</Callout>
+
+One claim that stood on the old ruler does **not** survive the fitted one, and it is the reverse of a
+retraction — it was too generous to the rung. The page said that at every mark count where both
+answer, the rung is closer to the payload than the level drawing the same marks. **That holds at two
+of the three counts and reverses at the finest.** On the fitted grid, at 19,818 marks level 2 scores
+0.2460 against rung 1's 0.2624; at 4,955 the rung wins, 0.2513 against 0.2696; at 1,239 the rung wins
+by more, 0.2339 against 0.2804. The planted fixture reproduces the same crossing. The mechanism is
+visible once the resolution is: **a centroid concentrates its cell's whole mass at one point**, which
+is right at a scale coarser than the cell and wrong at a scale finer than it, while a sample spreads
+the same mass out. So *a summary beats a sample* is a claim about the scale it is judged at — the
+rung's advantage is a coarse-scale advantage, and it widens exactly as the picture coarsens.
+
+What this does **not** settle is whether the writer should stop emitting the deep rungs — not because
+they carry nothing, which is now measured false, but because nothing ever asks for them.
+[What this does not settle](/docs/design/cells#what-this-does-not-settle) carries that, with what it
+would cost.
+
+## A categorical channel gets a mode and a purity
+
+A texel averages colour. A category does not average: the mean of two `cluster_id`s is not a cluster,
+and `crates/fossil-sinks/src/generated.rs, PAYLOAD_CATEGORICAL` is the column that says which of the
+payload's columns this is true of.
+
+**That constant is a fact about fossil's writer, not about the corpus in front of you**, and until
+the channel was declared it was the closest thing to an answer the document had. A cell row's `mode`
+is a bare `uint32`. `crates/fossil-sinks/src/manifest.rs, CellRung` said *the mode and purity of the
+payload's categorical* in prose, `corpus.bnf`'s `mode` role said *the majority value of a categorical
+over the rows summarised*, and neither named **which** categorical — because until
+[`channels:`](/docs/design/position) there was nothing to name. So a reader colouring a rung by
+`mode` had to guess which palette the values belonged to, and could not know the domain at all. That
+is the same defect the `domain` field closed one level down, and it survived at this one.
+
+`crates/fossil-sinks/src/manifest.rs, CellTree` names it now — `mode_channel:`, a scalar sitting
+between `coordinates:` and `rungs:` — and the shape comes from the field this tree already carries
+for the same reason. A cell's position is declared rather than derived in silence, and the section
+below notes that it *does a second job while it is there: it names which columns hold the position*.
+The mode had no such field. It has one, and what it holds is the **name** of a channel, resolved
+against the vertex type's own `channels:` list.
+
+**A reference and not a copy**, which is the whole of why it is a name. Repeating the channel's
+`domain` on the tree would put a measured number in the document twice, and a number written twice is
+the thing this block was added to stop — the second copy is the one that goes stale when the
+partition moves. A reader follows one hop and gets the column and the domain from the entry that
+measured them.
+
+**Two states, and that is a departure worth stating rather than noticing.** `coordinates:` and
+`channels:` are lists with three states, because *this type carries none* is an answer a list can
+give. A reference cannot give it: a rung's `mode` column always holds the mode of something, so
+there is no «carries none» to express. And the two are not a choice a writer makes — every tree
+`fossil-layout` writes names its channel, so the absent state is reachable only by a tree written
+before the field or by a writer that is not this one. Absent means *nobody said*, and it never means
+*the mode is of nothing*, because no such rung exists.
+
+**The reference is checked in two places, and neither could make the other's claim.** A name that
+resolves to nothing is the failure a reference introduces, so `apps/corpus/guards` carries
+`mode-names-a-channel` over the document — the name is one of the type's own channels, and the entry
+it lands on is `categorical`, because a measure has no majority to take. That guard cannot reach
+bytes. `crates/fossil-layout/tests/cells.rs` can and does: the pyramid's fifth obligation no longer
+spells `cluster_id`, it *resolves* the reference and recounts the mode and the purity over whatever
+column it lands on, against the written Parquet. So a tree that named the wrong channel fails a test
+rather than drawing a picture, and a tree that named a channel nobody declared fails a guard.
+
+The answer is the one indexed textures already use — **the majority value, and what fraction of the
+cell holds it**. Both, because the mode without the purity is a lie at the coarse end. Measured,
+purity of a cell with respect to `cluster_id`:
+
+| level | purity of the mode |
+| --- | --- |
+| ≤ 8 | 100% |
+| 9 | 98.6% |
+| 10 | 94.0% |
+| 11 | 83.4% |
+| 12 | 68.1% |
+| 13 | 48.7% |
+| 16 | 7.7% |
+
+At and below the saturation scale a cell is **pure by construction** — it holds one cluster, and the
+mode is not a summary but the value. It decays smoothly from there, and the decay is the useful
+signal: a cell whose mode holds 94% of it draws solid, one at 27% draws desaturated, and the picture
+then shows **where the structure is sharp and where the reader is looking at a blur**. Which is
+strictly more than a colour would have carried, and it costs one extra column on a cell row.
+
+## And the one thing that is not an exact aggregate
+
+Counts sum. Edges sum. **Where a cell goes on the plane is a choice** — and a spatial partition
+narrows that choice without closing it. A cell's extent is known from its id alone, so the two
+candidates are the cell's own centre and the members' centroid; they are different pictures, the
+first regular and the second following the data, and no amount of checking makes either correct.
+
+So it is declared rather than derived in silence, exactly as a vertex's position is:
+[where x and y come from](/docs/design/position) is the field, and a cell's position carries a
+provenance in it like any other. Everything else here is verified; this one is declared.
+
+It is the same type and not a second one — `crates/fossil-sinks/src/manifest.rs, CoordinateSystem`
+on the tree, with `crates/fossil-sinks/src/manifest.rs, Provenance`'s three answers available — and
+it does a second job while it is there: it names *which columns* hold the position. A cell's is
+`derived` by construction, which makes the deriver the part that earns its keep, because re-deriving
+is how a reader checks that a cell's referent has not moved and nothing can re-run what nothing
+names. A tree whose writer recorded none reads back as **not declared**, which is weaker than
+`derived` rather than equivalent to it — the rule a corpus written before the block existed is
+already held under, and the reason the whole block is optional rather than defaulted.
+
+## The name promised a nesting this does not have, and the name is gone
+
+**«Holon» was Koestler's**, and the word means a thing that is simultaneously a whole and a part —
+semantic nesting, a level of organisation that is *about* something. That is exactly what the
+sentence at the top of this page gives up. The partition is cut on `dense_id` and carries no
+meaning, so a name that promises meaning worked against every reader who looked it up; the argument
+was never about taste, and [prior art](/docs/design/prior-art) keeps the source cited for that
+reason. The pyramid is spelled **`cell`** now, everywhere — a region of the plane, summarised —
+which is what `corpus.bnf` had been calling its columns all along.
+
+The rename waited on one condition, and the condition was met before it was taken: *a writer that
+partitions spatially, so that nothing in the tree is a community any more*. That writer exists — the
+pass writes `crates/fossil-layout/src/layout/cells.rs, Pyramid`, and
+`crates/fossil-layout/src/layout/community.rs, Cut` is reached only from tests and from
+`crates/fossil-layout/examples/hierarchy_stats.rs, main`. So nothing in a written tree is a
+community, and the old name described a thing that no longer exists in the artefact.
+
+The three sections below are what it cost, and they are kept because two of the three estimates this
+page made before taking it were wrong.
+
+### Half of it was already paid, and the half that was paid is the half a reader sees
+
+`corpus.bnf` writes this pyramid's columns as `cell_id`, `count`, `internal`, `mode` and `purity`,
+in a container it names `cell`, and the quotient's as `src_cell` and `dst_cell`. Both generated
+projections of that file — `crates/fossil-sinks/src/generated.rs` and
+`packages/corpus/src/vocabulary.generated.ts` — carried **zero** occurrences of the old word. So the
+column vocabulary a reader meets in a Parquet file already said `cell`, and what `cargo xtask
+corpus` generates was never part of the rename, because it was never part of the old name.
+
+What was left was the manifest block, the Rust types above it, the prose around it, and one
+directory name.
+
+### The rest, counted — and the count this page published was low
+
+**604 occurrences in 39 files**, case-insensitively, over everything `git ls-files` lists. This
+page said 561 in 36, which was an undercount of 43 in three files, and the shape of the miss is
+worth more than the correction: **56 of the 604 were this page's own route**, which no count of the
+word in prose reaches, because a route is not the word — it is the word inside a path. Splitting the
+remaining 548 by what a rename actually had to do to each:
+
+| where the word was | occurrences | files | what the rename was there |
+| --- | --- | --- | --- |
+| Rust code — `CellTree`, `CellRung`, `CellQuotient`, `CELL_PREFIX`, `cell_count`, `cells_at`, `with_cells` and the test fns | 260 | 11 | mechanical, and the compiler found every one |
+| Rust doc and line comments | 137 | 15 | prose, and the compiler found none of it |
+| design pages on this site | 116 | 7 | prose |
+| guard code under `apps/corpus/guards/` | 22 | 4 | **two of these read the manifest key** |
+| a corpus on disk — the conformance manifest and one snapshot | 7 | 2 | **the format change, and the whole of it** |
+| TypeScript and JavaScript comments | 3 | 3 | prose |
+| `corpus.bnf` | 2 | 1 | prose; its columns already said `cell` |
+| `apps/docs/content/docs/design/meta.json` | 1 | 1 | this page's slug |
+
+**The route moved first, and in its own commit.** `docs/design/holons` — named here without its
+leading slash, because `content.test.ts` now reads a route out of any file in the tree and a dead one
+fails the build wherever it is written — was cited **56 times in 22 files**, and only nineteen of those files are MDX, where `content.test.ts` had been failing the
+build on a `/docs/…` link that does not resolve since the format site was folded in. The rest — Rust
+doc comments, `corpus.bnf`, `packages/corpus/src/corpus.ts` — were held by nothing at all, which is
+why the guard was widened to read the whole tree before a single citation moved. Moving a page and
+leaving its route behind is the exact failure this site's guards were built out of, one directory
+along.
+
+**One collision the count did not predict.** `cell` is a name Rust's own standard library uses:
+`crates/fossil-graph/src/executor.rs` holds a `std::cell::RefCell`, and three pages carried the
+claim that `crates/fossil-graph` *contains no occurrence of* `holon`, `rung`, `cell` or `quotient`.
+That claim was already false before the rename — `packages/corpus`, named in the same sentence,
+carries `cell_id` in its generated vocabulary — and the rename made it false twice over. It is
+restated on [the reference viewer](/docs/design/reference-viewer) and in [what was
+discarded](/docs/design/discarded) as what it always meant: no verb, no plan and no type in that
+crate names a rung, a cell or a quotient. A grep over a four-letter word is not evidence about a
+read surface.
+
+### The wire was four spellings, and the two keys broke in opposite directions
+
+Four spellings reach a corpus on disk. Two are keys — `cells:` on the vertex info and `cell_count:`
+on a rung — and two are values: the `cell/` prefix and the `cell` coordinate system.
+
+**The values were not a compatibility question at all.**
+`crates/fossil-sinks/src/manifest.rs, CELL_PREFIX` is *written into* `prefix:`, and every reader
+takes the declared prefix rather than the constant — which is what `Projection::path`'s own
+paragraph means by declared rather than conventional. A corpus written before the rename keeps
+resolving its tiles under `holon/` however the writer spells the next one, and a corpus is free to
+carry a directory whose name matches nothing in any crate.
+
+**The keys were, and they break in opposite directions — which is the finding.**
+
+<Callout type="warn" title="The rename does not stop an old corpus loading. It stops it saying anything.">
+`crates/fossil-sinks/src/manifest.rs, VertexInfo` carries the block behind
+`#[serde(default, skip_serializing_if = "Option::is_none")]`, and **no struct in the manifest model
+sets `deny_unknown_fields`**. So a corpus written before the rename deserialises *cleanly* under the
+new name, with the pyramid **silently absent** — not an error, not a state a reader can tell apart
+from a corpus that genuinely declares no tree, because
+`crates/fossil-sinks/src/manifest.rs, a_vertex_written_before_the_cell_block_existed_declares_nothing`
+asserts that absence is legal and means *declares nothing*. The rungs are still on disk under
+`holon/` and nothing points at them.
+
+`cell_count` is the opposite — required, no default, so a stale rung fails loudly with a missing
+field. **Under a rename with no alias that failure is unreachable**, because the block above it was
+dropped in silence first. The loud half is the half that never fires.
+
+**This tree has already paid that exact failure once.** `crates/fossil-df-wasm/src/lib.rs` carries
+the account: the browser's report of a run silently lost the pyramid block and then `channels:` —
+two fields present in the YAML the very same call emitted — and what caught it was somebody reading
+both, not a test.
+</Callout>
+
+**It was taken with no alias, and what stands in for one is a guard rather than an attribute.**
+`#[serde(alias = "holons")]` would have made the break loud-free, and it is refused on
+[what was discarded](/docs/design/discarded) for the reason an alias always costs: two spellings of
+one key legal forever is a statement about the *format*, and this site does not say anywhere whether
+that is allowed. Nothing is released and no corpus written by anyone else exists, so what an alias
+buys is a property of a set with nothing in it.
+
+What holds the two halves together instead is the guard, and it was made to hold *before* the
+rename rather than after. `apps/corpus/guards/inspect.mjs, cellsOf` is the one function in the tree
+that reads the key; `mode-names-a-channel` in `apps/corpus/guards/guards.mjs` counts the trees it
+examined, and `apps/corpus/guards/self-test.mjs` asserts that count is non-zero against a fixture
+that writes one. A writer that renames the key and a reader that does not now produces *zero trees
+examined* and a red self-test naming the missing pyramid — which is what a silent `null` would
+otherwise have been reported as a note. That exchange is the whole answer to the callout above: the
+silence is still there in `serde`, and the thing that breaks on it is a guard that counts.
+
+
+## What this does not settle
+
+**Whether the writer should stop emitting the rungs nothing asks for.**
+
+<Callout type="warn">
+**This question was posed as «whether the writer should stop emitting the rungs that fail fidelity»,
+and there are none.** The six failures it named were an artefact of measuring 310 marks on a
+2,304-bin grid; re-measured on a grid fitted to each arm, every rung beats an unstructured subsample
+of its own size and the margin widens as the pyramid coarsens. The question survives the retraction
+because a second measurement from the same instrument puts it on firmer ground than the first one
+did — **not «these rungs carry nothing», which is now measured false, but «nothing ever asks for
+them», which the tree states in three places.**
+</Callout>
+
+A camera spends a budget in *marks* and takes the coarsest artefact that still carries them, so the
+floor on what anything is read at is the smallest budget anything spends — not the deepest zoom, since
+zooming in shrinks what the rectangle holds and answers level 0 off the payload.
+`crates/fossil-layout/tests/level_vs_rung.rs, asked_for` collects the three budgets that exist in
+this tree: **15,000** marks (`SCREEN_MARKS`, the number the pyramid's own base is picked with),
+**20,000** (`BOUNDED_DEFAULTS.limit`, what `apps/playground/src/tiles.ts` actually spends), and
+**160,000** (a 1,200 px canvas at three pixels a mark, if the door ever took the canvas). The
+smallest decides, and on com-DBLP **only rung 1, at 19,818 cells, is above it**. Eight of the nine
+rungs are below anything's budget, and they are **958 kB of the cell pyramid's 2,322** — 41% of it,
+against the 119 kB the fidelity reading would have saved.
+
+**And the obvious conclusion is still not taken here, because the property it would break is
+load-bearing.** `crates/fossil-sinks/src/manifest.rs, planned` emits a complete list — rung 1 up to
+the rung holding a single cell — and that completeness is what lets everything downstream stay
+arithmetic. A reader computes `ceil(base_count / 4^k)` and knows the rung is there; nothing needs a
+*this rung was not written* path, and a corpus fossil wrote always has the artefact its own
+arithmetic names. A writer that stopped at a measured floor would make the tree's tail
+data-dependent — exactly the property
+[the decision above](/docs/design/cells#the-corpus-carries-one-multiscale-structure-and-it-is-the-cell-pyramid)
+refused to pay for in a holarchy — and a budget is a worse floor to cut at than a fidelity score
+would have been, because it is a property of a *reader* and not of the corpus: the writer would be
+choosing what to emit out of a constant living on the other side of the wasm boundary. The tension is
+real in both directions and nothing in the tree resolves it. What would settle it is a reader that
+descends past rung 1 and says which it would rather have: a rung nothing on its side will ever ask
+for, or an absence it has to handle.
+
+**Whether the base is declared per corpus or once globally.** The measurements say it is
+data-dependent and must be written down; they do not say where. Per vertex type is the shape the
+block already has, and a global default would be a number in a spec that is wrong for most corpora —
+but a corpus of many small types would then carry the same measurement many times. What would
+settle it is a second corpus of a different shape, measured the same way.
+
+**The name.** Above, counted, with the ruling it waits on.
+
+**Which level a reader opens on.** The tree makes every level addressable and says nothing about
+where a reader starts. The screen picks the base; nothing yet picks the entry point.
+
+**How a cell tree is written incrementally.** Everything above assumes one pass over a finished
+corpus, and a spatial partition makes this harder rather than easier in one specific way: a new
+vertex outside the current bounding box requantises every position and renumbers every `dense_id`.
+
+**Which relation a tree is over when a type has several.** The block names them and the writer
+chooses them; nothing here says what a reader should do with two trees over the same type, and
+`relations` is a list because refusing to answer that is cheaper than answering it wrongly.
+
+**What a guard would have to grow to read a rung.** `apps/corpus/guards/manifest.mjs` is a line
+scanner that reads a nested mapping one level deep and skips what is deeper, so it sees the tree's
+`prefix` and `chunk_size` and not its rungs — the same wall `index:` hit, and the same fix.
+Nothing reads a rung today, which is why it is a design question and not a gap.

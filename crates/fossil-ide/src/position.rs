@@ -1,6 +1,6 @@
 //! LSP position → byte offset → [`SyntaxToken`] / [`SyntaxNode`] resolution.
 //!
-//! Phase 2 plan 02-06: the minimum bridge the hover handler needs to walk
+//! The bridge the hover handler needs to walk
 //! from an `(line, character)` LSP position down to the enclosing
 //! `MAPPING` / `PROPERTY` CST node, so it can index into the per-mapping
 //! [`fossil_hir::body::HirBody`] and look up `ty_origin` in the provenance
@@ -12,12 +12,12 @@
 //! boundary) deterministically picks the LEFT token, matching what the LSP
 //! hover semantics expect (the token the cursor "is in" / "just past").
 //!
-//! # UTF-16 positions (Phase 6 LSP-01)
+//! # UTF-16 positions
 //!
-//! LSP positions use UTF-16 code units (Monaco / VS Code). Phase 2 treated the
-//! `character` column as a raw byte offset — correct only for ASCII source.
-//! Phase 6 plumbs proper conversion via [`crate::line_index::LineIndex`]
-//! (rust-analyzer pattern, Research Pitfall #4): [`position_to_offset`] now
+//! LSP positions use UTF-16 code units (Monaco / VS Code). This module treated
+//! the `character` column as a raw byte offset once — correct only for ASCII
+//! source. The conversion goes through [`crate::line_index::LineIndex`]
+//! (the rust-analyzer pattern): [`position_to_offset`]
 //! interprets `character` as a UTF-16 code unit, and [`offset_to_lsp_position`]
 //! converts a byte offset back to a UTF-16 column. Both build the index from
 //! the SAME FILE-keyed [`line_offsets`] table, so no new per-mapping Salsa
@@ -41,7 +41,7 @@ pub struct LineOffsets<'db> {
 
 /// Compute byte-offset-per-line table for `file`.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 pub fn line_offsets<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> LineOffsets<'db> {
     let text = file.text(db);
     let mut offsets: Vec<u32> = vec![0];
@@ -57,9 +57,13 @@ pub fn line_offsets<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> Line
 /// Convert an LSP `(line, character)` position to a byte offset.
 ///
 /// `character` is interpreted as a UTF-16 code unit (the LSP wire convention),
-/// converted to a UTF-8 byte offset via the [`LineIndex`]. Returns `None` if
-/// `line` is past the end of the file. (Phase 6 LSP-01 — replaces Phase 2's
-/// byte-offset-as-column assumption; Research Pitfall #4.)
+/// converted to a UTF-8 byte offset via the [`LineIndex`]. `None` when `line`
+/// is past the end of the file; a `character` past the end of ITS line clamps
+/// to that line's last content byte. [`LineIndex::offset`] carries the argument
+/// for the split and what rust-analyzer does at the same layer.
+///
+/// The offset is therefore always inside the file's text, which is what the
+/// callers need: `rowan`'s `token_at_offset` panics on one that is not.
 #[must_use]
 pub fn position_to_offset(index: &LineIndex, line: u32, character: u32) -> Option<u32> {
     index.offset(Utf16Position { line, character })
@@ -89,8 +93,13 @@ pub fn line_index(db: &dyn fossil_base::Db, file: SourceFile) -> LineIndex {
 ///
 /// Walks the CST root via [`SyntaxNode::token_at_offset`]; if the cursor is
 /// on a token boundary returns the left-hand token (typical hover semantic
-/// — "the token I am on / just past"). Returns `None` if the position is
-/// past EOF or the file is empty.
+/// — "the token I am on / just past"). `None` when `line` is past the last
+/// line or the file is empty.
+///
+/// A `character` past the end of its line resolves to the token at the line's
+/// end rather than to `None`, because that is what [`position_to_offset`]
+/// clamps it to. It used to hand `token_at_offset` an offset outside the CST,
+/// which is a `rowan` panic and so a crash in whatever embeds this crate.
 pub fn token_at_position(
     db: &dyn fossil_base::Db,
     file: SourceFile,
@@ -127,7 +136,8 @@ mod tests {
     use std::sync::Arc;
 
     fn db_with_text(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         (db, file)
@@ -156,6 +166,65 @@ mod tests {
         assert!(position_to_offset(&idx, 99, 0).is_none());
     }
 
+    /// The reproducer, verbatim: `tests/completion_property_key.rs`'s `BLANK`
+    /// fixture with the indent a formatter strips. Line 4 is empty, the file is
+    /// 124 bytes, and `(4, 4)` is four columns past the end of that line.
+    const PAST_EOL: &str = "\
+type { Person, Order } := io.shex(\"shop.shex\")
+User := io.csv(\"users.csv\")
+Users : Person from User
+    email = User.email
+
+";
+
+    /// **A column past the end of its line stays on that line.** `(4, 4)` on a
+    /// blank line 4 answers the line's end, not `line_start + 4`.
+    ///
+    /// Before: `Some(127)` for a 124-byte file — an offset outside the text,
+    /// handed to `rowan` by the caller below.
+    #[test]
+    fn position_to_offset_clamps_a_column_past_the_end_of_its_line() {
+        let (db, file) = db_with_text(PAST_EOL);
+        let idx = line_index(&db, file);
+        assert_eq!(PAST_EOL.len(), 124, "the fixture the panic was recorded on");
+        // Line 4 is empty and starts at 123, the last byte being its `\n`.
+        assert_eq!(position_to_offset(&idx, 4, 0), Some(123));
+        assert_eq!(
+            position_to_offset(&idx, 4, 4),
+            Some(123),
+            "a column past the line's end clamps to the line, never past it",
+        );
+        // The line is still the answer, not the document: a huge column on an
+        // EARLIER line stops at that line's last content byte (`\n` excluded),
+        // rather than running on to EOF.
+        assert_eq!(
+            position_to_offset(&idx, 2, 9_999),
+            Some(99),
+            "line 2 is `Users : Person from User`, 24 bytes from 75",
+        );
+        // And the line itself is still a `None`.
+        assert!(position_to_offset(&idx, 99, 0).is_none());
+    }
+
+    /// **The panic.** `token_at_position` handed `rowan` the unclamped offset
+    /// and `SyntaxNode::token_at_offset` aborted the process.
+    ///
+    /// Before: `Bad offset: range 0..124 offset 127`.
+    ///
+    /// No conforming editor sends this — a cursor cannot be past EOL — but
+    /// every harness in this tree computes `(line, character)` by hand, the
+    /// browser worker takes positions from JS, and `fossil-ide` is a library:
+    /// a panic here is a crash in whatever embeds it.
+    #[test]
+    fn token_at_position_past_the_end_of_a_line_does_not_panic() {
+        let (db, file) = db_with_text(PAST_EOL);
+        let tok = token_at_position(&db, file, 4, 4);
+        assert!(
+            tok.is_some(),
+            "the clamped offset is inside the CST, so a token resolves",
+        );
+    }
+
     /// `token_at_position` on `"prefix ex: <https://example.org/>\n"` at
     /// column 8 (inside `ex`) returns an IDENT token whose text is `"ex"`.
     ///
@@ -176,8 +245,8 @@ mod tests {
     fn node_at_position_returns_some_for_valid_position() {
         let (db, file) = db_with_text("prefix ex: <https://example.org/>\n");
         let node = node_at_position(&db, file, 0, 7).expect("expected a node at (0, 7)");
-        // We don't fix the exact kind here (parser shape may vary across
-        // Phase 2 plans); just confirm we got somewhere up the tree.
+        // We don't fix the exact kind here (the parser's node shape is free to
+        // change); just confirm we got somewhere up the tree.
         assert!(!node.text().to_string().is_empty());
     }
 }

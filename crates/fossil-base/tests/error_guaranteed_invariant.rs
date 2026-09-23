@@ -1,12 +1,12 @@
 //! Contract test: [`fossil_base::ErrorGuaranteed`] invariants.
 //!
-//! Per RESEARCH.md §Q6 + plan 02-05 Task 2:
+//! The invariants:
 //!
 //! 1. Every construction path ([`delay_span_bug`] / [`bug`]) returns an
 //!    `ErrorGuaranteed` AND accumulates at least one [`Diagnostic`].
 //! 2. `ErrorGuaranteed` cannot be `Default`-constructed (negative-compile
-//!    assertion documented as a comment — promoted to a `trybuild` test
-//!    in Phase 3 when we have enough emission sites to make a corpus).
+//!    assertion documented as a comment — a `trybuild` test would need a
+//!    corpus of emission sites to be worth its build cost).
 //! 3. `ErrorGuaranteed` is `Send + Sync` (`PhantomData<()>` preserves both;
 //!    `PhantomData<*const ()>` would not — guarding against accidental
 //!    regression of the marker type).
@@ -15,8 +15,9 @@
 //!    `delay_span_bug` exposes the diagnostic to the host via
 //!    `Diagnostic::accumulated`".
 
+use fossil_base::test_support::NativeSystem;
 use fossil_base::{
-    Db, Diagnostic, FossilDb, NativeSystem, Severity, SourceFile, Span, System, bug, delay_span_bug,
+    Db, Diagnostic, FossilDb, Severity, SourceFile, Span, System, bug, delay_span_bug,
 };
 use std::sync::Arc;
 
@@ -109,15 +110,16 @@ fn error_guaranteed_cannot_be_default_constructed() {
     //
     //   let _: fossil_base::ErrorGuaranteed = Default::default();
     //
-    // Trybuild-style negative compile tests are deferred to Phase 3 when we
-    // have enough error-emission sites to make a meaningful corpus.
+    // Trybuild-style negative compile tests stay deferred until there are
+    // enough error-emission sites to make a meaningful corpus; one assertion
+    // does not pay for a second compiler invocation per run.
     fn _no_default<T: Default>() {}
     // _no_default::<fossil_base::ErrorGuaranteed>();   // would not compile
 }
 
 #[test]
 fn error_guaranteed_is_send_and_sync() {
-    // PhantomData<()> preserves Send + Sync per RESEARCH.md §Q6. Verify at
+    // PhantomData<()> preserves Send + Sync. Verify at
     // the type level so a future change to PhantomData<*const ()> (which
     // would break the Salsa accumulator cross-thread flow) trips compilation
     // here.

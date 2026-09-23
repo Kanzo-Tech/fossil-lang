@@ -1,0 +1,17 @@
+// #region shape
+type { Person } := io.shex("hello.shex")
+// #endregion shape
+
+// #region source
+User := io.csv("data/people.csv")
+// #endregion source
+
+// #region header
+People : Person from User
+// #endregion header
+    // #region identity
+    @subject = "https://shop.example/person/{User.id}"
+    // #endregion identity
+    // #region property
+    name     = User.name
+    // #endregion property

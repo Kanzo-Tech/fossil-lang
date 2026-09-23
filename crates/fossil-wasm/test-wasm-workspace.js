@@ -1,13 +1,14 @@
-// Phase 7 plan 07-02 — WASM Workspace lifecycle smoke (WASM-02 / SC#5 first half).
+// WASM Workspace lifecycle smoke.
 //
-// Companion to test-wasm.js (Phase 1) — verifies the ty_wasm-shaped lifecycle
-// (open_file / update_file / close_file / check / compile_file / diagnostics_for /
-// set_target_shex) round-trips through wasm-bindgen + serde-wasm-bindgen
+// Verifies the ty_wasm-shaped lifecycle
+// (open_file / update_file / close_file / check /
+// diagnostics_for) round-trips through wasm-bindgen + serde-wasm-bindgen
 // correctly in a node process. The native cargo-test mirror is
 // `crates/fossil-wasm/tests/workspace.rs` (catches API regressions on every
 // PR without needing the wasm-bindgen toolchain); this script is the
 // JS-side rehearsal that proves wasm-bindgen serialization actually works
-// in node ≥18 — the requirement SC#5 calls out ("testable from node").
+// in node ≥18: the workspace surface has to be testable from node, not only
+// from a browser.
 //
 // Build precondition:
 //   cargo build --release --target wasm32-unknown-unknown -p fossil-wasm
@@ -17,10 +18,10 @@
 // Run:
 //   node crates/fossil-wasm/test-wasm-workspace.js
 //
-// NOTE: this is the same `--target nodejs` bindgen target as Phase 1
-// `test-wasm.js` (CommonJS-friendly, `require('fs')`-based .wasm loading) —
-// distinct from playground-poc/'s `--target web` artefact. Both come from
-// the same .wasm binary; only the generated JS shim differs.
+// NOTE: this is the `--target nodejs` bindgen target (CommonJS-friendly,
+// `require('fs')`-based .wasm loading) — distinct from the `--target web`
+// artefact the browser packages consume. Both come from the same .wasm binary;
+// only the generated JS shim differs.
 
 'use strict';
 
@@ -29,28 +30,6 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 
 const { FossilPlayground } = require('./pkg/fossil_wasm.js');
-
-const MINIMAL_SHEX_JSON = JSON.stringify({
-    '@context': 'http://www.w3.org/ns/shex.jsonld',
-    type: 'Schema',
-    shapes: [
-        {
-            type: 'ShapeDecl',
-            id: 'http://example.org/Person',
-            shapeExpr: {
-                type: 'Shape',
-                expression: {
-                    type: 'TripleConstraint',
-                    predicate: 'http://example.org/name',
-                    valueExpr: {
-                        type: 'NodeConstraint',
-                        datatype: 'http://www.w3.org/2001/XMLSchema#string',
-                    },
-                },
-            },
-        },
-    ],
-});
 
 function fail(msg) {
     console.error(`FAIL: ${msg}`);
@@ -80,7 +59,9 @@ function main() {
     const diags1 = pg.check();
     assert.ok(Array.isArray(diags1), 'check returns an array');
     console.log(`check() -> ${diags1.length} rows`);
-    // Every row carries the LSP shape — { uri, range, severity, message }.
+    // Every row carries the CheckRow shape — { uri, range, severity, message }.
+    // That is the playground's panel shape, NOT the LSP wire: the worker
+    // publishes lsp_types::Diagnostic, which has no `uri` field.
     for (const d of diags1) {
         assert.ok(typeof d.uri === 'string', 'row.uri is a string');
         assert.ok(d.range && d.range.start && d.range.end, 'row.range is well-formed');
@@ -89,15 +70,7 @@ function main() {
         assert.ok(typeof d.message === 'string', 'row.message is a string');
     }
 
-    // ----- compile_file -----
-    const out = pg.compile_file(h1);
-    assert.ok(out && typeof out.sql === 'string', 'compile_file returns { sql, ... }');
-    assert.ok(out.sql.includes('COPY'), 'compile_file SQL contains COPY');
-    assert.ok(out.sql.includes('output.parquet'), 'compile_file SQL contains output.parquet');
-    assert.ok(typeof out.manifest_yaml === 'string', 'compile_file returns { manifest_yaml }');
-    assert.ok(out.manifest_yaml.includes('graphar_version'), 'manifest_yaml contains graphar_version');
-
-    // ----- multi-file isolation + diagnostics_for (B3) -----
+    // ----- multi-file isolation + diagnostics_for -----
     const h2 = pg.open_file('b.fossil', source);
     const perFileA = pg.diagnostics_for(h1);
     const perFileB = pg.diagnostics_for(h2);
@@ -106,15 +79,6 @@ function main() {
     // Every row drained for h1 carries h1's URI; same for h2 (per-file scoping).
     for (const d of perFileA) assert.equal(d.uri, 'a.fossil');
     for (const d of perFileB) assert.equal(d.uri, 'b.fossil');
-
-    // ----- set_target_shex -----
-    pg.set_target_shex(MINIMAL_SHEX_JSON);  // must not throw on a valid ShExJ schema
-    // Failure path — garbage input should throw and NOT wedge the playground.
-    let threw = false;
-    try { pg.set_target_shex('definitely not shex'); } catch (_e) { threw = true; }
-    assert.ok(threw, 'set_target_shex with garbage throws');
-    // Re-install after failure still works (descriptor not half-applied).
-    pg.set_target_shex(MINIMAL_SHEX_JSON);
 
     // ----- close_file -----
     pg.close_file(h1);

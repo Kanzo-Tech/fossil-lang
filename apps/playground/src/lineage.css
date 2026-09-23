@@ -1,0 +1,92 @@
+/*
+ * The lineage panel's own styles.
+ *
+ * Separate from `styles.css` for one reason: the editor half of this app is being replaced,
+ * `styles.css` is the file that replacement touches, and a feature that can be merged without
+ * a conflict is worth a second stylesheet. It reuses `styles.css`'s custom properties and
+ * defines none of its own — the palette stays one palette. Same disposition as its neighbour:
+ * meant to be deleted when `@kanzo-tech/ui` arrives, not extended.
+ */
+
+.lin {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.lin-claim {
+  margin: 0;
+  font: 12px/1.6 var(--mono);
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+}
+
+.lin-note { margin: 0; font: 11px/1.6 var(--mono); color: var(--muted); }
+.lin-err { margin: 0; font: 11px/1.6 var(--mono); color: var(--warn); }
+.lin-dim { color: var(--muted); }
+
+.lin-table { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+.lin-table th,
+.lin-table td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); }
+.lin-table th { color: var(--muted); font-weight: 500; }
+.lin-path { word-break: break-all; }
+
+.lin-conn { color: var(--ok); font-weight: 600; }
+
+.lin-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.lin-role-schema { color: var(--warn); }
+.lin-role-data { color: var(--muted); }
+
+.lin-needs { list-style: none; margin: 0; padding: 0; font: 12px/1.7 var(--mono); }
+.lin-needs li { padding: 0.25rem 0; border-top: 1px solid var(--line); }
+
+.lin-ledger {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.4rem;
+  font: 11px/1.5 var(--mono);
+}
+.lin-ledger div {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.4rem 0.5rem;
+  min-width: 0;
+}
+.lin-ledger dt { color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; }
+.lin-ledger dd { margin: 0.15rem 0 0; word-break: break-word; }
+
+.lin-providers { list-style: none; margin: 0; padding: 0; font: 11px/1.6 var(--mono); }
+.lin-providers li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.25rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.lin-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+}
+.lin-kind-schema { color: var(--warn); }
+.lin-kind-both { color: var(--ok); }

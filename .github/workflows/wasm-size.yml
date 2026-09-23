@@ -39,7 +39,7 @@ jobs:
       - name: Run wasm-opt -O3
         run: wasm-opt -O3 packages/wasm/pkg/fossil_wasm_bg.wasm -o packages/wasm/pkg/fossil_wasm_bg.wasm
 
-      - name: Assert WASM compressed size <= 2 MB (PKG-03)
+      - name: Assert WASM compressed size <= 2 MB
         run: |
           # gzip the wasm; assert compressed size is <= 2 * 1024 * 1024 = 2097152 bytes
           gzip -9 -k packages/wasm/pkg/fossil_wasm_bg.wasm
@@ -47,11 +47,11 @@ jobs:
           LIMIT=2097152
           echo "WASM compressed size: $SIZE bytes (limit: $LIMIT)"
           if [ "$SIZE" -gt "$LIMIT" ]; then
-            echo "::error::WASM bundle exceeds 2 MB compressed (PKG-03): $SIZE > $LIMIT"
+            echo "::error::WASM bundle exceeds 2 MB compressed: $SIZE > $LIMIT"
             exit 1
           fi
 
-      - name: Assert total deployable artefact <= 10 MB (CONTEXT.md SC#3)
+      - name: Assert total deployable artefact <= 10 MB
         run: |
           # Sum of all files in packages/wasm/pkg/ (the published artifact)
           TOTAL=$(du -bsc packages/wasm/pkg/* | tail -1 | awk '{print $1}')

@@ -1,0 +1,137 @@
+---
+title: 'Reference: the standard library'
+description: Every function fossil ships, grouped by what it attaches to — the operations of a relation, of a string, of a number, and the readers under io.
+---
+
+The catalogue, organised by **what is on the left of the dot** — which is how you look one up when
+you are mid-line: you have a value, you want to know what you can do to it.
+
+| namespace | on the left of the dot |
+| --- | --- |
+| [`seq`](#a-relation) | a relation — filter, project, join, aggregate |
+| [`str`](#a-string) | a string |
+| [`math`](#a-number) | a number |
+| [`core`](#core) | the two that belong nowhere else |
+| [`parse`](#parse) | text you want as something else |
+| [`io`](#io) | nothing — the readers are what make the thing |
+
+**Every table below is generated and the prose between them is written.** The rows come out of the
+catalogue the checker resolves a call against, through `cargo xtask catalogue`: a sentence here can
+be wrong, a row cannot, because a row is not written down twice.
+
+## How to read a row
+
+A member of a **type** is reachable through the value or through the type, and they are one function:
+`Contact.email.trim()` is `str.trim(Contact.email)`. A member of a **namespace** has only the one
+spelling, because a namespace is not a value: there is no `Row.qty.integer()`. That is why the first
+column below is sometimes a bare member and sometimes a dotted name.
+
+The first parameter is the receiver, so a row taking `(text: String, start: Integer)` is what you
+call as `s.slice(start = 3)`. **Every parameter carries its name, and the name is load-bearing**: it
+is what a named argument writes to reach that position (`grammar.bnf, NamedArg`), so
+`str.replace(x, needle = "a", replacement = "b")` is a call and `from =` / `to =` is an error.
+`Relation` and `Predicate` stand for the receiver's own relation and a condition over one of its
+rows; everywhere else the type is scalar, which is the approximation the catalogue has today.
+
+## A relation
+
+Everything here takes a relation and gives back a relation, so they chain.
+
+<include>../../generated/stdlib.mdx#seq</include>
+
+`where` filters. `select` narrows to the named fields, and it names one parameter because its columns
+are **names and not values** — the lowering reads them off the syntax. `join` takes an equality
+between qualified references, or several joined by `and`, and does not flatten the rows: both sides
+stay in scope after it. `distinct` takes nothing and keeps one of each identical row; `union` takes
+another binding and gives back one row that answers to the pipeline's name, because a row of it came
+from one of the two sides and nothing says which. `group_by` takes the columns to group by and then
+one aggregation per column it produces, written with the name that column will answer to —
+`group_by(Order.customer, total = math.sum(Order.amount))`. There has to be at least one: a grouping
+with nothing aggregated has the rows of `select(…).distinct()`, which is how to write that. There is
+no `filter` — it is spelled `where`, so that the catalogue spells what the surface spells.
+
+**Six of the twelve reach the surface today** — `where`, `select`, `join`, `distinct`, `union` and
+`group_by`. The other six are rows the checker knows and the lowering does not handle yet.
+
+<Program src="shop/shop.fossil" region="join" title="shop.fossil" />
+
+## A string
+
+<include>../../generated/stdlib.mdx#str</include>
+
+`slug` lowercases, replaces anything that is not a letter or a digit with `-`, and collapses runs of
+them — the shape you want in an IRI. `slice` counts from zero and takes a `start`; there is no `end`.
+`concat` takes exactly two strings. There is no Unicode normalisation: NFC is the only form the
+engine offers, and a row taking a `form` argument would have accepted three values it could not
+honour.
+
+## A number
+
+<include>../../generated/stdlib.mdx#math</include>
+
+`math.sum`, `math.avg`, `math.min` and `math.max` are the four that go inside a `group_by`, and the
+catalogue is what says so: an aggregation naming any other row is refused, and the refusal lists
+these four by reading the table above.
+`math.round` takes no `digits` argument, and it is the one row taking a `Float` and handing back an
+`Integer`.
+
+## `core`
+
+<include>../../generated/stdlib.mdx#core</include>
+
+`core.lang("Bonjour", tag = "fr")` is a language-tagged literal. There is no `dir` argument.
+
+A column the source declares as nullable is a `T?`, and a shape that requires a value will not take
+one. There is no operator that turns one into the other: `core.require` did that by raising, and
+raising is what the execution engine has no spelling for.
+
+## `parse`
+
+<include>../../generated/stdlib.mdx#parse</include>
+
+`format` is a strftime pattern:
+
+<Program src="expressions/expressions.fossil" region="named-arguments" title="expressions.fossil" />
+
+`parse.decimal` differs from `parse.float` in refusing what will not fit: `'1e400'` is an error there
+and an infinity here.
+
+There is no `parse.json`: it needed a JSON extraction the execution engine does not ship, and
+schema-directed parsing — a path and a `T`, rather than a path and a `String` — is what the row
+should have been in the first place. There is no `parse.csv_row` either; pulling one field out of a
+line of CSV is what `io.csv` is for.
+
+## What is not here
+
+Two namespaces have been deleted from the language, and each for its own reason.
+
+`validate` was five rows sharing one shape — the value or an error, never a null — and that shape is
+a raise. The engine that writes a corpus has no way to raise from an expression, so not one of the
+five could run. `validate.regex` is the instructive one: it lowered to a bare match, which the engine
+renders happily as a `Bool`, under a row declaring `String` — so a mapping that validated a code
+wrote `true` into it and nothing failed. Renderable and wrong is worse than absent.
+
+`anon` was two rows, and it is a change of design rather than of engine. Anonymisation is a policy
+you declare once for a corpus and the writer applies, so the language names no anonymisation
+operator. `anon.hash(x, salt = "…")` put the salt in the program text at every call site and made
+"is this column anonymised?" a question you answered by reading every mapping.
+
+## `io`
+
+These take nothing on the left, because they are what makes the thing.
+
+<include>../../generated/stdlib.mdx#io</include>
+
+The table is a different shape because the datum is: an `io.` row is a name, the extensions it
+accepts and what it does with them. It carries no signature — what a call needs to know is that the
+name is a source. The rows live in `catalogue.bnf`, and a format that arrives later is a row there
+and nothing else, including on this page, which will show it without being edited.
+
+The first four read rows, one name giving both a row type and a relation — see
+[naming what you read](/docs/book/what-you-read). The last two read types and bind the output
+contract — see [naming what you produce](/docs/book/what-you-produce).
+
+`io.rdf` and `io.shacl` both accept `.ttl`, and that is not a conflict: the name decides, so
+`io.rdf("g.ttl")` reads rows out of a graph and `io.shacl("s.ttl")` reads types out of a shapes
+graph. `io.shex` does not claim `.ttl`, which is the same rule read the other way —
+`io.shex("catalogue.ttl")` is an error naming both the constructor and the extension.

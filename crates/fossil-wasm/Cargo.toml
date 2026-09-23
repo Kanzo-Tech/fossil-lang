@@ -7,70 +7,73 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "WASM shim for the Fossil compiler — exposes FossilPlayground to JS"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 doctest = false
-test = false
+# `test = false` stood here and it was scaffold boilerplate from `6bb78b4`, the
+# commit that created the workspace — no other manifest under `crates/` carries
+# it. What it did in the end was switch off the two `#[test]`s in
+# `src/lsp_worker.rs`, which had therefore never run: `cargo test -p fossil-wasm`
+# emitted no `Running unittests src/lib.rs` line at all, so there was nothing to
+# notice. Both pass. The `rlib` half of `crate-type` is what makes a unit test
+# linkable, and the wasm gate compiles without `--all-targets`, so a test target
+# costs the browser build nothing.
 
 [lints]
 workspace = true
 
 [dependencies]
-# Compiler-core crates wired into FossilPlayground::compile per RESEARCH.md
+# Compiler-core crates wired into FossilPlayground::compile
 # The wasm dep tree is the compiler front-end crates plus WASM glue. NO
-# fossil-runtime (native DuckDB), NO fossil-cli/fossil-lsp (binaries), NO
+# fossil-layout (the write path's post-pass), NO fossil-cli/fossil-lsp (binaries), NO
 # fossil-sinks/fossil-codegen (the SQL/GraphAr backend — the browser does not
 # compile to SQL anymore; the editor is LSP-only).
 fossil-base    = { path = "../fossil-base" }
 fossil-syntax  = { path = "../fossil-syntax" }
 fossil-hir     = { path = "../fossil-hir" }
 fossil-mir     = { path = "../fossil-mir" }
-# Plan 03-03 Task 2 step 6: WASM host wires `SystemWithDescriptors` on its
-# `WasmSystem` struct. Default `output_descriptor_kind()` returns AcceptAll
-# for Phase 3 v0.1 — Phase 7+ playground wires user-supplied ShEx text.
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-# Phase 13 INPUT-01 (ADR-0037): WasmSystem stores InferredDescriptors registered
+# WasmSystem stores InferredDescriptors registered
 # by the browser-side playground orchestration BEFORE invoking compile() — the
-# Rust forward-propagation path (13-02) reads them through the System trait
-# accessor.
+# Rust forward-propagation path reads them through the System trait accessor,
+# because the browser has no filesystem to introspect a CSV from.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+# The `SHEX` decoder row this host installs on its `System`. A table of `fn`
+# so the dependency buys one const and no vtable — and the
+# playground never names a ShEx type: it hands the row over and the compiler
+# calls it.
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 smol_str = { workspace = true }
-# Phase 5 STDL-07: the stdlib classification table the playground reads to
-# disable native_udf_only functions in-browser. fossil-registry is WASM-clean
-# (deps: fossil-hir + salsa + smol_str — all already in the WASM gate); it does
-# NOT pull fossil-runtime or any native UDF crate (Pitfall 3).
-fossil-registry = { path = "../fossil-registry" }
-# WASM-clean wire types (serde + schemars) — the `refs()`/`providers()` lineage
-# surface returns `SourceRefInfo`/`ProviderInfo`, shared verbatim with the host
-# (keasy consumes the SAME structs). fossil-ide produces them; we name the
-# return type of the test-reachable `refs_native` core.
-fossil-run-status = { path = "../fossil-run-status" }
-# Plan 07-02 (WASM-02): the `check()` method converts byte-offset spans to
-# UTF-16 LSP ranges via `fossil_ide::LineIndex` (rust-analyzer model from
-# 06-05). fossil-ide is the 7th crate in the 9-crate WASM gate (Phase 6) —
-# wasm32-clean by construction. Wiring this dep lets `check()` return the
-# same range shape the LSP Worker (07-03) republishes verbatim.
+# `fossil_lineage::source_refs` is what the test-reachable `refs_native` core
+# calls to report a program's source bindings. WASM-clean: its own deps are
+# fossil-hir + salsa + smol_str, all already inside the WASM gate, and it pulls
+# NEITHER fossil-layout NOR any native UDF crate.
+fossil-lineage = { path = "../fossil-lineage" }
+# The `check()` method converts byte-offset spans to UTF-16 LSP ranges via
+# `fossil_ide::LineIndex` (the rust-analyzer model). fossil-ide is inside the
+# WASM gate — wasm32-clean by construction. Wiring this dep lets `check()`
+# return the same range shape the LSP Worker republishes verbatim.
 fossil-ide = { path = "../fossil-ide" }
-# Plan 07-02: `WasmDb` is a fresh `#[salsa::db]` struct (mirrors `LspDb` in
-# 06-09 — production hosts own their own db; `impl HirDb for FossilDb` is
-# `#[cfg(test)]`-only). Needs the `salsa::Storage<Self>` field + the
-# `Database` derive macro at the trait-object level.
+# `WasmDb` is a fresh `#[salsa::db]` struct (mirrors `LspDb` — production hosts
+# own their own db). Needs the
+# `salsa::Storage<Self>` field + the `Database` derive macro at the
+# trait-object level.
 salsa = { workspace = true }
 
-# Plan 07-03 (WASM-02 / PLAY-01): the WASM LSP transport speaks raw LSP
+# The WASM LSP transport speaks raw LSP
 # JSON-RPC over `postMessage` to a Web Worker. lsp-types gives us the typed
-# request / notification params + capability surface (mirrors fossil-lsp 06-09
-# 1:1); web-sys gives us the `DedicatedWorkerGlobalScope.onmessage` hook the
+# request / notification params + capability surface (mirrors fossil-lsp 1:1);
+# web-sys gives us the `DedicatedWorkerGlobalScope.onmessage` hook the
 # `start_lsp_worker` entrypoint installs. Both are wasm32-clean (lsp-types
-# proven by the 9-crate gate from Phase 6; web-sys is the canonical
-# JsCast-able binding crate). No tokio, no mio (Pitfall 5).
+# proven by the WASM gate; web-sys is the canonical
+# JsCast-able binding crate). No tokio, no mio.
 lsp-types = { workspace = true }
 web-sys = { workspace = true, features = ["MessageEvent", "DedicatedWorkerGlobalScope"] }
 
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) per
-# RESEARCH.md Pitfall 5: the lib version MUST match the wasm-bindgen-cli
+# The lib version MUST match the wasm-bindgen-cli
 # version installed locally / in CI.
 wasm-bindgen             = { workspace = true }
 serde-wasm-bindgen       = { workspace = true }
@@ -80,11 +83,17 @@ js-sys                   = { workspace = true }
 console_error_panic_hook = { workspace = true }
 
 # Transitive WASM enablers — keep as direct deps so feature resolution sticks.
-# The `wasm_js` feature on getrandom is required by salsa→hashbrown→ahash on
-# wasm32; the `.cargo/config.toml` rustflag is the belt-and-suspenders fallback
-# for unconditioned getrandom call sites.
+# The `wasm_js` feature is what lets getrandom build for wasm32 at all, and who
+# needs it is the rudof/ShEx stack, not salsa: `cargo tree -p fossil-wasm -i
+# getrandom@0.3.4 --target wasm32-unknown-unknown` arrives through `rand` ←
+# `oxrdf` ← `oxrdfio` ← `rudof_rdf` ← `shex_ast`. Salsa's own hashbrown hashes
+# with foldhash and draws no randomness. The line here used to say
+# salsa→hashbrown→ahash, until the tree above was read. The `.cargo/config.toml`
+# rustflag is the belt-and-suspenders fallback for unconditioned call sites.
 getrandom = { workspace = true }
 uuid      = { workspace = true }
 
 [dev-dependencies]
+# The lattice the descriptor JSON carries.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 wasm-bindgen-test.workspace = true

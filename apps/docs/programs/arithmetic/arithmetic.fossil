@@ -1,0 +1,12 @@
+type { Line } := io.shex("arithmetic.shex")
+
+Row := io.csv("data/lines.csv")
+
+Lines : Line from Row
+    @subject = "https://shop.example/line/{Row.id}"
+    // #region additive
+    net      = Row.gross - Row.discount
+    // #endregion additive
+    // #region left-assoc
+    payable  = Row.gross - Row.discount + Row.shipping
+    // #endregion left-assoc

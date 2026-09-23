@@ -1,0 +1,52 @@
+{
+  "name": "@fossil-lang/corpus",
+  "version": "0.0.0-development",
+  "description": "Open a fossil corpus and read it. `open` is the door: it runs the fossil-graph verb surface as verb→SQL in WASM (fossil-graph-wasm) and delegates execution to a host-provided DuckDB-WASM query callback (e.g. keasy's Mosaic coordinator) — the larger-than-RAM query layer for whatever draws the graph; fossil ships no viewer. The addressing comes off the same WASM reader and is NOT a second import: `corpus.addressing` is the resolved plan the door already built, turning a GraphAr manifest into tile URLs by asking fossil-graph, which is the only implementation of it.",
+  "//name": "This was `@fossil-lang/graph` and it does not draw one. Its door is `open`, what comes back is a `Corpus`, and every type it exports is `Corpus*` — the door spelled the word outright as `openCorpus` when this rename was argued, so the evidence for the package's name is now the type it answers with rather than the name that answers. The package that DOES put vertices on a GPU — `@kanzo-tech/graph` — sits beside it in `apps/playground/package.json`, where two entries called `graph` meant nothing about an import told you which. The Rust crates behind it are deliberately NOT renamed: `fossil-graph` is a verb surface over a property graph, which is what it says it is, and a cargo name is not in the import space this collision happened in. See /docs/design/corpus.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/corpus"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "//exports": "ONE entry, and there were four. `.` is the door and it exports FOUR values plus the writer's role table: `open`, `levelsOf` and the two errors. **`resolveCorpus` came off it and did not come back under another name — it IS `open` now**: the engine-free route was never a second door, it was the same call with a smaller capability, so `open(base, { manifestFiles })` and `open(url, { readText })` answer with the addressing and `open(url, { query })` answers with the corpus. `GRAPH_INFO_PATH` and `initFossilGraphWasm` stay off: the boot is awaited inside the door, and the index's file name is the door's business — but that second reason had been applied to the engine-free route, which cannot read anything for itself, and the cost was three hand-written copies of the index scan (two here, one in another repository). `readText` publishes the SEQUENCE instead of the file name, which is what those copies were re-implementing. Every part of this still needs the WASM — `corpus.js`, `client.js`, `load.js` and `address.js` all static-import `../pkg/fossil_graph_wasm.js`, so a consumer without that build output cannot load the barrel at all. `./corpus` went when the door reached the verbs. `./address` went when the addressing did: its whole justification was a closure that reached no WASM, and the only way to keep that promise was a second implementation of `crates/fossil-graph/src/plan.rs` in TypeScript. Composing a URL now costs loading a wasm module and an `await`, and that is the price of there being one reader behind one name.",
+
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./pkg/fossil_graph_wasm_bg.wasm": "./pkg/fossil_graph_wasm_bg.wasm"
+  },
+  "files": [
+    "dist/",
+    "pkg/fossil_graph_wasm.js",
+    "pkg/fossil_graph_wasm.d.ts",
+    "pkg/fossil_graph_wasm_bg.wasm",
+    "pkg/fossil_graph_wasm_bg.wasm.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:wasm": "bash scripts/build-wasm.sh",
+    "gen:types": "bash scripts/gen-types.sh",
+    "build": "pnpm run build:wasm && pnpm run gen:types && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "@duckdb/duckdb-wasm": "1.32.0",
+    "json-schema-to-typescript": "^15.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}

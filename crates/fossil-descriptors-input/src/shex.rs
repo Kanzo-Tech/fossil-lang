@@ -1,6 +1,9 @@
-//! Derive an [`InferredDescriptor`] from a `ShEx` shape — the **compile-time,
-//! always** source-type path for RDF inputs (`io.rdf("data.ttl", schema:
-//! "person.shex")`).
+//! Derive an [`InferredDescriptor`] from a `ShEx` shape, for an RDF input
+//! (`io.rdf("data.ttl", schema: "person.shex")`).
+//!
+//! **It has no caller.** The live path for a `schema =` argument is
+//! `fossil_hir::def_map`, which resolves the document through the provider
+//! registry; nothing in the workspace reaches this function.
 //!
 //! A `ShEx` shape *is* the schema: each triple constraint declares a predicate
 //! (→ column name) and a value type (→ column [`Primitive`]). Unlike CSV/JSON
@@ -9,15 +12,12 @@
 //! (parse + `EachOf` flatten + `Ref` resolution + the `valueExpr` narrowing)
 //! lives in the neutral [`fossil_shex`] crate, shared with the output
 //! descriptor's backward checker; here we only map the resolved
-//! [`fossil_shex::ConstraintValue`] onto the [`Primitive`] lattice via the same
-//! `xsd:` table the CSVW path uses ([`datatype_to_primitive_name`]).
-//!
-//! [`Primitive`]: ../../fossil_hir/ty/enum.Primitive.html
-//! [`datatype_to_primitive_name`]: crate::datatype_to_primitive_name
+//! [`fossil_shex::ConstraintValue`] onto the [`Primitive`] lattice via
+//! [`Primitive::from_xsd_iri`], the one xsd table every descriptor shares.
 
+use fossil_graph_schema::Primitive;
 use fossil_shex::{ConstraintValue, ShExDescriptor};
 
-use crate::csvw::datatype_to_primitive_name;
 use crate::inferred::{InferredColumn, InferredDescriptor};
 
 /// Failure modes of deriving a descriptor from a `ShEx` schema.
@@ -36,17 +36,15 @@ pub enum ShExInputError {
 /// Each resolved triple constraint of the target shape becomes one column: the
 /// predicate's local name is the column name, and the `valueExpr` narrows to a
 /// [`Primitive`] (typed literal → that primitive; IRI / object reference →
-/// `AnyURI`; un-narrowable → `String`). Compile-time + deterministic: no data is
+/// `AnyUri`; un-narrowable → `String`). Compile-time + deterministic: no data is
 /// read, so the same `(shape, shape IRI)` always yields the same columns.
 ///
 /// # Errors
 ///
 /// [`ShExInputError::Parse`] if the schema is malformed; [`ShExInputError::ShapeNotFound`]
 /// if `shape_iri` names no shape in the schema.
-///
-/// [`Primitive`]: ../../fossil_hir/ty/enum.Primitive.html
 pub fn inferred_descriptor_from_shex(
-    source_name: &str,
+    uri: &str,
     shape_iri: &str,
     shex_json: &[u8],
 ) -> Result<InferredDescriptor, ShExInputError> {
@@ -61,34 +59,30 @@ pub fn inferred_descriptor_from_shex(
         .iter()
         .map(|c| InferredColumn {
             name: c.predicate_local_name().into(),
-            primitive: column_primitive(&c.value()).into(),
+            primitive: column_primitive(&c.value()),
         })
         .collect();
 
     Ok(InferredDescriptor {
-        source_name: source_name.into(),
+        uri: uri.into(),
         columns,
-        content_hash: String::new(),
+        // A shape is not a file: nothing about it goes stale between two reads
+        // of the same schema text, so there is no token to carry. The empty
+        // token means the caller re-derives, which for a compile-time shape
+        // costs a parse it was doing anyway.
+        freshness_token: String::new(),
     })
 }
 
-/// Map a narrowed [`ConstraintValue`] to a canonical `Primitive` variant name.
-/// Datatype IRIs reuse the CSVW `xsd:` → primitive table (stripped to local
-/// name); IRI / object references are `AnyURI`; anything un-narrowable falls
-/// back to `String` (mirrors the CSVW unknown-datatype behaviour).
-fn column_primitive(value: &ConstraintValue) -> &'static str {
+/// Map a narrowed [`ConstraintValue`] onto the lattice. Datatype IRIs go through
+/// the one xsd table; IRI / object references are `AnyUri`; anything
+/// un-narrowable falls back to `String`.
+fn column_primitive(value: &ConstraintValue) -> Primitive {
     match value {
-        ConstraintValue::Datatype(iri) => {
-            datatype_to_primitive_name(local_name(iri)).unwrap_or("String")
-        }
-        ConstraintValue::Iri => "AnyURI",
-        ConstraintValue::Unknown => "String",
+        ConstraintValue::Datatype(iri) => Primitive::from_xsd_iri(iri).unwrap_or(Primitive::String),
+        ConstraintValue::Iri => Primitive::AnyUri,
+        ConstraintValue::Unknown => Primitive::String,
     }
-}
-
-/// The local name of an IRI — the substring after the last `#` or `/`.
-fn local_name(iri: &str) -> &str {
-    iri.rsplit(['#', '/']).next().unwrap_or(iri)
 }
 
 #[cfg(test)]
@@ -130,31 +124,30 @@ mod tests {
       ]
     }"#;
 
-    fn primitive_of<'a>(d: &'a InferredDescriptor, col: &str) -> &'a str {
+    fn primitive_of(d: &InferredDescriptor, col: &str) -> Primitive {
         d.columns
             .iter()
             .find(|c| c.name == col)
             .unwrap_or_else(|| panic!("column `{col}` missing"))
             .primitive
-            .as_str()
     }
 
     #[test]
     fn derives_columns_and_primitives_from_the_shape() {
         let d = inferred_descriptor_from_shex(
-            "people",
+            "people.ttl",
             "http://example.org/Person",
             PERSON_SCHEMA.as_bytes(),
         )
         .expect("descriptor derives");
 
-        assert_eq!(d.source_name, "people");
+        assert_eq!(d.uri, "people.ttl");
         assert_eq!(d.columns.len(), 3, "one column per triple constraint");
         // Predicate local name → column name; datatype → Primitive.
-        assert_eq!(primitive_of(&d, "name"), "String");
-        assert_eq!(primitive_of(&d, "age"), "Integer");
+        assert_eq!(primitive_of(&d, "name"), Primitive::String);
+        assert_eq!(primitive_of(&d, "age"), Primitive::Integer);
         // nodeKind IRI → an IRI-valued column (an edge target).
-        assert_eq!(primitive_of(&d, "homepage"), "AnyURI");
+        assert_eq!(primitive_of(&d, "homepage"), Primitive::AnyUri);
     }
 
     #[test]
@@ -170,8 +163,8 @@ mod tests {
 
     #[test]
     fn malformed_schema_is_a_parse_error() {
-        let err = inferred_descriptor_from_shex("x", "http://example.org/X", b"not json")
-            .unwrap_err();
+        let err =
+            inferred_descriptor_from_shex("x", "http://example.org/X", b"not json").unwrap_err();
         assert!(matches!(err, ShExInputError::Parse(_)));
     }
 }

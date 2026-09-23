@@ -1,0 +1,25 @@
+── type bindings ──
+Reading ← expressions.shex = https://lab.example/voc#Reading
+
+── source bindings ──
+Row := io.csv(data/readings.csv)
+Valid := Row.where((str.trim(Row.station) != "") and (Row.celsius != null))
+
+── mappings ──
+Readings: 12 written, 12 lowered
+    @subject
+    kit
+    revision
+    accuracy
+    verified
+    station
+    slug
+    code
+    label
+    operator
+    taken_on
+    celsius
+
+── run ──
+vertex Reading (https://lab.example/voc#Reading) × 2 — dense_id, subject, kit, revision, accuracy, verified, station, slug, code, label, operator, taken_on, celsius, x, y, cluster_id
+NO EDGE TYPE was written

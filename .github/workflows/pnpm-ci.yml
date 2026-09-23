@@ -9,9 +9,8 @@ jobs:
   pnpm:
     runs-on: ubuntu-latest
     # Generous ceiling for a COLD run (no cargo cache yet: datafusion wasm in
-    # @fossil-lang/executor + fossil-cli --release in @fossil-lang/examples build
-    # from scratch). Warm runs (cache hit) finish in a few minutes; this only
-    # catches a genuine hang, not a slow first build.
+    # @fossil-lang/executor builds from scratch). Warm runs (cache hit) finish in
+    # a few minutes; this only catches a genuine hang, not a slow first build.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -66,30 +65,67 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Build WASM first — every TS package downstream depends on the wasm-bindgen output
-      # being present in packages/wasm/pkg/. This step is a no-op early in Phase 8
-      # (the @fossil-lang/wasm package doesn't exist yet; its script will be `echo ok`).
-      # Once 08-06 lands, this builds the real artifact.
+      # being present in packages/wasm/pkg/. The `|| echo` fallback keeps the job
+      # green if the package has no build script yet.
       - name: Build wasm
         run: pnpm --filter "@fossil-lang/wasm" run build:wasm || echo "no @fossil-lang/wasm yet"
 
+      # Scoped to packages/ because the workspace also holds `apps/*`, which this
+      # job must not build: the ceiling below is already 60 minutes for a cold
+      # cargo build, and the docs app has its own path-filtered `docs.yml`.
       - name: Build all packages
-        run: pnpm -r build
+        run: pnpm --filter "./packages/*" build
 
-      # `@fossil-lang/examples` is EXCLUDED here: its variations harness builds
-      # `fossil-cli` (datafusion/duckdb — minutes) just to spawn `fossil check`,
-      # and the dedicated, cached, path-filtered `examples.yml` workflow already
-      # owns that ≥30 compile-gate. Running it here too only duplicated the heavy
-      # Rust build and slowed every PR.
-      - name: Test all packages (except examples — owned by examples.yml)
-        run: pnpm --filter "!@fossil-lang/examples" -r test
+      # There is no exclusion here any more. `@fossil-lang/examples` was carved
+      # out because its variations harness built `fossil-cli` (datafusion/duckdb
+      # — minutes) just to spawn `fossil check`, and `examples.yml` owned that
+      # gate. Both are gone: the acceptance corpus is `apps/docs/programs/`, run
+      # by `crates/fossil-cli/tests/programs.rs`, which is a Rust test on the
+      # Rust side of the seam and never enters a pnpm filter.
+      # `@fossil-lang/corpus` has three suites — `address-cost`, `cost`, `containers` —
+      # gated on `describe.skipIf(!hasDuckdb)`, and no job that ran vitest installed the
+      # binary, so they were GREEN with zero assertions: the Morton over-read table, the
+      # container comparison and the cost model were all unasserted here while reading as
+      # covered. Pinned for the reason `corpus.yml` gives beside the same block — these
+      # suites read Parquet footer statistics, and a silent CLI major should turn a run
+      # red on purpose rather than by surprise.
+      - name: Install the duckdb binary (three suites skip themselves without it)
+        env:
+          DUCKDB_VERSION: v1.5.3
+        run: |
+          curl -fsSL -o /tmp/duckdb.zip \
+            "https://github.com/duckdb/duckdb/releases/download/${DUCKDB_VERSION}/duckdb_cli-linux-amd64.zip"
+          unzip -q -o /tmp/duckdb.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/duckdb
+          duckdb -version
+
+      - name: Test all packages
+        run: pnpm --filter "./packages/*" test
 
       - name: Type-check all packages
-        run: pnpm -r exec tsc --noEmit
+        run: pnpm --filter "./packages/*" exec tsc --noEmit
 
-      # PKG-03 JS half — enforce per-package bundle budgets via size-limit.
-      # Currently only @fossil-lang/playground declares a size script + budget
-      # (500 KB gzip per CONTEXT.md SC#4 + 08-VERIFICATION.md gap 2). Future
-      # packages with budgets are picked up automatically by `pnpm -r`.
-      # The WASM half of PKG-03 is enforced separately by wasm-size.yml.
-      - name: Bundle size budget (PKG-03 JS half)
-        run: pnpm -r size
+      # The conformance table, against every reader that exists at once.
+      #
+      # `apps/corpus/conformance/expected.json` is executed by three implementations and
+      # written by none of them: plain Node (`conformance/reader.mjs`), the published
+      # TypeScript (`resolveCorpus`, run by the `Test all packages` step above), and
+      # `fossil_graph::plan` compiled to wasm32 — which needs `packages/corpus/pkg/`,
+      # and this is the only job that has it, because `Build all packages` two steps up
+      # is what wrote it.
+      #
+      # It is a step here rather than in `corpus.yml` for the reason that file states: its
+      # install list is `node` and a `duckdb` binary, deliberately, and the wasm leg needs
+      # a Rust toolchain. There it runs with `--without-wasm`; here it runs with all of
+      # them, and no flag, so the leg cannot go missing without this step going red.
+      #
+      # `--addressing-only` because the `answers` half of that file opens Parquet through the
+      # `duckdb` binary, which this job has no reason to install; `corpus.yml` is where that
+      # half runs, and duplicating its pinned CLI install here would be one version in two
+      # files. It is an explicit refusal rather than a skip — without the flag the run fails.
+      # The wasm reader opens no byte, so it has nothing to contribute to that half anyway.
+      #
+      # `apps/` is otherwise out of this job's reach on purpose — every recursive step is
+      # filtered to `./packages/*`. This is one file invoked by path, not a build of an app.
+      - name: Conformance, every reader at once
+        run: node apps/corpus/conformance/verify.mjs --addressing-only

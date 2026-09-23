@@ -1,6 +1,6 @@
 //! Workspace lifecycle — the `ty_wasm`-shaped multi-file API the playground
 //! and the WASM LSP Worker share. Mirrors Astral's `ty_wasm::Workspace`
-//! exactly (see ADR-0024 + Phase 7 RESEARCH §"Workspace API"): a small
+//! exactly: a small
 //! `FileHandle` newtype on the JS boundary plus an internal
 //! `HashMap<FileHandle, SourceFile>` open-files map.
 //!
@@ -9,10 +9,10 @@
 //! The map keys are plain `u32` newtypes — they NEVER enter a Salsa key,
 //! NEVER appear inside `Box<dyn Trait>`. `update_file` mutates the SAME
 //! `SourceFile` Salsa input via the [`salsa::Setter`] (`set_text`); this is
-//! the EXACT mechanism the Phase-6 LSP `didChange` path uses (ADR-0022 — the
-//! revision bump is the cancellation trigger). No new tracked queries land
+//! the EXACT mechanism the LSP `didChange` path uses (the revision
+//! bump is the cancellation trigger). No new tracked queries land
 //! in the Workspace lifecycle path, so `MAX_PER_MAPPING_FAN_OUT` stays at 1
-//! (verified by `fossil-hir::tests::invalidation_regression`, 3/3).
+//! (`crates/fossil-hir/tests/invalidation_regression.rs` is what proves it).
 //!
 //! # Why `FileHandle` is a `u32` newtype (not the Salsa interned id)
 //!
@@ -34,6 +34,24 @@ use wasm_bindgen::prelude::*;
 ///
 /// `Copy + Clone + Eq + Hash` so it can be a `HashMap` key on the Rust
 /// side; `#[wasm_bindgen]` so JS can pass it back across the boundary.
+///
+/// # Every exported method takes `&FileHandle`, and it has to
+///
+/// wasm-bindgen CONSUMES an exported struct passed by value: the generated glue
+/// calls `__destroy_into_raw()` on the JS wrapper, which nulls its pointer. A
+/// handle passed by value is therefore good for exactly one call, and the second
+/// throws *"null pointer passed to rust"* — from inside a method that has nothing
+/// wrong with it, naming no handle and no file.
+///
+/// `Copy` does not save it. The derive is a Rust-side property; nothing about it
+/// reaches the JS boundary, where this is a class holding a pointer like any
+/// other. The three methods a host calls repeatedly with one handle
+/// (`update_file`, `close_file`, `diagnostics_for`) take `&FileHandle` so
+/// wasm-bindgen borrows instead, and the handle stays live across the whole
+/// lifetime `open_file`'s doc comment promises.
+///
+/// This was reachable from the FIRST loop an editor runs: `updateFile(h, text)` on
+/// every check, with the handle `openFile` returned once.
 #[wasm_bindgen]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FileHandle(pub(crate) u32);
@@ -42,11 +60,11 @@ pub struct FileHandle(pub(crate) u32);
 /// Salsa [`SourceFile`] inputs that downstream queries (`def_map`,
 /// `typecheck_mapping`) consume. Replacing the `SourceFile` for a given
 /// handle on `update_file` is NOT how this works — we KEEP the `SourceFile`
-/// and call `set_text` (Salsa `Setter`, ADR-0022) so the revision bumps and
+/// and call `set_text` (Salsa `Setter`) so the revision bumps and
 /// queries are invalidated incrementally.
 ///
 /// `by_uri` is a secondary index so `lookup_uri` (used by the LSP Worker
-/// in 07-03 to map `textDocument/...` URIs back to handles) is O(1). It
+/// to map `textDocument/...` URIs back to handles) is O(1). It
 /// stays consistent with `files` because every insert / remove touches
 /// both maps.
 // `pub(crate)` is the deliberate visibility (mirrors `WasmSystem` in
@@ -87,9 +105,8 @@ impl OpenFiles {
         Some(f)
     }
 
-    /// URI → handle lookup. Used by the LSP Worker (07-03) to dispatch
-    /// `textDocument/...` notifications from the JS side.
-    #[allow(dead_code)] // 07-03 wires the first caller; the accessor is part of the published surface.
+    /// URI → handle lookup, behind `FossilPlayground::lookup_handle_by_uri`.
+    /// The LSP Worker dispatches `textDocument/...` notifications through it.
     pub(crate) fn lookup_uri(&self, uri: &str) -> Option<FileHandle> {
         self.by_uri.get(uri).copied()
     }

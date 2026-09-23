@@ -4,7 +4,7 @@ expression: schema_for! (Operation)
 ---
 $schema: "http://json-schema.org/draft-07/schema#"
 title: Operation
-description: "All graph operations dispatchable on the surface.\n\nThe `tag = \"verb\"` serde representation makes the wire form `{ \"verb\": \"list_vertex_types\", \"params\": { … } }` — identical for MCP tool calls, HTTP POST bodies, and CLI subcommand args."
+description: "All graph operations dispatchable on the surface.\n\nThe `tag = \"verb\"` serde representation makes the wire form `{ \"verb\": \"schema\", \"params\": { … } }` — identical for MCP tool calls, HTTP POST bodies, and CLI subcommand args.\n\n# It serialises, and it does not deserialise\n\nThere is no `Deserialize` impl, and its absence is load-bearing rather than an oversight: two variants carry [`RawSql`], and [`Operation::from_wire`] is the one door from wire JSON because that door takes the permission those two fields share. [`raw_sql`] is the argument."
 oneOf:
   - type: object
     required:
@@ -12,88 +12,44 @@ oneOf:
       - verb
     properties:
       params:
-        $ref: "#/definitions/ListVertexTypesParams"
+        $ref: "#/definitions/SchemaParams"
       verb:
         type: string
         enum:
-          - list_vertex_types
+          - schema
   - type: object
     required:
       - params
       - verb
     properties:
       params:
-        $ref: "#/definitions/ListEdgeTypesParams"
+        $ref: "#/definitions/ReadParams"
       verb:
         type: string
         enum:
-          - list_edge_types
+          - read
   - type: object
     required:
       - params
       - verb
     properties:
       params:
-        $ref: "#/definitions/DescribeFieldParams"
+        $ref: "#/definitions/ExpandParams"
       verb:
         type: string
         enum:
-          - describe_field
+          - expand
   - type: object
     required:
       - params
       - verb
     properties:
       params:
-        $ref: "#/definitions/DescribeVertexTypeParams"
+        $ref: "#/definitions/PathParams"
       verb:
         type: string
         enum:
-          - describe_vertex_type
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/SearchByLabelParams"
-      verb:
-        type: string
-        enum:
-          - search_by_label
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/FindNeighborsParams"
-      verb:
-        type: string
-        enum:
-          - find_neighbors
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/FindPathParams"
-      verb:
-        type: string
-        enum:
-          - find_path
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/GetVertexParams"
-      verb:
-        type: string
-        enum:
-          - get_vertex
+          - path
   - type: object
     required:
       - params
@@ -111,83 +67,6 @@ oneOf:
       - verb
     properties:
       params:
-        $ref: "#/definitions/HistogramParams"
-      verb:
-        type: string
-        enum:
-          - histogram
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/TopKParams"
-      verb:
-        type: string
-        enum:
-          - top_k
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/SummarizeClusterParams"
-      verb:
-        type: string
-        enum:
-          - summarize_cluster
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/AnswerWithCommunitiesParams"
-      verb:
-        type: string
-        enum:
-          - answer_with_communities
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/ViewportParams"
-      verb:
-        type: string
-        enum:
-          - viewport
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/SetSelectionParams"
-      verb:
-        type: string
-        enum:
-          - set_selection
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/MaterializeGraphParams"
-      verb:
-        type: string
-        enum:
-          - materialize_graph
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
         $ref: "#/definitions/ExecuteSqlParams"
       verb:
         type: string
@@ -195,6 +74,7 @@ oneOf:
           - execute_sql
 definitions:
   AggregateParams:
+    description: "One grouping, over values or over ranges.\n\n**Binning is grouping**, which is why `histogram` is not a second verb: it was the same `GROUP BY` with the key computed from a range instead of read from a column. Setting [`Self::bins`] is what picks which, and it is the only difference between the two."
     type: object
     required:
       - agg
@@ -203,9 +83,19 @@ definitions:
     properties:
       agg:
         $ref: "#/definitions/Aggregation"
+      bins:
+        description: "Group over this many equal-width ranges of `group_by` rather than over its distinct values — what `histogram` used to be. Requires a numeric or temporal column: a categorical one has no ranges, and grouping it by value is already the answer."
+        default: ~
+        type:
+          - integer
+          - "null"
+        format: uint32
+        minimum: 0
       group_by:
+        description: "The column the groups come from — its values, or its ranges when [`Self::bins`] is set."
         type: string
       limit:
+        description: "Cap on rows returned. Groups are ordered by value and cut here; a binned call is cut to this many bins instead, so `limit` means one thing."
         default: 1000
         type: integer
         format: uint32
@@ -227,59 +117,6 @@ definitions:
       - avg
       - min
       - max
-  AnswerWithCommunitiesParams:
-    type: object
-    required:
-      - question
-    properties:
-      max_communities:
-        description: "Cap on how many cluster summaries the LLM may pull as context. The Microsoft `GraphRAG` paper recommends 5–10; defaulting low to match."
-        default: 8
-        type: integer
-        format: uint8
-        minimum: 0
-      question:
-        type: string
-    additionalProperties: false
-  BoundingBox:
-    type: object
-    required:
-      - x_max
-      - x_min
-      - y_max
-      - y_min
-    properties:
-      x_max:
-        type: number
-        format: float
-      x_min:
-        type: number
-        format: float
-      y_max:
-        type: number
-        format: float
-      y_min:
-        type: number
-        format: float
-  DescribeFieldParams:
-    type: object
-    required:
-      - field
-      - vertex_type
-    properties:
-      field:
-        type: string
-      vertex_type:
-        type: string
-    additionalProperties: false
-  DescribeVertexTypeParams:
-    type: object
-    required:
-      - vertex_type
-    properties:
-      vertex_type:
-        type: string
-    additionalProperties: false
   ExecuteSqlParams:
     type: object
     required:
@@ -293,19 +130,25 @@ definitions:
         minimum: 0
       sql:
         type: string
-      timeout_ms:
-        description: "Hard cap on wall-clock execution time, milliseconds."
-        default: 10000
-        type: integer
-        format: uint32
-        minimum: 0
     additionalProperties: false
-  FindNeighborsParams:
+  ExpandMode:
+    description: "Which edges an expansion keeps — Neo4j's `Expand(All)` / `Expand(Into)`."
+    oneOf:
+      - description: "Walk outward: every edge leaving the frontier, up to `depth`."
+        type: string
+        enum:
+          - all
+      - description: "The subgraph induced on `from`: only edges whose **both** ends are in the set.\n\n**The form is right and the speed argument is not available here.** The mode was justified by the membership mask Kùzu (`SEMI_MASKER`) and Neo4j push inside the scan; then it was measured, and `DuckDB` does not accept that class of pruning — a range join against the ids costs more than not pruning at all. So this is a shape a caller wants, not a fast path we have."
+        type: string
+        enum:
+          - into
+  ExpandParams:
     type: object
     required:
-      - iri
+      - from
     properties:
       depth:
+        description: "Hops to walk. [`ExpandMode::Into`] ignores it — the induced subgraph has no frontier to advance."
         default: 1
         type: integer
         format: uint8
@@ -316,15 +159,22 @@ definitions:
         type: array
         items:
           type: string
-      iri:
-        type: string
+      from:
+        description: "The vertices to expand from, by subject IRI."
+        type: array
+        items:
+          type: string
       limit:
         default: 500
         type: integer
         format: uint32
         minimum: 0
+      mode:
+        default: all
+        allOf:
+          - $ref: "#/definitions/ExpandMode"
     additionalProperties: false
-  FindPathParams:
+  PathParams:
     type: object
     required:
       - source_iri
@@ -340,134 +190,48 @@ definitions:
       target_iri:
         type: string
     additionalProperties: false
-  GetVertexParams:
+  ReadParams:
+    description: "Rows of one vertex type, filtered, ordered and capped.\n\n**`where` is SQL and is trusted exactly as far as `execute_sql` is**, which is why its type is [`RawSql`] and why this struct is not `Deserialize`: the permission that opens the escape hatch is the same token that fills this field, and [`Operation::from_wire`](super::Operation::from_wire) is the one place either can be built from wire JSON. [`raw_sql`](super::raw_sql) carries the argument."
     type: object
     required:
-      - subject
-      - vertex_type
-    properties:
-      subject:
-        description: "The vertex's `subject` IRI (unique across the graph)."
-        type: string
-      vertex_type:
-        type: string
-    additionalProperties: false
-  HistogramParams:
-    type: object
-    required:
-      - field
-      - vertex_type
-    properties:
-      bins:
-        default: 50
-        type: integer
-        format: uint32
-        minimum: 0
-      field:
-        type: string
-      vertex_type:
-        type: string
-    additionalProperties: false
-  ListEdgeTypesParams:
-    type: object
-    additionalProperties: false
-  ListVertexTypesParams:
-    type: object
-    additionalProperties: false
-  MaterializeGraphParams:
-    type: object
-    properties:
-      limit:
-        default: 50000
-        type: integer
-        format: uint32
-        minimum: 0
-      vertex_types:
-        description: Restrict to a subset of vertex types. Empty = all.
-        default: []
-        type: array
-        items:
-          type: string
-    additionalProperties: false
-  SearchByLabelParams:
-    type: object
-    required:
-      - query
-    properties:
-      query:
-        type: string
-      top_k:
-        default: 20
-        type: integer
-        format: uint32
-        minimum: 0
-      vertex_types:
-        description: Restrict the vector search to a subset of vertex types. Empty = all.
-        default: []
-        type: array
-        items:
-          type: string
-    additionalProperties: false
-  SetSelectionParams:
-    type: object
-    properties:
-      selection:
-        description: "Mosaic-Selection-compatible filter expression. `None` clears the current selection so the next viewport call returns the full bbox."
-    additionalProperties: false
-  SummarizeClusterParams:
-    type: object
-    required:
-      - cluster_id
-    properties:
-      cluster_id:
-        type: integer
-        format: uint32
-        minimum: 0
-    additionalProperties: false
-  TopKParams:
-    type: object
-    required:
-      - order_by
       - vertex_type
     properties:
       descending:
         default: false
         type: boolean
-      k:
-        default: 20
+      limit:
+        default: 100
         type: integer
         format: uint32
         minimum: 0
       order_by:
-        type: string
+        description: "Column to order by. Absent, the rows arrive in storage order, which is the writer's Morton order and says nothing the caller asked about."
+        default: ~
+        type:
+          - string
+          - "null"
       vertex_type:
         type: string
+      where:
+        description: "A `WHERE` predicate over the type's columns, without the keyword. Reading one vertex is `subject = '…'`."
+        default: ~
+        type:
+          - string
+          - "null"
     additionalProperties: false
-  ViewportParams:
+  SchemaParams:
     type: object
-    required:
-      - bbox
-      - zoom
     properties:
-      bbox:
-        $ref: "#/definitions/BoundingBox"
-      limit:
-        default: 500000
-        type: integer
-        format: uint32
-        minimum: 0
-      lod_threshold:
-        default: 0.5
-        type: number
-        format: float
-      vertex_types:
-        description: Restrict to a subset of vertex types. Empty = all.
-        default: []
-        type: array
-        items:
-          type: string
-      zoom:
-        description: "Current zoom level. Above [`Self::lod_threshold`] the executor swaps to aggregate mode (`GROUP BY cluster_id`) returning ≤ 10k super-nodes regardless of total N."
-        type: number
-        format: float
+      field:
+        description: "Name a field to narrow the statistics to it and pick up its samples. Ignored without `vertex_type`."
+        default: ~
+        type:
+          - string
+          - "null"
+      vertex_type:
+        description: "Name a vertex type to also get its per-field statistics. Omitted, the answer is the type lists alone and no field is queried."
+        default: ~
+        type:
+          - string
+          - "null"
     additionalProperties: false

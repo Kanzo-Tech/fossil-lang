@@ -1,24 +1,31 @@
-//! SC#5 (LSP-01 code-actions half) — integration test for the three code
-//! actions through the PUBLIC [`fossil_ide::code_actions`] entry.
+//! Integration test for the two code actions through the PUBLIC
+//! [`fossil_ide::code_actions`] entry.
 //!
-//! Three cases (Research test-map):
+//! Two cases:
 //!   1. **did-you-mean** — a typo'd-identifier diagnostic carrying the
 //!      structured [`fossil_base::DidYouMean`] candidate yields a `QuickFix`
 //!      whose `WorkspaceEdit` replaces the typo span with the suggestion.
-//!   2. **auto-import** — an unknown-prefix diagnostic yields a `QuickFix`
-//!      inserting the `prefix xx: <iri>` line.
-//!   3. **split-mapping (SECOND-ORDER)** — a real `ShEx` `OneOf` shape produces
-//!      a diagnostic with a populated `suggestion_source` (the Phase-3
-//!      `generate_split_suggestion` snippet, ADR-0006); the split-mapping
-//!      `QuickFix` replaces the offending mapping with that snippet, and the
-//!      EDITED document re-compiles cleanly (`parse` + `def_map` + `typecheck`
-//!      with no new errors) — the same second-order assertion plan 03-08 used
-//!      for the suggestion text itself.
+//!   2. **split-mapping (SECOND-ORDER)** — a diagnostic carrying a populated
+//!      `suggestion_source`; the split-mapping `QuickFix` replaces the
+//!      offending mapping with that snippet, and the EDITED document
+//!      re-compiles cleanly (`parse` + `def_map` + `typecheck` with no new
+//!      errors) — a suggestion is only worth offering if applying it leaves a
+//!      program the compiler accepts.
 //!
-//! The split-mapping case drives the `OneOf` rejection through the REAL
-//! `fossil_descriptors_output::ShExDescriptor` (the host-side descriptor a
-//! production LSP loads) and the REAL `generate_split_suggestion` — the code
-//! action reads `suggestion_source` VERBATIM (never regenerates it).
+//! The split-mapping case drives the REAL renderer the checker uses,
+//! `fossil_hir::render_split_suggestion`, over the disjunct predicates a
+//! `fossil_graph_schema::Rejection::Disjunction` carries — which is exactly
+//! what `Checker::surface_shape_lowering_errors` passes it. The code action
+//! then reads `suggestion_source` VERBATIM (never regenerates it).
+//!
+//! **The disjunct predicates are written out here rather than decoded from a
+//! `ShEx` document, and that is the crate boundary, not a shortcut.** What
+//! crosses out of the decoder is `Rejection::Disjunction` — plain strings — and
+//! the `ShEx`-to-`Rejection` half is `fossil-shex`'s own test. This file owes
+//! the half after it: renderer → `suggestion_source` → code action → an edited
+//! document that still compiles. Reaching for a `ShExDescriptor` here would
+//! test the decoder twice and this boundary not at all, which is why there is
+//! no `fossil-shex` dev-dependency to reach for.
 
 #![cfg(not(target_arch = "wasm32"))]
 // The split snippet + IRI templates are LITERAL Fossil source, not Rust
@@ -27,8 +34,8 @@
 
 use std::sync::Arc;
 
-use fossil_base::{Diagnostic, FossilDb, NativeSystem, Severity, SourceFile, Span, System};
-use fossil_descriptors_output::{ShExDescriptor, ShExLoweringError, generate_split_suggestion};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{Diagnostic, FossilDb, Severity, SourceFile, Span, System};
 use fossil_ide::code_actions;
 use lsp_types::{CodeAction, Position, Range, TextEdit};
 
@@ -102,7 +109,7 @@ fn apply_edits(src: &str, edits: &[TextEdit]) -> String {
 #[test]
 fn did_you_mean_action_replaces_typo_with_suggestion() {
     let db = db();
-    let src = "User : ex:Person from users\n    ex:n = .naem\n";
+    let src = "User : Person from users\n    name = users.naem\n";
     let f = file(&db, src);
     let start = u32::try_from(src.find("naem").unwrap()).unwrap();
     let span = Span::new(start, start + 4);
@@ -125,109 +132,58 @@ fn did_you_mean_action_replaces_typo_with_suggestion() {
     );
 }
 
-#[test]
-fn auto_import_action_inserts_prefix_decl() {
-    let db = db();
-    let src = "User : ex:Person from users\n    ex:age = xsd:integer\n";
-    let f = file(&db, src);
-    let diag = Diagnostic::new(
-        Severity::Error,
-        "undeclared prefix `xsd:` in IRI expression `xsd:integer`",
-        Span::new(0, 5),
-    );
-    let actions = code_actions(&db, f, whole(src), &[diag]);
-    let a = actions
-        .iter()
-        .find(|a| a.title.contains("xsd"))
-        .expect("an auto-import action must be offered");
-    let edited = apply_edits(src, &edits_of(a));
-    assert!(
-        edited.starts_with("prefix xsd: <http://www.w3.org/2001/XMLSchema#>"),
-        "auto-import must prepend the canonical xsd prefix decl; got {edited:?}",
-    );
-}
-
-/// A `ShEx` schema declaring `ex:Contact` with a `OneOf` over (`ex:email` |
-/// `ex:phone`) — the same shape Phase 3's tests use to exercise the rejection.
-const CONTACT_ONEOF_SCHEMA: &str = r#"{
-  "@context": "http://www.w3.org/ns/shex.jsonld",
-  "type": "Schema",
-  "shapes": [
-    {
-      "type": "ShapeDecl",
-      "id": "http://example.org/Contact",
-      "shapeExpr": {
-        "type": "Shape",
-        "expression": {
-          "type": "OneOf",
-          "expressions": [
-            {
-              "type": "TripleConstraint",
-              "predicate": "http://example.org/email",
-              "valueExpr": {
-                "type": "NodeConstraint",
-                "datatype": "http://www.w3.org/2001/XMLSchema#string"
-              }
-            },
-            {
-              "type": "TripleConstraint",
-              "predicate": "http://example.org/phone",
-              "valueExpr": {
-                "type": "NodeConstraint",
-                "datatype": "http://www.w3.org/2001/XMLSchema#string"
-              }
-            }
-          ]
-        }
-      }
-    }
-  ]
-}"#;
+// `auto_import_action_inserts_prefix_decl` stood here: it fed an «undeclared
+// prefix `xsd:`» diagnostic in and expected a top-of-file `prefix xsd: <…>`
+// insertion back. `lower.rs` emits no such diagnostic and `prefix` is not a
+// production, so the action, its message parser and the `WELL_KNOWN_PREFIXES`
+// table went together — see `code_action.rs`, where the same note sits over the
+// hole `auto_import_action` left.
 
 #[test]
 fn split_mapping_action_recompiles_second_order() {
     let db = db();
 
-    // The consuming mapping targets `ex:Contact` (the OneOf shape). Its prefix
-    // is declared so the split snippet (which uses `ex:` predicates) re-compiles.
+    // The consuming mapping targets the `Contact` shape (the OneOf one) through
+    // the `type` binding that brings the document in — the only way a header
+    // names a shape now.
     let src = "\
-prefix ex: <http://example.org/>
-Contact : ex:Contact from contacts
-    ex:email = .email
+type { Contact } := io.shex(\"contact.shex\")
+Contact : Contact from contacts
+    email = contacts.email
 ";
     let f = file(&db, src);
 
-    // Drive the REAL OneOf rejection through the host-side ShEx descriptor +
-    // the REAL split-suggestion generator — exactly as the production typecheck
-    // emitter (`surface_shape_lowering_errors`) does. The mapping span covers
-    // the offending `Contact : ...` block so the split edit replaces it.
-    let descriptor =
-        ShExDescriptor::from_reader(CONTACT_ONEOF_SCHEMA.as_bytes()).expect("ShEx parses");
-    let rej = descriptor
-        .lowering_errors()
-        .iter()
-        .find_map(|e| match e {
-            ShExLoweringError::OneOfRejection(r) => Some(r),
-            _ => None,
-        })
-        .expect("the OneOf shape must produce a rejection");
+    // The two disjuncts of an `ex:Contact` `OneOf` over (`ex:email` | `ex:phone`),
+    // in the vocabulary the checker actually hands the renderer: a
+    // `Rejection::Disjunction` carries each branch's predicate IRIs and nothing
+    // `ShEx`-typed. `fossil-shex` builds these in `rejection_of`; that lowering
+    // is its own crate's test, and what this file owes is the half after it.
+    let disjuncts = vec![
+        vec!["http://example.org/email".to_string()],
+        vec!["http://example.org/phone".to_string()],
+    ];
+
+    // The REAL renderer, with the four values the checker reads off the mapping
+    // it is splitting: the mapping's name, the bound shape NAME (never an IRI),
+    // the `from` binding, and the mapping's own `@subject`.
+    let suggestion = fossil_hir::render_split_suggestion(
+        "Contact",
+        "Contact",
+        "contacts",
+        "\"https://example.org/contact/{contacts.id}\"",
+        &disjuncts,
+        &[],
+    );
 
     // The mapping block runs from `Contact :` to end-of-file.
     let mapping_start = u32::try_from(src.find("Contact :").unwrap()).unwrap();
     let mapping_end = u32::try_from(src.len()).unwrap();
 
-    let suggestion = generate_split_suggestion(
-        "Contact",
-        "`${ex:}contact/${.id}`",
-        "contacts",
-        rej.shape_iri.to_string().as_str(),
-        &rej.suggestion_seed.one_of_node,
-    );
-
     // The production emitter attaches this snippet to the diagnostic verbatim.
     let diag = Diagnostic::new(
         Severity::Error,
-        "ShEx OneOf is not supported in v0.1 — split into separate mappings",
+        "a value disjunction is not supported in v0.1 (2 branches in shape \
+         `http://example.org/Contact`); help: split into 2 separate mappings",
         Span::new(mapping_start, mapping_end),
     )
     .with_suggestion_source(suggestion.clone());
@@ -245,17 +201,16 @@ Contact : ex:Contact from contacts
     );
 
     // SECOND-ORDER: the edited document re-compiles cleanly. Replace the OneOf
-    // mapping with the split snippet (keeping the prefix decl) and assert
+    // mapping with the split snippet (keeping the `type` binding) and assert
     // parse + def_map + typecheck_mapping produce NO error for any mapping (the
-    // split mappings are flat — no OneOf — so they type-check under the
-    // AcceptAll target).
+    // split mappings are flat — no OneOf — so nothing constrains them).
     let edited = apply_edits(src, &produced);
     assert!(
         edited.contains("Contact1") && edited.contains("Contact2"),
         "the edited document must contain the two split mappings; got {edited:?}",
     );
     assert!(
-        !edited.contains("ex:Contact from contacts\n    ex:email = .email\n}"),
+        !edited.contains("Contact : Contact from contacts"),
         "the original OneOf mapping must be gone",
     );
 

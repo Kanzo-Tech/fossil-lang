@@ -1,12 +1,11 @@
-//! `textDocument/semanticTokens/full` — full-document semantic tokens (SC#4).
+//! `textDocument/semanticTokens/full` — full-document semantic tokens.
 //!
 //! # Why this is load-bearing for the playground
 //!
 //! Monaco renders the playground **inert** (no syntax coloring) without LSP
-//! semantic tokens: Fossil ships no `TextMate` grammar to the *playground* (the
-//! `VS Code` extension gets one in Phase 9; the browser editor relies on the
-//! LSP `semanticTokensProvider`). So this module is the *only* source of syntax
-//! highlighting in the v0.1 playground (Research §Semantic Tokens / Monaco).
+//! semantic tokens: Fossil ships no `TextMate` grammar to the *playground* —
+//! the browser editor relies on the LSP `semanticTokensProvider`. So this module
+//! is the *only* source of syntax highlighting in the v0.1 playground.
 //!
 //! # Shape (LSP spec)
 //!
@@ -16,18 +15,18 @@
 //! delta-encoded relative to the previous token (the LSP wire format). The
 //! `tokenType` is an *index* into the legend's `token_types`; `length` and
 //! `deltaStartChar` are **UTF-16 code units** (Monaco counts UTF-16), so we route
-//! every column / length through the 06-05 [`crate::line_index::LineIndex`]
-//! (Research Pitfall #4) — without it any source with a multi-byte character
+//! every column / length through the [`crate::line_index::LineIndex`]
+//! — without it any source with a multi-byte character
 //! (non-ASCII IRIs, emoji in comments) colors the wrong span.
 //!
-//! # FILE-keyed, WASM-clean (Research Pitfall #3)
+//! # FILE-keyed, WASM-clean
 //!
 //! [`semantic_tokens`] is a whole-file CST walk — it re-runs **once** per edit
 //! (no per-mapping Salsa key, so `MAX_PER_MAPPING_FAN_OUT` is untouched). It is a
 //! pure function over [`fossil_syntax::parse`] + the line index, with no native
-//! dependency, so `fossil-ide` stays inside the 9-crate WASM gate. We emit
-//! full-document tokens (not delta/range) per Research's v0.1 recommendation:
-//! < 5ms on 200 lines is well within the perf budget; delta is a v2 optimization.
+//! dependency, so `fossil-ide` stays inside the WASM gate. We emit
+//! full-document tokens rather than delta or range ones: delta is an
+//! optimisation, and the whole-file walk is not the cost on a program's scale.
 
 use fossil_base::SourceFile;
 use fossil_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
@@ -39,7 +38,13 @@ use crate::position::line_index;
 
 /// Token-type indices into [`semantic_legend`]'s `token_types`. The numeric
 /// value IS the `tokenType` field of the emitted 5-tuples, so the order here
-/// MUST stay in lock-step with [`LEGEND_TYPES`].
+/// MUST stay in lock-step with [`LEGEND_TYPES`] — and with the third table,
+/// [`legend_type_name`], which renders the same indices back for review.
+///
+/// `tests/semantic_legend.rs` holds all three: it scrapes the names out of this
+/// module (they are `pub(super)`, so the name is reachable nowhere else) and
+/// calls the other two. It was prose, and prose does not go red — permuting any
+/// two of these left every test in the tree green.
 mod ty {
     pub(super) const KEYWORD: u32 = 0;
     pub(super) const NAMESPACE: u32 = 1;
@@ -54,9 +59,8 @@ mod ty {
 }
 
 /// The legend's token *types*, in index order (index == the `tokenType` u32).
-/// The minimal v0.1 set Fossil needs for legible coloring (Research §Semantic
-/// Tokens): keyword, namespace, type, function, property, string, number,
-/// operator, comment, variable.
+/// The minimal v0.1 set Fossil needs for legible coloring: keyword, namespace,
+/// type, function, property, string, number, operator, comment, variable.
 const LEGEND_TYPES: [SemanticTokenType; 10] = [
     SemanticTokenType::KEYWORD,
     SemanticTokenType::NAMESPACE,
@@ -72,9 +76,9 @@ const LEGEND_TYPES: [SemanticTokenType; 10] = [
 
 /// The LSP semantic-tokens legend Fossil's `semanticTokensProvider` declares.
 ///
-/// `fossil-lsp` (06-08) plugs this straight into
+/// `fossil-lsp` plugs this straight into
 /// `SemanticTokensOptions { legend: fossil_ide::semantic_legend(), .. }` when
-/// registering the capability (Research §LSP capability registration). v0.1
+/// registering the capability. v0.1
 /// emits no modifiers (an empty modifier list), so the `tokenModifiers` bitset
 /// of every emitted token is `0`.
 #[must_use]
@@ -101,12 +105,11 @@ struct AbsToken {
 /// `(deltaLine, deltaStartChar, length, tokenType, tokenModifiers)`.
 ///
 /// Walks the [`fossil_syntax::parse`] CST in source order, classifies each
-/// *leaf* token via [`classify`] (using its parent node for the IDENT /
-/// prefixed-name disambiguation), and converts byte offsets to UTF-16
+/// *leaf* token via [`classify`], and converts byte offsets to UTF-16
 /// `(line, char, length)` through the FILE-keyed [`LineIndex`]. Tokens with no
 /// semantic category (whitespace, structural punctuation, parse-error trivia)
 /// are skipped. The result is exactly what
-/// `textDocument/semanticTokens/full` returns; `fossil-lsp` (06-08) wraps it in
+/// `textDocument/semanticTokens/full` returns; `fossil-lsp` wraps it in
 /// `SemanticTokens { result_id: None, data }`.
 #[must_use]
 pub fn semantic_tokens(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<u32> {
@@ -132,40 +135,45 @@ pub fn semantic_tokens(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<u32> {
 
 /// Classify a leaf [`SyntaxToken`] into a legend token-type index, or `None`
 /// if it carries no color (whitespace, structural punctuation, indent/dedent,
-/// errors). Uses the token's parent node kind to disambiguate `IDENT` /
-/// `PREFIXED_NAME` (a mapping subject vs a shape type vs a stdlib call).
+/// errors). An `IDENT` is disambiguated by its local tree shape — see
+/// [`ident_type`] for the three it can take.
 fn classify(tok: &SyntaxToken) -> Option<u32> {
     use SyntaxKind as K;
     match tok.kind() {
         // ── unambiguous lexical classes ───────────────────────────────
         K::COMMENT => Some(ty::COMMENT),
-        K::STRING | K::TEMPLATE => Some(ty::STRING),
+        // A string with a hole is carved into a run of tokens, so every part
+        // of it has to be named here or the literal loses its colour halfway
+        // through — which is what happened when the carve landed.
+        K::STRING | K::STRING_OPEN | K::STRING_TEXT | K::STRING_CLOSE => Some(ty::STRING),
         K::INTEGER | K::FLOAT => Some(ty::NUMBER),
-        K::FIELD_REF => Some(ty::PROPERTY),
-        K::ABS_IRI => Some(ty::NAMESPACE),
-        K::ENV_VAR => Some(ty::VARIABLE),
+        // `K::ABS_IRI => NAMESPACE` was here, and `K::TEMPLATE` shared the
+        // STRING arm above. Neither is a token: `<` and `>` have one reading
+        // each, and a constant IRI is a STRING like any other.
 
-        // ── keywords (prefix / from / in / use / as / and / or / not /
-        //    iri) + the @export / @attr annotation markers read as keywords ─
-        K::KW_PREFIX
-        | K::KW_FROM
-        | K::KW_IN
-        | K::KW_USE
-        | K::KW_AS
+        // ── keywords (from / and / or / not) + the `@attr` marker,
+        //    read as a keyword ─────────────────────────────────────────────
+        //
+        // `in`, `use` and `as` were here. They stopped being keywords when the
+        // named-graph clause and the import left the grammar, and an `in`
+        // painted as a keyword would now be a lie about an ordinary column.
+        // `iri` went the same way: the subject slot is `@subject`
+        // and `iri` is an ordinary identifier again, so painting it as a
+        // keyword would colour a user's column name. `prefix` is the fifth and
+        // the most recent (grammar.bnf, § RESERVED KEYWORDS).
+        K::KW_FROM
         | K::KW_AND
         | K::KW_OR
         | K::KW_NOT
-        | K::KW_IRI
-        | K::AT_EXPORT
         | K::AT_ATTR => Some(ty::KEYWORD),
 
-        // ── operators (pipeline, assignment, ternary, arithmetic,
-        //    comparison, type-annotation `::`, shape `&`) ─────────────────
-        K::PIPE
-        | K::ARROW
-        | K::DEFINE
+        // ── operators (assignment, ternary, arithmetic, comparison) ───────
+        //
+        // `K::PIPE` was the first name in this list. `|>` is not a token any
+        // more (ruling 7 of 2026-08-11), so painting it
+        // was painting a lexeme the lexer cannot produce.
+        K::DEFINE
         | K::ASSIGN
-        | K::TYPE_ANNOT
         | K::EQ
         | K::NEQ
         | K::LT
@@ -178,45 +186,45 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         | K::SLASH
         | K::PERCENT
         | K::T_QUESTION
-        | K::SHAPE_AND => Some(ty::OPERATOR),
+        // The hole's opener: an operator, because it is what separates the
+        // expression inside from the text around it.
+        | K::INTERP_OPEN => Some(ty::OPERATOR),
 
         // ── context-sensitive names ───────────────────────────────────
-        K::PREFIXED_NAME => Some(prefixed_name_type(tok)),
         K::IDENT => Some(ident_type(tok)),
+
+        // The hole's CLOSER, and the reason it needs its own arm: `{` is
+        // `INTERP_OPEN`, a token of its own, but `}` is an ordinary `RBRACE`
+        // shared with `type { Person } := …` and `{ A, B } := …`. Painting
+        // every `RBRACE` would colour those, so the arm asks the parent — the
+        // grammar puts the closer directly under `INTERPOLATION`
+        // (`Interpolation := INTERP_OPEN Expression RBRACE`) and nowhere else.
+        // Without it the literal opened as an operator and closed as nothing:
+        // the run went string, string, operator, expression, *gap*, string.
+        K::RBRACE if is_interpolation_close(tok) => Some(ty::OPERATOR),
 
         _ => None,
     }
 }
 
-/// A `PREFIXED_NAME` (`ex:Person`, `ex:name`) is a shape *type* when it sits in
-/// a mapping header's `SHAPE_EXPR` (`User : ex:Person`), and a *property*
-/// otherwise (the predicate of a `PROPERTY`, e.g. `ex:name = .name`). Default to
-/// namespace if it is neither (a bare prefixed name in an expression position).
-fn prefixed_name_type(tok: &SyntaxToken) -> u32 {
-    if has_ancestor(tok, SyntaxKind::SHAPE_EXPR) {
-        ty::TYPE
-    } else if has_ancestor(tok, SyntaxKind::PROPERTY_LHS) || has_ancestor(tok, SyntaxKind::PROPERTY)
-    {
-        ty::PROPERTY
-    } else {
-        ty::NAMESPACE
-    }
-}
-
-/// Classify a bare `IDENT`. The grammar (parser/expr.rs) produces no `CALL_EXPR`
-/// / `FIELD_REF` *leaf* — calls and member access are `POSTFIX_EXPR` nodes and a
-/// primary field ref is a `FIELD_REF_EXPR`. So we read the IDENT's local tree
-/// shape, in priority order:
+/// Classify a bare `IDENT`. Calls and member access are `POSTFIX_EXPR` nodes —
+/// there is no call *leaf* token. So we read the IDENT's local tree shape, in
+/// priority order:
 ///
-/// 1. **property** — the IDENT names a record field: it is the IDENT of a
-///    `FIELD_REF_EXPR` (`.name` in primary position) or it directly follows a
-///    `DOT` sibling (`x.name` member access under a `POSTFIX_EXPR`).
-/// 2. **function** — the IDENT is a *call callee*: its primary node
-///    (`LITERAL_EXPR` / `IRI_EXPR`) is the first child of a `POSTFIX_EXPR` that
-///    also has an `LPAREN` child (`upper(...)`, `io.csv(...)`).
-/// 3. **namespace** — the prefix segment of a prefixed name (`ex` in
-///    `ex:Person`): under an `IRI_EXPR`.
-/// 4. **variable** — otherwise (a mapping subject, a source name, a binding).
+/// 1. **property** — the IDENT names a record field: it directly follows a
+///    `DOT` sibling (`User.name` member access under a `POSTFIX_EXPR`). It used
+///    to have a second way in, the IDENT of a `FIELD_REF_EXPR` (`.name` in
+///    primary position), and that node is gone — a leading `.` is an error —
+///    which leaves this rule with ONE shape, and the one every reference now has.
+/// 2. **function** — the IDENT is a *call callee*: its `LITERAL_EXPR` is the
+///    first child of a `POSTFIX_EXPR` that also has an `LPAREN` child
+///    (`upper(...)`, `io.csv(...)`).
+/// 3. **variable** — otherwise (a mapping subject, a source name, a binding).
+///
+/// A **namespace** rule sat between 2 and 3: the prefix segment of `ex:Person`,
+/// found by climbing to an `IRI_EXPR`. Both are gone, and a shape name is now
+/// an ordinary IDENT that falls to rule 3 — correctly, because it IS a binding
+/// the program made.
 fn ident_type(tok: &SyntaxToken) -> u32 {
     if is_field_name(tok) {
         return ty::PROPERTY;
@@ -224,22 +232,23 @@ fn ident_type(tok: &SyntaxToken) -> u32 {
     if is_call_callee(tok) {
         return ty::FUNCTION;
     }
-    if has_ancestor(tok, SyntaxKind::IRI_EXPR) {
-        return ty::NAMESPACE;
-    }
     ty::VARIABLE
 }
 
-/// Whether `tok` names a record field — the IDENT of a `FIELD_REF_EXPR` or an
-/// IDENT immediately preceded by a `DOT` token (member access).
+/// Whether this `RBRACE` closes an interpolation hole rather than a
+/// destructuring pattern. The parser builds `INTERPOLATION` around
+/// `INTERP_OPEN Expression RBRACE` and bumps the closer as a direct child of
+/// that node, so the parent is the whole test — and it stays true for the
+/// recovery path, where `expect_or_recover` still attaches the brace it found
+/// before `p.finish()`.
+fn is_interpolation_close(tok: &SyntaxToken) -> bool {
+    tok.parent()
+        .is_some_and(|p| p.kind() == SyntaxKind::INTERPOLATION)
+}
+
+/// Whether `tok` names a record field — an IDENT immediately preceded by a
+/// `DOT` token (member access).
 fn is_field_name(tok: &SyntaxToken) -> bool {
-    if tok
-        .parent()
-        .is_some_and(|p| p.kind() == SyntaxKind::FIELD_REF_EXPR)
-    {
-        return true;
-    }
-    // Preceding sibling token is a DOT (postfix `x.name`).
     prev_token_kind(tok) == Some(SyntaxKind::DOT)
 }
 
@@ -249,10 +258,7 @@ fn is_call_callee(tok: &SyntaxToken) -> bool {
     let Some(primary) = tok.parent() else {
         return false;
     };
-    if !matches!(
-        primary.kind(),
-        SyntaxKind::LITERAL_EXPR | SyntaxKind::IRI_EXPR
-    ) {
+    if primary.kind() != SyntaxKind::LITERAL_EXPR {
         return false;
     }
     let Some(postfix) = primary.parent() else {
@@ -282,18 +288,6 @@ fn prev_token_kind(tok: &SyntaxToken) -> Option<SyntaxKind> {
         cur = t.prev_token();
     }
     None
-}
-
-/// Whether `tok` has an ancestor node of `kind`.
-fn has_ancestor(tok: &SyntaxToken, kind: SyntaxKind) -> bool {
-    let mut node = tok.parent();
-    while let Some(n) = node {
-        if n.kind() == kind {
-            return true;
-        }
-        node = n.parent();
-    }
-    false
 }
 
 /// Convert one token's byte range to UTF-16 `(line, start_char, length)` via the
@@ -403,51 +397,87 @@ mod tests {
     use std::sync::Arc;
 
     fn db_file(src: &str) -> (fossil_base::FossilDb, SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         (db, file)
     }
 
+    /// v0.1 emits no modifiers, so the `tokenModifiers` bitset of every token is
+    /// `0`. The types are `tests/semantic_legend.rs`'s subject, not this one's:
+    /// this counted to ten and pinned indices 0 and 8, which is a copy of two
+    /// tenths of the answer and could not notice the other eight moving.
     #[test]
-    fn legend_has_ten_types_and_no_modifiers() {
-        let legend = semantic_legend();
-        assert_eq!(legend.token_types.len(), 10);
-        assert!(legend.token_modifiers.is_empty());
-        assert_eq!(
-            legend.token_types[ty::KEYWORD as usize],
-            SemanticTokenType::KEYWORD
-        );
-        assert_eq!(
-            legend.token_types[ty::COMMENT as usize],
-            SemanticTokenType::COMMENT
-        );
+    fn the_legend_declares_no_modifiers() {
+        assert!(semantic_legend().token_modifiers.is_empty());
     }
+
+    /// A whole small program, so the token stream is the one a real file emits.
+    /// These fixtures were `prefix ex: <https://example.org/>` — one retired
+    /// line, which lexes to error tokens now and asserts nothing about colour.
+    const SRC: &str = "\
+type { Person } := io.shex(\"person.shex\")
+users := io.csv(\"users.csv\")
+Users : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+";
 
     #[test]
     fn tokens_are_a_multiple_of_five() {
-        let (db, file) = db_file("prefix ex: <https://example.org/>\n");
+        let (db, file) = db_file(SRC);
         let data = semantic_tokens(&db, file);
         assert_eq!(data.len() % 5, 0, "the token stream must be 5-tuples");
-        assert!(!data.is_empty(), "a prefix decl should emit tokens");
+        assert!(!data.is_empty(), "a program should emit tokens");
     }
 
+    /// The reserved set is `from`, `and`, `or`, `not` and the `@attr` sigils;
+    /// painting an ordinary identifier as a keyword is the failure the
+    /// classifier's own comment warns about.
     #[test]
-    fn prefix_keyword_is_first_token() {
-        let (db, file) = db_file("prefix ex: <https://example.org/>\n");
+    fn from_is_painted_as_a_keyword() {
+        let (db, file) = db_file(SRC);
         let decoded = decode_tokens(&semantic_tokens(&db, file));
-        // The `prefix` keyword is at line 0, col 0, length 6, type keyword.
-        let first = decoded.first().expect("at least one token");
-        assert_eq!(first.0, 0, "line");
-        assert_eq!(first.1, 0, "col");
-        assert_eq!(first.2, 6, "len of `prefix`");
-        assert_eq!(first.3, ty::KEYWORD, "type keyword");
+        let kw = decoded
+            .iter()
+            .find(|&&(_, _, _, t)| t == ty::KEYWORD)
+            .expect("a keyword token");
+        assert_eq!(kw.0, 2, "`from` is on the mapping header line");
+        assert_eq!(kw.2, 4, "len of `from`");
+    }
+
+    /// The hole closes in the colour it opened in.
+    ///
+    /// `{` is `INTERP_OPEN`, a token of its own and never anything else, so it
+    /// was painted from the day the carve landed. `}` is an ordinary `RBRACE`,
+    /// the same token the destructuring on line 0 writes, and it was painted as
+    /// nothing at all — a literal that opened as an operator and ended in a
+    /// gap. Both halves are asserted here, because the fix has to name the
+    /// interpolation and not the brace: line 3 gains the closer, line 0 keeps
+    /// exactly the one operator it always had, its `:=`.
+    #[test]
+    fn the_interpolation_closes_in_the_colour_it_opened() {
+        let (db, file) = db_file(SRC);
+        let decoded = decode_tokens(&semantic_tokens(&db, file));
+        let ops_on = |want: u32| -> Vec<u32> {
+            decoded
+                .iter()
+                .filter(|&&(line, _, _, t)| line == want && t == ty::OPERATOR)
+                .map(|&(_, col, _, _)| col)
+                .collect()
+        };
+        // `    @subject = "https://example.org/u/{users.id}"`
+        //                ^13            the hole ^38    ^47
+        assert_eq!(ops_on(3), vec![13, 38, 47], "all tokens: {decoded:?}");
+        // `type { Person } := io.shex("person.shex")` — the `:=` and NOTHING
+        // else. If the classifier had taken every `RBRACE`, col 14 would be here.
+        assert_eq!(ops_on(0), vec![16], "all tokens: {decoded:?}");
     }
 
     #[test]
     fn comment_classified_as_comment() {
         // Fossil comments are `//`-to-EOL (lexer.rs), NOT `#`.
-        let (db, file) = db_file("// a comment\nprefix ex: <https://example.org/>\n");
+        let (db, file) = db_file(&format!("// a comment\n{SRC}"));
         let decoded = decode_tokens(&semantic_tokens(&db, file));
         assert!(
             decoded.iter().any(|&(_, _, _, t)| t == ty::COMMENT),
@@ -480,15 +510,17 @@ mod tests {
     #[test]
     fn utf16_columns_for_multibyte_comment() {
         // A comment with a 2-byte `é`; the token AFTER it on the next line must
-        // start at a UTF-16-correct column (the LineIndex handles this).
-        let (db, file) = db_file("// café\nprefix ex: <https://example.org/>\n");
+        // start at a UTF-16-correct column (the LineIndex handles this). Read as
+        // bytes, `café` is five and the column would be off by one.
+        let (db, file) = db_file(&format!("// café\n{SRC}"));
         let decoded = decode_tokens(&semantic_tokens(&db, file));
-        // `prefix` on line 1, col 0.
-        let kw = decoded
+        let first_on_line_1 = decoded
             .iter()
-            .find(|&&(_, _, _, t)| t == ty::KEYWORD)
-            .expect("a keyword token");
-        assert_eq!(kw.0, 1, "prefix is on line 1");
-        assert_eq!(kw.1, 0, "prefix starts at col 0");
+            .find(|&&(line, _, _, _)| line == 1)
+            .expect("a token on the line after the comment");
+        assert_eq!(
+            first_on_line_1.1, 0,
+            "the line after the comment starts at column 0"
+        );
     }
 }

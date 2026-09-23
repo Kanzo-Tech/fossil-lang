@@ -1,0 +1,34 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (discovery::ReadParams)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: ReadParams
+description: "Rows of one vertex type, filtered, ordered and capped.\n\n**`where` is SQL and is trusted exactly as far as `execute_sql` is**, which is why its type is [`RawSql`] and why this struct is not `Deserialize`: the permission that opens the escape hatch is the same token that fills this field, and [`Operation::from_wire`](super::Operation::from_wire) is the one place either can be built from wire JSON. [`raw_sql`](super::raw_sql) carries the argument."
+type: object
+required:
+  - vertex_type
+properties:
+  descending:
+    default: false
+    type: boolean
+  limit:
+    default: 100
+    type: integer
+    format: uint32
+    minimum: 0
+  order_by:
+    description: "Column to order by. Absent, the rows arrive in storage order, which is the writer's Morton order and says nothing the caller asked about."
+    default: ~
+    type:
+      - string
+      - "null"
+  vertex_type:
+    type: string
+  where:
+    description: "A `WHERE` predicate over the type's columns, without the keyword. Reading one vertex is `subject = '…'`."
+    default: ~
+    type:
+      - string
+      - "null"
+additionalProperties: false

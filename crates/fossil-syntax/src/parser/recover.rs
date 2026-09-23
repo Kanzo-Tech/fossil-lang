@@ -4,7 +4,7 @@
 // they need `pub(crate)` visibility.
 #![allow(clippy::redundant_pub_crate)]
 
-//! Error recovery per RESEARCH.md §Q2: anchor-based "bump until we see a known
+//! Error recovery: anchor-based "bump until we see a known
 //! start-of-the-next-thing" recovery. Anchors are kept tiny — Fossil's INDENT/
 //! DEDENT layer + the small set of item-leading keywords makes this trivial.
 //!
@@ -13,16 +13,15 @@
 //! - [`recover_to`] — consume tokens into an `ERROR` node until the current
 //!   token is in `anchors` (or EOF). Emits a single `UnexpectedToken`
 //!   diagnostic per call.
-//! - [`expect_or_recover`] — like the Phase 1 `Parser::expect` but DOES NOT
-//!   consume the offending token on mismatch. Instead it emits a zero-width
-//!   `ERROR` marker + an `ExpectedToken` diagnostic, then delegates to
-//!   `recover_to` so the offending token can be re-examined by the caller's
-//!   recovery cascade.
+//! - [`expect_or_recover`] — like `Parser::expect` but DOES NOT consume the
+//!   offending token on mismatch. Instead it emits a zero-width `ERROR` marker
+//!   and an `ExpectedToken` diagnostic, then delegates to `recover_to` so the
+//!   offending token can be re-examined by the caller's recovery cascade.
 //!
-//! The Phase 1 `Parser::expect` was kept as a thin wrapper for back-compat
-//! with the existing prefix-decl / source-def / mapping-header callers — see
-//! `super::Parser::expect`. New code SHOULD prefer `expect_or_recover` with
-//! an explicit anchor set.
+//! `Parser::expect` survives for the callers inside `parser::expr` that are
+//! already bounded by a delimiter and so have no anchor set worth naming — see
+//! `super::Parser::expect`. New code SHOULD prefer `expect_or_recover` with an
+//! explicit anchor set.
 
 use crate::kind::SyntaxKind;
 
@@ -32,28 +31,26 @@ use super::diag::ParseDiagnostic;
 /// Token kinds that start a top-level item. After a parse error inside or
 /// between items, the parser bumps until it sees one of these (or EOF).
 ///
-/// `IDENT` and `AT_EXPORT` are deliberately included even though `IDENT` is
-/// ambiguous at lookahead-0 — `parse_program` re-disambiguates IDENT into
-/// `Definition` / `Mapping` / fallthrough-error on the next iteration.
-pub(crate) const TOP_LEVEL_ANCHORS: &[SyntaxKind] = &[
-    SyntaxKind::KW_USE,
-    SyntaxKind::KW_PREFIX,
-    SyntaxKind::AT_EXPORT,
-    SyntaxKind::IDENT,
-];
+/// `IDENT` is deliberately included even though it is ambiguous at
+/// lookahead-0 — `parse_program` re-disambiguates IDENT into `SourceDef` /
+/// `Mapping` / fallthrough-error on the next iteration.
+///
+/// It is now a one-element set. `KW_PREFIX` was the other, and with the
+/// vocabulary declaration gone every top-level item
+/// starts with an `IDENT` or a `{` — and the `{` is `MULTI_SOURCE_DEF`, which
+/// the outer loop dispatches without needing an anchor.
+pub(crate) const TOP_LEVEL_ANCHORS: &[SyntaxKind] = &[SyntaxKind::IDENT];
 
-/// Token kinds that end a property inside a `MAPPING_BODY` (or annotation
-/// body): either the `NEWLINE` separator or the `DEDENT` closing the body
-/// block. Note `peek_kind` skips `NEWLINE` as trivia, so for property-level
-/// recovery the practical anchor is `DEDENT` plus whatever starts the next
-/// property (`IDENT` / `KW_IRI`).
+/// Token kinds that end a property inside a `MAPPING_BODY`: either the
+/// `NEWLINE` separator or the `DEDENT` closing the body block. Note
+/// `peek_kind` skips `NEWLINE` as trivia, so for property-level recovery the
+/// practical anchor is `DEDENT` plus whatever starts the next property
+/// (an `IDENT`, or the `AT_ATTR` of the identity).
+///
+/// The retired `<…>` key needs no anchor: `items::parse_property` refuses it on
+/// an `LT` arm that consumes the whole form.
 pub(crate) const MAPPING_BODY_ANCHORS: &[SyntaxKind] =
-    &[SyntaxKind::DEDENT, SyntaxKind::IDENT, SyntaxKind::KW_IRI];
-
-/// Token kinds that close balanced brackets — used when recovering inside a
-/// `{ ... }` annotation block or `( ... )` call args.
-pub(crate) const CLOSE_BRACKET_ANCHORS: &[SyntaxKind] =
-    &[SyntaxKind::RBRACE, SyntaxKind::RPAREN, SyntaxKind::DEDENT];
+    &[SyntaxKind::DEDENT, SyntaxKind::IDENT, SyntaxKind::AT_ATTR];
 
 /// Consume tokens into an `ERROR` node until the current token is in
 /// `anchors` (or EOF). The anchor token itself is NOT consumed — it remains
@@ -85,11 +82,10 @@ pub(crate) const CLOSE_BRACKET_ANCHORS: &[SyntaxKind] =
 /// See `crates/fossil-syntax/src/parser/items.rs::parse_program` for the
 /// canonical example of the safe shape: when the IDENT lookahead doesn't
 /// match `DEFINE` or `SHAPE_SEP`, the fall-through is `p.bump_as_error()`,
-/// NOT `recover_to(p, TOP_LEVEL_ANCHORS)`. Historical bug:
-/// `.planning/phases/06-cli-complete-lsp/deferred-items.md` (parser-hang on
-/// a bare `#` — the logos lexer drops `#` silently, the next non-trivia
-/// token is often IDENT, and `IDENT ∈ TOP_LEVEL_ANCHORS` made the call a
-/// no-op).
+/// NOT `recover_to(p, TOP_LEVEL_ANCHORS)`. The historical bug was the
+/// parser-hang on a bare `#`: the logos lexer dropped `#` silently, the next
+/// non-trivia token was often IDENT, and `IDENT ∈ TOP_LEVEL_ANCHORS` made the
+/// call a no-op.
 pub(crate) fn recover_to(p: &mut Parser, anchors: &[SyntaxKind]) {
     p.skip_trivia();
     if at_anchor(p, anchors) {
@@ -118,9 +114,9 @@ pub(crate) fn recover_to(p: &mut Parser, anchors: &[SyntaxKind]) {
 /// 3. DO NOT consume the offending token — fall through to [`recover_to`]
 ///    which bumps to a known anchor.
 ///
-/// This is the structural fix the Phase 1 [`Parser::expect`] lacks. The Phase
-/// 1 implementation consumed the wrong token on mismatch, which broke the
-/// recovery cascade because the anchor token disappeared into an `ERROR`.
+/// This is the structural fix [`Parser::expect`] lacks: `expect` consumes the
+/// wrong token on mismatch, which breaks the recovery cascade because the
+/// anchor token disappears into an `ERROR`.
 pub(crate) fn expect_or_recover(p: &mut Parser, want: SyntaxKind, anchors: &[SyntaxKind]) {
     p.skip_trivia();
     if p.current() == Some(want) {
@@ -163,22 +159,22 @@ mod tests {
 
     #[test]
     fn recover_to_stops_at_anchor() {
-        // `garbage prefix ex: <x>` — anchor on KW_PREFIX. After recovery the
-        // current token MUST be `prefix`.
-        let mut p = parser("garbage prefix ex: <x>");
+        // `* * users := …` — anchor on IDENT. After recovery the current token
+        // MUST be `users`.
+        let mut p = parser("* * users := io.csv(\"u.csv\")");
         // Open a synthetic PROGRAM node so the green-tree builder is in a
         // valid `start_node` context for the ERROR node `recover_to` emits.
         p.start(SyntaxKind::PROGRAM);
-        recover_to(&mut p, &[SyntaxKind::KW_PREFIX]);
-        assert_eq!(p.current(), Some(SyntaxKind::KW_PREFIX));
+        recover_to(&mut p, TOP_LEVEL_ANCHORS);
+        assert_eq!(p.current(), Some(SyntaxKind::IDENT));
         p.finish();
     }
 
     #[test]
     fn recover_to_emits_one_diagnostic_per_call() {
-        let mut p = parser("garbage prefix ex: <x>");
+        let mut p = parser("* * users := io.csv(\"u.csv\")");
         p.start(SyntaxKind::PROGRAM);
-        recover_to(&mut p, &[SyntaxKind::KW_PREFIX]);
+        recover_to(&mut p, TOP_LEVEL_ANCHORS);
         assert_eq!(
             p.diagnostics.len(),
             1,
@@ -193,15 +189,15 @@ mod tests {
 
     #[test]
     fn recover_to_noop_when_already_at_anchor() {
-        let mut p = parser("prefix ex: <x>");
+        let mut p = parser("users := io.csv(\"u.csv\")");
         p.start(SyntaxKind::PROGRAM);
-        recover_to(&mut p, &[SyntaxKind::KW_PREFIX]);
+        recover_to(&mut p, TOP_LEVEL_ANCHORS);
         assert_eq!(
             p.diagnostics.len(),
             0,
             "no diagnostic when already at anchor"
         );
-        assert_eq!(p.current(), Some(SyntaxKind::KW_PREFIX));
+        assert_eq!(p.current(), Some(SyntaxKind::IDENT));
         p.finish();
     }
 

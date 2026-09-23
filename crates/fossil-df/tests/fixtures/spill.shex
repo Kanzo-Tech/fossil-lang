@@ -1,0 +1,18 @@
+# The output contract of `spill.rs`. Two shapes; `Order` writes ONLY the edge,
+# which is what makes the orders table the thing that does not fit the budget
+# (each order is an `Order` vertex AND an edge row, joined and sorted twice).
+#
+# `ex:placedBy @ex:Person` is load-bearing: with an accept-all descriptor the
+# template-skeleton guess that used to infer the edge is gone, so `placedBy`
+# degrades to a string column, the edge table disappears, and the test's premise
+# — "one edge table to join and sort twice" — goes with it silently.
+PREFIX ex: <https://example.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+ex:Person {
+  ex:name xsd:string
+}
+
+ex:Order {
+  ex:placedBy @ex:Person
+}

@@ -1,0 +1,48 @@
+---
+title: fossil
+description: A statically typed mapping language that turns tables and RDF into a graph, and the compiler that writes that graph to disk.
+---
+
+fossil is a **mapping language**: you declare how tabular and RDF sources become a graph, and it
+type checks that declaration against the shapes the output has to satisfy. It is also a **corpus
+compiler**: it runs the mapping and writes a graph anyone can read by byte range, with no server in
+the path.
+
+This is a whole program. Three rows of CSV go in and three `Person` nodes come out.
+
+<Program src="hello/hello.fossil" title="hello.fossil" />
+
+`User.name` is a column the compiler read off the CSV while compiling; `name` is a predicate the
+shape document declares. Those two meeting is the type check — so `User.nmae` is a squiggle in your
+editor rather than a null in the graph.
+
+```bash
+fossil run hello.fossil --dest file:///tmp/hello
+```
+
+```
+wrote 1 vertex type(s), 0 edge type(s) to file:///tmp/hello
+```
+
+Under `/tmp/hello` is the corpus: Parquet files and a manifest, three `Person` nodes in them, one
+per row.
+
+## Start here
+
+<Cards>
+  <Card
+    href="/docs/book/getting-started"
+    title="Getting started"
+    description="Install the binary, run the program above against the three rows it reads, and open what it wrote."
+  />
+</Cards>
+
+Then [your first program](/docs/book/first-program) accounts for every token in those seven lines,
+and [the anatomy of a fossil program](/docs/book/anatomy) grows a larger one — two sources, a join
+and an edge — a section at a time.
+
+## The rest of the site
+
+[What fossil is](/docs/design) is the thesis and the argument behind it: types arriving from the
+data and from the shape document, and made to meet. [What a corpus is](/docs/format) is the format
+on disk — plain Parquet, read by code that was never compiled against the code that wrote it.

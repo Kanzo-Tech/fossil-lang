@@ -1,16 +1,41 @@
-// Phase 1 walking skeleton — exercises every crate with the minimum
-// grammar surface (prefix decl, source binding, mapping header, one
-// property assignment, IRI template, field reference, string field).
+// The walking skeleton: five rows of CSV in, five `Person` vertices out, in
+// Apache GraphAr layout. Run it from the repository root —
 //
-// Grammar productions used: PrefixDecl, SourceDef, Mapping, MappingHeader,
-//   Property, TEMPLATE, FieldRef, IRIExpr (PrefixedName + ABS_IRI).
-// Stdlib used: io/csv (source ctor), implicit core/iri (template→IRI),
-//   implicit core/literal (string→Literal).
+//     cargo run --bin fossil -- run examples/hello.fossil --dest file:///tmp/hello
+//
+// — and `/tmp/hello/vertex/Person/*.parquet` holds the rows,
+// `/tmp/hello/vertex/Person.vertex.yml` declares their columns. `README.md` has
+// the DuckDB one-liner that reads them back.
+//
+// This is the one program asserted by CONTENT rather than by exit code:
+// `crates/fossil-cli/tests/walking_skeleton.rs` checks the five subjects
+// `https://example.org/user/1`…`/5` and the five names on a `name` column. It
+// may be made clearer; it may not be made to mean something else.
+//
+// Every path it names is resolved against THIS FILE, never against the
+// directory you ran `fossil` from — `users.csv` and `hello.shex` sit beside it.
 
-prefix ex: <https://example.org/>
+// The output contract, and it is MANDATORY (ruling 3, 2026-08-11). A property
+// key is the last segment of a predicate IRI some shape declares, so with no
+// shape document in scope the `name` below resolves against nothing, the mapping
+// writes no properties — and the run still SUCCEEDS, five vertices with the
+// column simply absent. `hello.shex` declares `ex:name xsd:string` at 1..1,
+// which is what makes `name` a key that exists and a key that must be written.
+type { Person } := io.shex("hello.shex")
 
-users := io.csv("examples/users.csv")
+// The source. Its columns are introspected from the CSV, not declared here, and
+// `User` is the name every reference in the body is qualified by.
+User := io.csv("users.csv")
 
-User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
+// The header reads: a mapping called `People`, of shape `Person`, over the rows
+// of `User`. The vertex type on disk is `Person` — the local name of the shape's
+// IRI, never the mapping's own name.
+People : Person from User
+    // The identity, and every mapping needs exactly one: it is what turns a row
+    // into a node. An ordinary quoted string whose `{…}` holes are ordinary
+    // expressions, evaluated per row.
+    @subject = "https://example.org/user/{User.id}"
+    // A property. Bare key on the left, because the shape document is what says
+    // which keys exist; qualified reference on the right, because the source
+    // binding is what says where the value comes from.
+    name     = User.name

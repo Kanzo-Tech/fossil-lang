@@ -1,0 +1,208 @@
+/*
+ * The canvas panel's own styles. Same disposition as `streaming.css`: it reuses `styles.css`'s
+ * custom properties, defines no palette, and reuses `.str-*` for the ledger and the notes rather
+ * than restating them — the two panels are one argument in two halves and a second set of rules
+ * for the same boxes would be two of them.
+ *
+ * `.can-surface` has an explicit height and that is not decoration. `GraphCanvas` renders
+ * `size-full` — 100% of its parent in both axes — and cosmos.gl sizes its WebGL drawing buffer
+ * from the element's own box. A parent whose height is content-derived is therefore zero tall, the
+ * canvas is zero tall, and the renderer draws a million vertices into no pixels and reports
+ * nothing wrong. Somebody has to name a height; the host is the only one who can.
+ */
+
+.can {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.can-surface {
+  /*
+   * The five tokens the renderer resolves, mapped onto this app's own three colours.
+   *
+   * `@kanzo-tech/graph` reads `--background`, `--foreground`, `--muted-foreground`, `--border` and
+   * `--primary` off the element the canvas sits in — `resolveToken(host, …)`, resolved against the
+   * host rather than against `<html>` precisely so a scoped override wins. `@kanzo-tech/ui`'s
+   * prebuilt stylesheet defines them, but only inside `[data-theme=…]` and `.dark`, and this app
+   * sets neither: it follows `prefers-color-scheme` on a palette of its own. So the canvas came up
+   * WHITE on a dark page — resolved, not unresolved, which is why nothing reported a problem.
+   *
+   * Mapping here rather than adopting a `data-theme` is deliberate: picking one of kanzo's themes
+   * for the whole document is the editor half's decision, and it would repaint the editor. Five
+   * declarations scoped to one element repaint the canvas.
+   */
+  --background: var(--panel);
+  --foreground: var(--fg);
+  --muted-foreground: var(--muted);
+  --border: var(--line);
+  --primary: var(--ok);
+
+  height: 26rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  overflow: hidden;
+  /* The canvas takes pointer gestures — a drag here is a pan, not a text selection. */
+  touch-action: none;
+}
+
+/*
+ * What stands in the surface while the encoding is being read off the corpus.
+ *
+ * Inside `.can-surface` rather than replacing it, so the panel does not change height when the
+ * renderer arrives — the surface names its own 26rem for the reason at the top of this file, and a
+ * placeholder that let it collapse would reflow everything below it a second later.
+ */
+.can-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+
+/*
+ * The comparison table: two modes, four rows, and the active column marked.
+ *
+ * A table and not a second `.str-ledger`, because the ledger's grid is one thing measured many
+ * ways and this is one measurement taken two ways — the column heading is the variable, so a
+ * reader has to be able to run their eye down it. `.str-ledger` still carries each mode's own
+ * detail underneath, where the numbers stop having a counterpart on the other side.
+ */
+
+.can-compare {
+  width: 100%;
+  border-collapse: collapse;
+  font: 11px var(--mono);
+  table-layout: fixed;
+}
+
+.can-compare caption {
+  caption-side: top;
+  text-align: left;
+  color: var(--muted);
+  padding-bottom: 0.4rem;
+  line-height: 1.6;
+}
+
+.can-compare th,
+.can-compare td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: baseline;
+}
+
+.can-compare thead th {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+/* Which column is on screen. A border rather than a fill: the numbers are the content and a tinted
+ * cell reads as a state on the number instead of on the mode. */
+.can-compare thead th.on {
+  color: var(--fg);
+  border-bottom-color: var(--ok);
+}
+
+.can-compare tbody th {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* Buttons carry the mode, and `aria-pressed` carries which one — so the styling reads the same
+ * attribute a screen reader does rather than a class that could disagree with it. */
+.can button[aria-pressed='true'] {
+  border-color: var(--ok);
+  color: var(--fg);
+}
+
+/* ── the crossfilter ────────────────────────────────────────────────────────────────────────────
+   The chart beside the canvas, and the ledger for what a filter pass cost. Tokens rather than
+   colours: `@kanzo-tech/ui`'s stylesheet defines these on `:root` and its themes disagree about
+   them, which is the same reason `--chart-capacity` is read off the document rather than written
+   down in this app. */
+.xf {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-top: 0.75rem;
+}
+
+.xf-chart {
+  flex: 1 1 420px;
+  min-width: 320px;
+}
+
+.xf-waiting {
+  display: flex;
+  align-items: center;
+  min-height: 132px;
+}
+
+.xf-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.xf-head h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.xf-head button {
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+/* `touch-action: none` so a drag on a touch screen brushes instead of scrolling the page — the
+   pointer capture cannot take over a gesture the browser has already claimed for panning. */
+.xf-svg {
+  width: 100%;
+  height: auto;
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.xf-bar {
+  fill: var(--chart-1, #4c78a8);
+}
+
+/* An excluded bar keeps its position and loses its weight, for the same reason the canvas fades
+   rather than drops: what was filtered OUT is half of what a brush is telling you. */
+.xf-bar-out {
+  fill: var(--muted-foreground, #888);
+  opacity: 0.35;
+}
+
+.xf-brush {
+  fill: var(--foreground, #000);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+.xf-axis {
+  stroke: var(--border, #ccc);
+  stroke-width: 1;
+}
+
+.xf-tick,
+.xf-empty {
+  fill: var(--muted-foreground, #888);
+  font-size: 10px;
+}
+
+.xf-ledger {
+  flex: 0 1 auto;
+}

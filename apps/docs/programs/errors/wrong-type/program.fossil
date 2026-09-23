@@ -1,0 +1,7 @@
+type { Order } := io.shex("shape.shex")
+
+Purchase := io.csv("data/orders.csv")
+
+Orders : Order from Purchase
+    @subject = "https://shop.example/order/{Purchase.id}"
+    total    = Purchase.reference

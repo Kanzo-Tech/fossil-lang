@@ -1,0 +1,59 @@
+PROGRAM
+  TYPE_DEF
+    IDENT "type"
+    LBRACE "{"
+    IDENT "Person"
+    COMMA ","
+    IDENT "City"
+    RBRACE "}"
+    DEFINE ":="
+    EXPR
+      POSTFIX_EXPR
+        POSTFIX_EXPR
+          LITERAL_EXPR
+            IDENT "io"
+          DOT "."
+          IDENT "shex"
+        LPAREN "("
+        ARG_LIST
+          ARG
+            LITERAL_EXPR
+              STRING "\"personas.shex\""
+        RPAREN ")"
+  SOURCE_DEF
+    IDENT "type"
+    DEFINE ":="
+    EXPR
+      POSTFIX_EXPR
+        POSTFIX_EXPR
+          LITERAL_EXPR
+            IDENT "io"
+          DOT "."
+          IDENT "csv"
+        LPAREN "("
+        ARG_LIST
+          ARG
+            LITERAL_EXPR
+              STRING "\"type.csv\""
+        RPAREN ")"
+  MAPPING
+    MAPPING_HEADER
+      IDENT "Users"
+      SHAPE_SEP ":"
+      SHAPE_EXPR
+        IDENT "Person"
+      KW_FROM "from"
+      EXPR
+        LITERAL_EXPR
+          IDENT "type"
+    MAPPING_BODY
+      PROPERTY
+        PROPERTY_LHS
+          AT_ATTR "@subject"
+        ASSIGN "="
+        EXPR
+          POSTFIX_EXPR
+            LITERAL_EXPR
+              IDENT "type"
+            DOT "."
+            IDENT "id"

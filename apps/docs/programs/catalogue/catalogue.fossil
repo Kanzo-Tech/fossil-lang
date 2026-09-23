@@ -1,0 +1,8 @@
+type { Product } := io.shacl("catalogue.ttl")
+
+Item := io.csv("data/products.csv")
+
+Products : Product from Item
+    @subject = "https://shop.example/product/{Item.sku}"
+    label    = Item.title
+    price    = Item.price

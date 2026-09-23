@@ -1,0 +1,11 @@
+type { Species } := io.shex("distinct.shex")
+
+Sighting := io.csv("data/sightings.csv")
+
+// #region chain
+Seen := Sighting.select(Sighting.species).distinct()
+// #endregion chain
+
+Observed : Species from Seen
+    @subject = "https://field.example/species/{Sighting.species}"
+    name     = Sighting.species

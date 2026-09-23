@@ -1,0 +1,42 @@
+# workspace_peer.shex — the output contract of workspace_peer.fossil.
+#
+# ONE SHAPE PER MAPPING, four of them, declared in the order the program's
+# `type { … }` binding names them: binding is POSITIONAL, so a shape moved here
+# rebinds a name there silently.
+#
+# Un-narrowed predicates are written `.` for the same reason canonical_200.shex
+# gives: the source bindings carry no input descriptor, so a column's type is
+# not known, and the properties that ARE narrowed are the ones whose value is a
+# catalogue call with a static return type.
+
+PREFIX ex:     <https://example.org/>
+PREFIX schema: <https://schema.org/>
+PREFIX foaf:   <http://xmlns.com/foaf/0.1/>
+PREFIX xsd:    <http://www.w3.org/2001/XMLSchema#>
+
+# 1 — employees
+ex:Employee {
+  foaf:name     xsd:string ;
+  schema:email  . ;
+  ex:grade      .
+}
+
+# 2 — departments
+ex:Department {
+  schema:name   . ;
+  ex:costCentre .
+}
+
+# 3 — employee to department
+ex:Assignment {
+  ex:assignee . ;
+  ex:unit     . ;
+  ex:since    .
+}
+
+# 4 — offices
+ex:Office {
+  ex:label    xsd:string ;
+  ex:floor    . ;
+  ex:capacity .
+}

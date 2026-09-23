@@ -1,0 +1,11 @@
+---
+source: crates/fossil-hir/tests/diagnostic_corpus.rs
+expression: "run_shape_fixture(\"backward_check\", &document, &[])"
+---
+# mode: helper-proven (the neutral shape vocabulary, built by hand, through
+#       ResolvedShape — these fixtures name no document, so the production
+#       path resolves no shape; see module docs)
+# bucket: backward_check
+resolved constraints:
+  https://example.org/email : String [Occurs { min: 1, max: None }]
+rejections: (none)

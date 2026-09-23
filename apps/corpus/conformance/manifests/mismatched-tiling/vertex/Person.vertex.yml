@@ -1,0 +1,13 @@
+type: Person
+vertex_count: 18432
+chunk_size: 4096
+prefix: vertex/Person/
+projections:
+- path: ''
+  scale: 1
+  file_type: parquet
+  properties:
+  - name: subject
+    data_type: string
+    is_primary: true
+version: gar/v1

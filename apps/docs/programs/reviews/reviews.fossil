@@ -1,0 +1,15 @@
+type { Person, Review } := io.shex("reviews.shex")
+
+User := io.csv("data/users.csv")
+Note := io.csv("data/reviews.csv")
+
+People : Person from User
+    @subject = "https://shop.example/user/{User.email}"
+    name     = User.name
+
+Reviews : Review from Note
+    @subject = "https://shop.example/review/{Note.id}"
+    body     = Note.body
+    // #region edge
+    author   = Person(Note.email)
+    // #endregion edge

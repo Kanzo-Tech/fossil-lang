@@ -1,0 +1,14 @@
+type { Batch } := io.shex("scaling.shex")
+
+Row := io.csv("data/batches.csv")
+
+Batches : Batch from Row
+    @subject  = "https://lab.example/batch/{Row.id}"
+    // #region multiplicative
+    subtotal  = Row.unit_price * Row.quantity
+    unit_cost = Row.total_cost / Row.quantity
+    leftover  = Row.quantity % Row.pack_size
+    // #endregion multiplicative
+    // #region precedence
+    charged   = Row.handling + Row.unit_price * Row.quantity
+    // #endregion precedence

@@ -1,0 +1,12 @@
+{
+  "aggregate_sum": "SELECT CAST(user_id AS VARCHAR) AS user_id, CAST(SUM(amount) AS VARCHAR) AS total FROM read_csv_auto('examples/orders.csv', sample_size=-1) GROUP BY user_id ORDER BY user_id",
+  "distinct_all": "SELECT DISTINCT CAST(id AS VARCHAR) AS id, CAST(name AS VARCHAR) AS name FROM read_csv_auto('examples/users.csv', sample_size=-1) ORDER BY id, name",
+  "distinct_by": "SELECT CAST(id AS VARCHAR) AS id, CAST(name AS VARCHAR) AS name FROM (SELECT DISTINCT ON (id) id, name FROM read_csv_auto('examples/users.csv', sample_size=-1)) AS d ORDER BY id",
+  "extend_concat": "SELECT CAST('https://example.org/' || id AS VARCHAR) AS iri FROM read_csv_auto('examples/users.csv', sample_size=-1) ORDER BY id",
+  "group_by_count": "SELECT CAST(user_id AS VARCHAR) AS user_id, CAST(COUNT(id) AS VARCHAR) AS n FROM read_csv_auto('examples/orders.csv', sample_size=-1) GROUP BY user_id ORDER BY user_id",
+  "project_two_cols": "SELECT CAST(id AS VARCHAR) AS id, CAST(name AS VARCHAR) AS name FROM read_csv_auto('examples/users.csv', sample_size=-1) ORDER BY id",
+  "r7_const_fold_extend": "SELECT CAST('https://example.org/user' AS VARCHAR) AS subject FROM read_csv_auto('examples/users.csv', sample_size=-1) ORDER BY id",
+  "r8_drop_true_filter": "SELECT CAST(id AS VARCHAR) AS id, CAST(name AS VARCHAR) AS name FROM read_csv_auto('examples/users.csv', sample_size=-1) ORDER BY id",
+  "rename_col": "SELECT CAST(name AS VARCHAR) AS label FROM read_csv_auto('examples/users.csv', sample_size=-1) ORDER BY id",
+  "union_two_sources": "SELECT CAST(id AS VARCHAR) AS id, CAST(name AS VARCHAR) AS name FROM ( SELECT id, name FROM read_csv_auto('examples/a.csv', sample_size=-1) UNION SELECT id, name FROM read_csv_auto('examples/b.csv', sample_size=-1) ) AS u ORDER BY id"
+}

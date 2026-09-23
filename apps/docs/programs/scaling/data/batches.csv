@@ -1,0 +1,4 @@
+id,unit_price,quantity,total_cost,pack_size,handling
+B-1,2.5,40,88.0,12,5.0
+B-2,0.75,150,101.25,12,5.0
+B-3,12.0,7,79.8,12,0.0

@@ -1,0 +1,16 @@
+PREFIX lab: <https://lab.example/voc#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+lab:Reading {
+  lab:kit      xsd:string ;
+  lab:revision xsd:integer ;
+  lab:accuracy xsd:float ;
+  lab:verified xsd:boolean ;
+  lab:station  xsd:string ;
+  lab:slug     xsd:string ;
+  lab:code     xsd:string ;
+  lab:label    xsd:string ;
+  lab:operator xsd:string ;
+  lab:taken_on xsd:date ;
+  lab:celsius  xsd:float
+}

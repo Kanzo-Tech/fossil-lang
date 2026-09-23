@@ -1,0 +1,177 @@
+---
+title: Identity
+description: dense_id is an address and the subject IRI is a name. A gapless 0..V−1 is what makes a tile a range, uint32 is what the column holds, and 64 bits is what the arithmetic does and what makes a boundary safe.
+---
+
+A corpus carries two numbers that are easy to confuse and must not be. **`dense_id` is where a
+vertex is. The subject IRI is which vertex it is.**
+
+## `dense_id` is a gapless `0..V−1`
+
+Per vertex type, the dense ids are exactly the integers from zero to one less than the vertex count,
+with no gaps and no repeats. Four other conventions are built on it:
+
+- **A tile is a range of ids.** A gap is either an addressable tile that holds nothing — a round
+  trip spent learning it was empty — or a vertex that no address reaches.
+- **The tile count is derivable.** The manifest declares `V` as `vertex_count`, so
+  `ceil(V / chunk_size)` tiles exist and a reader knows the whole set before opening a file. That is
+  the only thing in a corpus that catches a **missing tail**: a hole in the middle breaks the
+  addressing, but a tree that stops at `chunk16` is indistinguishable from a corpus with seventeen
+  tiles. Guard: `declared-count`.
+- **The `dense_id` column need not be stored.** If tile `i` is `[i·4096, (i+1)·4096)` then row `j` of
+  tile `i` *is* `i·4096 + j`. That column is 4.000 of the 9.23 compressed bytes per row a drawing
+  tile costs — **43% of the payload** — derivable only because the ids are gapless.
+- **Each vertex type has its own space.** Two types both number from zero, so an id is meaningless
+  without its type, which is why an edge manifest names `src_type` and `dst_type`.
+
+**An identity is therefore the pair `(type, dense_id)`, and the manifest names the type three
+times**: the vertex info's `type`, the edge info's `src_type` and `dst_type`, and the `prefix` a
+type's tiles live under. Nothing defaults. A corpus carrying one vertex type still names it, and a
+reader that supplies a type of its own when the corpus omits one is inventing the half of an address
+that says which space the other half is in — which is how a second relation comes to embark the same
+identities as the first with nothing to report it.
+
+Guard: `dense-ids` — and every guard named here is specified in full, with what it cannot prove, on
+[the guard index](/docs/format#the-guards).
+
+## The identity is the subject IRI
+
+Redoing the layout renumbers every vertex. The spatial order *is* the id space
+([Addressing](/docs/format/conventions/addressing)), so a new placement produces a new numbering and a
+`dense_id` stored outside the corpus names a different vertex after the next write.
+
+So the identity is the subject IRI, carried as a `subject` column: non-null, unique within its type.
+A selection, a bookmark, a link from another system, a row in somebody else's database — all of them
+key on the IRI. The consequence that catches people is in the client: a viewer that tracks selection
+by *index into the resident buffers* has stored an address twice over, and a tiled reader moves those
+buffers constantly.
+
+<Callout title="Where the IRI lives is a measured trade, and half of it is open">
+Carrying `subject` in the drawing tile costs **1.87× the tile**. Compressed bytes per row on the
+five-million corpus: `subject` **8.016**, `dense_id` 4.000, `x` 2.717, `y` 2.501, `cluster_id` 0.028,
+`community` 0.014 — 9.23 B/row for the four drawing columns, 17.25 with `subject`. On real tiles that
+is **3 requests and 36.0 kB** against **4 and 37.0 kB**, from 68.8 kB stored: the same bytes on the
+wire, one round trip fewer, half the storage. So the drawing path carries addresses and the IRI is
+fetched when something has to be *named*.
+
+**Which path fetches it is a design question.** No convention pins it, and `identity-is-the-subject`
+reflects that: it asserts uniqueness and non-nullness wherever a `subject` column appears, and
+*reports* rather than fails when a payload has none. What would settle it is a reader that names a
+vertex on hover, measured against one that names it on selection only.
+</Callout>
+
+## Searching for one is a second table, not a second column
+
+The payload is in Morton order, which is what makes a window a range and a tile a shift. A lookup by
+identity needs the other order, and **a table has one order**: a second key would break the first,
+and the first is the one every window depends on. So a vertex type may carry the same rows a **second
+time**, sorted by identity, as its own tiled table beside the payload:
+
+```yaml
+# vertex/Person/chunk{k}.parquet        the payload — every column, in Morton order
+# vertex/Person/index/tile{k}.parquet   the index — subject and dense_id, lexicographic
+index:
+  prefix: index/
+  ordered_by: subject
+  chunk_size: 64
+```
+
+`ordered_by` is named rather than assumed, because a corpus whose identity is some other column
+indexes that column instead, and a `prefix` without it names files whose sort a reader would have to
+guess. **The index is the one artefact of a corpus that is not a
+[projection](/docs/format/conventions/addressing#projections-the-payload-and-the-levels-in-one-list):
+it is a second ORDER over the same rows, so the Morton cut does not address it.** Everything else is
+that one sequence at some `scale`, whose tile `k` is a `dense_id` range; tile `k` here is the `k`th
+slice of the **sorted** order. Hence its own `chunk_size`, no `scale`, and files spelled `tile{k}`
+where a projection's are `chunk{k}`.
+
+### Disjoint ranges are the whole mechanism
+
+Morton order and lexicographic order have nothing to do with each other, so a payload tile's footer
+for `subject` claims almost the whole alphabet. The index tiles are sorted, so theirs do not overlap:
+
+```
+the payload, Morton order                index/, lexicographic order
+footer min/max for `subject`             footer min/max for `subject`
+
+chunk0     ex:a01 … ex:z98   ✗           tile0      ex:a01 … ex:a44
+chunk1     ex:a04 … ex:z71   ✗           tile1      ex:a44 … ex:b19   <- ex:b02 is in here
+chunk2     ex:a00 … ex:z95   ✗           tile2      ex:b19 … ex:c07
+  …                          ✗              …
+chunk1220  ex:a02 … ex:z99   ✗           tile1220   ex:z41 … ex:z99
+
+✗ = every range spans the type, so       the ranges are disjoint, so the footers
+no footer prunes anything: 1,221 tiles   name the one tile a value can be in:
+read, ≈ 40 MB at five million            1 tile read
+```
+
+The address it hands back names the payload tile arithmetically, so a lookup is two reads and no scan
+of either table:
+
+```
+subject = ex:b02
+   |  1. the index footers prune to one tile
+   v
+index/tile1.parquet  ---->  dense_id = 41000
+                               |  2. 41000 >> 12 = 10, arithmetic and not a lookup
+                               v
+                            vertex/Person/chunk10.parquet   the row, every column
+```
+
+### It is optional, and `vertex_count` is not
+
+Two fields two lines apart in the same manifest, one required and one not. A missing `vertex_count`
+leaves a question **unanswerable** — the missing tail above. A missing `index:` leaves it
+**answerable and slower**: `subject = ?` over every tile returns exactly the row the index would have
+found. A type whose payload carries no `subject` has nothing to index and declares none.
+
+Guard: `index-agrees-with-the-payload`, whose mutation is not a deleted row — a scan would lose that
+one too — but a single row pointed at the **wrong address**: a scan finds nothing, and a wrong index
+returns a vertex that is real and is not the one asked for. What no guard can prove is that a reader
+*uses* the index, since both routes return the same row by construction. That is closed from the
+reader's side — `apps/corpus/conformance/expected.json` runs each id twice, against the manifest as
+it is and against a copy of the tree with the `index:` block stripped, and requires the same vertex
+both ways.
+
+## Thirty-two bits in the column, sixty-four in the arithmetic
+
+A vertex payload carries `dense_id` as **`uint32`** — the spelling its projection declares under
+`properties`, and the width of the column on disk — so **one vertex type holds at most
+4,294,967,295 vertices**. An adjacency's `src_dense` and `dst_dense` are declared the same width in
+the same place: those two columns are the relation rather than a payload of it, and they are the
+whole of what an adjacency projection carries.
+
+**The arithmetic is wider than the column, and deliberately.** `tile_of` takes and returns an
+unsigned **64-bit** integer, and the [published
+vectors](/docs/format/conventions/addressing#the-published-vectors) carry 2³¹, 2³² − 1 and 2⁵³ —
+three values no `uint32` column can hold. A reader is therefore checked past the ceiling its corpora
+reach, which is what makes the two widths independent: a corpus written with a wider column is
+addressed by the same arithmetic, against the same vectors, by a reader that changes nothing.
+
+Unsigned is the half a reader gets wrong in silence. A string `dense_id` opens, describes and
+addresses until something shifts it; a **signed** one shifts arithmetically rather than logically
+and hands back a tile that is real and is not the one asked for. Guard:
+`addressing-is-unsigned` — and what it does not check is the *width*, because `uint32` and `uint64`
+both address correctly and a column cannot say which ceiling its writer was working to. That is why
+the width is stated here.
+
+Why the column is the narrower of the two is [argued with the measurement that decides
+it](/docs/design/corpus#the-width-of-an-address-and-what-actually-runs-out-first).
+
+## Sixty-four bits, and `number` is not one of them
+
+The boundary is specified against the 64-bit arithmetic and not against the width of the column, so
+it does not move when the column does: an id, a count and a tile number are unsigned integers that
+may carry more than 53 bits. **At a language boundary each of them is a `BigInt`, and a `Number` is
+wrong.** The operator is worse than the width: `>>` means three
+different things across the layers that have to agree.
+
+| | what `>>` does |
+| --- | --- |
+| Rust, on a signed type | arithmetic shift — sign-extends |
+| Rust, on `u64` | logical shift, which is what the addressing specifies |
+| JavaScript, on a `Number` | **truncates to 32 bits, then shifts** |
+
+`apps/corpus/guards/arithmetic.mjs` therefore refuses a `Number` outright, and the
+[published vectors](/docs/format/conventions/addressing#the-published-vectors) include 2³¹ and 2⁵³ for no
+other reason than that those are the two places a port that got this wrong gives a different answer.

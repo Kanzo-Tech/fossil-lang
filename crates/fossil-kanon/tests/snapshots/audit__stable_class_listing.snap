@@ -1,0 +1,25 @@
+---
+source: crates/fossil-kanon/tests/audit.rs
+expression: first
+---
+k: 2
+rows: 6
+classes:
+  - values:
+      - EC2*
+      - "[65, 80)"
+    exact_rows: 2
+    anonymity_set: 2
+  - values:
+      - N1*
+      - "[30, 45)"
+    exact_rows: 2
+    anonymity_set: 2
+  - values:
+      - SW1*
+      - "[18, 30)"
+    exact_rows: 2
+    anonymity_set: 2
+achieved_k: 2
+rows_below_k: 0
+satisfies_k: true

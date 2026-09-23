@@ -1,0 +1,85 @@
+---
+title: Mappings
+description: Write a mapping body that satisfies a shape — the header and its two names, the three rules `@subject` obeys, property assignments, and what the declared count costs.
+---
+
+A mapping is where a row becomes a node: a header that says what it produces and where the rows come
+from, and a body that says what the node holds.
+
+## The header, and its two names
+
+<Program src="shop/shop.fossil" region="header" title="shop.fossil" />
+
+*The mapping called `Users` produces `Person`s, one per row of `Adults`.*
+
+Two names, and both earn their place. **`Person`** is the type: it came from the shape document, and it
+is the contract this body is checked against — which properties may appear, what each holds, how many
+there may be. **`Users`** is the mapping's own name, and it is there because two mappings can produce
+the same type; when something is wrong across both, "`Users` and `Imported`" is a sentence you can act
+on where "two mappings of `Person`" is not.
+
+**`Adults`** is the relation: one node per row of it, and it can be any relation, including one built
+on the spot:
+
+<Program src="shop/shop.fossil" region="join" title="shop.fossil" />
+
+There is no colon at the end of a header — the body is opened by the indentation, and the header
+already has one colon doing a job.
+
+## `@subject`
+
+The first line of every body is the identity:
+
+<Program src="shop/shop.fossil" region="identity" title="shop.fossil" />
+
+An IRI is not in your data — you mint one — and in RDF the subject **is** the node rather than one of
+its properties, so a shape document has nowhere to declare it. The language owns the slot instead, and
+marks it with `@` so that it can never be confused with a property your vocabulary happens to call
+`subject`. It is an assignment, and the right-hand side is an ordinary interpolated string; see
+[values and expressions](/docs/book/expressions). Three rules bind this slot and only this slot.
+
+| the rule | what the checker says |
+| --- | --- |
+| **It depends only on the row.** An identity that reaches for another row is not reproducible. | *`Purchase.id` reads a row this mapping does not have; it maps `User`.* This is the ordinary scope rule — the identical line as a property value reports the identical thing. |
+| **It is the first line.** Not by convention. | *`@subject` is the first line of a mapping body, and in `Users` it is line 3. The identity comes before what it identifies.* |
+| **One per type.** Every mapping producing `Person` writes the same one. | *`Users` and `Imported` mint two identities for Person*, naming both mappings and both templates ([when it does not compile](/docs/book/diagnostics) shows it). An error and not a warning, because a warning here buys you two nodes where you meant one. |
+
+The last rule is what makes [edges](/docs/book/edges) as short as they are: a type has one identity, so
+naming the type is enough to know the IRI.
+
+## Property lines
+
+<Program src="shop/shop.fossil" region="properties" title="shop.fossil" />
+
+The key is a bare name — the last segment of the predicate IRI the shape declares. The value is any
+expression, and the shape decides what is allowed on the right: `shop:total` is `xsd:float`, so an
+`Integer` column is fine — a whole number is a float — and a `String` column is not:
+
+<Program src="errors/wrong-type/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+The count the document writes after the datatype decides whether the body may leave the property out.
+
+| in the document | leaving it out | writing it |
+| --- | --- | --- |
+| `xsd:string` — exactly one | an error against the mapping | one value |
+| `xsd:string ?` — at most one | fine | one value |
+| `xsd:string *` — zero or more | fine | one value |
+| `xsd:string +` — one or more | an error against the mapping | one value |
+
+The right-hand column is not a simplification: **no property takes a sequence today, whatever its
+count.** `str.split(User.tags, ";")` against `shop:tag xsd:string *` is refused as a type error — `tag`
+expects a `String` and that is a `Seq<String>` — and nothing is lifted into a sequence to make a value
+fit, which would hide precisely the mistake worth catching.
+
+A required property the body never mentions cannot be blamed on a line, being a line that is not there,
+so it is reported against the header, against the place in the document that required it, and with the
+list of what you may still leave out:
+
+<Program src="errors/missing-property/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+## Two mappings of one type
+
+Perfectly ordinary — two populations of `Person`, taking their name from different columns, agreeing on
+identity. What you cannot do is give one type two identity schemes.
+
+<Program src="two-mappings/two-mappings.fossil" region="both" title="two-mappings.fossil" />

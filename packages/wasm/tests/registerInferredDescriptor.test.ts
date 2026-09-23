@@ -1,9 +1,10 @@
 /**
- * Vitest coverage for FossilPlayground.registerInferredDescriptor (plan 13-03,
- * ADR-0037). Exercises the wasm-bindgen build output directly — these tests
+ * Vitest coverage for FossilPlayground.registerInferredDescriptor — the API a
+ * host uses to push a `DESCRIBE`-derived input schema into the compiler, which
+ * does no IO of its own. Exercises the wasm-bindgen build output directly — these tests
  * are integration-flavoured (real WASM load) but isolated to the
- * registration API (no compile call yet — that comes in plan 13-04b's
- * playground orchestration).
+ * registration API: no compile call, so a failure here is the boundary and not
+ * the compiler behind it.
  *
  * The Rust side is covered by `crates/fossil-wasm/tests/register_inferred_descriptor.rs`
  * (6 tests against the pure-Rust `*_native` helper). This suite covers the
@@ -33,12 +34,12 @@ describe('FossilPlayground.registerInferredDescriptor', () => {
     const pg = new FossilPlayground();
     try {
       const desc: InferredDescriptorJson = {
-        source_name: 'users',
+        uri: 'users.csv',
         columns: [
-          { name: 'id', primitive: 'Integer' },
-          { name: 'name', primitive: 'String' },
+          { name: 'id', primitive: 'integer' },
+          { name: 'name', primitive: 'string' },
         ],
-        content_hash: '',
+        freshness_token: '',
       };
       expect(() => pg.registerInferredDescriptor(desc)).not.toThrow();
     } finally {
@@ -46,21 +47,21 @@ describe('FossilPlayground.registerInferredDescriptor', () => {
     }
   });
 
-  it('re-registering the same source_name does not throw', () => {
+  it('re-registering the same uri does not throw', () => {
     const pg = new FossilPlayground();
     try {
       const first: InferredDescriptorJson = {
-        source_name: 'users',
-        columns: [{ name: 'id', primitive: 'Integer' }],
-        content_hash: 'h1',
+        uri: 'users.csv',
+        columns: [{ name: 'id', primitive: 'integer' }],
+        freshness_token: 'h1',
       };
       const second: InferredDescriptorJson = {
-        source_name: 'users',
+        uri: 'users.csv',
         columns: [
-          { name: 'id', primitive: 'Integer' },
-          { name: 'email', primitive: 'String' },
+          { name: 'id', primitive: 'integer' },
+          { name: 'email', primitive: 'string' },
         ],
-        content_hash: 'h2',
+        freshness_token: 'h2',
       };
       pg.registerInferredDescriptor(first);
       expect(() => pg.registerInferredDescriptor(second)).not.toThrow();
@@ -73,25 +74,25 @@ describe('FossilPlayground.registerInferredDescriptor', () => {
     const pg = new FossilPlayground();
     try {
       // Bypass TS to exercise runtime Rust-side validation.
-      const malformed = { source_name: 'users' } as unknown as InferredDescriptorJson;
+      const malformed = { uri: 'users.csv' } as unknown as InferredDescriptorJson;
       expect(() => pg.registerInferredDescriptor(malformed)).toThrow();
     } finally {
       pg.free();
     }
   });
 
-  it('registers multiple distinct sources independently', () => {
+  it('registers multiple distinct uris independently', () => {
     const pg = new FossilPlayground();
     try {
       pg.registerInferredDescriptor({
-        source_name: 'users',
-        columns: [{ name: 'id', primitive: 'Integer' }],
-        content_hash: '',
+        uri: 'users.csv',
+        columns: [{ name: 'id', primitive: 'integer' }],
+        freshness_token: '',
       });
       pg.registerInferredDescriptor({
-        source_name: 'products',
-        columns: [{ name: 'sku', primitive: 'String' }],
-        content_hash: '',
+        uri: 'products.csv',
+        columns: [{ name: 'sku', primitive: 'string' }],
+        freshness_token: '',
       });
       // Both registrations should succeed; no cross-contamination. The
       // observable read path lives on the Rust side (covered by the
@@ -107,9 +108,9 @@ describe('FossilPlayground.registerInferredDescriptor', () => {
     const pg = new FossilPlayground();
     try {
       const desc: InferredDescriptorJson = {
-        source_name: 'empty',
+        uri: 'empty.csv',
         columns: [],
-        content_hash: '',
+        freshness_token: '',
       };
       expect(() => pg.registerInferredDescriptor(desc)).not.toThrow();
     } finally {

@@ -1,7 +1,7 @@
 # fossil-df-wasm — wasm-bindgen wrapper exposing the DataFusion executor
 # (`fossil-df`) to JS. Kept SEPARATE from `fossil-wasm` (the LSP shim) so the
-# editor's wasm stays lean and loads on page-load, while this heavy executor
-# (datafusion ≈7MB gz) is lazy-loaded only when running a job (design §D/§E4).
+# editor's wasm stays lean and loads on page-load, while this heavy executor is
+# lazy-loaded only when a job runs.
 [package]
 name = "fossil-df-wasm"
 version.workspace = true
@@ -11,6 +11,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "WASM wrapper for the fossil DataFusion executor — runs mappings in the browser"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
 [lib]
@@ -23,14 +24,45 @@ workspace = true
 [dependencies]
 # The executor itself (lower_to_mir_pg → DataFusion → GraphArData → to_files).
 fossil-df = { path = "../fossil-df" }
+# The layout pass — Louvain communities and the Morton renumbering — run here,
+# in memory, after `execute_graph`. It is the same crate and the same entry
+# point the native host calls, driven through `fossil_layout::io::MemoryFs`
+# because a browser has no filesystem. Without this edge the tab wrote the
+# STAGED tree against a manifest declaring the TILED one, with `x`/`y`/
+# `cluster_id` at the writer's zeros — a corpus satisfying the manifest's shape
+# and violating the addressing property that shape exists to express.
+#
+# It costs the wasm bundle nothing it was not already paying: the crate declares
+# `[package.metadata.fossil] wasm = true`, and everything it links — DataFusion
+# included, which it takes transitively through `fossil-df` — is what the line
+# above already brings.
+fossil-layout = { path = "../fossil-layout" }
+# One name — `manifest::DEFAULT_CHUNK_SIZE` — so the tile size this pass emits
+# at and the tile size the manifest declares are one constant, as they are on
+# the native side.
+fossil-sinks = { path = "../fossil-sinks" }
 # FossilDb (production salsa db) + SourceFile + the System trait. The executor
-# needs no HirDb — the output descriptor is passed as an argument (ADR-0018).
+# takes the output descriptor as an argument, never off the db.
 fossil-base = { path = "../fossil-base" }
 # The program-resident output descriptor: ShEx text → OutputDescriptorKind,
 # threaded into execute_graph (drives edge/cardinality classification).
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-# The host↔fossil wire status keasy consumes for DCAT (serialized to JS).
-fossil-run-status = { path = "../fossil-run-status" }
+# `def_map` — the one question this host asks the compiler before it runs
+# anything: which document does `type { … } := io.shex("…")` name? It has to
+# know, because that is the key the checker will look the schema up under. It is
+# already in the graph through `fossil-df`; naming it is what makes the call
+# legal. NOT `fossil-ide`: sharing that crate's twin of this loop is the
+# arrangement `fossil-lineage` exists to prevent.
+fossil-hir = { path = "../fossil-hir" }
+# `Renames` — the `@rename` table the descriptor lowering needs to emit a column
+# under the name the program actually writes. Same crate the schema itself comes
+# from; naming it is what makes the call legal.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+# The `ShEx` AST behind that descriptor, named directly:
+# `fossil-descriptors-output` stopped re-exporting it. This host is one of the
+# consumers that genuinely wants the parse — it lowers the schema blob the
+# browser handed it before any query runs.
+fossil-shex = { path = "../fossil-shex" }
 
 # DataFusion (match fossil-df: no `sql` frontend, keep `parquet` reads). The
 # wasm host owns the SessionContext so it can register source object stores +
@@ -39,8 +71,8 @@ datafusion = { version = "54", default-features = false, features = ["parquet"] 
 # In-memory object store: JS fetches each source by signed URL and hands us the
 # bytes; we stage them in an `InMemory` store keyed by the source URI's
 # scheme+authority, so the executor's existing `read_csv`/`read_parquet` path
-# (design §C2 "the host registers an ObjectStore in the ctx") reads them
-# unchanged. The HTTP/streaming store is a later host-only swap — same seam.
+# reads them unchanged: the host registers an ObjectStore in the ctx. The
+# HTTP/streaming store is a later host-only swap — same seam.
 object_store = "0.13"
 url = "2"
 # chrono is transitive (datafusion / object_store) and pulled with wasmbind OFF,
@@ -52,7 +84,7 @@ url = "2"
 chrono = { version = "0.4", features = ["wasmbind"] }
 
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) to match
-# the wasm-bindgen-cli version (RESEARCH.md Pitfall 5). `run()` is async, so
+# the wasm-bindgen-cli version exactly. `run()` is async, so
 # wasm-bindgen-futures bridges the Rust future to a JS Promise.
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
@@ -62,9 +94,12 @@ serde_json = { workspace = true }
 js-sys = { workspace = true }
 console_error_panic_hook = { workspace = true }
 
-# Transitive WASM enablers — keep as direct deps so feature resolution sticks
-# (the `wasm_js` getrandom backend is required by salsa→hashbrown→ahash on wasm32;
-# same belt-and-suspenders as fossil-wasm).
+# Transitive WASM enablers — keep as direct deps so feature resolution sticks.
+# The `wasm_js` backend is what lets getrandom build for wasm32 at all, and who
+# needs it is DataFusion, not salsa: `cargo tree -p fossil-df-wasm -i
+# getrandom@0.3.4 --target wasm32-unknown-unknown` arrives through `rand` ←
+# `datafusion-datasource`, and getrandom 0.2 through `const-random` ← `ahash` ←
+# `arrow`. Salsa's own hashbrown hashes with foldhash and draws no randomness.
 getrandom = { workspace = true }
 
 [dev-dependencies]

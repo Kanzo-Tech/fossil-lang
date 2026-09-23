@@ -1,0 +1,52 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (discovery::ExpandResult)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: ExpandResult
+type: object
+required:
+  - edges
+  - vertices
+properties:
+  edges:
+    type: array
+    items:
+      $ref: "#/definitions/GraphEdge"
+  vertices:
+    type: array
+    items:
+      $ref: "#/definitions/GraphVertex"
+definitions:
+  GraphEdge:
+    type: object
+    required:
+      - predicate
+      - source
+      - target
+    properties:
+      predicate:
+        type: string
+      source:
+        type: string
+      target:
+        type: string
+  GraphVertex:
+    type: object
+    required:
+      - hop
+      - iri
+      - label
+      - vertex_type
+    properties:
+      hop:
+        description: Hop count from the origin set (0 = a vertex the call named).
+        type: integer
+        format: uint8
+        minimum: 0
+      iri:
+        type: string
+      label:
+        type: string
+      vertex_type:
+        type: string

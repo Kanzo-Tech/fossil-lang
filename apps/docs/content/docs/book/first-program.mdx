@@ -1,0 +1,64 @@
+---
+title: Your first program
+description: Seven lines, and an account of every token in them — the shape binding, the source binding, the mapping header, the identity and one property.
+---
+
+<Program src="hello/hello.fossil" title="hello.fossil" />
+
+Three rows of CSV go in, three `Person` nodes come out, and every token above is accounted for below.
+
+## Line 1 — what you are producing
+
+<Program src="hello/hello.fossil" region="shape" title="hello.fossil" />
+
+`io.shex("hello.shex")` reads the shape document next to the program. A shape document says what a
+node of a given class looks like: which properties it has, what kind of value each holds, how many
+there may be. This one says a `shop:Person` has exactly one `shop:name`, and that it is a string.
+
+<Program src="hello/hello.shex" title="hello.shex" />
+
+The braces on the left pull one shape out of it under the local name `Person`, and `:=` is the binder
+that introduces the name. From here on `Person` is a **type** the compiler knows, with a set of
+properties you never wrote down — and naming a document is not optional, because every property key
+you write is the name of a predicate one of them declares.
+
+## Line 3 — what you are reading
+
+<Program src="hello/hello.fossil" region="source" title="hello.fossil" />
+
+Same binder, pointed the other way. `io.csv` reads the CSV — the real one, on disk, next to the
+program — and gives you `User`, which is two things at once, decided by what you ask for:
+
+- a **type**, whose fields are the columns. `User.id` and `User.name` exist because those columns
+  exist. `User.nmae` is a mistake, and it is a mistake the compiler catches.
+- a **relation**, whose rows are the rows. That is what `from User` means below.
+
+## Line 5 — the mapping header
+
+<Program src="hello/hello.fossil" region="header" title="hello.fossil" />
+
+Read it out loud: *the mapping called `People` produces `Person`s, one per row of `User`.* `Person`
+is the type, the contract the body is checked against; `People` is the mapping's own name, and
+[mappings](/docs/book/mappings#the-header-and-its-two-names) says why it needs one. There is no colon
+at the end — the block below is opened by the indentation.
+
+## Lines 6 and 7 — the body
+
+<Program src="hello/hello.fossil" region="identity" title="hello.fossil" />
+
+Every node in the graph is an IRI, and an IRI is not in your CSV, so you mint one here — always on
+the first line of the body, and one per type ([`@subject`](/docs/book/mappings#subject)). The
+right-hand side is an ordinary string in which `{...}` holds an expression, so row 1 becomes
+`https://shop.example/person/1`. For a literal brace, write `{{`.
+
+<Program src="hello/hello.fossil" region="property" title="hello.fossil" />
+
+The key on the left is a bare name: the last segment of the predicate IRI your shape declares. The
+document said `shop:name`, which is `https://shop.example/voc#name`, so the key is `name`. You write
+no IRI and no prefix — repeating the IRI here would only create somewhere for the two to disagree.
+
+The value comes from the right. `User.name` is the column, it is a `String`, and a `String` is what
+`shop:name` asked for. Those two facts meeting is the entire job of the type checker.
+
+Next: [the anatomy of a fossil program](/docs/book/anatomy) takes a bigger program — two sources, a
+filter, a join and an edge — and grows it a section at a time.

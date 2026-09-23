@@ -1,7 +1,7 @@
 /**
  * Source resolution types for the Fossil playground React library family.
  *
- * Per ADR-0029 (Two-Tier Source Resolution via injected ConnectionResolver),
+ * Source resolution is two-tier, through a host-injected `ConnectionResolver`:
  * the React component never sees plaintext credentials. The host supplies a
  * `ConnectionResolver` implementation that maps logical `@connector/path`
  * references to browser-fetchable URLs at execution time.
@@ -19,7 +19,7 @@
 /**
  * Parsed `@connector/path` reference.
  *
- * Connector-name validation rule (ADR-0029, borrowed from Keasy):
+ * Connector-name validation rule (borrowed from Keasy):
  * `/^[a-z0-9][a-z0-9_-]*$/i` — applied at parse time. Resolvers MUST reject
  * invalid names with a clear error rather than silently coercing.
  */
@@ -41,7 +41,7 @@ export interface ResolvedSource {
   /** Browser-fetchable URL (`blob:`, `https:`, `file:`, etc.). The component
    *  substitutes this into the codegen'd SQL at run time. */
   url: string;
-  /** Optional codegen hint — the `io/{csv,json,parquet}` constructor to use. */
+  /** Optional codegen hint — the `io.{csv,json,parquet}` constructor to use. */
   format?: 'csv' | 'json' | 'parquet';
   /** Optional schema hint for IDE preview (autocomplete for shape properties etc.).
    *  Tier-1 resolvers typically don't provide this; Tier-2 hosts can. */
@@ -70,7 +70,7 @@ export type ConnectorType = 'local_file' | 'public_http' | 'upload' | 'examples'
  */
 export interface Connector {
   /** Connector name (matches the `@connector/` prefix in mappings).
-   *  Naming rule: `/^[a-z0-9][a-z0-9_-]*$/i` per ADR-0029. */
+   *  Naming rule: `/^[a-z0-9][a-z0-9_-]*$/i`. */
   name: string;
   /** Classification — drives the icon + UI affordances. */
   type: ConnectorType;
@@ -92,9 +92,9 @@ export interface ResolverEvent {
 /**
  * The IoC contract — every host implements this; every consumer accepts it.
  *
- * Per ADR-0029, the component NEVER sees plaintext credentials. Resolver
+ * The component NEVER sees plaintext credentials. Resolver
  * implementations bear the responsibility of:
- *   - Validating connector names against the ADR-0029 regex.
+ *   - Validating connector names against the `SourceRef` naming rule above.
  *   - NOT retaining credential-shape strings in any state exposed via
  *     `list()` or returned from `resolve()`. The CONN-01 invariant test
  *     in `@fossil-lang/resolvers/tests/no-credentials-leak.test.ts` asserts

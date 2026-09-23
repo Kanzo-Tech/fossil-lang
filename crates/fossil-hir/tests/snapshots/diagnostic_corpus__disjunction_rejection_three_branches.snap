@@ -1,0 +1,23 @@
+---
+source: crates/fossil-hir/tests/diagnostic_corpus.rs
+expression: "run_shape_fixture(\"disjunction_rejection\", &document, &[rejection])"
+---
+# mode: helper-proven (the neutral shape vocabulary, built by hand, through
+#       ResolvedShape — these fixtures name no document, so the production
+#       path resolves no shape; see module docs)
+# bucket: disjunction_rejection
+resolved constraints: (none — a disjunction body, see the rejection below)
+disjunction rejection: 3 branches in shape `http://example.org/Contact`
+  branch predicates: http://example.org/email, http://example.org/phone, http://example.org/fax
+  suggestion:
+    Contact1 : Contact from users
+        @subject = "https://example.org/u/{users.id}"
+        email = users.email
+    
+    Contact2 : Contact from users
+        @subject = "https://example.org/u/{users.id}"
+        phone = users.phone
+    
+    Contact3 : Contact from users
+        @subject = "https://example.org/u/{users.id}"
+        fax = users.fax

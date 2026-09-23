@@ -1,78 +1,84 @@
 //! Host-injected capabilities (filesystem, time, future: registry, descriptors).
 //!
-//! Per ADR-0003, descriptors and registry live behind a single `dyn System`
-//! indirection on the `Db` trait. Phase 1 only needs `read_file` and `now`;
-//! Phase 3+ extends this trait with `input_descriptor`, `output_descriptor`,
-//! `registry`, `read_dir`, and `random_seed`.
+//! **The `Db` trait stays thin, and descriptors and registry live behind a
+//! single `dyn System` indirection on it** — so a new host capability widens one
+//! trait and never the query surface. Today that is `read_file` and `now`, plus
+//! the two tables below; `read_dir`, `random_seed` and the function registry are
+//! extension points, listed at the foot of the trait and not written yet.
 //!
-//! Phase 13 (v0.2, ADR-0037) adds `inferred_descriptor` +
-//! `register_inferred_descriptor`: hosts (browser-side `DuckDB-WASM` via
-//! `FossilPlayground::register_inferred_descriptor`; native CLI via the
-//! `duckdb` crate) populate runtime-introspected column lists BEFORE invoking
-//! `compile()`. The Rust compiler never initiates network IO from the
-//! WASM-gated crate set — descriptors are HOST-PROVIDED and consumed inside
-//! tracked queries via this `System` accessor (mirrors the `read_file`
-//! pattern; Salsa-safe; `MAX_PER_MAPPING_FAN_OUT = 1` invariant preserved
-//! — see `crates/fossil-hir/tests/invalidation_regression.rs`).
+//! The inferred-descriptor table arrived as a read/write method pair that three
+//! `System` impls each re-implemented, and it sits behind ONE accessor now,
+//! [`System::descriptors`]. Hosts (browser-side
+//! `DuckDB-WASM` via `FossilPlayground::registerInferredDescriptor`; the
+//! native engine via the `duckdb` crate) populate runtime-introspected column
+//! lists BEFORE invoking `compile()`. The Rust compiler never initiates
+//! network IO from the WASM-gated crate set — descriptors are HOST-PROVIDED
+//! and consumed inside tracked queries through this accessor (mirrors the
+//! `read_file` pattern; Salsa-safe; `MAX_PER_MAPPING_FAN_OUT = 1` invariant
+//! preserved — see `crates/fossil-hir/tests/invalidation_regression.rs`).
 
 use std::path::Path;
 use std::time::SystemTime;
 
-use fossil_descriptors_input::InferredDescriptor;
+use fossil_descriptors_input::DescriptorCache;
+
+use crate::providers::{DATA, Provider};
 
 pub trait System: Send + Sync + std::fmt::Debug {
     fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError>;
     fn now(&self) -> SystemTime;
 
-    /// Look up an [`InferredDescriptor`] by source binding name (e.g. `"users"`).
+    /// The host's [`DescriptorCache`] — the introspected input schemas, keyed
+    /// by source URI — or `None` for a host that does not keep one.
     ///
-    /// Hosts populate the inferred-descriptor table BEFORE invoking any tracked
-    /// query that may need it (browser-side: via
-    /// `FossilPlayground::register_inferred_descriptor`; native CLI: via the
-    /// `duckdb` crate after parsing the source).
+    /// This is the whole descriptor surface: one accessor handing out a
+    /// reference to a plain table, in place of the read/write method pair that
+    /// three `System` impls each re-implemented over a private
+    /// `Mutex<HashMap>`. There is no default to write, so a host either has a
+    /// table or answers `None`. **A host capability is ambient in the context
+    /// and never part of a query key**, which is what lets this be an accessor
+    /// at all.
     ///
-    /// Returns `None` if no descriptor was registered for this source name —
-    /// the consumer (`fossil-hir::infer::resolve_source_row`) falls back to
-    /// the deprecated CSVW path (when explicit `schema = "..."` arg is
-    /// present) or returns `None` (no forward propagation, same as Phase 2
-    /// walking-skeleton behaviour).
+    /// It is a concrete struct and not a `fn` table because the split is data
+    /// against behaviour: [`Self::providers`] is a table of BEHAVIOUR and this
+    /// is a table of DATA, and a function pointer that returned descriptors
+    /// would be the indirection without the reason for it.
     ///
-    /// OWNED return signature (cloned-on-read). Rationale (LOCKED per plan
-    /// 13-02 `<interfaces>` block — not a mid-task decision): the underlying
-    /// `Mutex<HashMap>` on [`NativeSystem`] cannot lend a borrow across the
-    /// lock guard's lifetime; [`InferredDescriptor`] is small (Vec of
-    /// SmolStr-pairs, typically < 50 columns), so clone-on-read is acceptable.
-    /// The cost is per-mapping during typecheck, not per-Salsa-query.
+    /// `None` is a real answer and not a stub: `fossil-df-wasm`'s executor
+    /// takes its schemas from the plan it was handed and has nothing to cache.
     ///
-    /// Default impl returns `None` so existing test fixtures + mock Systems
-    /// compile unchanged. [`NativeSystem`] overrides to return entries from
-    /// its internal `HashMap`.
-    ///
-    /// Salsa-safe: reads through this method do NOT trigger Salsa
-    /// invalidation. The descriptor is host-provided, never produced by a
-    /// tracked query. Mirrors `read_file` (ADR-0020); the
-    /// `MAX_PER_MAPPING_FAN_OUT = 1` invariant from Phase 2 SC#2 is preserved
-    /// (verified by `crates/fossil-hir/tests/invalidation_regression.rs`).
-    fn inferred_descriptor(&self, source_name: &str) -> Option<InferredDescriptor> {
-        let _ = source_name;
+    /// Salsa-safe: reading through this accessor does NOT register a Salsa
+    /// dependency and does NOT trigger invalidation. The cache is host-owned
+    /// state, never produced by a tracked query. A host that wants downstream
+    /// queries to re-run bumps the source file's text via `set_text`, which
+    /// Salsa already tracks.
+    fn descriptors(&self) -> Option<&DescriptorCache> {
         None
     }
 
-    /// Register an [`InferredDescriptor`] for a source name. Idempotent:
-    /// re-registering with the same `source_name` OVERWRITES the previous
-    /// entry (intentional — the host may re-introspect when file content
-    /// changes).
+    /// **What this host declares it recognises**, and nothing reads it directly:
+    /// `FossilDb::new` copies it into [`crate::providers::Registry`], a Salsa
+    /// input, and every query goes through [`crate::providers::installed`].
     ///
-    /// Default impl panics — only Systems that opt into inferred-descriptor
-    /// storage need to implement this. [`NativeSystem`] does; ad-hoc test
-    /// `System` mocks do not unless their tests require it.
-    fn register_inferred_descriptor(&self, descriptor: InferredDescriptor) {
-        let _ = descriptor;
-        panic!("register_inferred_descriptor not implemented for this System");
+    /// The rows stay `&'static` because a row's identity is its address, and a
+    /// `Vec<&'static Provider>` inside an input is exactly that. A table read
+    /// from a file at run time cannot be `&'static`, which is why the read path
+    /// moved to the input and this method stayed a declaration.
+    ///
+    /// **This method is a seam that should close.** All but two implementations
+    /// return the identical `fossil_descriptors_output::PROVIDERS`, so "the host
+    /// chooses what is installed" is a choice nobody makes. When the catalogue
+    /// is loaded from a file there is one loader, and they all go with it.
+    ///
+    /// The default is [`DATA`] — the four rows that read data — and it is a real
+    /// answer, not a stub: a host that decodes no shape document still has to
+    /// recognise `io.csv`.
+    fn providers(&self) -> &'static [&'static Provider] {
+        DATA
     }
 
-    // Phase 3+ extension points (do not add now — keep the trait surface
-    // tight until a downstream consumer forces it):
+    // Extension points considered and deliberately not added — keep the trait
+    // surface tight until a downstream consumer forces one:
     //   fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, FsError>;
     //   fn input_descriptor(&self, kind: &str) -> Option<&dyn InputDescriptor>;
     //   fn output_descriptor(&self, kind: &str) -> Option<&dyn OutputDescriptor>;
@@ -88,87 +94,68 @@ pub enum FsError {
     Io(String),
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Default)]
-pub struct NativeSystem {
-    /// Inferred-descriptor table, keyed by source binding name (e.g. `"users"`
-    /// from `users := io.csv(...)`). Populated by the native CLI (plan 13-04a)
-    /// BEFORE invoking `typecheck`. Mutex needed for interior mutability —
-    /// `register_inferred_descriptor` takes `&self` (the `System` trait method
-    /// signature is shared with the WASM host, where workspace mutation goes
-    /// through `&self` on the Salsa Db handle).
-    inferred: std::sync::Mutex<std::collections::HashMap<smol_str::SmolStr, InferredDescriptor>>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl System for NativeSystem {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        std::fs::read(path).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => FsError::NotFound(path.display().to_string()),
-            _ => FsError::Io(e.to_string()),
-        })
-    }
-
-    fn now(&self) -> SystemTime {
-        SystemTime::now()
-    }
-
-    fn inferred_descriptor(&self, source_name: &str) -> Option<InferredDescriptor> {
-        // Lock can only fail if poisoned (another thread panicked while
-        // holding it). Treat that as "no descriptor available" rather than
-        // propagating the poison — the typecheck fallback path handles
-        // missing descriptors gracefully.
-        self.inferred.lock().ok()?.get(source_name).cloned()
-    }
-
-    fn register_inferred_descriptor(&self, descriptor: InferredDescriptor) {
-        let mut lock = self.inferred.lock().expect("mutex poisoned");
-        lock.insert(descriptor.source_name.clone(), descriptor);
-    }
-}
+// `NativeSystem` — a filesystem, a clock and the DEFAULT provider table — lived
+// here beside the trait it implements, and is `crate::test_support` now.
+//
+// It had no production consumer. Measured across the workspace: every mention
+// outside this crate is `#[cfg(test)]`, a `tests/` file, a bench or an example,
+// and the one in `fossil-lsp` is a docblock saying `LspSystem` replaced it. That
+// is not an accident of history — a host that COMPILES a program has to install
+// the rows that read types, and the trait default is the data rows alone, so
+// every real host (`LspSystem`, the engine's, the playground's) declares its
+// own. What was left is a fixture: the cheapest `System` a test can stand up.
+//
+// A fixture on the crate root is a fixture something will eventually reach for
+// in production, and «in `base` only traits» is the rule that says so.
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod inferred_tests {
     use super::*;
+    use crate::test_support::NativeSystem;
     use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+    use fossil_graph_schema::Primitive;
 
-    fn sample(source: &str) -> InferredDescriptor {
+    fn sample(uri: &str) -> InferredDescriptor {
         InferredDescriptor {
-            source_name: source.into(),
+            uri: uri.into(),
             columns: vec![InferredColumn {
                 name: "id".into(),
-                primitive: "Integer".into(),
+                primitive: Primitive::Integer,
             }],
-            content_hash: String::new(),
+            freshness_token: "t1".into(),
         }
     }
 
     #[test]
     fn native_system_register_then_lookup_returns_same_descriptor() {
         let s = NativeSystem::default();
-        s.register_inferred_descriptor(sample("users"));
-        let got = s.inferred_descriptor("users").expect("present");
-        assert_eq!(got.source_name.as_str(), "users");
+        let cache = s.descriptors().expect("the native host keeps a table");
+        cache.insert(sample("examples/users.csv"));
+        let got = cache.get("examples/users.csv").expect("present");
+        assert_eq!(got.uri.as_str(), "examples/users.csv");
         assert_eq!(got.columns.len(), 1);
     }
 
     #[test]
-    fn native_system_lookup_unknown_source_returns_none() {
+    fn native_system_lookup_unknown_uri_returns_none() {
         let s = NativeSystem::default();
-        assert!(s.inferred_descriptor("nope").is_none());
+        assert!(s.descriptors().expect("table").get("nope.csv").is_none());
     }
 
+    /// The default `System` has no table, and says so with a value the caller
+    /// can branch on rather than a panic.
     #[test]
-    fn native_system_re_register_overwrites() {
-        let s = NativeSystem::default();
-        s.register_inferred_descriptor(sample("users"));
-        let mut second = sample("users");
-        second.columns.push(InferredColumn {
-            name: "name".into(),
-            primitive: "String".into(),
-        });
-        s.register_inferred_descriptor(second);
-        let got = s.inferred_descriptor("users").expect("present");
-        assert_eq!(got.columns.len(), 2);
+    fn a_system_without_a_table_says_so_instead_of_panicking() {
+        #[derive(Debug)]
+        struct Bare;
+        impl System for Bare {
+            fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
+                Err(FsError::NotFound(path.display().to_string()))
+            }
+            fn now(&self) -> SystemTime {
+                SystemTime::UNIX_EPOCH
+            }
+        }
+        assert!(Bare.descriptors().is_none());
     }
 }

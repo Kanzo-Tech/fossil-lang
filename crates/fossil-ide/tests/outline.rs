@@ -8,32 +8,39 @@
 
 use std::sync::Arc;
 
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{FossilDb, SourceFile, System};
 use fossil_ide::document_symbols;
 use lsp_types::SymbolKind;
 
-/// A multi-item fixture: a prefix decl, a source def, two mappings (each with a
-/// shape ref), and an exported function definition.
+/// A multi-item fixture: a type binding, a source def, and two mappings (each
+/// with a shape ref).
+///
+/// It opened with `prefix ex: <https://example.org/>`, and the outline carried a
+/// NAMESPACE for it. There is no vocabulary declaration and so no namespace to
+/// outline — `outline.rs`'s `map_kind` emits CLASS, INTERFACE and VARIABLE and
+/// nothing else, which is why `kind_name` names only those three.
+///
+/// `users` is the third: the `:=` binding on line 2 was in NO outline until
+/// `SymbolIndex` grew its `SOURCE_DEF` arm, because the walk tested only for
+/// `MAPPING`. The snapshot below gained exactly that row.
 const FIXTURE: &str = "\
-prefix ex: <https://example.org/>
+type { Person, Organization } := io.shex(\"org.shex\")
 
 users := io.csv(\"users.csv\")
 
-@export greet := .name
+User : Person from users
+    name = users.name
 
-User : ex:Person from users
-    ex:name = .name
-
-Org : ex:Organization from users
-    ex:title = .title
+Org : Organization from users
+    title = users.title
 ";
 
 const fn kind_name(k: SymbolKind) -> &'static str {
     match k {
-        SymbolKind::NAMESPACE => "namespace",
         SymbolKind::CLASS => "class",
-        SymbolKind::FUNCTION => "function",
         SymbolKind::INTERFACE => "interface",
+        SymbolKind::VARIABLE => "variable",
         _ => "other",
     }
 }

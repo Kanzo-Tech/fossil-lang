@@ -63,7 +63,7 @@ jobs:
       # wasm-bindgen-cli. Crate 0.116.1 == binaryen 116. NOT apt binaryen: ubuntu
       # ships 108, whose wasm-opt corrupts wasm-bindgen's externref table (binaryen
       # #4711) → "WebAssembly.Table.grow(): failed to grow table" at instantiation
-      # (the LSP/@fossil-lang/graph wasm). 116 fixes it. build-wasm.sh runs it `-Oz`
+      # (the LSP/@fossil-lang/corpus wasm). 116 fixes it. build-wasm.sh runs it `-Oz`
       # (executor) / `-O3` (graph). WITHOUT it the wasm ships unoptimised (~2-3×).
       - name: Install wasm-opt (binaryen 116 via the wasm-opt crate)
         run: cargo install wasm-opt --locked --version 0.116.1
@@ -85,13 +85,19 @@ jobs:
         run: pnpm --filter @fossil-lang/wasm build:wasm
 
       - name: Build all packages (recursive)
-        run: pnpm -r build
+        run: pnpm --filter "./packages/*" build
 
-      # Exclude @fossil-lang/examples — its variations harness builds fossil-cli
-      # (datafusion/duckdb, minutes); the dedicated cached `examples.yml` already
-      # owns that gate. Same exclusion as pnpm-ci.yml.
-      - name: Test (gate before publishing, except examples)
-        run: pnpm --filter "!@fossil-lang/examples" -r test
+      # Filtered to `./packages/*`, like every other recursive step in this repo.
+      # It read `pnpm -r test`, which reaches `apps/corpus` — whose test script
+      # hard-requires the `duckdb` binary this job never installs, so the gate
+      # before publishing exited 2 on a missing dependency rather than on a
+      # failing package. `apps/` is `private: true` and nothing here publishes
+      # it; CLAUDE.md states the filter as the invariant that makes an app
+      # unpublishable by accident, and this was the one step that did not honour
+      # it. The `@fossil-lang/examples` exclusion the old comment mentioned is
+      # gone because that package is.
+      - name: Test (gate before publishing)
+        run: pnpm --filter "./packages/*" test
 
       # The tag (e.g. v0.3.0-alpha.5) is the single source of truth: strip the
       # leading `v` to get the version, and derive the dist-tag from a prerelease
@@ -109,11 +115,15 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "→ version=$ver  dist-tag=$tag"
 
-      # Stamp the tag's version into every workspace package.json (ephemeral — in
+      # Stamp the tag's version into every PUBLISHED package.json (ephemeral — in
       # the CI checkout only, never committed back). pnpm rewrites internal
       # `workspace:*` deps to this same version automatically at publish time.
-      - name: Stamp version into all packages
-        run: pnpm -r exec npm pkg set version="${{ steps.rel.outputs.version }}"
+      #
+      # `--filter "./packages/*"` is load-bearing, not tidiness. The workspace also
+      # contains `apps/*`, which is never published; unfiltered, this step would
+      # stamp a release version into an app that has no `version` to speak of.
+      - name: Stamp version into all published packages
+        run: pnpm --filter "./packages/*" exec npm pkg set version="${{ steps.rel.outputs.version }}"
 
       - name: Publish to npm
         # Idempotent: pnpm publishes only packages whose version isn't on the
@@ -125,7 +135,11 @@ jobs:
         # and Kanzo-Tech/fossil-lang is private (E422 otherwise). When the repo
         # goes public for the OSS launch, re-add `publishConfig.provenance: true`
         # to each package (or pass --provenance here) to attach the attestation.
-        run: pnpm -r publish --no-git-checks --tag "${{ steps.rel.outputs.tag }}"
+        #
+        # Scoped to packages/ for the same reason as the stamp above. `private: true`
+        # on an app would also make pnpm skip it, but that is an implicit guard one
+        # forgotten field away from a leaked publish. This one is explicit.
+        run: pnpm --filter "./packages/*" publish --no-git-checks --tag "${{ steps.rel.outputs.tag }}"
         env:
           # BOOTSTRAP (one-time): npm OIDC/Trusted Publishing cannot create a
           # brand-new package, so the FIRST publish needs `NPM_TOKEN` (a Granular

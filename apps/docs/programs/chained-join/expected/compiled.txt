@@ -1,0 +1,20 @@
+── type bindings ──
+Order ← chained-join.shex = https://shop.example/voc#Order
+
+── source bindings ──
+Purchase := io.csv(data/orders.csv)
+User := io.csv(data/users.csv)
+Region := io.csv(data/regions.csv)
+Adults := User.where(User.age >= 18)
+Both := Purchase.join(Adults, on = Purchase.user_id == User.id)
+Tri := Both.join(Region, on = User.region_id == Region.id)
+
+── mappings ──
+Orders: 3 written, 3 lowered
+    @subject
+    amount
+    region
+
+── run ──
+vertex Order (https://shop.example/voc#Order) × 2 — dense_id, subject, amount, region, x, y, cluster_id
+NO EDGE TYPE was written

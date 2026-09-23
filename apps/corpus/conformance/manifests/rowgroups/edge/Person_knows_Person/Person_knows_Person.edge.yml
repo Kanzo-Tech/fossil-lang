@@ -1,0 +1,23 @@
+src_type: Person
+edge_type: knows
+dst_type: Person
+edge_count: 900
+chunk_size: 4096
+src_chunk_size: 4096
+dst_chunk_size: 4096
+directed: true
+prefix: edge/Person_knows_Person/
+projections:
+- path: by_source/
+  scale: 1
+  aligned_by: src
+  ordered: true
+  file_type: parquet
+  properties: []
+- path: by_target/
+  scale: 1
+  aligned_by: dst
+  ordered: true
+  file_type: parquet
+  properties: []
+version: gar/v1

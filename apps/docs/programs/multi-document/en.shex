@@ -1,0 +1,6 @@
+PREFIX council: <https://council.example/voc#>
+PREFIX xsd:     <http://www.w3.org/2001/XMLSchema#>
+
+council:Person {
+  council:name xsd:string
+}

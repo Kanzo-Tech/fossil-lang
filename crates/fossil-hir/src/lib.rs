@@ -1,63 +1,84 @@
 //! `fossil-hir` — types + name resolution + minimal type check.
 //!
-//! Per ADR-0002 this crate collapses what was originally three crates
-//! (`fossil-types + fossil-resolve + fossil-typeck`) into one, matching the
-//! `ty_python_semantic` pattern from the research synthesis.
+//! # What lives here
 //!
-//! # Phase 2 scope (current)
-//!
-//! - Full 11-kind [`Ty`] ADT (`Primitive`, `Optional`, `Seq`, `Record`,
-//!   `Iri`, `IriTemplate`, `Shape`, `Fn`, `TripleTerm`, `Error`, `Unknown`)
-//!   per CORE-03 + plan 02-05.
-//! - [`DefMap`] = prefix table + source bindings + mapping list, populated by
+//! - The [`Ty`] ADT — [`TyKind`] is the list, and there is no count here.
+//! - [`DefMap`] = source bindings + type bindings + mapping list, populated by
 //!   the [`def_map`] Salsa query.
-//! - Interned [`MappingLoc`]/[`SourceLoc`] location IDs (rust-analyzer pattern,
-//!   per RESEARCH.md §"Architecture Patterns" Pattern 2 + 3).
+//! - Interned [`MappingLoc`]/[`SourceLoc`] location IDs (the rust-analyzer
+//!   pattern).
 //! - [`item_tree`] signature-only query + [`body`] per-mapping body query
-//!   (rust-analyzer invalidation-barrier pattern per ADR-0005, plan 02-04).
-//! - [`lower_to_hir`] for header-only `HirFile` lowering; body content lives
+//!   (rust-analyzer invalidation-barrier pattern): the signature
+//!   query is what everything else depends on, so editing one mapping's body
+//!   re-runs that mapping and nothing else.
+//! - [`crate::lower::lower_to_hir`] for header-only `HirFile` lowering; body content lives
 //!   behind [`body`] (`body(db, MappingLoc) -> HirBody`).
-//! - [`check::typecheck_mapping`] no-op stub returning
-//!   `Result<(), ErrorGuaranteed>` (plan 02-05 migrated from the deleted
-//!   Phase 1 local taint-wrapper newtype).
-//! - [`check::compatible`] stub demonstrating Phase 3's two-span blame
-//!   pattern (plan 02-06) — pointer-equality only for Phase 2; Phase 3
-//!   wires real subtyping + facets.
-//! - [`provenance`] side table: `(MappingLoc, ExprId) -> ExprTypeEntry`
-//!   per RESEARCH.md §Q5; [`provenance::expr_types`] populates the Phase 2
-//!   literal subset (`StringLit` / `Template` / `PrefixedName`); [`provenance::ty_origin`]
-//!   is the user-facing lookup returning `Option<ExprTypeEntry>` (per
-//!   planner checker Blocker 5 — tuples don't auto-impl `salsa::Update`).
+//! - [`check::typecheck_mapping`], the ONE tracked checker entry per mapping.
+//! - [`check::compatible`], the two-span blame pattern: real subtyping plus
+//!   cardinality facets, blaming the constraint and the expression separately.
+//! - [`provenance`] side table: `(MappingLoc, ExprId) -> ExprTypeEntry`.
+//!   [`provenance::expr_types`] projects [`check::typecheck_mapping`]'s
+//!   per-expression types; [`provenance::ty_origin`]
+//!   is the user-facing lookup returning `Option<ExprTypeEntry>` — a struct
+//!   and not a tuple, because tuples don't auto-impl `salsa::Update`.
 //! - [`spans`] side table: per-mapping real-span lookup
 //!   (`(MappingLoc, ExprId) -> Span`) populated from `rowan::TextRange`s at
-//!   query time. Replaces Phase 2's zero-width `Span { start: 0, end: 0 }`
-//!   placeholders for the literal-subset provenance entries. The
+//!   query time. The
 //!   [`spans::spans`] tracked query reads `mapping_cst_node` (NOT
-//!   `parse(file)`) to preserve the Phase 2 plan 02-07
-//!   `MAX_PER_MAPPING_FAN_OUT = 1` invariant. ADR-0008 records the
-//!   side-table-over-`HirExpr`-field choice (same rationale as Phase 2
-//!   RESEARCH §Q5 for provenance).
+//!   `parse(file)`) to preserve the
+//!   `MAX_PER_MAPPING_FAN_OUT = 1` invariant. The spans live in a side table
+//!   rather than in a `span` field on every `HirExpr` so that lowering stays
+//!   span-free and only the layers that emit diagnostics pay for them (same
+//!   rationale as the provenance side table).
 //!
-//! # Phase 2-9 contract (locked)
+//! # The locked surface
 //!
 //! Public Salsa query signatures (`def_map`, `item_tree`, `lower_to_hir`,
 //! `body`, `typecheck_mapping`) and the public types in [`ty`], [`def_map`],
-//! [`item_tree`], [`body`], and [`lower`] are stable for downstream phases.
-//! Phase 3 wires bidirectional checking + [`fossil_base::ErrorGuaranteed`]
-//! propagation (CORE-04..07) atop the Phase 2 surface.
+//! [`item_tree`], [`body`], and [`lower`] are stable for every crate
+//! downstream: bidirectional checking and [`fossil_base::ErrorGuaranteed`]
+//! propagation are built on top of them, not beside them.
 
 pub mod ast_id;
 pub mod body;
 pub mod check;
-pub mod db_ext;
 pub mod def_map;
 pub mod didyoumean;
+/// The source spelling of a lowered node — the HIR said back in surface syntax.
+///
+/// Its consumer is the conformance census — `fossil-cli`'s `tests/census`,
+/// which commits a per-program record of what the compiler UNDERSTOOD. Rendering
+/// that from source text would prove nothing; rendering it from the HIR is the
+/// only version of the artefact that can be wrong.
+pub mod display;
+pub mod documents;
+/// The identity of a TYPE: one `@subject` template per shape, file-keyed.
+///
+/// The identity is unique per type — one `@subject` per shape, declared by the
+/// program — and that is what turns an edge from a guess into a lookup. `crate::body`'s identity checks are keyed by
+/// `MappingLoc` and so cannot see a second mapping; this is the file-level table
+/// they cannot hold.
+pub mod identity;
 pub mod infer;
 pub mod item_tree;
 pub mod lower;
 pub mod provenance;
+/// What the compiler says when a program names a provider it cannot use. Three
+/// sentences, shared by every path that raises one — this crate's checker and
+/// the native host's run path. They were methods on `fossil_base::Provider`,
+/// which put English Fossil compiler errors in the trait-and-db substrate.
+pub mod refusals;
+pub mod shape_documents;
 pub mod shapes;
 pub mod spans;
+/// The stdlib catalog: every function the language declares, its signature and
+/// how it compiles. It lives here because the checker resolves a call against
+/// it, and the checker cannot depend on a crate that depends on the checker —
+/// which is what `fossil-registry` was until it was folded in here.
+pub mod stdlib;
+// The host-with-a-decoder this crate's tests use is `fossil_base::test_support`
+// (feature `test-support`) and not a real ShEx decoder: this crate names no
+// schema language, and reaching for one as a dev-dependency puts it back.
 pub mod ty;
 
 // Type re-exports only; the query functions are intentionally kept under their
@@ -66,19 +87,14 @@ pub mod ty;
 // avoid name shadowing with the modules themselves.
 pub use ast_id::{AstIdEntry, AstIdMap, FileAstId, MappingNode, SourceDefNode};
 pub use body::{ExprId, HirBody};
-pub use def_map::{DefMap, MappingLoc, SourceLoc};
+pub use check::{Checker, TypeckOutput, compatible, render_split_suggestion, typecheck_mapping};
+pub use def_map::{DefMap, MappingLoc, SourceCall, SourceLoc};
+pub use didyoumean::did_you_mean;
 pub use item_tree::{ItemHeader, ItemTree, MappingHeader};
-pub use lower::{HirExpr, HirFile, HirMapping, HirProperty, PropertyKey};
+pub use lower::{BinOp, FloatBits, HirExpr, HirFile, HirMapping, HirProperty, PropertyKey, UnOp};
 pub use provenance::{
     ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind, expr_types, mapping_at, ty_origin,
 };
-// The `spans()` query function is reachable as `fossil_hir::spans::spans`
-// (the module path is intentional — the bare `spans` name would shadow the
-// module). Mirrors the rust-analyzer convention of keeping Salsa query
-// functions under their module paths.
-pub use check::{BlamePos, Checker, TypeckOutput, compatible, typecheck_mapping};
-pub use db_ext::HirDb;
-pub use didyoumean::did_you_mean;
 pub use spans::Spans;
 pub use ty::display::render_ty_kind;
-pub use ty::{FnSig, InferenceId, Primitive, Record, RecordField, ShapeId, Ty, TyKind};
+pub use ty::{Record, RecordField, Ty, TyKind};

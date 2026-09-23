@@ -1,71 +1,63 @@
 //! `textDocument/hover` query — position → enclosing `PROPERTY` → `ty_origin`.
 //!
-//! Phase 2 plan 02-06 (per RESEARCH.md §Q9): the minimum delta to wire the
-//! LSP hover end-to-end. The handler:
+//! The minimum delta that wires LSP hover end-to-end. The handler:
 //!
 //! 1. Resolves the LSP position to a [`fossil_syntax::SyntaxNode`] via
 //!    [`crate::position::node_at_position`].
 //! 2. Walks up to the enclosing `PROPERTY` node (the type-bearing position
 //!    in the property grammar) AND the enclosing `MAPPING` node.
-//! 3. Computes the per-MAPPING-kind dense index of the enclosing mapping
-//!    (matches `MappingLoc::index` and `body()`'s filter-then-nth contract
-//!    per ADR-0005 / plan 02-04 Blocker 2).
+//! 3. Computes the per-MAPPING-kind dense index of the enclosing mapping —
+//!    the position among MAPPING-kind top-level children, which is what
+//!    `MappingLoc::index` and `body()`'s filter-then-nth contract mean.
 //! 4. Computes the property's index inside `MAPPING_BODY` — this is the
-//!    `ExprId` per plan 02-04's `expr_count` advancement (one `ExprId` per
-//!    lowered property in source order).
+//!    `ExprId`, one per lowered property in source order.
 //! 5. Calls [`fossil_hir::provenance::ty_origin`] for the
-//!    `(MappingLoc, ExprId)` pair. Returns `None` if Phase 2's literal
-//!    subset didn't infer a type for the RHS expression (e.g. `FieldRef`).
-//! 6. Destructures the returned [`ExprTypeEntry`] (per planner checker
-//!    Blocker 5 — NOT a tuple) into `ty` + `provenance`.
+//!    `(MappingLoc, ExprId)` pair. Returns `None` when the checker inferred
+//!    no type for the RHS expression.
+//! 6. Destructures the returned [`ExprTypeEntry`] — a named struct, not a
+//!    tuple — into `ty` + `provenance`.
 //! 7. Renders the type kind as Markdown: a fenced code block ```` ```fossil ````
 //!    + the rendered `TyKind` + an italic provenance trailer.
 //!
-//! Phase 2 limitation (DISCHARGED in Phase 3 plan 03-07): hover used to fire
-//! only for literal-subset RHS expressions (`StringLit` / `Template` /
-//! `PrefixedName`); `FieldRef`s returned `None`. Phase 3 plan 03-05 made
-//! [`fossil_hir::check::typecheck_mapping`] the source of truth, so a
-//! `FieldRef` resolved against a CSVW source row now carries an
-//! [`ExprTypeEntry`] — hover surfaces its type (the standard `*from
-//! InputDescriptor { .. }*` trailer).
+//! [`fossil_hir::check::typecheck_mapping`] is the source of truth, so a
+//! `FieldRef` resolved against a source row carries an [`ExprTypeEntry`] and
+//! hover surfaces its type (the standard `*from InputDescriptor { .. }*`
+//! trailer). Hover used to fire only for literal RHS expressions and return
+//! `None` for every `FieldRef`.
 //!
-//! # Phase 3 plan 03-07: SC#3 implicit-closure surfacing
+//! # The implicit-closure rendering
 //!
-//! Plan 03-06 populated [`ProvenanceKind::SynthesizedClosureRendering`] on the
-//! body `ExprId` of an implicitly-synthesised closure (the ONLY lambda form in
-//! Fossil — type-system.md §7). This handler reads that variant in
-//! [`render_markdown`] and renders the closure binding as a fenced `fossil`
-//! code block ABOVE the field type, plus a `*synthesised closure parameter
-//! binding*` tagline so the synthesis is NEVER hidden from the user (SC#3 /
-//! CORE-07). All type rendering goes through [`render_ty_kind`], so
-//! `TyKind::Unknown(InferenceId)` normalises to `?` and never leaks (STATE.md
-//! "Do NOT expose `Unknown`").
+//! [`ProvenanceKind::SynthesizedClosureRendering`] sits on the body `ExprId` of
+//! an implicitly-synthesised closure. [`render_markdown`] reads that variant and
+//! renders the closure binding as a fenced `fossil` code block ABOVE the field
+//! type, plus a `*synthesised closure parameter binding*` tagline, so the
+//! synthesis is NEVER hidden from the user. All type rendering goes through
+//! [`render_ty_kind`], never `{:?}`, so no `TyKind` reaches a hover under its
+//! Rust spelling.
 //!
-//! The full JSON-RPC end-to-end SC#3 surface form
-//! (`users |> seq.filter(.age >= 18)`) is deferred to Phase 6: per plan
-//! 03-05's recorded decision, no
-//! `seq.filter` registry stub was added (Phase 3 v0.1's `HirExpr` has no
-//! `Pipeline` / `Call` variant to lower), so the synthesis is unreachable
-//! through surface syntax. The SC#3 rendering is verified at the
-//! `render_markdown` unit layer here + a direct integration test in
-//! `fossil-lsp/tests/lsp_hover_smoke.rs`.
+//! Nothing in the compiler builds that variant any more. The synthesis went away
+//! when the row got a name: a reference reaches its row through the binding that
+//! introduced it, so there is no free `.field` left to wrap into a lambda, and
+//! no surface form that triggers a synthesis. The arm in [`render_markdown`] and
+//! the two tests that construct the variant by hand — here and in
+//! `fossil-lsp/tests/lsp_hover_smoke.rs` — are what is left of it, and they
+//! should go with the variant.
 
 use std::ops::Range;
 
 use fossil_base::SourceFile;
-use fossil_hir::HirDb;
 use fossil_hir::body::{ExprId, body};
+use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::def_map;
 use fossil_hir::lower::PropertyKey;
 use fossil_hir::provenance::{ExprTypeEntry, ProvenanceKind, ty_origin};
 use fossil_hir::shapes::resolve_target_shape;
 use fossil_syntax::SyntaxKind;
 
-// Phase 3 plan 03-05 (Serious #7): `render_ty_kind` was PROMOTED to
-// `fossil_hir::ty::display` as the single source of truth for type
-// pretty-printing. It is re-exported here for back-compat so existing
-// `fossil_ide::hover::render_ty_kind` callers (and plan 03-07's hover
-// widening) keep working without a local definition.
+// `render_ty_kind` lives in `fossil_hir::ty::display`, the single source of
+// truth for type pretty-printing. It is re-exported here so a caller reaching
+// for `fossil_ide::hover::render_ty_kind` gets that one and this module needs no
+// local definition to drift from it.
 pub use fossil_hir::render_ty_kind;
 
 use crate::position::node_at_position;
@@ -73,25 +65,23 @@ use crate::position::node_at_position;
 /// Hover result: Markdown body + the source range the hover applies to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HoverInfo {
-    /// Markdown content (`Hover.contents` per LSP spec). Phase 2 fenced as
-    /// ```` ```fossil ```` + rendered type kind + italic provenance line.
+    /// Markdown content (`Hover.contents` per LSP spec): a ```` ```fossil ````
+    /// fence + the rendered type kind + an italic provenance line.
     pub markdown: String,
     /// Byte-offset range the hover applies to. Translated to
-    /// `lsp_types::Range` by the LSP handler in `fossil-lsp/src/main.rs`.
+    /// `lsp_types::Range` by the LSP handler in `fossil-lsp/src/lib.rs`.
     pub range: Range<u32>,
 }
 
 /// Compute hover info at an LSP position (source-side only).
 ///
 /// Returns `None` if no type-bearing expression is at the cursor (e.g.
-/// cursor on whitespace, on a `FieldRef` whose type Phase 2 cannot
-/// synthesise, or on a position outside any MAPPING).
+/// cursor on whitespace, on an expression the checker inferred no type for,
+/// or on a position outside any MAPPING).
 ///
-/// This entry takes `&dyn fossil_base::Db`, which (per ADR-0006) does NOT
-/// carry the descriptor vtable, so it renders the source-side type only —
-/// exactly the degraded `AcceptAll` behaviour. A host that has loaded a `ShEx`
-/// schema calls [`hover_bidirectional`] with its [`HirDb`] to also surface the
-/// target-side (`ShEx`) type (SC#4).
+/// This entry renders the source-side type ONLY — it never resolves the
+/// mapping's target shape, even for a program that names one. A caller that
+/// wants the target-side (`ShEx`) type too calls [`hover_bidirectional`].
 #[must_use]
 pub fn hover(
     db: &dyn fossil_base::Db,
@@ -108,25 +98,27 @@ pub fn hover(
     })
 }
 
-/// Compute **bidirectional** hover info at an LSP position (SC#4).
+/// Compute **bidirectional** hover info at an LSP position.
 ///
-/// Like [`hover`], but takes a [`HirDb`] so it can read the host's output
-/// descriptor ([`HirDb::output_descriptor_kind`], the 06-01 / ADR-0020 R2
-/// wiring) and resolve the mapping's target `ShEx` shape via
-/// [`resolve_target_shape`]. When the hovered `.field`'s predicate matches a
-/// shape constraint carrying a value type, the rendered Markdown appends a
-/// SECOND fenced block showing the **target-side** type (from
+/// Like [`hover`], but also resolves the mapping's target `ShEx` shape via
+/// [`resolve_target_shape`], which reads the document the PROGRAM names.
+/// When the hovered `.field`'s predicate matches a shape
+/// constraint carrying a value type, the rendered Markdown appends a SECOND
+/// fenced block showing the **target-side** type (from
 /// `ShapeConstraint::value_ty`).
 ///
-/// The "if reachable" hedge (truth #2): if no shape resolves (`AcceptAll`, or
-/// the schema omits the mapping's shape, or the predicate has no constraint),
-/// the hover shows the source-side block only — best-effort, no error.
+/// The "if reachable" hedge: if no shape resolves (the program
+/// names no document, the host has not registered the one it names — see
+/// [`crate::shape_documents`] — the document omits the mapping's shape, or the
+/// predicate has no constraint), the hover shows the source-side block only —
+/// best-effort, no error. The last three are a `TargetShapeError` the CHECKER
+/// reports; a hover is not the place to.
 ///
 /// All type rendering routes through [`render_ty_kind`], so `TyKind::Unknown`
-/// never leaks (truth #4 / STATE.md "Do NOT expose `Unknown`").
+/// never leaks: internal inference state must not appear in a hover.
 #[must_use]
 pub fn hover_bidirectional(
-    db: &dyn HirDb,
+    db: &dyn fossil_base::Db,
     file: SourceFile,
     line: u32,
     character: u32,
@@ -137,7 +129,10 @@ pub fn hover_bidirectional(
     // Target-side: resolve the mapping's ShEx shape against the host descriptor
     // and find the constraint matching the hovered property's predicate IRI.
     let target_block = resolved.predicate_iri.as_deref().and_then(|pred| {
-        let shape = resolve_target_shape(db, resolved.mapping, db.output_descriptor_kind())?;
+        // The failure cases carry a `TargetShapeError` now; the diagnostic for
+        // them belongs to `typecheck_mapping`, and a hover that cannot resolve
+        // the target simply shows the source side.
+        let shape = resolve_target_shape(db, resolved.mapping).ok().flatten()?;
         let constraint = shape.constraint_for(pred)?;
         // `value_ty == None` means "any value" (no datatype narrowing) — render
         // it as `Iri` (the constraint's default node type), consistent with the
@@ -197,8 +192,8 @@ fn resolve_hover_target<'db>(
     let property_node = enclosing_property?;
 
     let cst = fossil_syntax::parse(db, file);
-    // Per ADR-0005 / plan 02-04 Blocker 2: MappingLoc.index is the position
-    // among MAPPING-kind top-level children — filter BEFORE indexing.
+    // MappingLoc.index is the position among MAPPING-kind top-level
+    // children — filter BEFORE indexing.
     let mapping_index = cst
         .root(db)
         .syntax()
@@ -212,27 +207,60 @@ fn resolve_hover_target<'db>(
         .find(|m| m.index(db) == mapping_index)
         .copied()?;
 
-    // ExprId is the property's dense index within MAPPING_BODY (matches
-    // `body()` / `expr_types()` enumeration in plans 02-04 + 02-06).
-    let body_node = mapping_node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::MAPPING_BODY)?;
-    let property_index = body_node
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::PROPERTY)
-        .position(|p| p == property_node)?;
+    // The `ExprId` under the cursor, BY SPAN CONTAINMENT.
+    //
+    // This counted instead: the property's position among the CST's `PROPERTY`
+    // children, used both as the `ExprId` and (below) as an index into the HIR's
+    // `properties` vector. Those are two different numbers. `body()` numbers
+    // densely over the properties that LOWERED, and a property that parses and
+    // does not lower — every retired spelling in the corpus is one: a CURIE key,
+    // `iri =`, an absolute-IRI key — makes the CST longer than the HIR and
+    // shifts everything behind it. The hover then showed the short name and the
+    // predicate IRI of a DIFFERENT property, with no way to tell.
+    //
+    // `body()` publishes one span per lowered property at the property's own
+    // index, so the id is a lookup and the two vectors cannot drift: they are
+    // the same vector's indices.
+    let hir_body = body(db, mapping);
+    // `expr_spans` are mapping-relative (rowan resets offsets at the detached
+    // per-mapping root); the CST node here is in the file tree. Rebase the
+    // PROPERTY's range down, then take the property whose RHS span sits inside
+    // it — the RHS of a property is inside exactly one property.
+    let base = fossil_hir::spans::mapping_start_offset(db, mapping);
+    let range = property_node.text_range();
+    let lo = u32::from(range.start()).saturating_sub(base);
+    let hi = u32::from(range.end()).saturating_sub(base);
+    let property_index = hir_body
+        .expr_spans(db)
+        .iter()
+        .position(|s| s.start >= lo && s.end <= hi)?;
     let expr_id = ExprId(u32::try_from(property_index).unwrap_or(u32::MAX));
 
     // The hovered property's predicate IRI (for matching a shape constraint).
-    // Reads the SAME lowered `HirProperty` the checker uses — `PropertyKey::Iri`
-    // (the subject `iri =`) is not a shape predicate.
-    let predicate_iri = body(db, mapping)
+    //
+    // The key no longer carries it: a body writes a bare `name`, and the IRI is
+    // the shape document's to know. So the short name comes from
+    // the SAME lowered `HirProperty` the checker uses, and the IRI comes from
+    // the checker's own `predicates` table — the one `fossil-mir` reads for
+    // `rdf_uri`. One table, two consumers, no second resolution.
+    //
+    // `PropertyKey::Subject` is not a predicate at all: a shape declares a
+    // node's predicates, and in RDF the subject IS the node.
+    let short_name = hir_body
         .properties(db)
         .get(property_index)
         .and_then(|prop| match &prop.key {
-            PropertyKey::PrefixedName { iri } => Some(iri.to_string()),
-            PropertyKey::Iri => None,
+            PropertyKey::Name(name) => Some(name.clone()),
+            PropertyKey::Subject => None,
         });
+    let predicate_iri = short_name.and_then(|name| {
+        let output = typecheck_mapping(db, mapping).ok()?;
+        output
+            .predicates(db)
+            .iter()
+            .find(|(short, _)| *short == name)
+            .map(|(_, iri)| iri.to_string())
+    });
 
     let r = property_node.text_range();
     Some(ResolvedHover {
@@ -247,38 +275,40 @@ fn resolve_hover_target<'db>(
 ///
 /// Two paths:
 ///
-/// 1. [`ProvenanceKind::SynthesizedClosureRendering`] (Phase 3 plan 03-07,
-///    SC#3 / CORE-07): the entry sits on the body `ExprId` of an implicitly
-///    synthesised closure. Render the closure binding as a fenced `fossil`
+/// 1. [`ProvenanceKind::SynthesizedClosureRendering`]: the entry sits on the
+///    body `ExprId` of an implicitly synthesised closure. Render the closure
+///    binding as a fenced `fossil`
 ///    code block ABOVE the field type, then a `*synthesised closure parameter
 ///    binding*` tagline. Both the closure binding AND the field type appear —
-///    the synthesis is NEVER hidden from the user (RESEARCH.md §Pitfall 6).
+///    the synthesis is NEVER hidden from the user. Hover sits downstream of
+///    the checker, so a binding only `check.rs` knows about is invisible
+///    unless this layer reads the provenance and says so.
 ///
-/// 2. Every other provenance kind (the Phase 2 literal subset + Phase 3's
-///    CSVW-`FieldRef` widening): a fenced `fossil` type block + an italic
+/// 2. Every other provenance kind (a literal, or a `FieldRef` resolved against
+///    a source row): a fenced `fossil` type block + an italic
 ///    `*from {provenance:?}*` origin trailer.
 ///
 /// All type rendering routes through [`render_ty_kind`], so
 /// `TyKind::Unknown(InferenceId)` normalises to `?` and never leaks.
 ///
-/// This is the source-side-only entry, preserved verbatim for back-compat
-/// (`fossil-lsp`'s `lsp_hover_smoke` calls it with 2 args). It delegates to
-/// [`render_markdown_bidirectional`] with no target block.
+/// This is the source-side-only entry (`fossil-lsp`'s `lsp_hover_smoke` calls
+/// it with 2 args). It delegates to [`render_markdown_bidirectional`] with no
+/// target block.
 #[must_use]
 pub fn render_markdown(db: &dyn fossil_base::Db, entry: &ExprTypeEntry<'_>) -> String {
     render_markdown_bidirectional(db, entry, None)
 }
 
 /// Render the Markdown body for an [`ExprTypeEntry`], optionally appending a
-/// **target-side** type block (SC#4).
+/// **target-side** type block.
 ///
-/// The source-side rendering is identical to the Phase 2/3 behaviour
-/// (closure-binding path + the literal/CSVW `*from {provenance:?}*` trailer).
+/// The source-side rendering is what [`render_markdown`] produces: the
+/// closure-binding path + the `*from {provenance:?}*` trailer.
 /// When `target_ty` is `Some(rendered)`, a SECOND fenced `fossil` block plus a
 /// `*target type (ShEx shape constraint)*` tagline is appended, so the user
-/// sees BOTH the source-side type (from the CSVW descriptor provenance) AND the
+/// sees BOTH the source-side type (from the input descriptor provenance) AND the
 /// target-side type (from the resolved `ShEx` shape). When `target_ty` is
-/// `None` (no shape resolved — `AcceptAll` / unreachable, the "if reachable"
+/// `None` (no shape resolved — no document named / unreachable, the "if reachable"
 /// hedge), only the source-side block is rendered — no error.
 ///
 /// `target_ty` is always pre-rendered through [`render_ty_kind`] by the caller,
@@ -291,22 +321,28 @@ pub fn render_markdown_bidirectional(
 ) -> String {
     let field_ty = render_ty_kind(db, entry.ty.kind(db));
     let source_side = match &entry.provenance.kind {
-        // SC#3: the closure rendering ALREADY carries the row Record's field
-        // names + types (built by `render_closure` via `render_ty_kind` in
-        // plan 03-06), so it is reproduced verbatim as a fenced block. The
-        // field type below is the closure body's result type.
+        // The rendering ALREADY carries the row Record's field names +
+        // types, so it is reproduced verbatim as a fenced block; the field type
+        // below is the closure body's result type.
+        //
+        // NOTHING IN THE COMPILER CONSTRUCTS THIS VARIANT ANY MORE. The
+        // producer was `fossil_hir::check::synthesize_closure`, deleted with the
+        // implicit closure (a reference names its own row, so a
+        // closure has nothing to capture). This arm and the two tests that build
+        // the variant by hand — here and in `fossil-lsp`'s hover smoke — are
+        // what is left of it, and they should go with the variant.
         ProvenanceKind::SynthesizedClosureRendering { rendering } => format!(
             "```fossil\n{rendering}\n```\n\n\
              field type: `{field_ty}`\n\n\
              *synthesised closure parameter binding*",
         ),
-        // Phase 2 literal subset + Phase 3 CSVW FieldRef widening. The
-        // `*from {:?}*` trailer is preserved verbatim from plan 02-06 so the
-        // existing lsp_hover_smoke literal assertion (`"Literal"`) holds.
+        // A literal, or a FieldRef resolved against a source row. The
+        // `*from {:?}*` trailer is the wording `lsp_hover_smoke`'s literal
+        // assertion (`"Literal"`) reads, so it does not change casually.
         other => format!("```fossil\n{field_ty}\n```\n\n*from {other:?}*"),
     };
 
-    // SC#4: append the target-side (ShEx) type block when a shape resolved.
+    // Append the target-side (ShEx) type block when a shape resolved.
     match target_ty {
         Some(target) => format!(
             "{source_side}\n\n\
@@ -323,38 +359,42 @@ mod tests {
     use std::sync::Arc;
 
     const HELLO: &str = "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"person.shex\")
 users := io.csv(\"x.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
 
     fn db_with_text(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "hover.fossil".to_string());
         (db, file)
     }
 
-    /// Hover on the iri template property line (line 3) returns Markdown
-    /// containing `IriTemplate` (the rendered ty kind) AND `Literal` (the
-    /// provenance kind).
+    /// Hover on the identity line (line 3) returns Markdown naming the type —
+    /// a REFERENCE — and the `Literal` provenance.
+    ///
+    /// It read `IriTemplate`, and that type is gone: an identity is a reference
+    /// to the shape the mapping produces. This fixture registers no document,
+    /// so the shape resolves to nothing and the rendering is `Ref<?>`.
     #[test]
-    fn hover_on_iri_template_returns_iri_template_markdown() {
+    fn hover_on_the_identity_names_a_reference() {
         let (db, file) = db_with_text(HELLO);
         // Lines in HELLO are 0-indexed:
-        //   0: prefix ex: <...>
+        //   0: type { Person } := io.shex(...)
         //   1: users := io.csv(...)
-        //   2: User : ex:Person from users
-        //   3:     iri = `${ex:}u/${.id}`
-        //   4:     ex:name = .name
-        // Cursor inside the template text at character 10 (within the iri
-        // line, comfortably inside the property).
-        let info = hover(&db, file, 3, 10).expect("hover at (3, 10) must return Some");
+        //   2: User : Person from users
+        //   3:     @subject = "https://example.org/u/{users.id}"
+        //   4:     name = users.name
+        // Cursor inside the interpolated string at character 20, comfortably
+        // inside the property.
+        let info = hover(&db, file, 3, 20).expect("hover at (3, 20) must return Some");
         assert!(
-            info.markdown.contains("IriTemplate"),
-            "expected hover markdown to mention IriTemplate, got {:?}",
+            info.markdown.contains("Ref<"),
+            "expected hover markdown to name a reference, got {:?}",
             info.markdown,
         );
         assert!(
@@ -369,35 +409,36 @@ User : ex:Person from users
         );
     }
 
-    /// Hover on the `ex:name = .name` line returns `None` for the HELLO
-    /// fixture — its `users` source declares NO CSVW schema arg, so
-    /// `resolve_source_row` returns `None` and the `FieldRef` synthesises no
-    /// entry (matching the Phase 2 behaviour for the schema-less case). Plan
-    /// 03-05 widened `FieldRef` hover ONLY when a CSVW schema is declared; with
-    /// a schema, `render_markdown` surfaces the field type (see the
-    /// `render_markdown_for_fieldref_with_csvw_propagation` unit test).
+    /// Hover on the `name = users.name` line returns `None` for the HELLO
+    /// fixture — no descriptor is registered for its `users` source, so
+    /// `resolve_source_scope` returns `None` and the `FieldRef` synthesises no
+    /// entry. A `FieldRef` hover needs a row to resolve against; given one,
+    /// `render_markdown` surfaces the field type (see the
+    /// `render_markdown_for_fieldref_with_forward_propagation` unit test).
     #[test]
-    fn hover_on_field_ref_returns_none_without_csvw_schema() {
+    fn hover_on_field_ref_returns_none_without_a_source_row() {
         let (db, file) = db_with_text(HELLO);
-        // Line 4 is `    ex:name = .name`. Cursor inside the property at
+        // Line 4 is `    name = users.name`. Cursor inside the property at
         // character 14 (somewhere on the value).
         let info = hover(&db, file, 4, 14);
         assert!(
             info.is_none(),
-            "hover on FieldRef RHS with no CSVW schema must return None \
-             (no source row to resolve against)"
+            "hover on FieldRef RHS with no registered descriptor must return \
+             None (no source row to resolve against)"
         );
     }
 
+    use fossil_graph_schema::Primitive;
     use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};
-    use fossil_hir::ty::{InferenceId, Primitive, Record, RecordField, Ty, TyKind};
+    use fossil_hir::ty::{Record, RecordField, Ty, TyKind};
 
     fn bare_db() -> fossil_base::FossilDb {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         fossil_base::FossilDb::new(system)
     }
 
-    /// SC#3 surface (CORE-07): an `ExprTypeEntry` carrying
+    /// An `ExprTypeEntry` carrying
     /// `SynthesizedClosureRendering` renders the closure binding as a fenced
     /// `fossil` block, then the field type, then the tagline — BOTH the
     /// closure parameter binding AND the field type are present.
@@ -432,16 +473,14 @@ User : ex:Person from users
         );
         // The synthesis is NEVER hidden: closure binding + field type both present.
         assert!(md.contains("row.age >= 18") && md.contains("Integer"));
-        // Risk Register: internal inference state must never leak.
+        // Internal inference state must never leak into a hover.
         assert!(!md.contains("Unknown") && !md.contains("InferenceId"));
     }
 
-    /// Phase 3 widening: a `FieldRef` resolved against a CSVW source row
-    /// carries `InputDescriptor` provenance + the field's type.
-    /// `render_markdown` surfaces the type (Phase 2 returned `None` for
-    /// `FieldRef`).
+    /// A `FieldRef` resolved against a source row carries `InputDescriptor`
+    /// provenance + the field's type, and `render_markdown` surfaces that type.
     #[test]
-    fn render_markdown_for_fieldref_with_csvw_propagation() {
+    fn render_markdown_for_fieldref_with_forward_propagation() {
         let db = bare_db();
         let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
         let entry = ExprTypeEntry {
@@ -458,7 +497,7 @@ User : ex:Person from users
         let md = render_markdown(&db, &entry);
         assert!(
             md.contains("String"),
-            "expected the CSVW field type `String`, got {md:?}",
+            "expected the field type `String`, got {md:?}",
         );
         assert!(
             md.contains("```fossil"),
@@ -472,7 +511,7 @@ User : ex:Person from users
         assert!(!md.contains("Unknown") && !md.contains("InferenceId"));
     }
 
-    /// SC#4: `render_markdown_bidirectional` with a `Some(target)` appends a
+    /// `render_markdown_bidirectional` with a `Some(target)` appends a
     /// SECOND fenced block + the `ShEx` tagline — BOTH the source-side type and
     /// the target-side type appear, in that order. With `None` it is identical
     /// to the source-only `render_markdown` (the "if reachable" hedge).
@@ -494,7 +533,7 @@ User : ex:Person from users
 
         // Target-side resolved (ShEx demands `Integer` for this predicate).
         let md = render_markdown_bidirectional(&db, &entry, Some("Integer"));
-        // Source-side block (CSVW String) present.
+        // Source-side block (`String`, from the input descriptor) present.
         assert!(
             md.contains("String"),
             "source-side type `String` must still appear; got {md:?}",
@@ -530,10 +569,11 @@ User : ex:Person from users
         assert!(!md_none.contains("Unknown") && !md_none.contains("InferenceId"));
     }
 
-    /// Risk Register: `render_ty_kind` (re-exported here) maps EVERY `TyKind`
-    /// variant to user-facing text — no rendered output contains the internal
-    /// `Unknown` / `InferenceId` placeholders (STATE.md "Do NOT expose
-    /// `TyKind::Unknown(InferenceId)`").
+    /// `render_ty_kind` (re-exported here) maps EVERY `TyKind` variant to
+    /// user-facing text — no rendered output contains the internal
+    /// `Unknown` / `InferenceId` placeholders, because
+    /// `TyKind::Unknown(InferenceId)` is inference state and must never appear
+    /// in a surface diagnostic or a hover.
     #[test]
     fn render_ty_kind_normalises_unknown_to_question_mark() {
         let db = bare_db();
@@ -545,20 +585,21 @@ User : ex:Person from users
                 ty: int_ty,
             }],
         );
-        let sig = fossil_hir::ty::FnSig::new(&db, vec![int_ty], int_ty);
         let variants: Vec<TyKind<'_>> = vec![
             TyKind::Primitive(Primitive::String),
-            TyKind::Optional(int_ty),
             TyKind::Seq(int_ty),
             TyKind::Record(rec),
-            TyKind::Iri,
-            TyKind::IriTemplate,
-            TyKind::Shape(fossil_hir::ty::ShapeId(0)),
-            TyKind::Fn(sig),
-            TyKind::TripleTerm,
-            TyKind::Unknown(InferenceId(7)),
+            TyKind::Ref(vec![smol_str::SmolStr::new_static(
+                "https://example.org/Person",
+            )]),
         ];
-        // 10 surface-constructible variants + Error (constructed below) = 11.
+        // Every variant a caller can construct. There is no count to quote and
+        // there used to be («10 surface-constructible + Error = 11»): three of
+        // the eleven — `Optional`, `Fn` and `Unknown` — were built by this list
+        // and by nothing else in the workspace, and all three are gone. The
+        // third is why this assertion is still worth making: it was CHECKER
+        // state given a type, and this test existed to keep it off the screen.
+        // A kind that cannot be constructed cannot leak.
         for kind in &variants {
             let s = render_ty_kind(&db, kind);
             assert!(
@@ -566,7 +607,5 @@ User : ex:Person from users
                 "render_ty_kind leaked internal state for {kind:?}: {s:?}",
             );
         }
-        // The Unknown variant specifically normalises to "?".
-        assert_eq!(render_ty_kind(&db, &TyKind::Unknown(InferenceId(7))), "?");
     }
 }

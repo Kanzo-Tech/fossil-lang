@@ -1,35 +1,32 @@
 //! `OutputDescriptorKind` — enum dispatch for inside-Salsa-query descriptor
 //! access.
 //!
-//! Phase 3 introduces this enum because [`crate::OutputDescriptor`] is a
-//! trait (per ADR-0003) and Salsa 0.26 cannot intern or memoize trait objects
-//! (`Box<dyn OutputDescriptor>`) — they lack structural equality. Inside a
-//! `#[salsa::tracked]` query body (plan 03-05's `typecheck_mapping`), dispatch
-//! goes through this enum's variants (concrete types), not through
-//! `&dyn OutputDescriptor`. See ADR-0006.
+//! This enum exists because [`crate::OutputDescriptor`] is a trait and Salsa
+//! 0.26 cannot intern or memoize trait objects (`Box<dyn OutputDescriptor>`) —
+//! they lack structural equality. Dispatch goes through this enum's variants
+//! (concrete types), not through `&dyn OutputDescriptor`.
 //!
-//! The trait stays as the OUTSIDE-Salsa surface API (e.g. for the playground
-//! UI listing loaded descriptors).
+//! The consumers are the HOSTS — `fossil-cli`, `fossil-df` and
+//! `fossil-df-wasm` carry one into the executor. `fossil-hir` is not among
+//! them and cannot be: it has no dependency on this crate.
 
 use crate::AcceptAllDescriptor;
-use fossil_graph_schema::GraphSchema;
+use fossil_graph_schema::{GraphSchema, Renames};
 use fossil_shex::ShExDescriptor;
 
 /// Concrete-type dispatch surface for the bidirectional checker.
 ///
 /// Each variant carries the descriptor's owned state so Salsa's `interned`
-/// / tracked-struct interning can equate descriptors structurally. New
-/// variants (e.g. future `Shacl`) are an architectural addition — they
-/// require updating every match arm in `fossil-hir`'s typecheck path. That
-/// churn is acceptable: adding a new output descriptor is a major
-/// architectural change.
+/// / tracked-struct interning can equate descriptors structurally. A new
+/// variant is an architectural addition — every match arm in every host that
+/// carries one has to answer for it, which is acceptable churn: adding an
+/// output descriptor is a major architectural change.
 //
 // `large_enum_variant`: the `ShEx(ShExDescriptor)` variant carries a
 // `shex_ast::Schema` + a resolved `HashMap<String, ShapeBinding>` — large
 // compared to the unit-struct `AcceptAll` variant. Boxing the larger
-// variant would add an allocation per `ShExDescriptor` construction (which
-// already lives behind a long-lived `Arc<SystemWithDescriptors-impl>` on
-// the host); the size asymmetry is intentional and stable.
+// variant would add an allocation per `ShExDescriptor` construction, which
+// happens once per compile; the size asymmetry is intentional and stable.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum OutputDescriptorKind {
@@ -37,21 +34,28 @@ pub enum OutputDescriptorKind {
     /// compile-time backward checker (`fossil-hir`) needs the rich resolved
     /// table; the executor reads only [`Self::to_graph_schema`].
     ShEx(ShExDescriptor),
-    /// A canonical output model, already lowered (the SHACL path produces this
-    /// directly — SHACL is RDF, walked into [`GraphSchema`] — and any future
-    /// pre-resolved source can reuse it). The executor consumes it as-is;
-    /// `fossil-hir`'s ShEx backward checker treats it like `AcceptAll`.
-    Shacl(GraphSchema),
-    /// Phase 1 stub — accepts any graph. Used when no shape target is loaded
-    /// (the walking-skeleton case) or as the degraded fallback if a host
-    /// can't resolve a `ShEx` schema.
+    /// A canonical output model, **already lowered** — whatever language it came
+    /// from. The executor consumes it as-is.
+    ///
+    /// It was called `Shacl`, and the name was a claim about the document's
+    /// language that the value does not carry: since the run reads its shape
+    /// document through the provider registry (`fossil_cli::host`'s
+    /// `read_output_shape`), a `ShEx` document arrives here too. What the
+    /// variant means is "the decode already happened", which is what it now
+    /// says. [`Self::ShEx`] survives beside it because the browser executor is
+    /// handed a raw `ShEx` blob with no registry in front of it.
+    Lowered(GraphSchema),
+    /// Accepts any graph. Used when no shape target is loaded (the
+    /// walking-skeleton case) or as the degraded fallback when a host cannot
+    /// resolve a `ShEx` schema.
     AcceptAll(AcceptAllDescriptor),
 }
 
 impl OutputDescriptorKind {
-    /// Inherent `const` default, returned by
-    /// [`crate::SystemWithDescriptors`]'s default impl when the host hasn't
-    /// loaded a `ShEx` schema.
+    /// Inherent `const` default: the descriptor an executor uses when the
+    /// program declares no output shape (`fossil_cli::host`'s
+    /// `resolve_output_descriptor`, `fossil_df_wasm`'s `build_program`).
+    /// Backward checking is a no-op and the produced graph is accepted whole.
     ///
     /// This is const-evaluable because [`AcceptAllDescriptor`] is a unit
     /// struct (no fields, no heap, no non-const constructors). If a future
@@ -67,14 +71,19 @@ impl OutputDescriptorKind {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::ShEx(_) => "shex",
-            Self::Shacl(_) => "shacl",
+            Self::Lowered(_) => "lowered",
             Self::AcceptAll(_) => "accept-all",
         }
     }
 
     /// `true` iff the descriptor is `AcceptAll` (no backward-shape
-    /// constraints). Plan 03-05's typecheck reads this to short-circuit
-    /// backward checking.
+    /// constraints).
+    ///
+    /// It said `fossil_hir`'s typecheck reads this to short-circuit backward
+    /// checking. It does not, and cannot: `fossil-hir` has no dependency on this
+    /// crate. Nothing in the tree calls this outside the tests below, and the
+    /// same is true of [`Self::name`] — which is why the doc on [`Self::ShEx`]
+    /// saying the executor reads only [`Self::to_graph_schema`] is still true.
     #[must_use]
     pub const fn accepts_anything(&self) -> bool {
         matches!(self, Self::AcceptAll(_))
@@ -82,15 +91,20 @@ impl OutputDescriptorKind {
 
     /// Lower this descriptor to the canonical, format-neutral [`GraphSchema`] —
     /// the single output model the executor (`apply_output_shape`) consumes,
-    /// independent of the source schema language. ShEx lowers through its
-    /// resolved table; SHACL is already a `GraphSchema`; `AcceptAll` is empty
+    /// independent of the source schema language. `ShEx` lowers through its
+    /// resolved table; `Lowered` already is one; `AcceptAll` is empty
     /// (no node/edge typing → every predicate stays a vertex property, the
     /// walking-skeleton behaviour).
+    ///
+    /// `renames` is the program's [`Renames`] and governs the column label.
+    /// [`Self::Lowered`] ignores it on purpose: the decode already happened,
+    /// and the side that did it (`fossil_cli::host`'s `read_output_shape`) is the
+    /// side that had the program.
     #[must_use]
-    pub fn to_graph_schema(&self) -> GraphSchema {
+    pub fn to_graph_schema(&self, renames: &Renames) -> GraphSchema {
         match self {
-            Self::ShEx(d) => d.to_graph_schema(),
-            Self::Shacl(gs) => gs.clone(),
+            Self::ShEx(d) => d.to_graph_schema(renames),
+            Self::Lowered(gs) => gs.clone(),
             Self::AcceptAll(_) => GraphSchema {
                 nodes: Vec::new(),
                 edges: Vec::new(),
@@ -106,7 +120,6 @@ mod tests {
     /// Compile-time test (the assignment itself is the assertion): proves
     /// [`OutputDescriptorKind::ACCEPT_ALL_DEFAULT`] is const-evaluable. If a
     /// future variant breaks const-constructibility, this fails to compile.
-    /// Mitigates plan 03-03 Serious #8.
     #[test]
     fn accept_all_default_is_const_constructible() {
         const FOO: OutputDescriptorKind = OutputDescriptorKind::ACCEPT_ALL_DEFAULT;
@@ -146,11 +159,10 @@ mod tests {
         assert!(!kind.accepts_anything());
     }
 
-    /// SC#5 structural property: the enum supports swapping descriptors at
-    /// the host wiring layer (CLI vs playground vs degraded fallback)
-    /// without `fossil-hir` source changes. This test exercises the swap
-    /// pattern — building both variants and matching on them in the same
-    /// function body — which IS the swap surface.
+    /// The structural property: the enum supports swapping descriptors — a
+    /// parsed `ShEx` document against the no-contract fallback — and a
+    /// consumer matches on the variants in one function body, which IS the
+    /// swap surface.
     #[test]
     fn output_descriptor_kind_swap_does_not_require_fossil_hir_change() {
         let schema_src = r#"{
@@ -164,19 +176,18 @@ mod tests {
         );
         let kinds: [&OutputDescriptorKind; 2] = [&accept_all, &shex];
         for k in kinds {
-            // The match shape itself is the swap surface. New variants
-            // require a new match arm in fossil-hir, intentionally.
+            // The match shape itself is the swap surface. A new variant
+            // requires a new arm in every host that carries one.
             let _name: &'static str = match k {
                 OutputDescriptorKind::ShEx(_) => "shex",
-                OutputDescriptorKind::Shacl(_) => "shacl",
+                OutputDescriptorKind::Lowered(_) => "lowered",
                 OutputDescriptorKind::AcceptAll(_) => "accept-all",
             };
         }
     }
 
-    /// `OutputDescriptorKind` must be `Send + Sync` because
-    /// `fossil_base::System: Send + Sync` and the descriptor accessor lives
-    /// on a `System` extension trait.
+    /// `OutputDescriptorKind` must be `Send + Sync` because the executor
+    /// carries one across the thread boundary its plan is run on.
     #[test]
     fn output_descriptor_kind_send_sync() {
         const fn assert_send_sync<T: Send + Sync>() {}

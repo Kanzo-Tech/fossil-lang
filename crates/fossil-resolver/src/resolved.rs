@@ -68,9 +68,10 @@ pub struct ResolvedPath {
 /// are safe regardless.
 fn is_ident(s: &str) -> bool {
     !s.is_empty()
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
 }
 
 impl ResolvedPath {
@@ -143,7 +144,10 @@ impl ResolvedPath {
         if !is_ident(&secret.secret_type) || !is_ident(name) {
             return None;
         }
-        let mut sql = format!("CREATE OR REPLACE SECRET {name} (TYPE {}", secret.secret_type);
+        let mut sql = format!(
+            "CREATE OR REPLACE SECRET {name} (TYPE {}",
+            secret.secret_type
+        );
         // Sorted for a deterministic statement (tests, logs).
         let mut keys: Vec<&String> = secret.params.keys().collect();
         keys.sort();
@@ -237,9 +241,15 @@ mod tests {
     #[test]
     fn rejects_non_identifier_type_or_name() {
         let r = ResolvedPath::with_secret("s3://b", CloudSecret::new("s3; DROP", HashMap::new()));
-        assert!(r.create_secret_sql("ok").is_none(), "injected TYPE not rejected");
+        assert!(
+            r.create_secret_sql("ok").is_none(),
+            "injected TYPE not rejected"
+        );
         let r2 = ResolvedPath::with_secret("s3://b", s3_secret());
-        assert!(r2.create_secret_sql("bad name").is_none(), "injected name not rejected");
+        assert!(
+            r2.create_secret_sql("bad name").is_none(),
+            "injected name not rejected"
+        );
     }
 
     #[test]

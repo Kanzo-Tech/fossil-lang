@@ -33,72 +33,100 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
 # `schemars` derives JSON Schema from Rust types. Adopted in `fossil-graph`
-# (ADR-0039) to publish a per-verb param/result schema once and have every
-# transport binding (fossil-mcp, fossil-http, @fossil-lang/graph) consume the
+# to publish a per-verb param/result schema once and have every
+# transport binding (fossil-mcp, fossil-cli, @fossil-lang/corpus) consume the
 # SAME schema — no hand-written contract duplicated across bindings. Pin 0.8
 # because 0.9 is in alpha and the keasy-side TS codegen depends on the 0.8
 # JSON Schema draft-07 dialect for openapi-typescript interop.
 schemars = { version = "0.8" }
-# `utoipa` derives OpenAPI schemas. Optional + off by default — only the keasy
-# host enables it (on `fossil-run-status`) so `RunStatus` lands in keasy's
-# openapi.json for openapi-typescript codegen. rmlext's own CLI/WASM builds
-# never enable it, so the crate stays dependency-light + WASM-clean.
-utoipa = { version = "5" }
-# Pure-Rust SHA-256 for the SC#1 cross-engine parity digest (native_baseline.json
-# producer in fossil-runtime tests). Already a transitive dep via duckdb/parquet;
+# Pure-Rust SHA-256 for the cross-engine parity digest (native_baseline.json
+# producer in fossil-layout tests). Already a transitive dep via duckdb/parquet;
 # WASM-safe (no C/FFI) though only used in a native-only dev dependency here.
 sha2 = "0.10"
 
-# === Input descriptors (Phase 5+, declared here for inheritance) ===
+# === Input descriptors (declared here for inheritance) ===
 csv = "1.3"
 jsonschema = { version = "0.42", default-features = false }
 roxmltree = "0.20"
 
-# === Output descriptor (Phase 3+; rudof spike resolved 2026-05-15 — see decisions/rudof-wasm.md) ===
-# Major-pinned; allow patch drift. shex_validation intentionally NOT included — Phase 3 is AST-only
-# (no runtime ShEx validation), per 03-RESEARCH.md §"Standard Stack".
+# === Output descriptor (the rudof WASM spike resolved this 2026-05-15) ===
+# Major-pinned; allow patch drift. shex_validation intentionally NOT included — the checker walks
+# the ShEx AST only, and never runs ShEx validation.
 shex_ast = "0.3"
 rudof_iri = "0.3"
 prefixmap = "0.3"
 # Turtle/N-Triples parsing for the RDF source provider (the oxigraph parser
 # rudof's srdf wraps; already resolved transitively via the ShEx crates).
-oxttl = "0.2"
-oxrdf = "0.3"
+#
+# `rdf-12` is oxttl/oxrdf's RDF 1.2 gate and it is OFF by default. Measured
+# 2026-08-07 against oxttl 0.2.3 outside this workspace: with it off, `<<( … )>>`
+# fails with "`<<(` is not a valid RDF object" and `"x"@en--ltr` with "Literal
+# base direction are only allowed in RDF 1.2"; with it on, both parse. It gates
+# `Term::Triple`, `Literal::direction`, `BaseDirection` and `rdf::DIR_LANG_STRING`,
+# and pulls in NO new dependency — `oxttl/rdf-12 = ["oxrdf/rdf-12"]` and
+# `oxrdf/rdf-12 = []`, so the wasm closure is unchanged.
+#
+# It was ALREADY on in every build of this workspace, by feature unification from
+# `rudof_iri`/`rudof_rdf`, never by our own declaration — which is why the
+# `Term::Triple` arm in `fossil-df/src/rdf.rs` compiles today. That made our RDF
+# 1.2 reach a property of rudof's dependency graph: dropping rudof, or rudof
+# dropping the feature, turns our Turtle parser back into an RDF 1.1 one and
+# breaks that arm at compile time for a reason no one would connect. Declaring it
+# here is a no-op for today's graph and the guard for tomorrow's.
+oxttl = { version = "0.2", features = ["rdf-12"] }
+oxrdf = { version = "0.3", features = ["rdf-12"] }
 
-# === Did-you-mean diagnostics (Phase 3 CORE-05) ===
+# === Did-you-mean diagnostics ===
 strsim = "0.11"
 
-# === Native CLI pre-introspection (Phase 13 INPUT-01 / plan 13-04a) ===
+# === Native CLI pre-introspection ===
 # Source-binding extraction in fossil-cli scans the .fossil text for
-# io.csv("...") / io.json("...") references via regex (v0.2 placeholder;
-# Phase 14+ replaces with an AST walk). NATIVE-ONLY consumer; never
-# referenced by a WASM-gated crate.
+# io.csv("...") / io.json("...") references via regex. It is a placeholder for
+# an AST walk, and it is wrong on any binding a regex cannot see. NATIVE-ONLY
+# consumer; never referenced by a WASM-gated crate.
 regex = "1"
 
-# === Sinks (Phase 5+) ===
-# `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc;
-# SC#5 / ADR-0017). The `arrow` umbrella + `parquet` stay for native byte-level test deps.
+# === Sinks ===
+# `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc,
+# either of which would break the wasm32 gate). The `arrow` umbrella + `parquet` stay
+# for native byte-level test deps.
 # Pinned to 58 — the latest published arrow/parquet line (59 is not on crates.io as of
 # 2026-05; the prior `= "59"` placeholders were aspirational and never resolved). 58.3.0
 # is what Cargo.lock already resolves transitively via duckdb's parquet.
 arrow-schema = "58"
+# `arrow-array` alongside it, for the same reason and one crate further in:
+# `fossil-kanon` reads the quasi-identifier columns value by value and builds
+# the generalised ones, which needs the array types and not the umbrella's four
+# format readers. Same 58.3.0 the lockfile already resolves.
+arrow-array = "58"
 arrow = "58"
 parquet = "58"
+# `bytes` for `fossil-layout`'s in-memory filesystem, which is how the layout
+# pass runs in a browser: `parquet`'s `ChunkReader` is defined in terms of
+# `Bytes`, so a reader over memory has to speak it, and slicing one is a
+# refcount rather than a copy — which is what keeps the browser path at one
+# resident copy per file instead of one per read. Not a new crate in the tree:
+# `parquet` already depends on it and `Cargo.lock` already resolves it, so this
+# line names a version rather than adding a dependency. Pure Rust, so it costs
+# the wasm32 gate nothing.
+bytes = "1"
 
-# === Runtime — NATIVE ONLY ===
-# `vscalar` enables the scalar-UDF registration API (VScalar trait + Connection::
-# register_scalar_function) used for the native_udf_only stdlib functions in
-# fossil-runtime (STDL-03/05). Native-only crate (wasm32 cfg-tripwire) so these
-# never reach the WASM gate.
+# === The native engine — NATIVE ONLY ===
+# `fossil-introspect` is the one crate on a normal edge; `fossil-engine`,
+# `fossil-layout`, `fossil-mcp` and `fossil-cli` keep it as a dev-dependency, to
+# read written Parquet back or to bring an engine to a test. `deny.toml`'s
+# `duckdb` wrappers list is the enforced version of that sentence.
+#
+# `vscalar` (the scalar-UDF registration API) has no user left: nothing in
+# `crates/` names `VScalar` or `register_scalar_function`.
 duckdb = { version = "1.10502", features = ["bundled", "vscalar"] }
 
-# === Native Rust UDF impl crates (Phase 5 STDL-03/05 — NATIVE ONLY) ===
-# Implement the native_udf_only stdlib functions registered on the DuckDB
-# connection in fossil-runtime. NEVER referenced by a WASM-gated crate (Pitfall 3).
-unicode-normalization = "0.1"           # clean.normalize_unicode (NFC/NFD/NFKC/NFKD)
-slug = "0.1"                            # clean.slug (URL slugification)
-voca_rs = "1"                           # clean.strip_html (strip tags → text)
-hmac = "0.12"                           # anon.hmac (keyed HMAC; digest 0.10 compatible with sha2 0.10)
+# === Reference implementations for stdlib fidelity tests (NATIVE ONLY) ===
+# `fossil-df` dev-depends on these to measure its SQL templates against the Rust
+# behaviour they are meant to reproduce.
+# NEVER referenced by a WASM-gated crate.
+unicode-normalization = "0.1"           # the NFC/NFD/NFKC/NFKD reference
+slug = "0.1"                            # the URL-slugification reference
 
 # === LSP — NATIVE ONLY ===
 lsp-server = "0.7"
@@ -119,9 +147,9 @@ console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 uuid = { version = "1", features = ["js"] }
 
-# === Logging (CLI + LSP — NATIVE ONLY in Phase 1) ===
-# default-features=false to avoid pulling mio (which breaks the WASM gate per RESEARCH.md Pitfall 3).
-# Only the env-filter and fmt features are needed for Phase 1.
+# === Logging (CLI + LSP — NATIVE ONLY) ===
+# default-features=false to avoid pulling mio, which breaks the WASM gate.
+# Only the env-filter and fmt features are needed.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
 
@@ -144,14 +172,26 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 # === Dev / testing ===
 insta = { version = "1", features = ["yaml"] }
 expect-test = "1"
+# Property tests. `fossil-kanon`'s contract is a universally quantified sentence
+# — for any input and any k, every released row's anonymity set is at least k —
+# and a privacy guarantee asserted by example is a guarantee asserted on the
+# inputs its author thought of. Already in the lockfile at 1.11.0 via the
+# DataFusion stack, so adding it resolves nothing new.
+proptest = "1"
 wasm-bindgen-test = "0.3"
-# Native temp dirs for fossil-runtime W0b/4 integration tests that
-# write GraphAr Parquet to disk and read back via duckdb. Native-only
-# (uses real filesystem); not in the WASM gate.
+# Native temp dirs for integration tests that write Parquet to disk and read it
+# back via duckdb — `fossil-engine`, `fossil-df` and `fossil-introspect`, which
+# are its three dev-dependents. (It named `fossil-layout` here and that crate
+# dropped it along with the `tests/graphar_decomp.rs` it served.) Native-only
+# (uses a real filesystem); no `tests/` target is built for wasm32.
 tempfile = "3"
+# The spill test (fossil-df tests/spill.rs) reads DataFusion's own log records:
+# an operator that spills says so through `log`, and nothing else survives the
+# run to be asserted on. Dev-dep only — fossil emits `tracing`, not `log`.
+log = "0.4"
 
 [workspace.lints.rust]
-unsafe_code = "deny"   # per ADR-0004 — per-item #[allow] permitted with justification at third-party-trait integration boundaries (e.g., Salsa Update for rowan types)
+unsafe_code = "deny"   # per-item #[allow] permitted with justification at third-party-trait integration boundaries (e.g., Salsa Update for rowan types)
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 elided_lifetimes_in_paths = "warn"

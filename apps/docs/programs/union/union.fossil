@@ -1,0 +1,12 @@
+type { Person } := io.shex("union.shex")
+
+Staff      := io.csv("data/staff.csv")
+Contractor := io.csv("data/contractors.csv")
+
+// #region chain
+Everyone := Staff.union(Contractor)
+// #endregion chain
+
+People : Person from Everyone
+    @subject = "https://shop.example/person/{Everyone.email}"
+    name     = Everyone.name

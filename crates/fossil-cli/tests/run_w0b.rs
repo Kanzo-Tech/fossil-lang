@@ -1,5 +1,7 @@
-// The embedded `.fossil` fixtures use template syntax (`${ex:}…/${.id}`) that
-// clippy mistakes for format args in a plain string literal — they are not.
+// The embedded `.fossil` fixture carries `"…{people.id}"` interpolation holes —
+// LITERAL fossil source, which clippy mistakes for format args in a plain Rust
+// string literal. Same allow, same reason, as `host.rs`'s
+// `provider_registry.rs`.
 #![allow(clippy::literal_string_with_formatting_args)]
 
 //! `fossil run --dest <url>` W0b path integration test.
@@ -16,10 +18,11 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::OnceLock;
+
+mod common;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -29,39 +32,79 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// The `fossil` binary this test drives — cargo's own path for it.
+///
+/// Never a hard-coded `target/debug/fossil`: with `CARGO_TARGET_DIR` set the
+/// build lands elsewhere, so that path holds whatever was left there last and
+/// the test passes against a binary it did not build. `CARGO_BIN_EXE_<name>`
+/// is cargo's answer — the binary of THIS build, already built before the
+/// test runs, with no path to guess and no `cargo build` from inside a test.
 fn fossil_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "--quiet", "-p", "fossil-cli", "--bin", "fossil"])
-            .status()
-            .expect("spawn cargo build");
-        assert!(status.success(), "cargo build -p fossil-cli failed");
-        let bin = repo_root().join("target").join("debug").join("fossil");
-        assert!(bin.exists(), "fossil binary missing at {}", bin.display());
-        bin
-    })
+    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil")))
 }
 
 /// Per-test workdir with the canonical hello.fossil + users.csv.
 fn fresh_workdir(test_name: &str) -> PathBuf {
     let root = repo_root();
-    let tmp = std::env::temp_dir().join(format!("fossil-cli-w0b-{test_name}"));
-    let _ = std::fs::remove_dir_all(&tmp);
+    let tmp = common::unique_workdir("fossil-cli-w0b", test_name);
     std::fs::create_dir_all(tmp.join("examples")).expect("create examples subdir");
-    // The CLI reads `examples/users.csv` (the io.csv binding in
-    // hello.fossil resolves to this path).
-    for f in ["hello.fossil", "users.csv"] {
+    // Everything the program NAMES: the `users.csv` its `io.csv` binding reads
+    // and the `hello.shex` its `type { Person }` binding names. Without the
+    // document the mapping has no output contract and the run writes a `Person`
+    // with no `name` column — no error, just a column that is not there.
+    for f in ["hello.fossil", "users.csv", "hello.shex"] {
         std::fs::copy(root.join("examples").join(f), tmp.join("examples").join(f))
             .unwrap_or_else(|e| panic!("copy {f}: {e}"));
     }
     tmp
 }
 
+/// Assert that `vtype`'s vertex tiles are on disk, and return a `read_parquet`
+/// glob over them.
+///
+/// A vertex is **tiles**, not a file. `c416e07` made the layout pass emit one
+/// tile per 4,096-row `dense_id` range under `vertex/<Type>/` and then delete
+/// the single staged `vertex/<Type>.parquet`
+/// (`crates/fossil-cli/src/host.rs:538`). Three assertions in this file went
+/// on naming the deleted path, so the suite went red the day the emitter landed
+/// and stayed red — one of five failures across the repo from the same commit,
+/// none of which were the emitter being wrong.
+///
+/// The convention lives here so the next change to tile naming is one diff.
+fn assert_vertex_tiles(dest: &Path, vtype: &str) -> String {
+    let dir = dest.join("vertex").join(vtype);
+    assert!(
+        dir.is_dir(),
+        "vertex tile directory missing at {}",
+        dir.display()
+    );
+    let tiles: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|x| x == "parquet"))
+        .collect();
+    assert!(
+        !tiles.is_empty(),
+        "no vertex tiles under {} — the directory exists but the emitter wrote nothing",
+        dir.display()
+    );
+    // And the staged single file must be gone; if it comes back, the emitter has
+    // stopped cleaning up and every reader has two sources of truth.
+    let staged = dest.join(format!("vertex/{vtype}.parquet"));
+    assert!(
+        !staged.exists(),
+        "the staged single file survived at {} — readers would see it and the tiles",
+        staged.display()
+    );
+    format!("{}/*.parquet", dir.display())
+}
+
 /// Acceptance: the W0b path produces `GraphAr` Parquet + YAML manifests
 /// under --dest, with the W0b vertex column shape declared in the
-/// vertex.yml manifest. The vertex type `Person` is derived from the mapping's
-/// shape IRI (`ex:Person`) — no `--shape` needed.
+/// vertex.yml manifest. The vertex type `Person` is derived from the IRI of the
+/// shape its header names (`https://example.org/Person`, declared in
+/// `hello.shex`) — no `--shape` flag needed.
 #[test]
 fn run_w0b_writes_graph_ar_under_dest() {
     let bin = fossil_binary();
@@ -83,13 +126,8 @@ fn run_w0b_writes_graph_ar_under_dest() {
         String::from_utf8_lossy(&output.stderr),
     );
 
-    // The Person vertex Parquet is the W0b artefact.
-    let vertex_parquet = dest.join("vertex/Person.parquet");
-    assert!(
-        vertex_parquet.exists(),
-        "vertex Parquet missing at {}",
-        vertex_parquet.display()
-    );
+    // The Person vertex tiles are the W0b artefact.
+    let vertex_glob = assert_vertex_tiles(&dest, "Person");
 
     // W3.1b: the layout pass must have replaced the placeholder x/y (0 for every
     // vertex) with real coordinates — at least one vertex now carries a non-zero
@@ -99,7 +137,7 @@ fn run_w0b_writes_graph_ar_under_dest() {
         .query_row(
             &format!(
                 "SELECT count(*) FROM read_parquet('{}') WHERE x <> 0 OR y <> 0",
-                vertex_parquet.display().to_string().replace('\'', "''")
+                vertex_glob.replace('\'', "''")
             ),
             [],
             |r| r.get(0),
@@ -136,8 +174,13 @@ fn run_w0b_writes_graph_ar_under_dest() {
     );
 }
 
-/// `--output-json` emits a status object that keasy can parse via
+/// `--output-json` emits the manifest as one JSON object keasy can parse via
 /// `serde_json::from_str` after `Command::output()`.
+///
+/// **It is the manifest and not a second account of one.** Every key asserted
+/// below is a `fossil_sinks::manifest` field, spelled the way the YAML on disk
+/// spells it — `type`, `vertex_count`, `prefix`, `projections` — so a host
+/// that learns the format learns stdout for free, and the two cannot drift.
 #[test]
 fn run_w0b_output_json_is_parseable() {
     let bin = fossil_binary();
@@ -169,43 +212,54 @@ fn run_w0b_output_json_is_parseable() {
         panic!("--output-json must emit a single JSON object; got: {stdout:?} (parse error: {e})")
     });
     assert_eq!(parsed["dest"], serde_json::Value::String(dest_url));
-    assert!(
-        parsed["vertices"].is_array(),
-        "json.vertices must be an array; got: {parsed}"
+    assert_eq!(
+        parsed["graph"]["vertices"][0].as_str(),
+        Some("vertex/Person.vertex.yml"),
+        "the index names the per-type document; got: {parsed}"
     );
-    // Each vertex carries its type, file, row count, and property columns — the
-    // structure the keasy host consumes (it has no DuckDB to re-introspect with).
+
     let first = &parsed["vertices"][0];
     assert_eq!(
         first["type"].as_str(),
         Some("Person"),
         "vertex.type expected; got: {first}"
     );
-    assert!(
-        first["file"]
-            .as_str()
-            .is_some_and(|f| f.starts_with("vertex/")),
-        "vertex.file rel_path expected; got: {first}"
+    assert_eq!(
+        first["prefix"].as_str(),
+        Some("vertex/Person/"),
+        "the chunk prefix a reader addresses, not the staged file; got: {first}"
     );
     assert_eq!(
-        first["count"].as_i64(),
+        first["vertex_count"].as_u64(),
         Some(5),
         "hello.fossil writes 5 Persons (examples/users.csv); got: {first}"
     );
     assert!(
-        first["columns"]
+        first["projections"][0]["properties"]
             .as_array()
             .is_some_and(|c| c.iter().any(|col| col["name"] == "name")),
-        "vertex.columns must include the `name` property; got: {first}"
+        "the payload projection must declare the `name` column; got: {first}"
     );
+    assert_eq!(
+        first["projections"][0]["scale"].as_u64(),
+        Some(1),
+        "the payload is the projection at scale 1, and it comes first; got: {first}"
+    );
+
+    // The JSON on stdout and the YAML on disk are the same values. That is the
+    // whole reason `RunStatus` is gone, and a string comparison of the two
+    // serialisations is the cheapest thing that would notice them parting.
+    let on_disk: serde_json::Value = serde_yaml_ng::from_str(
+        &std::fs::read_to_string(dest.join("vertex/Person.vertex.yml")).expect("read the document"),
+    )
+    .expect("the document is YAML");
+    assert_eq!(*first, on_disk, "stdout and the document disagree");
 }
 
 /// A workdir seeded with arbitrary `(rel_path, contents)` files (for the
 /// multi-mapping fixture below, which is not part of the canonical examples).
 fn workdir_with_files(test_name: &str, files: &[(&str, &str)]) -> PathBuf {
-    let tmp = std::env::temp_dir().join(format!("fossil-cli-w0b-{test_name}"));
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).expect("create workdir");
+    let tmp = common::unique_workdir("fossil-cli-w0b", test_name);
     for (rel, contents) in files {
         let path = tmp.join(rel);
         if let Some(parent) = path.parent() {
@@ -216,34 +270,58 @@ fn workdir_with_files(test_name: &str, files: &[(&str, &str)]) -> PathBuf {
     tmp
 }
 
-/// Slice 8 end-to-end: a TWO-mapping program with NO `--shape`. The synthesised
-/// (`AcceptAll`) descriptor must (a) materialise BOTH vertex types and (b) turn
-/// `Order.ex:placedBy = ${ex:}person/${.user_id}` into a cross-type edge to the
-/// `Person` mapping (same subject-template skeleton `${ex:}person/${.id}`), whose
-/// CSR Parquet joins the order subjects to the person subjects. Proves Phase B
-/// edge synthesis (8a) + multi-mapping merge/materialisation (8b) on real `DuckDB`.
+/// Slice 8 end-to-end: a TWO-mapping program with no `--shape` FLAG — the output
+/// descriptor is program-resident, read from the `type { … } := io.shex(…)`
+/// binding the program names. It must (a) materialise BOTH vertex types and (b)
+/// turn `placedBy = Person(orders.user_id)` into a cross-type edge to the
+/// `Person` mapping, whose CSR Parquet joins the order subjects to the person
+/// subjects. Proves Phase B edge synthesis (8a) + multi-mapping
+/// merge/materialisation (8b) on real `DuckDB`.
+///
+/// **The edge is now a CALL, and both halves of that moved.** It used to be
+/// GUESSED: `ex:placedBy = ${ex:}person/${.user_id}` was matched against every
+/// mapping's subject template by SKELETON — every per-row hole blanked to a
+/// `\u{1}` marker — and a match made it a foreign key. `Person(orders.user_id)`
+/// says it instead: the destination type applied to an expression, resolved
+/// through the one identity template that type has. The `.shex` below is the
+/// other half — `ex:placedBy @ex:Person` is what classifies the predicate as an
+/// edge rather than a property, and `ex:amount` beside it stays a column.
 #[test]
 fn run_no_shape_writes_cross_type_edge_from_two_mappings() {
     let bin = fossil_binary();
     let program = "\
-prefix ex: <https://example.org/>
+type { Person, Order } := io.shex(\"prog.shex\")
 
 people := io.csv(\"people.csv\")
 orders := io.csv(\"orders.csv\")
 
-Person : ex:Person from people
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+People : Person from people
+    @subject = \"https://example.org/person/{people.id}\"
+    name = people.name
 
-Order : ex:Order from orders
-    iri = `${ex:}order/${.order_id}`
-    ex:placedBy = `${ex:}person/${.user_id}`
-    ex:amount = .amount
+Orders : Order from orders
+    @subject = \"https://example.org/order/{orders.order_id}\"
+    placedBy = Person(orders.user_id)
+    amount = orders.amount
+";
+    let shex = "\
+PREFIX ex: <https://example.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+ex:Person {
+  ex:name xsd:string
+}
+
+ex:Order {
+  ex:placedBy @ex:Person ;
+  ex:amount   .
+}
 ";
     let workdir = workdir_with_files(
         "cross-type-edge",
         &[
             ("prog.fossil", program),
+            ("prog.shex", shex),
             ("people.csv", "id,name\n1,Ada\n2,Linus\n3,Grace\n"),
             (
                 "orders.csv",
@@ -269,14 +347,8 @@ Order : ex:Order from orders
     );
 
     // Both vertex types materialised.
-    assert!(
-        dest.join("vertex/Person.parquet").exists(),
-        "Person vertex Parquet missing"
-    );
-    assert!(
-        dest.join("vertex/Order.parquet").exists(),
-        "Order vertex Parquet missing"
-    );
+    let _ = assert_vertex_tiles(&dest, "Person");
+    let _ = assert_vertex_tiles(&dest, "Order");
 
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
     let parsed: serde_json::Value =
@@ -288,12 +360,23 @@ Order : ex:Order from orders
     let placed_by = edges
         .iter()
         .find(|e| e["src_type"] == "Order" && e["dst_type"] == "Person")
-        .unwrap_or_else(|| panic!("no Order→Person edge in status: {parsed}"));
+        .unwrap_or_else(|| panic!("no Order→Person edge in the report: {parsed}"));
     assert_eq!(
-        placed_by["count"].as_i64(),
+        placed_by["edge_count"].as_u64(),
         Some(3),
         "3 orders join to persons; got: {placed_by}"
     );
+
+    // And every one of the three resolved, so the drop beside it is zero —
+    // stated rather than omitted, because «no key» and «nothing dropped» are
+    // not the same answer.
+    let drops = parsed["dropped"]
+        .as_array()
+        .expect("dropped array")
+        .iter()
+        .find(|d| d["prefix"] == placed_by["prefix"])
+        .unwrap_or_else(|| panic!("no drop entry for the edge: {parsed}"));
+    assert_eq!(drops["dropped"].as_u64(), Some(0), "got: {drops}");
 
     // The literal `ex:amount` stayed a property on Order; `ex:placedBy` did NOT.
     let order_v = parsed["vertices"]
@@ -301,10 +384,10 @@ Order : ex:Order from orders
         .expect("vertices array")
         .iter()
         .find(|v| v["type"] == "Order")
-        .expect("Order vertex in status");
-    let cols: Vec<&str> = order_v["columns"]
+        .expect("Order vertex in the report");
+    let cols: Vec<&str> = order_v["projections"][0]["properties"]
         .as_array()
-        .expect("columns array")
+        .expect("properties array")
         .iter()
         .filter_map(|c| c["name"].as_str())
         .collect();
@@ -318,223 +401,54 @@ Order : ex:Order from orders
     );
 
     // #5a: the manifest carries the RDF output spec the governance layer (DCAT)
-    // consumes — full shape IRI per vertex, predicate IRI + XSD datatype per
-    // column — derived from the mapping alone (no ShEx, no host re-derivation).
+    // consumes — the full shape IRI per vertex type, derived from the mapping
+    // alone (no ShEx, no host re-derivation).
+    //
+    // **It used to carry more, and this is where the loss is visible.**
+    // `RunStatus` also gave a `rdf_uri` and an `xsd_datatype` per COLUMN, and
+    // `fossil_sinks::manifest::Property` has neither: it declares `name`,
+    // `data_type`, `is_primary` and `is_nullable`. `VertexInfo::iri` and
+    // `EdgeInfo::iri` exist and a property's predicate does not, which is an
+    // asymmetry in the format rather than a decision — the fix, if the DCAT
+    // projection needs it back, is a `Property::iri` beside the other two, not
+    // a second description of the corpus.
     let person_v = parsed["vertices"]
         .as_array()
         .expect("vertices array")
         .iter()
         .find(|v| v["type"] == "Person")
-        .expect("Person vertex in status");
+        .expect("Person vertex in the report");
     assert_eq!(
-        person_v["rdf_type"].as_str(),
+        person_v["iri"].as_str(),
         Some("https://example.org/Person"),
         "vertex carries its full RDF type IRI; got: {person_v}"
     );
-    let name_col = person_v["columns"]
+    let name_col = person_v["projections"][0]["properties"]
         .as_array()
-        .expect("columns array")
+        .expect("properties array")
         .iter()
         .find(|c| c["name"] == "name")
         .expect("name column on Person");
     assert_eq!(
-        name_col["rdf_uri"].as_str(),
-        Some("https://example.org/name"),
-        "column carries its full predicate IRI; got: {name_col}"
-    );
-    assert_eq!(
-        name_col["xsd_datatype"].as_str(),
-        Some("http://www.w3.org/2001/XMLSchema#string"),
-        "column carries its XSD datatype IRI; got: {name_col}"
+        name_col["data_type"].as_str(),
+        Some("string"),
+        "column carries its GraphAr storage spelling; got: {name_col}"
     );
 }
 
-/// End-to-end cloud write (W0 subprocess slices 1+2): pipe `DuckDB` cloud-config
-/// on stdin (`--creds-stdin`), write `GraphAr` to an `s3://` destination, and
-/// prove the round-trip — the `--output-json` `count` is computed by reading the
-/// just-written *cloud* Parquet back, so a successful `count == 5` exercises the
-/// full creds-stdin → SET dance → cloud COPY → cloud read path.
-///
-/// Env-gated: skips unless an S3-compatible endpoint is configured (a `MinIO` /
-/// `LocalStack` fixture), so the hermetic suite stays runnable everywhere. Set:
-///   `FOSSIL_TEST_S3_ENDPOINT`  e.g. `localhost:9000`
-///   `FOSSIL_TEST_S3_BUCKET`    a writable bucket
-///   `FOSSIL_TEST_S3_KEY` / `FOSSIL_TEST_S3_SECRET`
-///   `FOSSIL_TEST_S3_REGION`    (optional, default `us-east-1`)
-#[test]
-fn run_w0b_writes_to_cloud_dest_with_stdin_creds() {
-    let Ok(endpoint) = std::env::var("FOSSIL_TEST_S3_ENDPOINT") else {
-        eprintln!("skipping cloud e2e: FOSSIL_TEST_S3_ENDPOINT unset");
-        return;
-    };
-    let bucket = std::env::var("FOSSIL_TEST_S3_BUCKET").expect("FOSSIL_TEST_S3_BUCKET");
-    let key = std::env::var("FOSSIL_TEST_S3_KEY").expect("FOSSIL_TEST_S3_KEY");
-    let secret = std::env::var("FOSSIL_TEST_S3_SECRET").expect("FOSSIL_TEST_S3_SECRET");
-    let region = std::env::var("FOSSIL_TEST_S3_REGION").unwrap_or_else(|_| "us-east-1".to_string());
-
-    let bin = fossil_binary();
-    let workdir = fresh_workdir("cloud");
-    let dest_url = format!("s3://{bucket}/fossil-cli-test/w0b");
-
-    // DuckDB-spelt cloud config — the vocabulary keasy will project from its
-    // provider schema. `s3_url_style=path` + `s3_use_ssl=false` suit a local
-    // MinIO over http; a real AWS fixture overrides via env as needed.
-    let creds = serde_json::json!({
-        "dest": { "config": {
-            "s3_endpoint": endpoint,
-            "s3_access_key_id": key,
-            "s3_secret_access_key": secret,
-            "s3_region": region,
-            "s3_url_style": "path",
-            "s3_use_ssl": "false",
-        }}
-    })
-    .to_string();
-
-    let mut child = Command::new(bin)
-        .args([
-            "run",
-            "examples/hello.fossil",
-            "--dest",
-            &dest_url,
-            "--output-json",
-            "--creds-stdin",
-        ])
-        .current_dir(&workdir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn fossil run");
-    child
-        .stdin
-        .take()
-        .expect("child stdin")
-        .write_all(creds.as_bytes())
-        .expect("write creds to stdin");
-    let output = child.wait_with_output().expect("wait fossil run");
-
-    assert!(
-        output.status.success(),
-        "cloud run exit {}: stderr={}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("--output-json parseable");
-    assert_eq!(parsed["dest"], serde_json::Value::String(dest_url));
-    // count is read back FROM the cloud Parquet just written → proves the
-    // write+read round-trip through the object store.
-    assert_eq!(
-        parsed["vertices"][0]["count"].as_i64(),
-        Some(5),
-        "cloud round-trip count mismatch; got: {parsed}"
-    );
-}
-
-/// `fossil catalog` (#5-grande slice 2): a `CatalogInput` on stdin materialises
-/// the DCAT-AP graph through the same W0b writer. Proves the catalog vertex/edge
-/// shape lands on real `DuckDB` and the cross-type edges (Catalog→Dataset, etc.)
-/// resolve against the vertex subject URNs.
-#[test]
-fn catalog_subcommand_materialises_dcat_ap_graph() {
-    let bin = fossil_binary();
-    let workdir = workdir_with_files("catalog", &[]);
-    let dest = workdir.join("catalog");
-    let dest_url = format!("file://{}", dest.display());
-
-    let payload = serde_json::json!({
-        "catalog": {
-            "job_id": "job-1",
-            "job_name": "My Run",
-            "completed_at": "2026-06-02T00:00:00Z",
-            "publisher_name": "Acme Org",
-            "license_uri": "https://ex.org/license",
-            "contact_email": "a@b.com",
-            "datasets": [{
-                "type_name": "Person",
-                "rdf_type": "https://example.org/Person",
-                "entity_count": 5,
-                "fields": [{
-                    "name": "name",
-                    "rdf_uri": "https://example.org/name",
-                    "datatype": "http://www.w3.org/2001/XMLSchema#string"
-                }],
-                "distributions": [{
-                    "destination": "file:///out/vertex/Person.parquet",
-                    "media_type": "application/parquet"
-                }]
-            }]
-        }
-    })
-    .to_string();
-
-    let mut child = Command::new(bin)
-        .args(["catalog", "--dest", &dest_url, "--output-json"])
-        .current_dir(&workdir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn fossil catalog");
-    child
-        .stdin
-        .take()
-        .expect("child stdin")
-        .write_all(payload.as_bytes())
-        .expect("write catalog payload");
-    let output = child.wait_with_output().expect("wait fossil catalog");
-
-    assert!(
-        output.status.success(),
-        "fossil catalog exited {}: stdout={} stderr={}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-
-    // The DCAT-AP vertex Parquets are written.
-    for vtype in [
-        "Catalog",
-        "Dataset",
-        "Distribution",
-        "Agent",
-        "Contact",
-        "Field",
-    ] {
-        assert!(
-            dest.join(format!("vertex/{vtype}.parquet")).exists(),
-            "missing vertex/{vtype}.parquet"
-        );
-    }
-
-    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("--output-json parseable");
-
-    // Dataset vertex carries its DCAT-AP RDF type + a conforms_to column.
-    let dataset = parsed["vertices"]
-        .as_array()
-        .expect("vertices array")
-        .iter()
-        .find(|v| v["type"] == "Dataset")
-        .expect("Dataset vertex");
-    assert_eq!(
-        dataset["rdf_type"].as_str(),
-        Some("http://www.w3.org/ns/dcat#Dataset"),
-        "Dataset rdf_type; got: {dataset}"
-    );
-
-    // The Catalog→Dataset edge resolved its endpoints against the vertex URNs.
-    let edges = parsed["edges"].as_array().expect("edges array");
-    let cat_ds = edges
-        .iter()
-        .find(|e| e["src_type"] == "Catalog" && e["dst_type"] == "Dataset")
-        .unwrap_or_else(|| panic!("no Catalog→Dataset edge: {parsed}"));
-    assert_eq!(
-        cat_ds["count"].as_i64(),
-        Some(1),
-        "one dataset edge; got: {cat_ds}"
-    );
-}
+// **There is no cloud-destination test here, and there was one.**
+//
+// It was `run_w0b_writes_to_cloud_dest_with_stdin_creds`: env-gated on
+// `FOSSIL_TEST_S3_ENDPOINT`, so it skipped on every machine that has ever run
+// this suite, and it asserted that `fossil run --dest s3://…` succeeds. It
+// cannot. `fossil_cli::run` resolves its destination through
+// `local_dest_dir`, which returns `None` for any scheme but `file://`, and the
+// run is refused before a byte is written. The test had also drifted out of the
+// wire it drove: it piped `{"dest":{"config":{…}}}` while the payload type
+// declared `{"dest":{"secret":{…}}}`, and neither was ever read.
+//
+// A skipped test asserting a capability that does not exist is worse than no
+// test: it is the capability's only documentation, and it reads as coverage.
+// What replaced it is `crates/fossil-cli/tests/cloud_dest.rs`, which asserts
+// the refusal — and which goes red the day the write path learns an object
+// store, so the removal cannot be forgotten.

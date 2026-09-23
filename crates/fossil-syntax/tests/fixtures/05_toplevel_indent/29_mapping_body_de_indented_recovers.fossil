@@ -1,3 +1,3 @@
-User : ex:Person from users
-    iri = .id
-ex:name = .name
+Users : Person from User
+    @subject = User.id
+name = User.name

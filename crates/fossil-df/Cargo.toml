@@ -1,7 +1,7 @@
 # DataFusion backend for the property-graph MIR: lowers `lower_to_mir_pg` to a
 # DataFusion plan and materialises the GraphAr graph (vertices + edges +
-# manifests + RunStatus). Compiles to wasm32 (browser executor); the native
-# Arrow→Parquet sink (`sink` module) is gated native-only.
+# manifests). Compiles to wasm32 (browser executor); the native Arrow→Parquet
+# sink (`sink` module) is gated native-only.
 [package]
 name = "fossil-df"
 version.workspace = true
@@ -11,26 +11,61 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "DataFusion backend for the property-graph MIR (lower_to_mir_pg)"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
+
+# The workspace lint table (pedantic + nursery at warn), absent here until
+# 2026-09-18 and never by an argument anybody made. It is not a free omission:
+# eight pedantic findings surfaced only when code MOVED out of this crate into
+# one that does inherit the table, so the alternative — leaving it off and
+# letting the destination crate catch them — is a finding that waits for a
+# refactor. The three crates that were still without it — `fossil-graph-schema`,
+# `fossil-policy` and `xtask` — now inherit it too, so
+# `grep -L lints crates/*/Cargo.toml` is empty and this is a policy again.
+[lints]
+workspace = true
 
 [lib]
 doctest = false
 
 [dependencies]
 fossil-base = { path = "../fossil-base" }
+# The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
+# It depends on nothing, so this edge costs a `std::path` join and no build time.
+fossil-locator = { path = "../fossil-locator" }
 fossil-hir = { path = "../fossil-hir" }
+# `FOSSIL_MEM_PROBE` — peak RSS and elapsed seconds per phase of a write. A
+# dependency-free leaf, shared with `fossil-layout`'s layout pass; neither half
+# of the write path may depend on the other.
+fossil-mem-probe = { path = "../fossil-mem-probe" }
 fossil-mir = { path = "../fossil-mir" }
-# Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name) and the
-# host↔fossil wire contract (RunStatus). Both WASM-clean (arrow-schema / serde
-# only) — the backend reuses them instead of re-deriving the GraphAr layout.
+# The policy document a corpus is verified against, and the vocabulary the
+# manifest records the verification in. A leaf (serde/serde_json/thiserror), so
+# `src/privacy.rs` costs the wasm build nothing beyond what is already here —
+# which it has to, because the browser host writes corpora too and a bound only
+# the native writer can establish is a bound with a second writer's worth of
+# hole in it.
+fossil-policy = { path = "../fossil-policy" }
+# Mondrian strict k-anonymity, for `src/generalize.rs`: the writer DERIVES the
+# generalisation a declared bound needs instead of only measuring what it was
+# handed. Two `arrow` sub-crates and serde/thiserror, on the workspace's arrow
+# 58 — the same line `datafusion` resolves to, so a `RecordBatch` crosses this
+# edge without a conversion. It declares `[package.metadata.fossil] wasm = true`
+# and was already in the gate closure on that declaration alone; this edge is
+# what makes it reachable, and the browser writer needs it for the same reason
+# the native one does.
+fossil-kanon = { path = "../fossil-kanon" }
+# Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name). WASM-clean
+# — the backend reuses them instead of re-deriving the GraphAr layout.
 fossil-sinks = { path = "../fossil-sinks" }
-fossil-run-status = { path = "../fossil-run-status" }
 # The canonical graph-schema contract — the metadata fossil-df produces and the
-# manifest/RunStatus materialize from (the universal substrate's single source).
+# manifest materializes from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The program-resident output descriptor (ShEx) that drives edge/cardinality
-# classification, threaded into execute_graph as an argument (ADR-0018) and
-# applied via `fossil_mir::apply_output_shape`.
+# classification, threaded into execute_graph as an argument, never read off
+# the db. This
+# crate is where it stops: `to_graph_schema()` is called here and only the
+# format-neutral schema crosses into `fossil_mir::apply_output_shape`.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # RDF input seam: Turtle parsing for `io.rdf` sources → Arrow rows. Pure Rust,
 # WASM-clean (the oxigraph parsers rudof's ShEx already pulls) — RDF is decoded
@@ -54,14 +89,51 @@ serde_yaml_ng = { workspace = true }
 # (Apple's system clang lacks the wasm target; `brew install llvm` provides one.)
 # Cutting zstd entirely would require a `[patch.crates-io]` fork of those three
 # subcrates — deferred. The wasm CI job must install LLVM.
-datafusion = { version = "54", default-features = false, features = ["parquet"] }
+#
+# `nested_expressions` is ON because a catalogue row asked for it, and that is
+# the only reason a feature is on here. `str.split` lowers to `string_split`,
+# which reconciles to DataFusion's `string_to_array` — a function that lives in
+# the nested-expressions package and is therefore absent from
+# `all_default_functions()`. The row was UNRENDERABLE on this engine for want of
+# a feature flag, which is a different thing from unrenderable for want of a
+# capability, and it was filed beside the ones that cannot be done at all.
+#
+# `crypto_expressions` is deliberately OFF. It is the sibling package, and its
+# `sha256` had exactly one consumer — `anon.hash` — which is gone from the
+# language: anonymisation is a declared policy the writer applies, not an
+# operator a program names. Turning it on would grow the wasm surface for a
+# function no template says.
+datafusion = { version = "54", default-features = false, features = [
+  "parquet",
+  "nested_expressions",
+] }
 # The single Arrow→Parquet encoder, shared native+wasm (universal-substrate
 # decision: one parquet-rs encoder, no parquet-wasm JS). `default-features =
 # false` + `arrow` keeps it pure-Rust (no compression C deps) → wasm-clean; the
 # in-memory `Vec<u8>` writer in `files.rs` is target-agnostic. Only the *fs*
 # write (`sink.rs`) is native-gated.
 parquet = { version = "58", default-features = false, features = ["arrow"] }
+
+# `src/report.rs` — what a run tells its caller. The (de)serialization the CLI
+# writes to stdout and a host reads back; also what `serde-wasm-bindgen` hands
+# JS. Pure Rust, WASM-clean.
+#
+# `schemars` stood beside it and went with `RunStatus`: it derived a JSON Schema
+# for a shape nothing generated TypeScript from. The two crates that publish
+# schemas — `fossil-lineage` and `fossil-graph` — still do, and this one has
+# nothing to publish that `fossil-sinks`'s manifest structs do not already
+# define in YAML.
+serde = { workspace = true }
+# The JSON array reader (`read_json_source`). `arrow-json` decodes a slice of
+# `serde_json::Value`, so the parse and the decode speak the same type; both are
+# pure Rust, so neither costs the wasm build anything.
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+# The stdlib UDFs no engine ships. Pure Rust, no C, wasm-clean — the logic is
+# the function's, not the database's, which is why it can live in the compiler
+# ring at all.
+slug = { workspace = true }
+unicode-normalization = { workspace = true }
 
 # Native-only: the fs sink writes the encoded bytes to a directory. The browser
 # path hands the same bytes to JS for signed PUT, so std::fs + tokio never reach
@@ -74,7 +146,29 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# `NativeSystem` and the line-format decoder moved out of `fossil-base`'s
+# production surface into its `test_support` module, which is behind this
+# feature — they had no consumer that was not a test.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }
+# `tests/pipeline.rs` builds a `SourceAnchor` itself — a regular dependency is
+# invisible to an integration test, which links the crate plus its dev deps only.
+fossil-locator = { path = "../fossil-locator" }
 tokio = { workspace = true }
-fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
+# `tests/rdf_source.rs` builds a `ShExDescriptor` to exercise the ShEx→edge path
+# end to end. It names the decode directly because `fossil-descriptors-output`
+# stopped re-exporting ShEx types: a host may know what ShEx is, the compiler
+# may not.
+fossil-shex = { path = "../fossil-shex" }
 tempfile = { workspace = true }
+# tests/pipeline.rs builds the op list by hand — the MIR operators, which no
+# `.fossil` reaches yet — so it spells `SmolStr` directly.
+smol_str = { workspace = true }
+# `tests/privacy.rs` builds a `PrivacyPolicy` by hand — a policy document is a
+# host's job to read, and the check under test takes the parsed value.
+fossil-policy = { path = "../fossil-policy" }
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+fossil-sinks = { path = "../fossil-sinks" }
+# tests/spill.rs asserts that a declared budget is honoured by spilling, and the
+# spill only announces itself through a `log` record from DataFusion.
+log = { workspace = true }

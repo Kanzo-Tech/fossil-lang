@@ -1,0 +1,184 @@
+(* ==========================================================================
+   corpus.bnf — WHAT A CORPUS IS MADE OF.
+
+   `grammar.bnf` says the SHAPE of a program. `catalogue.bnf` says the NAMES a
+   program may write. This says the names the WRITER emits and every reader has
+   to know — the third data file, and the one that was missing.
+
+   Reference: the same shape as `catalogue.bnf`, same dialect, same lexer. Not a
+   second mechanism.
+
+   # Why this file exists
+
+   Of the three boundaries this system has — program, plan, artefact — two were
+   specified by a grammar that generates code and the third was not. The corpus
+   format is the only one of the three that crosses a process, a language and a
+   network, and it was specified in prose and re-implemented per language.
+
+   Measured before this file existed, over `crates/`, `packages/` and `apps/`:
+   **545 string literals for eight words** — `dense_id` 190 times, `subject` 74,
+   `src_dense`/`dst_dense` 134, `by_source`/`by_target` 73, `cluster_id` 50,
+   `tiles.parquet` 34 — with no declaration any of them derived from.
+
+   And they had already drifted. «The columns the writer emits» was stated in
+   three places with **two different contents**:
+
+     crates/fossil-graph/src/manifest.rs   five names, `cluster_id` included
+     packages/corpus/src/corpus.ts         four names, `cluster_id` absent
+     apps/playground/src/encoding.ts       the same set spelled a third way
+
+   Neither is wrong where it stands, and that is the point: they mean different
+   things — *every column the writer emits* against *the columns this struct
+   already surfaces as named members* — and nothing said so, because there was
+   nowhere for a set to be named. A `role` is what tells them apart now, and each
+   reader names the roles it means.
+
+   # The `type` is the spelling the MANIFEST writes
+
+   Not Arrow's and not Rust's. `crates/fossil-sinks/src/manifest.rs, data_type_name`
+   is the mapping from an Arrow type to it, and a `properties:` entry carries
+   whatever that returns — so a column declared here with a different spelling
+   for the same type would put two names for one thing in one document, which is
+   the defect this file exists to remove.
+
+   That was live and cost nothing to find: `x` and `y` read `float32` here while
+   the manifest wrote `float` for the same column, and it stayed invisible for as
+   long as nothing read this field. A cell row's columns go into a manifest, so it
+   is read now.
+
+   `uint32` and `uint64` are fossil's own, and the format says so: GraphAr defines
+   no unsigned type and its reference reader throws on `dense_id`. See the header
+   of `crates/fossil-sinks/src/manifest.rs`.
+
+   # What is data and what is not
+
+   Same split as `catalogue.bnf`. The NAME, the TYPE and the ROLE are data and
+   live here. What a reader DOES with a role — hide it from a field listing,
+   surface it as a member, colour by it — is the reader's decision and stays
+   where it is made.
+
+   # What is NOT here, on purpose
+
+   **Prefixes and file names** (`tiles.parquet`, `by_source/`, `index/`,
+   `l{k}/`, `graph.graph.yml`). They are addressing, and addressing is
+   `crates/fossil-graph/src/plan.rs` — one implementation already, compiled to
+   wasm32 for the TypeScript side. A second declaration of them here would be a
+   second source for a fact that already has one. Columns are different: nothing
+   owns them today, which is why they drifted.
+
+   **`TILE_SHIFT` and `STRIDE_BITS`.** They are in
+   `crates/fossil-sinks/src/manifest.rs` and every reader derives from them
+   there. Same reason.
+
+   # Status
+
+   `cargo xtask corpus` generates `crates/fossil-sinks/src/generated.rs` and
+   `packages/corpus/src/vocabulary.generated.ts` from this file, and
+   `cargo xtask corpus --check` fails when a checked-in output is stale.
+   `crates/xtask/tests/corpus_generated.rs` runs that check, so `cargo test`
+   catches an edit to this file that was not regenerated, and an edit to a
+   generated file by hand. There is no CI step for it, for the reason
+   `catalogue.bnf` has none.
+   ========================================================================== *)
+
+(* ------------------------------------------------------------------ roles *)
+(* A role says what a column IS, not what anyone does with it.
+
+   address      the row's position in the ordering. `dense_id` is the vertex's
+                rank in Morton order of its position, so it is an ADDRESS and
+                never an identity: re-running the layout renumbers every vertex.
+                `/docs/design/identity` is the argument.
+   identity     what a bookmark keys on and what survives a rebuild.
+   coordinate   the plane. Declared as a pair, drawn as a pair.
+   categorical  an ordinal the writer computed, for a reader to colour by.
+   endpoint     one end of a relation, in the aligned type's `dense_id` space.
+   tally        how many rows of the level below a summary row stands for.
+   weight       a summed edge weight.
+   mode         the majority value, over the rows summarised, of the channel the
+                tree NAMES — `crates/fossil-sinks/src/manifest.rs,
+                CellTree::mode_channel`. The referent is not in this column and
+                cannot be: the value is a bare ordinal. This read «a
+                categorical» for as long as there was nothing to name, which is
+                an indefinite article over a set the document did not
+                constrain.
+   purity       what fraction of those rows carry the mode.
+   incident     one end of a quotient edge, in its own rung's cell space. NOT an
+                `endpoint`: an endpoint indexes a vertex type's `dense_id`, and
+                these index the rung's own cells, which is a different space with
+                a different width at every rung. Sharing the role would have
+                given the quotient an `aligns` it has no use for.
+
+   `declared` marks a column that also appears in the manifest's `properties:`.
+   Exactly one does. That asymmetry is the whole of the manifest-versus-bytes
+   difference `packages/corpus/src/corpus.ts` documents from the other side: on
+   the conformance corpus it is three declared properties against seven columns
+   on disk, and this file is where the three-versus-seven is stated once. *)
+
+(* ------------------------------------------------------- the vertex payload *)
+(* In writer order, which is the order `fossil-df` prepends and `fossil-layout`
+   replaces. A reader may project any subset; the order is what the two writers
+   agree on. *)
+
+col dense_id   = in payload ; type uint32  ; role address .
+col subject    = in payload ; type string  ; role identity    ; declared .
+col x          = in payload ; type float   ; role coordinate .
+col y          = in payload ; type float   ; role coordinate .
+col cluster_id = in payload ; type uint32  ; role categorical .
+
+(* ----------------------------------------------------------- the adjacency *)
+(* Both orientations carry the same two columns and differ only in row order —
+   `by_source` is sorted by `src_dense`, `by_target` by `dst_dense`. `aligns`
+   names which one a given orientation is tiled by, which is the column a tile
+   of that orientation filters on. *)
+
+col src_dense = in adjacency ; type uint32 ; role endpoint ; aligns src .
+col dst_dense = in adjacency ; type uint32 ; role endpoint ; aligns dst .
+
+(* ------------------------------------------------------------- the pyramid *)
+(* A cell row is one texel: a region of the plane, summarised. One rung of the
+   pyramid is a set of them, and `/docs/design/cells` is the argument for why it
+   is a third artefact and not a coarse `Projection`.
+
+   «A region of the plane» is a claim about the PLACEMENT and not about anything
+   below. A cell is cut by count — `dense_id >> shift`, a fixed number of
+   consecutive ranks — and that is an area only because every group is placed in
+   a block sized to its own membership, so the plane carries one vertex per unit
+   of area wherever it is sampled. Measured over com-DBLP, a rung-1 cell ran
+   1,019,008x from the smallest to the largest before that placement and 7,049x
+   after; `/docs/design/position` is where the rule and the residue live.
+
+   Two columns of the payload are NOT here and their absence is the design:
+
+   - no `parent`. A cell of rung `k` covers exactly `[r·4^k, (r+1)·4^k)` of the
+     `dense_id` axis, so the parent of cell `r` is `r >> 2` and the id carries
+     it. A stored parent would be a second statement of a shift.
+   - no `subject`. A cell is not an entity and no bookmark keys on one; the same
+     argument that keeps it out of `properties:` keeps it out of here.
+
+   `x` and `y` are deliberately the payload's own names. A reader drawing a cell
+   draws it exactly as it draws a vertex, and a second spelling would make the
+   camera ask which artefact it is holding. *)
+
+col cell_id  = in cell ; type uint32  ; role address .
+col x        = in cell ; type float   ; role coordinate .
+col y        = in cell ; type float   ; role coordinate .
+col count    = in cell ; type uint32  ; role tally .
+col internal = in cell ; type uint64  ; role weight .
+col mode     = in cell ; type uint32  ; role mode .
+col purity   = in cell ; type float   ; role purity .
+
+(* ------------------------------------------------------------- the quotient *)
+(* The edges between one rung's cells, beside that rung's rows. A separate
+   artefact because of arity and not preference: a cell row is one cell and a
+   quotient edge is a pair of them, which is the same reason a corpus writes its
+   vertices and its relations apart.
+
+   An edge whose two ends share a cell is NOT an edge of that cell — it is
+   absorbed into the cell's `internal`. On the planted fixture
+   `crates/fossil-layout/tests/aggregation.rs` evaluates, 1,088 of 1,095 edges are
+   absorbed and the quotient has seven, so a writer that relabels the endpoints
+   and keeps the set is not wrong in an edge case. *)
+
+col src_cell = in quotient ; type uint32 ; role incident .
+col dst_cell = in quotient ; type uint32 ; role incident .
+col weight   = in quotient ; type uint64 ; role weight .

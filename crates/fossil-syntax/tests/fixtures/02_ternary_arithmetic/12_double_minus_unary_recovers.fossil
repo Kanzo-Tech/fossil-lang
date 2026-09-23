@@ -1,2 +1,2 @@
-User : ex:Person from users
-    iri = - - x
+Users : Person from User
+    @subject = - - x

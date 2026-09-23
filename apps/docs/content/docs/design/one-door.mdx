@@ -1,0 +1,255 @@
+---
+title: One door for a camera
+description: "`frame(rect, pixels)` derives the level from the canvas and `frame(rect, level)` names one outright; why a written pyramid changes bytes and not rows, and why this grew `open` instead of opening a port next to it."
+direction:
+  summary: "`frame` takes a rectangle and a resolution and depends on nothing else — the same rectangle at the same level is the same answer, however the camera got there."
+---
+
+A consumer that wanted a picture out of a corpus used to order three concepts by hand — the
+addressing, the door and a renderer's source contract — and sew them together with SQL of its own.
+The first two were two exported functions then and are one name at two depths now. That is the arithmetic `@fossil-lang/corpus` exists to publish, being re-derived by its own
+consumer. There is one call now:
+
+```ts
+const frame = await corpus.frame({ x, y, w, h, pixels: { w: 800, h: 600 } });
+```
+
+Everything below is why the canvas is what decides the level, why that answer is the same rows with
+or without a pyramid on disk, and why none of it is a new entry point.
+
+## Purity is the specification, not a property it happens to have
+
+`frame` is a function of its arguments and of the corpus bytes. No cap that moves with what the
+rectangle happens to hold, no stride derived from a running count, no state carried between calls.
+The same rectangle at the same level is the same answer.
+
+That is not tidiness. It is the only form in which the two properties a level-of-detail reader owes
+its reader can be *stated*:
+
+- **Monotone refinement** compares `frame(R, k+1)` with `frame(R, k)` — one rectangle, two levels. A
+  reader with no way to name a level cannot be asked the question.
+- **Path independence** compares `frame(R, k)` reached one way with `frame(R, k)` reached another. If
+  the answer could depend on the session, the comparison has no left-hand side.
+
+Both are measured on [the camera](/docs/design/camera), which is also where the count they turn on
+is written down rather than restated here.
+
+## The level comes from the canvas, and naming one is still how you say it
+
+**The pixels come in.** `frame` takes the canvas it is drawn into and derives the level at **one
+mark per pixel** — the whole of the conversion, because any factor below it would be a constant this
+package invented about somebody else's renderer. A renderer whose marks are four pixels wide passes
+the canvas divided by four.
+
+**This page argued the opposite, and the reversal owes that argument something.** The case against
+choosing the level inside the read was never ergonomic: refinement is a statement about
+`frame(R, k+1)` against `frame(R, k)` and path independence one about `frame(R, k)` reached two
+ways, so *the same rectangle at the same level* has to stay expressible or neither has a left-hand
+side. **It does.** `level` survives as a parameter — named outright it wins, and the canvas is not
+consulted — and `packages/corpus/tests/frame-levels.test.ts` still spells both properties that way.
+
+What changed underneath is that **the pyramid is complete**: level *k* is `dense_id % strideOf(k) =
+0`, which needs no bytes on disk, so every level up to the single-vertex one is answerable and
+`corpus.levels()` lists them. A derived level was unsafe while a window of five levels meant a
+camera could ask for one nobody wrote; it cannot now, and the second call is gone.
+
+Zarr still decides the level on the client and this is still that: what moved is who picks by
+default, not where the decision lives. Screen size, device pixel ratio and legibility remain the
+host's facts and still stop at one argument. The same rule governs `minLinkLength`, in the corpus's
+own units and never in pixels: `p` units per pixel and a three-pixel floor passes `3p`.
+
+### It estimates over tiles, and area would be wrong by a level and a half
+
+A rectangle covering **9%** of the extent of the million-vertex fixture holds **25%** of its
+vertices, because a layout clusters: area is off by 2.8× there, which is a level and a half.
+Counting tiles is not. `tiles × chunk_size` over-counts the same rectangle by **1.57×** — under one
+level — and, unlike a uniformity assumption, it is monotone in the rectangle. The declared
+`vertex_count` caps it, because a rectangle covering the corpus cannot hold more than the corpus.
+
+## No pyramid on disk: the same rows, more bytes, and the cost says so
+
+`dense_id % strideOf(k) == 0` **is** the definition of level *k*. A written `vertex/<Type>/l{k}/` is a cache
+of that definition and nothing else.
+
+This is the whole of the second decision. If a level file and the predicate could disagree there
+would be **two contracts**, which is strictly worse than having no pyramid: a reader would have to
+know which one it got in order to know what it was looking at, and the two would drift in the
+direction nobody tests. So they select the same rows by construction, and what a written level
+changes is the **byte count**.
+
+A byte count is a number the caller is already watching, so that is where the difference is
+reported:
+
+| field | what it says |
+| --- | --- |
+| `cost.requests` | maximal runs of tiles whose bytes abut: what those tiles cost in `Range` requests. |
+| `cost.bytes` | compressed bytes those requests hold, from the Parquet footers. |
+| `cost.tiles`, `cost.ofTiles` | the working — tiles the rectangle and the pins selected, against what the artefact that answered holds. |
+
+The ledger leads with the two numbers a network tab also shows; the tile counts are the working. The
+day a level file exists, `cost.bytes` falls. **And no field names the artefact that replied, though
+one did**: `read: 'strided' | 'level'` said in a word what `matchedAt` says in a number, since only a
+written `l{k}/` can report a level above zero, and a field restating a derivation is a field that
+can drift from it.
+
+**This section used to end "and nothing else changes: not the rows, not the API, not a test — this
+side needs no change when it lands", and that was written before anybody measured it.** Two things
+change, and both are consequences of what a level file *is* rather than of how it is read.
+
+### A level file cannot position an anchor, and that is what decides when it may answer
+
+`marks` is a prefix length because the rows past it are anchors: far ends of edges the sample did
+not draw, **out of tiles that were already opened**. A level file holds the level's rows and nothing
+else, so those far ends are not in it — and the camera keeps an edge with *one* end drawn, not two.
+
+The number that settles it is not the induced count. `crates/fossil-layout/tests/levels.rs`,
+`a_level_induces_essentially_no_edges_which_is_why_none_are_written` measures edges with **both**
+ends in the level, which is the right question for writing an *edge* pyramid and the wrong one for
+reading a *vertex* level: the edges a coarse frame draws scale with the marks, `V/strideOf(k) ·
+degree`, not with their square. `what_the_pixel_floor_leaves_of_a_coarse_view` beside it prints the
+right one — marks, edges past the app's three-pixel floor, anchors, and the share a level file can
+position. **The table that stood here is deleted rather than adjusted**: its rows were read off a
+pyramid whose strides were halves, and that pyramid is gone.
+
+**The rule that keeps one contract is: the pyramid answers when the level set carries what the
+answer needs** — for points that is the vertex level, and for lines it is the pair.
+
+<Callout type="warn">
+**This said *the pyramid answers when the answer is points*, and that was the narrow form of the
+rule rather than the rule.** It was true of the reader, and true for a reason about the READER: a
+frame that asked for links had to open the payload, because a vertex level holds the level's rows
+and nothing else, so the far end of an edge leaving it was not there. `matchedAt` said `0` and
+this page said why.
+
+It stopped being true when a relation grew a pyramid of its own. A level row of a RELATION carries
+**both endpoints' coordinates** (`crates/fossil-sinks/src/manifest.rs, Projection`), which places
+the far end without opening a vertex tile for it — and that is not a synthetic edge, which is the
+thing the design refuses: the far end is the vertex, where the payload puts it. `Corpus.frame`
+reads it, and [the reference viewer](/docs/design/reference-viewer) says so as the general rule
+this one is a special case of.
+
+Measured rather than argued: `apps/playground/scripts/measure-frame.mjs` puts every one of ten
+camera rectangles at level 1, 2 or 3 **with links asked for** — 322 to 62,024 of them. Not one at
+level 0.
+
+The page held the narrow form deliberately, on the grounds that *a rule stated in the future tense
+on this site is a rule nothing holds*. The reader exists now, so the general form is what is
+written.
+</Callout>
+
+Nobody loses a drawing they have today, and a caller takes the bytes by asking for something a
+level can answer. What is *not* on the table is the level file answering a different question under
+the same name — see `design/discarded`, where the two alternatives and what would bring each back
+are written down.
+
+The predicate stays in the SQL either way. `pool` applies `dense_id % strideOf(k) = 0` over a level file
+whose every row already satisfies it, which is the identity being asserted rather than assumed: a
+level file that disagreed with the predicate could change what a read **costs** and could not change
+what it **answers**.
+
+### `matched` says which level it counted
+
+`matched` is `count(*)` over the rows that were read, so a level read cannot count level 0 without
+opening the bytes the pyramid exists to avoid. `Frame.matchedAt` is that level — `0` when the
+payload was strided, `level` when a written level answered — **and it is therefore also how a caller
+learns which artefact replied**, which is why nothing else on the ledger says so.
+
+The two ways of not saying so were both worse. Reporting `matched · strideOf(k)` invents an estimate
+the type does not admit to; letting the field mean different things depending on which artefact
+answered is exactly the two-contracts failure this page refuses everywhere else. `matched ·
+strideOf(matchedAt)` is the caller's own arithmetic if it wants an estimate, and it is an estimate:
+the decimation is uniform in `dense_id`, not in the rectangle.
+
+The writer's half lives in `crates/fossil-layout` and `crates/fossil-sinks`, and the reader's in
+`packages/corpus` — `tests/frame-levels.test.ts` builds the corpus the assertion needs, because the
+conformance one is three orders under the floor at which a writer spends bytes on a level.
+
+## The relational work is two clauses, and the SQL still cannot go
+
+`crates/fossil-layout` makes the argument from the writer's side — *the relational work was never
+relational*: a tile is a slice of a Morton-ordered file, a stride is a modulo, a level is a modulo.
+Read against `frame`, that is true of most of what the query says. Only two clauses are relational:
+the box test `x BETWEEN … AND y BETWEEN …`, and the join that finds the edges among the drawn set.
+Everything else — which tiles, which run of `dense_id`, which residues survive the level — is
+arithmetic this package already performs in TypeScript before a character of SQL exists.
+
+**It still cannot come out, and the reason is the host contract.** `@fossil-lang/corpus` asks a
+host for exactly one capability — `query(sql) => Record<string, unknown>[]` — and links no engine
+(see the argument in `packages/corpus/src/query.ts`). SQL is not a language choice here; it is the
+*only channel* through which a byte of a corpus reaches this package. Arithmetic that stays in
+TypeScript is arithmetic performed on rows that already crossed that boundary.
+
+What it costs to move was measured against a pyramid whose strides were halves, so that figure is
+deleted rather than adjusted. The shape of it does not need one: pushing the modulo down lets the
+engine skip the strided-out rows in its own memory, where doing it above the seam means every one of
+them crossing as a plain object to be discarded — the waste `frame` returns typed arrays to avoid.
+
+So what the SQL is allowed to be is the constraint that survives: **every clause in it is a
+function of numbers computed above it**, never of anything read. That is what makes `frame` a pure
+function of `(rect, level)` at all, and it is why the tile ranges, the stride and the pin list are
+built by named helpers rather than written into the template as prose.
+
+## It grew `open` rather than opening a port beside it
+
+The camera needs an engine — reading tiles and striding them is SQL — so it was never going to live
+on a subpath that had none. **Both of the subpaths that did are now gone**, and for one reason each
+time: `./corpus` was justified by a closure that reached no WASM and the door reached the verbs, and
+`./address` by the same promise kept at the price of
+[a second implementation of the arithmetic](/docs/design/corpus#conformance-is-a-round-trip-and-what-it-rests-on-is-not-a-headcount).
+Composing a URL costs loading a module now, and `packages/corpus/src/index.ts` carries the note
+above the export. Neither objection was ever large — `open` runs a `DESCRIBE` per vertex type
+before it returns, so a caller holding one is already in *I have an engine* territory. So the shapes
+on the table were two: a member of the existing door, or a second function taking the same two
+arguments.
+
+**This package already made that mistake once and corrected it.** `createGraphClient` took
+`{ query, manifestFiles }` and returned the verbs; `openCorpus` — the door's name then — took
+`(url, { query })` and returned discovery plus the camera. Two entry points over one manifest with
+no rule for choosing between them is how one question came to have two answers, in two languages,
+over two SQL generators. It was
+folded in for exactly this reason, and the note survives at the seam: the verbs section of
+`packages/corpus/src/corpus.ts` records that it *is the transport now, and this is the door*.
+Adding `frame` as a third would have re-run the argument that removal settled.
+
+**And it made it a second time, with the entry point that had survived two passes.**
+`resolveCorpus` needed no engine and spent no round trip, so deleting it looked like withdrawing a
+capability rather than removing a duplicate — which is why it outlived both subpaths. What the
+objection never established is that the capability needs a name: it is what the CALLER brings, so
+it is an argument. `open(base, { manifestFiles })` and `open(url, { readText })` answer with the
+addressing, `open(url, { query })` answers with the corpus, and the rule for choosing is no longer
+a rule — it is which capability the caller has. The price was the synchronous
+form, which had no production consumer: every rung is `await`ed now.
+
+`frame` and `rows` are **two members and not two doors**, and the invariant that keeps them one
+contract is asserted rather than asserted-about: `frame` at level 0 selects what `rows` selects over
+the same rectangle. **Two names, because they are two questions** — `rows` answers *what is here*,
+every row and every column, and `frame` answers *what do I draw at this resolution*, parallel typed
+arrays for a renderer that will upload them. They were one call whose return type moved with a flag,
+which is a signature that cannot be read without reading the flag; at twenty thousand marks the
+difference between a `PlacedVertex[]` and four typed arrays is twenty thousand objects built to be
+read four fields at a time and thrown away.
+
+## What the answer carries
+
+```ts
+interface Frame {
+  box, level, stride     // what was asked, and the level the canvas came to
+  matched, matchedAt     // what the rectangle holds, and at which level it was counted
+  denseIds, positions, categories
+  marks                  // a PREFIX LENGTH, not a count
+  links
+  cost                   // requests and bytes; tiles and ofTiles as the working
+}
+```
+
+`marks` is a prefix length because the rows past it are **anchors**: far ends of edges the sample did
+not draw, at their real coordinates, out of tiles that were already opened. They cost no request. An
+anchor is not "a vertex outside the rectangle" — that wording was wrong and measurably so; there are
+two ways to be one, outside the rectangle or inside it and not in the sample, and a verification
+counting 420 of the second kind is what caught it.
+
+`matched` is the population of the rectangle at `matchedAt` — level 0 whenever the payload was
+read, which is every frame that asked for links and every level nobody wrote. It is the one number
+that says whether a coarse frame is a picture of the whole rectangle or a picture of one corner of
+it, and the section above is why it carries the level it was counted at rather than promising a
+level it would have to buy the bytes for.

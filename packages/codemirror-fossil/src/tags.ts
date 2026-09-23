@@ -1,201 +1,99 @@
 /**
- * Token kind → CodeMirror highlight-tag mapping for the Fossil language
- * extension.
+ * Lexer variant NAME → `@lezer/highlight` tag.
  *
- * `FossilKind` mirrors the variant ORDER of `fossil_syntax::lexer::Token` in
- * `crates/fossil-syntax/src/lexer.rs` (lines 32-227). Each variant's numeric
- * value is the u32 discriminant logos assigns by declaration order — the
- * Rust side passes that same u32 through `wasm-bindgen` as `TokenRow.kind`
- * (see `@fossil-lang/types::TokenRow`).
+ * ## Why this table is keyed by name and the old one was not
  *
- * Per ADR-0030 § Negative consequences: REORDERING the Rust `Token` enum is
- * a BREAKING CHANGE for `@fossil-lang/codemirror-fossil` — bump major in
- * lockstep. APPENDING new variants is backwards-compatible: any kind not in
- * `KIND_TO_TAG` falls back to `null` (CodeMirror's default text style).
+ * There was a `packages/codemirror-fossil/src/tags.ts` before `873cbc0`, and it
+ * opened with a hand-copied `enum FossilKind { Whitespace = 0, Newline = 1, … }`
+ * under a comment saying it «MUST stay in sync with
+ * `crates/fossil-syntax/src/lexer.rs` — reorders are a breaking change». Nothing
+ * could enforce that from TypeScript, and nothing did: by the time the package
+ * was deleted the table named nine variants the lexer no longer had
+ * (`KwPrefix`, `KwIn`, `KwUse`, `KwAs`, `KwIri`, `Template`, `AbsIri`, `EnvVar`,
+ * `Pipe`), was missing three it had gained (`True`, `False`, `Null`), and every
+ * discriminant from 3 upwards pointed at the wrong token — silently, because a
+ * wrong colour is not an exception.
  *
- * Mapping philosophy (v0.1):
- *   - Keywords (`prefix`, `from`, `in`, `use`, `as`, `and`, `or`, `not`,
- *     `iri`) → `'keyword'`
- *   - Attribute markers (`@export`, `@dcat`, …) → `'meta'` (semantic
- *     decoration, not a value)
- *   - Numeric / string / template literals → `'number'` / `'string'`
- *   - Absolute IRIs (`<https://…>`) → `'string'` (they are URI literals)
- *   - `$ENV_VAR` references → `'variableName'`
- *   - Operators (`:=`, `==`, `|>`, arithmetic, comparison) → `'operator'`
- *   - Punctuation (parens / braces / dot / comma / colon) → `'punctuation'`
- *   - Identifiers → `null` (no opinionated highlight; the LSP semantic-tokens
- *     overlay in 08-09 paints these as `variable`/`function`/`type` etc.)
- *   - `Partial` (`_`) → `'keyword'` (it's a language-level placeholder)
- *   - Trivia (`Whitespace` / `Newline` / `Comment`) — `Comment` → `'comment'`;
- *     the indent pass also keeps `Whitespace` and `Newline` tokens, but those
- *     are stripped by the lexer before `tokenize()` returns (the raw_lex
- *     output we receive includes them — they get mapped to `null` so
- *     CodeMirror renders them as plain text).
+ * So the numbers are not the contract any more. `fossil-wasm` ships
+ * `tokenKinds()`, a legend of variant names indexed by the discriminant a row
+ * carries, and this file maps NAMES. A reorder of the Rust enum now moves both
+ * sides at once and changes nothing here. A variant appended by a newer compiler
+ * is a name this table does not have, which is `undefined`, which is plain text.
+ *
+ * ## What is deliberately not coloured
+ *
+ * `Ident` gets no tag. The lexer cannot tell a type from a binding from a column
+ * — `fossil-ide`'s semantic tokens can, and the legend for those is a separate
+ * export (`semanticLegend`) over a separate call. Painting every identifier one
+ * colour here would be a guess that a later overlay has to undo.
  */
+import { tags, type Tag } from '@lezer/highlight';
 
 /**
- * Numeric discriminants of `fossil_syntax::lexer::Token`, in declaration order
- * (logos assigns 0, 1, 2, … by source position). MUST stay in sync with
- * `crates/fossil-syntax/src/lexer.rs` — reorders are a breaking change.
+ * The map. Keys are `fossil_syntax::lexer::Token` variant names exactly as
+ * `tokenKinds()` reports them.
  */
-export enum FossilKind {
-  // Trivia
-  Whitespace = 0,
-  Newline = 1,
-  Comment = 2,
-  // Keywords
-  KwPrefix = 3,
-  KwFrom = 4,
-  KwIn = 5,
-  KwUse = 6,
-  KwAs = 7,
-  KwAnd = 8,
-  KwOr = 9,
-  KwNot = 10,
-  KwIri = 11,
-  // Attribute markers
-  AtExport = 12,
-  AtAttr = 13,
-  // Numeric literals
-  Float = 14,
-  Integer = 15,
-  // Identifier / partial-application placeholder
-  Ident = 16,
-  Partial = 17,
-  // String / template / IRI / env-var literals
-  String = 18,
-  Template = 19,
-  AbsIri = 20,
-  EnvVar = 21,
-  // Multi-character operators (longer-first per logos longest-match)
-  Define = 22,
-  TypeAnnot = 23,
-  Eq = 24,
-  Neq = 25,
-  Le = 26,
-  Ge = 27,
-  Arrow = 28,
-  Pipe = 29,
-  TripleOpen = 30,
-  TripleClose = 31,
-  // Single-character operators / punctuation
-  Assign = 32,
-  Colon = 33,
-  Dot = 34,
-  Comma = 35,
-  LParen = 36,
-  RParen = 37,
-  LBrace = 38,
-  RBrace = 39,
-  Lt = 40,
-  Gt = 41,
-  Plus = 42,
-  Minus = 43,
-  Star = 44,
-  Slash = 45,
-  Percent = 46,
-  Question = 47,
-  ShapeAnd = 48,
-}
+export const TAG_BY_NAME: Readonly<Record<string, Tag>> = {
+  // Trivia. `Whitespace` and `Newline` are absent on purpose: the lexer keeps
+  // them so the indent pass can see them, and a decoration over a space is a
+  // range CodeMirror has to maintain for no visible result.
+  Comment: tags.lineComment,
 
-/**
- * Highlight-scope name returned to CodeMirror's `StreamParser.token()` callback.
- *
- * The names are the canonical `@lezer/highlight` tag names — CodeMirror's
- * `defaultHighlightStyle` maps these to its built-in theme, and consumer themes
- * key on the same names. Using strings (rather than `Tag` objects) keeps the
- * StreamParser callback path zero-allocation per token and matches the
- * `StreamParser<State>.token()` return-type contract (`string | null`).
- */
-export const KIND_TO_TAG: Record<number, string | null> = {
-  // Trivia — Whitespace + Newline are usually stripped before they reach the
-  // StreamParser path, but we map them defensively so an upstream change
-  // doesn't crash the highlighter.
-  [FossilKind.Whitespace]: null,
-  [FossilKind.Newline]: null,
-  [FossilKind.Comment]: 'comment',
+  // The four reserved words. `grammar.bnf`'s KEYWORD production is the list.
+  KwFrom: tags.keyword,
+  KwAnd: tags.logicOperator,
+  KwOr: tags.logicOperator,
+  KwNot: tags.logicOperator,
 
-  // Keywords — single category, matches CodeMirror's built-in `keyword` tag.
-  [FossilKind.KwPrefix]: 'keyword',
-  [FossilKind.KwFrom]: 'keyword',
-  [FossilKind.KwIn]: 'keyword',
-  [FossilKind.KwUse]: 'keyword',
-  [FossilKind.KwAs]: 'keyword',
-  [FossilKind.KwAnd]: 'keyword',
-  [FossilKind.KwOr]: 'keyword',
-  [FossilKind.KwNot]: 'keyword',
-  [FossilKind.KwIri]: 'keyword',
+  // `@subject`, `@rename` — a marker, not a value.
+  AtAttr: tags.annotation,
 
-  // Attribute markers — semantic decoration, not value. `meta` is the
-  // canonical Lezer tag for "language-machinery markers" (preprocessor
-  // directives, attributes, derive macros etc.).
-  [FossilKind.AtExport]: 'meta',
-  [FossilKind.AtAttr]: 'meta',
+  // Literals. `true`/`false`/`null` are literals rather than keywords in this
+  // lexer, and that is not a technicality: they became tokens because leaving
+  // them as `Ident` made `verified = true` report `unknown column \`true\``.
+  True: tags.bool,
+  False: tags.bool,
+  Null: tags.null,
+  Float: tags.float,
+  Integer: tags.integer,
+  String: tags.string,
 
-  // Numeric literals
-  [FossilKind.Float]: 'number',
-  [FossilKind.Integer]: 'number',
+  // `Ident` — see the header. No tag, on purpose.
 
-  // Identifier — DELIBERATELY null at the syntactic layer. The LSP
-  // semantic-tokens overlay (08-09) paints these as `variable`/`function`/
-  // `type`/`property` based on HIR resolution.
-  [FossilKind.Ident]: null,
+  // Operators.
+  Define: tags.definitionOperator,
+  Eq: tags.compareOperator,
+  Neq: tags.compareOperator,
+  Le: tags.compareOperator,
+  Ge: tags.compareOperator,
+  Lt: tags.compareOperator,
+  Gt: tags.compareOperator,
+  Assign: tags.definitionOperator,
+  Plus: tags.arithmeticOperator,
+  Minus: tags.arithmeticOperator,
+  Star: tags.arithmeticOperator,
+  Slash: tags.arithmeticOperator,
+  Percent: tags.arithmeticOperator,
+  Question: tags.operator,
 
-  // Partial-application placeholder `_` — it's a language-level token, not
-  // an identifier. `operator` is the closest match in Lezer's vocabulary.
-  [FossilKind.Partial]: 'operator',
-
-  // String / template / IRI literals — all string-shaped values.
-  [FossilKind.String]: 'string',
-  [FossilKind.Template]: 'string',
-  [FossilKind.AbsIri]: 'string',
-
-  // $ENV_VAR — a variable reference, but distinct enough to use a stable
-  // tag that themes can target separately if they wish. `variableName` is
-  // the @lezer/highlight built-in for "variable in scope".
-  [FossilKind.EnvVar]: 'variableName',
-
-  // Operators (assignment, comparison, arrow, pipe, triple-quoting, etc.)
-  [FossilKind.Define]: 'operator',
-  [FossilKind.TypeAnnot]: 'operator',
-  [FossilKind.Eq]: 'operator',
-  [FossilKind.Neq]: 'operator',
-  [FossilKind.Le]: 'operator',
-  [FossilKind.Ge]: 'operator',
-  [FossilKind.Arrow]: 'operator',
-  [FossilKind.Pipe]: 'operator',
-  [FossilKind.TripleOpen]: 'operator',
-  [FossilKind.TripleClose]: 'operator',
-  [FossilKind.Assign]: 'operator',
-  [FossilKind.Lt]: 'operator',
-  [FossilKind.Gt]: 'operator',
-  [FossilKind.Plus]: 'operator',
-  [FossilKind.Minus]: 'operator',
-  [FossilKind.Star]: 'operator',
-  [FossilKind.Slash]: 'operator',
-  [FossilKind.Percent]: 'operator',
-  [FossilKind.Question]: 'operator',
-  [FossilKind.ShapeAnd]: 'operator',
-
-  // Punctuation
-  [FossilKind.Colon]: 'punctuation',
-  [FossilKind.Dot]: 'punctuation',
-  [FossilKind.Comma]: 'punctuation',
-  [FossilKind.LParen]: 'punctuation',
-  [FossilKind.RParen]: 'punctuation',
-  [FossilKind.LBrace]: 'punctuation',
-  [FossilKind.RBrace]: 'punctuation',
+  // Punctuation.
+  Colon: tags.punctuation,
+  Dot: tags.derefOperator,
+  Comma: tags.separator,
+  LParen: tags.paren,
+  RParen: tags.paren,
+  LBrace: tags.brace,
+  RBrace: tags.brace,
 };
 
 /**
- * Look up the highlight-scope name for a Token kind. Returns `null` for
- * trivia + identifiers (default editor styling) or for unknown kinds (a
- * newly-appended Rust `Token` variant; CodeMirror falls back to the default
- * style — no crash).
+ * The tag for one row's `kind`, given the legend the wasm module reported.
+ *
+ * Returns `null` for whitespace, for identifiers, and for any kind the legend
+ * does not name — all three of which CodeMirror renders as plain text.
  */
-export function kindToTagName(kind: number): string | null {
-  // Map lookup; deliberate undefined → null normalisation so callers can
-  // pass the value straight to StreamParser's token() return path.
-  const tag = KIND_TO_TAG[kind];
-  return tag ?? null;
+export function tagFor(legend: readonly string[], kind: number): Tag | null {
+  const name = legend[kind];
+  if (name === undefined) return null;
+  return TAG_BY_NAME[name] ?? null;
 }

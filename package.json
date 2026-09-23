@@ -3,12 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "description": "Fossil compiler + LSP + editor React library family — monorepo root",
+  "//scripts": "The four recursive scripts stay on packages/ — an app is not a library and has neither a size budget nor a dist to build for anyone. `docs:*` is the separate door.",
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm --filter \"./packages/*\" build",
     "build:wasm": "pnpm --filter @fossil-lang/wasm build:wasm",
-    "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
-    "size": "pnpm -r size"
+    "test": "pnpm --filter \"./packages/*\" test",
+    "lint": "pnpm --filter \"./packages/*\" lint",
+    "size": "pnpm --filter \"./packages/*\" size",
+    "docs:dev": "pnpm --filter @fossil-lang/docs dev",
+    "docs:build": "pnpm --filter @fossil-lang/docs build"
   },
   "devDependencies": {
     "size-limit": "^11.0.0",
@@ -17,6 +20,12 @@
     "@vitest/coverage-v8": "^2.0.0",
     "happy-dom": "^15.0.0",
     "typescript": "^5.6.0"
+  },
+  "//pnpm": "ONE DuckDB-WASM in the graph, which is the condition `apps/playground` is built against. `@uwdata/mosaic-core@0.29.2` names `@duckdb/duckdb-wasm@1.33.1-dev57.0` as an EXACT dependency and the playground pins 1.32.0, so without this the tab boots two engines and therefore two crossfilters that never hear each other. The override is safe because of one measurement rather than optimism: mosaic's `wasmConnector` accepts a pre-existing `duckdb`+`connection` (see its `src/connectors/wasm.ts`), and given both it never calls `initDatabase()` — the only path that fetches a jsDelivr bundle and spawns a worker. The whole surface it then uses on the injected objects is `con.useUnsafe((bindings, conn) => bindings.runQuery(conn, sql))`, and `dist/types/src/parallel/async_connection.d.ts` is BYTE-IDENTICAL between the two versions (md5 d55a6a4f3348f5d874a427117246361f). Drop this override the day the playground moves to the version the bindings name, and re-check that file's md5 before bumping either pin.",
+  "pnpm": {
+    "overrides": {
+      "@uwdata/mosaic-core>@duckdb/duckdb-wasm": "1.32.0"
+    }
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {

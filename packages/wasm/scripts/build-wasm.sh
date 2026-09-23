@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-wasm.sh — Build packages/wasm/pkg/ from crates/fossil-wasm/ per ADR-0030 + RESEARCH.md Pattern 3.
+# build-wasm.sh — Build packages/wasm/pkg/ from crates/fossil-wasm/.
 #
 # Pinned tooling (CLAUDE.md):
 #   Rust toolchain: 1.90 (from rust-toolchain.toml at repo root)
@@ -58,8 +58,7 @@ fi
 
 # ---- 2. Run wasm-bindgen --target web ----
 #
-# Why --target web (NOT --target bundler): per RESEARCH.md Pitfall 1, the
-# --target bundler output assumes the consumer's bundler handles .wasm ESM
+# Why --target web (NOT --target bundler): the --target bundler output assumes the consumer's bundler handles .wasm ESM
 # imports — fragile when republished as a library (consumer's Vite/Next/Webpack
 # config may not). --target web produces a small JS shim where the consumer
 # passes the resolved .wasm URL via init({ wasmUrl }) — explicit, predictable
@@ -80,19 +79,19 @@ if [[ $HAS_WASM_OPT -eq 1 ]]; then
   wasm-opt -O3 "$PKG_DIR/fossil_wasm_bg.wasm" -o "$PKG_DIR/fossil_wasm_bg.wasm"
 fi
 
-# ---- 4. Report size + assert PKG-03 (2 MB compressed) ----
+# ---- 4. Report size + assert the 2 MB compressed ceiling ----
 
 RAW_SIZE=$(wc -c < "$PKG_DIR/fossil_wasm_bg.wasm")
 gzip -9 -k "$PKG_DIR/fossil_wasm_bg.wasm"
 GZ_SIZE=$(wc -c < "$PKG_DIR/fossil_wasm_bg.wasm.gz")
 rm "$PKG_DIR/fossil_wasm_bg.wasm.gz"
 
-PKG03_LIMIT=$((2 * 1024 * 1024))
-echo "[build-wasm] fossil_wasm_bg.wasm: $RAW_SIZE bytes raw / $GZ_SIZE bytes gzipped (PKG-03 limit: $PKG03_LIMIT)"
+SIZE_LIMIT=$((2 * 1024 * 1024))
+echo "[build-wasm] fossil_wasm_bg.wasm: $RAW_SIZE bytes raw / $GZ_SIZE bytes gzipped (limit: $SIZE_LIMIT)"
 
-if [[ "$GZ_SIZE" -gt "$PKG03_LIMIT" ]]; then
-  echo "::error::WASM bundle exceeds 2 MB compressed (PKG-03): $GZ_SIZE > $PKG03_LIMIT bytes." >&2
-  echo "Either profile + slim the fossil-wasm crate, or split into fossil-wasm-lex-only + fossil-wasm-full per ADR-0030 deferred item." >&2
+if [[ "$GZ_SIZE" -gt "$SIZE_LIMIT" ]]; then
+  echo "::error::WASM bundle exceeds 2 MB compressed: $GZ_SIZE > $SIZE_LIMIT bytes." >&2
+  echo "Either profile + slim the fossil-wasm crate, or split it into a lexer-only shim and a full one so a consumer that needs only the tokenizer does not pay for the checker." >&2
   exit 1
 fi
 

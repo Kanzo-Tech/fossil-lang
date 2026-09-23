@@ -1,61 +1,62 @@
 PROGRAM
   MAPPING
     MAPPING_HEADER
-      IDENT "User"
+      IDENT "Users"
       SHAPE_SEP ":"
       SHAPE_EXPR
-        IRI_EXPR
-          IDENT "ex"
-          SHAPE_SEP ":"
-          IDENT "Person"
+        IDENT "Person"
       KW_FROM "from"
       EXPR
         LITERAL_EXPR
-          IDENT "users"
+          IDENT "User"
     MAPPING_BODY
       PROPERTY
         PROPERTY_LHS
-          KW_IRI "iri"
+          AT_ATTR "@subject"
         ASSIGN "="
         EXPR
-          PIPELINE_EXPR
-            PIPELINE_EXPR
-              PIPELINE_EXPR
-                LITERAL_EXPR
-                  IDENT "users"
-                PIPE "|>"
-                POSTFIX_EXPR
-                  LITERAL_EXPR
-                    IDENT "filter"
-                  LPAREN "("
-                  ARG_LIST
-                    ARG
-                      BINARY_EXPR
-                        FIELD_REF_EXPR
-                          DOT "."
-                          IDENT "age"
-                        GE ">="
-                        LITERAL_EXPR
-                          INTEGER "18"
-                  RPAREN ")"
-              PIPE "|>"
+          POSTFIX_EXPR
+            POSTFIX_EXPR
               POSTFIX_EXPR
-                LITERAL_EXPR
+                POSTFIX_EXPR
+                  POSTFIX_EXPR
+                    POSTFIX_EXPR
+                      LITERAL_EXPR
+                        IDENT "User"
+                      DOT "."
+                      IDENT "filter"
+                    LPAREN "("
+                    ARG_LIST
+                      ARG
+                        BINARY_EXPR
+                          POSTFIX_EXPR
+                            LITERAL_EXPR
+                              IDENT "User"
+                            DOT "."
+                            IDENT "age"
+                          GE ">="
+                          LITERAL_EXPR
+                            INTEGER "18"
+                    RPAREN ")"
+                  DOT "."
                   IDENT "map"
                 LPAREN "("
                 ARG_LIST
                   ARG
-                    FIELD_REF_EXPR
+                    POSTFIX_EXPR
+                      LITERAL_EXPR
+                        IDENT "User"
                       DOT "."
                       IDENT "name"
                 RPAREN ")"
-            PIPE "|>"
-            POSTFIX_EXPR
-              LITERAL_EXPR
-                IDENT "sort"
-              LPAREN "("
-              ARG_LIST
-                ARG
-                  PARTIAL_EXPR
-                    PARTIAL "_"
-              RPAREN ")"
+              DOT "."
+              IDENT "sort"
+            LPAREN "("
+            ARG_LIST
+              ARG
+                POSTFIX_EXPR
+                  LITERAL_EXPR
+                    IDENT "User"
+                  DOT "."
+                  IDENT "name"
+            RPAREN ")"

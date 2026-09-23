@@ -1,6 +1,6 @@
-//! E2E del backend DataFusion (paso 3, vertex phase): `hello.fossil` →
+//! E2E del backend `DataFusion` (paso 3, vertex phase): `hello.fossil` →
 //! [`fossil_df::execute_vertex`] → ejecuta el plan sobre un CSV real y comprueba
-//! la forma GraphAr W0b materializada (dense_id + subject + props + x/y/cluster).
+//! la forma `GraphAr` W0b materializada (`dense_id` + subject + props + x/y/cluster).
 //! Valida MIR-PG → `LogicalPlan` → `read_csv` → `Projection`/sort → `collect()`
 //! → `dense_id` denso determinista.
 //!
@@ -8,38 +8,49 @@
 //! como `tests/fixtures/users.csv` (relativa a `crates/fossil-df`).
 
 #![cfg(not(target_arch = "wasm32"))]
-
-use std::sync::Arc;
+// `{users.id}` is a Fossil interpolation hole, not a Rust format arg.
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::{Array, StringArray, UInt32Array};
 use datafusion::prelude::SessionContext;
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use fossil_hir::def_map::def_map;
 
+mod support;
+
 const HELLO: &str = "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"hello.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
-User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    name = users.name
 ";
+
+/// The document `hello.fossil` names. `name` — the bare key the body writes —
+/// is the last segment of `ex:name`: a property key is a BARE NAME whose
+/// meaning is the last segment of a predicate IRI that a shape declares, so
+/// without this document there is no such thing as the key `name`.
+const HELLO_SHEX: &str = include_str!("fixtures/person-name.shex");
 
 #[tokio::test]
 async fn execute_vertex_materialises_graphar_shape() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, HELLO.to_string(), "hello.fossil".to_string());
+    let (db, file) = support::db_with_shapes(HELLO, "hello.fossil", &[("hello.shex", HELLO_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
         .expect("hello.fossil must contain one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(&ctx, &db, mapping, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT, &std::collections::HashMap::new())
-        .await
-        .expect("execute_vertex runs the DataFusion plan");
+    let (vertex, node) = fossil_df::execute_vertex(
+        &ctx,
+        &db,
+        mapping,
+        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("execute_vertex: {e}; {:?}", support::diagnostics(&db, file)));
 
     // The node's metadata is the graph-schema contract; the table holds the data.
     assert_eq!(vertex.label, "Person");
@@ -47,7 +58,11 @@ async fn execute_vertex_materialises_graphar_shape() {
     assert_eq!(node.iri.as_deref(), Some("https://example.org/Person"));
     assert_eq!(node.properties[0].name, "name");
 
-    let total: usize = vertex.batches.iter().map(|b| b.num_rows()).sum();
+    let total: usize = vertex
+        .batches
+        .iter()
+        .map(datafusion::arrow::array::RecordBatch::num_rows)
+        .sum();
     assert_eq!(total, 3, "users.csv has 3 data rows");
 
     let batch = vertex.batches.first().expect("at least one RecordBatch");
@@ -77,7 +92,10 @@ async fn execute_vertex_materialises_graphar_shape() {
     );
 }
 
-fn column<A: Array + 'static>(batch: &datafusion::arrow::record_batch::RecordBatch, i: usize) -> &A {
+fn column<A: Array + 'static>(
+    batch: &datafusion::arrow::record_batch::RecordBatch,
+    i: usize,
+) -> &A {
     batch
         .column(i)
         .as_any()

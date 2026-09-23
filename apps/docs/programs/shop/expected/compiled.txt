@@ -1,0 +1,24 @@
+── type bindings ──
+Person ← shop.shex = https://shop.example/voc#Person
+Order ← shop.shex = https://shop.example/voc#Order
+
+── source bindings ──
+User := io.csv(data/users.csv)
+Purchase := io.csv(data/orders.csv)
+Adults := User.where(User.age >= 18)
+Orders from Purchase.join(User, on = Purchase.user_id == User.id)
+
+── mappings ──
+Users: 3 written, 3 lowered
+    @subject
+    email
+    name
+Orders: 3 written, 3 lowered
+    @subject
+    total
+    buyer
+
+── run ──
+vertex Person (https://shop.example/voc#Person) × 2 — dense_id, subject, email, name, x, y, cluster_id
+vertex Order (https://shop.example/voc#Order) × 3 — dense_id, subject, total, x, y, cluster_id
+edge Order_buyer_Person × 3

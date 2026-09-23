@@ -1,0 +1,13 @@
+type: Author
+vertex_count: 288
+chunk_size: 64
+prefix: vertex/Author/
+projections:
+- path: ''
+  scale: 1
+  file_type: parquet
+  properties:
+  - name: subject
+    data_type: string
+    is_primary: true
+version: gar/v1

@@ -1,113 +1,159 @@
-//! SC#4 (LSP-01 hover half) — bidirectional hover integration test.
+//! Bidirectional hover integration test.
 //!
-//! Proves the headline Phase-6 LSP feature end-to-end through the PUBLIC
-//! [`fossil_ide::hover_bidirectional`] entry: hovering on a `.field` reference
-//! whose predicate matches a target `ShEx` shape constraint surfaces BOTH
+//! Proves the hover feature end-to-end through the PUBLIC
+//! [`fossil_ide::hover_bidirectional`] entry: hovering on a `users.field`
+//! reference whose property key matches a target `ShEx` shape constraint
+//! surfaces BOTH
 //!
-//!   (a) the **source-side** type, from the CSVW input descriptor (forward
-//!       propagation — `resolve_source_row` reads the `schema = "<path>"`
-//!       CSVW file via the host filesystem), AND
+//!   (a) the **source-side** type, from the input descriptor the host
+//!       registered for the row (forward propagation), AND
 //!   (b) the **target-side** type, from the resolved `ShEx` shape constraint
-//!       (`ShapeConstraint::value_ty`), now reachable via the 06-01 / ADR-0020
-//!       R2 Db-wiring (`HirDb::output_descriptor_kind` → `resolve_target_shape`
-//!       returns `Some`).
+//!       (`ShapeConstraint::value_ty`), reached by `resolve_target_shape`
+//!       reading the document the PROGRAM names.
 //!
 //! Three cases:
-//!   1. `Some`-shape: hover shows BOTH the source-side (`String`) and the
-//!      target-side (`ShEx`) type, with the target block carrying the `ShEx`
-//!      tagline.
-//!   2. `AcceptAll`: hover shows the source-side block ONLY — no target block,
-//!      no error (the "if reachable" hedge).
+//!   1. The program names a document: hover shows BOTH the source-side
+//!      (`Integer`, from the input descriptor) and the target-side (`Float`,
+//!      from `ShEx`) type, with the target block carrying the `ShEx` tagline.
+//!   2. The program names none: hover shows the source-side block ONLY — no
+//!      target block, no error (the "if reachable" hedge).
 //!   3. No `Unknown` literal leaks into either output.
 //!
-//! # The host-wiring stand-in (`ShExHostDb`)
+//! Case 2 is decided by the program alone — there is no host mode that can turn
+//! backward checking on or off behind it. That is the whole of F4.
 //!
-//! `hover_bidirectional` takes `&dyn fossil_hir::HirDb` so it can read the
-//! host's `output_descriptor_kind()`. A production host (the Phase-6 LSP db
-//! wrapper) implements `HirDb` on its concrete `Db` type, returning a reference
-//! into its own descriptor storage. This test builds a minimal such host db:
-//! a `#[salsa::db]` struct carrying a `NativeSystem` (so the CSVW schema file
-//! is readable) plus an `Arc<OutputDescriptorKind>` it returns from the
-//! `HirDb` override. This is exactly the wiring contract documented in
-//! `fossil_hir::db_ext`.
+//! # The db stand-in (`HostDb`)
+//!
+//! A `#[salsa::db]` struct carrying a host `System` that reads the disk AND
+//! installs the `ShEx` decoder row, plus — in [`fixture`] — the registration of
+//! the document the program names. That is what a host owes the checker: a
+//! filesystem, a decoder table, and the documents put in the database before
+//! the queries look for them. It holds no descriptor of its own.
 
 #![cfg(not(target_arch = "wasm32"))]
-// The `.fossil` fixture sources contain `${ex:}` / `${.id}` template
-// placeholders — LITERAL Fossil source, not Rust format-string args.
+// The `.fossil` fixture sources interpolate — `"…/{users.id}"` is LITERAL
+// Fossil source, not a Rust format-string arg.
 #![allow(clippy::literal_string_with_formatting_args)]
 
+use std::path::Path;
 use std::sync::Arc;
+use std::time::SystemTime;
 
-use fossil_base::{Files, NativeSystem, SourceFile, System};
-use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
-use fossil_hir::HirDb;
+use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System};
 
-/// A host db stand-in: a real Salsa db (so tracked queries run) that also
-/// carries a host-supplied output descriptor, returned via the `HirDb`
-/// override. Mirrors the production host-wrapper contract (see
-/// `fossil_hir::db_ext`).
+/// The test's host `System` — a filesystem plus the `ShEx` decoder row, the
+/// same pair `fossil-lsp`'s `LspSystem` installs. `fossil_base::test_support::NativeSystem`
+/// is not enough: its decoder table is the trait default `&[]`, and a document
+/// nothing decodes resolves no shape.
+#[derive(Debug, Default)]
+struct HostSystem(fossil_descriptors_input::DescriptorCache);
+
+impl System for HostSystem {
+    /// The introspected-schema table. The trait default is `None`, and a host
+    /// that keeps it hands these tests no typed source row at all.
+    fn descriptors(&self) -> Option<&fossil_descriptors_input::DescriptorCache> {
+        Some(&self.0)
+    }
+
+    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
+        std::fs::read(path).map_err(|e| FsError::Io(e.to_string()))
+    }
+    fn now(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH
+    }
+    fn providers(&self) -> &'static [&'static Provider] {
+        fossil_descriptors_output::PROVIDERS
+    }
+}
+
+/// A host db stand-in: a real Salsa db (so tracked queries run) over a
+/// [`HostSystem`] (so the documents the program names are readable).
 #[salsa::db]
 #[derive(Clone)]
-struct ShExHostDb {
+struct HostDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
-    descriptor: Arc<OutputDescriptorKind>,
+    catalogue: Catalogue,
 }
 
-impl std::fmt::Debug for ShExHostDb {
+impl std::fmt::Debug for HostDb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ShExHostDb").finish_non_exhaustive()
+        f.debug_struct("HostDb").finish_non_exhaustive()
     }
 }
 
 #[salsa::db]
-impl salsa::Database for ShExHostDb {}
+impl salsa::Database for HostDb {}
 
 #[salsa::db]
-impl fossil_base::Db for ShExHostDb {
+impl fossil_base::Db for HostDb {
     fn system(&self) -> &dyn System {
         &*self.system
     }
     fn files(&self) -> &Files {
         &self.files
     }
-}
 
-impl HirDb for ShExHostDb {
-    fn output_descriptor_kind(&self) -> &OutputDescriptorKind {
-        &self.descriptor
+    fn catalogue(&self) -> &Catalogue {
+        &self.catalogue
     }
 }
 
-impl ShExHostDb {
-    fn new(descriptor: OutputDescriptorKind) -> Self {
+impl HostDb {
+    fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem::default()),
+            system: Arc::new(HostSystem::default()),
             files: Files::default(),
-            descriptor: Arc::new(descriptor),
+            catalogue: Catalogue::default(),
         }
     }
 }
 
-/// CSVW schema declaring a `name` column typed `xsd:string`.
-const USERS_CSVW: &str = r#"{
-  "@context": "http://www.w3.org/ns/csvw",
-  "url": "users.csv",
-  "tableSchema": {
-    "columns": [
-      { "name": "id", "datatype": "string" },
-      { "name": "name", "datatype": "string" }
-    ]
-  }
-}"#;
+/// The introspected `users` row, registered by the HOST before the compile —
+/// what `fossil_introspect::pre_introspect_and_register` and the browser's
+/// `registerInferredDescriptor` do for real. Its `name` column is
+/// `Integer`; see `SHEX_SRC` for why it is not `String` any more.
+fn register_users(db: &dyn fossil_base::Db) {
+    use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+    use fossil_graph_schema::Primitive;
+    let Some(cache) = db.system().descriptors() else {
+        panic!("the host keeps no descriptor table");
+    };
+    cache.insert(InferredDescriptor {
+        uri: "users.csv".into(),
+        columns: vec![
+            InferredColumn {
+                name: "id".into(),
+                primitive: Primitive::Integer,
+            },
+            InferredColumn {
+                name: "name".into(),
+                primitive: Primitive::Integer,
+            },
+        ],
+        freshness_token: String::new(),
+    });
+}
 
-/// A `ShEx` schema declaring `ex:Person` (full IRI `http://example.org/Person`)
-/// with a `ex:name` triple constraint narrowed to `xsd:integer` — DELIBERATELY
-/// different from the CSVW source-side `String`, so the two type blocks are
-/// visibly distinct (the source side renders `String`, the target side renders
-/// `Integer`).
+/// A `ShEx` schema declaring `http://example.org/Person` with an
+/// `http://example.org/name` triple constraint narrowed to `xsd:float` —
+/// DELIBERATELY different from the source-side `Integer`, so the two type blocks
+/// are visibly distinct (source renders `Integer`, target renders `Float`).
+/// The property key `name` is what binds the two: a bare key is the last segment
+/// of a predicate IRI **the document declares**.
+///
+/// The pair used to be `String` against `Integer`, which is not merely distinct
+/// but INCOMPATIBLE. Now that `resolve_target_shape` reads the document the
+/// program names, the mismatch is a real error, the expression
+/// stops typing, and hover has no type to show. An unchecked mismatch is no
+/// longer a state this language can be in.
+///
+/// `Integer` against `Float` keeps the two blocks distinct AND well-typed, via
+/// `S-IntFlt` — the subtyping rule kept precisely so
+/// an `Integer` column can feed an `xsd:float` property without a hand-written
+/// conversion. Nothing else in the suite exercises it.
 const SHEX_SRC: &str = r#"{
   "@context": "http://www.w3.org/ns/shex.jsonld",
   "type": "Schema",
@@ -122,7 +168,7 @@ const SHEX_SRC: &str = r#"{
           "predicate": "http://example.org/name",
           "valueExpr": {
             "type": "NodeConstraint",
-            "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+            "datatype": "http://www.w3.org/2001/XMLSchema#float"
           }
         }
       }
@@ -130,63 +176,72 @@ const SHEX_SRC: &str = r#"{
   ]
 }"#;
 
-/// Build a `.fossil` source whose `users` source declares the CSVW schema
-/// (so source-side `.name` resolves to `String`) and whose mapping targets
-/// `ex:Person` (so target-side resolution finds the `ShEx` shape). Write the
-/// CSVW file next to the `.fossil` so `resolve_source_row`'s relative-path
-/// read succeeds.
-fn fixture(dir: &std::path::Path) -> (ShExHostDb, SourceFile, OutputDescriptorKind) {
-    std::fs::write(dir.join("users.csvw"), USERS_CSVW).expect("write CSVW");
+/// Build a `.fossil` source whose `users` row the host has introspected (so
+/// source-side `users.name` resolves to `Integer`) and whose mapping targets
+/// `Person` (so target-side resolution finds the `ShEx` shape). The shape
+/// document is written next to the `.fossil`, because it is read by relative
+/// path from the program.
+fn fixture(dir: &std::path::Path) -> (HostDb, SourceFile) {
+    // The shape document sits beside the program, and the PROGRAM names it:
+    // `resolve_target_shape` reads what the program declares, so
+    // hover resolves a target type for the same reason the compiler does.
+    std::fs::write(dir.join("person.shex"), SHEX_SRC).expect("write ShEx");
     let fossil_path = dir.join("person.fossil");
     let src = "\
-prefix ex: <http://example.org/>
-users := io.csv(\"users.csv\", schema = \"users.csvw\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+type { Person } := io.shex(\"person.shex\")
+users := io.csv(\"users.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
-    let shex = ShExDescriptor::from_reader(SHEX_SRC.as_bytes()).expect("ShEx parses");
-    let kind = OutputDescriptorKind::ShEx(shex);
-    // The db OWNS one descriptor; we hand back a SECOND independent ShEx
-    // descriptor for callers that want to assert on it (cheap to re-parse).
-    let owned = OutputDescriptorKind::ShEx(
-        ShExDescriptor::from_reader(SHEX_SRC.as_bytes()).expect("ShEx parses"),
-    );
-    let db = ShExHostDb::new(owned);
+    let mut db = HostDb::new();
+    register_users(&db);
     let file = SourceFile::new(
         &db,
         src.to_string(),
         fossil_path.to_string_lossy().into_owned(),
     );
-    (db, file, kind)
+    // The host's half: the shape document is a Salsa input, so it has to be in
+    // the database before any query goes looking for it. The `users` row came
+    // in through the descriptor cache above — the input side has not moved.
+    fossil_ide::register_missing_documents(&mut db, file, &|key| std::fs::read_to_string(key).ok());
+    (db, file)
 }
 
-/// Hover position for `.name` on line 4 (`    ex:name = .name`). Column 14 is
-/// inside the `.name` RHS value of the property.
+/// Hover position for the `name` property on line 4 (`    name = users.name`).
+/// Column 14 is inside the `users.name` RHS value. Line 4 and not 3 because the
+/// program carries the `type { Person } := io.shex(...)` line that names its
+/// output document.
 const NAME_LINE: u32 = 4;
+
+/// The same position in the fixture that names NO document, which is one line
+/// shorter.
+const NAME_LINE_NO_DOCUMENT: u32 = 3;
 const NAME_COL: u32 = 14;
 
-/// Case 1 — the `Some`-shape path: hover shows BOTH the source-side (CSVW
-/// `String`) AND the target-side (`ShEx` `Integer`) type, target block tagged.
+/// Case 1 — the `Some`-shape path: hover shows BOTH the source-side
+/// (`Integer`) AND the target-side (`ShEx` `Float`) type, target block tagged.
 #[test]
 fn hover_shows_source_and_target_type_when_shape_resolves() {
     let tmp = std::env::temp_dir().join(format!("fossil-hover-bidi-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).expect("mk tmp");
-    let (db, file, _kind) = fixture(&tmp);
+    let (db, file) = fixture(&tmp);
 
     let info = fossil_ide::hover_bidirectional(&db, file, NAME_LINE, NAME_COL)
-        .expect("hover on `.name` with a CSVW schema must return Some");
+        .expect("hover on `users.name` with a registered descriptor must return Some");
     let md = &info.markdown;
 
-    // (a) source-side: the CSVW `name` column is `String`.
-    assert!(
-        md.contains("String"),
-        "hover must show the source-side CSVW type `String`; got {md:?}",
-    );
-    // (b) target-side: the ShEx constraint narrows `ex:name` to `Integer`.
+    // (a) source-side: the introspected `name` column is `Integer`.
     assert!(
         md.contains("Integer"),
-        "hover must show the target-side ShEx type `Integer`; got {md:?}",
+        "hover must show the source-side type `Integer`; got {md:?}",
+    );
+    // (b) target-side: the ShEx constraint narrows `name` to `Float`. The
+    //     pair is well-typed by `S-IntFlt`, which is why hover has anything to
+    //     show at all — see the SHEX_SRC doc comment.
+    assert!(
+        md.contains("Float"),
+        "hover must show the target-side ShEx type `Float`; got {md:?}",
     );
     // (c) the target block is explicitly tagged so the user knows its origin.
     assert!(
@@ -199,7 +254,7 @@ fn hover_shows_source_and_target_type_when_shape_resolves() {
         2,
         "expected two fenced fossil blocks (source + target); got {md:?}",
     );
-    // (3) Risk Register: no internal inference state leaks.
+    // (3) No internal inference state leaks into the hover.
     assert!(
         !md.contains("Unknown") && !md.contains("InferenceId"),
         "hover leaked internal type state; got {md:?}",
@@ -208,49 +263,49 @@ fn hover_shows_source_and_target_type_when_shape_resolves() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// Case 2 — `AcceptAll`: hover shows the source-side block ONLY (no target
-/// block, no error — the "if reachable" hedge).
+/// Case 2 — the program names no output document: hover shows the source-side
+/// block ONLY (no target block, no error — the "if reachable" hedge). What
+/// decides it is the program, and nothing else.
 #[test]
-fn hover_shows_source_only_under_accept_all() {
+fn hover_shows_source_only_when_the_program_names_no_document() {
     let tmp = std::env::temp_dir().join(format!("fossil-hover-accept-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).expect("mk tmp");
 
-    // Same fixture, but the host db carries the degraded AcceptAll default.
-    std::fs::write(tmp.join("users.csvw"), USERS_CSVW).expect("write CSVW");
+    // Same fixture, minus the `type { … } := io.shex(…)` line.
     let fossil_path = tmp.join("person.fossil");
     let src = "\
-prefix ex: <http://example.org/>
-users := io.csv(\"users.csv\", schema = \"users.csvw\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+users := io.csv(\"users.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
-    let db = ShExHostDb::new(OutputDescriptorKind::ACCEPT_ALL_DEFAULT);
+    let db = HostDb::new();
+    register_users(&db);
     let file = SourceFile::new(
         &db,
         src.to_string(),
         fossil_path.to_string_lossy().into_owned(),
     );
 
-    let info = fossil_ide::hover_bidirectional(&db, file, NAME_LINE, NAME_COL)
-        .expect("hover on `.name` still returns the source-side type under AcceptAll");
+    let info = fossil_ide::hover_bidirectional(&db, file, NAME_LINE_NO_DOCUMENT, NAME_COL)
+        .expect("hover on `users.name` still returns the source-side type with no output contract");
     let md = &info.markdown;
 
-    // Source-side present.
+    // Source-side present — the input descriptor still types the column.
     assert!(
-        md.contains("String"),
-        "AcceptAll hover must still show the source-side `String`; got {md:?}",
+        md.contains("Integer"),
+        "hover must still show the source-side `Integer`; got {md:?}",
     );
-    // No target block, no ShEx tagline.
+    // No target block, no ShEx tagline: the program declared no contract.
     assert!(
         !md.contains("target type (ShEx shape constraint)"),
-        "AcceptAll hover must NOT append a target-side block; got {md:?}",
+        "a program naming no document must get NO target-side block; got {md:?}",
     );
     // Exactly one fenced block.
     assert_eq!(
         md.matches("```fossil").count(),
         1,
-        "AcceptAll hover must have a single (source-only) fenced block; got {md:?}",
+        "with no output contract hover has a single (source-only) block; got {md:?}",
     );
     assert!(!md.contains("Unknown") && !md.contains("InferenceId"));
 

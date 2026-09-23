@@ -5,7 +5,7 @@
 //! YAML those structs serialise into and exposes lookup helpers used by every
 //! verb. Same structs round-trip write→read; no parallel "`GraphArReader`"
 //! that drifts from the writer's emission
-//! ([[`feedback_no_duplicate_logic_across_crates`]] at the crate boundary).
+//! (at the crate boundary).
 //!
 //! Entry point is the [`GraphInfo`] aggregate index (`graph.graph.yml`): in a
 //! serverless/httpfs model a reader cannot list a directory, so it fetches the
@@ -23,7 +23,15 @@ pub const GRAPH_INFO_PATH: &str = "graph.graph.yml";
 
 /// Writer-emitted (non-user) vertex columns. Schema verbs hide these from
 /// field listings so callers don't chart on `dense_id` or `x`/`y`.
-pub const RESERVED_VERTEX_COLUMNS: [&str; 5] = ["dense_id", "subject", "x", "y", "cluster_id"];
+///
+/// **Every column the writer emits**, which is the whole payload table and not a
+/// subset of it — and that is the distinction this used to lose. It was five
+/// names written here, against four written in `packages/corpus/src/corpus.ts`,
+/// and the two meant different questions: this one is *what is not user data*,
+/// that one is *what the struct already surfaces as a named member*. Naming the
+/// table instead of the names makes the difference legible and makes a column
+/// added to `corpus.bnf` arrive in both.
+pub use fossil_sinks::generated::PAYLOAD_NAMES as RESERVED_VERTEX_COLUMNS;
 
 /// Abstraction over fetching a manifest file by its dataset-relative path.
 ///
@@ -48,7 +56,8 @@ pub struct Manifest {
     vertices: Vec<VertexInfo>,
     edges: Vec<EdgeInfo>,
     /// Vertex type name → index into `vertices`. The index doubles as the
-    /// `type_idx` ordinal the viewport verb emits (stable, manifest order).
+    /// `type_idx` ordinal (stable, manifest order) — how a tile names which
+    /// vertex type a `dense_id` belongs to.
     vertex_idx: HashMap<String, usize>,
     /// Edge table name (`{src}_{edge}_{dst}`) → index into `edges`.
     edge_idx: HashMap<String, usize>,
@@ -132,7 +141,7 @@ impl Manifest {
     }
 
     /// The `type_idx` ordinal for a vertex type (its manifest position), as
-    /// emitted on the viewport verb's vertices. `None` if the type is unknown
+    /// paired with a `dense_id` to identify a vertex. `None` if the type is unknown
     /// or the manifest holds more than 256 types (the `u8` ceiling).
     #[must_use]
     pub fn vertex_type_idx(&self, name: &str) -> Option<u8> {
@@ -166,9 +175,8 @@ impl Manifest {
     pub fn vertex_fields(&self, name: &str) -> Result<Vec<String>> {
         let info = self.lookup_vertex(name)?;
         Ok(info
-            .property_groups
+            .properties()
             .iter()
-            .flat_map(|g| g.properties.iter())
             .map(|p| p.name.as_str())
             .filter(|n| !RESERVED_VERTEX_COLUMNS.contains(n))
             .map(ToString::to_string)
@@ -194,7 +202,8 @@ fn parse_yaml<T: serde::de::DeserializeOwned>(bytes: &[u8], path: &str) -> Resul
 mod tests {
     use super::*;
     use fossil_sinks::manifest::{
-        AdjList, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+        Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
+        VertexInfo,
     };
 
     /// In-memory manifest source: the test analogue of httpfs/fs. Proves the
@@ -215,14 +224,21 @@ mod tests {
             Property {
                 name: "dense_id".into(),
                 data_type: "uint32".into(),
-                is_primary: true,
+                // The ADDRESS, and it cannot also be the identity: the layout
+                // pass reranks by Morton code and gives this number away.
+                is_primary: false,
                 is_nullable: Some(false),
+                cardinality: Some(Cardinality::Single),
             },
             Property {
                 name: "subject".into(),
                 data_type: "string".into(),
-                is_primary: false,
+                // The identity, which is what `is_primary` marks. This fixture
+                // is a transcription of `fossil_df::vertex_info`'s shape and
+                // spelled it the other way round until 2026-08-25.
+                is_primary: true,
                 is_nullable: Some(false),
+                cardinality: Some(Cardinality::Single),
             },
         ];
         for f in user_fields {
@@ -231,6 +247,7 @@ mod tests {
                 data_type: "string".into(),
                 is_primary: false,
                 is_nullable: None,
+                cardinality: None,
             });
         }
         for layout in ["x", "y", "cluster_id"] {
@@ -239,38 +256,34 @@ mod tests {
                 data_type: "uint32".into(),
                 is_primary: false,
                 is_nullable: Some(false),
+                cardinality: Some(Cardinality::Single),
             });
         }
         VertexInfo::new(
             name,
+            3,
             DEFAULT_CHUNK_SIZE,
             format!("vertex/{name}/"),
-            vec![PropertyGroup {
-                file_type: "parquet".into(),
-                properties,
-            }],
+            vec![Projection::payload("", properties)],
         )
     }
 
     fn einfo(src: &str, edge: &str, dst: &str) -> EdgeInfo {
-        EdgeInfo {
-            src_type: src.into(),
-            edge_type: edge.into(),
-            iri: String::new(),
-            dst_type: dst.into(),
-            chunk_size: DEFAULT_CHUNK_SIZE,
-            src_chunk_size: DEFAULT_CHUNK_SIZE,
-            dst_chunk_size: DEFAULT_CHUNK_SIZE,
-            directed: true,
-            prefix: format!("edge/{src}_{edge}_{dst}/"),
-            adj_lists: vec![AdjList {
-                ordered: true,
-                aligned_by: "src".into(),
-                file_type: "parquet".into(),
-            }],
-            property_groups: vec![],
-            version: "gar/v1".into(),
-        }
+        // No `with_cardinality`, on purpose: this fixture is the corpus that
+        // declares no cardinality -- one written by another writer, or before
+        // the field existed -- and the reader has to stay correct over it.
+        EdgeInfo::new(
+            src,
+            edge,
+            dst,
+            2,
+            DEFAULT_CHUNK_SIZE,
+            format!("edge/{src}_{edge}_{dst}/"),
+            vec![
+                Projection::payload("by_source/", vec![]).aligned_by("src", true),
+                Projection::payload("by_target/", vec![]).aligned_by("dst", true),
+            ],
+        )
     }
 
     /// Two vertex types + one edge, serialised to YAML and indexed by `rel_path`
@@ -282,6 +295,7 @@ mod tests {
         let graph = GraphInfo::new(
             "graph",
             "",
+            Container::RowGroups,
             vec![
                 "vertex/Person.vertex.yml".into(),
                 "vertex/Org.vertex.yml".into(),

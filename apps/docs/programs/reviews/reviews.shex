@@ -1,0 +1,11 @@
+PREFIX shop: <https://shop.example/voc#>
+PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+
+shop:Person {
+  shop:name xsd:string
+}
+
+shop:Review {
+  shop:body   xsd:string ;
+  shop:author @shop:Person
+}

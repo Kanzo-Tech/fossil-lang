@@ -1,7 +1,7 @@
 {
   "name": "@fossil-lang/resolvers",
   "version": "0.0.0-development",
-  "description": "Default + mock + public-HTTP ConnectionResolver implementations for the @fossil-lang/playground React component (Tier 1 per ADR-0029).",
+  "description": "Default + mock + public-HTTP ConnectionResolver implementations. The host resolves a source binding to bytes; the compiler does no IO of its own.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

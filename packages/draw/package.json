@@ -1,0 +1,47 @@
+{
+  "name": "@fossil-lang/draw",
+  "version": "0.0.0-development",
+  "description": "The half of drawing a corpus that is not a renderer. It holds no canvas, no GPU and no camera: it answers what a corpus is drawn WITH — the `channels:` block a vertex type declares, and the derivation for a corpus that declares nothing — and what is already LOADED to draw it from — the frames a door has answered, and the interim picture assembled out of them while the next one is in flight. Fossil still ships no viewer.",
+  "//name": "`draw` and not `viewer`, `renderer` or `canvas`, all three of which would be a claim this package cannot make: there is no element, no context and no frame loop anywhere in it. It is named for the question rather than the machine, because the two things in it are the two a renderer has to ask before it can draw and only the corpus can answer.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/draw"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "//exports": "ONE entry, like the door it sits on. There is no `./encoding` and no `./residency` subpath: `@fossil-lang/corpus` deleted `./address` because a subpath whose justification is what a caller can avoid loading buys that promise with a second implementation, and neither module here is big enough or separable enough to be worth re-learning that.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "//dependencies": "NOT zero, and that is the layer rather than an oversight. `@fossil-lang/corpus` is a real runtime dependency: `PAYLOAD_ADDRESS`, `PAYLOAD_COORDINATES` and `PAYLOAD_CATEGORICAL` are VALUES off the writer's generated role table, and reading a role instead of spelling `cluster_id` is the whole reason this module does not hand-write the writer's column names. `@fossil-lang/types` is zero-runtime and carries `Channel` — the `channels:` wire shape, stated once for the family. Nothing else: no engine, no DuckDB, no renderer, no React.",
+  "dependencies": {
+    "@fossil-lang/corpus": "workspace:*",
+    "@fossil-lang/types": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
