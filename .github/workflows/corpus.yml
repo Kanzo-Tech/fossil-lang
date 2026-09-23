@@ -34,6 +34,14 @@ name: corpus
 # `packages/corpus/**` is in the path filter because `apps/corpus/conformance/expected.json`
 # is the contract BOTH implementations execute: an addressing change in the package has
 # to run the reader that shares nothing with it.
+#
+# **`apps/corpus/integration/` is not run here, and that is the same refusal.** Those four
+# suites are vitest, they need the workspace's `@duckdb/duckdb-wasm`, and they read a corpus
+# back through `packages/corpus/src`, whose barrel static-imports the gitignored `pkg/` — so
+# they want `pnpm install`, `node_modules` and a Rust toolchain, which are exactly the three
+# things the paragraph above refuses. `pnpm-ci.yml` runs them: it already has all three, it
+# already installs this same pinned binary, and its `Build all packages` step is what writes
+# the `pkg/`.
 on:
   pull_request:
     paths:

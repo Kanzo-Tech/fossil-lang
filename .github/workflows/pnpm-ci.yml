@@ -82,14 +82,20 @@ jobs:
       # gate. Both are gone: the acceptance corpus is `apps/docs/programs/`, run
       # by `crates/fossil-cli/tests/programs.rs`, which is a Rust test on the
       # Rust side of the seam and never enters a pnpm filter.
-      # `@fossil-lang/corpus` has three suites — `address-cost`, `cost`, `containers` —
-      # gated on `describe.skipIf(!hasDuckdb)`, and no job that ran vitest installed the
-      # binary, so they were GREEN with zero assertions: the Morton over-read table, the
-      # container comparison and the cost model were all unasserted here while reading as
-      # covered. Pinned for the reason `corpus.yml` gives beside the same block — these
-      # suites read Parquet footer statistics, and a silent CLI major should turn a run
-      # red on purpose rather than by surprise.
-      - name: Install the duckdb binary (three suites skip themselves without it)
+      # For `apps/corpus`'s `integration/` suites, two steps down. They were
+      # `packages/corpus/tests/{address-cost,cost,containers,frame-levels}.test.ts`,
+      # they probed for the binary with `spawnSync` and hid behind
+      # `describe.skipIf(!hasDuckdb)`, and this step was added so they would stop
+      # reporting GREEN with zero assertions. It did not finish the job: the skip
+      # applies to the TESTS and the describe BODY runs regardless, so the fixture
+      # write at the top of `address-cost.test.ts` ran anyway — and on the release
+      # runner, which installs no duckdb, it took `v0.3.0-alpha.4` down. The suites
+      # are declared now rather than probed: they live in the app that owns the
+      # guards they call, and the script that runs them is the one this job names.
+      # Pinned for the reason `corpus.yml` gives beside the same block — these
+      # suites read Parquet footer statistics, and a silent CLI major should turn a
+      # run red on purpose rather than by surprise.
+      - name: Install the duckdb binary (for the corpus integration suites)
         env:
           DUCKDB_VERSION: v1.5.3
         run: |
@@ -101,6 +107,27 @@ jobs:
 
       - name: Test all packages
         run: pnpm --filter "./packages/*" test
+
+      # The four suites that write a corpus with the `duckdb` binary and read it back
+      # through `packages/corpus/src` — the addressing-cost table, the container
+      # comparison, the cost model and the pyramid read. They are the strongest evidence
+      # this repository produces about what an address costs, and until now they ran in no
+      # job at all: the one that installed duckdb never invoked vitest, and the one that
+      # invoked vitest skipped them.
+      #
+      # It is a step HERE and not a job in `corpus.yml`, which is the other file that
+      # installs this binary, because `corpus.yml` states its install list as the point of
+      # the guards rather than an accident of them — `node` and `duckdb`, no `pnpm install`,
+      # no `node_modules`, no Rust. These suites need all three: vitest, the workspace's
+      # `@duckdb/duckdb-wasm`, and `packages/corpus/pkg/`, which a Rust toolchain and
+      # `wasm-bindgen-cli` produce. This job already has every one of them, and `Build all
+      # packages` above is what wrote the `pkg/`.
+      #
+      # Named, not recursive: `apps/` is out of reach of every `./packages/*` filter in this
+      # repo on purpose, and this step names one app the way the conformance step below
+      # names one file.
+      - name: Corpus integration (the suites that need a real duckdb)
+        run: pnpm --filter "@fossil-lang/corpus-contract" test:integration
 
       - name: Type-check all packages
         run: pnpm --filter "./packages/*" exec tsc --noEmit

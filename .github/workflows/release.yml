@@ -96,6 +96,15 @@ jobs:
       # unpublishable by accident, and this was the one step that did not honour
       # it. The `@fossil-lang/examples` exclusion the old comment mentioned is
       # gone because that package is.
+      #
+      # **The filter was necessary and was not sufficient**, which is what
+      # `v0.3.0-alpha.4` died of: four suites in `packages/corpus/tests/` imported
+      # `../../../apps/corpus/guards/*.mjs`, so this step selected the package and
+      # the package reached out of the selection anyway — into a fixture writer that
+      # spawns `duckdb`. A filter isolates a directory; it cannot isolate an import.
+      # Those four are `apps/corpus/integration/` now and run in `pnpm-ci.yml`, which
+      # installs the binary. Nothing under `packages/*` spawns a process this job does
+      # not have, and this step needs no duckdb to be green.
       - name: Test (gate before publishing)
         run: pnpm --filter "./packages/*" test
 
