@@ -162,7 +162,16 @@ function duck(sql, json) {
   if (run.error && run.error.code === 'ENOENT') {
     throw new Error('the `duckdb` binary is not on PATH; see https://duckdb.org/docs/installation.');
   }
-  if (run.status !== 0) throw new Error(`duckdb exited ${run.status}\n${run.stderr.trim()}\n--- sql ---\n${sql}`);
+  // Any other `run.error` is a process that never started either, and it leaves `status` and
+  // `stderr` null — so `run.stderr.trim()` below would report a TypeError from this file rather
+  // than the reason. `apps/corpus/guards/duck.mjs` has the same two lines for the same reason.
+  if (run.error) {
+    throw new Error(`duckdb could not be run: ${run.error.message}\n--- sql ---\n${sql}`, {
+      cause: run.error,
+    });
+  }
+  if (run.status !== 0)
+    throw new Error(`duckdb exited ${run.status}\n${(run.stderr ?? '').trim()}\n--- sql ---\n${sql}`);
   if (!json) return null;
   const out = run.stdout.trim();
   return out === '' ? [] : JSON.parse(out);

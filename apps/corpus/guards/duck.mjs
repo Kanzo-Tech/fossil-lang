@@ -19,6 +19,39 @@ export function lit(value) {
 }
 
 /**
+ * The one place a `duckdb` run that did not succeed becomes a sentence.
+ *
+ * A process that never STARTED reports in `run.error` and leaves `status`, `stdout` and `stderr`
+ * null — so `run.stderr.trim()` on that path throws a `TypeError` from inside this file and says
+ * nothing at all about the binary that is missing. That is not hypothetical: it is what a release
+ * gate reported, `Cannot read properties of null (reading 'trim')` at this module, when the runner
+ * had no `duckdb`. Both callers come through here so neither can grow the hole back.
+ *
+ * @param {import('node:child_process').SpawnSyncReturns<string>} run
+ * @param {string} sql
+ * @returns {Error | null} the failure, or `null` if there was none
+ */
+function failure(run, sql) {
+  if (run.error) {
+    if (run.error.code === "ENOENT") {
+      return new Error(
+        "the `duckdb` binary is not on PATH. The checker needs it and nothing else; " +
+          "see https://duckdb.org/docs/installation.",
+      );
+    }
+    return new Error(`duckdb could not be run: ${run.error.message}\n--- sql ---\n${sql}`, {
+      cause: run.error,
+    });
+  }
+  if (run.status !== 0) {
+    const said = (run.stderr ?? "").trim();
+    const why = run.status === null ? `was killed by ${run.signal}` : `exited ${run.status}`;
+    return new Error(`duckdb ${why}\n${said}\n--- sql ---\n${sql}`);
+  }
+  return null;
+}
+
+/**
  * Run one SQL statement and return its rows as objects.
  *
  * @param {string} sql
@@ -31,15 +64,8 @@ export function query(sql) {
     maxBuffer: 256 * 1024 * 1024,
   });
 
-  if (run.error && run.error.code === "ENOENT") {
-    throw new Error(
-      "the `duckdb` binary is not on PATH. The checker needs it and nothing else; " +
-        "see https://duckdb.org/docs/installation.",
-    );
-  }
-  if (run.status !== 0) {
-    throw new Error(`duckdb exited ${run.status}\n${run.stderr.trim()}\n--- sql ---\n${sql}`);
-  }
+  const bad = failure(run, sql);
+  if (bad) throw bad;
 
   const out = run.stdout.trim();
   if (out === "") return [];
@@ -65,9 +91,8 @@ export function scalar(sql) {
  */
 export function execute(sql) {
   const run = spawnSync("duckdb", ["-batch"], { input: `${sql};`, encoding: "utf8" });
-  if (run.status !== 0) {
-    throw new Error(`duckdb exited ${run.status}\n${run.stderr.trim()}\n--- sql ---\n${sql}`);
-  }
+  const bad = failure(run, sql);
+  if (bad) throw bad;
 }
 
 /** Whether the `duckdb` binary is available, so the caller can say so once instead of per guard. */
