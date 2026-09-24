@@ -45,8 +45,10 @@ export interface UnreadDocument extends MissingDocument {
   reason: string;
 }
 
-/** The two calls a compiled workspace answers — the checker's and the executor's. */
+/** What a compiled workspace answers — the checker's and the executor's. */
 export interface DocumentWorkspace {
+  /** The map `@name/…` expands against. It moves locators, never keys. */
+  setConnections(connections: Record<string, string>): void;
   missingDocuments(): MissingDocument[];
   registerDocument(key: string, text: string): void;
 }
@@ -68,6 +70,7 @@ export async function resolveDocuments(
   const attempted = new Set<string>();
   const unread: UnreadDocument[] = [];
   let registered = 0;
+  workspace.setConnections(await host.connections());
 
   for (;;) {
     const pending = workspace.missingDocuments().filter((d) => !attempted.has(d.key));
