@@ -412,16 +412,17 @@ impl LspState {
     /// on it is a buffer, and every keystroke in it is a `set_text` the checker
     /// sees.
     fn register_named_documents(&mut self, file: SourceFile) {
-        let registered = fossil_ide::register_missing_documents(&mut self.db, file, &|key| {
-            let path = local_path(key)?;
-            match std::fs::read_to_string(&path) {
-                Ok(text) => Some(text),
-                Err(e) => {
-                    tracing::debug!("shape document {} was not read: {e}", path.display());
-                    None
+        let registered =
+            fossil_hir::documents::register_missing_documents(&mut self.db, file, &|_, locator| {
+                let path = local_path(locator)?;
+                match std::fs::read_to_string(&path) {
+                    Ok(text) => Some(text),
+                    Err(e) => {
+                        tracing::debug!("shape document {} was not read: {e}", path.display());
+                        None
+                    }
                 }
-            }
-        });
+            });
         if registered > 0 {
             tracing::debug!("registered {registered} shape document(s) from disk");
         }

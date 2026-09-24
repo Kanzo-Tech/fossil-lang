@@ -39,7 +39,7 @@
 //! shape-property source calls `resolve_target_shape`, which reads the document
 //! the program names as a Salsa INPUT — through `file_at` and the tracked
 //! `shape_document`, which the HOST must have registered (see
-//! [`crate::shape_documents`]). Both dependencies are file-keyed, not
+//! [`fossil_hir::documents`]). Both dependencies are file-keyed, not
 //! per-mapping: ten mappings checked against one document share one decode, so
 //! no new per-mapping key appears and the `body()` fan-out is unchanged
 //! All type rendering routes through

@@ -624,7 +624,7 @@ impl FossilPlayground {
     }
 
     /// Register every shape document `file` names that is not in the database
-    /// already — see [`fossil_ide::register_missing_documents`].
+    /// already — see [`fossil_hir::documents::register_missing_documents`].
     ///
     /// The playground's filesystem is [`WasmSystem`]'s in-memory map, which is
     /// empty unless a host staged something in it. So in the browser this
@@ -635,8 +635,8 @@ impl FossilPlayground {
     /// compiler a shape document is to open it.
     fn register_named_documents(&mut self, file: fossil_base::SourceFile) {
         let system = &self.system;
-        fossil_ide::register_missing_documents(&mut self.db, file, &|key| {
-            let bytes = system.read_file(std::path::Path::new(key)).ok()?;
+        fossil_hir::documents::register_missing_documents(&mut self.db, file, &|_, locator| {
+            let bytes = system.read_file(std::path::Path::new(locator)).ok()?;
             String::from_utf8(bytes).ok()
         });
     }
