@@ -15,3 +15,67 @@ export interface SourceHost {
   /** Locator → fetchable URL, for each locator the host signs. */
   sign(locators: string[]): Promise<Record<string, string>>;
 }
+
+/** A document a program names and the workspace does not hold yet —
+ *  `fossil_hir::documents::MissingDocument` across the wasm boundary. */
+export interface MissingDocument {
+  /** The registry key: what the program wrote, independent of any connection. */
+  key: string;
+  /** Where to read it: the key expanded through the connection map. */
+  locator: string;
+}
+
+/** A document that stayed missing, and why. The checker reports it as a
+ *  diagnostic on its own; a run treats it as a failure. */
+export interface UnreadDocument extends MissingDocument {
+  reason: string;
+}
+
+/** The two calls a compiled workspace answers — the checker's and the executor's. */
+export interface DocumentWorkspace {
+  missingDocuments(): MissingDocument[];
+  registerDocument(key: string, text: string): void;
+}
+
+/**
+ * Read every document a workspace is missing through `host`, until nothing
+ * new is missing: a registered document can name another.
+ *
+ * The one IO loop over {@link SourceHost}. Fossil says what is missing and
+ * where it lives; this signs, fetches and registers. Each document is
+ * attempted once, so one that cannot be read ends the loop instead of
+ * repeating it.
+ */
+export async function resolveDocuments(
+  workspace: DocumentWorkspace,
+  host: SourceHost,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ registered: number; unread: UnreadDocument[] }> {
+  const attempted = new Set<string>();
+  const unread: UnreadDocument[] = [];
+  let registered = 0;
+
+  for (;;) {
+    const pending = workspace.missingDocuments().filter((d) => !attempted.has(d.key));
+    if (pending.length === 0) return { registered, unread };
+    for (const d of pending) attempted.add(d.key);
+
+    const signed = await host.sign(pending.map((d) => d.locator));
+    await Promise.all(
+      pending.map(async (d) => {
+        const url = signed[d.locator];
+        if (!url) {
+          unread.push({ ...d, reason: 'the host does not sign this locator' });
+          return;
+        }
+        const res = await fetchImpl(url);
+        if (!res.ok) {
+          unread.push({ ...d, reason: `HTTP ${res.status}` });
+          return;
+        }
+        workspace.registerDocument(d.key, await res.text());
+        registered++;
+      }),
+    );
+  }
+}
