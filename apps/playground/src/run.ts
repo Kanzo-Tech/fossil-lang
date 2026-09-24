@@ -15,7 +15,9 @@
 import type { ExecutorResult, SourceInput } from '@fossil-lang/executor';
 
 import type { BundleCost } from './check.js';
-import { absolutise, DEST, SHEX, SOURCE_BYTES } from './example.js';
+import { resolveDocuments } from '@fossil-lang/types';
+
+import { absolutise, DEST, HOST, SOURCE_BYTES } from './example.js';
 
 let cost: BundleCost | null = null;
 
@@ -45,27 +47,31 @@ export async function run(program: string): Promise<ExecutorResult> {
     cost = { bytes: buffer.byteLength, ms: Math.round(performance.now() - started) };
   }
 
-  const executor = new FossilExecutor();
-
   // The one rewrite, and `example.ts` argues it: the executor's object store is keyed by a
   // URI's scheme+authority, and a relative path has neither. The checker never sees this.
-  program = absolutise(program);
-
-  // `sources()` is pure — it reads the program and says what to fetch, without fetching.
-  // The shape document is passed alongside because a program's sources include the ShEx it
-  // names, and the executor parses it to know the output contract.
-  const wanted = executor.sources(program, {}, SHEX);
-
-  const staged: SourceInput[] = wanted.map((source) => {
-    const bytes = SOURCE_BYTES[source.uri];
-    if (!bytes) {
-      throw new Error(
-        `the program reads ${source.uri}, which this playground has no bytes for. ` +
-          `It ships the walking skeleton's sources only — see src/example.ts.`,
-      );
+  const executor = new FossilExecutor(absolutise(program));
+  try {
+    // The shape document arrives the way the checker's does, through `HOST`: the run
+    // decodes its output contract from it and refuses without it.
+    const { unread } = await resolveDocuments(executor, HOST);
+    if (unread.length > 0) {
+      throw new Error(`the program names ${unread.map((d) => d.key).join(', ')}, which this playground has no text for.`);
     }
-    return { ...source, bytes };
-  });
 
-  return executor.run(program, staged, DEST, {}, SHEX);
+    // `sources()` is pure — it reads the program and says what to fetch, without fetching.
+    const staged: SourceInput[] = executor.sources().map((source) => {
+      const bytes = SOURCE_BYTES[source.uri];
+      if (!bytes) {
+        throw new Error(
+          `the program reads ${source.uri}, which this playground has no bytes for. ` +
+            `It ships the walking skeleton's sources only — see src/example.ts.`,
+        );
+      }
+      return { ...source, bytes };
+    });
+
+    return await executor.run(staged, DEST);
+  } finally {
+    executor.free();
+  }
 }

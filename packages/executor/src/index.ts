@@ -2,19 +2,17 @@
  * @fossil-lang/executor — the DataFusion executor that runs fossil mappings in
  * the browser (the heavy, lazy-loaded counterpart to the LSP @fossil-lang/wasm).
  *
- * Flow (design §E2 — browser-driven, no mapping runtime on the server):
+ * A job, end to end — documents, sources, run, upload, completion:
  *
- *   import { initFossilExecutor, FossilExecutor } from '@fossil-lang/executor';
+ *   import { initFossilExecutor, runJob } from '@fossil-lang/executor';
  *   import wasmUrl from '@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm?url'; // Vite
  *
  *   await initFossilExecutor({ wasmUrl });           // lazy — only when running a job
- *   const exec = new FossilExecutor();
- *   const srcs = exec.sources(program, shex);        // what to fetch
- *   const sources = await Promise.all(srcs.map(async (s) => ({
- *     ...s, bytes: new Uint8Array(await (await fetch(signedUrlFor(s.uri))).arrayBuffer()),
- *   })));
- *   const { files, report } = await exec.run(program, sources, jobDest, shex);
- *   // signed-PUT each file.path ← file.bytes, then PATCH the job with report.
+ *   const report = await runJob(program, { host, output });
+ *
+ * `host` is the `SourceHost` from `@fossil-lang/types`; `output` signs the PUTs
+ * and records the outcome. {@link FossilExecutor} is the step-by-step surface
+ * `runJob` drives.
  */
 
 // The wasm-bindgen glue (`../pkg/fossil_df_wasm.js`) is imported ONLY from leaf
@@ -28,7 +26,7 @@ export { initFossilExecutor } from './load.js';
 export type { InitFossilExecutorOpts } from './load.js';
 
 export { runJob } from './run-job.js';
-export type { JobTransport, CompletePayload, RunJobOptions } from './run-job.js';
+export type { Job, JobOutput, CompletePayload, RunJobOptions } from './run-job.js';
 
 import type { Channel } from '@fossil-lang/types';
 
@@ -47,17 +45,9 @@ export type SourceFormat = DataRow;
 
 export { DATA_ROWS } from './catalogue.generated.js';
 
-/**
- * The connection ref-map `{ name: baseUrl }` (the host's connections). A
- * `@name/path` source alias in the program resolves to `{baseUrl}/path`. Pass
- * the SAME map to {@link FossilExecutor.sources} and {@link FossilExecutor.run}
- * so the resolved URIs line up. Empty/omitted ⇒ every source URI is concrete.
- */
-export type ConnectionRefs = Record<string, string>;
-
 /** A source the program reads, as enumerated by {@link FossilExecutor.sources}. */
 export interface SourceDescriptor {
-  /** The program URI (`io.csv("…")`) — resolve it to a signed URL to fetch. */
+  /** The locator fossil resolved from what the program wrote — sign it to fetch. */
   uri: string;
   format: SourceFormat;
 }

@@ -45,8 +45,10 @@ const GRAPH_SHEX: &str = include_str!("fixtures/graph.shex");
 async fn write_manifests_lays_out_the_graphar_manifests_and_no_payload() {
     let (db, file) =
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
-    let descriptor = fossil_df::OutputDescriptorKind::ShEx(
-        fossil_shex::ShExDescriptor::from_shex_source(GRAPH_SHEX).expect("parse graph.shex"),
+    let descriptor = fossil_df::OutputDescriptorKind::Lowered(
+        fossil_shex::ShExDescriptor::from_shex_source(GRAPH_SHEX)
+            .expect("parse graph.shex")
+            .to_graph_schema(&fossil_graph_schema::Renames::default()),
     );
 
     let ctx = SessionContext::new();
@@ -174,8 +176,10 @@ async fn write_manifests_lays_out_the_graphar_manifests_and_no_payload() {
 async fn a_measured_channel_reaches_the_manifest_and_a_silent_type_declares_none() {
     let (db, file) =
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
-    let descriptor = fossil_df::OutputDescriptorKind::ShEx(
-        fossil_shex::ShExDescriptor::from_shex_source(GRAPH_SHEX).expect("parse graph.shex"),
+    let descriptor = fossil_df::OutputDescriptorKind::Lowered(
+        fossil_shex::ShExDescriptor::from_shex_source(GRAPH_SHEX)
+            .expect("parse graph.shex")
+            .to_graph_schema(&fossil_graph_schema::Renames::default()),
     );
 
     let ctx = SessionContext::new();

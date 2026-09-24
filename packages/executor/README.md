@@ -3,38 +3,56 @@
 The DataFusion executor that runs fossil mappings **in the browser** — the heavy,
 lazy-loaded counterpart to the LSP-only [`@fossil-lang/wasm`](../wasm).
 
-Wraps the `fossil-df-wasm` wasm-bindgen build (`--target web`). The browser fetches
-each source by signed URL, runs the mapping on DataFusion-WASM, and gets back the
-GraphAr output (Parquet + manifests, as bytes) ready to signed-`PUT`. No mapping
-runtime on the server (design §E2).
+Wraps the `fossil-df-wasm` wasm-bindgen build (`--target web`). The browser reads
+every document and source the program names through the host's `SourceHost`, runs
+the mapping on DataFusion-WASM, and gets back the GraphAr output (Parquet +
+manifests, as bytes) ready to signed-`PUT`. No mapping runtime on the server.
 
 ## Usage
 
 ```ts
-import { initFossilExecutor, FossilExecutor } from '@fossil-lang/executor';
+import { initFossilExecutor, runJob } from '@fossil-lang/executor';
+import type { SourceHost } from '@fossil-lang/types';
 import wasmUrl from '@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm?url'; // Vite
 
 // Lazy — only when the user runs a job (the artefact is large, datafusion-heavy).
 await initFossilExecutor({ wasmUrl });
 
-const exec = new FossilExecutor();
-const program = `...fossil mapping...`;
+const host: SourceHost = {
+  connections: async () => ({ minio: 'http://minio:9000/bucket' }),
+  sign: async (locators) => signEach(locators), // { locator: fetchableUrl }
+};
 
-// 1. What sources does the program read?
-const srcs = exec.sources(program /*, shexText */);
+const report = await runJob(program, {
+  host,
+  output: {
+    signOutputUrls: async (paths) => signPuts(paths), // { path: putUrl }
+    complete: async (outcome) => patchJob(outcome),
+  },
+});
+```
 
-// 2. Fetch each by signed URL.
+`runJob` reads the documents the program names (every shape, not just the first)
+with `resolveDocuments` from `@fossil-lang/types`, fails the job if any stays
+unread, then signs and fetches the sources fossil resolved, runs, uploads and
+completes. Fossil turns each `@conn/path` into a locator; the host only signs.
+
+Step by step, the same thing is:
+
+```ts
+import { resolveDocuments } from '@fossil-lang/types';
+
+const exec = new FossilExecutor(program);
+const { unread } = await resolveDocuments(exec, host); // sets connections, registers documents
+const wanted = exec.sources();                         // [{ uri: locator, format }]
+const signed = await host.sign(wanted.map((s) => s.uri));
 const sources = await Promise.all(
-  srcs.map(async (s) => ({
+  wanted.map(async (s) => ({
     ...s,
-    bytes: new Uint8Array(await (await fetch(signedUrlFor(s.uri))).arrayBuffer()),
+    bytes: new Uint8Array(await (await fetch(signed[s.uri])).arrayBuffer()),
   })),
 );
-
-// 3. Run — get the GraphAr files + the run report.
-const { files, report } = await exec.run(program, sources, jobDest /*, shexText */);
-
-// 4. signed-PUT each file.path ← file.bytes, then PATCH the job with report.
+const { files, report } = await exec.run(sources, jobDest);
 exec.free();
 ```
 

@@ -11,55 +11,53 @@
  * undefined (reading '__wbindgen_malloc…')`). Mirrors `@fossil-lang/corpus`'s
  * `client.ts` split, which is the known-good shape.
  */
+import type { DocumentWorkspace, MissingDocument } from '@fossil-lang/types';
+
 import { FossilExecutor as RawFossilExecutor } from '../pkg/fossil_df_wasm.js';
-import type {
-  ConnectionRefs,
-  ExecutorResult,
-  SourceDescriptor,
-  SourceInput,
-} from './index.js';
+import type { ExecutorResult, SourceDescriptor, SourceInput } from './index.js';
 
 /**
- * Runs a fossil program on DataFusion in the browser. One instance per job;
- * cheap to construct (the heavy state lives per `run` call). Call {@link free}
- * when done to release the wasm-side handle.
+ * One compiled fossil program, run on DataFusion in the browser. Call
+ * {@link free} when done to release the wasm-side handle.
+ *
+ * It is a {@link DocumentWorkspace}: hand it to `resolveDocuments` from
+ * `@fossil-lang/types` before {@link sources} or {@link run}, so every document
+ * the program names — its output shape among them — is registered. The run
+ * decodes its output contract from those registrations and refuses without them.
  *
  * MUST be constructed only after {@link initFossilExecutor} has resolved.
  */
-export class FossilExecutor {
+export class FossilExecutor implements DocumentWorkspace {
   readonly #raw: RawFossilExecutor;
 
-  constructor() {
-    this.#raw = new RawFossilExecutor();
+  constructor(program: string) {
+    this.#raw = new RawFossilExecutor(program);
+  }
+
+  setConnections(connections: Record<string, string>): void {
+    this.#raw.setConnections(connections);
+  }
+
+  missingDocuments(): MissingDocument[] {
+    return this.#raw.missingDocuments() as MissingDocument[];
+  }
+
+  registerDocument(key: string, text: string): void {
+    this.#raw.registerDocument(key, text);
+  }
+
+  /** The sources to sign and fetch — `uri` is the locator fossil resolved. */
+  sources(): SourceDescriptor[] {
+    return this.#raw.sources() as SourceDescriptor[];
   }
 
   /**
-   * Enumerate the program's sources so the host knows what to fetch + how to
-   * stage. Pure (no IO) — call it first, resolve each `uri` to a signed URL,
-   * fetch the bytes, then pass them to {@link run}. `refs` resolves `@conn`
-   * aliases (pass the same map to {@link run}).
+   * Execute against the fetched `sources`, materialising the GraphAr graph.
+   * `dest` labels the run (the job's object-storage prefix). Returns the output
+   * files (Parquet + manifest YAML, as bytes) and the manifest, already parsed.
    */
-  sources(program: string, refs?: ConnectionRefs, shex?: string): SourceDescriptor[] {
-    return this.#raw.sources(program, shex, refs ?? {}) as SourceDescriptor[];
-  }
-
-  /**
-   * Execute `program` against the host-fetched `sources`, materialising the
-   * GraphAr graph. `dest` labels the run (the job's object-storage prefix);
-   * `shex` is the optional output schema text.
-   *
-   * Returns the output files (Parquet + manifest YAML, as bytes) plus the
-   * `RunReport` — the same manifest, already parsed. The caller signed-PUTs each
-   * file and PATCHes the job.
-   */
-  run(
-    program: string,
-    sources: SourceInput[],
-    dest: string,
-    refs?: ConnectionRefs,
-    shex?: string,
-  ): Promise<ExecutorResult> {
-    return this.#raw.run(program, shex, sources, dest, refs ?? {}) as Promise<ExecutorResult>;
+  run(sources: SourceInput[], dest: string): Promise<ExecutorResult> {
+    return this.#raw.run(sources, dest) as Promise<ExecutorResult>;
   }
 
   /** Release the wasm-side handle. */

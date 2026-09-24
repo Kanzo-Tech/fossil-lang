@@ -38,7 +38,7 @@
     "test:watch": "vitest",
     "lint": "tsc --noEmit"
   },
-  "//dependencies": "`@fossil-lang/types` is a zero-runtime dependency and carries no code into a bundle: this package re-exports `Channel` and `Scale` from it rather than stating the `channels:` wire shape a second time. The rest of the manifest mirror stays here, beside the run that returns it.",
+  "//dependencies": "`@fossil-lang/types` is the host contract: `runJob` reads through its `SourceHost` with its `resolveDocuments`, and this package re-exports `Channel` and `Scale` from it rather than stating the `channels:` wire shape a second time. The rest of the manifest mirror stays here, beside the run that returns it.",
   "dependencies": {
     "@fossil-lang/types": "workspace:*"
   },
