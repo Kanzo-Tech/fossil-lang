@@ -8,14 +8,13 @@
  *
  * ## Two things a host has to supply, and neither is optional
  *
- * 1. **The shape document, by opening it.** `hello.fossil` says `io.shex("hello.shex")`.
- *    The playground's filesystem is `WasmSystem`'s in-memory map and it is EMPTY — a
- *    document the host never opened is not there, and `fossil-wasm` says so in as many
- *    words: *"The playground's way to give the compiler a shape document is to open it."*
- *    So `open()` opens the `.shex` FIRST. Without it the `name` key resolves against
- *    nothing, the mapping writes no properties, and the run still succeeds with the
- *    column simply absent — which is the failure mode worth knowing about, because it is
- *    silent.
+ * 1. **The shape document, through a `SourceHost`.** `hello.fossil` says
+ *    `io.shex("hello.shex")`. The checker reads nothing itself: it reports the document
+ *    missing, `resolveDocuments` has {@link HOST} sign its locator and fetches it, and
+ *    the text is registered under the key the program wrote. Without it the `name` key
+ *    resolves against nothing, the mapping writes no properties, and the run still
+ *    succeeds with the column simply absent — which is the failure mode worth knowing
+ *    about, because it is silent.
  * 2. **The input columns, by registering a descriptor.** `User := io.csv("users.csv")`
  *    declares no columns; they are introspected from the real file. Natively
  *    `fossil-introspect` runs a `DESCRIBE` through DuckDB. Here `descriptor.ts` does the
@@ -38,8 +37,9 @@ import {
   type InferredDescriptorJson,
 } from '@fossil-lang/wasm';
 import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
+import { resolveDocuments } from '@fossil-lang/types';
 
-import { PROGRAM_PATH, SHEX, SHEX_PATH } from './example.js';
+import { HOST, PROGRAM_PATH } from './example.js';
 
 export type { CheckRow, CompletionRow, DefinitionRow, HoverRow };
 
@@ -69,7 +69,7 @@ export function checkerCost(): BundleCost | null {
 }
 
 /**
- * Fetch + instantiate the checker, open the shape document, open the program.
+ * Fetch + instantiate the checker, open the program, read the documents it names.
  *
  * Measured rather than declared: the `.wasm` is fetched here as a `Response` so its
  * `Content-Length` is readable, and `initFossilWasm` accepts one directly — wasm-bindgen's
@@ -84,12 +84,10 @@ export async function load(program: string): Promise<void> {
   cost = { bytes: buffer.byteLength, ms: Math.round(performance.now() - started) };
 
   playground = new FossilPlayground();
-  // The shape document first: opening it is what puts it in the registry, and the
-  // registry is a Salsa input, so opening it AFTER the program would also work (every
-  // query that missed it re-executes). Doing it first just means the first check is right.
-  playground.openFile(SHEX_PATH, SHEX);
+  playground.setConnections(await HOST.connections());
   programHandle = playground.openFile(PROGRAM_PATH, program);
   pushed = program;
+  await resolveDocuments(playground.workspace(programHandle), HOST);
 }
 
 /**
@@ -150,9 +148,11 @@ export function registerDescriptor(descriptor: InferredDescriptorJson): void {
  * `didChange` anyway. This function is now what it always should have been: one
  * edit, one check, no scheduling of its own.
  */
-export function checkText(program: string): CheckRow[] {
+export async function checkText(program: string): Promise<CheckRow[]> {
   if (!playground || programHandle === null) return [];
   sync(program);
+  // An edit can name a document the workspace has not read; nothing missing is no call.
+  await resolveDocuments(playground.workspace(programHandle), HOST);
   return playground.check();
 }
 

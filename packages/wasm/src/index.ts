@@ -8,8 +8,10 @@
  * - {@link tokenKinds} — the legend for TokenRow.kind: variant names by index.
  * - {@link semanticLegend} — returns the LSP SemanticTokensLegend.
  * - {@link FossilPlayground} — Workspace API class: open / update / close,
- *   `check`, and the three position queries (`hover`, `completions`,
- *   `gotoDefinition`) an editor draws its IDE surface from.
+ *   `check`, the three position queries (`hover`, `completions`,
+ *   `gotoDefinition`) an editor draws its IDE surface from, and the documents
+ *   and sources a program reads (`missingDocuments`, `registerDocument`,
+ *   `sources`) that a host resolves through its `SourceHost`.
  *
  * Consumer pattern (wasm-bindgen --target web):
  *
@@ -193,7 +195,15 @@ export interface InferredDescriptorJson {
   freshness_token: string;
 }
 
-// Re-export the Token + Diagnostic + Resolver types for ergonomics — consumers
+// Re-export the token and source-host types for ergonomics — consumers
 // can import the full surface from `@fossil-lang/wasm` without also reaching
 // for `@fossil-lang/types` (still works; this is convenience).
-export type { TokenRow, SemanticTokensLegend } from '@fossil-lang/types';
+export type {
+  TokenRow,
+  SemanticTokensLegend,
+  SourceHost,
+  MissingDocument,
+  UnreadDocument,
+  DocumentWorkspace,
+  ProgramSource,
+} from '@fossil-lang/types';

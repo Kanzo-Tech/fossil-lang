@@ -142,8 +142,9 @@ crates/
                            open — `@conn`, scheme, absolute, else the program's directory; never
                            the cwd. It was a module of `fossil-base` and is not one now: a
                            substrate «doesn't know about file paths». It depends on NOTHING and
-                           `fossil-base` does not depend on IT — each of its five readers
-                           (`fossil-hir`, `-cli`, `-introspect`, `-df`, `-lsp`) takes it direct
+                           `fossil-base` does not depend on IT — each of its readers
+                           (`fossil-hir`, `-cli`, `-introspect`, `-df`, `-lsp`, `-lineage`)
+                           takes it direct
   fossil-syntax/           lossless CST + parser
   fossil-hir/              types + name resolution + bidirectional checker + the stdlib
                            catalog. `stdlib.rs` owns the TYPES a row is written in; the ROWS
@@ -261,10 +262,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   executor/                datafusion-wasm query executor, and the manifest wire mirror, because
                            a run HANDS THAT BACK — except `Channel`/`Scale`, in `types/` because
                            `draw/` reads one and 22 MB of wasm is the wrong price for an interface
-  types/                   shared TS types (SourceHost, the one host contract; FossilTheme; the
-                           `channels:` wire shape — zero runtime)
-  resolvers/               default + mock + public-HTTP resolvers, over a contract of their
-                           own until they become SourceHosts
+  types/                   SourceHost, the one host contract, and resolveDocuments, the one IO
+                           loop over it; FossilTheme; the `channels:` wire shape
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
                            and not an editor. FIVE of them, not two: highlighting from
                            `tokenize()` + `tokenKinds()`, squiggles from `check()` through
@@ -280,8 +279,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            legend ships, and the guard is on the Rust side
   introspect/              source-binding schema introspection (the one home; `fossil-introspect`
                            is the Rust sibling). Their agreement is ENFORCED, not asserted:
-                           `packages/introspect/tests/rust-parity.test.ts` derives the regex, the
-                           reader arms and the type table out of
+                           `packages/introspect/tests/rust-parity.test.ts` derives the reader
+                           arms, the option keyword and the type table out of
                            `crates/fossil-introspect/src/lib.rs` and fails on drift. It is a
                            **pnpm** test — editing that Rust turns it red and `cargo test` will
                            not tell you.

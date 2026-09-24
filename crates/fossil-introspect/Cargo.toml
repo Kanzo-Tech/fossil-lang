@@ -42,8 +42,8 @@ fossil-resolver = { path = "../fossil-resolver" }
 # same dialect, which is what keeps `rust-parity.test.ts` meaningful.
 duckdb = { workspace = true }
 
-# The source-binding scrape. A regex placeholder for an AST walk, and the
-# TypeScript half compiles the same pattern — see `extract_source_refs`.
+# The source-binding scrape. A regex placeholder for an AST walk — see
+# `extract_source_refs`.
 regex = { workspace = true }
 smol_str = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

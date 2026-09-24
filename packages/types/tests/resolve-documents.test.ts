@@ -3,13 +3,17 @@ import { resolveDocuments, type MissingDocument, type SourceHost } from '../src'
 
 function workspace(names: Record<string, string[]>, roots: string[]) {
   const held = new Map<string, string>();
+  let base = '';
   return {
     held,
+    setConnections(connections: Record<string, string>) {
+      base = connections.shapes ?? '';
+    },
     missingDocuments(): MissingDocument[] {
       const named = [...roots, ...[...held.keys()].flatMap((k) => names[k] ?? [])];
       return [...new Set(named)]
         .filter((k) => !held.has(k))
-        .map((key) => ({ key, locator: key.replace('@shapes/', 's3://b/') }));
+        .map((key) => ({ key, locator: key.replace('@shapes/', `${base}/`) }));
     },
     registerDocument(key: string, text: string) {
       held.set(key, text);

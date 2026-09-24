@@ -13,23 +13,8 @@ export const NATIVE_READERS = {
   parquet: "read_parquet",
 } as const;
 
-/** The constructors above, in catalogue order — the alternation's corpus. */
+/** The constructors above, in catalogue order. */
 export const NATIVE_ROWS = ["csv", "json", "parquet"] as const;
 
 /** One `io.` constructor that reads through a native reader. */
 export type NativeRow = (typeof NATIVE_ROWS)[number];
-
-/**
- * The reader options each constructor takes — the named, optional positions
- * of its signature. Empty for a row that takes none.
- *
- * The counterpart of `fossil_base::Provider::options`, from the same rows.
- * The browser scrapes a source binding for these and the native host does
- * too, so the word a program writes is the catalogue's on both sides; what
- * each one sends to its own DuckDB is its own.
- */
-export const READER_OPTIONS = {
-  csv: ["delimiter"],
-  json: [],
-  parquet: [],
-} as const satisfies Record<NativeRow, readonly string[]>;

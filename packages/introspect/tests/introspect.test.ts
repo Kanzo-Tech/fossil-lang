@@ -1,12 +1,12 @@
+import type { ProgramSource } from "@fossil-lang/types";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildDescriptor,
   describeSql,
   duckdbTypeToFossilPrimitive,
-  extractSourceRefs,
   introspect,
   type DescribeRow,
-  type SourceRef,
+  type IntrospectIO,
 } from "../src/index.js";
 
 describe("duckdbTypeToFossilPrimitive", () => {
@@ -37,36 +37,19 @@ describe("duckdbTypeToFossilPrimitive", () => {
   });
 });
 
-describe("extractSourceRefs", () => {
-  it("scrapes every constructor, with the @conn/path form, keeping the one written", () => {
-    const text = [
-      'users := io.csv("@warehouse/users.csv")',
-      "orders := io.json('@warehouse/orders.json')",
-      'events := io.parquet("@warehouse/events.parquet")',
-    ].join("\n");
-    expect(extractSourceRefs(text)).toEqual([
-      { sourceName: "users", format: "csv", url: "@warehouse/users.csv" },
-      { sourceName: "orders", format: "json", url: "@warehouse/orders.json" },
-      { sourceName: "events", format: "parquet", url: "@warehouse/events.parquet" },
-    ]);
-  });
-
-  it("ignores non-source lines and tolerates surrounding whitespace", () => {
-    const text = '  people  :=  io.csv( "data.csv" )\nx := 1 + 2\n';
-    expect(extractSourceRefs(text)).toEqual([
-      { sourceName: "people", format: "csv", url: "data.csv" },
-    ]);
-  });
-
-  it("returns empty for text with no source bindings", () => {
-    expect(extractSourceRefs("User : Person from users")).toEqual([]);
-  });
-});
-
 describe("describeSql", () => {
   it("single-quote-escapes the url", () => {
     expect(describeSql("o'brien.csv", "csv")).toBe(
       "DESCRIBE SELECT * FROM read_csv_auto('o''brien.csv')",
+    );
+  });
+
+  it("carries the reader option under DuckDB's name for it", () => {
+    expect(describeSql("u.csv", "csv", "|")).toBe(
+      "DESCRIBE SELECT * FROM read_csv_auto('u.csv', delim='|')",
+    );
+    expect(describeSql("u.json", "json", "|")).toBe(
+      "DESCRIBE SELECT * FROM read_json_auto('u.json')",
     );
   });
 
@@ -121,23 +104,63 @@ describe("buildDescriptor", () => {
 });
 
 describe("introspect", () => {
-  const mapping = [
-    'users := io.csv("@w/users.csv")',
-    'orders := io.csv("@w/orders.csv")',
-  ].join("\n");
+  const users: ProgramSource = {
+    binding: "users",
+    key: "@w/users.csv",
+    locator: "s3://bucket/w/users.csv",
+    format: "csv",
+  };
+  const orders: ProgramSource = {
+    binding: "orders",
+    key: "@w/orders.csv",
+    locator: "s3://bucket/w/orders.csv",
+    format: "csv",
+  };
 
-  it("resolves + queries each source and returns the descriptors", async () => {
-    const resolve = (ref: SourceRef) => `https://signed/${ref.url}`;
-    const query = vi.fn(async (sql: string): Promise<DescribeRow[]> => {
-      if (sql.includes("users")) {
-        return [{ column_name: "id", column_type: "BIGINT" }];
-      }
-      return [{ column_name: "total", column_type: "DOUBLE" }];
+  /** A host that signs every locator it is given, and a DuckDB that records
+   *  what was registered under which name. */
+  function fakeIO(
+    query: IntrospectIO["query"],
+    overrides: Partial<IntrospectIO> = {},
+  ) {
+    const registered = new Map<string, string>();
+    const sign = vi.fn(async (locators: string[]) =>
+      Object.fromEntries(locators.map((l) => [l, `https://signed/${l}`])),
+    );
+    const io: IntrospectIO = {
+      host: { connections: async () => ({}), sign },
+      register: async (name, url) => {
+        registered.set(name, url);
+      },
+      query,
+      ...overrides,
+    };
+    return { io, sign, registered };
+  }
+
+  it("signs every locator in one call, registers each under its key and describes the key", async () => {
+    const seen: string[] = [];
+    const { io, sign, registered } = fakeIO(async (sql) => {
+      seen.push(sql);
+      return sql.includes("users")
+        ? [{ column_name: "id", column_type: "BIGINT" }]
+        : [{ column_name: "total", column_type: "DOUBLE" }];
     });
 
-    const descriptors = await introspect(mapping, { resolve, query });
+    const descriptors = await introspect([users, orders], io);
 
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(sign).toHaveBeenCalledWith([users.locator, orders.locator]);
+    expect(registered).toEqual(
+      new Map([
+        ["@w/users.csv", "https://signed/s3://bucket/w/users.csv"],
+        ["@w/orders.csv", "https://signed/s3://bucket/w/orders.csv"],
+      ]),
+    );
+    expect(seen).toEqual([
+      "DESCRIBE SELECT * FROM read_csv_auto('@w/users.csv')",
+      "DESCRIBE SELECT * FROM read_csv_auto('@w/orders.csv')",
+    ]);
     expect(descriptors).toEqual([
       {
         uri: "@w/users.csv",
@@ -152,63 +175,83 @@ describe("introspect", () => {
     ]);
   });
 
-  it("introspects a parquet binding, and asks DuckDB for it as parquet", async () => {
+  it("describes a parquet source as parquet, and carries a csv source's delimiter", async () => {
     const seen: string[] = [];
-    const descriptors = await introspect('e := io.parquet("@w/events.parquet")', {
-      resolve: (r) => r.url,
-      query: async (sql) => {
-        seen.push(sql);
-        return [{ column_name: "ts", column_type: "TIMESTAMP" }];
-      },
+    const { io } = fakeIO(async (sql) => {
+      seen.push(sql);
+      return [{ column_name: "ts", column_type: "TIMESTAMP" }];
     });
+    await introspect(
+      [
+        { binding: "e", key: "@w/e.parquet", locator: "s3://b/e.parquet", format: "parquet" },
+        { ...users, option: "|" },
+      ],
+      io,
+    );
     expect(seen).toEqual([
-      "DESCRIBE SELECT * FROM read_parquet('@w/events.parquet')",
-    ]);
-    expect(descriptors).toEqual([
-      {
-        uri: "@w/events.parquet",
-        columns: [{ name: "ts", primitive: "date_time" }],
-        freshness_token: "",
-      },
+      "DESCRIBE SELECT * FROM read_parquet('@w/e.parquet')",
+      "DESCRIBE SELECT * FROM read_csv_auto('@w/users.csv', delim='|')",
     ]);
   });
 
-  it("asks the host for a freshness token and stamps it on the descriptor", async () => {
-    const freshness = vi.fn((ref: SourceRef) => `etag-for-${ref.url}`);
-    const descriptors = await introspect('u := io.csv("@w/u.csv")', {
-      resolve: (r) => r.url,
-      query: async () => [{ column_name: "id", column_type: "INT" }],
+  it("does not describe a materialised source, and asks the host nothing for none", async () => {
+    const query = vi.fn(async () => []);
+    const { io, sign } = fakeIO(query);
+    const descriptors = await introspect(
+      [{ binding: "g", key: "@w/g.ttl", locator: "s3://b/g.ttl", format: "rdf" }],
+      io,
+    );
+    expect(descriptors).toEqual([]);
+    expect(sign).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it("asks the host for a freshness token against the signed url", async () => {
+    const freshness = vi.fn((_: ProgramSource, url: string) => `etag-for-${url}`);
+    const { io } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }], {
       freshness,
     });
-    expect(freshness).toHaveBeenCalledTimes(1);
-    expect(descriptors[0]?.freshness_token).toBe("etag-for-@w/u.csv");
+    const descriptors = await introspect([users], io);
+    expect(freshness).toHaveBeenCalledWith(users, "https://signed/s3://bucket/w/users.csv");
+    expect(descriptors[0]?.freshness_token).toBe(
+      "etag-for-https://signed/s3://bucket/w/users.csv",
+    );
   });
 
-  it("is best-effort: a failing source is skipped (logged), the rest succeed", async () => {
-    const resolve = (ref: SourceRef) => ref.url;
-    const query = async (sql: string): Promise<DescribeRow[]> => {
-      if (sql.includes("users")) throw new Error("CORS / unreachable");
-      return [{ column_name: "total", column_type: "INT" }];
-    };
+  it("is best-effort: an unsigned or unreadable source is reported and skipped", async () => {
     const onWarn = vi.fn();
+    const { io } = fakeIO(
+      async (sql) => {
+        if (sql.includes("orders")) throw new Error("CORS / unreachable");
+        return [{ column_name: "total", column_type: "INT" }];
+      },
+      {
+        host: {
+          connections: async () => ({}),
+          sign: async (locators) =>
+            Object.fromEntries(
+              locators.filter((l) => l !== users.locator).map((l) => [l, `https://signed/${l}`]),
+            ),
+        },
+        onWarn,
+      },
+    );
+    const parquet: ProgramSource = {
+      binding: "e",
+      key: "@w/e.parquet",
+      locator: "s3://b/e.parquet",
+      format: "parquet",
+    };
 
-    const descriptors = await introspect(mapping, { resolve, query, onWarn });
+    const descriptors = await introspect([users, orders, parquet], io);
 
-    expect(onWarn).toHaveBeenCalledTimes(1);
+    expect(onWarn).toHaveBeenCalledTimes(2);
     expect(descriptors).toEqual([
       {
-        uri: "@w/orders.csv",
+        uri: "@w/e.parquet",
         columns: [{ name: "total", primitive: "integer" }],
         freshness_token: "",
       },
     ]);
-  });
-
-  it("returns empty for a mapping with no source bindings", async () => {
-    const descriptors = await introspect("x := 1 + 2", {
-      resolve: (r) => r.url,
-      query: async () => [],
-    });
-    expect(descriptors).toEqual([]);
   });
 });

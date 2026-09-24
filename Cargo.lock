@@ -2134,6 +2134,7 @@ version = "0.1.0"
 dependencies = [
  "fossil-base",
  "fossil-hir",
+ "fossil-locator",
  "schemars 0.8.22",
  "serde",
 ]
