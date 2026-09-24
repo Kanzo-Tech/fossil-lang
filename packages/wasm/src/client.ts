@@ -230,6 +230,7 @@ export class FossilPlayground {
    */
   workspace(handle: FileHandle): DocumentWorkspace {
     return {
+      setConnections: (connections) => this.setConnections(connections),
       missingDocuments: () => this.missingDocuments(handle),
       registerDocument: (key, text) => this.registerDocument(key, text),
     };

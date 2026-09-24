@@ -84,7 +84,6 @@ export async function load(program: string): Promise<void> {
   cost = { bytes: buffer.byteLength, ms: Math.round(performance.now() - started) };
 
   playground = new FossilPlayground();
-  playground.setConnections(await HOST.connections());
   programHandle = playground.openFile(PROGRAM_PATH, program);
   pushed = program;
   await resolveDocuments(playground.workspace(programHandle), HOST);

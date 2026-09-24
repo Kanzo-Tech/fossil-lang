@@ -21,9 +21,8 @@ network: it reports what it is missing, and the host hands back text through a
 import { resolveDocuments } from '@fossil-lang/types';
 
 const pg = new FossilPlayground();
-pg.setConnections(await host.connections()); // name → base; re-checks nothing
-const h = pg.openFile('prog.fossil', text);   // edited buffers only
-const { unread } = await resolveDocuments(pg.workspace(h), host);
+const h = pg.openFile('prog.fossil', text); // edited buffers only
+const { unread } = await resolveDocuments(pg.workspace(h), host); // sets the connections too
 const rows = pg.check();
 ```
 
@@ -35,7 +34,10 @@ const rows = pg.check();
   It is the one loop; a host does not write a second.
 - `openFile` is for buffers the user edits. An open `.shex` is the document
   every program naming it reads; opening a program registers nothing it names.
-- `sources(h)` — the `ProgramSource[]` the program reads: binding, key,
+- `setConnections(map)` — name → base; re-checks nothing. `resolveDocuments`
+  calls it with `host.connections()`, so a host never does.
+- `sources(h)` — the `ProgramSource[]` the program reads, through the map the
+  last `resolveDocuments` set: binding, key,
   locator, catalogue row, reader option. Introspection DESCRIBEs these and
   registers each descriptor under `key` with `registerInferredDescriptor`.
 
