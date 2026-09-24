@@ -9,14 +9,11 @@
 //! `SystemTime`-shaped shim that delegates to `performance.now()` in the
 //! browser and `process.hrtime` in Node — rather than making this method fail.
 //!
-//! The filesystem is a programmable in-memory map: hosts can stage source
-//! files via [`WasmSystem::write`] before invoking compiler queries that need
-//! to read them. The setter exists so the `open_file`/`update_file`/`close_file`
-//! lifecycle has a place to land without reshaping the `System` trait.
+//! There is no filesystem. A buffer arrives through `open_file` and a document
+//! through `register_document`, both into the Salsa file registry, so
+//! [`WasmSystem::read_file`] has nothing to answer.
 
-use std::collections::HashMap;
 use std::path::Path;
-use std::sync::RwLock;
 use std::time::SystemTime;
 
 use fossil_base::{FsError, Provider, System};
@@ -32,7 +29,6 @@ use fossil_descriptors_input::DescriptorCache;
 #[allow(clippy::redundant_pub_crate)]
 #[derive(Debug, Default)]
 pub(crate) struct WasmSystem {
-    fs: RwLock<HashMap<String, Vec<u8>>>,
     /// Keyed by the source URI the program writes:
     /// the descriptors the playground introspected with DuckDB-WASM and
     /// pushed in via [`crate::FossilPlayground::register_inferred_descriptor`]
@@ -43,14 +39,7 @@ pub(crate) struct WasmSystem {
 
 impl System for WasmSystem {
     fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        let key = path.to_string_lossy().into_owned();
-        let bytes = self
-            .fs
-            .read()
-            .expect("WasmSystem fs lock poisoned")
-            .get(&key)
-            .cloned();
-        bytes.ok_or(FsError::NotFound(key))
+        Err(FsError::NotFound(path.display().to_string()))
     }
 
     fn now(&self) -> SystemTime {
@@ -71,20 +60,5 @@ impl System for WasmSystem {
     /// shape.
     fn providers(&self) -> &'static [&'static Provider] {
         fossil_descriptors_output::PROVIDERS
-    }
-}
-
-#[allow(clippy::redundant_pub_crate)]
-impl WasmSystem {
-    /// Programmatic file write — for a host that stages a file the compiler
-    /// will read back through [`System::read_file`]. Nothing calls it yet; it
-    /// exists as the symmetric setter to `read_file`, so a host that needs to
-    /// stage a file does not have to reshape the `System` trait to do it.
-    #[allow(dead_code)] // the symmetric setter, kept ahead of its first caller
-    pub(crate) fn write(&self, path: &str, contents: Vec<u8>) {
-        self.fs
-            .write()
-            .expect("WasmSystem fs lock poisoned")
-            .insert(path.to_string(), contents);
     }
 }

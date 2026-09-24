@@ -12,6 +12,10 @@
 //! | [`WasmPlayground::open_file`]   | [`FileHandle`]                       | `textDocument/didOpen`     |
 //! | [`WasmPlayground::update_file`] | `()`                                 | `textDocument/didChange`   |
 //! | [`WasmPlayground::close_file`]  | `()`                                 | `textDocument/didClose`    |
+//! | [`WasmPlayground::set_connections`] | `()`                             | the host's `SourceHost.connections()` |
+//! | [`WasmPlayground::missing_documents`] | `Array<{ key, locator }>`      | `resolveDocuments` |
+//! | [`WasmPlayground::register_document`] | `()`                           | `resolveDocuments` |
+//! | [`WasmPlayground::sources`]     | `Array<ProgramSource>`               | introspection |
 //! | [`WasmPlayground::check`]       | `Array<{ uri, range, severity, message }>` | the playground's panel, workspace-wide |
 //! | [`WasmPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | the same rows scoped to one file |
 //! | [`WasmPlayground::hover`]       | `{ markdown, range } \| null`        | `textDocument/hover`       |
@@ -62,6 +66,7 @@ pub use crate::tokenize::{TokenRow, token_kinds_native, tokenize_native};
 // glue, not via Rust callers).
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, System};
@@ -79,8 +84,8 @@ use crate::workspace::OpenFiles;
 /// [`System`] (here [`WasmSystem`]) + the file registry. The target-side `ShEx`
 /// type/properties `fossil-ide` surfaces are reachable because the PROGRAM
 /// names its output document and the host REGISTERS it (see
-/// [`FossilPlayground::open_file_native`]) — the playground supplies documents,
-/// not a contract.
+/// [`FossilPlayground::register_document_native`]) — the playground supplies
+/// documents, not a contract.
 #[salsa::db]
 #[derive(Clone)]
 struct WasmDb {
@@ -138,9 +143,13 @@ impl WasmDb {
 pub struct FossilPlayground {
     db: WasmDb,
     /// The system handle is owned by `db` via `Arc<dyn System>`; we retain a
-    /// typed `Arc<WasmSystem>` here so the shape-document loop can reach the
-    /// in-memory filesystem without round-tripping through the trait object.
+    /// typed `Arc<WasmSystem>` here so descriptor registration reaches its
+    /// cache without round-tripping through the trait object.
     system: Arc<WasmSystem>,
+    /// Connection name → base, as `@name/…` expands against it. Outside Salsa:
+    /// it reaches locators only, never a registry key, so setting it
+    /// invalidates nothing.
+    connections: HashMap<String, String>,
     /// The open-file lifecycle map (handle → `SourceFile` + URI index).
     /// Mutated by `open_file` / `update_file` / `close_file`; iterated by
     /// `check` / `diagnostics_for`.
@@ -169,6 +178,7 @@ impl FossilPlayground {
         Self {
             db,
             system,
+            connections: HashMap::new(),
             files: OpenFiles::default(),
         }
     }
@@ -323,9 +333,8 @@ impl WasmPlayground {
     /// playground's panel view. It is NOT what the LSP Worker publishes; see
     /// [`CheckRow`], and `lsp_worker::publish_diagnostics` for the wire.
     ///
-    /// A buffer the installed provider catalogue claims — the `.shex` the
-    /// playground had to open to give the compiler a document, a `.csv`, a
-    /// `.parquet` — is an INPUT and is not parsed as fossil.
+    /// A buffer the installed provider catalogue claims — a `.shex` being
+    /// edited, a `.csv`, a `.parquet` — is an INPUT and is not parsed as fossil.
     /// [`fossil_ide::diagnostics()`] is where that is said and measured, for both
     /// hosts.
     ///
@@ -366,6 +375,75 @@ impl WasmPlayground {
             .map_err(|_| busy_error("diagnostics_for"))?;
         let rows = pg
             .diagnostics_for_rows(*handle)
+            .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
+        serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
+    }
+
+    // ----- Documents and sources: fossil resolves, the host reads -----
+
+    /// Replace the connection map `@name/…` expands against, as
+    /// `SourceHost.connections()` answers it.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error if `connections` is not a string-to-string record, or
+    /// if the workspace is busy.
+    #[wasm_bindgen(js_name = setConnections)]
+    pub fn set_connections(&self, connections: JsValue) -> Result<(), JsError> {
+        let connections: HashMap<String, String> =
+            serde_wasm_bindgen::from_value(connections).map_err(JsError::from)?;
+        self.inner
+            .try_borrow_mut()
+            .map_err(|_| busy_error("setConnections"))?
+            .set_connections_native(connections);
+        Ok(())
+    }
+
+    /// The documents the file at `handle` names that nothing has registered:
+    /// `{ key, locator }` rows, the locator expanded through the connection map.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
+    /// if serialization fails.
+    #[wasm_bindgen(js_name = missingDocuments)]
+    pub fn missing_documents(&self, handle: &FileHandle) -> Result<JsValue, JsError> {
+        let pg = self
+            .inner
+            .try_borrow()
+            .map_err(|_| busy_error("missingDocuments"))?;
+        let rows = pg
+            .missing_documents_native(*handle)
+            .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
+        serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
+    }
+
+    /// Register a fetched document's `text` under the `key` `missingDocuments`
+    /// reported.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error if the workspace is busy.
+    #[wasm_bindgen(js_name = registerDocument)]
+    pub fn register_document(&self, key: &str, text: &str) -> Result<(), JsError> {
+        self.inner
+            .try_borrow_mut()
+            .map_err(|_| busy_error("registerDocument"))?
+            .register_document_native(key, text);
+        Ok(())
+    }
+
+    /// The data sources the file at `handle` reads — see
+    /// [`fossil_lineage::program_sources`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
+    /// if serialization fails.
+    pub fn sources(&self, handle: &FileHandle) -> Result<JsValue, JsError> {
+        let pg = self.inner.try_borrow().map_err(|_| busy_error("sources"))?;
+        let rows = pg
+            .sources_native(*handle)
             .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
     }
@@ -579,11 +657,6 @@ impl FossilPlayground {
             .get(handle)
             .ok_or(WorkspaceError::UnknownHandle)?;
         file.set_text(&mut self.db).to(contents);
-        // The edit may have just added the `type { … } = io.shex("…")` line
-        // that names a document. A no-op once the document is in (the loop
-        // skips what the registry already holds), and the `def_map` it consults
-        // is the one `check` is about to run anyway.
-        self.register_named_documents(file);
         Ok(())
     }
 
@@ -610,35 +683,51 @@ impl FossilPlayground {
     /// fresh handle directly (panics on `u32::MAX` counter overflow, same
     /// as the wasm-bindgen wrapper).
     ///
-    /// Two registrations happen here, and they are different things. The buffer
-    /// goes into the file registry under its own path, so that opening a
-    /// `.shex` makes the OPEN COPY the document every program naming it reads —
-    /// the editor's buffer is the truth, not whatever the host staged. Then the
-    /// documents THIS file names are registered if nobody has them yet.
+    /// The buffer goes into the file registry under its own path, so an open
+    /// `.shex` is the document every program naming it reads: the editor's
+    /// buffer is the truth, not a copy the host fetched.
     pub fn open_file_native(&mut self, path: String, contents: String) -> FileHandle {
         let file = fossil_base::SourceFile::new(&self.db, contents, path.clone());
         fossil_base::register_file(&mut self.db, path.clone(), file);
-        let handle = self.files.insert(path, file);
-        self.register_named_documents(file);
-        handle
+        self.files.insert(path, file)
     }
 
-    /// Register every shape document `file` names that is not in the database
-    /// already — see [`fossil_hir::documents::register_missing_documents`].
-    ///
-    /// The playground's filesystem is [`WasmSystem`]'s in-memory map, which is
-    /// empty unless a host staged something in it. So in the browser this
-    /// normally registers NOTHING, and that is the honest answer: a document
-    /// the host never opened is not there. It is not a dead end either — the
-    /// registry is a Salsa input, so `open_file`ing that document later
-    /// re-executes every query that missed it. The playground's way to give the
-    /// compiler a shape document is to open it.
-    fn register_named_documents(&mut self, file: fossil_base::SourceFile) {
-        let system = &self.system;
-        fossil_hir::documents::register_missing_documents(&mut self.db, file, &|_, locator| {
-            let bytes = system.read_file(std::path::Path::new(locator)).ok()?;
-            String::from_utf8(bytes).ok()
-        });
+    /// Pure-Rust mirror of [`WasmPlayground::set_connections`].
+    pub fn set_connections_native(&mut self, connections: HashMap<String, String>) {
+        self.connections = connections;
+    }
+
+    /// Pure-Rust mirror of [`WasmPlayground::missing_documents`]; `None` for an
+    /// unknown handle.
+    #[must_use]
+    pub fn missing_documents_native(&self, handle: FileHandle) -> Option<Vec<MissingDocumentRow>> {
+        let file = self.files.get(handle)?;
+        Some(
+            fossil_hir::documents::missing_documents(&self.db, file, &self.connections)
+                .into_iter()
+                .map(|d| MissingDocumentRow {
+                    key: d.key,
+                    locator: d.locator,
+                })
+                .collect(),
+        )
+    }
+
+    /// Pure-Rust mirror of [`WasmPlayground::register_document`].
+    pub fn register_document_native(&mut self, key: &str, text: &str) {
+        fossil_base::register_document(&mut self.db, key, text);
+    }
+
+    /// Pure-Rust mirror of [`WasmPlayground::sources`]; `None` for an unknown
+    /// handle.
+    #[must_use]
+    pub fn sources_native(&self, handle: FileHandle) -> Option<Vec<fossil_lineage::ProgramSource>> {
+        let file = self.files.get(handle)?;
+        Some(fossil_lineage::program_sources(
+            &self.db,
+            file,
+            &self.connections,
+        ))
     }
 
     // ----- LSP-worker dispatch helpers (pub(crate)) -----
@@ -796,6 +885,14 @@ pub fn refs_native(program: &str) -> Vec<fossil_lineage::SourceRefInfo> {
     let db = WasmDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), "<refs>".to_string());
     fossil_lineage::source_refs(&db, file)
+}
+
+/// `fossil_hir::documents::MissingDocument` in the shape it crosses to JS —
+/// `MissingDocument` in `@fossil-lang/types`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MissingDocumentRow {
+    pub key: String,
+    pub locator: String,
 }
 
 /// One diagnostic row in the [`WasmPlayground::check`] return array.
