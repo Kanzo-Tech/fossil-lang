@@ -191,11 +191,9 @@ fn write_fixture(dir: &Path) {
 }
 
 fn introspect(path: &Path) {
-    let system = fossil_cli::host_system(path);
     let _ = fossil_introspect::introspect_program(
-        &*system,
+        fossil_cli::host_system(path),
         path,
-        &std::collections::HashMap::new(),
         &fossil_introspect::RunCreds::default(),
     );
 }

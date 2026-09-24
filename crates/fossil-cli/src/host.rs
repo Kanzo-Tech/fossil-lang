@@ -248,7 +248,7 @@ fn resolve_policy(
 }
 
 // The pre-introspection block stood here — `pre_introspect_and_register`, the
-// DuckDB type table, the source scrape, the freshness token — and it is
+// DuckDB type table, the freshness token — and it is
 // `fossil-introspect` now. It is what a HOST does before compiling, which the
 // browser has always done from outside: `fossil-wasm` implements
 // `System::descriptors` and `@fossil-lang/introspect` fills it. Doing it from

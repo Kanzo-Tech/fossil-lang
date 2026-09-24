@@ -181,14 +181,10 @@ crates/
                            it is not the only crate that does — `cargo tree -e normal -i duckdb
                            --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
                            holds it against `deny.toml`. Native by that edge and by
-                           `fossil-resolver`, without a tripwire of its own. It links `salsa`
-                           too, through `fossil-base`, and that is NOT what `39d0fb8` cut: it
-                           names no `Db`, no query and no diagnostic, only the substrate's two
-                           salsa-free halves that a host HAS to name — `System::descriptors`,
-                           the cache it fills, and the `io.` rows the scrape's alternation and
-                           its reader choice come from. Cutting that edge is a split of
-                           `fossil-base` and nothing in here, which is why the substrate bullet
-                           does not name this crate
+                           `fossil-resolver`, without a tripwire of its own. Which sources it
+                           DESCRIBEs is `fossil_lineage::program_sources` — the list the
+                           browser's `sources()` returns — so it links the compiler front-end,
+                           as every host does
   fossil-layout/           the layout post-pass — Louvain + Morton over Parquet through
                            arrow-rs. It links no engine: `DuckDB` and `fossil-df` are both
                            dev-dependencies, the second since `TileWriter` became

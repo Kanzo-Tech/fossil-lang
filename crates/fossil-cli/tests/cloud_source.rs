@@ -134,9 +134,8 @@ fn a_cloud_source_introspects_through_duckdb_and_the_run_refuses_it() {
     let path = dir.path().join("prog.fossil");
 
     let creds = fossil_introspect::RunCreds::from_json(&creds_json()).expect("the payload parses");
-    let urls = fossil_introspect::connection_urls(&creds.connections);
     let system = fossil_cli::host_system(&path);
-    fossil_introspect::introspect_program(&*system, &path, &urls, &creds).expect("introspect");
+    fossil_introspect::introspect_program(system.clone(), &path, &creds).expect("introspect");
 
     // HALF ONE: the DESCRIBE reached the bucket and came back with real types.
     // Asserted on the TYPES and not merely on the descriptor existing — an entry
@@ -163,7 +162,7 @@ fn a_cloud_source_introspects_through_duckdb_and_the_run_refuses_it() {
     let err = fossil_cli::run(
         &path,
         &dir.path().join("out").to_string_lossy(),
-        &urls,
+        &fossil_introspect::connection_urls(&creds.connections),
         None,
         None,
     )

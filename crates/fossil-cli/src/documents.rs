@@ -213,18 +213,18 @@ User : Person from users
     /// type — without it there is nothing for the shape's constraint to
     /// disagree with. `check` and `run` do the same, in the same order.
     fn intern(db: &FossilDb, dir: &Path) -> SourceFile {
-        fossil_introspect::pre_introspect_and_register(
-            db.system(),
-            PROGRAM,
-            fossil_locator::SourceAnchor::beside(dir),
-            &std::collections::HashMap::new(),
-            fossil_introspect::Reach::Anywhere,
-        );
-        SourceFile::new(
+        let file = SourceFile::new(
             db,
             PROGRAM.to_string(),
             dir.join("prog.fossil").to_string_lossy().into_owned(),
-        )
+        );
+        fossil_introspect::pre_introspect_and_register(
+            db.system(),
+            &fossil_lineage::program_sources(db, file, &std::collections::HashMap::new()),
+            &std::collections::HashMap::new(),
+            fossil_introspect::Reach::Anywhere,
+        );
+        file
     }
 
     /// Every mapping's diagnostics, drained the way `check` drains them.

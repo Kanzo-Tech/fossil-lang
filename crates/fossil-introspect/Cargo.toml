@@ -17,16 +17,12 @@ workspace = true
 # Two salsa-free halves of the substrate, and no third. The `System` seam this
 # fills: `descriptors()` is a host-owned cache, and this is the native host's
 # way of filling it. And `providers::DATA` — the `io.` rows, which
-# `extract_source_refs` builds its alternation and its option list from and
-# `pre_introspect_and_register` picks a reader off; `Provider::options` says in
-# as many words that it is here so THIS crate can reach it without the stdlib
-# registry. Nothing here names `Db`, a query, an accumulator or a diagnostic,
-# so the `salsa` this puts in the normal closure is the host seam's and not the
-# compiler's — and cutting it is a split of `fossil-base`, not a change here.
+# `pre_introspect_and_register` picks a reader off.
 fossil-base = { path = "../fossil-base" }
-# The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
-# It depends on nothing, so this edge costs a `std::path` join and no build time.
-fossil-locator = { path = "../fossil-locator" }
+# `program_sources` — which sources a program reads, off the def map's source
+# table. The browser's `sources()` is the same function, so the two hosts
+# DESCRIBE one list; reading the program text here instead was a second answer.
+fossil-lineage = { path = "../fossil-lineage" }
 # `InferredDescriptor` / `InferredColumn` — the cache's element type.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # `Primitive`, the lattice a DuckDB column type maps onto.
@@ -42,9 +38,6 @@ fossil-resolver = { path = "../fossil-resolver" }
 # same dialect, which is what keeps `rust-parity.test.ts` meaningful.
 duckdb = { workspace = true }
 
-# The source-binding scrape. A regex placeholder for an AST walk — see
-# `extract_source_refs`.
-regex = { workspace = true }
 smol_str = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -58,4 +51,6 @@ tracing = { workspace = true }
 # what lets these tests have a host without depending on one: `fossil-cli`
 # would be a cycle, because it depends on this crate.
 fossil-base = { path = "../fossil-base", features = ["test-support"] }
+# `SourceAnchor`, for the test that pins the creds projection it is built from.
+fossil-locator = { path = "../fossil-locator" }
 tempfile = { workspace = true }
