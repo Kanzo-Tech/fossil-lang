@@ -1,19 +1,15 @@
 /**
  * Orchestration smoke for {@link runJob} — drives the full browser job flow
- * (sources → fetch → run → upload → complete) against a mock transport + a fake
- * `fetch` that serves the CSV fixtures and records the signed PUTs. Proves the
- * end-to-end wiring keasy will use, with no network/server.
+ * (documents → sources → run → upload → complete) against an identity-signing
+ * `SourceHost` + a fake `fetch` that serves the fixtures and records the signed
+ * PUTs. Proves the end-to-end wiring keasy will use, with no network/server.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import {
-  initFossilExecutor,
-  FossilExecutor,
-  runJob,
-  type JobTransport,
-  type CompletePayload,
-} from '../src/index.js';
+import type { SourceHost } from '@fossil-lang/types';
+
+import { initFossilExecutor, runJob, type CompletePayload, type JobOutput } from '../src/index.js';
 
 // See `execute.test.ts` for why this program changed shape: bare header names
 // bound positionally against `graph.shex`, which is the language since ruling 3
@@ -35,37 +31,40 @@ const PROGRAM = [
   '',
 ].join('\n');
 
-/** The output contract the program names — the same file the Rust tests use. */
-let SHEX: string;
+/** Signs every locator as itself; the fake `fetch` below serves them. */
+const host: SourceHost = {
+  connections: async () => ({}),
+  sign: async (locators) => Object.fromEntries(locators.map((l) => [l, l])),
+};
+
+/** Records the outcome; PUT URLs are keyed by path. */
+function recording(): JobOutput & { completed?: CompletePayload } {
+  const output: JobOutput & { completed?: CompletePayload } = {
+    signOutputUrls: async (paths) => Object.fromEntries(paths.map((p) => [p, `put:${p}`])),
+    complete: async (req) => {
+      output.completed = req;
+    },
+  };
+  return output;
+}
 
 beforeAll(async () => {
-  SHEX = await readFile(
-    fileURLToPath(new URL('../../../crates/fossil-df/tests/fixtures/graph.shex', import.meta.url)),
-    'utf8',
-  );
   const wasmPath = fileURLToPath(new URL('../pkg/fossil_df_wasm_bg.wasm', import.meta.url));
   await initFossilExecutor({ wasmUrl: (await readFile(wasmPath)) as unknown as URL });
 });
 
 describe('runJob', () => {
-  it('drives sources → fetch → run → upload → complete', async () => {
+  it('drives documents → sources → run → upload → complete', async () => {
+    // The shape document arrives the way the sources do: named by the
+    // program, signed by the host, fetched.
     const fixtures: Record<string, string> = {
+      'graph.shex': '../../../crates/fossil-df/tests/fixtures/graph.shex',
       'users.csv': '../../../crates/fossil-df/tests/fixtures/users.csv',
       'orders.csv': '../../../crates/fossil-df/tests/fixtures/orders.csv',
     };
 
     const uploaded: string[] = [];
-    let completed: CompletePayload | undefined;
-
-    // Identity source signing; PUT urls keyed by path; complete records.
-    const transport: JobTransport = {
-      sourceRefs: async () => ({}),
-      signSourceUrls: async (uris) => Object.fromEntries(uris.map((u) => [u, u])),
-      signOutputUrls: async (paths) => Object.fromEntries(paths.map((p) => [p, `put:${p}`])),
-      complete: async (req) => {
-        completed = req;
-      },
-    };
+    const output = recording();
 
     // Fake fetch: GET serves the fixture by basename; PUT records the key.
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -74,25 +73,21 @@ describe('runJob', () => {
         uploaded.push(url.replace(/^put:/, ''));
         return new Response(null, { status: 200 });
       }
-      const name = Object.keys(fixtures).find((n) => url.includes(n));
+      const name = Object.keys(fixtures).find((n) => url.endsWith(n));
       if (!name) return new Response(null, { status: 404 });
       const bytes = await readFile(fileURLToPath(new URL(fixtures[name], import.meta.url)));
       return new Response(bytes);
     }) as unknown as typeof fetch;
 
-    const exec = new FossilExecutor();
-    let report;
-    try {
-      report = await runJob(exec, PROGRAM, transport, { dest: 'job-1', fetchImpl, shex: SHEX });
-    } finally {
-      exec.free();
-    }
+    const report = await runJob(PROGRAM, { host, output }, { dest: 'job-1', fetchImpl });
 
     // Completed with the manifest the run wrote.
-    expect(completed?.status).toBe('completed');
-    expect(completed?.manifest).toEqual(report);
+    expect(output.completed?.status).toBe('completed');
+    expect(output.completed?.manifest).toEqual(report);
     const person = report.vertices.find((v) => v.type === 'Person');
     expect(person?.vertex_count).toBe(3);
+    // The edge exists only because the fetched shape document was the output
+    // contract: without it `placedBy` would be a literal property.
     const edge = report.edges.find((e) => e.edge_type === 'placedBy');
     expect(edge?.edge_count).toBe(4);
 
@@ -109,24 +104,14 @@ describe('runJob', () => {
     }
   });
 
-  it('reports a failed completion when the executor throws', async () => {
-    let completed: CompletePayload | undefined;
-    const transport: JobTransport = {
-      sourceRefs: async () => ({}),
-      signSourceUrls: async (uris) => Object.fromEntries(uris.map((u) => [u, u])),
-      signOutputUrls: async (paths) => Object.fromEntries(paths.map((p) => [p, `put:${p}`])),
-      complete: async (req) => {
-        completed = req;
-      },
-    };
-    // A source fetch that always 404s → run fails before upload.
+  it('fails the job when a document the program names cannot be read', async () => {
+    const output = recording();
     const fetchImpl = (async () => new Response(null, { status: 404 })) as unknown as typeof fetch;
 
-    const exec = new FossilExecutor();
-    await expect(
-      runJob(exec, PROGRAM, transport, { fetchImpl }).finally(() => exec.free()),
-    ).rejects.toThrow();
-    expect(completed?.status).toBe('failed');
-    expect(completed?.error).toBeTruthy();
+    await expect(runJob(PROGRAM, { host, output }, { fetchImpl })).rejects.toThrow(
+      /graph\.shex \(HTTP 404\)/,
+    );
+    expect(output.completed?.status).toBe('failed');
+    expect(output.completed?.error).toMatch(/could not be read/);
   });
 });

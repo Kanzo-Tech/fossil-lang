@@ -92,8 +92,8 @@ export const SOURCE_BYTES: Record<string, Uint8Array> = {
  *
  * So the app does it, on the program text, and only on the way into `run` — the CHECKER
  * still sees the program exactly as written, which is what keeps the diagnostics honest.
- * `io.shex` is deliberately not rewritten: the shape document reaches the executor as a
- * separate argument, not as an object-store source.
+ * `io.shex` is deliberately not rewritten: the shape document is registered with the
+ * executor as a document, not staged as an object-store source.
  *
  * The right fix is upstream — either the wasm host takes a base URI, or
  * `register_object_store_sources` treats a relative URI as relative to `dest`. Either is a
