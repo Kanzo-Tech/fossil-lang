@@ -956,7 +956,7 @@ pub fn emit_ts_introspect(rows: &[Row]) -> String {
     }
     out.push_str("} as const;\n\n");
 
-    out.push_str("/** The constructors above, in catalogue order — the alternation's corpus. */\n");
+    out.push_str("/** The constructors above, in catalogue order. */\n");
     let names: Vec<String> = native.iter().map(|(n, _)| format!("{n:?}")).collect();
     let _ = writeln!(
         out,
@@ -965,29 +965,8 @@ pub fn emit_ts_introspect(rows: &[Row]) -> String {
     );
 
     out.push_str("/** One `io.` constructor that reads through a native reader. */\n");
-    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n\n");
+    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n");
 
-    out.push_str(
-        "/**\n\
-         \x20* The reader options each constructor takes — the named, optional positions\n\
-         \x20* of its signature. Empty for a row that takes none.\n\
-         \x20*\n\
-         \x20* The counterpart of `fossil_base::Provider::options`, from the same rows.\n\
-         \x20* The browser scrapes a source binding for these and the native host does\n\
-         \x20* too, so the word a program writes is the catalogue's on both sides; what\n\
-         \x20* each one sends to its own DuckDB is its own.\n\
-         \x20*/\n",
-    );
-    out.push_str("export const READER_OPTIONS = {\n");
-    for (name, _) in &native {
-        let row = rows
-            .iter()
-            .find(|r| r.name == *name)
-            .expect("a native row came from this list");
-        let opts: Vec<String> = row.options().iter().map(|o| format!("{o:?}")).collect();
-        let _ = writeln!(out, "  {name}: [{}],", opts.join(", "));
-    }
-    out.push_str("} as const satisfies Record<NativeRow, readonly string[]>;\n");
     out
 }
 

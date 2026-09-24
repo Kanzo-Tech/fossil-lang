@@ -278,8 +278,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            legend ships, and the guard is on the Rust side
   introspect/              source-binding schema introspection (the one home; `fossil-introspect`
                            is the Rust sibling). Their agreement is ENFORCED, not asserted:
-                           `packages/introspect/tests/rust-parity.test.ts` derives the regex, the
-                           reader arms and the type table out of
+                           `packages/introspect/tests/rust-parity.test.ts` derives the reader
+                           arms, the option keyword and the type table out of
                            `crates/fossil-introspect/src/lib.rs` and fails on drift. It is a
                            **pnpm** test — editing that Rust turns it red and `cargo test` will
                            not tell you.

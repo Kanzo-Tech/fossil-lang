@@ -267,6 +267,10 @@ importers:
         version: 2.1.9(@types/node@20.19.41)(happy-dom@15.11.7)(lightningcss@1.32.0)
 
   packages/introspect:
+    dependencies:
+      '@fossil-lang/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
       happy-dom:
         specifier: ^15.0.0

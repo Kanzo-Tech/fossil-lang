@@ -8,7 +8,7 @@
  *
  * **`@fossil-lang/introspect` is the one home for this**, and this file is not trying to
  * be a second one: it is eleven lines of the same idea, kept local because the package's
- * surface takes a resolver and a URL and this app has bytes it already owns. Reaching for
+ * surface signs locators through a `SourceHost` and this app has bytes it already owns. Reaching for
  * the package the moment a second source format appears is the right move; the type table
  * below is where it would stop being defensible, because
  * `packages/introspect/tests/rust-parity.test.ts` derives the real one out of
