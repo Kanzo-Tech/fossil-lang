@@ -25,6 +25,9 @@
 // same place for the same reason.
 #![allow(clippy::future_not_send)]
 
+/// The output descriptor a program names, decoded from the document the
+/// checker read — the one resolution every host runs with.
+pub mod descriptor;
 pub mod files;
 /// Deriving the generalisation a declared bound needs, over the same batches
 /// [`privacy`] then measures — and separately from it, so the verifier still
@@ -48,6 +51,7 @@ pub mod stdlib;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sink;
 
+pub use descriptor::output_descriptor;
 /// Re-exported so callers name the program-resident output descriptor that
 /// [`execute_graph`] / [`provider_bindings`] take: it is passed as an argument,
 /// never read through `Db::system()`.
