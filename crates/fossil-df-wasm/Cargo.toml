@@ -41,28 +41,15 @@ fossil-layout = { path = "../fossil-layout" }
 # at and the tile size the manifest declares are one constant, as they are on
 # the native side.
 fossil-sinks = { path = "../fossil-sinks" }
-# FossilDb (production salsa db) + SourceFile + the System trait. The executor
-# takes the output descriptor as an argument, never off the db.
+# FossilDb (production salsa db) + SourceFile + the System trait + the document
+# registry the host fills.
 fossil-base = { path = "../fossil-base" }
-# The program-resident output descriptor: ShEx text → OutputDescriptorKind,
-# threaded into execute_graph (drives edge/cardinality classification).
+# The type-reading provider rows `ExecutorSystem` installs, and the
+# `OutputDescriptorKind` `fossil_df::output_descriptor` hands back.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-# `def_map` — the one question this host asks the compiler before it runs
-# anything: which document does `type { … } := io.shex("…")` name? It has to
-# know, because that is the key the checker will look the schema up under. It is
-# already in the graph through `fossil-df`; naming it is what makes the call
-# legal. NOT `fossil-ide`: sharing that crate's twin of this loop is the
-# arrangement `fossil-lineage` exists to prevent.
+# `documents::missing_documents` — which documents the program names and does
+# not hold, keyed and located by the one rule the checker uses.
 fossil-hir = { path = "../fossil-hir" }
-# `Renames` — the `@rename` table the descriptor lowering needs to emit a column
-# under the name the program actually writes. Same crate the schema itself comes
-# from; naming it is what makes the call legal.
-fossil-graph-schema = { path = "../fossil-graph-schema" }
-# The `ShEx` AST behind that descriptor, named directly:
-# `fossil-descriptors-output` stopped re-exporting it. This host is one of the
-# consumers that genuinely wants the parse — it lowers the schema blob the
-# browser handed it before any query runs.
-fossil-shex = { path = "../fossil-shex" }
 
 # DataFusion (match fossil-df: no `sql` frontend, keep `parquet` reads). The
 # wasm host owns the SessionContext so it can register source object stores +
