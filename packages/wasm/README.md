@@ -10,6 +10,35 @@ JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Prov
   itself is native-only (stdio over crossbeam), so the browser gets this
   equivalent dispatch surface over the same `fossil-ide` functions.
 
+## Documents and sources: fossil resolves, the host reads
+
+A program names shape documents (`io.shex("@vocab/person.shex")`) and data
+sources (`io.csv("@lake/users.csv")`). The checker reads no file and no
+network: it reports what it is missing, and the host hands back text through a
+`SourceHost` (`@fossil-lang/types`) — the connection map, and `sign(locators)`.
+
+```typescript
+import { resolveDocuments } from '@fossil-lang/types';
+
+const pg = new FossilPlayground();
+pg.setConnections(await host.connections()); // name → base; re-checks nothing
+const h = pg.openFile('prog.fossil', text);   // edited buffers only
+const { unread } = await resolveDocuments(pg.workspace(h), host);
+const rows = pg.check();
+```
+
+- `missingDocuments(h)` — `{ key, locator }` rows. The key is what the program
+  wrote, so repointing a connection invalidates nothing; the locator is that
+  key through the map, and it is what `sign` receives.
+- `registerDocument(key, text)` — what `resolveDocuments` calls for each
+  fetched document, until nothing new is missing (a document can name another).
+  It is the one loop; a host does not write a second.
+- `openFile` is for buffers the user edits. An open `.shex` is the document
+  every program naming it reads; opening a program registers nothing it names.
+- `sources(h)` — the `ProgramSource[]` the program reads: binding, key,
+  locator, catalogue row, reader option. Introspection DESCRIBEs these and
+  registers each descriptor under `key` with `registerInferredDescriptor`.
+
 ## Why explicit `init({ wasmUrl })` and not auto-load?
 
 We use `wasm-bindgen --target web` (NOT `--target bundler`). This means consumers
