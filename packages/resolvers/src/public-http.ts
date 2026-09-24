@@ -3,7 +3,7 @@ import type {
   Connector,
   ResolvedSource,
   SourceRef,
-} from '@fossil-lang/types';
+} from './contract';
 
 /**
  * Strict-passthrough resolver that ONLY accepts public CORS-enabled HTTPS URLs

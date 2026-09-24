@@ -261,9 +261,10 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   executor/                datafusion-wasm query executor, and the manifest wire mirror, because
                            a run HANDS THAT BACK — except `Channel`/`Scale`, in `types/` because
                            `draw/` reads one and 22 MB of wasm is the wrong price for an interface
-  types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme, the
+  types/                   shared TS types (SourceHost, the one host contract; FossilTheme; the
                            `channels:` wire shape — zero runtime)
-  resolvers/               default + mock + public-HTTP ConnectionResolver impls
+  resolvers/               default + mock + public-HTTP resolvers, over a contract of their
+                           own until they become SourceHosts
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
                            and not an editor. FIVE of them, not two: highlighting from
                            `tokenize()` + `tokenKinds()`, squiggles from `check()` through

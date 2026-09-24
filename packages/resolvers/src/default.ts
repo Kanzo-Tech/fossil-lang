@@ -3,7 +3,7 @@ import type {
   SourceRef,
   ResolvedSource,
   Connector,
-} from '@fossil-lang/types';
+} from './contract';
 
 /**
  * Connector-name validation rule (borrowed from Keasy):

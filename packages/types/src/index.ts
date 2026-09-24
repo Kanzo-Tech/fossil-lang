@@ -1,4 +1,4 @@
-export * from './resolver';
+export * from './source-host';
 export * from './theme';
 export * from './diagnostic';
 export * from './token';

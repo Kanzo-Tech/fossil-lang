@@ -3,7 +3,7 @@ import type {
   Connector,
   ResolvedSource,
   SourceRef,
-} from '@fossil-lang/types';
+} from './contract';
 
 /**
  * Options for {@link createMockResolver}. Used in tests, Storybook, and

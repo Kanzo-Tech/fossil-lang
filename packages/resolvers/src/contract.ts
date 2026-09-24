@@ -1,19 +1,7 @@
 /**
- * Source resolution types for the Fossil playground React library family.
- *
- * Source resolution is two-tier, through a host-injected `ConnectionResolver`:
- * the React component never sees plaintext credentials. The host supplies a
- * `ConnectionResolver` implementation that maps logical `@connector/path`
- * references to browser-fetchable URLs at execution time.
- *
- * The same `@connector/path` grammar serves both tiers:
- *   - Tier 1 (browser-local): bundled examples + uploads + public CORS HTTPS
- *     — see `createDefaultResolver` in `@fossil-lang/resolvers`.
- *   - Tier 2 (host-mediated): host injects a custom resolver (Keasy vault,
- *     paper-demo fixture, AWS Secrets Manager, etc.).
- *
- * These types are the IoC contract — every package in the @fossil-lang/*
- * family that touches sources imports them from here.
+ * The contract these resolvers implement. It was `@fossil-lang/types`' and no
+ * consumer accepted it; `SourceHost` replaced it there, and this file goes when
+ * the resolvers become `SourceHost`s.
  */
 
 /**

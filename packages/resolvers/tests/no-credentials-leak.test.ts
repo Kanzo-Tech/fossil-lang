@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createDefaultResolver, createMockResolver } from '../src/index';
-import type { ConnectionResolver } from '@fossil-lang/types';
+import type { ConnectionResolver } from '../src/contract';
 
 // happy-dom may not implement URL.createObjectURL deterministically; stub
 // it so the resolve flow under test completes without env-specific failure.
