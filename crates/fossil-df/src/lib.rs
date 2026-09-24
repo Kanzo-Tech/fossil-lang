@@ -368,10 +368,7 @@ async fn prepare_vertex<'db>(
 ) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    // The program's `@rename`s: they govern the emitted column label, and the
-    // checker resolved the body's property keys against the same table.
-    let renames = def_map(db, mapping.file(db)).renames(db);
-    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema(&renames));
+    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
     prepare_vertex_ops(ctx, db, &ops, anchor).await
 }
 
@@ -571,8 +568,7 @@ async fn execute_edges<'db>(
 ) -> datafusion::error::Result<Vec<(EdgeTable, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let renames = def_map(db, mapping.file(db)).renames(db);
-    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema(&renames));
+    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
     let ops = ops.as_slice();
 
     let mut out = Vec::new();
@@ -1030,7 +1026,7 @@ pub fn provider_bindings(
     let program_dir = fossil_locator::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
-    let schema = descriptor.to_graph_schema(&def_map(db, file).renames(db));
+    let schema = descriptor.to_graph_schema();
     let mut out = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
@@ -1096,7 +1092,7 @@ pub fn program_sources(
     let program_dir = fossil_locator::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
-    let schema = descriptor.to_graph_schema(&def_map(db, file).renames(db));
+    let schema = descriptor.to_graph_schema();
     let mut out: Vec<SourceRef> = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
