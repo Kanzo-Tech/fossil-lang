@@ -86,7 +86,8 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use fossil_base::test_support::{new_db, register_document};
+use fossil_base::register_document;
+use fossil_base::test_support::new_db;
 use fossil_base::{Db, Diagnostic, SourceFile};
 use fossil_graph_schema::{Occurs, Primitive, PropertyConstraint, Rejection, Shape};
 use fossil_hir::body::body;

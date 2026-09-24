@@ -386,8 +386,7 @@ fn build_program(
         && let Some(document) = fossil_hir::def_map::def_map(&db, file).output_shape_document(&db)
     {
         let key = fossil_hir::documents::registry_key(&db, file, &document);
-        let doc = SourceFile::new(&db, text.to_string(), key.clone());
-        fossil_base::register_file(&mut db, key, doc);
+        fossil_base::register_document(&mut db, &key, text);
     }
 
     // AFTER the registration, not before: a `@rename` is addressed to a `type`

@@ -55,7 +55,8 @@
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
-use fossil_base::test_support::{DecodingHost, register_document};
+use fossil_base::register_document;
+use fossil_base::test_support::DecodingHost;
 use fossil_base::{FossilDb, SourceFile, System};
 use fossil_hir::def_map::def_map;
 use fossil_mir::lower_to_mir_pg;

@@ -92,7 +92,8 @@ pub fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
 mod tests {
     use super::*;
 
-    use fossil_base::test_support::{PERSON_DOCUMENT, new_db, register_document};
+    use fossil_base::register_document;
+    use fossil_base::test_support::{PERSON_DOCUMENT, new_db};
 
     /// A program naming its shape document with `document`, and writing the one
     /// property [`PERSON_DOCUMENT`] declares.

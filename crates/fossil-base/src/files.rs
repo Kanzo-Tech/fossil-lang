@@ -119,6 +119,13 @@ pub fn register_file(db: &mut dyn Db, path: String, file: SourceFile) {
     registry.set_entries(db).to(entries);
 }
 
+/// Register `text` as a new [`SourceFile`] under `key` — a document a host
+/// fetched, as opposed to a buffer it holds a handle to.
+pub fn register_document(db: &mut dyn Db, key: &str, text: &str) {
+    let document = SourceFile::new(&*db, text.to_string(), key.to_string());
+    register_file(db, key.to_string(), document);
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use std::sync::Arc;
