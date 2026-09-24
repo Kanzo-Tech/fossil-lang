@@ -138,6 +138,9 @@ importers:
       '@fossil-lang/executor':
         specifier: workspace:*
         version: link:../../packages/executor
+      '@fossil-lang/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@fossil-lang/wasm':
         specifier: workspace:*
         version: link:../../packages/wasm

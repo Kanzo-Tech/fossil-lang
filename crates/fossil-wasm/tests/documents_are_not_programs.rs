@@ -1,8 +1,8 @@
 //! **A file the catalogue reads is not parsed as a program.**
 //!
-//! The playground has no filesystem, so the only way to hand the compiler a
-//! shape document is to open it — and until this test existed, opening one put
-//! it in the workspace-wide drain as if it were fossil source. The `ShExJ`
+//! A shape document the user is editing is an open buffer — and until this
+//! test existed, opening one put it in the workspace-wide drain as if it were
+//! fossil source. The `ShExJ`
 //! document `shape_document.rs` uses produced **twenty-one rows** attributed to
 //! `person.shex`: `unexpected token` eleven times, `expected IDENT, found
 //! STRING` eight, `expected IDENT, found INDENT` once and `expected DEFINE,

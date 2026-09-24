@@ -21,7 +21,14 @@ import {
   refs as rawRefs,
   providers as rawProviders,
 } from '../pkg/fossil_wasm.js';
-import type { TokenRow, TokenKindLegend, SemanticTokensLegend } from '@fossil-lang/types';
+import type {
+  DocumentWorkspace,
+  MissingDocument,
+  ProgramSource,
+  SemanticTokensLegend,
+  TokenKindLegend,
+  TokenRow,
+} from '@fossil-lang/types';
 import type {
   CheckRow,
   CompletionRow,
@@ -184,6 +191,48 @@ export class FossilPlayground {
    */
   closeFile(handle: FileHandle): void {
     this._inner.close_file(handle);
+  }
+
+  /**
+   * The connection map `@name/…` expands against — what
+   * `SourceHost.connections()` answers. It reaches locators only, so setting it
+   * re-checks nothing.
+   */
+  setConnections(connections: Record<string, string>): void {
+    this._inner.setConnections(connections);
+  }
+
+  /**
+   * The documents the file at `handle` names and nothing has registered, each
+   * with the key to register it under and the locator to read it from.
+   */
+  missingDocuments(handle: FileHandle): MissingDocument[] {
+    return this._inner.missingDocuments(handle) as MissingDocument[];
+  }
+
+  /** Register a fetched document's text under the key {@link missingDocuments} reported. */
+  registerDocument(key: string, text: string): void {
+    this._inner.registerDocument(key, text);
+  }
+
+  /**
+   * The data sources the file at `handle` reads, as fossil resolved them: the
+   * binding, the URI as written, its locator through the connection map, the
+   * catalogue row and the reader option.
+   */
+  sources(handle: FileHandle): ProgramSource[] {
+    return this._inner.sources(handle) as ProgramSource[];
+  }
+
+  /**
+   * The file at `handle` as a {@link DocumentWorkspace}, for
+   * `resolveDocuments(playground.workspace(handle), host)`.
+   */
+  workspace(handle: FileHandle): DocumentWorkspace {
+    return {
+      missingDocuments: () => this.missingDocuments(handle),
+      registerDocument: (key, text) => this.registerDocument(key, text),
+    };
   }
 
   /**

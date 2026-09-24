@@ -20,6 +20,9 @@ workspace = true
 # functions that fill them.
 fossil-hir = { path = "../fossil-hir" }
 fossil-base = { path = "../fossil-base" }
+# `program_sources` reports each source's locator, and the rule that makes one
+# is this crate's, not a host's.
+fossil-locator = { path = "../fossil-locator" }
 # `ProviderInfo` / `SourceRefInfo` cross to a host as JSON (the CLI's stdout) or
 # as a JS value (`serde-wasm-bindgen`), and `schemars` publishes the same shape
 # for TS codegen. Both pure Rust, WASM-clean.
