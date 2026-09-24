@@ -44,9 +44,8 @@ smol_str = { workspace = true }
 lsp-types = { workspace = true }
 
 [dev-dependencies]
-# The host with a shape decoder installed, so `shape_documents`' own tests can
-# ask the CHECKER whether the document this host registered reached it — the
-# only question that tells a key mismatch apart from a missing document.
+# The host with a shape decoder installed, so a test can ask the CHECKER
+# whether a registered document reached it.
 fossil-base = { path = "../fossil-base", features = ["test-support"] }
 # The completion test's host installs the `SHEX` decoder row on its `System`,
 # the way `fossil-lsp` and `fossil-wasm` do — without it a `.shex` the test can

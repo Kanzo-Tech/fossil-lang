@@ -61,11 +61,31 @@ beforeAll(async () => {
   await initFossilExecutor({ wasmUrl: bytes as unknown as URL });
 });
 
+/** `PROGRAM` compiled, with the one document it names registered. */
+function compiled(): FossilExecutor {
+  const exec = new FossilExecutor(PROGRAM);
+  for (const d of exec.missingDocuments()) exec.registerDocument(d.key, SHEX);
+  return exec;
+}
+
 describe('FossilExecutor', () => {
-  it('enumerates the program sources', () => {
-    const exec = new FossilExecutor();
+  it('reports the document the program names until it is registered', () => {
+    const exec = new FossilExecutor(PROGRAM);
     try {
-      const srcs = exec.sources(PROGRAM, {}, SHEX);
+      exec.setConnections({ vocab: 'https://shapes.example.com' });
+      expect(exec.missingDocuments()).toEqual([{ key: 'graph.shex', locator: 'graph.shex' }]);
+      expect(() => exec.sources()).toThrow(/not registered/);
+      exec.registerDocument('graph.shex', SHEX);
+      expect(exec.missingDocuments()).toEqual([]);
+    } finally {
+      exec.free();
+    }
+  });
+
+  it('enumerates the program sources', () => {
+    const exec = compiled();
+    try {
+      const srcs = exec.sources();
       expect(srcs.map((s) => s.uri).sort()).toEqual([
         'https://data.example.com/orders.csv',
         'https://data.example.com/users.csv',
@@ -82,10 +102,10 @@ describe('FossilExecutor', () => {
       { uri: 'https://data.example.com/orders.csv', format: 'csv', bytes: await fixture('orders.csv') },
     ];
 
-    const exec = new FossilExecutor();
+    const exec = compiled();
     let result;
     try {
-      result = await exec.run(PROGRAM, sources, 's3://jobs/run-1', {}, SHEX);
+      result = await exec.run(sources, 's3://jobs/run-1');
     } finally {
       exec.free();
     }

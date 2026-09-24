@@ -39,6 +39,7 @@
     "@fossil-lang/executor": "workspace:*",
     "@fossil-lang/corpus": "workspace:*",
     "@fossil-lang/draw": "workspace:*",
+    "@fossil-lang/types": "workspace:*",
     "@fossil-lang/wasm": "workspace:*",
     "@kanzo-tech/graph": "0.1.0",
     "@kanzo-tech/mosaic": "0.1.0",

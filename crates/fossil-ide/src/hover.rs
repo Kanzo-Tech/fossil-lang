@@ -109,7 +109,7 @@ pub fn hover(
 ///
 /// The "if reachable" hedge: if no shape resolves (the program
 /// names no document, the host has not registered the one it names — see
-/// [`crate::shape_documents`] — the document omits the mapping's shape, or the
+/// [`fossil_hir::documents`] — the document omits the mapping's shape, or the
 /// predicate has no constraint), the hover shows the source-side block only —
 /// best-effort, no error. The last three are a `TargetShapeError` the CHECKER
 /// reports; a hover is not the place to.

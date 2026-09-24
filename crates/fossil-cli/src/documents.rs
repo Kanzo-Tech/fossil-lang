@@ -23,39 +23,23 @@
 //! re-derived once on the way to the check. That is one structural pass per
 //! compile — the engine builds a fresh database per `check`/`run` anyway (see
 //! [`crate::system::open_db`]) — and not per keystroke, which is the editor
-//! hosts' concern and where the same loop is spelled once in `fossil-ide`.
+//! hosts' concern.
 //!
-//! # Why there are two of these
+//! # One loop
 //!
-//! `fossil_ide::shape_documents` is this file's twin, and it is deliberate, not
-//! an oversight: `fossil-lsp` and `fossil-wasm` share it, and the engine
-//! cannot, because the native host depending on the editor surface is the
-//! arrangement that was undone deliberately — `fossil-lineage`'s module docs
-//! name it as the mistake that crate exists to prevent.
+//! Which documents, under what key, and the read-then-register loop are all
+//! [`fossil_hir::documents`], shared with `fossil-lsp` and `fossil-wasm`. What
+//! is this host's is only how a locator becomes text: the engine [`System`].
 //!
-//! What the two twins no longer duplicate is the two questions the compiler
-//! answers: WHICH documents a program names and under WHAT key each is looked
-//! up. Both are [`fossil_hir::documents`], and this file's copies of them are
-//! gone. `documents_named` was byte-identical in both; `registry_key` was not,
-//! and the drift was live — the editor's half hand-rolled `parent().join()`,
-//! which anchors a `s3://` URL and a `@conn` alias that the checker leaves
-//! alone. The claim that stood here — «both are now the same call, so there is
-//! nothing left to drift» — was true of this file and false of the pair, which
-//! is exactly the kind of thing a docblock cannot hold. What holds it now is
-//! that there is one function, and `fossil_hir::documents`' tests resolve a
-//! target shape through it.
+//! [`System`]: fossil_base::System
 
 use std::path::Path;
 
-use fossil_base::{Db, FossilDb, SourceFile, file_at, register_file};
-use fossil_hir::documents::{documents_named, registry_key};
+use fossil_base::{FossilDb, SourceFile, file_at};
+use fossil_hir::documents::{documents_named, register_missing_documents, registry_key};
 
 /// Read and register every shape document `file` names that the database does
-/// not already hold.
-///
-/// A document already in the registry is left alone: registration is
-/// idempotent by key, and re-reading the disk under a document somebody else
-/// registered would replace it with a staler copy.
+/// not already hold, through the engine [`System`](fossil_base::System).
 ///
 /// A document that cannot be read is skipped, not diagnosed. The compiler is
 /// the side that knows a missing document is worth complaining about — it has
@@ -68,35 +52,18 @@ use fossil_hir::documents::{documents_named, registry_key};
 // the one this workspace opted into by name.
 #[allow(clippy::redundant_pub_crate)]
 pub(crate) fn register_shape_documents(db: &mut FossilDb, file: SourceFile) {
-    // Read first, register second: `register_file` takes the database
-    // exclusively and `System::read_file` borrows it shared.
-    let pending: Vec<(String, String)> = documents_named(db, file)
-        .into_iter()
-        .filter_map(|document| {
-            let key = registry_key(db, file, &document);
-            if file_at(db, &key).is_some() {
-                return None;
-            }
-            match db.system().read_file(Path::new(&key)) {
-                Ok(bytes) => match String::from_utf8(bytes) {
-                    Ok(text) => Some((key, text)),
-                    Err(e) => {
-                        tracing::debug!("shape document `{key}` is not UTF-8: {e}");
-                        None
-                    }
-                },
-                Err(e) => {
-                    tracing::debug!("shape document `{key}` was not read: {e}");
-                    None
-                }
-            }
-        })
-        .collect();
-
-    for (key, text) in pending {
-        let document = SourceFile::new(&*db, text, key.clone());
-        register_file(db, key, document);
-    }
+    register_missing_documents(db, file, &|db, locator| match db
+        .system()
+        .read_file(Path::new(locator))
+    {
+        Ok(bytes) => String::from_utf8(bytes)
+            .map_err(|e| tracing::debug!("shape document `{locator}` is not UTF-8: {e}"))
+            .ok(),
+        Err(e) => {
+            tracing::debug!("shape document `{locator}` was not read: {e}");
+            None
+        }
+    });
 }
 
 /// Every shape document the program names, **under the program's spelling**,
@@ -134,7 +101,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use fossil_base::{Diagnostic, System};
+    use fossil_base::{Db as _, Diagnostic, System};
     use fossil_hir::shape_documents::shape_document;
     use salsa::Setter as _;
 
@@ -246,18 +213,18 @@ User : Person from users
     /// type — without it there is nothing for the shape's constraint to
     /// disagree with. `check` and `run` do the same, in the same order.
     fn intern(db: &FossilDb, dir: &Path) -> SourceFile {
-        fossil_introspect::pre_introspect_and_register(
-            db.system(),
-            PROGRAM,
-            fossil_locator::SourceAnchor::beside(dir),
-            &std::collections::HashMap::new(),
-            fossil_introspect::Reach::Anywhere,
-        );
-        SourceFile::new(
+        let file = SourceFile::new(
             db,
             PROGRAM.to_string(),
             dir.join("prog.fossil").to_string_lossy().into_owned(),
-        )
+        );
+        fossil_introspect::pre_introspect_and_register(
+            db.system(),
+            &fossil_lineage::program_sources(db, file, &std::collections::HashMap::new()),
+            &std::collections::HashMap::new(),
+            fossil_introspect::Reach::Anywhere,
+        );
+        file
     }
 
     /// Every mapping's diagnostics, drained the way `check` drains them.

@@ -24,7 +24,7 @@
 //! **This is not compiler logic** — the anti-pattern `CLAUDE.md` names for this
 //! crate. It is a reference implementation of the seam `fossil-base` itself
 //! defines ([`Provider`](crate::Provider),
-//! `fossil_hir::shape_documents::shape_document`, [`register_file`]), in a format
+//! `fossil_hir::shape_documents::shape_document`, [`register_file`](crate::register_file)), in a format
 //! that exists nowhere else and that no program will ever be written in.
 //! Coverage of a real `ShEx` document belongs where the `ShEx` decoder lives.
 //!
@@ -65,7 +65,7 @@ use std::time::SystemTime;
 use fossil_graph_schema::{Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape};
 
 use crate::db::{Db, FossilDb};
-use crate::files::{SourceFile, register_file};
+use crate::files::{SourceFile, register_document};
 use crate::providers::{CSV, JSON, PARQUET, Provider, RDF};
 use crate::system::{FsError, System};
 use fossil_descriptors_input::DescriptorCache;
@@ -179,7 +179,6 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
 pub static SHEX: Provider = Provider {
     name: "shex",
     extensions: &["shex", "shexj", "shexc"],
-    options: &[],
     reads_rows: None,
     reads_types: Some(decode_lines),
 };
@@ -255,17 +254,6 @@ pub fn register_inferred(db: &dyn Db, uri: &str, columns: &[(&str, Primitive)]) 
 pub fn new_db() -> FossilDb {
     let system: Arc<dyn System> = Arc::new(DecodingHost::default());
     FossilDb::new(system)
-}
-
-/// Put `text` in the database under `path`.
-///
-/// Registration is the half that is *not* the decoder and is just as easy to
-/// forget: `decoded_document` resolves through [`crate::file_at`], which reads
-/// the Salsa registry and never the disk, so a `.shex` written next to the
-/// program is invisible until this is called.
-pub fn register_document(db: &mut dyn Db, path: &str, text: &str) {
-    let doc = SourceFile::new(&*db, text.to_string(), path.to_string());
-    register_file(db, path.to_string(), doc);
 }
 
 /// A database holding `src` as `test.fossil` plus one shape document

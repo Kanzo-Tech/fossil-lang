@@ -51,11 +51,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use fossil_base::Diagnostic;
-use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_df::RunReport;
 use fossil_lineage::{ProviderInfo, SourceRefInfo};
 use fossil_locator::SourceAnchor;
-use smol_str::SmolStr;
 
 use crate::system::open_db;
 
@@ -250,144 +248,12 @@ fn resolve_policy(
 }
 
 // The pre-introspection block stood here — `pre_introspect_and_register`, the
-// DuckDB type table, the source scrape, the freshness token — and it is
+// DuckDB type table, the freshness token — and it is
 // `fossil-introspect` now. It is what a HOST does before compiling, which the
 // browser has always done from outside: `fossil-wasm` implements
 // `System::descriptors` and `@fossil-lang/introspect` fills it. Doing it from
 // inside this crate is what made the compiler open a DuckDB connection.
 // ================================================================== run pipeline
-
-/// Resolve the program-resident OUTPUT descriptor. The shape is sourced from the
-/// PROGRAM, never a host flag (invariant #1).
-///
-/// # Two places a program can name its output shape, and the order between them
-///
-/// 1. **`type { … } := io.shex("shop.shex")`** — naming a shape document is
-///    MANDATORY, so this binding always exists. It is what the CHECKER reads
-///    ([`fossil_hir::def_map::DefMap::output_shape_document`]), and it is
-///    consulted FIRST: the document the run classifies edges with has to be the
-///    document the program compiled against, or a CSV program gets
-///    `ACCEPT_ALL_DEFAULT` and emits zero edges.
-/// 2. `io.rdf(schema = …)` — an RDF *input* whose `ShEx` doubles as the output
-///    contract. It stays as the fallback for a program that reads a graph and
-///    writes one back.
-///
-/// v1: one shape per program (a second, different `io.rdf` schema is rejected,
-/// not merged).
-fn resolve_output_descriptor(
-    db: &fossil_base::FossilDb,
-    def_map: fossil_hir::def_map::DefMap<'_>,
-    anchor: SourceAnchor<'_>,
-) -> miette::Result<OutputDescriptorKind> {
-    // The `type { … } := io.shex(…)` binding, and it wins: it is the one the
-    // checker resolved the mapping's target shape against, so preferring it is
-    // what keeps «what compiled» and «what ran» the same document. The
-    // CONSTRUCTOR travels with it, because it is what selects the row that
-    // reads it, and reading a document with a row the program did not name is
-    // how the run comes to use a different parser from the check.
-    // The program's `@rename`s travel with the document, because they decide
-    // the emitted column's name. Read off the same `def_map` — and read HERE
-    // rather than inside the decode, so the one place that has the program is
-    // the one place that supplies them.
-    let renames = def_map.renames(db);
-
-    if let Some((constructor, document)) = def_map.output_shape_binding(db) {
-        return read_output_shape(constructor.as_deref(), document.as_str(), anchor, &renames);
-    }
-
-    // The `schema =` argument carries its OWN provider now
-    // (`schema = io.shex("x.shex")`), so the pair travels together here exactly
-    // as the `type { … }` pair does above — there is no position left where a
-    // document arrives without the row that reads it.
-    let mut schema: Option<(Option<SmolStr>, SmolStr)> = None;
-    for s in def_map.sources(db) {
-        let is_provider = s
-            .constructor
-            .as_deref()
-            .and_then(|c| fossil_base::provider(fossil_descriptors_output::PROVIDERS, c))
-            .is_some_and(|p| p.reads_rows == Some(fossil_base::RowReader::Materialised));
-        if !is_provider {
-            continue;
-        }
-        let Some(arg) = s.schema_arg.as_ref() else {
-            continue;
-        };
-        match &schema {
-            Some((_, existing)) if existing != arg => {
-                return Err(miette::miette!(
-                    "a program may declare only one io.rdf output shape (v1); found `{existing}` and `{arg}`"
-                ));
-            }
-            _ => schema = Some((s.schema_provider.clone(), arg.clone())),
-        }
-    }
-
-    let Some((provider, schema)) = schema else {
-        return Ok(OutputDescriptorKind::ACCEPT_ALL_DEFAULT);
-    };
-
-    read_output_shape(provider.as_deref(), schema.as_str(), anchor, &renames)
-}
-
-/// Read and decode one shape document into the run's output descriptor,
-/// **through the registry row the program named** — the row is selected by the
-/// constructor the program wrote and its `reads_types` is the same `fn` the
-/// checker calls, so «what compiled» and «what ran» are one decode of one set of
-/// bytes by construction. Parsing the document any other way here is how a
-/// document comes to type-check and then fail the run.
-///
-/// The descriptor is [`OutputDescriptorKind::Lowered`] whatever the language: it
-/// means "the decode already happened". The rich `ShEx` resolved table it
-/// replaces was only ever read by the checker, which does not come through here;
-/// the executor reads `to_graph_schema` and nothing else.
-fn read_output_shape(
-    constructor: Option<&str>,
-    document: &str,
-    anchor: SourceAnchor<'_>,
-    renames: &fossil_graph_schema::Renames,
-) -> miette::Result<OutputDescriptorKind> {
-    use fossil_base::providers::{Capability, provider};
-
-    let table = fossil_descriptors_output::PROVIDERS;
-    let ctor = constructor.ok_or_else(|| {
-        miette::miette!(
-            "the shape document `{document}` is named by no provider — write \
-             `io.shex(\"…\")` or `io.shacl(\"…\")`"
-        )
-    })?;
-    let row = provider(table, ctor).ok_or_else(|| {
-        miette::miette!("{}", fossil_hir::refusals::unknown_constructor(ctor, table))
-    })?;
-    if !row.provides(Capability::ReadTypes) {
-        return Err(miette::miette!(
-            "{}",
-            fossil_hir::refusals::decline_capability(row, Capability::ReadTypes, table)
-        ));
-    }
-    if !row.accepts(document) {
-        return Err(miette::miette!(
-            "{}",
-            fossil_hir::refusals::decline_extension(row, document)
-        ));
-    }
-    let decode = row
-        .reads_types
-        .ok_or_else(|| miette::miette!("`{}` reads no types", row.constructor()))?;
-
-    // The one resolution rule, and the same one the CHECKER went through to
-    // read this document (`fossil_hir::documents::registry_key`). A run that
-    // anchored differently would decode a different file from the one that
-    // type-checked, which is the same class of bug as decoding it with a
-    // different parser.
-    let locator = anchor.locator(document);
-    let text = std::fs::read_to_string(&locator)
-        .map_err(|e| miette::miette!("read output shape document `{locator}`: {e}"))?;
-    let shapes = decode(&locator, &text)
-        .map_err(|e| miette::miette!("parse output shape document `{locator}`: {e:?}"))?;
-    Ok(OutputDescriptorKind::Lowered(
-        shapes.to_graph_schema(renames),
-    ))
-}
 
 // `connection_urls` and `apply_source_creds` went with it, and `mod creds` with
 // them. This crate takes a `HashMap<String, String>` of connection URLs and
@@ -475,14 +341,15 @@ pub fn run(
     let from_program = resolve_policy(&db, file, &anchor, policy_flag)?;
     let policy = from_program.as_ref().or(policy_flag);
 
-    let def_map = fossil_hir::def_map::def_map(&db, file);
-    if def_map.mappings(&db).is_empty() {
+    if fossil_hir::def_map::def_map(&db, file)
+        .mappings(&db)
+        .is_empty()
+    {
         return Err(miette::miette!("no mapping found in {}", path.display()));
     }
 
-    // The program-resident output descriptor (ShEx) drives the PG edge/cardinality
-    // classification inside `execute_graph` (via `apply_output_shape`).
-    let descriptor = resolve_output_descriptor(&db, def_map, anchor)?;
+    // Decoded from the document `open_db` registered — the one the check read.
+    let descriptor = fossil_df::output_descriptor(&db, file).map_err(|e| miette::miette!("{e}"))?;
 
     // The single execution path: lower to the property-graph MIR + execute on
     // DataFusion + write the GraphAr tree. The host's only job is the byte seam

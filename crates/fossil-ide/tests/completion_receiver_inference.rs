@@ -73,7 +73,9 @@ fn program(db: &mut HostDb, src: &str) -> SourceFile {
         &[("name", Primitive::String), ("age", Primitive::Integer)],
     );
     let f = SourceFile::new(&*db, src.to_string(), "receiver.fossil".to_string());
-    fossil_ide::register_missing_documents(db, f, &|key| std::fs::read_to_string(key).ok());
+    fossil_hir::documents::register_missing_documents(db, f, &|_, locator| {
+        std::fs::read_to_string(locator).ok()
+    });
     f
 }
 

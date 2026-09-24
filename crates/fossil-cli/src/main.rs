@@ -16,7 +16,6 @@ compile_error!(
      do not add it to the WASM CI gate"
 );
 
-use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
@@ -234,7 +233,7 @@ fn cmd_providers(output_json: bool) -> miette::Result<()> {
 fn cmd_check(path: &Path) -> miette::Result<()> {
     // `check` has no `--creds-stdin`, so it introspects with no connection map —
     // and against the same directory `run` will.
-    introspect(path, &HashMap::new(), &RunCreds::default())?;
+    introspect(path, &RunCreds::default())?;
     let outcome = fossil_cli::check(path)?;
     let named = NamedSource::new(path.to_string_lossy(), outcome.source);
 
@@ -301,15 +300,11 @@ fn gib_to_bytes(raw: &str) -> Result<u64, String> {
 /// `registerInferredDescriptor`. Same engine, same dialect, so the two hosts
 /// answer one program the same way — which is what
 /// `packages/introspect/tests/rust-parity.test.ts` is there to catch.
-fn introspect(
-    path: &Path,
-    connections: &HashMap<String, String>,
-    creds: &RunCreds,
-) -> miette::Result<()> {
+fn introspect(path: &Path, creds: &RunCreds) -> miette::Result<()> {
     // `host_system` takes the program PATH and derives the directory itself —
     // the cache is keyed by that directory, so a caller deriving it differently
     // would fill a table the compile never reads.
-    fossil_introspect::introspect_program(&*fossil_cli::host_system(path), path, connections, creds)
+    fossil_introspect::introspect_program(fossil_cli::host_system(path), path, creds)
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))
 }
 
@@ -331,7 +326,7 @@ fn cmd_run(
     // now and never sees a secret. The credential exists so that a `DESCRIBE`
     // over a cloud `@conn` source authenticates, which happens here.
     let connections = fossil_introspect::connection_urls(&creds.connections);
-    introspect(path, &connections, &creds)?;
+    introspect(path, &creds)?;
     // Read and parsed HERE, before the compile, so a malformed policy is a
     // message about the policy rather than a run that gets most of the way and
     // then cannot say what it was checking against.

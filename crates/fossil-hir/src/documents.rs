@@ -24,8 +24,18 @@
 //! test held it — which is why there is one function now and not a claim.
 //!
 //! Both hosts already depend on this crate, so nothing forced the copies.
+//!
+//! # Sans-IO
+//!
+//! [`missing_documents`] reports what is missing and reads nothing; the host
+//! fetches each [`MissingDocument::locator`] however it can — a disk, a signed
+//! URL — and hands the text back through [`fossil_base::register_document`]
+//! under [`MissingDocument::key`]. A host that reads synchronously has
+//! [`register_missing_documents`], which is that loop and nothing else.
 
-use fossil_base::{Db, SourceFile};
+use std::collections::HashMap;
+
+use fossil_base::{Db, SourceFile, file_at, register_document};
 use smol_str::SmolStr;
 
 /// Every distinct document `file` names, in the order it names them.
@@ -85,6 +95,68 @@ pub fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
     fossil_locator::SourceAnchor::beside(&dir).locator(document)
 }
 
+/// A document a program names that the database does not hold yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingDocument {
+    /// What it is registered under: [`registry_key`], anchored with no
+    /// connection map, so repointing a connection never invalidates a query.
+    pub key: String,
+    /// Where it is fetched from: the same reference through the connection map.
+    pub locator: String,
+}
+
+/// Every document `file` names that is not registered yet, with the key it
+/// goes under and the locator it is fetched from.
+///
+/// `connections` expands `@conn` aliases in the locator only. The program's
+/// directory comes from `file`, so the key and the locator cannot be anchored
+/// against two different places.
+#[allow(clippy::implicit_hasher)] // `SourceAnchor` takes the std map.
+#[must_use]
+pub fn missing_documents(
+    db: &dyn Db,
+    file: SourceFile,
+    connections: &HashMap<String, String>,
+) -> Vec<MissingDocument> {
+    let dir = fossil_locator::program_dir(file.path(db));
+    let anchor = fossil_locator::SourceAnchor::new(&dir, connections);
+    documents_named(db, file)
+        .into_iter()
+        .filter_map(|document| {
+            let key = registry_key(db, file, &document);
+            file_at(db, &key).is_none().then(|| MissingDocument {
+                key,
+                locator: anchor.locator(&document),
+            })
+        })
+        .collect()
+}
+
+/// [`missing_documents`] read synchronously and registered — the loop for a
+/// host with no connection map, so each locator is its key.
+///
+/// `read` answers `None` for a document it cannot produce, and that document
+/// stays unregistered: the checker's diagnostic has the span, this loop does
+/// not. An already-registered document is never re-read, so an open buffer is
+/// not replaced by the saved copy and a second call is a no-op.
+///
+/// Returns how many documents were registered.
+pub fn register_missing_documents(
+    db: &mut dyn Db,
+    file: SourceFile,
+    read: &dyn Fn(&dyn Db, &str) -> Option<String>,
+) -> usize {
+    // Read first, register second: registering takes the database exclusively.
+    let pending: Vec<(String, String)> = missing_documents(&*db, file, &HashMap::new())
+        .into_iter()
+        .filter_map(|missing| read(&*db, &missing.locator).map(|text| (missing.key, text)))
+        .collect();
+    for (key, text) in &pending {
+        register_document(db, key, text);
+    }
+    pending.len()
+}
+
 // The `.fossil` sources below carry a `{users.id}` interpolation hole and
 // `type { … }` braces — LITERAL Fossil source, not Rust format-string args.
 #[allow(clippy::literal_string_with_formatting_args)]
@@ -92,7 +164,8 @@ pub fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
 mod tests {
     use super::*;
 
-    use fossil_base::test_support::{PERSON_DOCUMENT, new_db, register_document};
+    use fossil_base::register_file;
+    use fossil_base::test_support::{PERSON_DOCUMENT, new_db};
 
     /// A program naming its shape document with `document`, and writing the one
     /// property [`PERSON_DOCUMENT`] declares.
@@ -166,28 +239,129 @@ mod tests {
         );
     }
 
-    /// And the whole point of the two above: a document registered under
-    /// [`registry_key`] is a document the CHECKER resolves. This is the
-    /// end-to-end statement the two docblocks used to make in prose — a key
-    /// mismatch is indistinguishable from a document nobody registered, so
-    /// only resolving the target shape can tell them apart.
-    #[test]
-    fn a_document_registered_by_url_resolves_the_target_shape() {
-        let mut db = new_db();
-        let file = program(&db, "/programs/prog.fossil", "s3://bucket/person.shex");
-        let key = registry_key(&db, file, "s3://bucket/person.shex");
-        register_document(&mut db, &key, PERSON_DOCUMENT);
+    fn connections(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(name, base)| ((*name).to_string(), (*base).to_string()))
+            .collect()
+    }
 
-        let mapping = *crate::def_map::def_map(&db, file)
-            .mappings(&db)
+    fn resolves_target_shape(db: &fossil_base::FossilDb, file: SourceFile) -> bool {
+        let mapping = *crate::def_map::def_map(db, file)
+            .mappings(db)
             .first()
             .expect("the program has one mapping");
-        let resolved = crate::shapes::resolve_target_shape(&db, mapping)
-            .expect("the document declares the mapping's target shape")
-            .expect("the program names a document, so there is something to check against");
-        assert!(
-            resolved.constraint_for("http://example.org/name").is_some(),
-            "the shape the checker resolved is the document that was registered"
+        matches!(
+            crate::shapes::resolve_target_shape(db, mapping),
+            Ok(Some(_))
+        )
+    }
+
+    #[test]
+    fn without_a_connection_map_the_locator_is_the_key() {
+        let db = new_db();
+        let file = program(&db, "a/prog.fossil", "shapes/person.shex");
+        assert_eq!(
+            missing_documents(&db, file, &HashMap::new()),
+            [MissingDocument {
+                key: "a/shapes/person.shex".to_string(),
+                locator: "a/shapes/person.shex".to_string(),
+            }]
+        );
+    }
+
+    /// The map reaches the locator and never the key: the key is what the
+    /// program wrote, so repointing `warehouse` invalidates nothing.
+    #[test]
+    fn a_connection_expands_the_locator_and_leaves_the_key_as_written() {
+        let db = new_db();
+        let file = program(&db, "a/prog.fossil", "@warehouse/shapes/person.shex");
+        assert_eq!(
+            missing_documents(
+                &db,
+                file,
+                &connections(&[("warehouse", "s3://bucket/base/")])
+            ),
+            [MissingDocument {
+                key: "@warehouse/shapes/person.shex".to_string(),
+                locator: "s3://bucket/base/shapes/person.shex".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn an_alias_the_map_does_not_name_passes_through_verbatim() {
+        let db = new_db();
+        let file = program(&db, "a/prog.fossil", "@warehouse/person.shex");
+        let missing = missing_documents(&db, file, &connections(&[("lake", "s3://lake")]));
+        assert_eq!(missing[0].locator, "@warehouse/person.shex");
+        assert_eq!(missing[0].key, "@warehouse/person.shex");
+    }
+
+    #[test]
+    fn a_registered_document_is_not_missing() {
+        let mut db = new_db();
+        let file = program(&db, "a/prog.fossil", "shapes/person.shex");
+        register_document(&mut db, "a/shapes/person.shex", PERSON_DOCUMENT);
+        assert!(missing_documents(&db, file, &HashMap::new()).is_empty());
+    }
+
+    /// Registering under the reported key is what the checker resolves.
+    #[test]
+    fn registering_what_is_missing_resolves_the_target_shape() {
+        let mut db = new_db();
+        let file = program(&db, "a/prog.fossil", "@warehouse/person.shex");
+        let conns = connections(&[("warehouse", "https://w.example")]);
+        for missing in missing_documents(&db, file, &conns) {
+            assert_eq!(missing.locator, "https://w.example/person.shex");
+            register_document(&mut db, &missing.key, PERSON_DOCUMENT);
+        }
+        assert!(resolves_target_shape(&db, file));
+    }
+
+    #[test]
+    fn the_sync_loop_registers_under_the_key_the_checker_resolves() {
+        let mut db = new_db();
+        let file = program(&db, "a/prog.fossil", "s3://bucket/person.shex");
+        assert_eq!(
+            register_missing_documents(&mut db, file, &|_, _| Some(PERSON_DOCUMENT.to_string())),
+            1
+        );
+        assert!(file_at(&db, "s3://bucket/person.shex").is_some());
+        assert!(resolves_target_shape(&db, file));
+    }
+
+    /// An empty `.shex` and a missing one are different answers.
+    #[test]
+    fn a_host_that_cannot_read_registers_nothing() {
+        let mut db = new_db();
+        let file = program(&db, "prog.fossil", "shapes/person.shex");
+        assert_eq!(register_missing_documents(&mut db, file, &|_, _| None), 0);
+        assert!(file_at(&db, "shapes/person.shex").is_none());
+    }
+
+    /// The buffer already registered wins over anything `read` would produce,
+    /// which is what makes the loop safe on `didChange`.
+    #[test]
+    fn an_already_registered_document_is_not_replaced() {
+        let mut db = new_db();
+        let file = program(&db, "prog.fossil", "shapes/person.shex");
+        let buffer = SourceFile::new(
+            &db,
+            "the buffer the user is editing".to_string(),
+            "shapes/person.shex".to_string(),
+        );
+        register_file(&mut db, "shapes/person.shex".to_string(), buffer);
+
+        assert_eq!(
+            register_missing_documents(&mut db, file, &|_, _| Some(PERSON_DOCUMENT.to_string())),
+            0
+        );
+        assert_eq!(
+            file_at(&db, "shapes/person.shex")
+                .expect("still there")
+                .text(&db),
+            "the buffer the user is editing"
         );
     }
 }

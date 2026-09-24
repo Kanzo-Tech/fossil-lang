@@ -11,6 +11,8 @@
  *
  * `vite.config.ts` allows the repo root in `server.fs` for exactly this.
  */
+import type { SourceHost } from '@fossil-lang/types';
+
 import helloFossil from '../../../examples/hello.fossil?raw';
 import helloShex from '../../../examples/hello.shex?raw';
 import usersCsv from '../../../examples/users.csv?raw';
@@ -30,6 +32,23 @@ export const CSV_PATH = 'users.csv';
 export const PROGRAM = helloFossil;
 export const SHEX = helloShex;
 export const CSV = usersCsv;
+
+/**
+ * The playground's {@link SourceHost}: no connections, and every bundled document
+ * "signed" as a `data:` URL of its own text. Fossil asks for `hello.shex` by the locator
+ * the program's reference resolves to; the bundle answers, and nothing leaves the tab.
+ */
+const BUNDLED: Record<string, string> = { [SHEX_PATH]: SHEX };
+
+export const HOST: SourceHost = {
+  connections: async () => ({}),
+  sign: async (locators) =>
+    Object.fromEntries(
+      locators
+        .filter((locator) => locator in BUNDLED)
+        .map((locator) => [locator, `data:text/plain;charset=utf-8,${encodeURIComponent(BUNDLED[locator]!)}`]),
+    ),
+};
 
 /**
  * The base every relative source path is resolved against before the RUN. See
@@ -73,8 +92,8 @@ export const SOURCE_BYTES: Record<string, Uint8Array> = {
  *
  * So the app does it, on the program text, and only on the way into `run` — the CHECKER
  * still sees the program exactly as written, which is what keeps the diagnostics honest.
- * `io.shex` is deliberately not rewritten: the shape document reaches the executor as a
- * separate argument, not as an object-store source.
+ * `io.shex` is deliberately not rewritten: the shape document is registered with the
+ * executor as a document, not staged as an object-store source.
  *
  * The right fix is upstream — either the wasm host takes a base URI, or
  * `register_object_store_sources` treats a relative URI as relative to `dest`. Either is a

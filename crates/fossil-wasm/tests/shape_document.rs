@@ -3,16 +3,16 @@
 //!
 //! This is the browser-side twin of `fossil-cli`'s
 //! `documents::tests::editing_the_document_rechecks_the_program_and_the_diagnostic_changes`.
-//! There the document is registered from a filesystem; here there is no
-//! filesystem at all, so the only way a document reaches the compiler is
-//! `open_file`, and the only way it changes is `update_file` — which is
+//! There the document is registered from a filesystem; here a fetched document
+//! arrives through `register_document` (`tests/documents.rs`), and the one the
+//! user is editing through `open_file`, changing by `update_file` — which is
 //! `set_text` on the very Salsa input the checker reads.
 //!
 //! What it proves, in order:
 //!
-//!   1. A program whose document nobody opened resolves NO output contract.
-//!      That is not a silent failure: the playground has no disk, and the
-//!      registry says "not there" rather than caching a wrong answer.
+//!   1. A program whose document nobody registered resolves NO output contract.
+//!      That is not a silent failure: the registry says "not there" rather
+//!      than caching a wrong answer.
 //!   2. Opening the document afterwards invalidates the check that missed it —
 //!      the diagnostic appears without anyone touching the program.
 //!   3. Editing the document's text changes the diagnostic. This is what the
@@ -137,8 +137,8 @@ fn opening_and_editing_the_document_re_checks_the_program_that_names_it() {
 
     let program = pg.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
 
-    // (1) Nobody opened the document, and the playground has no disk to read
-    //     it from. The program is checked against no output contract.
+    // (1) Nobody registered the document. The program is checked against no
+    //     output contract.
     let before = messages(&pg);
     assert!(
         !mentions_integer(&before),

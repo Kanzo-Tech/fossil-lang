@@ -4,52 +4,34 @@
 //! drives the same core through the `#[wasm_bindgen]` wrapper under Node, which
 //! is where wasm-bindgen-futures is proved.
 
-//! **One of these used to pass for the wrong reason, and the shape IRI is what
-//! says it no longer does.**
-//!
-//! `fossil-df-wasm`'s `ExecutorSystem` installed no shape decoder and
-//! `build_program` registered no shape document — both deliberate, and both
-//! written before ruling 3 of 2026-08-11. So `resolve_target_shape` answered
-//! `Unregistered` for the `executor.shex` the program names; that is
-//! informational, NOT fatal, so the mapping still compiled — with an EMPTY
-//! predicate table. Measured on 2026-08-12:
-//!
-//! ```text
-//! RunStatus vertex Person → columns = [("name", None)]
-//! ```
-//!
-//! The column kept the bare name the author wrote and LOST its predicate IRI,
-//! and nothing here asserted it, which is why it went green. Two things broke
-//! silently downstream: keasy's DCAT and every edge, because
-//! `apply_output_shape` classifies on `p.rdf_uri` and `None` matches no
-//! predicate. The `shex` ARGUMENT cannot supply either: a bare property key
-//! means the last segment of a predicate IRI a shape declares, so the IRI comes
-//! from `TypeckOutput.predicates`, which comes from the REGISTERED document —
-//! and once the header stopped carrying its own CURIE, so did the vertex LABEL,
-//! which is how this finally became loud (`vertex/.parquet`).
-//!
-//! `build_program` now registers the one text it holds under the name the
-//! program writes. The assertion on `VertexInfo::iri` below is the guard: it is
-//! the cheapest thing that distinguishes "the document was read" from "the
-//! mapping compiled anyway".
-//!
-//! **It is a weaker guard than the one it replaces, and that is a fact about
-//! the manifest, not about this file.** `RunStatus` carried a `rdf_uri` per
-//! COLUMN; `fossil_sinks::manifest::Property` carries `name`, `data_type`,
-//! `is_primary` and `is_nullable` and no predicate. So the empty shape IRI is
-//! what is checkable here, and a shape that resolved its type IRI while losing a
-//! property's would pass. The two came from the same registration and failed
-//! together when they failed; nothing enforces that they still would.
+//! The shape document reaches the executor the way it reaches the checker —
+//! reported by `missing_documents`, registered under its key — and the run's
+//! output descriptor is decoded from that registration. The assertion on
+//! `VertexInfo::iri` is the guard that the document was READ: a bare header
+//! name is bound positionally against it, and a run that skipped it writes an
+//! empty type IRI.
 
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use fossil_df_wasm::{SourceInput, execute_core, program_sources_core, source_row};
+use std::collections::HashMap;
 
-/// The schema the browser fetched and hands to the executor. It is the SAME
-/// text the program names, and that is the point: this host has one shape and
-/// two consumers of it.
+use fossil_df_wasm::{Executor, SourceInput, source_row};
+
+/// The document every program below names.
 const EXECUTOR_SHEX: &str = include_str!("fixtures/executor.shex");
+
+/// `program` compiled, with every document it names registered — what
+/// `resolveDocuments` leaves behind.
+fn executor(program: &str, connections: HashMap<String, String>) -> Executor {
+    let mut exec = Executor::new(program);
+    exec.set_connections(connections);
+    for missing in exec.missing_documents() {
+        exec.register_document(&missing.key, EXECUTOR_SHEX);
+    }
+    assert!(exec.missing_documents().is_empty());
+    exec
+}
 
 const PROGRAM: &str = "\
 type { Person, Order } := io.shex(\"executor.shex\")
@@ -70,15 +52,10 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
         bytes,
     }];
 
-    let out = execute_core(
-        PROGRAM,
-        Some(EXECUTOR_SHEX),
-        sources,
-        "s3://jobs/run-1",
-        &empty_refs(),
-    )
-    .await
-    .expect("executor runs the CSV program");
+    let out = executor(PROGRAM, HashMap::new())
+        .execute(sources, "s3://jobs/run-1")
+        .await
+        .expect("executor runs the CSV program");
 
     // The TILED tree, which is the one `fossil run` writes: the tiles under the
     // declared prefix, the identity index beside them, and the staged
@@ -149,7 +126,8 @@ Order : Order from orders
 
 #[test]
 fn program_sources_lists_each_distinct_source_with_its_format() {
-    let srcs = program_sources_core(TWO_SOURCE_PROGRAM, Some(EXECUTOR_SHEX), &empty_refs())
+    let srcs = executor(TWO_SOURCE_PROGRAM, HashMap::new())
+        .sources()
         .expect("sources enumerated");
     let uris: Vec<&str> = srcs.iter().map(|(u, _)| u.as_str()).collect();
     assert!(uris.contains(&"https://data.example.com/users.csv"));
@@ -190,15 +168,10 @@ async fn the_report_is_the_manifest_the_browser_shipped() {
             bytes: std::fs::read("../fossil-df/tests/fixtures/orders.csv").expect("fixture"),
         },
     ];
-    let out = execute_core(
-        TWO_SOURCE_PROGRAM,
-        Some(EXECUTOR_SHEX),
-        sources,
-        "s3://jobs/run-1",
-        &empty_refs(),
-    )
-    .await
-    .expect("executor runs the two-source program");
+    let out = executor(TWO_SOURCE_PROGRAM, HashMap::new())
+        .execute(sources, "s3://jobs/run-1")
+        .await
+        .expect("executor runs the two-source program");
 
     let shipped = |rel: &str| -> String {
         let file = out
@@ -265,13 +238,15 @@ Person : Person from users
 async fn at_conn_source_alias_resolves_through_the_ref_map() {
     // `@mybucket/users.csv` resolves to `{base}/users.csv` via the ref-map —
     // both `sources()` (enumeration) and `run()` (staging + read) must agree.
-    let mut refs = std::collections::HashMap::new();
-    refs.insert(
-        "mybucket".to_string(),
-        "https://data.example.com".to_string(),
+    let exec = executor(
+        CONN_PROGRAM,
+        HashMap::from([(
+            "mybucket".to_string(),
+            "https://data.example.com".to_string(),
+        )]),
     );
 
-    let listed = program_sources_core(CONN_PROGRAM, Some(EXECUTOR_SHEX), &refs).expect("sources");
+    let listed = exec.sources().expect("sources");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].0, "https://data.example.com/users.csv");
     // The wire `format` round-trips: what `sources()` emits is a catalogue row
@@ -292,15 +267,10 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
         bytes: std::fs::read("../fossil-df/tests/fixtures/users.csv").expect("fixture"),
     }];
 
-    let out = execute_core(
-        CONN_PROGRAM,
-        Some(EXECUTOR_SHEX),
-        sources,
-        "s3://jobs/run-1",
-        &refs,
-    )
-    .await
-    .expect("executor runs the @conn-aliased program");
+    let out = exec
+        .execute(sources, "s3://jobs/run-1")
+        .await
+        .expect("executor runs the @conn-aliased program");
     let person = out
         .report
         .vertices
@@ -309,6 +279,40 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     assert_eq!(person.map(|v| v.vertex_count), Some(3));
 }
 
-fn empty_refs() -> std::collections::HashMap<String, String> {
-    std::collections::HashMap::new()
+const CONN_DOCUMENT_PROGRAM: &str = "\
+type { Person, Order } := io.shex(\"@vocab/executor.shex\")
+
+users := io.csv(\"https://data.example.com/users.csv\")
+
+Person : Person from users
+    @subject = \"https://example.org/person/{users.id}\"
+    name = users.name
+";
+
+/// A document is keyed by what the program wrote and located through the
+/// connection map, and until it is registered the run has no output contract to
+/// run against — it refuses rather than writing an untyped corpus.
+#[test]
+fn a_document_is_missing_until_registered_and_the_run_waits_for_it() {
+    let mut exec = Executor::new(CONN_DOCUMENT_PROGRAM);
+    exec.set_connections(HashMap::from([(
+        "vocab".to_string(),
+        "https://shapes.example.com/v1".to_string(),
+    )]));
+    let missing = exec.missing_documents();
+    assert_eq!(missing.len(), 1);
+    assert_eq!(missing[0].key, "@vocab/executor.shex");
+    assert_eq!(
+        missing[0].locator,
+        "https://shapes.example.com/v1/executor.shex"
+    );
+
+    let refused = exec
+        .sources()
+        .expect_err("no output shape is registered yet");
+    assert!(refused.contains("not registered"), "{refused}");
+
+    exec.register_document(&missing[0].key, EXECUTOR_SHEX);
+    assert!(exec.missing_documents().is_empty());
+    assert_eq!(exec.sources().expect("sources").len(), 1);
 }

@@ -403,25 +403,6 @@ impl Row {
     const fn needs_a_decoder(&self) -> bool {
         self.decodes.is_some()
     }
-
-    /// The READER OPTIONS this row takes: the named, optional positions of its
-    /// signature, in file order.
-    ///
-    /// Derived rather than declared, which is why there is no `option` clause
-    /// in `catalogue.bnf`. `delimiter = String?` already says everything a
-    /// clause would: `=` says the call site writes the name, `?` says the
-    /// program may leave it off. A second spelling of the same fact is the
-    /// drift this file exists to prevent, and it would be a spelling of it in
-    /// the same file.
-    #[must_use]
-    pub fn options(&self) -> Vec<&str> {
-        self.call
-            .iter()
-            .flat_map(|(sig, _)| &sig.params)
-            .filter(|p| p.named && p.arity == Arity::Optional)
-            .map(|p| p.name.as_str())
-            .collect()
-    }
 }
 
 /// Everything `catalogue.bnf` declares.
@@ -769,8 +750,6 @@ fn emit_row(out: &mut String, row: &Row) {
         "    extensions: {},",
         extensions_literal(&row.extensions)
     );
-    let options: Vec<String> = row.options().iter().map(|o| (*o).to_owned()).collect();
-    let _ = writeln!(out, "    options: {},", extensions_literal(&options));
     let _ = writeln!(out, "    reads_rows: {reads_rows},");
     let _ = writeln!(out, "    reads_types: {reads_types},");
     let _ = writeln!(out, "}};\n");
@@ -956,7 +935,7 @@ pub fn emit_ts_introspect(rows: &[Row]) -> String {
     }
     out.push_str("} as const;\n\n");
 
-    out.push_str("/** The constructors above, in catalogue order — the alternation's corpus. */\n");
+    out.push_str("/** The constructors above, in catalogue order. */\n");
     let names: Vec<String> = native.iter().map(|(n, _)| format!("{n:?}")).collect();
     let _ = writeln!(
         out,
@@ -965,29 +944,8 @@ pub fn emit_ts_introspect(rows: &[Row]) -> String {
     );
 
     out.push_str("/** One `io.` constructor that reads through a native reader. */\n");
-    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n\n");
+    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n");
 
-    out.push_str(
-        "/**\n\
-         \x20* The reader options each constructor takes — the named, optional positions\n\
-         \x20* of its signature. Empty for a row that takes none.\n\
-         \x20*\n\
-         \x20* The counterpart of `fossil_base::Provider::options`, from the same rows.\n\
-         \x20* The browser scrapes a source binding for these and the native host does\n\
-         \x20* too, so the word a program writes is the catalogue's on both sides; what\n\
-         \x20* each one sends to its own DuckDB is its own.\n\
-         \x20*/\n",
-    );
-    out.push_str("export const READER_OPTIONS = {\n");
-    for (name, _) in &native {
-        let row = rows
-            .iter()
-            .find(|r| r.name == *name)
-            .expect("a native row came from this list");
-        let opts: Vec<String> = row.options().iter().map(|o| format!("{o:?}")).collect();
-        let _ = writeln!(out, "  {name}: [{}],", opts.join(", "));
-    }
-    out.push_str("} as const satisfies Record<NativeRow, readonly string[]>;\n");
     out
 }
 

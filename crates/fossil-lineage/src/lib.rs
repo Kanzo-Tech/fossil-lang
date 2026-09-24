@@ -19,6 +19,8 @@
 //! registry, and the result type in a third crate that nothing but this one
 //! produced. A contract belongs to whoever fills it.
 
+use std::collections::HashMap;
+
 use fossil_base::{Db, SourceFile};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -97,6 +99,55 @@ fn parse_ref(raw: &str, role: RefRole) -> SourceRefInfo {
     }
 }
 
+/// A data source a program reads, as fossil resolved it — `ProgramSource` in
+/// `@fossil-lang/types`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProgramSource {
+    /// The binding the source is read into (`users` in `users := io.csv(…)`).
+    pub binding: String,
+    /// The URI as the program wrote it — what an inferred descriptor is keyed by.
+    pub key: String,
+    /// `key` through [`fossil_locator::SourceAnchor`]: what a host signs and reads.
+    pub locator: String,
+    /// The catalogue row the constructor names (`csv`), which chooses the reader.
+    pub format: String,
+    /// The reader option the binding wrote (`delimiter = "|"`), verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option: Option<String>,
+}
+
+/// Every source binding in `file` whose constructor names a row the host
+/// installs, one per binding: a destructured `{ A, B } := io.rdf(…)` is two.
+///
+/// `connections` expands `@conn` aliases in the locator only; the key is what
+/// the program wrote, so the descriptor a host registers under it survives a
+/// connection being repointed.
+#[allow(clippy::implicit_hasher)] // `SourceAnchor` takes the std map.
+#[must_use]
+pub fn program_sources(
+    db: &dyn Db,
+    file: SourceFile,
+    connections: &HashMap<String, String>,
+) -> Vec<ProgramSource> {
+    let dir = fossil_locator::program_dir(file.path(db));
+    let anchor = fossil_locator::SourceAnchor::new(&dir, connections);
+    fossil_hir::def_map::def_map(db, file)
+        .sources(db)
+        .iter()
+        .filter_map(|s| {
+            let uri = s.uri.as_deref()?;
+            let row = fossil_base::provider(db.system().providers(), s.constructor.as_deref()?)?;
+            Some(ProgramSource {
+                binding: s.name.to_string(),
+                key: uri.to_string(),
+                locator: anchor.locator(uri),
+                format: row.name.to_string(),
+                option: s.delimiter.as_ref().map(ToString::to_string),
+            })
+        })
+        .collect()
+}
+
 /// What a provider can appear as in a program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -162,7 +213,40 @@ pub fn providers(table: &[&'static fossil_base::Provider]) -> Vec<ProviderInfo> 
 
 #[cfg(test)]
 mod tests {
-    use super::{ProviderKind, providers};
+    use super::{ProgramSource, ProviderKind, program_sources, providers};
+
+    #[test]
+    fn a_source_keeps_what_the_program_wrote_and_resolves_where_it_is_read() {
+        let db = fossil_base::test_support::new_db();
+        let file = fossil_base::SourceFile::new(
+            &db,
+            "users := io.csv(\"@lake/users.csv\", delimiter = \"|\")\n\
+             orders := io.parquet(\"orders.parquet\")\n"
+                .to_string(),
+            "a/prog.fossil".to_string(),
+        );
+        let connections =
+            std::collections::HashMap::from([("lake".to_string(), "s3://bucket/".to_string())]);
+        assert_eq!(
+            program_sources(&db, file, &connections),
+            [
+                ProgramSource {
+                    binding: "users".to_string(),
+                    key: "@lake/users.csv".to_string(),
+                    locator: "s3://bucket/users.csv".to_string(),
+                    format: "csv".to_string(),
+                    option: Some("|".to_string()),
+                },
+                ProgramSource {
+                    binding: "orders".to_string(),
+                    key: "orders.parquet".to_string(),
+                    locator: "a/orders.parquet".to_string(),
+                    format: "parquet".to_string(),
+                    option: None,
+                },
+            ]
+        );
+    }
 
     #[test]
     fn providers_are_sorted_nonempty_and_include_csv() {
@@ -196,7 +280,6 @@ mod tests {
         static ROW: Provider = Provider {
             name: "shex",
             extensions: &["shex"],
-            options: &[],
             reads_rows: None,
             // Any `DecodeTypes` will do — what is under test is the projection,
             // and `fossil-base`'s reference decoder is the one row this crate can

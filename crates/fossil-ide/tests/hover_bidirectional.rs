@@ -204,7 +204,9 @@ User : Person from users
     // The host's half: the shape document is a Salsa input, so it has to be in
     // the database before any query goes looking for it. The `users` row came
     // in through the descriptor cache above — the input side has not moved.
-    fossil_ide::register_missing_documents(&mut db, file, &|key| std::fs::read_to_string(key).ok());
+    fossil_hir::documents::register_missing_documents(&mut db, file, &|_, locator| {
+        std::fs::read_to_string(locator).ok()
+    });
     (db, file)
 }
 

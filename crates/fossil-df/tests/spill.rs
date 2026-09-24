@@ -122,8 +122,10 @@ fn a_ridiculous_budget_spills_and_writes_the_same_corpus() {
 fn run(program: &str, dest: &Path, memory_bytes: Option<u64>) {
     let (db, file) =
         support::db_with_shapes(program, "spill.fossil", &[("spill.shex", SPILL_SHEX)]);
-    let descriptor = fossil_df::OutputDescriptorKind::ShEx(
-        fossil_shex::ShExDescriptor::from_shex_source(SPILL_SHEX).expect("parse spill.shex"),
+    let descriptor = fossil_df::OutputDescriptorKind::Lowered(
+        fossil_shex::ShExDescriptor::from_shex_source(SPILL_SHEX)
+            .expect("parse spill.shex")
+            .to_graph_schema(&fossil_graph_schema::Renames::default()),
     );
     let graph = fossil_df::materialise(
         &db,

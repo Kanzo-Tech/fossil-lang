@@ -1,7 +1,7 @@
 {
   "name": "@fossil-lang/types",
   "version": "0.0.0-development",
-  "description": "Shared TypeScript types for the @fossil-lang/* React playground family. Zero runtime.",
+  "description": "The host contract every @fossil-lang package reads sources through, and the shared editor types.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -28,11 +28,13 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "echo 'no runtime tests for types-only package' && exit 0",
+    "test": "vitest run",
     "lint": "tsc --noEmit"
   },
   "sideEffects": false,
   "devDependencies": {
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "happy-dom": "^15.0.0",
+    "vitest": "^2.0.0"
   }
 }

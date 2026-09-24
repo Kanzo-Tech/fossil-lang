@@ -38,12 +38,14 @@
 //! order — introspect, then compile — is the caller's, and it is the order the
 //! browser has always used.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::sync::Arc;
 
-use fossil_base::System;
+use fossil_base::{Db as _, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_graph_schema::Primitive;
-use fossil_locator::SourceAnchor;
+use fossil_lineage::ProgramSource;
 use smol_str::SmolStr;
 
 pub mod creds;
@@ -106,83 +108,20 @@ fn duckdb_type_to_fossil_primitive(t: &str) -> Primitive {
     }
 }
 
-/// The constructors this scraper looks for: the rows `catalogue.bnf` gives a
+/// The rows this host can `DESCRIBE`: the ones `catalogue.bnf` gives a
 /// `reads native <fn>`.
 ///
 /// **Introspection is a `DESCRIBE` through a table function**, so a row that
 /// reads `materialised` — `io.rdf` — has nothing to describe it with and is
-/// correctly absent. That used to be an alternation of three literals which
-/// happened to be the same three; now the reason is the selection.
-fn native_rows() -> impl Iterator<Item = &'static fossil_base::Provider> {
+/// correctly absent.
+fn native_reader(format: &str) -> Option<fossil_base::NativeReader> {
     fossil_base::providers::DATA
         .iter()
-        .copied()
-        .filter(|p| matches!(p.reads_rows, Some(fossil_base::RowReader::Native(_))))
-}
-
-/// One source binding, as the scrape sees it.
-struct ScrapedRef {
-    /// The bound name — `User`.
-    source_name: SmolStr,
-    /// The row written after `io.` — `csv`.
-    constructor: SmolStr,
-    /// The positional URI, as the program wrote it.
-    raw_uri: String,
-    /// The reader option, if the binding named one — `io.csv("u.csv",
-    /// delimiter = "|")` → `|`.
-    ///
-    /// **The introspecting DESCRIBE has to carry it or it describes a different
-    /// file than the run reads.** A pipe-delimited CSV read with a comma is one
-    /// column called `id|name|birthday`, so an introspection that dropped the
-    /// option would type the source's columns out of a schema the executor
-    /// never produces — and the mapping would be refused for naming columns
-    /// that are, in fact, there.
-    option: Option<String>,
-}
-
-/// Scrape source-binding RHS source URLs from a `.fossil` file's text. It is a
-/// regex placeholder for an AST walk, and it is wrong on any binding the regex
-/// cannot see.
-///
-/// `@fossil-lang/introspect` scrapes the same bindings for the browser. **The
-/// alternation is no longer written here**: it is built from the catalogue, and
-/// the TypeScript builds its own from `catalogue.generated.ts`, which
-/// `cargo xtask catalogue` writes from the same file. A constructor added to
-/// `catalogue.bnf` reaches both scrapers at once.
-///
-/// **The reader option is the second interpolation and arrives the same way.**
-/// The word a program writes for it (`delimiter`) is
-/// `fossil_base::Provider::options`, generated from the same rows, so neither
-/// this pattern nor the TypeScript one spells it. The alternation is over every
-/// option any native row declares — one today — because the scrape runs before
-/// the constructor is known and `fossil_hir::lower::check_reader_option` is
-/// what refuses an option written on the wrong row.
-///
-/// What is still written twice is the pattern AROUND the two interpolations, in
-/// two regex dialects, and `packages/introspect/tests/rust-parity.test.ts` reads
-/// this file for it. It is a `pnpm` test, so `cargo test` will not tell you.
-fn extract_source_refs(text: &str) -> Vec<ScrapedRef> {
-    use std::sync::OnceLock;
-    static RE: OnceLock<regex::Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| {
-        let alternation = native_rows().map(|p| p.name).collect::<Vec<_>>().join("|");
-        let options = native_rows()
-            .flat_map(|p| p.options.iter().copied())
-            .collect::<Vec<_>>()
-            .join("|");
-        regex::Regex::new(&format!(
-            r#"(\w[\w\d_]*)\s*:=\s*io\.({alternation})\(\s*['"]([^'"]+)['"](?:\s*,\s*(?:{options})\s*=\s*['"]([^'"]*)['"])?"#
-        ))
-        .expect("the catalogue's constructor and option names are regex-safe")
-    });
-    re.captures_iter(text)
-        .map(|c| ScrapedRef {
-            source_name: SmolStr::from(c.get(1).unwrap().as_str()),
-            constructor: SmolStr::from(c.get(2).unwrap().as_str()),
-            raw_uri: c.get(3).unwrap().as_str().to_string(),
-            option: c.get(4).map(|m| m.as_str().to_string()),
+        .find(|p| p.name == format)
+        .and_then(|p| match p.reads_rows {
+            Some(fossil_base::RowReader::Native(r)) => Some(r),
+            _ => None,
         })
-        .collect()
 }
 
 /// The `DuckDB` named parameter a native reader's option is spelled with.
@@ -237,45 +176,42 @@ fn freshness_token(resolved: &str) -> String {
     )
 }
 
-/// Pre-introspect every source the program names — [`Reach::Anywhere`],
+/// Pre-introspect every source the program at `path` names — [`Reach::Anywhere`],
 /// because a host that reads the program off the disk is a COMMAND, and a
 /// command is allowed to wait. The editor does not come through here: its copy
-/// of the program is a buffer that may never have been saved, so it calls
-/// [`pre_introspect_and_register`] with the text it already holds.
+/// of the program is a buffer that may never have been saved, so it takes
+/// [`fossil_lineage::program_sources`] of the file it already holds and calls
+/// [`pre_introspect_and_register`] with them.
 ///
-/// Reads the file at `path`, anchors it, and registers an
-/// [`InferredDescriptor`] for every source it binds on `system`'s cache BEFORE
-/// typecheck — keyed by the URI the program writes rather than by the resolved
-/// locator, which is the only string the host and the checker both see.
-///
-/// **This is the unit of work a host actually has**, and the reason it is here
-/// rather than repeated at each call site: `pre_introspect_and_register` takes
-/// text that has already been read and an anchor that has already been built,
-/// and every caller wanted the same three lines in front of
-/// it. The `System` is the caller's because only the caller knows which host it
-/// is — `fossil_cli::host_system(path)` natively, and the browser does not
-/// come through here at all.
+/// The sources are [`fossil_lineage::program_sources`] over a database on
+/// `system` — the list the browser's `sources()` returns — so both hosts
+/// DESCRIBE the sources the compiler bound, and nothing reads them off the
+/// text a second way. The `System` is the caller's because only the caller
+/// knows which host it is: `fossil_cli::host_system(path)` natively.
 ///
 /// # Errors
 ///
 /// If `path` cannot be read. Per-source introspection failures are NOT errors:
 /// they log and skip, so a compile can still succeed with no forward-propagated
 /// types for that source.
-#[allow(clippy::implicit_hasher)] // the host builds one map and passes it; a
-// generic hasher here would be a parameter no caller varies.
 pub fn introspect_program(
-    system: &dyn System,
-    path: &std::path::Path,
-    connections: &HashMap<String, String>,
+    system: Arc<dyn System>,
+    path: &Path,
     creds: &RunCreds,
 ) -> std::io::Result<()> {
     let text = std::fs::read_to_string(path)?;
-    let program_dir = fossil_locator::program_dir(&path.to_string_lossy());
-    let anchor = SourceAnchor::new(&program_dir, connections);
-    pre_introspect_and_register(system, &text, anchor, &creds.connections, Reach::Anywhere);
+    let db = fossil_base::FossilDb::new(system);
+    let file = fossil_base::SourceFile::new(&db, text, path.to_string_lossy().into_owned());
+    let sources = fossil_lineage::program_sources(&db, file, &connection_urls(&creds.connections));
+    pre_introspect_and_register(db.system(), &sources, &creds.connections, Reach::Anywhere);
     Ok(())
 }
 
+/// Register an [`InferredDescriptor`] on `system`'s cache for every native
+/// source in `sources`, BEFORE typecheck — keyed by [`ProgramSource::key`],
+/// what the program wrote, and read from [`ProgramSource::locator`]. One
+/// `DESCRIBE` per key: two bindings over one file are one descriptor.
+///
 /// A source whose cached descriptor still carries the current
 /// `freshness_token` is skipped — no `DESCRIBE`, no read. That is where the
 /// cost is: programs are small and sources are not, so the introspection is
@@ -289,11 +225,11 @@ pub fn introspect_program(
 /// [`Reach`]. It is a parameter and not a property of the source because the
 /// same `s3://` URI is a legitimate read for `fossil check` and a stalled
 /// editor for `fossil-lsp`.
-#[allow(clippy::implicit_hasher)] // as `introspect_program`.
+#[allow(clippy::implicit_hasher)] // the host builds one map and passes it; a
+// generic hasher here would be a parameter no caller varies.
 pub fn pre_introspect_and_register(
     system: &dyn System,
-    source_text: &str,
-    anchor: SourceAnchor<'_>,
+    sources: &[ProgramSource],
     connections: &HashMap<String, ConnectionCreds>,
     reach: Reach,
 ) {
@@ -305,15 +241,26 @@ pub fn pre_introspect_and_register(
     // Opened on the first miss, not on entry. A compile whose sources are all
     // fresh must do no DuckDB work at all, and opening a connection is work.
     let mut conn: Option<duckdb::Connection> = None;
+    let mut seen = HashSet::new();
 
-    for ScrapedRef {
-        source_name,
-        constructor,
-        raw_uri,
-        option,
-    } in extract_source_refs(source_text)
-    {
-        let token = freshness_token(&anchor.locator(&raw_uri));
+    for source in sources {
+        let ProgramSource {
+            binding,
+            key,
+            locator,
+            format,
+            option,
+        } = source;
+        // The constructor chooses the reader: a JSON array read as CSV
+        // introspects to one column named `[`. A materialised row (`io.rdf`)
+        // takes its schema from its shape and has nothing to DESCRIBE.
+        let Some(native) = native_reader(format) else {
+            continue;
+        };
+        if !seen.insert(key.as_str()) {
+            continue;
+        }
+        let token = freshness_token(locator);
         // An empty token means this host could not `stat` the locator — a
         // scheme it does not own, or a path that is not there. Under
         // `Reach::Local` that is the whole filter, and it is deliberately
@@ -322,12 +269,12 @@ pub fn pre_introspect_and_register(
         // single keystroke.
         if reach == Reach::Local && token.is_empty() {
             tracing::debug!(
-                "`{raw_uri}` is not a file this host can stat; not reading it from here"
+                "`{locator}` is not a file this host can stat; not reading it from here"
             );
             continue;
         }
-        if cache.is_fresh(&raw_uri, &token) {
-            tracing::debug!("`{raw_uri}` is unchanged since it was introspected; reusing");
+        if cache.is_fresh(key, &token) {
+            tracing::debug!("`{key}` is unchanged since it was introspected; reusing");
             continue;
         }
 
@@ -347,38 +294,6 @@ pub fn pre_introspect_and_register(
             conn.insert(opened)
         };
 
-        // Resolved a second time deliberately: the token above is about the
-        // bytes on disk, this is the string DuckDB reads, and conflating them
-        // would make a `@conn` alias silently change meaning between the two.
-        let resolved_path = anchor.locator(&raw_uri);
-        let escaped_path = resolved_path.replace('\'', "''");
-        // The CONSTRUCTOR chooses the reader, and it used to not: every source
-        // was `read_csv_auto` whatever `io.` said. A JSON array read as CSV
-        // introspects to one column named after the first line, so
-        // `data/sightings.json` — which opens with a bare `[` — produced a
-        // schema whose only column was literally `[`, and every real column
-        // came back as `unknown column \`id\` — did you mean \`[\`?`. The
-        // did-you-mean is what made it legible: it printed the wrong schema.
-        //
-        // The three arms were a second copy of `catalogue.bnf`'s `native <fn>`
-        // tokens, and the `_ =>` fallback was the ORIGINAL BUG wearing a
-        // default: unreachable only for as long as the alternation above listed
-        // exactly the constructors this match named. Both are the catalogue's
-        // answer now, and a row the table does not know is skipped loudly
-        // rather than read as CSV.
-        let Some(native) = native_rows()
-            .find(|p| p.name == constructor.as_str())
-            .and_then(|p| match p.reads_rows {
-                Some(fossil_base::RowReader::Native(r)) => Some(r),
-                _ => None,
-            })
-        else {
-            tracing::warn!(
-                "source `{source_name}` names `io.{constructor}`, which is not a \
-                 natively-readable catalogue row; skipping pre-introspection"
-            );
-            continue;
-        };
         let reader = native.table_function();
         // **The option the binding wrote, in DuckDB's spelling, or nothing.**
         // Nothing is the whole of the absent case: `read_csv_auto` sniffs, and
@@ -393,13 +308,12 @@ pub fn pre_introspect_and_register(
             }
             _ => String::new(),
         };
+        let escaped_path = locator.replace('\'', "''");
         let sql = format!("DESCRIBE SELECT * FROM {reader}('{escaped_path}'{args})");
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(e) => {
-                tracing::warn!(
-                    "DESCRIBE prepare failed for source `{source_name}` (uri=`{raw_uri}`): {e}"
-                );
+                tracing::warn!("DESCRIBE prepare failed for source `{binding}` (uri=`{key}`): {e}");
                 continue;
             }
         };
@@ -413,21 +327,21 @@ pub fn pre_introspect_and_register(
         }) {
             Ok(iter) => iter.filter_map(Result::ok).collect(),
             Err(e) => {
-                tracing::warn!("DESCRIBE query_map failed for `{source_name}`: {e}");
+                tracing::warn!("DESCRIBE query_map failed for `{binding}`: {e}");
                 continue;
             }
         };
         cache.insert(InferredDescriptor {
-            uri: SmolStr::from(raw_uri.as_str()),
+            uri: SmolStr::from(key.as_str()),
             columns: cols,
             freshness_token: token,
         });
-        tracing::debug!("introspected `{raw_uri}` for source `{source_name}`");
+        tracing::debug!("introspected `{key}` for source `{binding}`");
     }
 }
 
 /// The name→base-URL view of the run's connections — what
-/// [`fossil_locator::SourceAnchor`] expands a `@conn` alias through, and what the
+/// [`fossil_lineage::program_sources`] expands a `@conn` alias through, and what the
 /// executor is handed for the same purpose.
 ///
 /// Projected ONCE per command and then borrowed, rather than rebuilt inside a
@@ -436,7 +350,7 @@ pub fn pre_introspect_and_register(
 /// also what lets the anchor be a borrow — the pair (directory, connections)
 /// has to outlive every resolution done against it, which is exactly the
 /// lifetime of the command.
-#[allow(clippy::implicit_hasher)] // as `introspect_program`.
+#[allow(clippy::implicit_hasher)] // as `pre_introspect_and_register`.
 pub fn connection_urls(connections: &HashMap<String, ConnectionCreds>) -> HashMap<String, String> {
     connections
         .iter()
@@ -456,7 +370,7 @@ pub fn connection_urls(connections: &HashMap<String, ConnectionCreds>) -> HashMa
 /// A crate does not need a dependency to run one statement on a connection it
 /// already holds, and that dependency was the last thing making `fossil-layout`
 /// link `DuckDB`.
-#[allow(clippy::implicit_hasher)] // as `introspect_program`.
+#[allow(clippy::implicit_hasher)] // as `pre_introspect_and_register`.
 pub fn apply_source_creds(
     conn: &duckdb::Connection,
     connections: &HashMap<String, ConnectionCreds>,
@@ -478,6 +392,23 @@ pub fn apply_source_creds(
 mod tests {
     use super::*;
     use fossil_base::test_support::NativeSystem;
+    use fossil_locator::SourceAnchor;
+
+    /// What `fossil_lineage::program_sources` reports for `program` written at
+    /// `dir/prog.fossil` — the list every host introspects.
+    fn sources_of(
+        dir: &Path,
+        program: &str,
+        connections: &HashMap<String, String>,
+    ) -> Vec<ProgramSource> {
+        let db = fossil_base::FossilDb::new(Arc::new(NativeSystem::default()));
+        let file = fossil_base::SourceFile::new(
+            &db,
+            program.to_string(),
+            dir.join("prog.fossil").to_string_lossy().into_owned(),
+        );
+        fossil_lineage::program_sources(&db, file, connections)
+    }
 
     fn conns(pairs: &[(&str, &str)]) -> HashMap<String, ConnectionCreds> {
         pairs
@@ -540,56 +471,6 @@ mod tests {
         }
     }
 
-    /// **The scrape reads the reader option, and reads it only where the
-    /// program wrote one.**
-    ///
-    /// The word it looks for is `fossil_base::Provider::options`, generated
-    /// from `catalogue.bnf`, so this asserts the SCAFFOLD around it and not the
-    /// word: the URI stays positional, the option is optional, and a binding
-    /// with neither reads exactly as it always did.
-    #[test]
-    fn the_scrape_reads_the_option_a_binding_wrote() {
-        let text = "\
-A := io.csv(\"a.csv\", delimiter = \"|\")
-B := io.csv(\"b.csv\")
-C := io.parquet(\"c.parquet\")
-";
-        let got: Vec<(String, String, String, Option<String>)> = extract_source_refs(text)
-            .into_iter()
-            .map(|r| {
-                (
-                    r.source_name.to_string(),
-                    r.constructor.to_string(),
-                    r.raw_uri,
-                    r.option,
-                )
-            })
-            .collect();
-        assert_eq!(
-            got,
-            vec![
-                (
-                    "A".to_string(),
-                    "csv".to_string(),
-                    "a.csv".to_string(),
-                    Some("|".to_string())
-                ),
-                (
-                    "B".to_string(),
-                    "csv".to_string(),
-                    "b.csv".to_string(),
-                    None
-                ),
-                (
-                    "C".to_string(),
-                    "parquet".to_string(),
-                    "c.parquet".to_string(),
-                    None
-                ),
-            ]
-        );
-    }
-
     /// **Introspection reads the same file the run reads.**
     ///
     /// This is the whole reason `io.csv` grew a delimiter rather than a
@@ -611,9 +492,8 @@ C := io.parquet(\"c.parquet\")
 
         let system = NativeSystem::default();
         let text = format!("User := io.csv(\"{}\", delimiter = \"|\")\n", csv.display());
-        let urls = HashMap::new();
-        let anchor = SourceAnchor::new(dir.path(), &urls);
-        pre_introspect_and_register(&system, &text, anchor, &HashMap::new(), Reach::Anywhere);
+        let sources = sources_of(dir.path(), &text, &HashMap::new());
+        pre_introspect_and_register(&system, &sources, &HashMap::new(), Reach::Anywhere);
 
         let descriptor = system
             .descriptors()
@@ -669,19 +549,17 @@ C := io.parquet(\"c.parquet\")
         let dir = tempfile::tempdir().expect("tempdir");
         let csv = dir.path().join("users.csv");
         std::fs::write(&csv, "id,name\n1,ada\n").expect("write csv");
-        let program = "users := io.csv(\"users.csv\")\n";
+        let sources = sources_of(
+            dir.path(),
+            "users := io.csv(\"users.csv\")\n",
+            &HashMap::new(),
+        );
         let no_creds = HashMap::new();
 
         let system = NativeSystem::default();
         let cache = system.descriptors().expect("the engine keeps a table");
 
-        pre_introspect_and_register(
-            &system,
-            program,
-            SourceAnchor::beside(dir.path()),
-            &no_creds,
-            Reach::Anywhere,
-        );
+        pre_introspect_and_register(&system, &sources, &no_creds, Reach::Anywhere);
         assert_eq!(
             cache.registrations(),
             1,
@@ -689,13 +567,7 @@ C := io.parquet(\"c.parquet\")
         );
         assert_eq!(cache.get("users.csv").expect("registered").columns.len(), 2);
 
-        pre_introspect_and_register(
-            &system,
-            program,
-            SourceAnchor::beside(dir.path()),
-            &no_creds,
-            Reach::Anywhere,
-        );
+        pre_introspect_and_register(&system, &sources, &no_creds, Reach::Anywhere);
         assert_eq!(
             cache.registrations(),
             1,
@@ -703,13 +575,7 @@ C := io.parquet(\"c.parquet\")
         );
 
         std::fs::write(&csv, "id,name,email\n1,ada,ada@example.org\n").expect("rewrite csv");
-        pre_introspect_and_register(
-            &system,
-            program,
-            SourceAnchor::beside(dir.path()),
-            &no_creds,
-            Reach::Anywhere,
-        );
+        pre_introspect_and_register(&system, &sources, &no_creds, Reach::Anywhere);
         assert_eq!(
             cache.registrations(),
             2,
@@ -728,17 +594,15 @@ C := io.parquet(\"c.parquet\")
     fn two_bindings_over_one_file_introspect_once() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("u.csv"), "id\n1\n").expect("write csv");
-        let program = "a := io.csv(\"u.csv\")\nb := io.csv(\"u.csv\")\n";
+        let sources = sources_of(
+            dir.path(),
+            "a := io.csv(\"u.csv\")\nb := io.csv(\"u.csv\")\n",
+            &HashMap::new(),
+        );
 
         let system = NativeSystem::default();
         let cache = system.descriptors().expect("the engine keeps a table");
-        pre_introspect_and_register(
-            &system,
-            program,
-            SourceAnchor::beside(dir.path()),
-            &HashMap::new(),
-            Reach::Anywhere,
-        );
+        pre_introspect_and_register(&system, &sources, &HashMap::new(), Reach::Anywhere);
 
         assert_eq!(cache.registrations(), 1);
         assert_eq!(cache.len(), 1);
@@ -759,19 +623,17 @@ C := io.parquet(\"c.parquet\")
     fn the_local_reach_skips_what_it_cannot_stat_and_keeps_skipping_it() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("near.csv"), "id,name\n1,ada\n").expect("write csv");
-        let program = "near := io.csv(\"near.csv\")\n\
-                       far  := io.csv(\"https://example.invalid/far.csv\")\n";
+        let sources = sources_of(
+            dir.path(),
+            "near := io.csv(\"near.csv\")\n\
+             far  := io.csv(\"https://example.invalid/far.csv\")\n",
+            &HashMap::new(),
+        );
 
         let system = NativeSystem::default();
         let cache = system.descriptors().expect("the host keeps a table");
         for _ in 0..3 {
-            pre_introspect_and_register(
-                &system,
-                program,
-                SourceAnchor::beside(dir.path()),
-                &HashMap::new(),
-                Reach::Local,
-            );
+            pre_introspect_and_register(&system, &sources, &HashMap::new(), Reach::Local);
         }
 
         assert_eq!(
@@ -784,6 +646,49 @@ C := io.parquet(\"c.parquet\")
             cache.get("https://example.invalid/far.csv").is_none(),
             "an editor must not go on the network from its message loop"
         );
+    }
+
+    /// The descriptor is keyed by what the program wrote and read from where
+    /// the connection points: repointing `@lake` moves the read, not the key
+    /// the checker looks up.
+    #[test]
+    fn a_conn_source_is_keyed_as_written_and_read_where_it_resolves() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("u.csv"), "id,name\n1,ada\n").expect("write csv");
+        let lake = HashMap::from([("lake".to_string(), dir.path().display().to_string())]);
+        let sources = sources_of(
+            Path::new("/elsewhere"),
+            "u := io.csv(\"@lake/u.csv\")\n",
+            &lake,
+        );
+
+        let system = NativeSystem::default();
+        pre_introspect_and_register(&system, &sources, &HashMap::new(), Reach::Anywhere);
+
+        let cache = system.descriptors().expect("the host keeps a table");
+        assert_eq!(
+            cache.get("@lake/u.csv").expect("registered").columns.len(),
+            2
+        );
+    }
+
+    /// A materialised row takes its schema from its shape: the file behind a
+    /// destructured `io.rdf` is not described, even when a reader could open it.
+    #[test]
+    fn a_materialised_source_is_not_described() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("g.ttl"), "id\n1\n").expect("write graph");
+        let sources = sources_of(
+            dir.path(),
+            "{ A, B } := io.rdf(\"g.ttl\", schema = io.shex(\"s.shex\"))\n",
+            &HashMap::new(),
+        );
+        assert_eq!(sources.len(), 2, "one source per destructured binding");
+
+        let system = NativeSystem::default();
+        pre_introspect_and_register(&system, &sources, &HashMap::new(), Reach::Anywhere);
+
+        assert_eq!(system.descriptors().expect("a table").registrations(), 0);
     }
 
     /// A source this host cannot `stat` gets an empty token, and an empty token

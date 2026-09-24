@@ -1503,7 +1503,7 @@ User : Person from users
 
     let mut db = fossil_base::test_support::new_db();
     let file = SourceFile::new(&db, SRC.to_string(), "prog.fossil".to_string());
-    fossil_base::test_support::register_document(&mut db, "person.shex", DOCUMENT);
+    fossil_base::register_document(&mut db, "person.shex", DOCUMENT);
 
     let mapping = first_mapping(&db, file);
     let _ = typecheck_mapping(&db, mapping);

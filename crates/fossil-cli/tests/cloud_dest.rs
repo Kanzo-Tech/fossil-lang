@@ -159,11 +159,9 @@ fn both_spellings_of_a_local_destination_are_accepted() {
 /// stopped doing for themselves. Without it a program's sources have no
 /// forward-propagated types, which is a different (and quietly weaker) answer.
 fn introspect(path: &std::path::Path) {
-    let system = fossil_cli::host_system(path);
     let _ = fossil_introspect::introspect_program(
-        &*system,
+        fossil_cli::host_system(path),
         path,
-        &std::collections::HashMap::new(),
         &fossil_introspect::RunCreds::default(),
     );
 }

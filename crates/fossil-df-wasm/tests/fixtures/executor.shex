@@ -5,14 +5,8 @@
 # `program_sources_lists_each_distinct_source_with_its_format` also needs
 # `ex:Order`, whose `placedBy` is a shape-ref (an edge).
 #
-# Handing this text to `execute_core`'s `shex` argument is not enough on its
-# own. That argument becomes an `OutputDescriptorKind` for the EXECUTOR; the
-# CHECKER resolves its shape through `file_at` + `shape_document`, so the same
-# text has to be REGISTERED under the name the program writes. `ExecutorSystem`
-# installed no decoder row and `build_program` registered nothing — both
-# deliberately, and both written before ruling 3 of 2026-08-11 made the header's
-# shape name and every property key resolve through the document. Both are
-# fixed; one text, two consumers.
+# Every program there names it, and the test registers it under the key
+# `missing_documents` reports — the checker and the run read that one copy.
 #
 # The name order is load-bearing: `type { Person, Order } := …` binds
 # POSITIONALLY, so `Person` is whatever this file declares FIRST.

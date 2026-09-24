@@ -33,14 +33,6 @@
 //!     open-files-as-workspace model, so a mapping or shape declared in file A
 //!     resolves from file B.
 //!
-//! ## The host's half ([`shape_documents`])
-//!
-//! Not a feature — the wiring both editor hosts need before any feature is
-//! correct. The shape document a program names is a Salsa **input**, so
-//! `fossil-lsp` and `fossil-wasm` have to register it before the checker asks
-//! for it, and both do it from the same three functions there. See that
-//! module's docs for why an editor needs this more than a batch compile does.
-//!
 //! They were `fossil-ide-db`, split off on the strength of rust-analyzer's
 //! `ide-db`/`ide` split, until this crate absorbed them: a crate boundary that
 //! separates nothing is a file boundary.
@@ -55,7 +47,6 @@ pub mod outline;
 pub mod position;
 pub mod related;
 pub mod semantic;
-pub mod shape_documents;
 pub mod symbol_index;
 pub mod workspace;
 
@@ -74,7 +65,6 @@ pub use position::{
 };
 pub use related::{Related, related_locations};
 pub use semantic::{decode_tokens, legend_type_name, semantic_legend, semantic_tokens};
-pub use shape_documents::register_missing_documents;
 pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};
 pub use workspace::WorkspaceIndex;
 

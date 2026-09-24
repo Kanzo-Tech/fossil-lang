@@ -170,8 +170,10 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
     let (db, file) =
         support::db_with_shapes(KB_PROGRAM, "kb.fossil", &[("kb-graph.shex", KB_GRAPH_SHEX)]);
 
-    let descriptor = OutputDescriptorKind::ShEx(
-        ShExDescriptor::from_reader(KB_SHEX.as_bytes()).expect("parse ShEx"),
+    let descriptor = OutputDescriptorKind::Lowered(
+        ShExDescriptor::from_reader(KB_SHEX.as_bytes())
+            .expect("parse ShEx")
+            .to_graph_schema(&fossil_graph_schema::Renames::default()),
     );
 
     let ctx = SessionContext::new();

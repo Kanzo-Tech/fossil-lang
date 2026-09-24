@@ -142,8 +142,9 @@ crates/
                            open — `@conn`, scheme, absolute, else the program's directory; never
                            the cwd. It was a module of `fossil-base` and is not one now: a
                            substrate «doesn't know about file paths». It depends on NOTHING and
-                           `fossil-base` does not depend on IT — each of its five readers
-                           (`fossil-hir`, `-cli`, `-introspect`, `-df`, `-lsp`) takes it direct
+                           `fossil-base` does not depend on IT — each of its readers
+                           (`fossil-hir`, `-cli`, `-introspect`, `-df`, `-lsp`, `-lineage`)
+                           takes it direct
   fossil-syntax/           lossless CST + parser
   fossil-hir/              types + name resolution + bidirectional checker + the stdlib
                            catalog. `stdlib.rs` owns the TYPES a row is written in; the ROWS
@@ -180,14 +181,10 @@ crates/
                            it is not the only crate that does — `cargo tree -e normal -i duckdb
                            --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
                            holds it against `deny.toml`. Native by that edge and by
-                           `fossil-resolver`, without a tripwire of its own. It links `salsa`
-                           too, through `fossil-base`, and that is NOT what `39d0fb8` cut: it
-                           names no `Db`, no query and no diagnostic, only the substrate's two
-                           salsa-free halves that a host HAS to name — `System::descriptors`,
-                           the cache it fills, and the `io.` rows the scrape's alternation and
-                           its reader choice come from. Cutting that edge is a split of
-                           `fossil-base` and nothing in here, which is why the substrate bullet
-                           does not name this crate
+                           `fossil-resolver`, without a tripwire of its own. Which sources it
+                           DESCRIBEs is `fossil_lineage::program_sources` — the list the
+                           browser's `sources()` returns — so it links the compiler front-end,
+                           as every host does
   fossil-layout/           the layout post-pass — Louvain + Morton over Parquet through
                            arrow-rs. It links no engine: `DuckDB` and `fossil-df` are both
                            dev-dependencies, the second since `TileWriter` became
@@ -261,9 +258,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   executor/                datafusion-wasm query executor, and the manifest wire mirror, because
                            a run HANDS THAT BACK — except `Channel`/`Scale`, in `types/` because
                            `draw/` reads one and 22 MB of wasm is the wrong price for an interface
-  types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme, the
-                           `channels:` wire shape — zero runtime)
-  resolvers/               default + mock + public-HTTP ConnectionResolver impls
+  types/                   SourceHost, the one host contract, and resolveDocuments, the one IO
+                           loop over it; FossilTheme; the `channels:` wire shape
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
                            and not an editor. FIVE of them, not two: highlighting from
                            `tokenize()` + `tokenKinds()`, squiggles from `check()` through
@@ -279,8 +275,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            legend ships, and the guard is on the Rust side
   introspect/              source-binding schema introspection (the one home; `fossil-introspect`
                            is the Rust sibling). Their agreement is ENFORCED, not asserted:
-                           `packages/introspect/tests/rust-parity.test.ts` derives the regex, the
-                           reader arms and the type table out of
+                           `packages/introspect/tests/rust-parity.test.ts` derives the reader
+                           arms, the option keyword and the type table out of
                            `crates/fossil-introspect/src/lib.rs` and fails on drift. It is a
                            **pnpm** test — editing that Rust turns it red and `cargo test` will
                            not tell you.

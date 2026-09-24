@@ -11,8 +11,7 @@
 //! them and cannot be: it has no dependency on this crate.
 
 use crate::AcceptAllDescriptor;
-use fossil_graph_schema::{GraphSchema, Renames};
-use fossil_shex::ShExDescriptor;
+use fossil_graph_schema::GraphSchema;
 
 /// Concrete-type dispatch surface for the bidirectional checker.
 ///
@@ -21,40 +20,23 @@ use fossil_shex::ShExDescriptor;
 /// variant is an architectural addition — every match arm in every host that
 /// carries one has to answer for it, which is acceptable churn: adding an
 /// output descriptor is a major architectural change.
-//
-// `large_enum_variant`: the `ShEx(ShExDescriptor)` variant carries a
-// `shex_ast::Schema` + a resolved `HashMap<String, ShapeBinding>` — large
-// compared to the unit-struct `AcceptAll` variant. Boxing the larger
-// variant would add an allocation per `ShExDescriptor` construction, which
-// happens once per compile; the size asymmetry is intentional and stable.
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum OutputDescriptorKind {
-    /// `ShEx` schema, pre-resolved into per-shape constraint tables. The
-    /// compile-time backward checker (`fossil-hir`) needs the rich resolved
-    /// table; the executor reads only [`Self::to_graph_schema`].
-    ShEx(ShExDescriptor),
     /// A canonical output model, **already lowered** — whatever language it came
     /// from. The executor consumes it as-is.
     ///
-    /// It was called `Shacl`, and the name was a claim about the document's
-    /// language that the value does not carry: since the run reads its shape
-    /// document through the provider registry (`fossil_cli::host`'s
-    /// `read_output_shape`), a `ShEx` document arrives here too. What the
-    /// variant means is "the decode already happened", which is what it now
-    /// says. [`Self::ShEx`] survives beside it because the browser executor is
-    /// handed a raw `ShEx` blob with no registry in front of it.
+    /// Every host decodes through the provider registry
+    /// (`fossil_df::output_descriptor`), so this is the one shape-bearing
+    /// variant whatever the document's language.
     Lowered(GraphSchema),
     /// Accepts any graph. Used when no shape target is loaded (the
-    /// walking-skeleton case) or as the degraded fallback when a host cannot
-    /// resolve a `ShEx` schema.
+    /// walking-skeleton case).
     AcceptAll(AcceptAllDescriptor),
 }
 
 impl OutputDescriptorKind {
     /// Inherent `const` default: the descriptor an executor uses when the
-    /// program declares no output shape (`fossil_cli::host`'s
-    /// `resolve_output_descriptor`, `fossil_df_wasm`'s `build_program`).
+    /// program declares no output shape (`fossil_df::output_descriptor`).
     /// Backward checking is a no-op and the produced graph is accepted whole.
     ///
     /// This is const-evaluable because [`AcceptAllDescriptor`] is a unit
@@ -70,7 +52,6 @@ impl OutputDescriptorKind {
     #[must_use]
     pub const fn name(&self) -> &'static str {
         match self {
-            Self::ShEx(_) => "shex",
             Self::Lowered(_) => "lowered",
             Self::AcceptAll(_) => "accept-all",
         }
@@ -82,8 +63,8 @@ impl OutputDescriptorKind {
     /// It said `fossil_hir`'s typecheck reads this to short-circuit backward
     /// checking. It does not, and cannot: `fossil-hir` has no dependency on this
     /// crate. Nothing in the tree calls this outside the tests below, and the
-    /// same is true of [`Self::name`] — which is why the doc on [`Self::ShEx`]
-    /// saying the executor reads only [`Self::to_graph_schema`] is still true.
+    /// same is true of [`Self::name`]: the executor reads only
+    /// [`Self::to_graph_schema`].
     #[must_use]
     pub const fn accepts_anything(&self) -> bool {
         matches!(self, Self::AcceptAll(_))
@@ -91,19 +72,14 @@ impl OutputDescriptorKind {
 
     /// Lower this descriptor to the canonical, format-neutral [`GraphSchema`] —
     /// the single output model the executor (`apply_output_shape`) consumes,
-    /// independent of the source schema language. `ShEx` lowers through its
-    /// resolved table; `Lowered` already is one; `AcceptAll` is empty
+    /// independent of the source schema language. `Lowered` already is one;
+    /// `AcceptAll` is empty
     /// (no node/edge typing → every predicate stays a vertex property, the
-    /// walking-skeleton behaviour).
-    ///
-    /// `renames` is the program's [`Renames`] and governs the column label.
-    /// [`Self::Lowered`] ignores it on purpose: the decode already happened,
-    /// and the side that did it (`fossil_cli::host`'s `read_output_shape`) is the
-    /// side that had the program.
+    /// walking-skeleton behaviour). The program's `@rename`s were applied when
+    /// the document was decoded.
     #[must_use]
-    pub fn to_graph_schema(&self, renames: &Renames) -> GraphSchema {
+    pub fn to_graph_schema(&self) -> GraphSchema {
         match self {
-            Self::ShEx(d) => d.to_graph_schema(renames),
             Self::Lowered(gs) => gs.clone(),
             Self::AcceptAll(_) => GraphSchema {
                 nodes: Vec::new(),
@@ -134,56 +110,13 @@ mod tests {
     }
 
     #[test]
-    fn output_descriptor_kind_shex_variant() {
-        // Minimal schema with one shape — `ex:Person` with `ex:name`.
-        let schema_src = r#"{
-          "@context": "http://www.w3.org/ns/shex.jsonld",
-          "type": "Schema",
-          "shapes": [
-            {
-              "type": "ShapeDecl",
-              "id": "http://example.org/Person",
-              "shapeExpr": {
-                "type": "Shape",
-                "expression": {
-                  "type": "TripleConstraint",
-                  "predicate": "http://example.org/name"
-                }
-              }
-            }
-          ]
-        }"#;
-        let shex = ShExDescriptor::from_reader(schema_src.as_bytes()).expect("schema parses");
-        let kind = OutputDescriptorKind::ShEx(shex);
-        assert_eq!(kind.name(), "shex");
+    fn output_descriptor_kind_lowered_variant() {
+        let kind = OutputDescriptorKind::Lowered(GraphSchema {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        });
+        assert_eq!(kind.name(), "lowered");
         assert!(!kind.accepts_anything());
-    }
-
-    /// The structural property: the enum supports swapping descriptors — a
-    /// parsed `ShEx` document against the no-contract fallback — and a
-    /// consumer matches on the variants in one function body, which IS the
-    /// swap surface.
-    #[test]
-    fn output_descriptor_kind_swap_does_not_require_fossil_hir_change() {
-        let schema_src = r#"{
-          "@context": "http://www.w3.org/ns/shex.jsonld",
-          "type": "Schema",
-          "shapes": []
-        }"#;
-        let accept_all = OutputDescriptorKind::ACCEPT_ALL_DEFAULT;
-        let shex = OutputDescriptorKind::ShEx(
-            ShExDescriptor::from_reader(schema_src.as_bytes()).expect("schema parses"),
-        );
-        let kinds: [&OutputDescriptorKind; 2] = [&accept_all, &shex];
-        for k in kinds {
-            // The match shape itself is the swap surface. A new variant
-            // requires a new arm in every host that carries one.
-            let _name: &'static str = match k {
-                OutputDescriptorKind::ShEx(_) => "shex",
-                OutputDescriptorKind::Lowered(_) => "lowered",
-                OutputDescriptorKind::AcceptAll(_) => "accept-all",
-            };
-        }
     }
 
     /// `OutputDescriptorKind` must be `Send + Sync` because the executor
