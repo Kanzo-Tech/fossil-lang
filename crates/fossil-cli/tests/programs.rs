@@ -854,11 +854,9 @@ fn the_census_counts_hello_by_hand() {
 /// stopped doing for themselves. Without it a program's sources have no
 /// forward-propagated types, which is a different (and quietly weaker) answer.
 fn introspect(path: &std::path::Path) {
-    let system = fossil_cli::host_system(path);
     let _ = fossil_introspect::introspect_program(
-        &*system,
+        fossil_cli::host_system(path),
         path,
-        &std::collections::HashMap::new(),
         &fossil_introspect::RunCreds::default(),
     );
 }

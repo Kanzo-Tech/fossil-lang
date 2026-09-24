@@ -108,7 +108,6 @@ use std::time::SystemTime;
 
 use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System, register_file};
 use fossil_descriptors_input::DescriptorCache;
-use fossil_locator::SourceAnchor;
 use lsp_server::{ErrorCode, Notification, Request, Response, ResponseError};
 use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
@@ -341,8 +340,8 @@ impl LspState {
     /// edit reaches the checker, and the disk cannot express it. Then the
     /// documents THIS file names are read from disk if nobody has them yet.
     fn open(&mut self, uri: &Uri, text: String, path: String) -> SourceFile {
-        self.introspect(&text, &path);
         let file = SourceFile::new(&self.db, text, path.clone());
+        self.introspect(file);
         register_file(&mut self.db, path, file);
         self.files.insert(uri.as_str().to_string(), file);
         self.register_named_documents(file);
@@ -362,10 +361,10 @@ impl LspState {
     /// **It must not go on the network.** The message loop is one sequential
     /// loop over one channel: a `didOpen` blocked on an `s3://` `DESCRIBE` is
     /// not one slow file, it is hover and completion dead in every other buffer
-    /// until the read returns. `fossil_introspect::Reach::Local` is the whole of
-    /// that promise — a source this host cannot `stat` is skipped, no connection
-    /// opened, and the diagnostics that needed its columns stay absent. That
-    /// gap is pinned by
+    /// until the read returns. A locator that is not a local path is dropped
+    /// here, and `fossil_introspect::Reach::Local` skips one this host cannot
+    /// `stat` — no connection opened, and the diagnostics that needed its
+    /// columns stay absent. That gap is pinned by
     /// `tests/introspected_diagnostics.rs::a_remote_source_is_not_introspected_by_the_editor`.
     ///
     /// **It must not run per keystroke.** It is called on every `didOpen` and
@@ -376,27 +375,31 @@ impl LspState {
     /// now, so a change that breaks the freshness token shows up as a budget
     /// failure rather than as a slow editor.
     ///
-    /// # Ordering, and why it is before the db
+    /// # Ordering
     ///
     /// The descriptor table is ambient — reading it inside a tracked query
     /// registers no Salsa dependency, so a write that lands after a query has
     /// memoised its answer is invisible until something else invalidates it.
-    /// Introspecting first, before the text is interned or set, means no query
-    /// in this revision has looked yet.
+    /// So this runs right after the text is interned or set: the only query in
+    /// this revision that has looked yet is the def map `program_sources`
+    /// reads, and it does not read descriptors.
     ///
     /// A URI this host cannot turn into a local path (an `untitled:` buffer, a
     /// remote workspace) resolves nothing relative and is skipped whole.
-    fn introspect(&self, text: &str, path: &str) {
-        let Some(program) = local_path(path) else {
+    fn introspect(&self, file: SourceFile) {
+        if local_path(file.path(&self.db)).is_none() {
             return;
-        };
-        let dir = program
-            .parent()
-            .map_or_else(PathBuf::new, Path::to_path_buf);
+        }
+        let sources: Vec<_> = fossil_lineage::program_sources(&self.db, file, &HashMap::new())
+            .into_iter()
+            .filter_map(|source| {
+                let locator = local_path(&source.locator)?.to_string_lossy().into_owned();
+                Some(fossil_lineage::ProgramSource { locator, ..source })
+            })
+            .collect();
         fossil_introspect::pre_introspect_and_register(
             &*self.db.system,
-            text,
-            SourceAnchor::beside(&dir),
+            &sources,
             &HashMap::new(),
             fossil_introspect::Reach::Local,
         );
@@ -437,12 +440,11 @@ impl LspState {
     fn change(&mut self, uri: &Uri, text: String, path: String) -> SourceFile {
         use salsa::Setter as _;
         if let Some(&file) = self.files.get(uri.as_str()) {
-            // Before the revision bump, for the reason in `introspect`: the
-            // descriptor table is ambient, so it has to be right before any
-            // query in this revision looks at it. A keystroke that changed no
-            // source line costs a `stat` per source and no read.
-            self.introspect(&text, &path);
             file.set_text(&mut self.db).to(text);
+            // Right after the revision bump, for the reason in `introspect`. A
+            // keystroke that changed no source line costs a `stat` per source
+            // and no read.
+            self.introspect(file);
             // The keystroke may have just written the `type { … } =
             // io.shex("…")` line that names a document. A no-op once the
             // document is in — the loop skips what the registry already holds.
