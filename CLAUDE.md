@@ -142,8 +142,9 @@ crates/
                            open — `@conn`, scheme, absolute, else the program's directory; never
                            the cwd. It was a module of `fossil-base` and is not one now: a
                            substrate «doesn't know about file paths». It depends on NOTHING and
-                           `fossil-base` does not depend on IT — each of its five readers
-                           (`fossil-hir`, `-cli`, `-introspect`, `-df`, `-lsp`) takes it direct
+                           `fossil-base` does not depend on IT — each of its readers
+                           (`fossil-hir`, `-cli`, `-introspect`, `-df`, `-lsp`, `-lineage`)
+                           takes it direct
   fossil-syntax/           lossless CST + parser
   fossil-hir/              types + name resolution + bidirectional checker + the stdlib
                            catalog. `stdlib.rs` owns the TYPES a row is written in; the ROWS
