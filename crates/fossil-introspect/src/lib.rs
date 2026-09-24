@@ -142,25 +142,19 @@ struct ScrapedRef {
 
 /// Scrape source-binding RHS source URLs from a `.fossil` file's text. It is a
 /// regex placeholder for an AST walk, and it is wrong on any binding the regex
-/// cannot see.
+/// cannot see. The browser no longer scrapes: `@fossil-lang/introspect` takes
+/// its sources from the AST, through `FossilPlayground.sources`.
 ///
-/// `@fossil-lang/introspect` scrapes the same bindings for the browser. **The
-/// alternation is no longer written here**: it is built from the catalogue, and
-/// the TypeScript builds its own from `catalogue.generated.ts`, which
-/// `cargo xtask catalogue` writes from the same file. A constructor added to
-/// `catalogue.bnf` reaches both scrapers at once.
+/// **The alternation is not written here**: it is built from the catalogue, so
+/// a constructor added to `catalogue.bnf` reaches this scrape at once.
 ///
 /// **The reader option is the second interpolation and arrives the same way.**
 /// The word a program writes for it (`delimiter`) is
-/// `fossil_base::Provider::options`, generated from the same rows, so neither
-/// this pattern nor the TypeScript one spells it. The alternation is over every
+/// `fossil_base::Provider::options`, generated from the same rows, so this
+/// pattern does not spell it. The alternation is over every
 /// option any native row declares — one today — because the scrape runs before
 /// the constructor is known and `fossil_hir::lower::check_reader_option` is
 /// what refuses an option written on the wrong row.
-///
-/// What is still written twice is the pattern AROUND the two interpolations, in
-/// two regex dialects, and `packages/introspect/tests/rust-parity.test.ts` reads
-/// this file for it. It is a `pnpm` test, so `cargo test` will not tell you.
 fn extract_source_refs(text: &str) -> Vec<ScrapedRef> {
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();

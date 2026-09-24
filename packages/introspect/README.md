@@ -1,34 +1,41 @@
 # @fossil-lang/introspect
 
-Source-binding schema introspection for the Fossil editor — the canonical TS
-home for the logic that turns a `.fossil` mapping + its sources into
-`InferredDescriptor`s the bidirectional checker (and editor field-completion)
-consume.
+Source schema introspection for the Fossil editor — the canonical TS home for
+the logic that turns the sources a program reads into the `InferredDescriptor`s
+the bidirectional checker (and editor field-completion) consume.
 
-Framework-agnostic, zero `@fossil-lang/*` runtime deps. The host injects the
-**data plane** (URL resolution + a DuckDB executor); this package owns the
-parsing, the DuckDB→Fossil primitive table, the DESCRIBE SQL, and the
-descriptor shape — so the playground and keasy read one copy of it.
+Which sources a program reads is fossil's answer, not this package's:
+`FossilPlayground.sources(handle)` walks the AST and returns a
+`ProgramSource[]` with each `@conn/path` already expanded into a locator. This
+package signs every locator in one `SourceHost.sign` call, registers each
+signed URL with the host's DuckDB under the key the program wrote, DESCRIBEs
+it through the reader its constructor names, and builds the descriptor keyed by
+that same key. It owns the DESCRIBE SQL, the DuckDB→Fossil primitive table and
+the descriptor shape; it has no runtime dependency.
 
 `crates/fossil-introspect` does the same job natively, and the two are separate
 implementations, not a shared one. Three things must agree or a program means
-something different in the browser and on the CLI: the source-binding pattern,
-the DuckDB reader each `io.` constructor picks (`read_csv_auto`,
-`read_json_auto`, `read_parquet`), and the DuckDB→primitive table.
+something different in the browser and on the CLI: the DuckDB reader each `io.`
+constructor picks (`read_csv_auto`, `read_json_auto`, `read_parquet`), what
+DuckDB calls a reader option (`delim`), and the DuckDB→primitive table.
 `tests/rust-parity.test.ts` reads that crate's source, derives all three from
-it, and goes red when they diverge — which is the only reason this README is
-allowed to say they agree. It says nothing about the rest of the two
-implementations, which are free to differ and do.
+it, and goes red when they diverge. The DESCRIBE statement itself is still
+composed on both sides; making it one is a separate step.
 
 ```ts
 import { introspect } from "@fossil-lang/introspect";
+import { DuckDBDataProtocol } from "@duckdb/duckdb-wasm";
 
-const descriptors = await introspect(mappingText, {
-  resolve: (ref) => signUrl(ref.url),        // host: ref → readable URL
-  query: (sql) => duckdbConn.query(sql),     // host: run DESCRIBE → rows
+const descriptors = await introspect(playground.sources(handle), {
+  host,                                      // SourceHost: signs locators
+  register: (name, url) =>                   // make the signed URL readable as `name`
+    db.registerFileURL(name, url, DuckDBDataProtocol.HTTP, false),
+  query: (sql) => conn.query(sql),           // run DESCRIBE → rows
 });
-// host then registers each descriptor with the editor / LSP worker.
+// host then registers each descriptor with the checker.
 ```
 
-Best-effort: a per-source failure (unreachable URL, DuckDB error) is logged and
-skipped — the editor degrades gracefully rather than hard-failing.
+Best-effort: a source the host will not sign, or one DuckDB cannot read, is
+reported through `onWarn` and skipped — the editor degrades gracefully rather
+than hard-failing. A materialised source (`io.rdf`) takes its schema from its
+shape and is not described.

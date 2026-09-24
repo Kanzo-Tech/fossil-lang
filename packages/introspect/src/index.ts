@@ -1,38 +1,36 @@
 /**
  * @fossil-lang/introspect — source-binding schema introspection (the one home).
  *
- * "Given a `.fossil` mapping + a way to read its sources, produce an
- * `InferredDescriptor` per source binding" is a single fossil capability. It
- * was copied across the playground hook and ad-hoc host code; this package is
- * the canonical TS home, and the host injects only the DATA PLANE (URL
- * resolution + a DuckDB executor), the same shape as `@fossil-lang/corpus`'s
- * injected `DuckExecutor`.
+ * "Given the sources a program reads, produce an `InferredDescriptor` per
+ * source" is a single fossil capability. Which sources a program reads is not
+ * this package's question: fossil answers it from the AST
+ * (`FossilPlayground.sources`), with every `@conn/path` already expanded into
+ * a locator. This package signs those locators through the host's
+ * `SourceHost`, DESCRIBEs each one through the host's DuckDB, and owns the
+ * DESCRIBE SQL, the DuckDB→primitive table and the descriptor shape.
  *
- * Framework-agnostic + zero @fossil-lang deps (a true leaf). The React glue
- * and the descriptor→LSP-worker push are the HOST's, not ours — fossil ships
- * no UI; the host decides how `resolve`/`query` reach its cloud + DuckDB.
+ * Framework-agnostic, and no runtime dependency: `@fossil-lang/types` is
+ * type-only, and the engine arrives as two callbacks — the same injection as
+ * `@fossil-lang/corpus`'s `QueryFn`, which is why DuckDB-WASM is not a peer.
  *
  * The primitive union below is the wire form of `fossil-graph-schema`'s
  * `Primitive`. A value outside the union is rejected when the descriptor is
  * registered.
  *
- * `fossil-introspect` does the same job natively, and the two must agree on three
- * things. Two of them stopped being an agreement and became one source: the
- * constructors that exist and the reader each picks are generated from
- * `catalogue.bnf` into `catalogue.generated.ts`, and the Rust reads the same
- * file through `fossil_base::providers`. The third — the DuckDB→primitive
- * table — is still written twice, and `tests/rust-parity.test.ts` reads that
- * crate's source and goes red when the two diverge.
- *
- * Zero @fossil-lang deps still holds: the generated module is a file in this
- * package, not a dependency on another one. `packages/executor` gets its own
- * projection of the same rows for the same reason.
+ * `fossil-introspect` does the same job natively. The constructors that exist
+ * and the reader each picks are generated from `catalogue.bnf` into
+ * `catalogue.generated.ts`, and the Rust reads the same file through
+ * `fossil_base::providers`. The DuckDB option keyword and the DuckDB→primitive
+ * table are still written twice, and so is the DESCRIBE itself;
+ * `tests/rust-parity.test.ts` reads that crate's source and goes red when the
+ * two diverge.
  */
+
+import type { ProgramSource, SourceHost } from "@fossil-lang/types";
 
 import {
   NATIVE_READERS,
   NATIVE_ROWS,
-  READER_OPTIONS,
   type NativeRow,
 } from "./catalogue.generated.js";
 
@@ -60,12 +58,10 @@ export interface InferredColumn {
 
 export interface InferredDescriptor {
   /**
-   * The source URI exactly as the program writes it (`data/users.csv` from
-   * `users := io.csv("data/users.csv")`) — the key the compiler looks the
-   * descriptor up under, and NOT the resolved URL this package fetched. The
-   * written URI is the only string the host and the checker both see: the
-   * checker has neither the `@conn` credentials nor the program directory the
-   * resolution needs.
+   * The source's `ProgramSource.key` — what the program wrote
+   * (`@warehouse/users.csv`), not its locator and not the signed URL. It is
+   * the key the compiler looks the descriptor up under, and a connection that
+   * moves changes the locator without moving the key.
    */
   uri: string;
   /** Ordered, position-significant columns. */
@@ -84,31 +80,16 @@ export interface InferredDescriptor {
  *
  * It was a hand-written union of three literals. It is `catalogue.bnf`'s now,
  * through `cargo xtask catalogue`, which is the same source the Rust reads: a
- * row added there reaches this type, the reader table below and the scrape
- * alternation at once, and none of the three can be the one that was forgotten.
+ * row added there reaches this type and the reader table below at once.
  */
 export type SourceFormat = NativeRow;
 
-/** A source binding scraped from a `.fossil` mapping. */
-export interface SourceRef {
-  sourceName: string;
-  /** Which `io.` constructor wrote it — it chooses the DuckDB reader. */
-  format: SourceFormat;
-  url: string;
-  /**
-   * The reader option the binding named — `io.csv("u.csv", delimiter = "|")`.
-   *
-   * **The DESCRIBE has to carry it or it describes a different file than the
-   * run reads.** A pipe-delimited CSV read with a comma is ONE column called
-   * `id|name|city`, so a descriptor built without the option types the source
-   * out of a schema the executor never produces, and the mapping is refused
-   * for naming columns that are in fact there.
-   *
-   * Which rows take one and what it is called are `catalogue.bnf`'s, through
-   * `READER_OPTIONS`; what DuckDB calls it (`delim`) is this file's, because
-   * that is the engine this package talks to.
-   */
-  option?: string;
+type NativeSource = ProgramSource & { format: SourceFormat };
+
+/** Whether this package can DESCRIBE a source — a materialised row
+ *  (`io.rdf`) takes its schema from its shape instead. */
+function isNative(source: ProgramSource): source is NativeSource {
+  return (NATIVE_ROWS as readonly string[]).includes(source.format);
 }
 
 /** A single row from DuckDB's `DESCRIBE SELECT * FROM <reader>(...)`. */
@@ -150,20 +131,6 @@ export function duckdbTypeToFossilPrimitive(t: string): InferredPrimitive {
 }
 
 /**
- * Every name that is a reader option of some native row, in catalogue order —
- * the scrape's second alternation.
- *
- * `["delimiter"]` today. It is not written here for the reason the constructor
- * list is not: `catalogue.bnf` declares `io.csv`'s second position as
- * `delimiter = String?` and `cargo xtask catalogue` projects it into
- * `READER_OPTIONS`, so the word a program writes is the same word on both
- * sides of the seam.
- */
-const READER_OPTION_NAMES: readonly string[] = Object.values(
-  READER_OPTIONS,
-).flat();
-
-/**
  * What DuckDB calls each row's reader option.
  *
  * **This is the ENGINE's vocabulary, and that is why it is written here rather
@@ -176,41 +143,6 @@ const READER_OPTION_NAMES: readonly string[] = Object.values(
 const DUCKDB_OPTION_KEYWORD: Partial<Record<SourceFormat, string>> = {
   csv: "delim",
 };
-
-/**
- * The source-binding pattern. Exported because it is the thing the parity
- * guard compares against `fossil-introspect`'s, and because a caller that wants to
- * ask "does this text bind any source?" should not write a second one.
- *
- * Not a shared `RegExp` instance: `g` carries `lastIndex`, so one object
- * reused across calls skips matches.
- */
-export const SOURCE_REF_PATTERN =
-  `(\\w[\\w\\d_]*)\\s*:=\\s*io\\.(${NATIVE_ROWS.join("|")})\\(\\s*['"]([^'"]+)['"](?:\\s*,\\s*(?:${READER_OPTION_NAMES.join("|")})\\s*=\\s*['"]([^'"]*)['"])?`;
-
-/**
- * Scrape source-binding RHS URLs from a `.fossil` text.
- *
- * LIMITATIONS (regex placeholder; an AST walk supersedes it): no multi-line
- * constructor, no interleaved comments between `:=` and `io.csv(`, no
- * backslash-escaped quotes inside the URL string.
- */
-export function extractSourceRefs(text: string): SourceRef[] {
-  const re = new RegExp(SOURCE_REF_PATTERN, "g");
-  const out: SourceRef[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m[1] && m[2] && m[3]) {
-      out.push({
-        sourceName: m[1],
-        format: m[2] as SourceFormat,
-        url: m[3],
-        option: m[4],
-      });
-    }
-  }
-  return out;
-}
 
 /**
  * The DuckDB table function each constructor reads through.
@@ -228,11 +160,15 @@ export function extractSourceRefs(text: string): SourceRef[] {
 const READERS: Record<SourceFormat, string> = NATIVE_READERS;
 
 /**
- * The canonical DESCRIBE SQL for a resolved source URL. The URL is
+ * The canonical DESCRIBE SQL for a readable path. The path is
  * single-quote-escaped (a SQL string literal, not a prepared parameter), and
  * `format` is the constructor the binding was written with — there is no
  * default, because a defaulted reader is how a `.parquet` source ends up read
  * as CSV.
+ *
+ * `option` is the reader option the binding named, and the DESCRIBE has to
+ * carry it or it describes a different file than the run reads: a
+ * pipe-delimited CSV read with a comma is ONE column called `id|name|city`.
  */
 export function describeSql(
   url: string,
@@ -249,8 +185,8 @@ export function describeSql(
 }
 
 /**
- * Build the descriptor a `DESCRIBE` produced for one source. Keyed by the URI
- * the program wrote, not the binding name and not the URL `resolve` returned.
+ * Build the descriptor a `DESCRIBE` produced for one source. Keyed by what
+ * the program wrote, not the binding name and not the URL that was read.
  * Columns with empty/missing names are dropped (defensive against malformed
  * rows).
  *
@@ -276,23 +212,27 @@ export function buildDescriptor(
 }
 
 /**
- * Host-injected data plane. `resolve` turns a scraped ref into a readable URL
- * string (signed cloud URL, bundled example, server proxy — the host's call);
- * `query` runs a SQL string and returns the rows (a DuckDB-WASM connection, a
- * server round-trip — the host's call). This is the `@fossil-lang/corpus`
- * injection pattern applied to introspection.
+ * What a host lends introspection: its credentials and its DuckDB.
+ *
+ * `register` makes a signed URL readable under a name — in DuckDB-WASM,
+ * `db.registerFileURL(name, url, DuckDBDataProtocol.HTTP, false)`. The name
+ * is the source's key, so the DESCRIBE reads what the program wrote and the
+ * signature never enters SQL text or the error DuckDB raises about it. It is
+ * a callback rather than a handle because the protocol is a runtime enum of
+ * `@duckdb/duckdb-wasm`, and taking it would make that package a peer.
  */
 export interface IntrospectIO {
-  resolve(ref: SourceRef): Promise<string> | string;
-  query(sql: string): Promise<readonly DescribeRow[]> | readonly DescribeRow[];
+  host: SourceHost;
+  register(name: string, url: string): Promise<void>;
+  query(sql: string): Promise<readonly DescribeRow[]>;
   /**
-   * Optional freshness token for the source behind `resolvedUrl` — an ETag, a
-   * `Last-Modified`, a version id. Only the host can produce one cheaply,
-   * because only the host knows how it fetched the file. Absent, descriptors
-   * carry `""` and the compiler re-introspects on every compile.
+   * A token for the state of the file behind `url` — an ETag, a
+   * `Last-Modified`, a version id. Only the host can produce one cheaply.
+   * Absent, descriptors carry `""` and the compiler re-introspects on every
+   * compile.
    */
-  freshness?(ref: SourceRef, resolvedUrl: string): Promise<string> | string;
-  /** Optional per-source failure sink; defaults to `console.warn`. */
+  freshness?(source: ProgramSource, url: string): Promise<string> | string;
+  /** Per-source failure sink; defaults to `console.warn`. */
   onWarn?(message: string, err: unknown): void;
 }
 
@@ -302,29 +242,41 @@ function defaultWarn(message: string, err: unknown): void {
 }
 
 /**
- * Introspect every source binding in `mappingText` and return the descriptors.
- * Best-effort: a per-source failure (unreachable URL, DuckDB error) is logged
- * and skipped, never thrown — the editor degrades gracefully to no field
- * completion for that source. The host registers the returned descriptors with
- * the editor / LSP worker.
+ * Describe every native source and return the descriptors, in `sources`
+ * order. Every locator is signed in one `host.sign` call.
+ *
+ * Best-effort: a source the host will not sign, or one DuckDB cannot read, is
+ * reported through `onWarn` and skipped, never thrown — the editor degrades
+ * to no field completion for that source. The host registers the returned
+ * descriptors with the checker.
  */
 export async function introspect(
-  mappingText: string,
+  sources: readonly ProgramSource[],
   io: IntrospectIO,
 ): Promise<InferredDescriptor[]> {
   const warn = io.onWarn ?? defaultWarn;
-  const out: InferredDescriptor[] = [];
-  for (const ref of extractSourceRefs(mappingText)) {
-    try {
-      const url = await io.resolve(ref);
-      const rows = await io.query(describeSql(url, ref.format, ref.option));
-      out.push(buildDescriptor(ref.url, rows, await io.freshness?.(ref, url)));
-    } catch (err) {
-      warn(
-        `[introspect] source \`${ref.sourceName}\` (url=\`${ref.url}\`) failed`,
-        err,
-      );
-    }
-  }
-  return out;
+  const native = sources.filter(isNative);
+  if (native.length === 0) return [];
+
+  const signed = await io.host.sign([...new Set(native.map((s) => s.locator))]);
+  const described = await Promise.all(
+    native.map(async (source) => {
+      const url = signed[source.locator];
+      try {
+        if (!url) throw new Error("the host does not sign this locator");
+        await io.register(source.key, url);
+        const rows = await io.query(
+          describeSql(source.key, source.format, source.option),
+        );
+        return buildDescriptor(source.key, rows, await io.freshness?.(source, url));
+      } catch (err) {
+        warn(
+          `[introspect] source \`${source.binding}\` (\`${source.key}\`) failed`,
+          err,
+        );
+        return undefined;
+      }
+    }),
+  );
+  return described.filter((d): d is InferredDescriptor => d !== undefined);
 }

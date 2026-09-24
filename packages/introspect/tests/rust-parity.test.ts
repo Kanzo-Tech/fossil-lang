@@ -2,73 +2,52 @@
  * The parity guard.
  *
  * `packages/introspect` and `crates/fossil-introspect` implement one capability
- * twice — the native half was `fossil-engine`'s until introspection became the
- * host's job — and three things had to agree or the browser and the CLI answer the
- * same program differently: the source-binding pattern, the DuckDB reader each
- * constructor picks, and the DuckDB→primitive table. Until this file existed
- * the agreement was asserted in a comment, and the comment was wrong in both
- * directions — the TS pattern had never learned `io.parquet`, and the comment
- * describing the Rust dispatch described a version of it that predated the
- * `read_json_auto` / `read_parquet` arms.
+ * twice — the browser's DESCRIBE through DuckDB-WASM and the native host's
+ * through `duckdb` — and they must agree or the browser and the CLI answer the
+ * same program differently. Which sources a program reads is not one of the
+ * things they share: the browser takes them from fossil's AST
+ * (`FossilPlayground.sources`), so the regex that used to be compared here is
+ * gone from this side, and this file builds its `ProgramSource`s by hand.
  *
- * **Two of the three stopped being an agreement.** Which constructors exist and
- * which reader each one names now come from `catalogue.bnf` on both sides —
- * `cargo xtask catalogue` writes `providers/generated.rs` and
- * `catalogue.generated.ts` from it, and neither side carries a list. So what
- * this file checks changed shape:
+ * What still has to agree, and how each is checked:
  *
- * - **The pattern** is still two regexes in two dialects, and the SCAFFOLD
- *   around the alternation is still written twice. That comparison stays,
- *   against the Rust source, with the alternation substituted from the
- *   catalogue rather than scraped.
- * - **The readers** are now two GENERATED projections of one file, by two
+ * - **The readers** are two GENERATED projections of `catalogue.bnf`, by two
  *   different emitters. `cargo xtask catalogue --check` proves each file
  *   matches its own emitter and nothing compares the two, so this does: it
- *   reads `providers/generated.rs` and asserts `describeSql` picks what the
- *   Rust names, for every row, with neither side holding a row the other lacks.
- * - **The type table** is unchanged — it is not catalogue data, it is still
- *   written twice by hand, and this still reads the Rust for it.
+ *   reads `providers/generated.rs` and asserts `introspect` DESCRIBEs through
+ *   what the Rust names, for every row, with neither side holding a row the
+ *   other lacks.
+ * - **The option keyword** — what DuckDB calls a row's reader option — is
+ *   written by hand on both sides, and this reads `duckdb_option_keyword`.
+ * - **The type table** is written by hand on both sides, and this reads
+ *   `duckdb_type_to_fossil_primitive`.
+ *
+ * The DESCRIBE statement itself is still composed twice and is not compared;
+ * making it one is a separate step.
  *
  * Nothing here restates a value as a literal — a copy of the answer cannot
  * notice the answer changing. Every extraction throws when the shape it expects
  * is gone: a guard that silently finds nothing and passes is the failure this
  * file exists to avoid, so "the Rust moved" fails here rather than going quiet.
  *
- * WHAT IT CANNOT PROVE, beside what it can:
- *
- * - **That either side is right.** It proves they say the same thing. Both
- *   scrapers are wider than the lexer — `\w` admits a leading digit, which
- *   `fossil-syntax`'s `Ident` (`[A-Za-z_][A-Za-z0-9_]*`) does not — and they
- *   are equally wrong together.
- * - **That the Rust behaves as its source reads.** This is a text comparison:
- *   it does not run `fossil-introspect`. A change to how the crate *uses*
- *   the pattern it compiles is invisible here.
- * - **That identical pattern text means identical matches.** Rust's `\w` is
- *   Unicode-aware and JS's is ASCII, so a non-ASCII binding name is scraped
- *   natively and skipped in the browser. Nothing in fossil can name one
- *   today, which is why this is a note and not a failing test.
- * - **That the generated files are current.** `cargo xtask catalogue --check`
- *   and `crates/xtask/tests/catalogue_generated.rs` own that. Two stale files
- *   that are stale in the same way agree here.
+ * WHAT IT CANNOT PROVE: that either side is right (only that they say the same
+ * thing); that the Rust behaves as its source reads (this does not run
+ * `fossil-introspect`); that the generated files are current
+ * (`crates/xtask/tests/catalogue_generated.rs` owns that).
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ProgramSource } from "@fossil-lang/types";
 import { describe, expect, it } from "vitest";
 import {
-  SOURCE_REF_PATTERN,
-  describeSql,
   duckdbTypeToFossilPrimitive,
-  extractSourceRefs,
+  introspect,
   type InferredPrimitive,
   type SourceFormat,
 } from "../src/index.js";
-import { NATIVE_ROWS, READER_OPTIONS } from "../src/catalogue.generated.js";
+import { NATIVE_ROWS } from "../src/catalogue.generated.js";
 
-// It was `crates/fossil-engine/src/lib.rs`. The scrape moved with the code:
-// introspection is the HOST's job and lives in `fossil-introspect` now, which
-// is what let `fossil-engine` stop linking a database. The pattern and the type
-// table did not change — this file compares the same two implementations.
 const ENGINE_REL = "crates/fossil-introspect/src/lib.rs";
 
 /** The repo root, found by walking up until the engine crate is under it. */
@@ -100,34 +79,6 @@ function must(re: RegExp, what: string): RegExpMatchArray {
   return m;
 }
 
-/**
- * The pattern `extract_source_refs` compiles, with the alternation filled in.
- *
- * The Rust used to carry the alternation as a literal; it interpolates
- * `{alternation}` from the catalogue now, so this substitutes the same source
- * the TypeScript uses. What the comparison proves is therefore narrower and
- * truer than before: the SCAFFOLD around the alternation, which is genuinely
- * written twice in two regex dialects, still agrees.
- */
-function rustPattern(): string {
-  const fn = must(
-    /fn extract_source_refs[\s\S]*?format!\(\s*r#"([\s\S]*?)"#\s*\)/,
-    "`extract_source_refs`'s pattern literal",
-  );
-  const literal = fn[1]!;
-  for (const hole of ["{alternation}", "{options}"]) {
-    if (!literal.includes(hole)) {
-      throw new Error(
-        `parity guard: the Rust pattern no longer interpolates \`${hole}\`; ` +
-          "if it went back to a literal list, this guard must compare it to the catalogue",
-      );
-    }
-  }
-  return literal
-    .replace("{alternation}", NATIVE_ROWS.join("|"))
-    .replace("{options}", Object.values(READER_OPTIONS).flat().join("|"));
-}
-
 /** The generated Rust catalogue, the counterpart of `catalogue.generated.ts`. */
 const GENERATED_REL = "crates/fossil-base/src/providers/generated.rs";
 
@@ -143,7 +94,7 @@ const GENERATED_REL = "crates/fossil-base/src/providers/generated.rs";
  * derived `CsvAuto` from `read_csv_auto` one way in Rust and another way in
  * TypeScript would pass every other check in the tree.
  */
-function rustNativeReaders(): Map<string, string> {
+function rustNativeReaders(): Map<string, { variant: string; fn: string }> {
   let dir = dirname(fileURLToPath(import.meta.url));
   let generated = "";
   for (let i = 0; i < 8; i++) {
@@ -166,7 +117,7 @@ function rustNativeReaders(): Map<string, string> {
     fns.set(m[1]!, m[2]!);
   }
   // row name → variant, from each `pub static` block.
-  const out = new Map<string, string>();
+  const out = new Map<string, { variant: string; fn: string }>();
   for (const m of generated.matchAll(
     /pub static \w+: Provider = Provider \{\s*name: "([^"]+)",[\s\S]*?reads_rows: ([^\n]+),/g,
   )) {
@@ -178,12 +129,34 @@ function rustNativeReaders(): Map<string, string> {
         `parity guard: \`NativeReader::${native[1]}\` has no \`table_function\` arm`,
       );
     }
-    out.set(m[1]!, fn);
+    out.set(m[1]!, { variant: native[1]!, fn });
   }
   if (out.size === 0) {
     throw new Error(
       "parity guard read no native rows out of the generated Rust; it changed shape",
     );
+  }
+  return out;
+}
+
+/** `NativeReader` variant → the DuckDB option keyword, or `null` for none. */
+function rustOptionKeywords(): Map<string, string | null> {
+  const block = must(
+    /fn duckdb_option_keyword[\s\S]*?match r \{([\s\S]*?)\n    \}/,
+    "`duckdb_option_keyword`'s match",
+  )[1]!;
+  const out = new Map<string, string | null>();
+  for (const line of block.split("\n")) {
+    const t = line.trim();
+    if (t === "" || t.startsWith("//")) continue;
+    const arm = t.match(/^((?:fossil_base::NativeReader::\w+\s*\|\s*)*fossil_base::NativeReader::\w+) => (Some\("([^"]+)"\)|None),$/);
+    if (!arm) throw new Error(`parity guard cannot read option arm \`${t}\``);
+    for (const v of arm[1]!.split("|")) {
+      out.set(v.trim().replace("fossil_base::NativeReader::", ""), arm[3] ?? null);
+    }
+  }
+  if (out.size === 0) {
+    throw new Error("parity guard read no option arms; the match changed shape");
   }
   return out;
 }
@@ -241,26 +214,6 @@ function rustTypeTable(): {
   return { exact, prefixes, fallback };
 }
 
-describe("source-binding pattern parity with fossil-introspect", () => {
-  it("is character-for-character the Rust one", () => {
-    expect(SOURCE_REF_PATTERN).toBe(rustPattern());
-  });
-
-  it("extracts every constructor the Rust pattern admits", () => {
-    const formats = mustFormats();
-    const text = formats
-      .map((f, i) => `s${i} := io.${f}("data/${i}.${f}")`)
-      .join("\n");
-    expect(extractSourceRefs(text)).toEqual(
-      formats.map((f, i) => ({
-        sourceName: `s${i}`,
-        format: f,
-        url: `data/${i}.${f}`,
-      })),
-    );
-  });
-});
-
 /** The constructors this package knows, checked for plausibility first. */
 function mustFormats(): SourceFormat[] {
   const formats = [...NATIVE_ROWS] as SourceFormat[];
@@ -275,21 +228,71 @@ function mustFormats(): SourceFormat[] {
   return formats;
 }
 
+/** One source per native row, as fossil would report it, with `option` on each. */
+function sourcesFor(formats: readonly SourceFormat[], option?: string): ProgramSource[] {
+  return formats.map((format, i) => ({
+    binding: `s${i}`,
+    key: `data/${i}.${format}`,
+    locator: `s3://bucket/data/${i}.${format}`,
+    format,
+    option,
+  }));
+}
+
+/** The DESCRIBE `introspect` sends for each source, in order. */
+async function describesOf(sources: ProgramSource[]): Promise<string[]> {
+  const seen: string[] = [];
+  await introspect(sources, {
+    host: {
+      connections: async () => ({}),
+      sign: async (locators) => Object.fromEntries(locators.map((l) => [l, l])),
+    },
+    register: async () => {},
+    query: async (sql) => {
+      seen.push(sql);
+      return [];
+    },
+    onWarn: (message, err) => {
+      throw new Error(`${message}: ${String(err)}`);
+    },
+  });
+  return seen;
+}
+
 describe("reader dispatch parity with the generated Rust catalogue", () => {
-  it("picks the reader the generated Rust names, for every constructor", () => {
+  it("describes every constructor through the reader the generated Rust names", async () => {
     const readers = rustNativeReaders();
-    for (const format of mustFormats()) {
-      const reader = readers.get(format);
-      expect(reader, `no native reader for \`io.${format}\` in the Rust`).toBeDefined();
-      expect(describeSql("x", format)).toBe(
-        `DESCRIBE SELECT * FROM ${reader}('x')`,
-      );
-    }
+    const formats = mustFormats();
+    const sources = sourcesFor(formats);
+    expect(await describesOf(sources)).toEqual(
+      sources.map((s) => {
+        const reader = readers.get(s.format);
+        expect(reader, `no native reader for \`io.${s.format}\` in the Rust`).toBeDefined();
+        return `DESCRIBE SELECT * FROM ${reader!.fn}('${s.key}')`;
+      }),
+    );
   });
 
   it("names the same native rows on both sides — neither has one the other lacks", () => {
     expect([...rustNativeReaders().keys()].sort()).toEqual(
       [...mustFormats()].sort(),
+    );
+  });
+});
+
+describe("reader option parity with fossil-introspect", () => {
+  it("sends a row's option under the keyword the Rust names, and drops it where the Rust has none", async () => {
+    const readers = rustNativeReaders();
+    const keywords = rustOptionKeywords();
+    const sources = sourcesFor(mustFormats(), "|");
+    expect(await describesOf(sources)).toEqual(
+      sources.map((s) => {
+        const { variant, fn } = readers.get(s.format)!;
+        expect(keywords.has(variant), `no option arm for \`${variant}\``).toBe(true);
+        const keyword = keywords.get(variant);
+        const args = keyword ? `, ${keyword}='|'` : "";
+        return `DESCRIBE SELECT * FROM ${fn}('${s.key}'${args})`;
+      }),
     );
   });
 });
