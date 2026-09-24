@@ -179,7 +179,6 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
 pub static SHEX: Provider = Provider {
     name: "shex",
     extensions: &["shex", "shexj", "shexc"],
-    options: &[],
     reads_rows: None,
     reads_types: Some(decode_lines),
 };

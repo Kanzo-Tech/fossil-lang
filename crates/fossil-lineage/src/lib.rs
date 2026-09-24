@@ -280,7 +280,6 @@ mod tests {
         static ROW: Provider = Provider {
             name: "shex",
             extensions: &["shex"],
-            options: &[],
             reads_rows: None,
             // Any `DecodeTypes` will do — what is under test is the projection,
             // and `fossil-base`'s reference decoder is the one row this crate can

@@ -403,25 +403,6 @@ impl Row {
     const fn needs_a_decoder(&self) -> bool {
         self.decodes.is_some()
     }
-
-    /// The READER OPTIONS this row takes: the named, optional positions of its
-    /// signature, in file order.
-    ///
-    /// Derived rather than declared, which is why there is no `option` clause
-    /// in `catalogue.bnf`. `delimiter = String?` already says everything a
-    /// clause would: `=` says the call site writes the name, `?` says the
-    /// program may leave it off. A second spelling of the same fact is the
-    /// drift this file exists to prevent, and it would be a spelling of it in
-    /// the same file.
-    #[must_use]
-    pub fn options(&self) -> Vec<&str> {
-        self.call
-            .iter()
-            .flat_map(|(sig, _)| &sig.params)
-            .filter(|p| p.named && p.arity == Arity::Optional)
-            .map(|p| p.name.as_str())
-            .collect()
-    }
 }
 
 /// Everything `catalogue.bnf` declares.
@@ -769,8 +750,6 @@ fn emit_row(out: &mut String, row: &Row) {
         "    extensions: {},",
         extensions_literal(&row.extensions)
     );
-    let options: Vec<String> = row.options().iter().map(|o| (*o).to_owned()).collect();
-    let _ = writeln!(out, "    options: {},", extensions_literal(&options));
     let _ = writeln!(out, "    reads_rows: {reads_rows},");
     let _ = writeln!(out, "    reads_types: {reads_types},");
     let _ = writeln!(out, "}};\n");

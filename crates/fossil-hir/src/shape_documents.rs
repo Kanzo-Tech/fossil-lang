@@ -171,7 +171,6 @@ mod tests {
     static NOTHING: Provider = Provider {
         name: "nothing",
         extensions: &["shex", "ttl"],
-        options: &[],
         reads_rows: None,
         reads_types: Some(decode_nothing),
     };
