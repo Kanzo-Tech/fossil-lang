@@ -25,6 +25,20 @@ export interface MissingDocument {
   locator: string;
 }
 
+/** A data source a program reads, as fossil resolved it — what introspection
+ *  DESCRIBEs. `key` is what the program wrote, and the descriptor is
+ *  registered under it; `locator` is what gets signed and read. */
+export interface ProgramSource {
+  /** The binding the source is read into (`users` in `users := io.csv(…)`). */
+  binding: string;
+  key: string;
+  locator: string;
+  /** The `io.` constructor — it chooses the reader. */
+  format: string;
+  /** The reader option the binding named (`delimiter = "|"`), verbatim. */
+  option?: string;
+}
+
 /** A document that stayed missing, and why. The checker reports it as a
  *  diagnostic on its own; a run treats it as a failure. */
 export interface UnreadDocument extends MissingDocument {
