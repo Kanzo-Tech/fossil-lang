@@ -72,6 +72,8 @@ fn to_js_error(error: &GraphError) -> JsError {
 /// - `op` — the [`Operation`] as `{ verb, params }` JSON.
 /// - `manifest_files` — `{ rel_path: yaml_string }` for the `GraphAr` manifest
 ///   (the host pre-fetches these; they're small).
+/// - `catalog` — the database the corpus's relations were registered in, or
+///   `undefined` for bare names (`fossil_graph::dispatch`'s `catalog`).
 /// - `query` — `(sql: string) => Promise<rows>` running on the host's DuckDB-WASM.
 ///
 /// Returns the verb's `Result` as a JS value. The `#[wasm_bindgen] async fn`
@@ -85,6 +87,7 @@ fn to_js_error(error: &GraphError) -> JsError {
 pub async fn dispatch_graph(
     op: JsValue,
     manifest_files: JsValue,
+    catalog: Option<String>,
     query: js_sys::Function,
 ) -> Result<JsValue, JsError> {
     // **This binding grants raw SQL, and it is one call that says so.**
@@ -105,7 +108,7 @@ pub async fn dispatch_graph(
         serde_wasm_bindgen::from_value(manifest_files).map_err(JsError::from)?;
     let manifest = Manifest::load(&MapSource(files)).map_err(|e| to_js_error(&e))?;
     let exec = JsExecutor { query };
-    let result = fossil_graph::dispatch(&op, &manifest, &exec)
+    let result = fossil_graph::dispatch(&op, &manifest, catalog.as_deref(), &exec)
         .await
         .map_err(|e| to_js_error(&e))?;
     // `json_compatible()` serialises structs/maps as plain JS objects (not the
