@@ -50,7 +50,7 @@ function recording(): JobOutput & { completed?: CompletePayload } {
 
 beforeAll(async () => {
   const wasmPath = fileURLToPath(new URL('../pkg/fossil_df_wasm_bg.wasm', import.meta.url));
-  await initFossilExecutor({ wasmUrl: (await readFile(wasmPath)) as unknown as URL });
+  await initFossilExecutor(await readFile(wasmPath));
 });
 
 describe('runJob', () => {

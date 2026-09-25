@@ -3,7 +3,7 @@
  *
  * Public API (one of the @fossil-lang/* packages; `git ls-files packages` is
  * the list):
- * - {@link initFossilWasm} — consumer-controlled .wasm URL loader (memoised).
+ * - {@link initFossilWasm} — boots the module; its `.wasm` is a bundler asset (memoised).
  * - {@link tokenize} — calls the Rust lexer, returns TokenRow[].
  * - {@link tokenKinds} — the legend for TokenRow.kind: variant names by index.
  * - {@link semanticLegend} — returns the LSP SemanticTokensLegend.
@@ -16,9 +16,8 @@
  * Consumer pattern (wasm-bindgen --target web):
  *
  *   import { initFossilWasm, tokenize } from '@fossil-lang/wasm';
- *   import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';  // Vite
  *
- *   await initFossilWasm({ wasmUrl });
+ *   await initFossilWasm();
  *   const tokens = tokenize('User := io.csv("data/people.csv")');
  */
 
@@ -29,7 +28,7 @@
 // `init()`'s wasm instance from the one the functions use (the crash the
 // codemirror tokenizer hit on the main thread). This entry only re-exports.
 export { initFossilWasm } from './load.js';
-export type { InitFossilWasmOpts } from './load.js';
+export type { InitInput } from './load.js';
 
 export {
   start_lsp_worker,

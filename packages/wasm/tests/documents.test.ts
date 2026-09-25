@@ -13,7 +13,7 @@ import { initFossilWasm, FossilPlayground } from '../src/index.js';
 beforeAll(async () => {
   const wasmPath = fileURLToPath(new URL('../pkg/fossil_wasm_bg.wasm', import.meta.url));
   const bytes = await readFile(wasmPath);
-  await initFossilWasm({ wasmUrl: bytes as unknown as URL });
+  await initFossilWasm(bytes);
 });
 
 const PROGRAM = `type { Person } := io.shex("@vocab/person.shex")

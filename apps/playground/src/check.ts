@@ -36,7 +36,6 @@ import {
   type HoverRow,
   type InferredDescriptorJson,
 } from '@fossil-lang/wasm';
-import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
 import { resolveDocuments } from '@fossil-lang/types';
 
 import { HOST, PROGRAM_PATH } from './example.js';
@@ -63,6 +62,21 @@ let cost: BundleCost | null = null;
 /** The text last pushed into the workspace. See {@link sync}. */
 let pushed: string | null = null;
 
+/**
+ * What the browser fetched for the `.wasm` whose file name starts with `stem`, since `started`.
+ *
+ * Read off Resource Timing rather than a `fetch` of our own: the module locates its `.wasm`
+ * itself (`new URL(…, import.meta.url)`, emitted by Vite as `assets/<stem>-<hash>.wasm`), so
+ * the app does not hold the bytes — it only observes the request the glue made.
+ */
+export function measured(stem: string, started: number): BundleCost {
+  const entry = performance
+    .getEntriesByType('resource')
+    .filter((e): e is PerformanceResourceTiming => e.name.includes(stem) && /\.wasm(\?|$)/.test(e.name))
+    .at(-1);
+  return { bytes: entry?.decodedBodySize ?? 0, ms: Math.round(performance.now() - started) };
+}
+
 /** The measured cost of the checker bundle, or `null` before {@link load}. */
 export function checkerCost(): BundleCost | null {
   return cost;
@@ -71,17 +85,14 @@ export function checkerCost(): BundleCost | null {
 /**
  * Fetch + instantiate the checker, open the program, read the documents it names.
  *
- * Measured rather than declared: the `.wasm` is fetched here as a `Response` so its
- * `Content-Length` is readable, and `initFossilWasm` accepts one directly — wasm-bindgen's
- * `--target web` init takes `module_or_path`, and a `Response` is the streaming path.
+ * Measured rather than declared: {@link measured} reads the request the module made for its
+ * own `.wasm` — `initFossilWasm()` takes nothing, because the bundler emitted that file.
  */
 export async function load(program: string): Promise<void> {
   if (playground) return;
   const started = performance.now();
-  const response = await fetch(wasmUrl);
-  const buffer = await response.arrayBuffer();
-  await initFossilWasm({ wasmUrl: new Response(buffer, { headers: { 'content-type': 'application/wasm' } }) });
-  cost = { bytes: buffer.byteLength, ms: Math.round(performance.now() - started) };
+  await initFossilWasm();
+  cost = measured('fossil_wasm_bg', started);
 
   playground = new FossilPlayground();
   programHandle = playground.openFile(PROGRAM_PATH, program);

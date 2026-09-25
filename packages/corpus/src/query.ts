@@ -80,7 +80,6 @@ export type QueryFn = (sql: string) => Promise<QueryRow[]>;
  * ```ts
  * const addressing = await open(base, {
  *   readText: async (url) => (await fetch(url)).text(),
- *   wasmUrl,
  * });
  * ```
  *

@@ -67,7 +67,7 @@ const CORPUS_WASM = new Response(
 
 const corpus = await open(root, {
   query: async (sql) => duckQuery(sql),
-  wasmUrl: CORPUS_WASM,
+  wasm: CORPUS_WASM,
 });
 const type = corpus.types.vertices[0].type;
 const extent = await corpus.extent();

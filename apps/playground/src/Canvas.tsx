@@ -37,7 +37,6 @@ import { ModeComparison, START, StreamingDetail, WholeDetail, type Mode, type Mo
 import Mask from './Mask.js';
 import { coordinatorFor } from './mosaic.js';
 import PinFrame from './PinFrame.js';
-import { CORPUS_WASM_URL } from './corpus.js';
 import type { TileBox } from './stream.js';
 import { corpusSource, type SliceCost } from './tiles.js';
 import { wholeSource, type WholeCost } from './whole.js';
@@ -158,7 +157,7 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
    * own members, once. `bench.base` is absolute for the reason `bench.ts` records: DuckDB resolves
    * a URL inside its Worker, where a relative one names the wrong directory.
    */
-  const corpus = useMemo(() => open(bench.base, { query: duck.query, wasmUrl: CORPUS_WASM_URL }), [bench]);
+  const corpus = useMemo(() => open(bench.base, { query: duck.query }), [bench]);
 
   const streaming: BoundedSource = useMemo(
     () => corpusSource({ corpus, boxes, channels, onCost, slots }),

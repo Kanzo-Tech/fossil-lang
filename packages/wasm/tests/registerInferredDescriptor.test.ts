@@ -26,7 +26,7 @@ beforeAll(async () => {
     new URL('../pkg/fossil_wasm_bg.wasm', import.meta.url),
   );
   const bytes = await readFile(wasmPath);
-  await initFossilWasm({ wasmUrl: bytes as unknown as URL });
+  await initFossilWasm(bytes);
 });
 
 describe('FossilPlayground.registerInferredDescriptor', () => {

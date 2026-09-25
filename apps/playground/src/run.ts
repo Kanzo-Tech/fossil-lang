@@ -14,7 +14,7 @@
  */
 import type { ExecutorResult, SourceInput } from '@fossil-lang/executor';
 
-import type { BundleCost } from './check.js';
+import { measured, type BundleCost } from './check.js';
 import { resolveDocuments } from '@fossil-lang/types';
 
 import { absolutise, DEST, HOST, SOURCE_BYTES } from './example.js';
@@ -29,22 +29,16 @@ export function executorCost(): BundleCost | null {
 /**
  * Compile and execute `program`, returning the GraphAr files and the manifest.
  *
- * The `.wasm` is fetched as bytes so its size is measurable; `initFossilExecutor` is
- * memoised, so the cost is only paid once and the measurement only recorded once.
+ * `initFossilExecutor` is memoised, so the cost is only paid once and the measurement only
+ * recorded once; see {@link measured} for where the size comes from.
  */
 export async function run(program: string): Promise<ExecutorResult> {
-  const [{ FossilExecutor, initFossilExecutor }, { default: wasmUrl }] = await Promise.all([
-    import('@fossil-lang/executor'),
-    import('@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm?url'),
-  ]);
+  const { FossilExecutor, initFossilExecutor } = await import('@fossil-lang/executor');
 
   if (!cost) {
     const started = performance.now();
-    const buffer = await (await fetch(wasmUrl)).arrayBuffer();
-    await initFossilExecutor({
-      wasmUrl: new Response(buffer, { headers: { 'content-type': 'application/wasm' } }),
-    });
-    cost = { bytes: buffer.byteLength, ms: Math.round(performance.now() - started) };
+    await initFossilExecutor();
+    cost = measured('fossil_df_wasm_bg', started);
   }
 
   // The one rewrite, and `example.ts` argues it: the executor's object store is keyed by a

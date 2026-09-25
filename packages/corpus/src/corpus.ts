@@ -28,7 +28,7 @@
  * no `dense_id`, no Morton, no `by_source`, no prefixes and no footers in the caller's face:
  *
  * ```ts
- * const corpus = await open(url, { query, wasmUrl });
+ * const corpus = await open(url, { query });
  * corpus.types                                  // what is inside
  * await corpus.rows({ x, y, w, h })             // vertices + edges, and whether that is all of them
  * await corpus.node(iri)
@@ -105,7 +105,7 @@ import type {
   SchemaParams,
   SchemaResult,
 } from './generated.js';
-import { initFossilGraphWasm } from './load.js';
+import { initFossilGraphWasm, type InitInput } from './load.js';
 import { join, paths, scan } from './manifest.js';
 import type { QueryFn, QueryRow, ReadTextFn } from './query.js';
 
@@ -743,24 +743,15 @@ export interface OpenOptions {
    */
   sql?: SqlPolicy;
   /**
-   * Where `fossil_graph_wasm_bg.wasm` is, for the bundler that needs to be told.
+   * The module's `.wasm`, for a host with no bundler — and only for one.
    *
-   * **The boot is not a step a consumer sequences.** It was: `initFossilGraphWasm` was exported
-   * beside `open` and had to be awaited first, which put the existence of a wasm module — and
-   * the ORDER of two calls — in a surface whose whole claim is that a corpus is a URL. It is
-   * memoised inside `open` now, and this is the one thing about it a caller can still need to
-   * say, because only the caller knows how its bundler resolves an asset:
-   *
-   *  - Vite: `import wasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url'`
-   *  - Next.js: serve from `public/` and pass the static URL
-   *  - Web Worker: `new URL('@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm', import.meta.url)`
-   *  - Node test: a `file://` URL resolved from `import.meta.url`
-   *
-   * Optional because the boot is memoised for the process: the second `open` need not repeat
-   * what the first said. Omitted on the FIRST one, it rejects with what the WASM says — which is
-   * the one failure this option exists to let a caller avoid.
+   * **The boot is not a step a consumer sequences.** `open` awaits it, memoised for the process,
+   * and with this omitted the module resolves `new URL('fossil_graph_wasm_bg.wasm',
+   * import.meta.url)` — the pattern Vite, webpack 5 and Turbopack emit as an asset, so a bundled
+   * host names nothing and copies nothing. Node is the host that needs it: its `fetch` rejects
+   * `file://`, so a script or a test hands the bytes (`BufferSource`) or a `Response`.
    */
-  wasmUrl?: string | URL | Request | Response;
+  wasm?: InitInput;
 }
 
 /** The four columns an answer reads by name; everything else is payload. */
@@ -905,9 +896,9 @@ function text(row: QueryRow, column: string): string {
  * from which capability**, and that is the whole of the argument for there being one name here:
  *
  * ```ts
- * await open(url,  { query, wasmUrl })          // Corpus — the door, 1 + N round trips
- * await open(url,  { readText, wasmUrl })       // CorpusAddressing — the manifests, no payload
- * await open(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
+ * await open(url,  { query })          // Corpus — the door, 1 + N round trips
+ * await open(url,  { readText })       // CorpusAddressing — the manifests, no payload
+ * await open(base, { manifestFiles })  // CorpusAddressing — no request at all
  * ```
  *
  * **This absorbed `resolveCorpus`, which was the third and last of the entry points over one
@@ -921,11 +912,11 @@ function text(row: QueryRow, column: string): string {
  * places state a fact, not about how many capabilities exist.
  *
  * **It is always asynchronous, and that is a real cost paid deliberately.** `resolveCorpus` was
- * synchronous when handed no `wasmUrl`, which is the arithmetic a caller whose module is already up
+ * synchronous when its module was already up, which is the arithmetic a caller whose module is already up
  * could have for free; the price of the collapse is that nine `expect(() => …).toThrow(…)`
  * assertions in `tests/address.test.ts` and `tests/conformance.test.ts` became `rejects`, and that
  * a synchronous caller would have to await. **The synchronous form had no production consumer** —
- * measured, not assumed: both engine-free call sites in this repository already passed `wasmUrl`
+ * measured, not assumed: both engine-free call sites in this repository already booted the module
  * and already awaited, and the third caller was this function. The rejected alternative is keeping
  * a conditionally-synchronous overload, which is a return type that depends on an option, on a
  * door whose other two rungs cannot have one.
@@ -994,7 +985,7 @@ export async function open(
   // Before anything is resolved, because resolving is what needs it: the addressing is
   // `fossil_graph::plan` behind this module, not a second implementation of it on this side. The
   // boot is memoised, so a second corpus in the same process costs the check and nothing else.
-  if (options.wasmUrl !== undefined) await initFossilGraphWasm({ wasmUrl: options.wasmUrl });
+  await initFossilGraphWasm(options.wasm);
 
   // The manifests, by whichever rung of the ladder the caller stood on. The engine reads the whole
   // set in ONE round trip because `read_text` takes a list; a plain text reader pays one request

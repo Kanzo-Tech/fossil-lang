@@ -1,23 +1,10 @@
 // '../pkg/fossil_wasm.js' is a wasm-bindgen --target web output emitted by `pnpm run build:wasm`.
-// It is gitignored (per 08-01 .gitignore + repo .gitignore `packages/wasm/pkg/`) but always present at build time.
-// The accompanying fossil_wasm.d.ts is consumed via the file's `/* @ts-self-types="./fossil_wasm.d.ts" */` pragma —
-// TS 5.6 resolves the `import` to that side-channel `.d.ts` automatically (no `@ts-expect-error` needed).
+// It is gitignored (repo .gitignore `packages/wasm/pkg/`) but always present at build time and in
+// the published tarball. Its `.d.ts` is consumed via the file's `/* @ts-self-types */` pragma.
 import init from '../pkg/fossil_wasm.js';
+import type { InitInput } from '../pkg/fossil_wasm.js';
 
-/** Options for {@link initFossilWasm}. */
-export interface InitFossilWasmOpts {
-  /**
-   * URL or path to `fossil_wasm_bg.wasm`. Consumers control resolution:
-   *  - Vite: `import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url'`
-   *  - Next.js: serve from `public/` and pass the static URL (e.g. `'/wasm/fossil_wasm_bg.wasm'`)
-   *  - Web Worker: `new URL('@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm', import.meta.url)`
-   *  - Node test: a `file://` URL resolved from `import.meta.url`
-   *
-   * Accepts `string` (a URL string), `URL`, a `Request`, or a `Response` —
-   * matching `wasm-bindgen --target web`'s init signature.
-   */
-  wasmUrl: string | URL | Request | Response;
-}
+export type { InitInput };
 
 let _initPromise: Promise<unknown> | null = null;
 
@@ -26,17 +13,18 @@ let _initPromise: Promise<unknown> | null = null;
  * {@link tokenize}, {@link semanticLegend}, or instantiating
  * {@link FossilPlayground}. Memoised — subsequent calls return the same promise.
  *
- * With `wasm-bindgen --target web`, consumers control
- * the `.wasm` URL — this avoids tying library users to a specific bundler's
- * `.wasm` import magic. See `packages/wasm/README.md` for consumer patterns.
+ * **Called with nothing, the module finds its own `.wasm`.** The glue resolves
+ * `new URL('fossil_wasm_bg.wasm', import.meta.url)`, which is the pattern Vite,
+ * webpack 5 and Turbopack all recognise and emit as an asset — so a bundled host
+ * writes `await initFossilWasm()` and copies nothing.
+ *
+ * `wasm` is for the host with no bundler to do that: Node, whose `fetch` rejects
+ * `file://`, hands the bytes (`BufferSource`) or a `Response`.
  */
-export function initFossilWasm(opts: InitFossilWasmOpts): Promise<unknown> {
+export function initFossilWasm(wasm?: InitInput): Promise<unknown> {
   if (!_initPromise) {
-    // wasm-bindgen 0.2.120 init() prefers the `{ module_or_path }` object form;
-    // passing the URL/Request/Response/BufferSource as a positional argument
-    // still works but logs a deprecation warning ("pass a single object
-    // instead"). We use the object form to stay on the maintained path.
-    _initPromise = init({ module_or_path: opts.wasmUrl as never });
+    // The object form: the positional one still works but logs a deprecation warning.
+    _initPromise = init(wasm === undefined ? undefined : { module_or_path: wasm });
   }
   return _initPromise;
 }
