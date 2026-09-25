@@ -11,6 +11,12 @@ export type Aggregation = "count" | "sum" | "avg" | "min" | "max";
  */
 export type ExpandMode = "all" | "into";
 /**
+ * What kind of VALUE a field holds, read off its `GraphAr` data type alone.
+ *
+ * Orthogonal to [`FieldRole`], which also weighs the name and the cardinality: an `int64` `user_id` is an `Identifier` by role and `Numeric` by kind. The kind is what decides whether `aggregate` may bin the field (`Numeric` and `Temporal` have ranges, `Categorical` groups by value only) and whether an axis is a time axis. It is the one table of `GraphAr` spellings; a reader asks for the kind instead of keeping a copy of it.
+ */
+export type FieldKind = "numeric" | "temporal" | "categorical";
+/**
  * Inferred role for chart-axis defaults. Mirrors keasy `lib/graph-schema.ts:: inferRole` — promoted here to be authoritative.
  */
 export type FieldRole = "identifier" | "dimension" | "measure";
@@ -61,6 +67,7 @@ export interface FossilGraphSchemas {
   ExpandMode?: ExpandMode;
   ExpandParams?: ExpandParams;
   ExpandResult?: ExpandResult;
+  FieldKind?: FieldKind;
   FieldRole?: FieldRole;
   FieldStat?: FieldStat;
   GraphEdge?: GraphEdge;
@@ -191,6 +198,10 @@ export interface FieldStat {
    * Distinct value count (`COUNT(DISTINCT field)`).
    */
   distinct: number;
+  /**
+   * What an axis over the field can do with it — see [`FieldKind`].
+   */
+  kind: "numeric" | "temporal" | "categorical";
   name: string;
   /**
    * Authoritative chart-axis role.
@@ -206,6 +217,10 @@ export interface SchemaParams {
    * Name a field to narrow the statistics to it and pick up its samples. Ignored without `vertex_type`.
    */
   field?: string | null;
+  /**
+   * Every vertex type's per-field statistics, on its [`VertexTypeSummary::stats`] — one batched query per type, the same one `vertex_type` spends on one. What a host drawing a schema panel asks for instead of one call per type. Samples are never part of it.
+   */
+  stats?: boolean;
   /**
    * Name a vertex type to also get its per-field statistics. Omitted, the answer is the type lists alone and no field is queried.
    */
@@ -274,4 +289,8 @@ export interface VertexTypeSummary {
    * Short local name as used in `DuckDB` table identifier (e.g. `"Person"`).
    */
   name: string;
+  /**
+   * Per-field statistics for this type, in the order of [`Self::fields`]. **Empty unless the call set `stats`**; with it, empty only for a type that declares no field.
+   */
+  stats: FieldStat[];
 }

@@ -160,6 +160,7 @@ fn schema_for_a_field_is_a_measure_with_samples() {
         &Operation::Schema(SchemaParams {
             vertex_type: Some("Person".into()),
             field: Some("age".into()),
+            stats: false,
         }),
     );
     assert_eq!(r.fields.len(), 1);

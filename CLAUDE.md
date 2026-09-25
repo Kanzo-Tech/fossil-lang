@@ -14,9 +14,9 @@ Keep it under 200 lines, rules-not-context.
   meant different questions by them. `cargo xtask corpus` generates the Rust and TypeScript
   projections; `crates/xtask/tests/corpus_generated.rs` is the `--check` as a test.
 - `catalogue.bnf` — WHICH NAMES EXIST, both halves: the `io.` constructors and every stdlib
-  function with its signature and lowering. Generated from, not compared against — six files
+  function with its signature and lowering. Generated from, not compared against — seven files
   come out of `cargo xtask catalogue` and no Rust states a row a second time. Adding a
-  function is a line here. `CONTRIBUTING.md` has the six and the round-trip guard.
+  function is a line here. `CONTRIBUTING.md` has the seven and the round-trip guard.
 - `apps/docs/` — the whole of the documentation, and there is no second site.
   `/docs/book/getting-started` teaches the language and `/docs/format` specifies the corpus;
   behind a maintainers' divider,
@@ -318,7 +318,7 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
-                           source of six generated files; no Rust states a row twice
+                           source of seven generated files; no Rust states a row twice
 corpus.bnf                 what a corpus is made of — the payload and adjacency columns and
                            the ROLE of each. The source of two generated files, one Rust and
                            one TypeScript. Prefixes and file names are NOT here: those are

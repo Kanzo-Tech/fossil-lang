@@ -28,7 +28,7 @@ use crate::operations::discovery::{
 };
 use crate::operations::raw_sql::RawSql;
 use crate::operations::schema::{
-    EdgeTypeSummary, FieldRole, FieldStat, SchemaParams, SchemaResult, VertexTypeSummary,
+    EdgeTypeSummary, FieldKind, FieldRole, FieldStat, SchemaParams, SchemaResult, VertexTypeSummary,
 };
 use crate::operations::sql::{ColumnDescriptor, ExecuteSqlParams, ExecuteSqlResult};
 use crate::{GraphError, Operation, Result};
@@ -152,6 +152,11 @@ impl<E: DuckExecutor> Context<'_, E> {
                 iri: info.iri.clone(),
                 count: self.count_rows(&info.vertex_type).await?,
                 fields: self.manifest.vertex_fields(&info.vertex_type)?,
+                stats: if p.stats {
+                    self.field_stats(&info.vertex_type, None).await?
+                } else {
+                    Vec::new()
+                },
             });
         }
 
@@ -239,6 +244,7 @@ impl<E: DuckExecutor> Context<'_, E> {
                     .unwrap_or(0);
                 FieldStat {
                     role: infer_role(name, datatype, Some(distinct), Some(count)),
+                    kind: FieldKind::of(datatype),
                     name: name.clone(),
                     datatype: datatype.clone(),
                     distinct,
@@ -333,7 +339,7 @@ impl<E: DuckExecutor> Context<'_, E> {
     /// grouping it by value is one call away.
     async fn aggregate_by_range(&self, p: &AggregateParams, bins: u32) -> Result<AggregateResult> {
         let datatype = self.field_datatype(&p.vertex_type, &p.group_by)?;
-        if !is_binnable_datatype(&datatype) {
+        if !FieldKind::of(&datatype).is_binnable() {
             return Err(GraphError::InvalidParams {
                 verb: "aggregate",
                 detail: format!(
@@ -892,12 +898,6 @@ const fn agg_fn(a: Aggregation) -> &'static str {
     }
 }
 
-/// Whether a `GraphAr` `data_type` spelling has ranges to bin over. A string
-/// or a boolean does not: the only grouping it admits is by value.
-fn is_binnable_datatype(datatype: &str) -> bool {
-    is_numeric_datatype(datatype) || matches!(datatype, "date" | "timestamp" | "time")
-}
-
 fn value_to_string(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -916,12 +916,13 @@ fn infer_role(name: &str, datatype: &str, distinct: Option<u64>, count: Option<u
     if is_identifier_name(name) {
         return FieldRole::Identifier;
     }
-    if is_numeric_datatype(datatype) {
-        return FieldRole::Measure;
-    }
-    match datatype {
-        "bool" | "boolean" | "date" | "timestamp" | "time" => return FieldRole::Dimension,
-        _ => {}
+    match FieldKind::of(datatype) {
+        FieldKind::Numeric => return FieldRole::Measure,
+        FieldKind::Temporal => return FieldRole::Dimension,
+        FieldKind::Categorical if matches!(datatype, "bool" | "boolean") => {
+            return FieldRole::Dimension;
+        }
+        FieldKind::Categorical => {}
     }
     if let (Some(d), Some(c)) = (distinct, count) {
         #[allow(clippy::cast_precision_loss)]
@@ -952,24 +953,6 @@ fn is_identifier_name(name: &str) -> bool {
         }
     }
     false
-}
-
-/// `GraphAr` numeric datatype spellings (the writer's int/float family). The
-/// numeric arm of role inference and of what can be binned.
-fn is_numeric_datatype(datatype: &str) -> bool {
-    matches!(
-        datatype,
-        "int8"
-            | "int16"
-            | "int32"
-            | "int64"
-            | "uint8"
-            | "uint16"
-            | "uint32"
-            | "uint64"
-            | "float"
-            | "double"
-    )
 }
 
 #[cfg(test)]
@@ -1329,6 +1312,7 @@ mod tests {
         SchemaParams {
             vertex_type: vertex_type.map(ToString::to_string),
             field: field.map(ToString::to_string),
+            stats: false,
         }
     }
 
@@ -1395,6 +1379,10 @@ mod tests {
         assert_eq!(r.fields[1].name, "name");
         assert_eq!(r.fields[1].role, FieldRole::Dimension); // string, 2/3 < 0.8
         assert_eq!(r.fields[1].distinct, 2);
+        assert_eq!(r.fields[0].kind, FieldKind::Numeric);
+        assert_eq!(r.fields[1].kind, FieldKind::Categorical);
+        // Per-type stats are the `stats` flag's, not `vertex_type`'s.
+        assert!(r.vertices.iter().all(|v| v.stats.is_empty()));
         // Samples are a second query, so a per-type call does not pay for them.
         assert!(r.fields.iter().all(|f| f.samples.is_empty()));
     }
@@ -1418,6 +1406,44 @@ mod tests {
         // The listings still come back — naming a field narrows the stats, not
         // the answer.
         assert_eq!(r.vertices.len(), 1);
+    }
+
+    #[test]
+    fn schema_with_stats_answers_every_type_in_one_call() {
+        let m = fixture();
+        let exec = FnExecutor(|sql: &str| {
+            if sql.contains("count(DISTINCT") {
+                return vec![serde_json::json!({ "n": 3, "d0": 3, "d1": 2 })];
+            }
+            vec![serde_json::json!({ "n": 3 })]
+        });
+        let params = SchemaParams {
+            stats: true,
+            ..SchemaParams::default()
+        };
+        let r: SchemaResult =
+            serde_json::from_value(run(&Operation::Schema(params), &m, &exec).unwrap()).unwrap();
+        let person = r.vertices.iter().find(|v| v.name == "Person").unwrap();
+        let names: Vec<_> = person.stats.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, person.fields.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(person.stats[0].kind, FieldKind::Numeric);
+        // The per-type answer is on the summaries; the narrowed slot stays empty.
+        assert!(r.fields.is_empty());
+    }
+
+    #[test]
+    fn field_kind_reads_the_graphar_spelling() {
+        for numeric in ["int8", "int64", "uint32", "float", "double"] {
+            assert_eq!(FieldKind::of(numeric), FieldKind::Numeric, "{numeric}");
+        }
+        for temporal in ["date", "timestamp", "time"] {
+            assert_eq!(FieldKind::of(temporal), FieldKind::Temporal, "{temporal}");
+        }
+        for categorical in ["string", "bool", "list<string>", ""] {
+            assert_eq!(FieldKind::of(categorical), FieldKind::Categorical, "{categorical}");
+        }
+        assert!(FieldKind::Temporal.is_binnable());
+        assert!(!FieldKind::Categorical.is_binnable());
     }
 
     #[test]

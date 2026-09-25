@@ -212,7 +212,13 @@ vocabulary does not. Neither is wrong and they are not the same question.
   ranges. Binning is grouping, so there is no histogram verb.
 - **`schema`** — the vertex and edge types with their counts. Name a
   `vertex_type` for its per-field statistics, and a `field` for its samples;
-  a bare call runs no per-field query.
+  a bare call runs no per-field query. `{ stats: true }` puts every type's
+  statistics on its own summary (`vertices[i].stats`), one batched query per
+  type — the call a schema panel makes. Each `FieldStat` carries a `role`
+  (a chart-axis guess from name and cardinality) and a `kind` —
+  `numeric` · `temporal` · `categorical`, read off the GraphAr spelling — which
+  is what decides whether `aggregate` may bin it. A host asks for the kind and
+  keeps no table of spellings.
 - **`executeSql`** — the escape hatch, for the question the other five cannot
   shape. **Withheld unless the host asks**: `open(url, { query })` returns
   a `Corpus` with no `executeSql` member and a `read` that refuses a `where`;
@@ -231,6 +237,31 @@ vocabulary does not. Neither is wrong and they are not the same question.
 LOD is not a filter but a different relation, and a `WHERE` cannot change which
 table it reads. A filter that must change the picture answers with ids, and the
 canvas masks its resident tiles with them.
+
+## Handing a corpus to a host
+
+A host that grants access file by file — signing URLs, registering them with
+its engine — composes no path and derives no name. Two members answer it:
+
+```ts
+// 1. No engine yet: the addressing alone, read through the host's own signer.
+const addressing = await open('', { readText });
+const signed = await sign(addressing.files());   // every file, distinct, once
+for (const [path, url] of Object.entries(signed)) db.registerFileURL(path, url, …);
+
+// 2. The same corpus with the engine, and what to record about it.
+const corpus = await open('', { query, manifestFiles });
+for (const r of await corpus.relations()) {
+  // { kind: 'vertex', name, rows, files, columns } | { kind: 'edge', name, rows, files, … }
+  record(r);
+}
+```
+
+`addressing.files()` is `fossil_graph::plan::ReadPlan::files`: every vertex
+type's projections and index, then every relation's projections. A projection
+whose count is not declared cannot be enumerated and is left out, not guessed.
+`relations()` is one bare `schema()` — the name is the corpus's `table_name`,
+the rows its `count(*)` — joined to the addressing for the files.
 
 ## Addressing
 

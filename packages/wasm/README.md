@@ -2,6 +2,8 @@
 
 JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Provides:
 
+- `openProgram(uri, { host, text })` — one program open for an editor, and the
+  call a host with an editor makes. See below.
 - `initFossilWasm()` — boots the module (memoised). Its `.wasm` ships in this
   package and the host's bundler emits it as an asset; the host copies nothing.
 - `tokenize(text)` — calls the Rust lexer, returns `TokenRow[]`. The Rust lexer
@@ -10,6 +12,29 @@ JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Prov
 - `FossilPlayground` — the Workspace API class for LSP + compile. `fossil-lsp`
   itself is native-only (stdio over crossbeam), so the browser gets this
   equivalent dispatch surface over the same `fossil-ide` functions.
+
+## One program in one editor: `openProgram`
+
+```typescript
+import { openProgram } from '@fossil-lang/wasm';
+import { fossil } from '@fossil-lang/codemirror-fossil';
+
+const program = await openProgram('job.fossil', { host, text });   // host: SourceHost
+const extensions = fossil({ ...program, onNavigate });
+
+program.registerDescriptor(descriptor);        // a host-introspected source, before a check
+const sources = await program.sources(text);   // what introspection DESCRIBEs
+```
+
+It boots the module, opens `uri` in its own workspace, and reads the documents
+the text names through `host`. The answer carries `fossil()`'s option names —
+`uri`, `tokenize`, `tokenKinds`, `check`, `hover`, `complete`, `definition` —
+and every one that answers about the program takes the text and pushes it
+first, comparing against what it last pushed so the common case costs a string
+comparison. `check` and `sources` also run `resolveDocuments`, which reads
+nothing when nothing is missing. That is the whole protocol an editor host used
+to write by hand; `workspace` is the `FossilPlayground` underneath, for a
+question this surface does not ask, and `close()` frees it.
 
 ## Documents and sources: fossil resolves, the host reads
 

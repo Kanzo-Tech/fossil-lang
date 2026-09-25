@@ -228,6 +228,10 @@ definitions:
         type:
           - string
           - "null"
+      stats:
+        description: "Every vertex type's per-field statistics, on its [`VertexTypeSummary::stats`] — one batched query per type, the same one `vertex_type` spends on one. What a host drawing a schema panel asks for instead of one call per type. Samples are never part of it."
+        default: false
+        type: boolean
       vertex_type:
         description: "Name a vertex type to also get its per-field statistics. Omitted, the answer is the type lists alone and no field is queried."
         default: ~

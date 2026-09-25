@@ -1,0 +1,42 @@
+{
+  "name": "@fossil-lang/prompt",
+  "version": "0.0.0-development",
+  "description": "The Fossil surface language as a system prompt for a model writing programs — its library generated from catalogue.bnf, its example a conformance program, its prose pinned to grammar.bnf so it cannot drift. Zero dependencies: a server-side LLM route imports a string, not a wasm module.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/prompt"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "@fossil-lang/types": "workspace:*",
+    "@fossil-lang/wasm": "workspace:*",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}

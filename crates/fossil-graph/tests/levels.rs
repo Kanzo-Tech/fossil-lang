@@ -366,3 +366,37 @@ fn no_pyramid_is_a_corpus_and_not_a_gap() {
     assert_eq!(half.vertex_type(None).expect("Person").projections.len(), 3);
     assert_eq!(half.edges.first().expect("knows").projections.len(), 1);
 }
+
+// ── the whole corpus as a file list ──────────────────────────────────────────
+
+/// **`ReadPlan::files` is every per-projection list, once each, in order** —
+/// the union a host grants access over, so it composes no path itself.
+#[test]
+fn the_corpus_files_are_every_projection_once() {
+    let plan = corpus(Some(300), Some(SMALL), true);
+    let person = plan.vertex_type(Some("Person")).unwrap();
+    let knows = &plan.edges[0];
+    let mut want = Vec::new();
+    for p in &person.projections {
+        want.extend(p.files().unwrap());
+    }
+    for p in &knows.projections {
+        want.extend(p.files().unwrap());
+    }
+    assert_eq!(plan.files(), want);
+    assert!(want.contains(&"vertex/Person/chunk0.parquet".to_string()));
+    assert!(
+        want.iter()
+            .any(|f| f.starts_with("edge/person_knows_person/by_source/"))
+    );
+    let mut unique = want.clone();
+    unique.dedup();
+    assert_eq!(unique.len(), want.len(), "distinct");
+}
+
+/// A corpus that declares no count cannot be enumerated, and the list says so
+/// by being empty rather than by guessing a tile count.
+#[test]
+fn an_uncounted_corpus_lists_nothing() {
+    assert!(corpus(None, None, false).files().is_empty());
+}

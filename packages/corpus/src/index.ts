@@ -56,8 +56,8 @@
  *   `OpenOptions.readText`: lend the package a text reader and it reads the index, the
  *   per-type manifests and nothing else. See {@link ReadTextFn}.
  * - **`export type *`** — an unbounded star publishes whatever the codegen makes, now and later,
- *   with nobody deciding. The fourteen the surviving surface names are re-exported below; the
- *   ten `./generated.ts` also holds (`Operation`, `FossilGraphSchemas`, the row and summary
+ *   with nobody deciding. The seventeen the surviving surface names are re-exported below; the
+ *   rest of `./generated.ts` (`Operation`, `FossilGraphSchemas`, the verb row
  *   shapes) stay reachable structurally, e.g. `SchemaResult['vertices'][number]`.
  *
  * # What is here and why
@@ -135,6 +135,7 @@ export type {
   Corpus,
   CorpusEdgeType,
   CorpusField,
+  CorpusRelation,
   CorpusTypes,
   CorpusVertexType,
   Extent,
@@ -182,24 +183,29 @@ export type {
   VertexAddress,
 } from './address.js';
 
-// The twelve the verbs name in their own signatures, plus the two `Corpus.schema` argues about by
-// name — from the schemars codegen, single source of truth with the Rust verb structs. This list
+// The twelve the verbs name in their own signatures, plus the five a reader of `Corpus.schema`
+// names — from the schemars codegen, single source of truth with the Rust verb structs. This list
 // replaces `export type *`: a name reaches a consumer because the surviving surface mentions it,
 // and for no other reason.
 //
 // **`FieldStat` and `FieldRole` are the second kind and they are not speculative.** Keasy's
 // `web/src/lib/graph-schema.ts` imports both today, and `Corpus.schema`'s own doc spends a
 // paragraph on `FieldStat.role === 'identifier'` being a chart-axis heuristic and NOT an identity
-// — a warning a consumer cannot act on if it cannot name the type it is about. The other ten
-// `./generated.ts` holds (`Operation`, `FossilGraphSchemas`, the row and summary shapes) stay
-// reachable structurally, e.g. `SchemaResult['vertices'][number]`.
+// — a warning a consumer cannot act on if it cannot name the type it is about. `FieldKind` is the
+// same argument: it is what a binnable or temporal axis is decided by, and a host that cannot name
+// it writes the GraphAr spelling table again. `VertexTypeSummary` and `EdgeTypeSummary` are the
+// rows of `SchemaResult` a schema panel is drawn from, and naming them structurally was the price
+// of a host keeping its own copy. The rest of `./generated.ts` (`Operation`,
+// `FossilGraphSchemas`, the verb row shapes) stays reachable structurally.
 export type {
   AggregateParams,
   AggregateResult,
   ExecuteSqlParams,
   ExecuteSqlResult,
   ExpandParams,
+  EdgeTypeSummary,
   ExpandResult,
+  FieldKind,
   FieldRole,
   FieldStat,
   PathParams,
@@ -208,4 +214,5 @@ export type {
   ReadResult,
   SchemaParams,
   SchemaResult,
+  VertexTypeSummary,
 } from './generated.js';

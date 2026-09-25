@@ -7,6 +7,9 @@
  * - {@link tokenize} — calls the Rust lexer, returns TokenRow[].
  * - {@link tokenKinds} — the legend for TokenRow.kind: variant names by index.
  * - {@link semanticLegend} — returns the LSP SemanticTokensLegend.
+ * - {@link openProgram} — one program open for an editor: the workspace, the push-before-ask
+ *   discipline and the document resolution a host would otherwise write, shaped to spread into
+ *   `@fossil-lang/codemirror-fossil`'s `fossil()`. What a host with one editor calls.
  * - {@link FossilPlayground} — Workspace API class: open / update / close,
  *   `check`, the three position queries (`hover`, `completions`,
  *   `gotoDefinition`) an editor draws its IDE surface from, and the documents
@@ -15,10 +18,11 @@
  *
  * Consumer pattern (wasm-bindgen --target web):
  *
- *   import { initFossilWasm, tokenize } from '@fossil-lang/wasm';
+ *   import { openProgram } from '@fossil-lang/wasm';
+ *   import { fossil } from '@fossil-lang/codemirror-fossil';
  *
- *   await initFossilWasm();
- *   const tokens = tokenize('User := io.csv("data/people.csv")');
+ *   const program = await openProgram('job.fossil', { host, text });
+ *   const extensions = fossil({ ...program, onNavigate });
  */
 
 // The wasm-bindgen glue (`../pkg/fossil_wasm.js`) is imported ONLY from leaf
@@ -40,6 +44,9 @@ export {
   providers,
 } from './client.js';
 export type { FileHandle } from './client.js';
+
+export { openProgram } from './program.js';
+export type { FossilProgram, OpenProgramOptions } from './program.js';
 
 /** One external reference a program makes — the typed lineage returned by
  *  {@link refs}. Mirrors `fossil_lineage::SourceRefInfo` (the SAME struct the
