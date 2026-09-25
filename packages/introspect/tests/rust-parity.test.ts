@@ -247,10 +247,13 @@ async function describesOf(sources: ProgramSource[]): Promise<string[]> {
       connections: async () => ({}),
       sign: async (locators) => Object.fromEntries(locators.map((l) => [l, l])),
     },
-    register: async () => {},
-    query: async (sql) => {
-      seen.push(sql);
-      return [];
+    engine: {
+      lend: async () => {},
+      drop: async () => {},
+      query: async (sql) => {
+        seen.push(sql);
+        return [];
+      },
     },
     onWarn: (message, err) => {
       throw new Error(`${message}: ${String(err)}`);
@@ -268,7 +271,7 @@ describe("reader dispatch parity with the generated Rust catalogue", () => {
       sources.map((s) => {
         const reader = readers.get(s.format);
         expect(reader, `no native reader for \`io.${s.format}\` in the Rust`).toBeDefined();
-        return `DESCRIBE SELECT * FROM ${reader!.fn}('${s.key}')`;
+        return `DESCRIBE SELECT * FROM ${reader!.fn}('sources/${s.key}')`;
       }),
     );
   });
@@ -291,7 +294,7 @@ describe("reader option parity with fossil-introspect", () => {
         expect(keywords.has(variant), `no option arm for \`${variant}\``).toBe(true);
         const keyword = keywords.get(variant);
         const args = keyword ? `, ${keyword}='|'` : "";
-        return `DESCRIBE SELECT * FROM ${fn}('${s.key}'${args})`;
+        return `DESCRIBE SELECT * FROM ${fn}('sources/${s.key}'${args})`;
       }),
     );
   });

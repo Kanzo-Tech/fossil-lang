@@ -117,26 +117,54 @@ describe("introspect", () => {
     format: "csv",
   };
 
-  /** A host that signs every locator it is given, and a DuckDB that records
-   *  what was registered under which name. */
+  /** A host that signs every locator it is given, and an engine with
+   *  DuckDB-WASM's registry: a name holds one URL, so a new one is a swap. */
   function fakeIO(
-    query: IntrospectIO["query"],
+    query: (sql: string) => Promise<Record<string, unknown>[]>,
     overrides: Partial<IntrospectIO> = {},
+    signature = () => "",
   ) {
     const registered = new Map<string, string>();
+    let swaps = 0;
     const sign = vi.fn(async (locators: string[]) =>
-      Object.fromEntries(locators.map((l) => [l, `https://signed/${l}`])),
+      Object.fromEntries(locators.map((l) => [l, `https://signed/${l}${signature()}`])),
     );
     const io: IntrospectIO = {
       host: { connections: async () => ({}), sign },
-      register: async (name, url) => {
-        registered.set(name, url);
+      engine: {
+        query,
+        lend: async (files) => {
+          for (const [name, url] of Object.entries(files)) {
+            if (registered.has(name) && registered.get(name) !== url) swaps++;
+            registered.set(name, url);
+          }
+        },
+        drop: async (names) => {
+          for (const name of names) registered.delete(name);
+        },
       },
-      query,
       ...overrides,
     };
-    return { io, sign, registered };
+    return { io, sign, registered, swaps: () => swaps };
   }
+
+  it("describes a source twice under fresh signatures by swapping its lease", async () => {
+    let n = 0;
+    const { io, registered, swaps } = fakeIO(
+      async () => [{ column_name: "id", column_type: "BIGINT" }],
+      {},
+      () => `?sig=${++n}`,
+    );
+    const warn = vi.fn();
+    const first = await introspect([users], { ...io, onWarn: warn });
+    const second = await introspect([users], { ...io, onWarn: warn });
+    expect(warn).not.toHaveBeenCalled();
+    expect(second).toEqual(first);
+    expect(swaps()).toBe(1);
+    expect(registered.get("sources/@w/users.csv")).toBe(
+      "https://signed/s3://bucket/w/users.csv?sig=2",
+    );
+  });
 
   it("signs every locator in one call, registers each under its key and describes the key", async () => {
     const seen: string[] = [];
@@ -153,13 +181,13 @@ describe("introspect", () => {
     expect(sign).toHaveBeenCalledWith([users.locator, orders.locator]);
     expect(registered).toEqual(
       new Map([
-        ["@w/users.csv", "https://signed/s3://bucket/w/users.csv"],
-        ["@w/orders.csv", "https://signed/s3://bucket/w/orders.csv"],
+        ["sources/@w/users.csv", "https://signed/s3://bucket/w/users.csv"],
+        ["sources/@w/orders.csv", "https://signed/s3://bucket/w/orders.csv"],
       ]),
     );
     expect(seen).toEqual([
-      "DESCRIBE SELECT * FROM read_csv_auto('@w/users.csv')",
-      "DESCRIBE SELECT * FROM read_csv_auto('@w/orders.csv')",
+      "DESCRIBE SELECT * FROM read_csv_auto('sources/@w/users.csv')",
+      "DESCRIBE SELECT * FROM read_csv_auto('sources/@w/orders.csv')",
     ]);
     expect(descriptors).toEqual([
       {
@@ -189,8 +217,8 @@ describe("introspect", () => {
       io,
     );
     expect(seen).toEqual([
-      "DESCRIBE SELECT * FROM read_parquet('@w/e.parquet')",
-      "DESCRIBE SELECT * FROM read_csv_auto('@w/users.csv', delim='|')",
+      "DESCRIBE SELECT * FROM read_parquet('sources/@w/e.parquet')",
+      "DESCRIBE SELECT * FROM read_csv_auto('sources/@w/users.csv', delim='|')",
     ]);
   });
 
