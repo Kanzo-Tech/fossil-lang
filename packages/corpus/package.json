@@ -43,6 +43,9 @@
     "lint": "tsc --noEmit"
   },
   "sideEffects": false,
+  "dependencies": {
+    "@fossil-lang/types": "workspace:*"
+  },
   "devDependencies": {
     "@duckdb/duckdb-wasm": "1.32.0",
     "json-schema-to-typescript": "^15.0.0",

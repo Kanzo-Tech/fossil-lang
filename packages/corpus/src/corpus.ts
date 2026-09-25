@@ -108,6 +108,7 @@ import type {
 import { initFossilGraphWasm, type InitInput } from './load.js';
 import { join, paths, scan } from './manifest.js';
 import type { QueryFn, QueryRow, ReadTextFn } from './query.js';
+import type { Engine, Signer } from '@fossil-lang/types';
 
 export { CorpusManifestError } from './address.js';
 export type { Direction, Drawing, Gap, GapReason } from './address.js';
@@ -513,6 +514,8 @@ export type CorpusRelation =
       readonly kind: 'vertex';
       /** The vertex type, which is also its relation's name. */
       readonly name: string;
+      /** The relation as SQL names it — qualified by the corpus's own catalog. */
+      readonly sql: string;
       readonly rows: number;
       /** The payload — the projection at `scale: 1`. */
       readonly files: readonly string[];
@@ -523,6 +526,8 @@ export type CorpusRelation =
       readonly kind: 'edge';
       /** `EdgeTypeSummary.table_name` — the corpus's own spelling, never composed by a host. */
       readonly name: string;
+      /** The relation as SQL names it — qualified by the corpus's own catalog. */
+      readonly sql: string;
       readonly rows: number;
       /** The source-aligned adjacency, which is the relation's rows. */
       readonly files: readonly string[];
@@ -691,6 +696,12 @@ export interface Corpus {
   path(params: PathParams): Promise<PathResult>;
   /** One grouping, over values or — with `bins` — over equal-width ranges. */
   aggregate(params: AggregateParams): Promise<AggregateResult>;
+  /**
+   * Give back what opening took from the engine: the catalog the verbs' views live in and,
+   * on the lent rung, every file lent under the corpus's name. Another open corpus of the
+   * same name on the same engine keeps both until it closes too.
+   */
+  close(): Promise<void>;
 }
 
 /**
@@ -747,6 +758,17 @@ export type SqlPolicy = 'withheld' | 'allowed';
  * {@link open}.
  */
 export interface OpenOptions {
+  /**
+   * The page's engine, for a corpus the host can only sign: `open(name, { engine, host })`.
+   *
+   * `name` is then a namespace and not a URL — every file is lent as `${name}/${path}` and the
+   * verbs' views live in a catalog called `name`, so two corpora in one engine never meet. The
+   * manifests are signed and fetched here, the payload is signed in one batch and lent, and it
+   * is signed again before {@link Signer.ttlMs} runs out.
+   */
+  engine?: Engine;
+  /** What signs the corpus's dataset-relative paths. Required with {@link engine}. */
+  host?: Signer;
   /**
    * The host's engine. One method, and see `./query.ts` for why it is the only one.
    *
@@ -997,6 +1019,14 @@ function text(row: QueryRow, column: string): string {
  *   then nothing to open the corpus with.
  */
 export function open(
+  name: string,
+  options: OpenOptions & { engine: Engine; host: Signer; sql: 'allowed' },
+): Promise<SqlCorpus>;
+export function open(
+  name: string,
+  options: OpenOptions & { engine: Engine; host: Signer },
+): Promise<Corpus>;
+export function open(
   url: string,
   options: OpenOptions & { query: QueryFn; sql: 'allowed' },
 ): Promise<SqlCorpus>;
@@ -1009,6 +1039,7 @@ export async function open(
   url: string,
   options: OpenOptions,
 ): Promise<Corpus | CorpusAddressing> {
+  if (options.engine !== undefined) return lent(url, options, options.engine);
   const { query, readText: readOne, manifestFiles: held } = options;
   if (typeof query !== 'function' && typeof readOne !== 'function' && held === undefined) {
     throw new TypeError(
@@ -1017,9 +1048,6 @@ export async function open(
         'manifestFiles (the host already holds them)',
     );
   }
-  // The policy, read once. Both consequences come off this one binding — the hatch below and
-  // `read`'s predicate — so there is no way to wire half of it. See `SqlPolicy`.
-  const rawSql = options.sql === 'allowed';
   // Before anything is resolved, because resolving is what needs it: the addressing is
   // `fossil_graph::plan` behind this module, not a second implementation of it on this side. The
   // boot is memoised, so a second corpus in the same process costs the check and nothing else.
@@ -1075,11 +1103,113 @@ export async function open(
     );
   }
 
+  return opened(url, options, manifestFiles, query);
+}
+
+/**
+ * How many open corpora hold each catalog, per engine — the one piece of state shared between
+ * corpora, because two opens of one name share its files and views and the first to close must
+ * not take them from the second.
+ */
+const holders = new WeakMap<object, Map<string, number>>();
+
+/**
+ * Renew a lease once half its life is spent — DHCP's T1 (RFC 2131 §4.4.5), which leaves the
+ * second half for a read already in flight.
+ */
+const RENEW_AT = 0.5;
+
+/** The lent rung: sign what the manifest names, lend it under `name`, keep it signed. */
+async function lent(
+  name: string,
+  options: OpenOptions,
+  engine: Engine,
+): Promise<Corpus> {
+  const host = options.host;
+  if (host === undefined) {
+    throw new TypeError('open(name, { engine }) needs host: the engine can only read what is signed');
+  }
+  await initFossilGraphWasm(options.wasm);
+  const read = async (relative: readonly string[]): Promise<Record<string, string>> => {
+    if (relative.length === 0) return {};
+    const signed = await host.sign([...relative]);
+    const texts = await Promise.all(
+      relative.map(async (path) => {
+        const at = signed[path];
+        if (at === undefined) throw new CorpusManifestError(`${join(name, path)} was not signed`);
+        const res = await fetch(at);
+        if (!res.ok) throw new CorpusManifestError(`${join(name, path)} did not read (HTTP ${res.status})`);
+        return res.text();
+      }),
+    );
+    return Object.fromEntries(relative.map((path, i) => [path, texts[i]!]));
+  };
+  const manifestFiles = options.manifestFiles ?? (await read([GRAPH_INFO_PATH]));
+  if (options.manifestFiles === undefined) {
+    const index = scan(GRAPH_INFO_PATH, manifestFiles[GRAPH_INFO_PATH]!);
+    Object.assign(manifestFiles, await read([...paths(index, 'vertices'), ...paths(index, 'edges')]));
+  }
+
+  const files = addressManifests(manifestFiles, name).files();
+  const prefix = name === '' ? '' : `${name.replace(/\/+$/, '')}/`;
+  const relative = files.map((file) => file.slice(prefix.length));
+  let signedAt = 0;
+  const sign = async (): Promise<void> => {
+    const at = Date.now();
+    const signed = await host.sign(relative);
+    await engine.lend(
+      Object.fromEntries(
+        relative.flatMap((path, i) => (signed[path] === undefined ? [] : [[files[i]!, signed[path]!]])),
+      ),
+    );
+    signedAt = at;
+  };
+  await sign();
+  let renewing: Promise<void> | null = null;
+  const query: QueryFn = async (sql) => {
+    if (host.ttlMs !== undefined && Date.now() - signedAt >= host.ttlMs * RENEW_AT) {
+      renewing ??= sign().finally(() => (renewing = null));
+      await renewing;
+    }
+    return engine.query(sql);
+  };
+  return (await opened(name, options, manifestFiles, query, {
+    holder: engine,
+    drop: () => engine.drop(files),
+  })) as Corpus;
+}
+
+/** What an engine-bearing rung hands {@link opened} so that `close` can give it back. */
+interface Holding {
+  readonly holder: object;
+  readonly drop?: () => Promise<void>;
+}
+
+async function opened(
+  url: string,
+  options: OpenOptions,
+  manifestFiles: Record<string, string>,
+  query: QueryFn | undefined,
+  holding?: Holding,
+): Promise<Corpus | CorpusAddressing> {
+  // The policy, read once. Both consequences come off this one binding — the hatch below and
+  // `read`'s predicate — so there is no way to wire half of it. See `SqlPolicy`.
+  const rawSql = options.sql === 'allowed';
   const addressing = addressManifests(manifestFiles, url);
   // The shallow rung. Everything below this line needs bytes, and a caller that brought no engine
   // has none to read them with — so the addressing IS the answer rather than a member of a
   // half-built one. `Corpus.addressing` is this same object for a caller that did bring one.
   if (query === undefined) return addressing;
+
+  // The catalog the verbs' views live in, named after the corpus: a database of its own, so two
+  // corpora with a `Person` each never resolve to each other's, and closing is one `DETACH`.
+  const catalog = url;
+  const holder: object = holding?.holder ?? query;
+  const held = holders.get(holder) ?? new Map<string, number>();
+  holders.set(holder, held);
+  held.set(catalog, (held.get(catalog) ?? 0) + 1);
+  const relationOf = (name: string): string => `${ident(catalog)}.${ident(name)}`;
+  let closed = false;
 
   // Every vertex type's payload files, derived once. `files()` throws when the manifest declares no
   // count, which is the corpus this API cannot open and the addressing layer still can.
@@ -1742,9 +1872,10 @@ export async function open(
 
   const verbs = (): Promise<GraphClient> => {
     transport ??= (async (): Promise<GraphClient> => {
+      await query(`ATTACH IF NOT EXISTS ':memory:' AS ${ident(catalog)}`);
       for (const type of addressing.types) {
         await query(
-          `CREATE OR REPLACE TEMP VIEW ${ident(type.type)} AS ` +
+          `CREATE OR REPLACE VIEW ${relationOf(type.type)} AS ` +
             `SELECT * FROM read_parquet(${list(distinct(payloadFiles.get(type.type)!))})`,
         );
       }
@@ -1759,12 +1890,12 @@ export async function open(
             ? lit(adjacency.tileUrl(0))
             : lit(`${adjacency.prefix}chunk*.parquet`);
         await query(
-          `CREATE OR REPLACE TEMP VIEW ` +
-            `${ident(`${edge.srcType}_${edge.edgeType}_${edge.dstType}`)} AS ` +
+          `CREATE OR REPLACE VIEW ` +
+            `${relationOf(`${edge.srcType}_${edge.edgeType}_${edge.dstType}`)} AS ` +
             `SELECT * FROM read_parquet(${source})`,
         );
       }
-      return createGraphClient({ query, manifestFiles });
+      return createGraphClient({ query, manifestFiles, catalog });
     })();
     return transport;
   };
@@ -2033,6 +2164,19 @@ export async function open(
     types,
     addressing,
 
+    async close() {
+      if (closed) return;
+      closed = true;
+      const left = (held.get(catalog) ?? 1) - 1;
+      if (left > 0) {
+        held.set(catalog, left);
+        return;
+      }
+      held.delete(catalog);
+      await query(`DETACH DATABASE IF EXISTS ${ident(catalog)}`);
+      await holding?.drop?.();
+    },
+
     async schema(params = {}) {
       return (await verbs()).schema(params);
     },
@@ -2042,6 +2186,7 @@ export async function open(
         (v): CorpusRelation => ({
           kind: 'vertex',
           name: v.name,
+          sql: relationOf(v.name),
           rows: v.count,
           files: payloadFiles.get(v.name) ?? [],
           columns: fieldsOf(v.name),
@@ -2056,6 +2201,7 @@ export async function open(
           {
             kind: 'edge',
             name: e.table_name,
+            sql: relationOf(e.table_name),
             rows: e.count,
             files: address.projectionFiles(1, 'src'),
             edgeType: e.name,
