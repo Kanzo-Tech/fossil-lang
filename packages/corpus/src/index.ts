@@ -135,6 +135,7 @@ export type {
   Corpus,
   CorpusEdgeType,
   CorpusField,
+  CorpusRelation,
   CorpusTypes,
   CorpusVertexType,
   Extent,

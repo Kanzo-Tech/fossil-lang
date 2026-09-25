@@ -636,6 +636,36 @@ impl ReadPlan {
             })
     }
 
+    /// **Every file the corpus can address**, distinct and in declaration
+    /// order: each vertex type's projections (the payload and every written
+    /// level) and its identity index, then each relation's projections (both
+    /// orientations of the adjacency, and its written levels).
+    ///
+    /// It is the list a host that must grant access file by file — signing
+    /// URLs, registering them with an engine — hands over, so it never composes
+    /// one itself. What cannot be enumerated is left out rather than guessed
+    /// at: a projection counted by a type whose manifest declares no
+    /// `vertex_count` has no tile count, and [`ProjectionAddress::files`] is
+    /// the question that refuses it by name.
+    #[must_use]
+    pub fn files(&self) -> Vec<String> {
+        let vertex = self.types.iter().flat_map(|t| {
+            t.projections
+                .iter()
+                .filter_map(|p| p.files().ok())
+                .chain(t.index.as_ref().and_then(|i| i.files(&t.path, &t.vertex_type).ok()))
+                .flatten()
+        });
+        let edge = self
+            .edges
+            .iter()
+            .flat_map(|e| e.projections.iter().filter_map(|p| p.files().ok()).flatten());
+        // A set beside the list: this one is every tile of the corpus, and the
+        // linear `distinct` the per-projection lists use would be quadratic here.
+        let mut seen = std::collections::HashSet::new();
+        vertex.chain(edge).filter(|url| seen.insert(url.clone())).collect()
+    }
+
     /// The edge types incident to `vertex_type` — as source, as destination, or
     /// both on a self-edge.
     #[must_use]

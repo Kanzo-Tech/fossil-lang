@@ -354,6 +354,14 @@ impl Corpus {
             .map_err(|e| to_js_error(&e))
     }
 
+    /// Every file the corpus can address, distinct and in declaration order —
+    /// `fossil_graph::plan::ReadPlan::files`, the list a host signs or
+    /// registers whole.
+    #[must_use]
+    pub fn files(&self) -> Vec<String> {
+        self.inner.files()
+    }
+
     /// Every file of a vertex type's identity index, in order and distinct.
     ///
     /// # Errors

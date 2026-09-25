@@ -537,6 +537,37 @@ describe('the verbs, through the same door', () => {
     expect(fields).toHaveLength(0);
   }, 30_000);
 
+  it('answers every type\'s field stats, with their kind, in one call', async () => {
+    const { vertices } = await corpus.schema({ stats: true });
+    const person = vertices.find((v) => v.name === 'Person')!;
+    expect(person.stats.map((f) => f.name)).toEqual(person.fields);
+    expect(person.stats.map((f) => [f.name, f.kind])).toEqual([
+      ['birth_year', 'numeric'],
+      ['postcode', 'categorical'],
+    ]);
+    // Without the flag the summaries carry none — the cheap call stays cheap.
+    expect((await corpus.schema()).vertices.every((v) => v.stats.length === 0)).toBe(true);
+  }, 30_000);
+
+  it('lists the relations a host records, named by the corpus and never composed', async () => {
+    const relations = await corpus.relations();
+    const { vertices, edges } = await corpus.schema();
+    expect(relations.map((r) => r.name)).toEqual([
+      ...vertices.map((v) => v.name),
+      ...edges.map((e) => e.table_name),
+    ]);
+    const person = relations.find((r) => r.kind === 'vertex')!;
+    expect(person.rows).toBe(Number(VERTEX_COUNT));
+    expect(person.files).toEqual(corpus.addressing.vertexType('Person').files());
+    expect(person.kind === 'vertex' && person.columns).toEqual(corpus.types.vertices[0]!.fields);
+    const knows = relations.find((r) => r.kind === 'edge')!;
+    expect(knows.rows).toBe(Number(EDGE_COUNT));
+    expect(knows.files).toEqual(corpus.addressing.edges[0]!.projectionFiles(1, 'src'));
+    // Every file a relation names is one the addressing enumerates for a host to grant.
+    const granted = new Set(corpus.addressing.files());
+    for (const r of relations) for (const f of r.files) expect(granted.has(f)).toBe(true);
+  }, 30_000);
+
   it('reads one vertex the way the verb surface says to — `where: subject = …`', async () => {
     const id = await seedOf(7);
     const { rows } = await corpus.read({ vertex_type: 'Person', where: `subject = ${lit(id)}` });

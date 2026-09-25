@@ -503,6 +503,34 @@ export interface NeighboursParams {
   directions?: readonly Direction[];
 }
 
+/**
+ * One relation the verbs register, as a host has to record it: the name the engine knows it by,
+ * the rows it holds, the payload files behind it and — for a vertex type — the columns a row
+ * carries. What {@link Corpus.relations} answers with.
+ */
+export type CorpusRelation =
+  | {
+      readonly kind: 'vertex';
+      /** The vertex type, which is also its relation's name. */
+      readonly name: string;
+      readonly rows: number;
+      /** The payload — the projection at `scale: 1`. */
+      readonly files: readonly string[];
+      /** What a row carries, off the bytes — {@link CorpusVertexType.fields}. */
+      readonly columns: readonly CorpusField[];
+    }
+  | {
+      readonly kind: 'edge';
+      /** `EdgeTypeSummary.table_name` — the corpus's own spelling, never composed by a host. */
+      readonly name: string;
+      readonly rows: number;
+      /** The source-aligned adjacency, which is the relation's rows. */
+      readonly files: readonly string[];
+      readonly edgeType: string;
+      readonly srcType: string;
+      readonly dstType: string;
+    };
+
 /** A corpus, open. */
 export interface Corpus {
   /** Where it lives, as {@link open} was given it. */
@@ -631,6 +659,16 @@ export interface Corpus {
    * disclosure decision on it. `identity` is the one that names an identity.
    */
   schema(params?: SchemaParams): Promise<SchemaResult>;
+  /**
+   * **Every relation the verbs query by name**, vertex types first, as a host records a corpus it
+   * has to hand on: the name, the row count, the payload files and a vertex type's columns.
+   *
+   * The name is asked of {@link Corpus.schema} and never composed — `table_name` is pre-computed
+   * there precisely so no binding reimplements the edge-naming convention — and the counts are its
+   * `count(*)`, so this is one bare `schema()` and no query of its own. A relation that publishes
+   * no source-aligned adjacency has no rows to register and is left out, as the verbs leave it.
+   */
+  relations(): Promise<readonly CorpusRelation[]>;
   /**
    * Rows of one vertex type under a `where` predicate, an order and a limit.
    *
@@ -1997,6 +2035,36 @@ export async function open(
 
     async schema(params = {}) {
       return (await verbs()).schema(params);
+    },
+    async relations() {
+      const answered = await (await verbs()).schema({});
+      const vertices = answered.vertices.map(
+        (v): CorpusRelation => ({
+          kind: 'vertex',
+          name: v.name,
+          rows: v.count,
+          files: payloadFiles.get(v.name) ?? [],
+          columns: fieldsOf(v.name),
+        }),
+      );
+      const edges = answered.edges.flatMap((e): CorpusRelation[] => {
+        const address = addressing.edges.find(
+          (a) => a.edgeType === e.name && a.srcType === e.source_type && a.dstType === e.target_type,
+        );
+        if (!address || address.adjacency('src') === null) return [];
+        return [
+          {
+            kind: 'edge',
+            name: e.table_name,
+            rows: e.count,
+            files: address.projectionFiles(1, 'src'),
+            edgeType: e.name,
+            srcType: e.source_type,
+            dstType: e.target_type,
+          },
+        ];
+      });
+      return [...vertices, ...edges];
     },
     async read(params) {
       // `where` is the second raw-SQL door and it is refused HERE rather than by the transport,

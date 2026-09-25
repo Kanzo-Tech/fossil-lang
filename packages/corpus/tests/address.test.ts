@@ -273,6 +273,22 @@ describe('open — the engine-free rung', () => {
     expect(person.tileOf(BigInt(declared))).toBe(1n);
   });
 
+  it('enumerates every addressable file once, payload first, for a host to grant whole', async () => {
+    const addressing = await open('', { manifestFiles });
+    const files = addressing.files();
+    expect(new Set(files).size).toBe(files.length);
+    const want: string[] = [];
+    for (const type of addressing.types) {
+      for (const p of type.projections) want.push(...type.projectionFiles(p.scale));
+      want.push(...(type.index?.files() ?? []));
+    }
+    for (const edge of addressing.edges) {
+      for (const p of edge.projections) want.push(...edge.projectionFiles(p.scale, p.direction!));
+    }
+    expect(files).toEqual([...new Set(want)]);
+    expect(files).toContain(addressing.types[0]!.tileUrl(0));
+  });
+
   it('addresses relative to the dataset root when the base is empty', async () => {
     const corpus = await open('', { manifestFiles });
     expect(corpus.vertexType().tileUrl(9)).toBe('vertex/Person/tiles.parquet');

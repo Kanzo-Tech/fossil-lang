@@ -497,6 +497,16 @@ export interface CorpusAddressing {
   readonly container: Container;
   readonly types: readonly VertexAddress[];
   readonly edges: readonly EdgeAddress[];
+  /**
+   * **Every file the corpus can address**, distinct and in declaration order: each vertex type's
+   * projections and identity index, then each relation's projections in both orientations.
+   *
+   * The list a host that grants access file by file — signing URLs, registering them with an
+   * engine — hands over whole, so it composes no path of its own. A projection whose count is not
+   * declared cannot be enumerated and is left out rather than guessed at; its own `files()` is the
+   * question that refuses it by name. `fossil_graph::plan::ReadPlan::files` is the implementation.
+   */
+  files(): readonly string[];
   /** One vertex type by name, or the first the index names when no name is given. */
   vertexType(name?: string): VertexAddress;
   /** The edge types incident to `type` — as source, as destination, or both on a self-edge. */
@@ -801,6 +811,7 @@ export function addressManifests(
     container: plan.container,
     types,
     edges,
+    files: () => reader.files(),
     vertexType,
     incident: (type) => edges.filter((e) => e.srcType === type || e.dstType === type),
     drawing: (type) => {
