@@ -2,7 +2,8 @@
 
 JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Provides:
 
-- `initFossilWasm({ wasmUrl })` — consumer-controlled `.wasm` URL loader (memoised).
+- `initFossilWasm()` — boots the module (memoised). Its `.wasm` ships in this
+  package and the host's bundler emits it as an asset; the host copies nothing.
 - `tokenize(text)` — calls the Rust lexer, returns `TokenRow[]`. The Rust lexer
   is the only lexer: no host reimplements one and drifts from the grammar.
 - `semanticLegend()` — returns the LSP semantic-tokens legend.
@@ -41,47 +42,50 @@ const rows = pg.check();
   locator, catalogue row, reader option. Introspection DESCRIBEs these and
   registers each descriptor under `key` with `registerInferredDescriptor`.
 
-## Why explicit `init({ wasmUrl })` and not auto-load?
-
-We use `wasm-bindgen --target web` (NOT `--target bundler`). This means consumers
-control the `.wasm` URL resolution — works in Vite, Next.js, Webpack, Rspack, or
-plain `new URL(...)` in a Web Worker context. `--target bundler` was rejected
-because its output assumes the consumer's bundler resolves `.wasm` ESM imports,
-which a republished library cannot assume of a host's Vite/Next/Webpack config.
-
-## Consumer patterns
-
-### Vite host
+## Loading: the `.wasm` is an asset of this package
 
 ```typescript
 import { initFossilWasm, tokenize } from '@fossil-lang/wasm';
-import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
 
-await initFossilWasm({ wasmUrl });
+await initFossilWasm();
 const tokens = tokenize('User := io.csv("data/people.csv")');
 ```
 
-### Next.js host (in a Client Component)
+That is the whole host flow, in Vite, Next.js (webpack or Turbopack), a Web
+Worker or any bundler that understands `new URL('…', import.meta.url)`. The glue
+(`wasm-bindgen --target web`) locates `fossil_wasm_bg.wasm` with exactly that
+expression, the bundler copies the file into its output under a hashed name and
+rewrites the URL, and the browser fetches it from there. No copy script, no
+`public/` directory, no URL to keep in sync with a version.
 
-```typescript
-'use client';
-import { initFossilWasm, tokenize } from '@fossil-lang/wasm';
+**Vite dev server, package installed from npm:** Vite's dependency optimizer
+pre-bundles the package into `node_modules/.vite/deps/` without its `.wasm`, and
+the URL then answers with `index.html`. Keep the three packages out of it —
+`vite build` needs nothing:
 
-// Put fossil_wasm_bg.wasm in public/wasm/ at build time (next.config.mjs copies it)
-useEffect(() => {
-  void initFossilWasm({ wasmUrl: '/wasm/fossil_wasm_bg.wasm' });
-}, []);
+```js
+// vite.config.js
+export default { optimizeDeps: { exclude: ['@fossil-lang/wasm', '@fossil-lang/executor', '@fossil-lang/corpus'] } };
 ```
 
-### Web Worker
+A workspace-linked package is never pre-bundled, which is why the playground needs
+no such line. Next.js needs none in either `next dev` or `next build`, webpack or
+Turbopack.
+
+`--target bundler` was rejected because it emits `import … from '*.wasm'` (the
+ESM-integration proposal), which each bundler gates behind its own experimental
+flag. `new URL(…, import.meta.url)` is the pattern they all support by default.
+
+**Without a bundler**, pass the module yourself — `initFossilWasm(wasm)` takes the
+glue's `InitInput` (`BufferSource`, `Response`, `URL`, `WebAssembly.Module`). Node
+is the case: its `fetch` rejects `file://`, so hand it the bytes:
 
 ```typescript
-// inside a Worker module:
-import { initFossilWasm, FossilPlayground } from '@fossil-lang/wasm';
-import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 
-await initFossilWasm({ wasmUrl });
-const pg = new FossilPlayground();
+const path = createRequire(import.meta.url).resolve('@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm');
+await initFossilWasm(await readFile(path));
 ```
 
 ## Build

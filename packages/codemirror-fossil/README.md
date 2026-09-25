@@ -25,9 +25,8 @@ at the lowest precedence CodeMirror has. The editor is the host's decision:
 ```ts
 import { fossil } from '@fossil-lang/codemirror-fossil';
 import { FossilPlayground, initFossilWasm, tokenize, tokenKinds } from '@fossil-lang/wasm';
-import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
 
-await initFossilWasm({ wasmUrl });
+await initFossilWasm();
 const pg = new FossilPlayground();
 const handle = pg.openFile('hello.fossil', program);
 

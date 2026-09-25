@@ -2,7 +2,7 @@
 
 The query layer for whatever draws the graph. **Fossil ships no viewer.**
 
-**One door, and it is one function.** `open(url, { query, wasmUrl })`
+**One door, and it is one function.** `open(url, { query })`
 returns discovery, the camera (`extent`, `frame`, `rows`, `node`, `neighbours`)
 and the five bounded verbs (`read`, `expand`, `path`, `aggregate`, `schema`) on
 one object. No tiles, no `dense_id`, no Morton, no `by_source`, no prefixes, no
@@ -13,9 +13,9 @@ engine-free route was a second function, `resolveCorpus`, and is now the shallow
 end of the same call:
 
 ```ts
-await open(url,  { query, wasmUrl })          // Corpus — the whole door
-await open(url,  { readText, wasmUrl })       // CorpusAddressing — manifests only
-await open(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
+await open(url,  { query })          // Corpus — the whole door
+await open(url,  { readText })       // CorpusAddressing — manifests only
+await open(base, { manifestFiles })  // CorpusAddressing — no request at all
 ```
 
 `query` is the engine; `readText` is `(url) => text` and buys only the
@@ -27,7 +27,7 @@ it.
 
 The capability was always the real difference between the two functions, and a
 capability is an argument. The call is now always asynchronous; the synchronous
-form `resolveCorpus` had without a `wasmUrl` had no production consumer.
+form `resolveCorpus` had once the module was up had no production consumer.
 
 Everything else that was on the barrel is reachable through the door or not at
 all:
@@ -44,8 +44,11 @@ all:
   index, the manifests it names, and nothing else.
 - `initFossilGraphWasm` — the boot, awaited inside `open`. A consumer
   should not have to know there is a wasm module, let alone sequence two calls
-  against it. `wasmUrl` is what survives, because only the caller knows how its
-  bundler resolves an asset.
+  against it. Nor does it say where the module is: the `.wasm` ships in this
+  package and the host's bundler emits it as an asset (`new URL(…, import.meta.url)`
+  in the glue). `wasm` is left on the options for a host with no bundler — Node,
+  which hands the bytes. (Vite's dev server: see `@fossil-lang/wasm`'s README for
+  the one `optimizeDeps` line.)
 - `export type *` — an unbounded star publishes whatever the codegen makes, now
   and later, with nobody deciding. The twelve params/results the members name
   are re-exported by name instead.
@@ -100,7 +103,6 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
 
 ```ts
 import { open } from '@fossil-lang/corpus';
-import wasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url'; // Vite
 
 const corpus = await open('https://data.example/graph', {
   // Adapt the host's DuckDB-WASM to row objects. In keasy this wraps the Mosaic
@@ -109,10 +111,9 @@ const corpus = await open('https://data.example/graph', {
     const table = await coordinator.query(sql, { type: 'arrow' });
     return table.toArray().map((r) => r.toJSON());
   },
-  // Where the wasm lives. Booted here, because the addressing needs it too: it
-  // asks `fossil_graph::plan` rather than re-deriving anything. The boot is
-  // memoised, so a second corpus in the same process may omit this.
-  wasmUrl,
+  // No wasm URL: `open` boots the module (memoised) and the bundler already
+  // emitted its `.wasm`. The addressing needs it too — it asks
+  // `fossil_graph::plan` rather than re-deriving anything.
 });
 
 corpus.types;                              // vertex types with counts and columns, edge types
@@ -243,7 +244,7 @@ already built while it was opening, so a drawing path that fetches its own tiles
 reaches it through the corpus it already has:
 
 ```ts
-const { addressing } = await open(url, { query, wasmUrl });
+const { addressing } = await open(url, { query });
 
 addressing.vertexType().tileUrl(10);
 // '/bench/1000000/vertex/Person/chunk10.parquet'
@@ -263,11 +264,10 @@ same name for the same object, by lending less:
 // The package reads the index and the manifests it names. You supply the reader.
 const addressing = await open(base, {
   readText: async (url) => (await fetch(url)).text(),
-  wasmUrl,
 });
 
 // Or, with the manifests already in hand, nothing is read at all.
-const same = await open(base, { manifestFiles, wasmUrl });
+const same = await open(base, { manifestFiles });
 ```
 
 `container` on every address says which number a footer hands you is the tile:

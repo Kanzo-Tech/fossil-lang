@@ -246,7 +246,9 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            `{ readText }` the manifests alone, `{ manifestFiles }` no request at
                            all. `resolveCorpus` is gone rather than renamed and all three are
                            ASYNC; `corpus.addressing` is what the first already resolved. The
-                           boot is the `wasmUrl` option on every depth and is internal otherwise
+                           boot is internal: the `.wasm` is a bundler asset (`new URL(…,
+                           import.meta.url)` in the glue), and `wasm` on the options is for a
+                           host with no bundler
   draw/                    the half of drawing a corpus that is NOT a renderer — no canvas, no
                            GPU, no camera, and fossil still ships no viewer. What a corpus is
                            drawn WITH (the `channels:` block, its three states, the derivation
