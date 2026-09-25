@@ -15,6 +15,7 @@
     "verify-properties": "node --experimental-strip-types scripts/verify-properties.mjs",
     "verify-encoding": "node --experimental-strip-types scripts/verify-encoding.mjs",
     "verify-one-engine": "node scripts/verify-one-engine.mjs",
+    "verify-wasm-assets": "node scripts/verify-wasm-assets.mjs",
     "measure-frame": "node --experimental-strip-types scripts/measure-frame.mjs",
     "test": "node scripts/test.mjs",
     "build": "pnpm run typecheck && vite build",
