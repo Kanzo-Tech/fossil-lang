@@ -35,7 +35,7 @@ beforeAll(async () => {
   // public API (the conservative, browser-shaped surface); BufferSource is a
   // wasm-bindgen-accepted input that we use here in the Node test harness via
   // a cast. The cast is test-internal and does not leak into the public API.
-  await initFossilWasm({ wasmUrl: bytes as unknown as URL });
+  await initFossilWasm(bytes);
 });
 
 describe('@fossil-lang/wasm — tokenize', () => {

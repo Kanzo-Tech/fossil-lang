@@ -11,8 +11,8 @@
  * **It costs a WASM module, and that is the price rather than an oversight.** Composing a URL was
  * synchronous arithmetic over a parsed manifest and is now a call into `fossil-graph-wasm`, so the
  * module has to be up before an address resolves — the same precondition every verb already had.
- * That precondition is an OPTION and not a call a caller sequences: `wasmUrl` on
- * `OpenOptions`, awaiting the same memoised boot. The subpath
+ * That precondition is not a call a caller sequences: `open` awaits the same memoised boot, and
+ * the module finds its own `.wasm` as a bundler asset. The subpath
  * `@fossil-lang/corpus/address` existed exactly so a third party could address a corpus *without*
  * the module at all, and it is deleted: a WASM-free path is a second implementation, and a second
  * implementation is what this change removed.
@@ -772,7 +772,7 @@ function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress 
  * reached and the module surface has one name on it. `./corpus.ts` is the only caller.
  *
  * **It is synchronous and stays synchronous**, because the boot is the caller's problem one layer
- * up: `open` awaits `wasmUrl` before it gets here, exactly as it does for a verb.
+ * up: `open` awaits the boot before it gets here, exactly as it does for a verb.
  *
  * Throws {@link CorpusManifestError} when the manifest cannot address itself — a missing file, a
  * `chunk_size` no shift addresses, an endpoint type the index does not declare, or an edge whose

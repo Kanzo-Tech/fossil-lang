@@ -9,9 +9,8 @@
  *
  * ```ts
  * import { open } from '@fossil-lang/corpus';
- * import wasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url'; // Vite
  *
- * const corpus = await open(url, { query, wasmUrl });
+ * const corpus = await open(url, { query });
  * corpus.types                                  // what is inside
  * await corpus.frame({ ...box, pixels })        // a rectangle at a resolution, ready to draw
  * await corpus.node(iri)
@@ -32,9 +31,9 @@
  * The capability is what the CALLER brings, so it is an argument:
  *
  * ```ts
- * await open(url,  { query, wasmUrl })          // Corpus — the door
- * await open(url,  { readText, wasmUrl })       // CorpusAddressing — manifests only
- * await open(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
+ * await open(url,  { query })          // Corpus — the door
+ * await open(url,  { readText })       // CorpusAddressing — manifests only
+ * await open(base, { manifestFiles })  // CorpusAddressing — no request at all
  * ```
  *
  * Three rungs, one name, and `corpus.addressing` is still what the first rung already resolved for
@@ -46,9 +45,9 @@
  *
  * - **`initFossilGraphWasm`** — the biggest leak of implementation into a surface whose claim is
  *   that a corpus is a URL: a consumer had to know there is a wasm module and had to sequence two
- *   calls in the right order. {@link open} awaits it, and
- *   `OpenOptions.wasmUrl` is the one thing about it a caller can still need to say, because
- *   only the caller knows how its bundler resolves an asset.
+ *   calls in the right order. {@link open} awaits it, and the module finds its own `.wasm`
+ *   through `new URL(…, import.meta.url)`, which the host's bundler emits as an asset.
+ *   `OpenOptions.wasm` is left for the host with no bundler (Node: the bytes).
  * - **`GRAPH_INFO_PATH`** — the index's file name is the door's business and not a consumer's.
  *   **That reasoning did not extend to the engine-free route and it was applied there anyway**,
  *   which is what made a hand-written scan of the index's `vertices:`/`edges:` lists the price of

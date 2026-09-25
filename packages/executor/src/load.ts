@@ -1,23 +1,11 @@
 // '../pkg/fossil_df_wasm.js' is a wasm-bindgen --target web output emitted by
 // `pnpm run build:wasm`. Gitignored (`packages/executor/pkg/`) but always
-// present at build time. Its .d.ts is consumed via the file's
-// `/* @ts-self-types */` pragma — TS 5.6 resolves it automatically.
+// present at build time and in the published tarball. Its .d.ts is consumed via
+// the file's `/* @ts-self-types */` pragma.
 import init from '../pkg/fossil_df_wasm.js';
+import type { InitInput } from '../pkg/fossil_df_wasm.js';
 
-/** Options for {@link initFossilExecutor}. */
-export interface InitFossilExecutorOpts {
-  /**
-   * URL or path to `fossil_df_wasm_bg.wasm`. Consumers control resolution:
-   *  - Vite: `import wasmUrl from '@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm?url'`
-   *  - Next.js: serve from `public/` and pass the static URL
-   *  - Web Worker: `new URL('@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm', import.meta.url)`
-   *  - Node test: the `.wasm` bytes (BufferSource) read off disk
-   *
-   * Accepts `string` / `URL` / `Request` / `Response` (the
-   * `wasm-bindgen --target web` init signature).
-   */
-  wasmUrl: string | URL | Request | Response;
-}
+export type { InitInput };
 
 let _initPromise: Promise<unknown> | null = null;
 
@@ -25,13 +13,18 @@ let _initPromise: Promise<unknown> | null = null;
  * Boot the fossil-df-wasm executor module. MUST be awaited before constructing
  * {@link FossilExecutor}. Memoised — subsequent calls return the same promise.
  *
+ * Called with nothing, the glue resolves `new URL('fossil_df_wasm_bg.wasm',
+ * import.meta.url)` and the host's bundler emits that file as an asset. `wasm`
+ * is for a host with no bundler (Node: the bytes, since its `fetch` rejects
+ * `file://`).
+ *
  * This is the HEAVY artefact (datafusion + arrow + parquet-rs). Lazy-load it
  * only when the user actually runs a job — do NOT call it on page-load (that's
- * what the light `@fossil-lang/wasm` LSP module is for).
+ * what the light `@fossil-lang/wasm` module is for).
  */
-export function initFossilExecutor(opts: InitFossilExecutorOpts): Promise<unknown> {
+export function initFossilExecutor(wasm?: InitInput): Promise<unknown> {
   if (!_initPromise) {
-    _initPromise = init({ module_or_path: opts.wasmUrl as never });
+    _initPromise = init(wasm === undefined ? undefined : { module_or_path: wasm });
   }
   return _initPromise;
 }

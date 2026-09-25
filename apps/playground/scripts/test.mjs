@@ -1,5 +1,5 @@
 /**
- * `pnpm --filter @fossil-lang/playground test` — the five verifiers, plus the typecheck.
+ * `pnpm --filter @fossil-lang/playground test` — the six verifiers, plus the typecheck.
  *
  * ## Why this file exists at all
  *
@@ -47,6 +47,7 @@ const steps = [
   { name: 'verify-nesting', argv: ['scripts/verify-nesting.mjs'] },
   { name: 'verify-properties', argv: ['scripts/verify-properties.mjs'] },
   { name: 'verify-encoding', argv: ['scripts/verify-encoding.mjs'] },
+  { name: 'verify-wasm-assets', argv: ['scripts/verify-wasm-assets.mjs'] },
 ];
 
 let failed = 0;

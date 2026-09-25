@@ -5,9 +5,8 @@
  * A job, end to end — documents, sources, run, upload, completion:
  *
  *   import { initFossilExecutor, runJob } from '@fossil-lang/executor';
- *   import wasmUrl from '@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm?url'; // Vite
  *
- *   await initFossilExecutor({ wasmUrl });           // lazy — only when running a job
+ *   await initFossilExecutor();                      // lazy — only when running a job
  *   const report = await runJob(program, { host, output });
  *
  * `host` is the `SourceHost` from `@fossil-lang/types`; `output` signs the PUTs
@@ -23,7 +22,7 @@
 export { FossilExecutor } from './client.js';
 
 export { initFossilExecutor } from './load.js';
-export type { InitFossilExecutorOpts } from './load.js';
+export type { InitInput } from './load.js';
 
 export { runJob } from './run-job.js';
 export type { Job, JobOutput, CompletePayload, RunJobOptions } from './run-job.js';

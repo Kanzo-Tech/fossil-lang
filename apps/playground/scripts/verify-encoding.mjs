@@ -222,7 +222,7 @@ function colourBeforeChannels(type) {
 
 const query = async (sql) => duckQuery(sql);
 
-const corpus = await open(root, { query, wasmUrl: CORPUS_WASM });
+const corpus = await open(root, { query, wasm: CORPUS_WASM });
 const declaredType = corpus.types.vertices[0];
 const vertexManifest = readFileSync(join(root, manifestPaths[0]), 'utf8');
 const properties = declaredProperties(vertexManifest);

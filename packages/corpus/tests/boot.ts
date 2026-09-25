@@ -16,8 +16,6 @@ import { initFossilGraphWasm } from '../src/load.js';
  * `--target web` init() defaults to `fetch(url)`, and Node's fetch rejects `file://` — so read the
  * bytes and pass a BufferSource, the same way `@fossil-lang/wasm`'s tests do.
  */
-await initFossilGraphWasm({
-  wasmUrl: (await readFile(
-    fileURLToPath(new URL('../pkg/fossil_graph_wasm_bg.wasm', import.meta.url)),
-  )) as unknown as URL,
-});
+await initFossilGraphWasm(
+  await readFile(fileURLToPath(new URL('../pkg/fossil_graph_wasm_bg.wasm', import.meta.url))),
+);

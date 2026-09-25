@@ -219,7 +219,7 @@ const SPAWN_MS = median(spawnSamples);
 
 process.stderr.write('opening the corpus…\n');
 
-const corpus = await open(root, { query, wasmUrl: CORPUS_WASM });
+const corpus = await open(root, { query, wasm: CORPUS_WASM });
 const address = corpus.addressing.vertexType();
 const payload = address.tileUrl(0);
 const boxes = duckQuery(FOOTER_SQL(payload)).map(toTileBox);

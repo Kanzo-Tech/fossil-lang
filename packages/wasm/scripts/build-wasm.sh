@@ -58,11 +58,12 @@ fi
 
 # ---- 2. Run wasm-bindgen --target web ----
 #
-# Why --target web (NOT --target bundler): the --target bundler output assumes the consumer's bundler handles .wasm ESM
-# imports — fragile when republished as a library (consumer's Vite/Next/Webpack
-# config may not). --target web produces a small JS shim where the consumer
-# passes the resolved .wasm URL via init({ wasmUrl }) — explicit, predictable
-# behaviour across every bundler model.
+# --target web (NOT bundler): the glue locates its .wasm with
+# `new URL('<name>_bg.wasm', import.meta.url)`, which Vite, webpack 5 and
+# Turbopack all emit as an asset — so a host calls init() with no argument and
+# copies nothing. --target bundler instead emits `import * from '.wasm'` (ESM
+# integration), which needs a per-bundler experiment flag. Nothing after this
+# step may rewrite or inline the glue: tsc leaves pkg/ untouched.
 
 PKG_DIR="$REPO_ROOT/packages/wasm/pkg"
 mkdir -p "$PKG_DIR"

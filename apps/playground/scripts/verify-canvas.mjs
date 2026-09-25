@@ -134,12 +134,12 @@ const note = (text) => console.log(`  ..   ${text}`);
 // existed because the package asked for `manifestFiles` and published nothing that said which
 // files those are. Now it lends a reader and is told nothing about the layout at all.
 //
-// `wasmUrl` because the addressing is `fossil_graph::plan` at wasm32: arithmetic, but not
+// `wasm` because the addressing is `fossil_graph::plan` at wasm32: arithmetic, but not
 // free-standing. `open` below is given the same value and the boot is memoised, so this is
 // one boot rather than two.
 const addressing = await open(root, {
   readText: (url) => readFileSync(url, 'utf8'),
-  wasmUrl: CORPUS_WASM,
+  wasm: CORPUS_WASM,
 });
 const type = addressing.vertexType();
 
@@ -169,7 +169,7 @@ let lastCost = null;
 // it costs — the manifests, one `DESCRIBE` per type, the tile-code anchors — is paid here, before
 // the counter below starts, because none of it is a camera move.
 
-const corpus = await open(root, { query, wasmUrl: CORPUS_WASM });
+const corpus = await open(root, { query, wasm: CORPUS_WASM });
 const source = corpusSource({
   corpus,
   boxes,

@@ -35,7 +35,6 @@
  * hands back the tiled tree**, so this file stages bytes and opens them, and there is no
  * stand-in left to document.
  */
-import corpusWasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url';
 // Aliased, and this is the one place in the tree where the door's name has to be: this module's
 // own `open()` is what the app calls (`corpus.open()` in `App.tsx`), and an import named `open`
 // beside a local `export function open` is a duplicate declaration rather than a shadow. The
@@ -47,16 +46,6 @@ import { query, register } from './duckdb.js';
 
 /** Where the corpus is addressed from. Any prefix works; it just has to be consistent. */
 export const CORPUS_URL = 'corpus';
-
-/**
- * Where the corpus reader's wasm lives, named once for the whole app.
- *
- * `open` resolves a manifest through `fossil_graph::plan` compiled to wasm32 — there is no
- * second implementation of the addressing on this side any more, so opening a corpus is what needs
- * it rather than only the verbs. Vite rewrites the `?url` at build time, which is the same way
- * `check.ts` reaches the compiler's wasm and `run.ts` the executor's.
- */
-export const CORPUS_WASM_URL = corpusWasmUrl;
 
 /** A single-quoted SQL string literal. Every path in this module reaches SQL through here. */
 const lit = (value: string) => `'${value.replace(/'/g, "''")}'`;
@@ -77,7 +66,7 @@ export async function stage(files: readonly GraphArFile[]): Promise<void> {
 
 /** Open the corpus through the reference door. Throws if the manifest cannot address itself. */
 export function open(): Promise<Corpus> {
-  return door(CORPUS_URL, { query, wasmUrl: CORPUS_WASM_URL });
+  return door(CORPUS_URL, { query });
 }
 
 /**

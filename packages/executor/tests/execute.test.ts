@@ -58,7 +58,7 @@ beforeAll(async () => {
     new URL('../pkg/fossil_df_wasm_bg.wasm', import.meta.url),
   );
   const bytes = await readFile(wasmPath);
-  await initFossilExecutor({ wasmUrl: bytes as unknown as URL });
+  await initFossilExecutor(bytes);
 });
 
 /** `PROGRAM` compiled, with the one document it names registered. */

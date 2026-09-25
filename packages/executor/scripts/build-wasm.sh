@@ -50,9 +50,12 @@ if [[ ! -f "$WASM_INPUT" ]]; then
   exit 1
 fi
 
-# --target web (NOT bundler): the consumer passes the resolved .wasm URL via
-# initFossilExecutor({ wasmUrl }); predictable across every bundler, where
-# --target bundler would assume the consumer's bundler resolves .wasm imports.
+# --target web (NOT bundler): the glue locates its .wasm with
+# `new URL('<name>_bg.wasm', import.meta.url)`, which Vite, webpack 5 and
+# Turbopack all emit as an asset — so a host calls init() with no argument and
+# copies nothing. --target bundler instead emits `import * from '.wasm'` (ESM
+# integration), which needs a per-bundler experiment flag. Nothing after this
+# step may rewrite or inline the glue: tsc leaves pkg/ untouched.
 PKG_DIR="$REPO_ROOT/packages/executor/pkg"
 mkdir -p "$PKG_DIR"
 echo "[build-wasm] wasm-bindgen --target web → $PKG_DIR"

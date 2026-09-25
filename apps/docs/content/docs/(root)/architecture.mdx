@@ -68,9 +68,9 @@ the depth follows from the capability the caller brings, which is the whole of w
 name:
 
 ```ts
-await open(url,  { query, wasmUrl })          // Corpus — the whole door
-await open(url,  { readText, wasmUrl })       // CorpusAddressing — the manifests, no payload
-await open(base, { manifestFiles, wasmUrl })  // CorpusAddressing — no request at all
+await open(url,  { query })          // Corpus — the whole door
+await open(url,  { readText })       // CorpusAddressing — the manifests, no payload
+await open(base, { manifestFiles })  // CorpusAddressing — no request at all
 ```
 
 `sql: 'allowed'` widens the first of those to `SqlCorpus`; it is a widening and not a fourth depth.

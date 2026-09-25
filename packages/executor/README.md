@@ -13,10 +13,12 @@ manifests, as bytes) ready to signed-`PUT`. No mapping runtime on the server.
 ```ts
 import { initFossilExecutor, runJob } from '@fossil-lang/executor';
 import type { SourceHost } from '@fossil-lang/types';
-import wasmUrl from '@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm?url'; // Vite
 
 // Lazy — only when the user runs a job (the artefact is large, datafusion-heavy).
-await initFossilExecutor({ wasmUrl });
+// The .wasm ships in this package and the bundler emits it as an asset: nothing
+// to copy, no URL to pass. Node passes the bytes: initFossilExecutor(bytes).
+// Vite dev: see @fossil-lang/wasm's README for the one optimizeDeps line.
+await initFossilExecutor();
 
 const host: SourceHost = {
   connections: async () => ({ minio: 'http://minio:9000/bucket' }),

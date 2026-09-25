@@ -30,7 +30,7 @@
  * import { fossil } from '@fossil-lang/codemirror-fossil';
  * import { initFossilWasm, tokenize, tokenKinds, FossilPlayground } from '@fossil-lang/wasm';
  *
- * await initFossilWasm({ wasmUrl });
+ * await initFossilWasm();
  * const pg = new FossilPlayground();
  * const handle = pg.openFile('hello.fossil', program);
  * const sync = (text: string) => { pg.updateFile(handle, text); };

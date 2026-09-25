@@ -1,19 +1,11 @@
 // '../pkg/fossil_graph_wasm.js' is a wasm-bindgen --target web output emitted by
 // `pnpm run build:wasm`. Gitignored (repo .gitignore `packages/corpus/pkg/`) but
-// always present at build time; its `.d.ts` is resolved via the file's
-// `@ts-self-types` pragma — same pattern as packages/wasm.
+// always present at build time and in the published tarball; its `.d.ts` is
+// resolved via the file's `@ts-self-types` pragma — same pattern as packages/wasm.
 import init from '../pkg/fossil_graph_wasm.js';
+import type { InitInput } from '../pkg/fossil_graph_wasm.js';
 
-/**
- * Options for {@link initFossilGraphWasm}.
- *
- * The four resolutions a bundler can want are documented where a consumer can still say one —
- * `OpenOptions.wasmUrl` in `./corpus.ts`. This type is not re-exported.
- */
-export interface InitFossilGraphWasmOpts {
-  /** URL or path to `fossil_graph_wasm_bg.wasm`. */
-  wasmUrl: string | URL | Request | Response;
-}
+export type { InitInput };
 
 let _initPromise: Promise<unknown> | null = null;
 
@@ -22,22 +14,18 @@ let _initPromise: Promise<unknown> | null = null;
  * same promise, so the second corpus in a process costs the check and nothing
  * else.
  *
- * **Internal, and that is the change.** It was exported from `./index.ts`
- * beside `open` and had to be awaited before it, which is the largest
- * thing the module surface leaked: a consumer had to know there IS a wasm
- * module, and had to sequence two calls in the right order against a package
- * whose whole claim is that a corpus is a URL. `open` awaits it now and
- * `OpenOptions.wasmUrl` is the one thing about it a caller can still
- * need to say. The rejected alternative was keeping it exported "for a caller
- * that wants to pay the boot up front" — which is a second door onto a
- * memoised promise, i.e. the thing `@fossil-lang/corpus` has twice already
- * removed. It stays a module export because `tests/boot.ts` instantiates from
- * a `BufferSource` that no bundler resolution names, and because
- * `./address.ts` needs it up before `addressManifests` can address anything.
+ * Called with nothing, the glue resolves `new URL('fossil_graph_wasm_bg.wasm',
+ * import.meta.url)` and the host's bundler emits that file as an asset;
+ * `OpenOptions.wasm` is what reaches `wasm` here, for a host with no bundler.
+ *
+ * **Internal.** `open` awaits it; a consumer never sequences a boot before the
+ * door. It stays a module export because `tests/boot.ts` instantiates from a
+ * `BufferSource` and because `./address.ts` needs it up before
+ * `addressManifests` can address anything.
  */
-export function initFossilGraphWasm(opts: InitFossilGraphWasmOpts): Promise<unknown> {
+export function initFossilGraphWasm(wasm?: InitInput): Promise<unknown> {
   if (!_initPromise) {
-    _initPromise = init({ module_or_path: opts.wasmUrl as never });
+    _initPromise = init(wasm === undefined ? undefined : { module_or_path: wasm });
   }
   return _initPromise;
 }

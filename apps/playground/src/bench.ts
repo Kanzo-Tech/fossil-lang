@@ -15,9 +15,8 @@
  *
  * What survives is the shape of the win, and it is the half that mattered: **no engine and no
  * request**. Every tile URL in a million-vertex corpus becomes available on one line, out of the
- * manifests already in hand. The boot is an option on that line now — `wasmUrl`, the same option
- * `open` takes — rather than a call sequenced before it, and it is memoised for the rest of
- * the session.
+ * manifests already in hand. The boot is not a call sequenced before it: `open` awaits it,
+ * memoised for the rest of the session, and the module finds its own `.wasm`.
  *
  * **The capability is what decides the depth, and this module is why that is a capability rather
  * than a preference**: there is no `query` here to give the door and nothing to run one against, so
@@ -31,8 +30,6 @@
  * reader, and the package asks for the index and then for what the index names.
  */
 import { open, type CorpusAddressing } from '@fossil-lang/corpus';
-
-import { CORPUS_WASM_URL } from './corpus.js';
 
 /** What `scripts/bench-corpus.mjs` recorded about the corpus it wrote. */
 export interface BenchStamp {
@@ -132,7 +129,7 @@ export async function openBench(): Promise<Bench | null> {
   const base = new URL(stamp.dir, document.baseURI).href.replace(/\/+$/, '');
 
   // The whole of the addressing, on one call and with no engine. Every tile URL of a
-  // million-vertex corpus becomes available here — the `wasmUrl` boots the reader (memoised), the
+  // million-vertex corpus becomes available here — `open` boots the reader (memoised), the
   // callback below is every request that happens, and nothing under it is a byte of payload.
   //
   // **Which files get asked for is not this module's decision any more.** It used to scan the
@@ -147,7 +144,6 @@ export async function openBench(): Promise<Bench | null> {
   let addressing: CorpusAddressing;
   try {
     addressing = await open(base, {
-      wasmUrl: CORPUS_WASM_URL,
       readText: async (url) => {
         const at = performance.now();
         const response = await fetch(url);
