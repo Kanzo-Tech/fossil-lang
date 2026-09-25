@@ -24,33 +24,25 @@ at the lowest precedence CodeMirror has. The editor is the host's decision:
 
 ```ts
 import { fossil } from '@fossil-lang/codemirror-fossil';
-import { FossilPlayground, initFossilWasm, tokenize, tokenKinds } from '@fossil-lang/wasm';
+import { openProgram } from '@fossil-lang/wasm';
 
-await initFossilWasm();
-const pg = new FossilPlayground();
-const handle = pg.openFile('hello.fossil', program);
+// `host` is the host's `SourceHost`: the connection map, and signing what the program names.
+const program = await openProgram('hello.fossil', { host, text });
 
-const sync = (text: string) => { pg.updateFile(handle, text); };
-
-const extensions = fossil({
-  tokenize,
-  tokenKinds,
-  uri: 'hello.fossil',
-  check: (text) => { sync(text); return pg.check(); },
-  hover: (text, line, ch) => { sync(text); return pg.hover(handle, line, ch); },
-  complete: (text, line, ch) => { sync(text); return pg.completions(handle, line, ch); },
-  definition: (text, line, ch) => { sync(text); return pg.gotoDefinition(handle, line, ch); },
-  onNavigate: (target) => console.log(target),
-});
+const extensions = fossil({ ...program, onNavigate: (target) => console.log(target) });
 ```
+
+`openProgram` answers with exactly this package's option names — `tokenize`, `tokenKinds`,
+`uri`, `check`, `hover`, `complete`, `definition` — over one workspace, so the host writes
+the one thing that is its own to decide: where a definition in another file goes.
 
 **Every source takes the text, and that repetition is the design.** The workspace answers
 about the text of the last `updateFile`; the checker is debounced, hover fires on
 mouse-move and completion on nearly every keystroke, so three of the four run between two
 checks. A source taking only a position would let a host query text it had not pushed and
-get a range one keystroke wrong. What the push costs is the host's to decide — comparing
-against what it last sent skips the call in the common case, which is what
-`apps/playground/src/check.ts` does.
+get a range one keystroke wrong. `openProgram` pushes before every answer and compares
+against what it last sent, so the push costs a string comparison in the common case; a
+host wiring `FossilPlayground` by hand owes the same discipline.
 
 `@kanzo-tech/ui`'s `CodeEditor` takes exactly that as its `extensions` prop and
 holds it in a live-reconfigured `Compartment`. So does a bare `EditorView`.

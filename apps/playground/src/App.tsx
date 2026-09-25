@@ -44,6 +44,7 @@ export default function App() {
   const [table, setTable] = useState<Table | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [definition, setDefinition] = useState<string | null>(null);
+  const [checked, setChecked] = useState<checker.FossilProgram | null>(null);
   const booted = useRef(false);
 
   const say = useCallback((line: string) => setLog((prior) => [...prior, line]), []);
@@ -59,17 +60,18 @@ export default function App() {
         const dc = duck.duckdbCost();
         if (dc) say(`duckdb-wasm  ${KB(dc.bytes)}  ${dc.ms} ms`);
 
-        await checker.load(PROGRAM);
+        const opened = await checker.load(PROGRAM);
         const cc = checker.checkerCost();
         if (cc) say(`fossil-wasm  ${KB(cc.bytes)}  ${cc.ms} ms`);
 
         // Introspect the CSV and tell the compiler what it found — the browser's version of
         // what `fossil-cli` does with `fossil-introspect` before every compile.
         const descriptor = await describeCsv(CSV_PATH, CSV_BYTES);
-        checker.registerDescriptor(descriptor);
+        opened.registerDescriptor(descriptor);
         say(`introspected ${CSV_PATH}: ${descriptor.columns.map((c) => `${c.name}:${c.primitive}`).join(', ')}`);
 
-        setDiagnostics(checker.check());
+        setDiagnostics(await opened.check(PROGRAM));
+        setChecked(opened);
         setPhase('ready');
       } catch (cause) {
         setError(String(cause));
@@ -78,43 +80,40 @@ export default function App() {
     })();
   }, [say]);
 
-  // The language layer, built once. `CodeEditor` reconfigures its `Compartment` on the
-  // REFERENTIAL identity of `extensions`, so an inline array would rebuild the editor's
-  // language on every render — the empty dependency list is load-bearing, not tidiness.
+  // The language layer, built once the program is open and keyed on it. `CodeEditor`
+  // reconfigures its `Compartment` on the REFERENTIAL identity of `extensions`, so an inline
+  // array would rebuild the editor's language on every render — the dependency list is
+  // load-bearing, not tidiness.
   //
   // Nothing here debounces. `fossil()`'s linter waits out its own `delay` and then waits
   // for the check to return before scheduling the next one, so the coalescing an LSP
   // client does with `didChange` is in the library rather than in this file. It used to
-  // be here, as a `setTimeout` plus a `busy` flag in `check.ts`, guarding a wasm
-  // re-entrancy defect that poisoned the workspace permanently — see `check.ts` for
-  // where that went.
+  // be here, as a `setTimeout` plus a `busy` flag, guarding a wasm re-entrancy defect that
+  // poisoned the workspace permanently; `crates/fossil-wasm` now holds the workspace in a
+  // `RefCell` and re-entry returns an error instead.
   //
   // Four sources at four rates, one workspace, and every one of them takes the text:
-  // `check.ts`'s `sync` is what makes that safe to say and cheap to do.
+  // `openProgram` pushes it before each answer, which is what makes that safe and cheap.
   const extensions = useMemo(
     () =>
-      fossil({
-        tokenize: checker.tokenize,
-        tokenKinds: checker.tokenKinds,
-        uri: PROGRAM_PATH,
-        check: checker.checkText,
-        // The panel below renders the same rows the squiggles do, from one check.
-        onDiagnostics: (rows) => setDiagnostics([...rows]),
-        hover: checker.hoverAt,
-        complete: checker.completeAt,
-        definition: checker.definitionAt,
-        // One pane, so a definition in `hello.shex` cannot be a jump — and two of the
-        // four positions goto-def recognises resolve into exactly that file. Reporting
-        // where it is beats moving the cursor to the same coordinates in the wrong
-        // buffer, which is what a host that ignored `uri` would do.
-        onNavigate: (target) =>
-          setDefinition(
-            target === null
-              ? 'no definition at the cursor'
-              : `${target.uri}:${target.range.start.line + 1}:${target.range.start.character + 1}`,
-          ),
-      }),
-    [],
+      checked === null
+        ? []
+        : fossil({
+            ...checked,
+            // The panel below renders the same rows the squiggles do, from one check.
+            onDiagnostics: (rows) => setDiagnostics([...rows]),
+            // One pane, so a definition in `hello.shex` cannot be a jump — and two of the
+            // four positions goto-def recognises resolve into exactly that file. Reporting
+            // where it is beats moving the cursor to the same coordinates in the wrong
+            // buffer, which is what a host that ignored `uri` would do.
+            onNavigate: (target) =>
+              setDefinition(
+                target === null
+                  ? 'no definition at the cursor'
+                  : `${target.uri}:${target.range.start.line + 1}:${target.range.start.character + 1}`,
+              ),
+          }),
+    [checked],
   );
 
   const onRun = async () => {

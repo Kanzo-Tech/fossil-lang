@@ -28,24 +28,15 @@
  *
  * ```ts
  * import { fossil } from '@fossil-lang/codemirror-fossil';
- * import { initFossilWasm, tokenize, tokenKinds, FossilPlayground } from '@fossil-lang/wasm';
+ * import { openProgram } from '@fossil-lang/wasm';
  *
- * await initFossilWasm();
- * const pg = new FossilPlayground();
- * const handle = pg.openFile('hello.fossil', program);
- * const sync = (text: string) => { pg.updateFile(handle, text); };
- *
- * const extensions = fossil({
- *   tokenize,
- *   tokenKinds,
- *   uri: 'hello.fossil',
- *   check: (text) => { sync(text); return pg.check(); },
- *   hover: (text, line, ch) => { sync(text); return pg.hover(handle, line, ch); },
- *   complete: (text, line, ch) => { sync(text); return pg.completions(handle, line, ch); },
- *   definition: (text, line, ch) => { sync(text); return pg.gotoDefinition(handle, line, ch); },
- *   onNavigate: (target) => report(target),
- * });
+ * const program = await openProgram('hello.fossil', { host, text });
+ * const extensions = fossil({ ...program, onNavigate: (target) => report(target) });
  * ```
+ *
+ * `openProgram` is `@fossil-lang/wasm`'s, and it is the protocol below written once: one
+ * workspace, the text pushed before every answer, the documents it names resolved before a
+ * check. A host wiring `FossilPlayground` by hand owes the same.
  *
  * **Every source takes the text**, and that repetition is the design. The wasm
  * workspace answers about the text of the last `updateFile`; the checker is
