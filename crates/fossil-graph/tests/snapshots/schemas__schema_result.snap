@@ -49,6 +49,21 @@ definitions:
         type: string
       target_type:
         type: string
+  FieldKind:
+    description: "What kind of VALUE a field holds, read off its `GraphAr` data type alone.\n\nOrthogonal to [`FieldRole`], which also weighs the name and the cardinality: an `int64` `user_id` is an `Identifier` by role and `Numeric` by kind. The kind is what decides whether `aggregate` may bin the field (`Numeric` and `Temporal` have ranges, `Categorical` groups by value only) and whether an axis is a time axis. It is the one table of `GraphAr` spellings; a reader asks for the kind instead of keeping a copy of it."
+    oneOf:
+      - description: "An integer or floating-point spelling (`int8` … `uint64`, `float`, `double`)."
+        type: string
+        enum:
+          - numeric
+      - description: "`date`, `timestamp` or `time`."
+        type: string
+        enum:
+          - temporal
+      - description: "Everything else — `string`, `bool`, and any spelling this table does not know."
+        type: string
+        enum:
+          - categorical
   FieldRole:
     description: "Inferred role for chart-axis defaults. Mirrors keasy `lib/graph-schema.ts:: inferRole` — promoted here to be authoritative."
     type: string
@@ -61,6 +76,7 @@ definitions:
     required:
       - datatype
       - distinct
+      - kind
       - name
       - role
       - samples
@@ -73,6 +89,10 @@ definitions:
         type: integer
         format: uint64
         minimum: 0
+      kind:
+        description: "What an axis over the field can do with it — see [`FieldKind`]."
+        allOf:
+          - $ref: "#/definitions/FieldKind"
       name:
         type: string
       role:
@@ -91,6 +111,7 @@ definitions:
       - fields
       - iri
       - name
+      - stats
     properties:
       count:
         description: "How many vertices the type has.\n\n**Not from the manifest, despite what this said.** The executor answers it with `count_rows` — a `SELECT count(*)` over the type's tiles. The manifest carries a declared `vertex_count` now, so the query is a second way to ask one question and can go; what it buys until then is that it measures the bytes rather than trusting the declaration, which is the disagreement `apps/corpus`'s `declared-count` guard exists to catch."
@@ -108,3 +129,8 @@ definitions:
       name:
         description: "Short local name as used in `DuckDB` table identifier (e.g. `\"Person\"`)."
         type: string
+      stats:
+        description: "Per-field statistics for this type, in the order of [`Self::fields`]. **Empty unless the call set `stats`**; with it, empty only for a type that declares no field."
+        type: array
+        items:
+          $ref: "#/definitions/FieldStat"

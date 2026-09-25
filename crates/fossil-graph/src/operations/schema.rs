@@ -25,6 +25,12 @@ pub struct SchemaParams {
     /// Ignored without `vertex_type`.
     #[serde(default)]
     pub field: Option<String>,
+    /// Every vertex type's per-field statistics, on its
+    /// [`VertexTypeSummary::stats`] — one batched query per type, the same one
+    /// `vertex_type` spends on one. What a host drawing a schema panel asks for
+    /// instead of one call per type. Samples are never part of it.
+    #[serde(default)]
+    pub stats: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -54,6 +60,10 @@ pub struct VertexTypeSummary {
     pub count: u64,
     /// Field names — what a follow-up `schema { vertex_type, field }` may name.
     pub fields: Vec<String>,
+    /// Per-field statistics for this type, in the order of [`Self::fields`].
+    /// **Empty unless the call set `stats`**; with it, empty only for a type
+    /// that declares no field.
+    pub stats: Vec<FieldStat>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -77,6 +87,8 @@ pub struct FieldStat {
     pub distinct: u64,
     /// Authoritative chart-axis role.
     pub role: FieldRole,
+    /// What an axis over the field can do with it — see [`FieldKind`].
+    pub kind: FieldKind,
     /// Up to 8 non-null values. **Populated only when the call named this
     /// field**: they are a second query, and a bare per-type call would pay it
     /// once per column.
@@ -91,4 +103,43 @@ pub enum FieldRole {
     Identifier,
     Dimension,
     Measure,
+}
+
+/// What kind of VALUE a field holds, read off its `GraphAr` data type alone.
+///
+/// Orthogonal to [`FieldRole`], which also weighs the name and the cardinality:
+/// an `int64` `user_id` is an `Identifier` by role and `Numeric` by kind. The
+/// kind is what decides whether `aggregate` may bin the field (`Numeric` and
+/// `Temporal` have ranges, `Categorical` groups by value only) and whether an
+/// axis is a time axis. It is the one table of `GraphAr` spellings; a reader
+/// asks for the kind instead of keeping a copy of it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldKind {
+    /// An integer or floating-point spelling (`int8` … `uint64`, `float`, `double`).
+    Numeric,
+    /// `date`, `timestamp` or `time`.
+    Temporal,
+    /// Everything else — `string`, `bool`, and any spelling this table does not know.
+    Categorical,
+}
+
+impl FieldKind {
+    /// The kind of a `GraphAr` `data_type` spelling. Case-sensitive, as the
+    /// writer emits it.
+    #[must_use]
+    pub fn of(datatype: &str) -> Self {
+        match datatype {
+            "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
+            | "float" | "double" => Self::Numeric,
+            "date" | "timestamp" | "time" => Self::Temporal,
+            _ => Self::Categorical,
+        }
+    }
+
+    /// Whether the field has ranges to bin over.
+    #[must_use]
+    pub const fn is_binnable(self) -> bool {
+        matches!(self, Self::Numeric | Self::Temporal)
+    }
 }
