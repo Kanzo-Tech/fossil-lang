@@ -31,6 +31,8 @@ export interface CreateGraphClientOpts {
    * binding keeps the {@link ManifestSource} sync by taking them by value.
    */
   manifestFiles: Record<string, string>;
+  /** The database the relations are registered in; absent, they are named bare. */
+  catalog?: string;
 }
 
 /**
@@ -85,12 +87,12 @@ export interface GraphClient {
  * WASM `dispatch_graph` throws otherwise.
  */
 export function createGraphClient(opts: CreateGraphClientOpts): GraphClient {
-  const { query, manifestFiles } = opts;
+  const { query, manifestFiles, catalog } = opts;
 
   const dispatch = (op: Operation): Promise<unknown> =>
     // dispatch_graph(op, manifest_files, query) → Promise<Result>. The Rust side
     // calls `query.call1(null, sql)`, so an arrow fn (no `this`) is correct.
-    dispatch_graph(op, manifestFiles, query as unknown as (sql: string) => Promise<QueryRow[]>);
+    dispatch_graph(op, manifestFiles, catalog, query as unknown as (sql: string) => Promise<QueryRow[]>);
 
   const call = async <R>(op: Operation): Promise<R> => (await dispatch(op)) as R;
 

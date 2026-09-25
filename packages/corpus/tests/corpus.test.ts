@@ -626,20 +626,19 @@ describe('the verbs, through the same door', () => {
     expect(walked.complete).toBe(false);
   }, 30_000);
 
-  it('shadows a host table of the same name rather than replacing it', async () => {
-    // `Person` is not an unlikely name for a table the host already has. A plain `CREATE OR
-    // REPLACE VIEW` would destroy it; a TEMP one is resolved first and dropped with the
-    // connection. This is the assertion that keeps the door from writing to a host's catalog.
-    // Qualified by CATALOG, not by schema: a temp view lands in `temp.main` and the host's table
-    // in `memory.main`, so `main."Person"` names both and the temp one wins. That precedence is
-    // the mechanism under test, and it makes the schema qualifier useless for saying which.
+  it('keeps its relations in a catalog of its own, beside a host table of the same name', async () => {
+    // `Person` is not an unlikely name for a table the host already has, nor for a second corpus
+    // in the same engine. The verbs' views live in a database named after the corpus, so the
+    // host's table is neither replaced nor shadowed, and the relation is reached by the name
+    // `relations()` answers with.
     await query(`CREATE OR REPLACE TABLE memory.main."Person" AS SELECT 99 AS host_owned`);
     const own = await open(CORPUS, { query });
     expect((await own.schema()).vertices[0]!.count).toBe(Number(VERTEX_COUNT));
-    // The host's table is untouched, and an unqualified name still reaches the corpus.
-    expect(await query(`SELECT host_owned FROM memory.main."Person"`)).toEqual([{ host_owned: 99 }]);
-    const [seen] = await query(`SELECT count(*) AS n FROM "Person"`);
+    expect(await query(`SELECT host_owned FROM "Person"`)).toEqual([{ host_owned: 99 }]);
+    const person = (await own.relations()).find((r) => r.name === 'Person')!;
+    const [seen] = await query(`SELECT count(*) AS n FROM ${person.sql}`);
     expect(Number(seen!['n'])).toBe(Number(VERTEX_COUNT));
+    await own.close();
     await query(`DROP TABLE memory.main."Person"`);
   }, 30_000);
 

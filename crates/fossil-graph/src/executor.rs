@@ -98,6 +98,7 @@ pub trait DuckExecutor {
 struct Context<'a, E: DuckExecutor> {
     manifest: &'a Manifest,
     exec: &'a E,
+    catalog: Option<&'a str>,
 }
 
 /// Dispatch one [`Operation`] against the manifest + executor.
@@ -109,12 +110,18 @@ struct Context<'a, E: DuckExecutor> {
 /// # Errors
 ///
 /// Propagates verb execution errors.
+///
+/// `catalog` is the database the relations live in. `None` names them bare, as a
+/// connection that holds one corpus registers them; a host that holds several
+/// registers each in its own catalog and passes its name, so two corpora with the
+/// same vertex type never resolve to each other's view.
 pub async fn dispatch<E: DuckExecutor>(
     op: &Operation,
     manifest: &Manifest,
+    catalog: Option<&str>,
     exec: &E,
 ) -> Result<Value> {
-    Context { manifest, exec }.dispatch(op).await
+    Context { manifest, exec, catalog }.dispatch(op).await
 }
 
 impl<E: DuckExecutor> Context<'_, E> {
@@ -226,7 +233,7 @@ impl<E: DuckExecutor> Context<'_, E> {
             .exec
             .query_json(&format!(
                 "SELECT {selects} FROM {}",
-                quote_ident(vertex_type)
+                self.relation(vertex_type)
             ))
             .await?;
         let row = rows.first().ok_or_else(|| {
@@ -269,7 +276,7 @@ impl<E: DuckExecutor> Context<'_, E> {
             .query_json(&format!(
                 "SELECT {field} AS sample FROM {table} WHERE {field} IS NOT NULL LIMIT 8",
                 field = quote_ident(field),
-                table = quote_ident(vertex_type),
+                table = self.relation(vertex_type),
             ))
             .await?;
         Ok(rows
@@ -301,7 +308,7 @@ impl<E: DuckExecutor> Context<'_, E> {
     /// `GROUP BY` the column, ordered by the aggregate and cut at `limit` —
     /// constant memory by the cap.
     async fn aggregate_by_value(&self, p: &AggregateParams) -> Result<AggregateResult> {
-        let table = quote_ident(&p.vertex_type);
+        let table = self.relation(&p.vertex_type);
         let group = quote_ident(&p.group_by);
         let agg_expr = agg_expr(p)?;
         let sql = format!(
@@ -350,7 +357,7 @@ impl<E: DuckExecutor> Context<'_, E> {
             });
         }
 
-        let table = quote_ident(&p.vertex_type);
+        let table = self.relation(&p.vertex_type);
         let field = quote_ident(&p.group_by);
         let agg_expr = agg_expr(p)?;
 
@@ -482,7 +489,7 @@ impl<E: DuckExecutor> Context<'_, E> {
         let mut sql = format!(
             "SELECT {} FROM {}",
             cols.join(", "),
-            quote_ident(&p.vertex_type)
+            self.relation(&p.vertex_type)
         );
         if let Some(predicate) = p.r#where.as_ref().map(RawSql::as_str) {
             let _ = write!(sql, " WHERE {predicate}");
@@ -695,7 +702,7 @@ impl<E: DuckExecutor> Context<'_, E> {
                 format!(
                     "SELECT subject AS iri, '{}' AS t FROM {} WHERE subject IN ({set})",
                     v.vertex_type,
-                    quote_ident(&v.vertex_type)
+                    self.relation(&v.vertex_type)
                 )
             })
             .collect::<Vec<_>>()
@@ -742,9 +749,9 @@ impl<E: DuckExecutor> Context<'_, E> {
                      JOIN {dst} d ON e.dst_dense = d.dense_id",
                     et = e.edge_type,
                     dt = e.dst_type,
-                    tbl = quote_ident(&edge_table_name(e)),
-                    src = quote_ident(&e.src_type),
-                    dst = quote_ident(&e.dst_type),
+                    tbl = self.relation(&edge_table_name(e)),
+                    src = self.relation(&e.src_type),
+                    dst = self.relation(&e.dst_type),
                 )
             })
             .collect();
@@ -772,10 +779,18 @@ impl<E: DuckExecutor> Context<'_, E> {
 
     // ── Helpers ───────────────────────────────────────────────────────────
 
+    /// A relation as SQL names it: in [`Self::catalog`] when there is one.
+    fn relation(&self, name: &str) -> String {
+        match self.catalog {
+            Some(catalog) => format!("{}.{}", quote_ident(catalog), quote_ident(name)),
+            None => quote_ident(name),
+        }
+    }
+
     /// Cheap row count — `DuckDB` answers from the Parquet footer metadata
     /// (O(1), no full scan) for `read_parquet`-backed views.
     async fn count_rows(&self, table: &str) -> Result<u64> {
-        let sql = format!("SELECT count(*) AS n FROM {}", quote_ident(table));
+        let sql = format!("SELECT count(*) AS n FROM {}", self.relation(table));
         scalar_u64(&self.exec.query_json(&sql).await?, "n")
             .ok_or_else(|| GraphError::Execution(format!("count(*) on `{table}` returned no row")))
     }
@@ -1065,7 +1080,7 @@ mod tests {
 
     /// Block on [`dispatch`] — the tests are sync.
     fn run<E: DuckExecutor>(op: &Operation, m: &Manifest, exec: &E) -> Result<Value> {
-        block_on(dispatch(op, m, exec))
+        block_on(dispatch(op, m, None, exec))
     }
 
     struct FakeExecutor;

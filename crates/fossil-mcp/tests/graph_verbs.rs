@@ -131,7 +131,7 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 
 fn run<T: serde::de::DeserializeOwned>(conn: &Connection, m: &Manifest, op: &Operation) -> T {
     let exec = ConnectionExecutor::new(conn);
-    let value = block_on(dispatch(op, m, &exec)).expect("verb dispatch");
+    let value = block_on(dispatch(op, m, None, &exec)).expect("verb dispatch");
     serde_json::from_value(value).expect("result deserialises")
 }
 

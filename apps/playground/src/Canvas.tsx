@@ -154,10 +154,26 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
    * `open` is asynchronous and a `BoundedSource` is not: the query loop builds the source
    * synchronously and calls it later. Handing the promise to `corpusSource` means there is no
    * loading branch here and no state machine around the canvas — the source awaits it inside its
-   * own members, once. `bench.base` is absolute for the reason `bench.ts` records: DuckDB resolves
-   * a URL inside its Worker, where a relative one names the wrong directory.
+   * own members, once.
+   *
+   * **The reference call site for a host that can only sign.** The corpus is lent to the page's
+   * engine under `bench/<count>`, every file behind a URL this host "signs" — a static server
+   * needs no signature, so signing is composing `bench.base`, which is absolute for the reason
+   * `bench.ts` records. The manifests are already in hand, so none is fetched again. Closing on
+   * unmount gives the engine its files and views back.
    */
-  const corpus = useMemo(() => open(bench.base, { query: duck.query }), [bench]);
+  const corpus = useMemo(
+    () =>
+      open(`bench/${bench.stamp.count}`, {
+        engine: duck.engine,
+        host: {
+          sign: async (paths) => Object.fromEntries(paths.map((p) => [p, `${bench.base}/${p}`])),
+        },
+        manifestFiles: bench.manifestTexts,
+      }),
+    [bench],
+  );
+  useEffect(() => () => void corpus.then((c) => c.close()), [corpus]);
 
   const streaming: BoundedSource = useMemo(
     () => corpusSource({ corpus, boxes, channels, onCost, slots }),

@@ -24,13 +24,10 @@ composed on both sides; making it one is a separate step.
 
 ```ts
 import { introspect } from "@fossil-lang/introspect";
-import { DuckDBDataProtocol } from "@duckdb/duckdb-wasm";
 
 const descriptors = await introspect(playground.sources(handle), {
-  host,                                      // SourceHost: signs locators
-  register: (name, url) =>                   // make the signed URL readable as `name`
-    db.registerFileURL(name, url, DuckDBDataProtocol.HTTP, false),
-  query: (sql) => conn.query(sql),           // run DESCRIBE → rows
+  host,     // SourceHost: signs locators
+  engine,   // Engine: lends each signed URL as `sources/<key>` and runs the DESCRIBE
 });
 // host then registers each descriptor with the checker.
 ```

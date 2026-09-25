@@ -117,7 +117,7 @@ export default function Streaming({ ready }: StreamingProps) {
     setReading(true);
     setError(null);
     try {
-      await duck.registerUrl(PAYLOAD, payloadUrl(bench));
+      await duck.engine.lend({ [PAYLOAD]: payloadUrl(bench) });
       const started = performance.now();
       const rows = await duck.query(FOOTER_SQL(PAYLOAD));
       setFooterMs(performance.now() - started);

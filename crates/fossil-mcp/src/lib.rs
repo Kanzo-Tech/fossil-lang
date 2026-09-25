@@ -128,7 +128,7 @@ pub async fn dispatch_json(
     tokio::task::spawn_blocking(move || {
         let (conn, manifest) = open(&dataset)?;
         let exec = ConnectionExecutor::new(&conn);
-        block_on(fossil_graph::dispatch(&operation, &manifest, &exec)).map_err(|e| e.to_string())
+        block_on(fossil_graph::dispatch(&operation, &manifest, None, &exec)).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("dispatch task panicked: {e}"))?

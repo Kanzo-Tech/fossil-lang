@@ -26,7 +26,7 @@
  * two diverge.
  */
 
-import type { ProgramSource, SourceHost } from "@fossil-lang/types";
+import type { Engine, ProgramSource, SourceHost } from "@fossil-lang/types";
 
 import {
   NATIVE_READERS,
@@ -212,19 +212,16 @@ export function buildDescriptor(
 }
 
 /**
- * What a host lends introspection: its credentials and its DuckDB.
+ * What a host lends introspection: its credentials and the page's engine.
  *
- * `register` makes a signed URL readable under a name — in DuckDB-WASM,
- * `db.registerFileURL(name, url, DuckDBDataProtocol.HTTP, false)`. The name
- * is the source's key, so the DESCRIBE reads what the program wrote and the
- * signature never enters SQL text or the error DuckDB raises about it. It is
- * a callback rather than a handle because the protocol is a runtime enum of
- * `@duckdb/duckdb-wasm`, and taking it would make that package a peer.
+ * Each source is lent to the engine as `sources/<key>`, so the DESCRIBE reads what the
+ * program wrote, the signature never enters SQL text or the error DuckDB raises about it, and
+ * the name cannot meet a corpus's. Describing a source again under a fresh signature swaps
+ * the lease — {@link Engine.lend}'s rule.
  */
 export interface IntrospectIO {
   host: SourceHost;
-  register(name: string, url: string): Promise<void>;
-  query(sql: string): Promise<readonly DescribeRow[]>;
+  engine: Engine;
   /**
    * A token for the state of the file behind `url` — an ETag, a
    * `Last-Modified`, a version id. Only the host can produce one cheaply.
@@ -264,10 +261,11 @@ export async function introspect(
       const url = signed[source.locator];
       try {
         if (!url) throw new Error("the host does not sign this locator");
-        await io.register(source.key, url);
-        const rows = await io.query(
-          describeSql(source.key, source.format, source.option),
-        );
+        const name = `sources/${source.key}`;
+        await io.engine.lend({ [name]: url });
+        const rows = (await io.engine.query(
+          describeSql(name, source.format, source.option),
+        )) as DescribeRow[];
         return buildDescriptor(source.key, rows, await io.freshness?.(source, url));
       } catch (err) {
         warn(

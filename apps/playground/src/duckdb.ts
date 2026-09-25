@@ -27,6 +27,7 @@ import * as duckdb from '@duckdb/duckdb-wasm';
 import ehWasm from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url';
 import ehWorker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url';
 import type { QueryFn, QueryRow } from '@fossil-lang/corpus';
+import type { Engine } from '@fossil-lang/types';
 
 import type { BundleCost } from './check.js';
 
@@ -112,39 +113,6 @@ export async function register(path: string, bytes: Uint8Array): Promise<void> {
   await db.registerFileBuffer(path, new Uint8Array(bytes));
 }
 
-/**
- * Point DuckDB at a URL on this app's own origin, without downloading it here.
- *
- * The counterpart to {@link register}: that one hands DuckDB bytes, this one hands it an
- * address and lets DuckDB fetch what it needs. `DuckDBDataProtocol.HTTP` makes the engine
- * issue its own `Range` requests, which is the only way to read a footer out of a 21 MB
- * Parquet file without pulling the 21 MB.
- *
- * Used by the streaming panel for exactly one job — reading the bench corpus's footer, once —
- * and deliberately not for the payload. See the note in `src/stream.ts`: requests the engine
- * makes happen inside a Worker where this thread cannot weigh them, and a panel about bytes
- * has to weigh its own bytes.
- *
- * `false` is `directIO`: DuckDB caches what it has already read, which is what makes the
- * footer bought-once rather than bought-per-query.
- */
-export async function registerUrl(path: string, url: string): Promise<void> {
-  if (!db) throw new Error('duckdb not booted');
-  try {
-    await db.dropFile(path);
-  } catch {
-    // Not registered yet.
-  }
-  await db.registerFileURL(path, url, duckdb.DuckDBDataProtocol.HTTP, false);
-}
-
-/**
- * The one capability, as `@fossil-lang/corpus` spells it.
- *
- * Arrow in, plain row objects out — the binding's contract is `Record<string, unknown>`
- * and it coerces widths at its own boundary, precisely because hosts disagree about
- * whether a `UINTEGER` arrives as a `Number` or a `BigInt`. So nothing is normalised here.
- */
 export const query: QueryFn = async (sql: string): Promise<QueryRow[]> => {
   if (!conn) throw new Error('duckdb not booted');
   const table = await conn.query(sql);
@@ -165,3 +133,32 @@ export async function queryForDisplay(sql: string): Promise<{ columns: string[];
     rows: rows.map((row) => columns.map((c) => (row[c] === null || row[c] === undefined ? '' : String(row[c])))),
   };
 }
+
+const lent = new Map<string, string>();
+
+/**
+ * This page's engine, as `@fossil-lang/types` asks for one — what `@kanzo-tech/mosaic`'s
+ * `engine()` is for a host that has adopted it.
+ *
+ * `lend` is the drop-then-register this file always did, done only when the URL behind a name
+ * changed: DuckDB-WASM refuses a second URL for a registered name, and a lease renewed under a
+ * fresh signature is exactly a second URL. `DuckDBDataProtocol.HTTP` makes the engine issue its
+ * own `Range` requests, and `directIO: false` lets it keep what it has read.
+ */
+export const engine: Engine = {
+  query,
+  async lend(files) {
+    for (const [name, url] of Object.entries(files)) {
+      if (lent.get(name) === url) continue;
+      if (lent.has(name)) await instance().dropFile(name);
+      await instance().registerFileURL(name, url, duckdb.DuckDBDataProtocol.HTTP, false);
+      lent.set(name, url);
+    }
+  },
+  async drop(names) {
+    for (const name of names) {
+      if (!lent.delete(name)) continue;
+      await instance().dropFile(name);
+    }
+  },
+};
