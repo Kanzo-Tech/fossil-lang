@@ -763,8 +763,8 @@ export interface OpenOptions {
    *
    * `name` is then a namespace and not a URL — every file is lent as `${name}/${path}` and the
    * verbs' views live in a catalog called `name`, so two corpora in one engine never meet. The
-   * manifests are signed and fetched here, the payload is signed in one batch and lent, and it
-   * is signed again before {@link Signer.ttlMs} runs out.
+   * manifests are signed and fetched here, and the payload is signed in one batch and lent, once:
+   * see {@link Signer} for how long those URLs must last.
    */
   engine?: Engine;
   /** What signs the corpus's dataset-relative paths. Required with {@link engine}. */
@@ -1113,13 +1113,7 @@ export async function open(
  */
 const holders = new WeakMap<object, Map<string, number>>();
 
-/**
- * Renew a lease once half its life is spent — DHCP's T1 (RFC 2131 §4.4.5), which leaves the
- * second half for a read already in flight.
- */
-const RENEW_AT = 0.5;
-
-/** The lent rung: sign what the manifest names, lend it under `name`, keep it signed. */
+/** The lent rung: sign what the manifest names and lend it under `name`. */
 async function lent(
   name: string,
   options: OpenOptions,
@@ -1153,27 +1147,13 @@ async function lent(
   const files = addressManifests(manifestFiles, name).files();
   const prefix = name === '' ? '' : `${name.replace(/\/+$/, '')}/`;
   const relative = files.map((file) => file.slice(prefix.length));
-  let signedAt = 0;
-  const sign = async (): Promise<void> => {
-    const at = Date.now();
-    const signed = await host.sign(relative);
-    await engine.lend(
-      Object.fromEntries(
-        relative.flatMap((path, i) => (signed[path] === undefined ? [] : [[files[i]!, signed[path]!]])),
-      ),
-    );
-    signedAt = at;
-  };
-  await sign();
-  let renewing: Promise<void> | null = null;
-  const query: QueryFn = async (sql) => {
-    if (host.ttlMs !== undefined && Date.now() - signedAt >= host.ttlMs * RENEW_AT) {
-      renewing ??= sign().finally(() => (renewing = null));
-      await renewing;
-    }
-    return engine.query(sql);
-  };
-  return (await opened(name, options, manifestFiles, query, {
+  const signed = await host.sign(relative);
+  await engine.lend(
+    Object.fromEntries(
+      relative.flatMap((path, i) => (signed[path] === undefined ? [] : [[files[i]!, signed[path]!]])),
+    ),
+  );
+  return (await opened(name, options, manifestFiles, (sql) => engine.query(sql), {
     holder: engine,
     drop: () => engine.drop(files),
   })) as Corpus;
