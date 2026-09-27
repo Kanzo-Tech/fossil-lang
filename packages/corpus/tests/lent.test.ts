@@ -12,7 +12,7 @@ import {
   type DuckDBBindings,
 } from '@duckdb/duckdb-wasm/blocking';
 import type { Engine, Signer } from '@fossil-lang/types';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import './boot.js';
 import { open } from '../src/corpus.js';
@@ -78,21 +78,13 @@ afterAll(() => {
   rmSync(spill, { recursive: true, force: true });
 });
 
-afterEach(() => vi.restoreAllMocks());
-
 let signings = 0;
-const signer = (ttlMs?: number): Signer & { calls: number } => {
-  const s = {
-    calls: 0,
-    ttlMs,
-    async sign(paths: string[]) {
-      s.calls++;
-      const n = ++signings;
-      return Object.fromEntries(paths.map((p) => [p, `signed://${n}${join(CORPUS, p)}`]));
-    },
-  };
-  return s;
-};
+const signer = (): Signer => ({
+  async sign(paths: string[]) {
+    const n = ++signings;
+    return Object.fromEntries(paths.map((p) => [p, `signed://${n}${join(CORPUS, p)}`]));
+  },
+});
 
 const catalogs = async (): Promise<string[]> =>
   (await engine.query(`SELECT database_name AS d FROM duckdb_databases()`)).map((r) => String(r['d']));
@@ -133,22 +125,6 @@ describe('open(name, { engine, host })', () => {
     await first.close();
     expect((await again.schema()).vertices[0]!.count).toBe(VERTEX_COUNT);
     await again.close();
-  }, 60_000);
-
-  it('signs again before the ttl runs out', async () => {
-    const host = signer(1_000);
-    const corpus = await open('jobs/4', { engine, host });
-    const opened = host.calls;
-    await corpus.schema();
-    expect(host.calls).toBe(opened);
-
-    const now = Date.now();
-    vi.spyOn(Date, 'now').mockReturnValue(now + 600);
-    const swaps = engine.swaps;
-    await corpus.schema();
-    expect(host.calls).toBe(opened + 1);
-    expect(engine.swaps).toBeGreaterThan(swaps);
-    await corpus.close();
   }, 60_000);
 
   it('close() gives back every file and view it took', async () => {

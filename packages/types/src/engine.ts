@@ -22,7 +22,9 @@ export interface Engine {
 
 /**
  * What a host gives a reader that only needs URLs signed — a job's output, which has no
- * connection map. `ttlMs` is how long a signature lives; given, the reader signs again
- * before it lapses, and absent, a signature is taken to last as long as the reader.
+ * connection map. The reader signs once, at open: every URL it is handed must stay readable
+ * while the reader is open. A host whose store signs for minutes hands out a locator of its own
+ * that signs at read time — a redirect, as Hugging Face's `/resolve/` does — and not the store's
+ * signature, which the engine would hold past its expiry.
  */
-export type Signer = Pick<SourceHost, 'sign'> & { readonly ttlMs?: number };
+export type Signer = Pick<SourceHost, 'sign'>;
