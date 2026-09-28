@@ -150,19 +150,19 @@ graph LR
   L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 4 crates<br/>df · df-wasm · cli · introspect"]
-  C["<b>corpus</b> · 9 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · tile-writer · resolver · policy · kanon"]
+  C["<b>corpus</b> · 10 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · tile-writer · storage · storage-wasm<br/>policy · kanon"]
   X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
   E -->|18| L
   E -->|1| M
-  M -->|24| L
+  M -->|22| L
   M -->|9| C
   C -->|1| L
   M -->|1| X
   C -->|1| X
 ```
 
-**55 cross-group edges**, and no pair runs both ways. Every number above
+**53 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -192,9 +192,9 @@ against the baseline encoder. The arrow that remains runs one way:
 | engine → corpus | `fossil-cli → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk — and `Privacy`, which the run summary prints |
 | engine → corpus | `fossil-df → fossil-policy` | the bound is verified where the release is still a value, before any of it is a file |
 | engine → corpus | `fossil-cli → fossil-policy` | reading the document is a host's job, the way reading a shape document is: the program's `policy := "…"` and `--policy` are both a reference, and a `PrivacyPolicy` by the time the write path is handed one. Unlike a shape document it never enters the database — the compiler does not open a policy |
-| engine → corpus | `fossil-introspect → fossil-resolver` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
+| engine → corpus | `fossil-introspect → fossil-storage` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
 
-`fossil-sinks` and `fossil-resolver` are filed by subject and not by history, and that is the whole
+`fossil-sinks` and `fossil-storage` are filed by subject and not by history, and that is the whole
 of the change: neither crate had a fossil dependency of its own when it was filed, so a leaf changed
 groups and no code moved.
 
@@ -205,10 +205,10 @@ substrate contract, and `crates/fossil-graph-schema/src/lib.rs, Cardinality` is 
 `{1,1}` a fact the corpus could state rather than one a reader defaulted. The direction runs this
 way for the same reason `fossil-policy` does, and it is **not** the objection that keeps
 `fossil-hir::Primitive` out of the manifest layer: a cardinality is not a type, it is the shape a
-predicate was declared with. `fossil-resolver` is still a leaf. It **cost** an edge rather than saving one — `fossil-df → fossil-sinks`,
-`fossil-cli → fossil-sinks` and `fossil-introspect → fossil-resolver` used to be internal to the
+predicate was declared with. `fossil-storage` is still a leaf. It **cost** an edge rather than saving one — `fossil-df → fossil-sinks`,
+`fossil-cli → fossil-sinks` and `fossil-introspect → fossil-storage` used to be internal to the
 engine, three that started crossing against two that stopped — and it bought the cycle:
-`fossil-graph → fossil-sinks` and `fossil-mcp → fossil-resolver` are now inside `corpus`, so the
+`fossil-graph → fossil-sinks` and `fossil-mcp → fossil-storage` are now inside `corpus`, so the
 return leg went from three edges to one — and that one has since gone too, which is the section
 above. There are still two cores; there is no longer a stitch closing the loop.
 [One engine](/docs/design/one-engine) is where the rest of the filing gets settled.
@@ -234,7 +234,7 @@ browser, and the gate was already reading that declaration.
 
 Two things have left `fossil-base` and neither shows on this diagram in the same way. The `@conn`
 locator is `fossil-locator`, a crate with no dependencies at all — filing it under `language` is the
-same subject-not-history move `fossil-sinks` and `fossil-resolver` got, except that this one moved a
+same subject-not-history move `fossil-sinks` and `fossil-storage` got, except that this one moved a
 file. The `tracked` query that decodes a shape document is `fossil_hir::shape_documents`, and it
 cost **no** edge: its only production caller was `fossil-hir` already, and `fossil-hir` already
 depended on `fossil-base`. A module crossing a boundary that was already crossed is the cheapest
@@ -253,9 +253,10 @@ projection directly.
 
 The attractive cut is three numbered rings by where the code runs. It is not the cut, and
 [three hosts](/docs/design/three-hosts) is where the three reference compilers say why. What survives
-is not a ring: two crates with a `cfg` and a written reason — `crates/fossil-lsp/src/lib.rs`,
-because `lsp-server` uses crossbeam and stdio, and `crates/fossil-resolver/src/lib.rs`, because
-credential material is deliberately kept off the wasm boundary.
+is not a ring: one crate with a `cfg` and a written reason — `crates/fossil-lsp/src/lib.rs`,
+because `lsp-server` uses crossbeam and stdio. The second was `fossil-resolver`, refusing wasm32 to
+keep credentials out of the browser; a vended credential is short-lived and prefix-scoped, and
+reaching the browser is what it is for, so the crate became `fossil-storage` and compiles there.
 
 ## A list is not a check
 

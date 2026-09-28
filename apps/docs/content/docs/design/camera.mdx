@@ -56,7 +56,7 @@ column is footer arithmetic — the size of the tiles the rectangle selected —
 inside its Worker, where the calling thread cannot see them. So the column says what those tiles
 *weigh*, never what crossed the wire.
 
-And the engine already caches. `apps/playground/src/duckdb.ts, registerUrl` passes `directIO =
+And the engine already caches. `apps/playground/src/duckdb.ts, engine` passes `directIO =
 false` with the reason written beside it — *DuckDB caches what it has already read, which is what
 makes the footer bought-once rather than bought-per-query*. If that cache also spans the payload
 reads the canvas issues, the 12,805,975 of row two was **banked before residency existed**, and

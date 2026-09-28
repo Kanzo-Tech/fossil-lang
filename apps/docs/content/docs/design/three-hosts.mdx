@@ -33,12 +33,10 @@ checker, not a reduced imitation. Gluon is the model, for a reason more specific
 being embedded in a host application is its whole problem statement.
 [The architecture](/docs/architecture) is the shape this argument produces.
 
-One boundary here is a threat model rather than a preference, and it looks mergeable. Resolving a
-source path can require credentials, and **credential material is deliberately kept off the wasm
-boundary**, so `fossil-resolver` refuses to compile to wasm by construction; merging it into the
-layer that must compile to wasm would break the browser target *and* put credential handling inside
-the browser. The proposal to merge came from two header comments that both, accurately, described
-their file as a host-injection seam. The constraint was elsewhere, in a `cfg`.
+One boundary here is a threat model rather than a preference. The host owns the credentials, and
+what crosses to fossil is never one of them: it is a **vended** credential — short-lived, scoped to
+one prefix, and enforced by the store rather than by the reader. See
+[storage is reached by a vended credential](#storage-is-reached-by-a-vended-credential).
 
 > **Do not read prose where there was a checkable constraint.** A dependency query, a search for a
 > compile-time refusal, or a build against the target answers in seconds a question that prose
@@ -115,6 +113,35 @@ Where an implementation genuinely cannot be shared,
 `packages/introspect/tests/rust-parity.test.ts` is the shape of the guard: it derives its tables from
 the Rust rather than restating any value, so a rewritten crate fails it instead of quietly matching
 nothing.
+
+## Storage is reached by a vended credential
+
+A host gives every `@fossil-lang/*` package one capability for storage, `Host.credentials(scope,
+access)`, and never a URL it signed. The answer is Iceberg REST's `StorageCredential` verbatim —
+`{ prefix, config }` with Iceberg's own keys — so what a catalogue vends to DuckDB, Spark or PyIceberg
+is what a host vends to fossil. `scope` is a connection or a job; `access` is `read` or `write`, one
+parameter and not two doors, which is how Unity Catalog and Polaris model it.
+
+What fossil does with one has **one implementation**, `fossil-storage`, sans-IO and compiled to
+wasm32 for `@fossil-lang/storage`:
+
+| a reader or writer that… | gets |
+| --- | --- |
+| queries through the page's engine (a corpus, introspection) | `CREATE OR REPLACE SECRET … SCOPE '<prefix>'` — what DuckDB's iceberg extension does with vended credentials. The SQL names `s3://…` and never the credential |
+| needs bytes and no engine (documents, a job's sources) | a GET signed with SigV4 in Rust |
+| writes a job's output | a PUT signed with SigV4 in Rust — fossil is the writer, because DuckDB-WASM's `COPY … TO 's3://'` signs a `content-type` the browser never sends |
+
+A mounted prefix is renewed at `expires − 5 min` by asking the host again and re-issuing the same
+statement under the same name, so a view over it never reopens: Iceberg's `VendedCredentialsProvider`
+margin. Renewal is the mechanism and not a retry on error, because DuckDB-WASM reports an expired
+credential as *no files found* or *404* and a reader cannot tell it from absent data. Two readers of
+one prefix on one engine share the secret, and the last to close drops it.
+
+**Azure is asymmetric, and the asymmetry is DuckDB-WASM's.** There is no Azure extension in the
+browser, so an Azure prefix is lent file by file — a scheme-less name the engine maps to the blob's
+SAS URL — and there is no glob. No reader of fossil globs: a corpus's manifest enumerates its files.
+The asymmetry stays inside `@fossil-lang/storage`; a reader names a locator and is told what SQL
+calls it.
 
 ## An open question this page does not settle
 

@@ -30,7 +30,7 @@ prose.
 | `fossil-lsp` | via `fossil-introspect` | no | a host, for the reason `fossil check` is one |
 | `fossil-layout` | dev-dependency only | **yes** | the post-pass, over Parquet through `arrow-rs` |
 
-Removing the database from `fossil-layout` was necessary and not sufficient: `fossil-resolver` was an
+Removing the database from `fossil-layout` was necessary and not sufficient: `fossil-resolver` (now `fossil-storage`) was an
 unused edge carrying its own wasm32 refusal for an unrelated reason, and `cargo check` never reports
 an unused dependency. The crate still links `datafusion` transitively through `fossil-df`, which is
 not the same claim — what it takes from there is one Arrow → Parquet encoder.

@@ -195,4 +195,16 @@ anything was ported. These are what was read, and the one thing each settles.
 | **Machanavajjhala et al.** (l-diversity) and **Li, Li & Venkatasubramanian** (t-closeness) | The boundary of what k measures. Both are properties of the **sensitive** attribute, which `fossil-kanon` never sees — which is the same fact that lets an auditor verify k without entitlement to it. |
 | **`diff-priv`** — the one crates.io candidate | Why this is a port rather than a dependency. Streaming microaggregation, a different technique; last published 2022; does not build for wasm32. |
 | **OpenDP** | The neighbouring guarantee, named so the two are not confused. Differential privacy is not a stronger k-anonymity — it answers a different question, about queries rather than about a released table — and it vendors OpenSSL, which settles the wasm32 question before the semantic one is reached. |
-| **Howard Hinnant**, *`chrono`-Compatible Low-Level Date Algorithms* | `civil_from_days`. Twenty lines of exact integer arithmetic, which is what lets the date hierarchy work without a fifth dependency in a crate that holds four. |
+| **Howard Hinnant**, *`chrono`-Compatible Low-Level Date Algorithms* | `civil_from_days`. Twenty lines of exact integer arithmetic, which is what lets the date hierarchy work without a fifth dependency in a crate that holds four — and what `fossil-storage` dates a SigV4 request with. |
+
+## Storage access
+
+| source | what it settles |
+| --- | --- |
+| **Apache Iceberg REST catalog spec** — `StorageCredential`, `loadCredentials`, `X-Iceberg-Access-Delegation: vended-credentials` | The wire form of what a host vends: `{ prefix, config }` with Iceberg's own config keys, several per answer, the longest prefix wins. [Three hosts](/docs/design/three-hosts#storage-is-reached-by-a-vended-credential) takes it verbatim. |
+| **Iceberg Java `VendedCredentialsProvider`** | The renewal margin: a credential is re-fetched five minutes before `expires-at`, not after a failure. |
+| **Unity Catalog OSS** — temporary table and path credentials, `AwsCredentialGenerator` | `access` as one parameter (`READ` / `READ_WRITE`) over one door, and `AssumeRole` with a session policy as the way a credential is scoped to a prefix. |
+| **Apache Polaris** — `AwsCredentialsStorageIntegration`, `AzureCredentialsStorageIntegration` | The same model on a second implementation, and user-delegation SAS as Azure's prefix-scoped credential. |
+| **DuckDB iceberg extension**, `ACCESS_DELEGATION_MODE 'vended_credentials'` | What a reader does with a vended credential: a secret with `SCOPE = prefix`, so the SQL names the object and never the credential. `fossil-storage` does the same for a reader that is not an Iceberg table. |
+| **AWS**, *Authenticating Requests: Using Query Parameters (Signature Version 4)* | The presigned request fossil's writer sends, and the worked example `crates/fossil-storage/src/sigv4.rs` is tested against. |
+| **duckdb-httpfs #351 / #352** | Why the writer is fossil and not `COPY … TO 's3://'` in DuckDB-WASM. |
