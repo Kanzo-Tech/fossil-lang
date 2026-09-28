@@ -22,8 +22,8 @@ use duckdb::Connection;
 use fossil_graph::executor::quote_ident;
 use fossil_graph::manifest::{Manifest, ManifestSource, edge_table_name};
 use fossil_graph::{GraphError, Operation, Result as GraphResult};
-use fossil_storage::{CloudSecret, ResolvedPath};
 use fossil_sinks::manifest::{Container, TILES_FILE};
+use fossil_storage::{CloudSecret, ResolvedPath};
 use secrecy::SecretString;
 use serde::Deserialize;
 use serde_json::Value;
@@ -128,7 +128,8 @@ pub async fn dispatch_json(
     tokio::task::spawn_blocking(move || {
         let (conn, manifest) = open(&dataset)?;
         let exec = ConnectionExecutor::new(&conn);
-        block_on(fossil_graph::dispatch(&operation, &manifest, None, &exec)).map_err(|e| e.to_string())
+        block_on(fossil_graph::dispatch(&operation, &manifest, None, &exec))
+            .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("dispatch task panicked: {e}"))?

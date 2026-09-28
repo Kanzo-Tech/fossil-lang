@@ -11,11 +11,13 @@ fn grant(credential: JsValue) -> Result<Grant, JsError> {
     Grant::try_from(credential).map_err(|e| JsError::new(&e.to_string()))
 }
 
-fn access(access: &str) -> Result<Access, JsError> {
+fn parse_access(access: &str) -> Result<Access, JsError> {
     match access {
         "read" => Ok(Access::Read),
         "write" => Ok(Access::Write),
-        other => Err(JsError::new(&format!("access is `read` or `write`, not {other:?}"))),
+        other => Err(JsError::new(&format!(
+            "access is `read` or `write`, not {other:?}"
+        ))),
     }
 }
 
@@ -39,10 +41,13 @@ fn opt(value: Option<String>) -> JsValue {
 /// # Errors
 /// A JS `Error` for a credential fossil does not read, or an unknown `access`.
 #[wasm_bindgen(js_name = storageGrant)]
-pub fn storage_grant(credential: JsValue, access_: &str) -> Result<JsValue, JsError> {
-    let (grant, access) = (grant(credential)?, access(access_)?);
-    #[allow(clippy::cast_precision_loss)] // milliseconds since 1970 fit in 2^53 until the year 287396
-    let expires = grant.expires_at_ms().map_or(JsValue::NULL, |ms| JsValue::from_f64(ms as f64));
+pub fn storage_grant(credential: JsValue, access: &str) -> Result<JsValue, JsError> {
+    let (grant, access) = (grant(credential)?, parse_access(access)?);
+    #[allow(clippy::cast_precision_loss)]
+    // milliseconds since 1970 fit in 2^53 until the year 287396
+    let expires = grant
+        .expires_at_ms()
+        .map_or(JsValue::NULL, |ms| JsValue::from_f64(ms as f64));
     object(&[
         ("prefix", JsValue::from_str(grant.prefix())),
         ("install", opt(grant.install_sql(access))),
@@ -59,8 +64,12 @@ pub fn storage_grant(credential: JsValue, access_: &str) -> Result<JsValue, JsEr
 #[wasm_bindgen(js_name = storageName)]
 pub fn storage_name(credential: JsValue, locator: &str) -> Result<JsValue, JsError> {
     let grant = grant(credential)?;
-    let name = grant.name(locator).map_err(|e| JsError::new(&e.to_string()))?;
-    let lend = grant.lend(locator).map_err(|e| JsError::new(&e.to_string()))?;
+    let name = grant
+        .name(locator)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let lend = grant
+        .lend(locator)
+        .map_err(|e| JsError::new(&e.to_string()))?;
     object(&[("name", JsValue::from_str(&name)), ("lend", opt(lend))])
 }
 
@@ -84,5 +93,8 @@ pub fn storage_sign(
         Reflect::set(&headers, &JsValue::from_str(key), &JsValue::from_str(value))
             .map_err(|_| JsError::new("setting a header on a fresh object"))?;
     }
-    object(&[("url", JsValue::from_str(&signed.url)), ("headers", headers.into())])
+    object(&[
+        ("url", JsValue::from_str(&signed.url)),
+        ("headers", headers.into()),
+    ])
 }

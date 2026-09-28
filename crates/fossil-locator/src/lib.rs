@@ -171,7 +171,9 @@ impl<'a> SourceAnchor<'a> {
     #[must_use]
     pub fn connection(&self, raw: &str) -> Option<String> {
         let (name, _) = raw.strip_prefix('@')?.split_once('/')?;
-        self.connections.contains_key(name).then(|| name.to_string())
+        self.connections
+            .contains_key(name)
+            .then(|| name.to_string())
     }
 
     /// `@name/path` → `{connections[name]}/path`; anything else verbatim.
@@ -205,7 +207,10 @@ mod tests {
     fn the_connection_is_the_alias_the_map_knows() {
         let c = conns(&[("warehouse", "s3://b/w/")]);
         let anchor = SourceAnchor::new(Path::new("p"), &c);
-        assert_eq!(anchor.connection("@warehouse/x.csv").as_deref(), Some("warehouse"));
+        assert_eq!(
+            anchor.connection("@warehouse/x.csv").as_deref(),
+            Some("warehouse")
+        );
         assert_eq!(anchor.connection("@missing/x.csv"), None);
         assert_eq!(anchor.connection("s3://b/w/x.csv"), None);
         assert_eq!(anchor.connection("x.csv"), None);
