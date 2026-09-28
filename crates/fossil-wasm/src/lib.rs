@@ -12,8 +12,8 @@
 //! | [`WasmPlayground::open_file`]   | [`FileHandle`]                       | `textDocument/didOpen`     |
 //! | [`WasmPlayground::update_file`] | `()`                                 | `textDocument/didChange`   |
 //! | [`WasmPlayground::close_file`]  | `()`                                 | `textDocument/didClose`    |
-//! | [`WasmPlayground::set_connections`] | `()`                             | the host's `SourceHost.connections()` |
-//! | [`WasmPlayground::missing_documents`] | `Array<{ key, locator }>`      | `resolveDocuments` |
+//! | [`WasmPlayground::set_connections`] | `()`                             | the host's `Host.connections()` |
+//! | [`WasmPlayground::missing_documents`] | `Array<{ key, locator, connection? }>` | `resolveDocuments` |
 //! | [`WasmPlayground::register_document`] | `()`                           | `resolveDocuments` |
 //! | [`WasmPlayground::sources`]     | `Array<ProgramSource>`               | introspection |
 //! | [`WasmPlayground::check`]       | `Array<{ uri, range, severity, message }>` | the playground's panel, workspace-wide |
@@ -382,7 +382,7 @@ impl WasmPlayground {
     // ----- Documents and sources: fossil resolves, the host reads -----
 
     /// Replace the connection map `@name/…` expands against, as
-    /// `SourceHost.connections()` answers it.
+    /// `Host.connections()` answers it.
     ///
     /// # Errors
     ///
@@ -708,6 +708,7 @@ impl FossilPlayground {
                 .map(|d| MissingDocumentRow {
                     key: d.key,
                     locator: d.locator,
+                    connection: d.connection,
                 })
                 .collect(),
         )
@@ -893,6 +894,8 @@ pub fn refs_native(program: &str) -> Vec<fossil_lineage::SourceRefInfo> {
 pub struct MissingDocumentRow {
     pub key: String,
     pub locator: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
 }
 
 /// One diagnostic row in the [`WasmPlayground::check`] return array.

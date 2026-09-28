@@ -103,6 +103,8 @@ pub struct MissingDocument {
     pub key: String,
     /// Where it is fetched from: the same reference through the connection map.
     pub locator: String,
+    /// The connection the locator lies under, when it was written `@name/…`.
+    pub connection: Option<String>,
 }
 
 /// Every document `file` names that is not registered yet, with the key it
@@ -127,6 +129,7 @@ pub fn missing_documents(
             file_at(db, &key).is_none().then(|| MissingDocument {
                 key,
                 locator: anchor.locator(&document),
+                connection: anchor.connection(&document),
             })
         })
         .collect()
@@ -266,6 +269,7 @@ mod tests {
             [MissingDocument {
                 key: "a/shapes/person.shex".to_string(),
                 locator: "a/shapes/person.shex".to_string(),
+                connection: None,
             }]
         );
     }
@@ -285,6 +289,7 @@ mod tests {
             [MissingDocument {
                 key: "@warehouse/shapes/person.shex".to_string(),
                 locator: "s3://bucket/base/shapes/person.shex".to_string(),
+                connection: Some("warehouse".to_string()),
             }]
         );
     }

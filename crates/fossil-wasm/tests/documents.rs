@@ -85,6 +85,7 @@ fn registering_what_is_missing_under_its_key_is_what_the_checker_reads() {
         [MissingDocumentRow {
             key: "@vocab/person.shex".to_string(),
             locator: "https://minio.example/shapes/person.shex".to_string(),
+            connection: Some("vocab".to_string()),
         }]
     );
     assert!(!violates_contract(&pg), "nothing registered, no contract");
@@ -153,6 +154,7 @@ fn sources_are_keyed_as_written_and_located_through_the_map() {
             binding: "users".to_string(),
             key: "@lake/users.csv".to_string(),
             locator: "s3://lake/users.csv".to_string(),
+            connection: Some("lake".to_string()),
             format: "csv".to_string(),
             option: Some("|".to_string()),
         }]

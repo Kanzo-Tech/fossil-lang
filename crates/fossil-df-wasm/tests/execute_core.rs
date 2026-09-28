@@ -129,11 +129,11 @@ fn program_sources_lists_each_distinct_source_with_its_format() {
     let srcs = executor(TWO_SOURCE_PROGRAM, HashMap::new())
         .sources()
         .expect("sources enumerated");
-    let uris: Vec<&str> = srcs.iter().map(|(u, _)| u.as_str()).collect();
+    let uris: Vec<&str> = srcs.iter().map(|(u, _, _)| u.as_str()).collect();
     assert!(uris.contains(&"https://data.example.com/users.csv"));
     assert!(uris.contains(&"https://data.example.com/orders.csv"));
     assert_eq!(srcs.len(), 2);
-    assert!(srcs.iter().all(|(_, fmt)| *fmt == "csv"));
+    assert!(srcs.iter().all(|(_, fmt, _)| *fmt == "csv"));
 }
 
 /// **The browser's report IS the documents the browser shipped** — every

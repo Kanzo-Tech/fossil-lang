@@ -805,7 +805,10 @@ async fn execute_edge(
 /// `SourceAnchor::locator`. The `binding` is the table name a `Provider` source
 /// is registered under (the host pre-registers it; [`read_source`] scans it);
 /// object-store formats ignore it.
-fn sources_of(ops: &[Op<'_>], anchor: SourceAnchor<'_>) -> Vec<(String, SourceFormat, String)> {
+fn sources_of(
+    ops: &[Op<'_>],
+    anchor: SourceAnchor<'_>,
+) -> Vec<(String, SourceFormat, String, Option<String>)> {
     ops.iter()
         .filter_map(|o| match o {
             Op::Source {
@@ -813,7 +816,12 @@ fn sources_of(ops: &[Op<'_>], anchor: SourceAnchor<'_>) -> Vec<(String, SourceFo
                 format,
                 binding,
                 ..
-            } => Some((anchor.locator(uri), format.clone(), binding.to_string())),
+            } => Some((
+                anchor.locator(uri),
+                format.clone(),
+                binding.to_string(),
+                anchor.connection(uri),
+            )),
             _ => None,
         })
         .collect()
@@ -1075,6 +1083,8 @@ pub fn provider_bindings(
 pub struct SourceRef {
     pub uri: String,
     pub format: SourceFormat,
+    /// The connection `uri` lies under, when the program wrote `@name/…`.
+    pub connection: Option<String>,
 }
 
 /// Enumerate every distinct source the program reads (one [`Op::Source`] per
@@ -1097,9 +1107,13 @@ pub fn program_sources(
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
         let ops = apply_output_shape(mir.ops(db), &schema);
-        for (uri, format, _binding) in sources_of(&ops, anchor) {
+        for (uri, format, _binding, connection) in sources_of(&ops, anchor) {
             if !out.iter().any(|s| s.uri == uri) {
-                out.push(SourceRef { uri, format });
+                out.push(SourceRef {
+                    uri,
+                    format,
+                    connection,
+                });
             }
         }
     }

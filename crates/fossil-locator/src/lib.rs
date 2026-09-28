@@ -165,6 +165,15 @@ impl<'a> SourceAnchor<'a> {
             .into_owned()
     }
 
+    /// The connection `raw` reads through: `name` for an `@name/…` the map
+    /// knows, and `None` for anything else. It is what a host vends a
+    /// credential for, so it is answered here rather than parsed again there.
+    #[must_use]
+    pub fn connection(&self, raw: &str) -> Option<String> {
+        let (name, _) = raw.strip_prefix('@')?.split_once('/')?;
+        self.connections.contains_key(name).then(|| name.to_string())
+    }
+
     /// `@name/path` → `{connections[name]}/path`; anything else verbatim.
     ///
     /// An unknown alias is left alone rather than diagnosed — the reader that
@@ -190,6 +199,16 @@ mod tests {
             .iter()
             .map(|(n, u)| ((*n).to_string(), (*u).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn the_connection_is_the_alias_the_map_knows() {
+        let c = conns(&[("warehouse", "s3://b/w/")]);
+        let anchor = SourceAnchor::new(Path::new("p"), &c);
+        assert_eq!(anchor.connection("@warehouse/x.csv").as_deref(), Some("warehouse"));
+        assert_eq!(anchor.connection("@missing/x.csv"), None);
+        assert_eq!(anchor.connection("s3://b/w/x.csv"), None);
+        assert_eq!(anchor.connection("x.csv"), None);
     }
 
     #[test]

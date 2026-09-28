@@ -3,7 +3,7 @@
 //! The browser runs the mapping. An [`Executor`] holds one compiled program and
 //! is a document workspace: it reports the documents the program names and does
 //! not hold ([`Executor::missing_documents`]), the host reads them through its
-//! `SourceHost` and registers each one, and only then are the sources listed
+//! `Host` and registers each one, and only then are the sources listed
 //! and the run executed — against the output descriptor decoded from those
 //! registered documents, which is what the checker read. [`Executor::execute`]
 //! builds a `DataFusion` plan (`lower_to_mir_pg` → `execute_graph`),
@@ -193,19 +193,19 @@ impl Executor {
         fossil_base::register_document(&mut self.db, key, text);
     }
 
-    /// The program's sources as `(locator, row-name)`: what the host signs and
-    /// fetches before [`Self::execute`]. The second element is the catalogue
+    /// The program's sources as `(locator, row-name, connection)`: what is read
+    /// before [`Self::execute`]. The second element is the catalogue
     /// row's name, which is what the program wrote after `io.` and what the host
     /// hands back on `SourceInput.format`.
     ///
     /// # Errors
     /// The output shape document is unregistered or does not decode.
-    pub fn sources(&self) -> Result<Vec<(String, String)>, String> {
+    pub fn sources(&self) -> Result<Vec<(String, String, Option<String>)>, String> {
         let descriptor = self.descriptor()?;
         Ok(
             fossil_df::program_sources(&self.db, self.file, &descriptor, &self.connections)
                 .into_iter()
-                .map(|s| (s.uri, format_kind(&s.format).to_owned()))
+                .map(|s| (s.uri, format_kind(&s.format).to_owned(), s.connection))
                 .collect(),
         )
     }
@@ -509,7 +509,7 @@ impl FossilExecutor {
     }
 
     /// `{ name: baseUrl }` — what `@name/…` expands against.
-    /// `@fossil-lang/types`' `resolveDocuments` sets it from the host.
+    /// `@fossil-lang/storage`'s `resolveDocuments` sets it from the host.
     ///
     /// # Errors
     /// A JS `Error` if `connections` is not an object of strings, or a run is
@@ -522,8 +522,9 @@ impl FossilExecutor {
         Ok(())
     }
 
-    /// `[{ key, locator }]` — the documents the program names and the executor
-    /// does not hold. `@fossil-lang/types`' `resolveDocuments` reads them.
+    /// `[{ key, locator, connection? }]` — the documents the program names and
+    /// the executor does not hold. `@fossil-lang/storage`'s `resolveDocuments`
+    /// reads them.
     ///
     /// # Errors
     /// A JS `Error` if a register is in flight.
@@ -535,6 +536,10 @@ impl FossilExecutor {
             set(&obj, "key", &JsValue::from_str(&missing.key)).map_err(|e| JsError::new(&e))?;
             set(&obj, "locator", &JsValue::from_str(&missing.locator))
                 .map_err(|e| JsError::new(&e))?;
+            if let Some(connection) = &missing.connection {
+                set(&obj, "connection", &JsValue::from_str(connection))
+                    .map_err(|e| JsError::new(&e))?;
+            }
             arr.push(&obj);
         }
         Ok(arr.into())
@@ -552,8 +557,9 @@ impl FossilExecutor {
         Ok(())
     }
 
-    /// `[{ uri, format }]` — the sources to sign and fetch, `uri` being the
-    /// locator fossil resolved and `format` the catalogue row's name.
+    /// `[{ uri, format, connection? }]` — the sources to read, `uri` being the
+    /// locator fossil resolved, `format` the catalogue row's name and
+    /// `connection` the one a credential is vended for.
     ///
     /// # Errors
     /// A JS `Error` if the output shape document is unregistered or does not
@@ -561,10 +567,14 @@ impl FossilExecutor {
     pub fn sources(&self) -> Result<JsValue, JsError> {
         let srcs = self.borrow()?.sources().map_err(|e| JsError::new(&e))?;
         let arr = js_sys::Array::new();
-        for (uri, format) in srcs {
+        for (uri, format, connection) in srcs {
             let obj = js_sys::Object::new();
             set(&obj, "uri", &JsValue::from_str(&uri)).map_err(|e| JsError::new(&e))?;
             set(&obj, "format", &JsValue::from_str(&format)).map_err(|e| JsError::new(&e))?;
+            if let Some(connection) = &connection {
+                set(&obj, "connection", &JsValue::from_str(connection))
+                    .map_err(|e| JsError::new(&e))?;
+            }
             arr.push(&obj);
         }
         Ok(arr.into())

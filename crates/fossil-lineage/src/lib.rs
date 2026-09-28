@@ -109,6 +109,9 @@ pub struct ProgramSource {
     pub key: String,
     /// `key` through [`fossil_locator::SourceAnchor`]: what a host signs and reads.
     pub locator: String,
+    /// The connection the locator lies under, when it was written `@name/…`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
     /// The catalogue row the constructor names (`csv`), which chooses the reader.
     pub format: String,
     /// The reader option the binding wrote (`delimiter = "|"`), verbatim.
@@ -141,6 +144,7 @@ pub fn program_sources(
                 binding: s.name.to_string(),
                 key: uri.to_string(),
                 locator: anchor.locator(uri),
+                connection: anchor.connection(uri),
                 format: row.name.to_string(),
                 option: s.delimiter.as_ref().map(ToString::to_string),
             })
@@ -234,6 +238,7 @@ mod tests {
                     binding: "users".to_string(),
                     key: "@lake/users.csv".to_string(),
                     locator: "s3://bucket/users.csv".to_string(),
+                    connection: Some("lake".to_string()),
                     format: "csv".to_string(),
                     option: Some("|".to_string()),
                 },
@@ -241,6 +246,7 @@ mod tests {
                     binding: "orders".to_string(),
                     key: "orders.parquet".to_string(),
                     locator: "a/orders.parquet".to_string(),
+                    connection: None,
                     format: "parquet".to_string(),
                     option: None,
                 },
