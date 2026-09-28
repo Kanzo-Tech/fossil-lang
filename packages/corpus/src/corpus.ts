@@ -108,7 +108,8 @@ import type {
 import { initFossilGraphWasm, type InitInput } from './load.js';
 import { join, paths, scan } from './manifest.js';
 import type { QueryFn, QueryRow, ReadTextFn } from './query.js';
-import type { Engine, Signer } from '@fossil-lang/types';
+import { mount } from '@fossil-lang/storage';
+import type { Engine, Host } from '@fossil-lang/types';
 
 export { CorpusManifestError } from './address.js';
 export type { Direction, Drawing, Gap, GapReason } from './address.js';
@@ -697,9 +698,9 @@ export interface Corpus {
   /** One grouping, over values or — with `bins` — over equal-width ranges. */
   aggregate(params: AggregateParams): Promise<AggregateResult>;
   /**
-   * Give back what opening took from the engine: the catalog the verbs' views live in and,
-   * on the lent rung, every file lent under the corpus's name. Another open corpus of the
-   * same name on the same engine keeps both until it closes too.
+   * Give back what opening took from the engine: the catalog the verbs' views live in and, for a
+   * job's corpus, the credential it was read with. Another open corpus of the same job on the
+   * same engine keeps both until it closes too.
    */
   close(): Promise<void>;
 }
@@ -759,16 +760,16 @@ export type SqlPolicy = 'withheld' | 'allowed';
  */
 export interface OpenOptions {
   /**
-   * The page's engine, for a corpus the host can only sign: `open(name, { engine, host })`.
+   * The page's engine, for a job's corpus: `open(job, { engine, host })`.
    *
-   * `name` is then a namespace and not a URL — every file is lent as `${name}/${path}` and the
-   * verbs' views live in a catalog called `name`, so two corpora in one engine never meet. The
-   * manifests are signed and fetched here, and the payload is signed in one batch and lent, once:
-   * see {@link Signer} for how long those URLs must last.
+   * The first argument then names the job and not a URL. The corpus is the one prefix the host
+   * vends `read` on for `{ job }`, and every file of it — manifests included — is read through the
+   * engine under that credential, which `@fossil-lang/storage` renews before it expires for as
+   * long as the corpus is open.
    */
   engine?: Engine;
-  /** What signs the corpus's dataset-relative paths. Required with {@link engine}. */
-  host?: Signer;
+  /** What vends the job's credential. Required with {@link engine}. */
+  host?: Host;
   /**
    * The host's engine. One method, and see `./query.ts` for why it is the only one.
    *
@@ -1019,12 +1020,12 @@ function text(row: QueryRow, column: string): string {
  *   then nothing to open the corpus with.
  */
 export function open(
-  name: string,
-  options: OpenOptions & { engine: Engine; host: Signer; sql: 'allowed' },
+  job: string,
+  options: OpenOptions & { engine: Engine; host: Host; sql: 'allowed' },
 ): Promise<SqlCorpus>;
 export function open(
-  name: string,
-  options: OpenOptions & { engine: Engine; host: Signer },
+  job: string,
+  options: OpenOptions & { engine: Engine; host: Host },
 ): Promise<Corpus>;
 export function open(
   url: string,
@@ -1039,7 +1040,7 @@ export async function open(
   url: string,
   options: OpenOptions,
 ): Promise<Corpus | CorpusAddressing> {
-  if (options.engine !== undefined) return lent(url, options, options.engine);
+  if (options.engine !== undefined) return vended(url, options, options.engine);
   const { query, readText: readOne, manifestFiles: held } = options;
   if (typeof query !== 'function' && typeof readOne !== 'function' && held === undefined) {
     throw new TypeError(
@@ -1113,50 +1114,54 @@ export async function open(
  */
 const holders = new WeakMap<object, Map<string, number>>();
 
-/** The lent rung: sign what the manifest names and lend it under `name`. */
-async function lent(
-  name: string,
-  options: OpenOptions,
-  engine: Engine,
-): Promise<Corpus> {
+/** A job's corpus: the one prefix the host vends `read` on, read through the engine. */
+async function vended(job: string, options: OpenOptions, engine: Engine): Promise<Corpus> {
   const host = options.host;
   if (host === undefined) {
-    throw new TypeError('open(name, { engine }) needs host: the engine can only read what is signed');
+    throw new TypeError('open(job, { engine }) needs host: a corpus is read with what it vends');
   }
   await initFossilGraphWasm(options.wasm);
-  const read = async (relative: readonly string[]): Promise<Record<string, string>> => {
-    if (relative.length === 0) return {};
-    const signed = await host.sign([...relative]);
-    const texts = await Promise.all(
-      relative.map(async (path) => {
-        const at = signed[path];
-        if (at === undefined) throw new CorpusManifestError(`${join(name, path)} was not signed`);
-        const res = await fetch(at);
-        if (!res.ok) throw new CorpusManifestError(`${join(name, path)} did not read (HTTP ${res.status})`);
-        return res.text();
-      }),
-    );
-    return Object.fromEntries(relative.map((path, i) => [path, texts[i]!]));
-  };
-  const manifestFiles = options.manifestFiles ?? (await read([GRAPH_INFO_PATH]));
-  if (options.manifestFiles === undefined) {
-    const index = scan(GRAPH_INFO_PATH, manifestFiles[GRAPH_INFO_PATH]!);
-    Object.assign(manifestFiles, await read([...paths(index, 'vertices'), ...paths(index, 'edges')]));
+  const storage = await mount(engine, host, { job }, 'read');
+  try {
+    if (storage.prefixes.length !== 1) {
+      throw new CorpusManifestError(
+        `job ${job} vends ${storage.prefixes.length} prefixes, and a corpus lives under one`,
+      );
+    }
+    const prefix = storage.prefixes[0]!;
+    const query: QueryFn = (sql) => engine.query(sql);
+    const read = async (relative: readonly string[]): Promise<Record<string, string>> => {
+      if (relative.length === 0) return {};
+      const names = await storage.files(relative.map((path) => `${prefix}${path}`));
+      const rows = await query(`SELECT filename, content FROM read_text(${list(names)})`);
+      const byName = new Map(rows.map((row) => [text(row, 'filename'), text(row, 'content')]));
+      return Object.fromEntries(
+        relative.map((path, i) => {
+          const content = byName.get(names[i]!);
+          if (content === undefined) {
+            throw new CorpusManifestError(`${prefix}${path} is named by the manifest and did not read`);
+          }
+          return [path, content];
+        }),
+      );
+    };
+    const manifestFiles = options.manifestFiles ?? (await read([GRAPH_INFO_PATH]));
+    if (options.manifestFiles === undefined) {
+      const index = scan(GRAPH_INFO_PATH, manifestFiles[GRAPH_INFO_PATH]!);
+      Object.assign(manifestFiles, await read([...paths(index, 'vertices'), ...paths(index, 'edges')]));
+    }
+    // An Azure file is readable only once lent; an S3 one is named as it is.
+    const base = storage.name(prefix);
+    const files = addressManifests(manifestFiles, base).files();
+    await storage.files(files.map((file) => `${prefix}${file.slice(base.length)}`));
+    return (await opened(base, options, manifestFiles, query, {
+      holder: engine,
+      drop: () => storage.close(),
+    })) as Corpus;
+  } catch (cause) {
+    await storage.close();
+    throw cause;
   }
-
-  const files = addressManifests(manifestFiles, name).files();
-  const prefix = name === '' ? '' : `${name.replace(/\/+$/, '')}/`;
-  const relative = files.map((file) => file.slice(prefix.length));
-  const signed = await host.sign(relative);
-  await engine.lend(
-    Object.fromEntries(
-      relative.flatMap((path, i) => (signed[path] === undefined ? [] : [[files[i]!, signed[path]!]])),
-    ),
-  );
-  return (await opened(name, options, manifestFiles, (sql) => engine.query(sql), {
-    holder: engine,
-    drop: () => engine.drop(files),
-  })) as Corpus;
 }
 
 /** What an engine-bearing rung hands {@link opened} so that `close` can give it back. */
@@ -2150,10 +2155,10 @@ async function opened(
       const left = (held.get(catalog) ?? 1) - 1;
       if (left > 0) {
         held.set(catalog, left);
-        return;
+      } else {
+        held.delete(catalog);
+        await query(`DETACH DATABASE IF EXISTS ${ident(catalog)}`);
       }
-      held.delete(catalog);
-      await query(`DETACH DATABASE IF EXISTS ${ident(catalog)}`);
       await holding?.drop?.();
     },
 

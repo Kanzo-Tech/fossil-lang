@@ -4,11 +4,12 @@
  * Rust half is `crates/fossil-wasm/tests/documents.rs`; this covers what it
  * cannot reach — the record crossing in, and the rows crossing out.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { resolveDocuments, type SourceHost } from '@fossil-lang/types';
+import { resolveDocuments } from '@fossil-lang/storage';
 import { initFossilWasm, FossilPlayground } from '../src/index.js';
+import { CONNECTIONS, recordingHost } from './host.js';
 
 beforeAll(async () => {
   const wasmPath = fileURLToPath(new URL('../pkg/fossil_wasm_bg.wasm', import.meta.url));
@@ -43,7 +44,7 @@ const DEMANDS_INTEGER = JSON.stringify({
   ],
 });
 
-const CONNECTIONS = { vocab: 'https://minio.example/shapes', lake: 's3://lake' };
+afterEach(() => vi.unstubAllGlobals());
 
 describe('FossilPlayground documents and sources', () => {
   it('resolves the documents a program names through the host, keyed as written', async () => {
@@ -60,25 +61,15 @@ describe('FossilPlayground documents and sources', () => {
       pg.setConnections(CONNECTIONS);
       const handle = pg.openFile('prog.fossil', PROGRAM);
       expect(pg.missingDocuments(handle)).toEqual([
-        { key: '@vocab/person.shex', locator: 'https://minio.example/shapes/person.shex' },
+        { key: '@vocab/person.shex', locator: 's3://vocab/shapes/person.shex', connection: 'vocab' },
       ]);
 
-      const signed: string[] = [];
-      const host: SourceHost = {
-        connections: async () => CONNECTIONS,
-        sign: async (locators) => {
-          signed.push(...locators);
-          return Object.fromEntries(locators.map((l) => [l, `${l}?signed`]));
-        },
-      };
-      const fetchImpl = (async (url: string) =>
-        url === 'https://minio.example/shapes/person.shex?signed'
-          ? new Response(DEMANDS_INTEGER)
-          : new Response('', { status: 404 })) as typeof fetch;
-
-      const result = await resolveDocuments(pg.workspace(handle), host, fetchImpl);
+      const { host, asked, fetched } = recordingHost(DEMANDS_INTEGER);
+      const result = await resolveDocuments(pg.workspace(handle), host);
       expect(result).toEqual({ registered: 1, unread: [] });
-      expect(signed).toEqual(['https://minio.example/shapes/person.shex']);
+      expect(asked).toEqual([{ connection: 'vocab' }]);
+      expect(fetched).toHaveLength(1);
+      expect(fetched[0]).toMatch(/^http:\/\/minio\.example\/vocab\/shapes\/person\.shex\?X-Amz-/);
       expect(pg.missingDocuments(handle)).toEqual([]);
       expect(pg.check().some((r) => r.message.includes('expects Integer'))).toBe(true);
     } finally {
@@ -96,6 +87,7 @@ describe('FossilPlayground documents and sources', () => {
           binding: 'users',
           key: '@lake/users.csv',
           locator: 's3://lake/users.csv',
+          connection: 'lake',
           format: 'csv',
           option: '|',
         },

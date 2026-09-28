@@ -14,7 +14,7 @@
  *    mouse-move would invalidate the memoised check the squiggles came from for nothing.
  * 2. **Read what the program names before you check it.** The compiler performs no IO. An edit
  *    can name a shape document the workspace has not read, so a check first runs
- *    `resolveDocuments` over the host's {@link SourceHost} — which reads nothing when nothing is
+ *    `resolveDocuments` over the host's {@link Host} — which reads nothing when nothing is
  *    missing.
  *
  * The result is shaped for `@fossil-lang/codemirror-fossil`'s `fossil()`: `tokenize`,
@@ -31,7 +31,8 @@
  * screen. The position methods take a SHARED borrow on the Rust side, so they nest inside a live
  * check rather than poisoning it.
  */
-import { resolveDocuments, type ProgramSource, type SourceHost } from '@fossil-lang/types';
+import { resolveDocuments } from '@fossil-lang/storage';
+import type { Host, ProgramSource } from '@fossil-lang/types';
 
 import { FossilPlayground, tokenize, tokenKinds } from './client.js';
 import type {
@@ -45,12 +46,10 @@ import { initFossilWasm, type InitInput } from './load.js';
 
 /** What {@link openProgram} takes beside the key. */
 export interface OpenProgramOptions {
-  /** The host's one capability: the connection map, and signing what the program names. */
-  host: SourceHost;
+  /** The connection map, and the credentials a document the program names is read with. */
+  host: Host;
   /** The buffer's text at open. Defaults to empty; every entry point takes the text anyway. */
   text?: string;
-  /** How a signed document is read. Defaults to the global `fetch`. */
-  fetch?: typeof fetch;
   /** The module's `.wasm`, for a host with no bundler — see {@link initFossilWasm}. */
   wasm?: InitInput;
 }
@@ -101,7 +100,7 @@ export interface FossilProgram {
  * in the same tab costs a workspace and nothing else.
  */
 export async function openProgram(uri: string, options: OpenProgramOptions): Promise<FossilProgram> {
-  const { host, text = '', fetch: fetchImpl = globalThis.fetch, wasm } = options;
+  const { host, text = '', wasm } = options;
   await initFossilWasm(wasm);
 
   const workspace = new FossilPlayground();
@@ -115,7 +114,7 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
   };
   const settle = async (next: string): Promise<void> => {
     sync(next);
-    await resolveDocuments(workspace.workspace(handle), host, fetchImpl);
+    await resolveDocuments(workspace.workspace(handle), host);
   };
 
   await settle(text);

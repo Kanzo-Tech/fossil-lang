@@ -19,7 +19,7 @@ JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Prov
 import { openProgram } from '@fossil-lang/wasm';
 import { fossil } from '@fossil-lang/codemirror-fossil';
 
-const program = await openProgram('job.fossil', { host, text });   // host: SourceHost
+const program = await openProgram('job.fossil', { host, text });   // host: Host
 const extensions = fossil({ ...program, onNavigate });
 
 program.registerDescriptor(descriptor);        // a host-introspected source, before a check
@@ -40,11 +40,15 @@ question this surface does not ask, and `close()` frees it.
 
 A program names shape documents (`io.shex("@vocab/person.shex")`) and data
 sources (`io.csv("@lake/users.csv")`). The checker reads no file and no
-network: it reports what it is missing, and the host hands back text through a
-`SourceHost` (`@fossil-lang/types`) — the connection map, and `sign(locators)`.
+network: it reports what it is missing, and `resolveDocuments`
+(`@fossil-lang/storage`) reads it under the credentials the `Host`
+(`@fossil-lang/types`) vends — `connections()` and `credentials(scope, access)`.
+A document under a connection is read by a GET signed with that connection's
+`read` credential; one with no connection only when it is a public `http(s)` URL.
+A host that already holds a document's text calls `registerDocument` itself.
 
 ```typescript
-import { resolveDocuments } from '@fossil-lang/types';
+import { resolveDocuments } from '@fossil-lang/storage';
 
 const pg = new FossilPlayground();
 const h = pg.openFile('prog.fossil', text); // edited buffers only
@@ -52,9 +56,9 @@ const { unread } = await resolveDocuments(pg.workspace(h), host); // sets the co
 const rows = pg.check();
 ```
 
-- `missingDocuments(h)` — `{ key, locator }` rows. The key is what the program
-  wrote, so repointing a connection invalidates nothing; the locator is that
-  key through the map, and it is what `sign` receives.
+- `missingDocuments(h)` — `{ key, locator, connection? }` rows. The key is what
+  the program wrote, so repointing a connection invalidates nothing; the locator
+  is that key through the map, and `connection` is the one it goes through.
 - `registerDocument(key, text)` — what `resolveDocuments` calls for each
   fetched document, until nothing new is missing (a document can name another).
   It is the one loop; a host does not write a second.
@@ -64,7 +68,7 @@ const rows = pg.check();
   calls it with `host.connections()`, so a host never does.
 - `sources(h)` — the `ProgramSource[]` the program reads, through the map the
   last `resolveDocuments` set: binding, key,
-  locator, catalogue row, reader option. Introspection DESCRIBEs these and
+  locator, connection, catalogue row, reader option. Introspection DESCRIBEs these and
   registers each descriptor under `key` with `registerInferredDescriptor`.
 
 ## Loading: the `.wasm` is an asset of this package

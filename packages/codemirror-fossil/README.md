@@ -26,7 +26,7 @@ at the lowest precedence CodeMirror has. The editor is the host's decision:
 import { fossil } from '@fossil-lang/codemirror-fossil';
 import { openProgram } from '@fossil-lang/wasm';
 
-// `host` is the host's `SourceHost`: the connection map, and signing what the program names.
+// `host` is the host's `Host`: the connection map, and credentials to read what the program names.
 const program = await openProgram('hello.fossil', { host, text });
 
 const extensions = fossil({ ...program, onNavigate: (target) => console.log(target) });

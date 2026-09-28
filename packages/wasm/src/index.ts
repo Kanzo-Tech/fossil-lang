@@ -14,7 +14,7 @@
  *   `check`, the three position queries (`hover`, `completions`,
  *   `gotoDefinition`) an editor draws its IDE surface from, and the documents
  *   and sources a program reads (`missingDocuments`, `registerDocument`,
- *   `sources`) that a host resolves through its `SourceHost`.
+ *   `sources`) that a host resolves through its `Host`.
  *
  * Consumer pattern (wasm-bindgen --target web):
  *
@@ -207,7 +207,7 @@ export interface InferredDescriptorJson {
 export type {
   TokenRow,
   SemanticTokensLegend,
-  SourceHost,
+  Host,
   MissingDocument,
   UnreadDocument,
   DocumentWorkspace,

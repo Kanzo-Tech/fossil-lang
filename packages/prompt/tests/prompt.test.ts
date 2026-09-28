@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { SourceHost } from '@fossil-lang/types';
+import type { Host } from '@fossil-lang/types';
 import { initFossilWasm, openProgram } from '@fossil-lang/wasm';
 
 import { EXAMPLE, FORBIDDEN, FOSSIL_PROMPT, NAMES } from '../src/index.js';
@@ -79,16 +79,13 @@ describe('every form the prompt calls gone is refused by the checker', () => {
   // A shape and a source the preamble names, so an error is the forbidden form's and not a
   // missing document's: the control below checks clean against the same two.
   const SHAPE = 'PREFIX ex: <http://example.org/>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nex:Person { ex:name xsd:string }\n';
-  const host: SourceHost = {
-    connections: async () => ({}),
-    sign: async (locators) => Object.fromEntries(locators.map((l) => [l, `mem://${l}`])),
-  };
-  const fetchShape = (async (url: string) =>
-    url.endsWith('person.shex') ? new Response(SHAPE) : new Response('', { status: 404 })) as typeof fetch;
+  // No connection to read through: the shape is registered as the host already holds it.
+  const host: Host = { connections: async () => ({}), credentials: async () => [] };
 
   const errors = async (text: string): Promise<string[]> => {
-    const program = await openProgram('forbidden.fossil', { host, fetch: fetchShape });
+    const program = await openProgram('forbidden.fossil', { host });
     try {
+      program.workspace.registerDocument('person.shex', SHAPE);
       program.registerDescriptor({
         uri: 'users.csv',
         columns: [

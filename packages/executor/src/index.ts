@@ -2,15 +2,15 @@
  * @fossil-lang/executor — the DataFusion executor that runs fossil mappings in
  * the browser (the heavy, lazy-loaded counterpart to the LSP @fossil-lang/wasm).
  *
- * A job, end to end — documents, sources, run, upload, completion:
+ * A job, end to end — documents, sources, run, write, completion:
  *
  *   import { initFossilExecutor, runJob } from '@fossil-lang/executor';
  *
  *   await initFossilExecutor();                      // lazy — only when running a job
- *   const report = await runJob(program, { host, output });
+ *   const report = await runJob(program, { id, host, complete });
  *
- * `host` is the `SourceHost` from `@fossil-lang/types`; `output` signs the PUTs
- * and records the outcome. {@link FossilExecutor} is the step-by-step surface
+ * `host` is the `Host` from `@fossil-lang/types`: it vends `read` per connection
+ * and `write` on the job. `complete` records the outcome. {@link FossilExecutor} is the step-by-step surface
  * `runJob` drives.
  */
 
@@ -25,7 +25,7 @@ export { initFossilExecutor } from './load.js';
 export type { InitInput } from './load.js';
 
 export { runJob } from './run-job.js';
-export type { Job, JobOutput, CompletePayload, RunJobOptions } from './run-job.js';
+export type { Job, CompletePayload } from './run-job.js';
 
 import type { Channel } from '@fossil-lang/types';
 
@@ -46,12 +46,14 @@ export { DATA_ROWS } from './catalogue.generated.js';
 
 /** A source the program reads, as enumerated by {@link FossilExecutor.sources}. */
 export interface SourceDescriptor {
-  /** The locator fossil resolved from what the program wrote — sign it to fetch. */
+  /** The locator fossil resolved from what the program wrote. */
   uri: string;
   format: SourceFormat;
+  /** The connection the locator lies under, when the program wrote `@name/…`. */
+  connection?: string;
 }
 
-/** A source the host fetched, fed to {@link FossilExecutor.run}. */
+/** A source's bytes, fed to {@link FossilExecutor.run}. */
 export interface SourceInput extends SourceDescriptor {
   /** The fetched bytes (CSV/JSON/Parquet content, or RDF Turtle text). */
   bytes: Uint8Array;
@@ -250,7 +252,7 @@ export interface RunReport {
 
 /** The result of {@link FossilExecutor.run}. */
 export interface ExecutorResult {
-  /** The W0b GraphAr tree as bytes — signed-PUT each `path` ← `bytes`. */
+  /** The W0b GraphAr tree as bytes, each `path` relative to the job's prefix. */
   files: GraphArFile[];
   /** The manifest that tree carries, plus `dest` and the drops. */
   report: RunReport;

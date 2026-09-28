@@ -233,7 +233,7 @@ function sourcesFor(formats: readonly SourceFormat[], option?: string): ProgramS
   return formats.map((format, i) => ({
     binding: `s${i}`,
     key: `data/${i}.${format}`,
-    locator: `s3://bucket/data/${i}.${format}`,
+    locator: `https://x.test/data/${i}.${format}`,
     format,
     option,
   }));
@@ -245,7 +245,7 @@ async function describesOf(sources: ProgramSource[]): Promise<string[]> {
   await introspect(sources, {
     host: {
       connections: async () => ({}),
-      sign: async (locators) => Object.fromEntries(locators.map((l) => [l, l])),
+      credentials: async () => [],
     },
     engine: {
       lend: async () => {},
@@ -271,7 +271,7 @@ describe("reader dispatch parity with the generated Rust catalogue", () => {
       sources.map((s) => {
         const reader = readers.get(s.format);
         expect(reader, `no native reader for \`io.${s.format}\` in the Rust`).toBeDefined();
-        return `DESCRIBE SELECT * FROM ${reader!.fn}('sources/${s.key}')`;
+        return `DESCRIBE SELECT * FROM ${reader!.fn}('${s.locator}')`;
       }),
     );
   });
@@ -294,7 +294,7 @@ describe("reader option parity with fossil-introspect", () => {
         expect(keywords.has(variant), `no option arm for \`${variant}\``).toBe(true);
         const keyword = keywords.get(variant);
         const args = keyword ? `, ${keyword}='|'` : "";
-        return `DESCRIBE SELECT * FROM ${fn}('sources/${s.key}'${args})`;
+        return `DESCRIBE SELECT * FROM ${fn}('${s.locator}'${args})`;
       }),
     );
   });

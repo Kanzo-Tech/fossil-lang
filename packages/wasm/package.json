@@ -40,6 +40,7 @@
   },
   "sideEffects": false,
   "dependencies": {
+    "@fossil-lang/storage": "workspace:*",
     "@fossil-lang/types": "workspace:*"
   },
   "devDependencies": {

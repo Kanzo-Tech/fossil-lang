@@ -1,7 +1,14 @@
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
+import { initStorage } from '@fossil-lang/storage';
+
 import { initFossilGraphWasm } from '../src/load.js';
+
+await initStorage(
+  await readFile(createRequire(import.meta.url).resolve('@fossil-lang/storage/pkg/fossil_storage_wasm_bg.wasm')),
+);
 
 /**
  * The WASM module, instantiated before the file that imported this is collected.

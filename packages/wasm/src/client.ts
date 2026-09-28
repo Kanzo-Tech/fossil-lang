@@ -195,7 +195,7 @@ export class FossilPlayground {
 
   /**
    * The connection map `@name/…` expands against — what
-   * `SourceHost.connections()` answers. It reaches locators only, so setting it
+   * `Host.connections()` answers. It reaches locators only, so setting it
    * re-checks nothing.
    */
   setConnections(connections: Record<string, string>): void {

@@ -10,10 +10,10 @@
  *
  * ## Two things a host has to supply, and neither is optional
  *
- * 1. **The shape document, through a `SourceHost`.** `hello.fossil` says
- *    `io.shex("hello.shex")`. The checker reads nothing itself: it reports the document
- *    missing, `resolveDocuments` has {@link HOST} sign its locator and fetches it, and
- *    the text is registered under the key the program wrote. Without it the `name` key
+ * 1. **The shape document.** `hello.fossil` says `io.shex("hello.shex")`. The checker
+ *    reads nothing itself: a host with connections has `resolveDocuments` read what it
+ *    reports missing under the credentials {@link HOST} vends; this one holds the text in
+ *    the bundle and registers it under the key the program wrote. Without it the `name` key
  *    resolves against nothing, the mapping writes no properties, and the run still
  *    succeeds with the column simply absent — which is the failure mode worth knowing
  *    about, because it is silent.
@@ -28,7 +28,7 @@
  */
 import { openProgram, type CheckRow, type FossilProgram } from '@fossil-lang/wasm';
 
-import { HOST, PROGRAM_PATH } from './example.js';
+import { HOST, PROGRAM_PATH, registerBundled } from './example.js';
 
 export type { CheckRow, FossilProgram };
 
@@ -63,15 +63,17 @@ export function checkerCost(): BundleCost | null {
 }
 
 /**
- * Fetch + instantiate the checker, open the program, read the documents it names.
+ * Fetch + instantiate the checker, open the program, register the documents it names.
  *
  * Measured rather than declared: {@link measured} reads the request the module made for its
  * own `.wasm` — `openProgram` boots it with nothing, because the bundler emitted that file.
+ * Opened empty: every member pushes the text it is handed, and the documents are in before it.
  */
-export async function load(program: string): Promise<FossilProgram> {
+export async function load(): Promise<FossilProgram> {
   const started = performance.now();
-  const opened = await openProgram(PROGRAM_PATH, { host: HOST, text: program });
+  const opened = await openProgram(PROGRAM_PATH, { host: HOST });
   cost = measured('fossil_wasm_bg', started);
+  registerBundled(opened.workspace);
   return opened;
 }
 

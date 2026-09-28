@@ -1,12 +1,13 @@
-import type { SourceHost } from './source-host';
-
 /**
- * The page's one SQL engine, as fossil needs it — a DuckDB-WASM with a file registry.
+ * The page's one SQL engine, as fossil needs it — a DuckDB-WASM with `httpfs` loaded and a file
+ * registry.
  *
- * Fossil does not own it and does not boot one: `@kanzo-tech/mosaic`'s `engine()` is the
- * reference and satisfies this structurally. A corpus or an introspection names files here
- * and never puts a signed URL into SQL text, so a signature cannot reach an error message, a
- * query-cache key or a view definition, and it can rotate under a view that stays.
+ * Fossil does not own it and does not boot one: `@kanzo-tech/mosaic`'s `engine()` is the reference
+ * and satisfies this structurally. It is the database, not the reader: fossil puts a vended
+ * credential into it as a scoped `CREATE SECRET` and names `s3://…` in SQL, so a credential never
+ * reaches SQL text, an error message, a query-cache key or a view definition, and it rotates under
+ * a view that stays. `lend` and `drop` are for what a secret cannot reach — an Azure file, which
+ * DuckDB-WASM has no extension for, and bytes the page already holds.
  */
 export interface Engine {
   query(sql: string): Promise<Record<string, unknown>[]>;
@@ -19,12 +20,3 @@ export interface Engine {
   /** Forget the names. A name the engine does not hold is ignored. */
   drop(names: readonly string[]): Promise<void>;
 }
-
-/**
- * What a host gives a reader that only needs URLs signed — a job's output, which has no
- * connection map. The reader signs once, at open: every URL it is handed must stay readable
- * while the reader is open. A host whose store signs for minutes hands out a locator of its own
- * that signs at read time — a redirect, as Hugging Face's `/resolve/` does — and not the store's
- * signature, which the engine would hold past its expiry.
- */
-export type Signer = Pick<SourceHost, 'sign'>;

@@ -4,15 +4,15 @@ The DataFusion executor that runs fossil mappings **in the browser** — the hea
 lazy-loaded counterpart to the LSP-only [`@fossil-lang/wasm`](../wasm).
 
 Wraps the `fossil-df-wasm` wasm-bindgen build (`--target web`). The browser reads
-every document and source the program names through the host's `SourceHost`, runs
-the mapping on DataFusion-WASM, and gets back the GraphAr output (Parquet +
-manifests, as bytes) ready to signed-`PUT`. No mapping runtime on the server.
+every document and source the program names under the credentials the host vends,
+runs the mapping on DataFusion-WASM, and writes the GraphAr output (Parquet +
+manifests) under the job's prefix. No mapping runtime on the server.
 
 ## Usage
 
 ```ts
 import { initFossilExecutor, runJob } from '@fossil-lang/executor';
-import type { SourceHost } from '@fossil-lang/types';
+import type { Host } from '@fossil-lang/types';
 
 // Lazy — only when the user runs a job (the artefact is large, datafusion-heavy).
 // The .wasm ships in this package and the bundler emits it as an asset: nothing
@@ -20,41 +20,43 @@ import type { SourceHost } from '@fossil-lang/types';
 // Vite dev: see @fossil-lang/wasm's README for the one optimizeDeps line.
 await initFossilExecutor();
 
-const host: SourceHost = {
-  connections: async () => ({ minio: 'http://minio:9000/bucket' }),
-  sign: async (locators) => signEach(locators), // { locator: fetchableUrl }
+const host: Host = {
+  connections: async () => ({ lake: 's3://bucket/raw' }),
+  // Iceberg REST StorageCredential[]: `read` per connection, `write` on `{ job }`.
+  credentials: async (scope, access) => vend(scope, access),
 };
 
 const report = await runJob(program, {
+  id: jobId,
   host,
-  output: {
-    signOutputUrls: async (paths) => signPuts(paths), // { path: putUrl }
-    complete: async (outcome) => patchJob(outcome),
-  },
+  complete: async (outcome) => patchJob(outcome),
 });
 ```
 
 `runJob` reads the documents the program names (every shape, not just the first)
-with `resolveDocuments` from `@fossil-lang/types`, fails the job if any stays
-unread, then signs and fetches the sources fossil resolved, runs, uploads and
-completes. Fossil turns each `@conn/path` into a locator; the host only signs.
+with `resolveDocuments` from `@fossil-lang/storage`, fails the job if any stays
+unread, then reads the sources fossil resolved, runs, writes and completes.
+Fossil turns each `@conn/path` into a locator and the connection it goes
+through; every request is signed in Rust with the credential the host vends for
+it — a GET per source under `read` on its connection, a PUT per output file at
+`<prefix><path>` under `write` on `{ job: id }`. The host never signs a URL.
 
 Step by step, the same thing is:
 
 ```ts
-import { resolveDocuments } from '@fossil-lang/types';
+import { read, resolveDocuments, write } from '@fossil-lang/storage';
 
 const exec = new FossilExecutor(program);
 const { unread } = await resolveDocuments(exec, host); // sets connections, registers documents
-const wanted = exec.sources();                         // [{ uri: locator, format }]
-const signed = await host.sign(wanted.map((s) => s.uri));
-const sources = await Promise.all(
-  wanted.map(async (s) => ({
-    ...s,
-    bytes: new Uint8Array(await (await fetch(signed[s.uri])).arrayBuffer()),
-  })),
-);
-const { files, report } = await exec.run(sources, jobDest);
+const wanted = exec.sources();                         // [{ uri: locator, connection?, format }]
+const results = await read(host, wanted.map((s) => ({ locator: s.uri, connection: s.connection })));
+const sources = wanted.map((s, i) => {
+  const r = results[i]!;
+  if (!r.ok) throw new Error(r.reason);
+  return { uri: s.uri, format: s.format, bytes: r.bytes };
+});
+const { files, report } = await exec.run(sources, '');
+await write(host, { job: jobId }, files);
 exec.free();
 ```
 

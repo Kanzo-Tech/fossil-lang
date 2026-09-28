@@ -1,12 +1,12 @@
 {
-  "name": "@fossil-lang/introspect",
+  "name": "@fossil-lang/storage",
   "version": "0.0.0-development",
-  "description": "Source schema introspection for the Fossil editor: reads the sources fossil reports through the host's DuckDB under the credentials the host vends, DESCRIBEs them, and builds the InferredDescriptors the checker consumes.",
+  "description": "Storage access for every @fossil-lang/* package, from credentials the host vends: a scoped DuckDB secret renewed before it expires, an Azure SAS lend, or a SigV4-signed request — rendered by fossil-storage in WASM.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/kanzo-tech/fossil.git",
-    "directory": "packages/introspect"
+    "directory": "packages/storage"
   },
   "publishConfig": {
     "access": "public"
@@ -19,26 +19,29 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./pkg/fossil_storage_wasm_bg.wasm": "./pkg/fossil_storage_wasm_bg.wasm"
   },
   "files": [
     "dist/",
-    "README.md",
-    "LICENSE"
+    "pkg/fossil_storage_wasm.js",
+    "pkg/fossil_storage_wasm.d.ts",
+    "pkg/fossil_storage_wasm_bg.wasm",
+    "pkg/fossil_storage_wasm_bg.wasm.d.ts",
+    "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build:wasm": "bash scripts/build-wasm.sh",
+    "build": "pnpm run build:wasm && tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit"
   },
   "sideEffects": false,
   "dependencies": {
-    "@fossil-lang/storage": "workspace:*",
     "@fossil-lang/types": "workspace:*"
   },
   "devDependencies": {
-    "happy-dom": "^15.0.0",
     "typescript": "^5.6.0",
     "vitest": "^2.0.0"
   }

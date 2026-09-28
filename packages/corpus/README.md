@@ -240,22 +240,23 @@ canvas masks its resident tiles with them.
 
 ## Handing a corpus to a host
 
-A host that grants access file by file — signing URLs, registering them with
-its engine — composes no path and derives no name. Two members answer it:
+A host that keeps a corpus per job gives the door its engine and its `Host`,
+and names the job:
 
 ```ts
-// 1. No engine yet: the addressing alone, read through the host's own signer.
-const addressing = await open('', { readText });
-const signed = await sign(addressing.files());   // every file, distinct, once
-for (const [path, url] of Object.entries(signed)) db.registerFileURL(path, url, …);
-
-// 2. The same corpus with the engine, and what to record about it.
-const corpus = await open('', { query, manifestFiles });
+const corpus = await open(jobId, { engine, host });
 for (const r of await corpus.relations()) {
   // { kind: 'vertex', name, rows, files, columns } | { kind: 'edge', name, rows, files, … }
   record(r);
 }
 ```
+
+The corpus is the one prefix `host.credentials({ job }, 'read')` vends, and
+every file of it — the manifests too — is read through the engine under that
+credential: a scoped secret for S3, renewed before it expires for as long as the
+corpus is open, and a lease per file for Azure (`@fossil-lang/storage`). The
+host signs nothing, composes no path and derives no name. `close()` gives the
+credential back.
 
 `addressing.files()` is `fossil_graph::plan::ReadPlan::files`: every vertex
 type's projections and index, then every relation's projections. A projection

@@ -1,4 +1,6 @@
-import type { ProgramSource } from "@fossil-lang/types";
+import "./boot.js";
+
+import type { Access, ProgramSource, Scope, StorageCredential } from "@fossil-lang/types";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildDescriptor,
@@ -104,91 +106,77 @@ describe("buildDescriptor", () => {
 });
 
 describe("introspect", () => {
+  const W = "s3://bucket/w/";
   const users: ProgramSource = {
     binding: "users",
     key: "@w/users.csv",
-    locator: "s3://bucket/w/users.csv",
+    locator: `${W}users.csv`,
+    connection: "w",
     format: "csv",
   };
   const orders: ProgramSource = {
     binding: "orders",
     key: "@w/orders.csv",
-    locator: "s3://bucket/w/orders.csv",
+    locator: `${W}orders.csv`,
+    connection: "w",
     format: "csv",
   };
 
-  /** A host that signs every locator it is given, and an engine with
-   *  DuckDB-WASM's registry: a name holds one URL, so a new one is a swap. */
+  const credential = (prefix: string): StorageCredential => ({
+    prefix,
+    config: {
+      "s3.access-key-id": "K",
+      "s3.secret-access-key": "secret",
+      "s3.endpoint": "http://localhost:9000",
+      "s3.path-style-access": "true",
+      "client.region": "us-east-1",
+    },
+  });
+
+  /** A host that vends a read credential per connection, and an engine that
+   *  records every statement but the `httpfs` probe, which it answers as loaded. */
   function fakeIO(
     query: (sql: string) => Promise<Record<string, unknown>[]>,
     overrides: Partial<IntrospectIO> = {},
-    signature = () => "",
+    vend: (scope: Scope) => StorageCredential[] = () => [credential(W)],
   ) {
-    const registered = new Map<string, string>();
-    let swaps = 0;
-    const sign = vi.fn(async (locators: string[]) =>
-      Object.fromEntries(locators.map((l) => [l, `https://signed/${l}${signature()}`])),
-    );
+    const sql: string[] = [];
+    const credentials = vi.fn(async (scope: Scope, _access: Access) => vend(scope));
     const io: IntrospectIO = {
-      host: { connections: async () => ({}), sign },
+      host: { connections: async () => ({ w: W }), credentials },
       engine: {
-        query,
-        lend: async (files) => {
-          for (const [name, url] of Object.entries(files)) {
-            if (registered.has(name) && registered.get(name) !== url) swaps++;
-            registered.set(name, url);
-          }
+        query: async (text) => {
+          if (text.includes("duckdb_extensions()")) return [{ loaded: true }];
+          sql.push(text);
+          return text.startsWith("DESCRIBE") ? query(text) : [];
         },
-        drop: async (names) => {
-          for (const name of names) registered.delete(name);
-        },
+        lend: async () => {},
+        drop: async () => {},
       },
       ...overrides,
     };
-    return { io, sign, registered, swaps: () => swaps };
+    return { io, credentials, sql };
   }
 
-  it("describes a source twice under fresh signatures by swapping its lease", async () => {
-    let n = 0;
-    const { io, registered, swaps } = fakeIO(
-      async () => [{ column_name: "id", column_type: "BIGINT" }],
-      {},
-      () => `?sig=${++n}`,
-    );
-    const warn = vi.fn();
-    const first = await introspect([users], { ...io, onWarn: warn });
-    const second = await introspect([users], { ...io, onWarn: warn });
-    expect(warn).not.toHaveBeenCalled();
-    expect(second).toEqual(first);
-    expect(swaps()).toBe(1);
-    expect(registered.get("sources/@w/users.csv")).toBe(
-      "https://signed/s3://bucket/w/users.csv?sig=2",
-    );
-  });
+  const describes = (sql: string[]) => sql.filter((s) => s.startsWith("DESCRIBE"));
 
-  it("signs every locator in one call, registers each under its key and describes the key", async () => {
-    const seen: string[] = [];
-    const { io, sign, registered } = fakeIO(async (sql) => {
-      seen.push(sql);
-      return sql.includes("users")
+  it("mounts each connection once, describes the s3:// locator and drops the secret after", async () => {
+    const { io, credentials, sql } = fakeIO(async (text) =>
+      text.includes("users")
         ? [{ column_name: "id", column_type: "BIGINT" }]
-        : [{ column_name: "total", column_type: "DOUBLE" }];
-    });
+        : [{ column_name: "total", column_type: "DOUBLE" }],
+    );
 
     const descriptors = await introspect([users, orders], io);
 
-    expect(sign).toHaveBeenCalledTimes(1);
-    expect(sign).toHaveBeenCalledWith([users.locator, orders.locator]);
-    expect(registered).toEqual(
-      new Map([
-        ["sources/@w/users.csv", "https://signed/s3://bucket/w/users.csv"],
-        ["sources/@w/orders.csv", "https://signed/s3://bucket/w/orders.csv"],
-      ]),
-    );
-    expect(seen).toEqual([
-      "DESCRIBE SELECT * FROM read_csv_auto('sources/@w/users.csv')",
-      "DESCRIBE SELECT * FROM read_csv_auto('sources/@w/orders.csv')",
+    expect(credentials).toHaveBeenCalledTimes(1);
+    expect(credentials).toHaveBeenCalledWith({ connection: "w" }, "read");
+    expect(sql[0]).toMatch(/^CREATE OR REPLACE SECRET fossil_read_[0-9a-f]{16} \(TYPE s3, /);
+    expect(describes(sql)).toEqual([
+      `DESCRIBE SELECT * FROM read_csv_auto('${W}users.csv')`,
+      `DESCRIBE SELECT * FROM read_csv_auto('${W}orders.csv')`,
     ]);
+    expect(sql.at(-1)).toMatch(/^DROP SECRET IF EXISTS fossil_read_[0-9a-f]{16}$/);
     expect(descriptors).toEqual([
       {
         uri: "@w/users.csv",
@@ -203,77 +191,75 @@ describe("introspect", () => {
     ]);
   });
 
+  it("describes a public source with no connection as it is, asking the host nothing", async () => {
+    const { io, credentials, sql } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }]);
+    const descriptors = await introspect(
+      [{ binding: "p", key: "https://x.test/p.csv", locator: "https://x.test/p.csv", format: "csv" }],
+      io,
+    );
+    expect(credentials).not.toHaveBeenCalled();
+    expect(sql).toEqual(["DESCRIBE SELECT * FROM read_csv_auto('https://x.test/p.csv')"]);
+    expect(descriptors).toHaveLength(1);
+  });
+
   it("describes a parquet source as parquet, and carries a csv source's delimiter", async () => {
-    const seen: string[] = [];
-    const { io } = fakeIO(async (sql) => {
-      seen.push(sql);
-      return [{ column_name: "ts", column_type: "TIMESTAMP" }];
-    });
+    const { io, sql } = fakeIO(async () => [{ column_name: "ts", column_type: "TIMESTAMP" }]);
     await introspect(
       [
-        { binding: "e", key: "@w/e.parquet", locator: "s3://b/e.parquet", format: "parquet" },
+        { binding: "e", key: "@w/e.parquet", locator: `${W}e.parquet`, connection: "w", format: "parquet" },
         { ...users, option: "|" },
       ],
       io,
     );
-    expect(seen).toEqual([
-      "DESCRIBE SELECT * FROM read_parquet('sources/@w/e.parquet')",
-      "DESCRIBE SELECT * FROM read_csv_auto('sources/@w/users.csv', delim='|')",
+    expect(describes(sql)).toEqual([
+      `DESCRIBE SELECT * FROM read_parquet('${W}e.parquet')`,
+      `DESCRIBE SELECT * FROM read_csv_auto('${W}users.csv', delim='|')`,
     ]);
   });
 
   it("does not describe a materialised source, and asks the host nothing for none", async () => {
     const query = vi.fn(async () => []);
-    const { io, sign } = fakeIO(query);
+    const { io, credentials, sql } = fakeIO(query);
     const descriptors = await introspect(
-      [{ binding: "g", key: "@w/g.ttl", locator: "s3://b/g.ttl", format: "rdf" }],
+      [{ binding: "g", key: "@w/g.ttl", locator: `${W}g.ttl`, connection: "w", format: "rdf" }],
       io,
     );
     expect(descriptors).toEqual([]);
-    expect(sign).not.toHaveBeenCalled();
-    expect(query).not.toHaveBeenCalled();
+    expect(credentials).not.toHaveBeenCalled();
+    expect(sql).toEqual([]);
   });
 
-  it("asks the host for a freshness token against the signed url", async () => {
-    const freshness = vi.fn((_: ProgramSource, url: string) => `etag-for-${url}`);
-    const { io } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }], {
-      freshness,
-    });
+  it("asks the host for a freshness token per source", async () => {
+    const freshness = vi.fn((source: ProgramSource) => `etag-for-${source.key}`);
+    const { io } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }], { freshness });
     const descriptors = await introspect([users], io);
-    expect(freshness).toHaveBeenCalledWith(users, "https://signed/s3://bucket/w/users.csv");
-    expect(descriptors[0]?.freshness_token).toBe(
-      "etag-for-https://signed/s3://bucket/w/users.csv",
-    );
+    expect(freshness).toHaveBeenCalledWith(users);
+    expect(descriptors[0]?.freshness_token).toBe("etag-for-@w/users.csv");
   });
 
-  it("is best-effort: an unsigned or unreadable source is reported and skipped", async () => {
+  it("is best-effort: an unvended, unaddressable or unreadable source is reported and skipped", async () => {
     const onWarn = vi.fn();
-    const { io } = fakeIO(
-      async (sql) => {
-        if (sql.includes("orders")) throw new Error("CORS / unreachable");
+    const { io, sql } = fakeIO(
+      async (text) => {
+        if (text.includes("orders")) throw new Error("CORS / unreachable");
         return [{ column_name: "total", column_type: "INT" }];
       },
-      {
-        host: {
-          connections: async () => ({}),
-          sign: async (locators) =>
-            Object.fromEntries(
-              locators.filter((l) => l !== users.locator).map((l) => [l, `https://signed/${l}`]),
-            ),
-        },
-        onWarn,
-      },
+      { onWarn },
+      (scope) => ("connection" in scope && scope.connection === "gone" ? [] : [credential(W)]),
     );
     const parquet: ProgramSource = {
       binding: "e",
       key: "@w/e.parquet",
-      locator: "s3://b/e.parquet",
+      locator: `${W}e.parquet`,
+      connection: "w",
       format: "parquet",
     };
+    const unvended: ProgramSource = { ...users, binding: "u", connection: "gone" };
+    const bare: ProgramSource = { binding: "b", key: "b.csv", locator: "b.csv", format: "csv" };
 
-    const descriptors = await introspect([users, orders, parquet], io);
+    const descriptors = await introspect([unvended, orders, parquet, bare], io);
 
-    expect(onWarn).toHaveBeenCalledTimes(2);
+    expect(onWarn).toHaveBeenCalledTimes(3);
     expect(descriptors).toEqual([
       {
         uri: "@w/e.parquet",
@@ -281,5 +267,7 @@ describe("introspect", () => {
         freshness_token: "",
       },
     ]);
+    expect(sql.at(-1)).toMatch(/^DROP SECRET IF EXISTS /);
   });
 });
+

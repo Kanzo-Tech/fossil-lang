@@ -156,19 +156,15 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
    * loading branch here and no state machine around the canvas — the source awaits it inside its
    * own members, once.
    *
-   * **The reference call site for a host that can only sign.** The corpus is lent to the page's
-   * engine under `bench/<count>`, every file behind a URL this host "signs" — a static server
-   * needs no signature, so signing is composing `bench.base`, which is absolute for the reason
-   * `bench.ts` records. The manifests are already in hand, so none is fetched again. Closing on
-   * unmount gives the engine its files and views back.
+   * The bench corpus is public: a static server behind `bench.base`, absolute for the reason
+   * `bench.ts` records, so there is no credential to vend and the engine reads it by URL. The
+   * manifests are already in hand, so none is fetched again. Closing on unmount gives the engine
+   * its views back.
    */
   const corpus = useMemo(
     () =>
-      open(`bench/${bench.stamp.count}`, {
-        engine: duck.engine,
-        host: {
-          sign: async (paths) => Object.fromEntries(paths.map((p) => [p, `${bench.base}/${p}`])),
-        },
+      open(bench.base, {
+        query: duck.query,
         manifestFiles: bench.manifestTexts,
       }),
     [bench],

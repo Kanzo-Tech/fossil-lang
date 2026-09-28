@@ -263,8 +263,14 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   executor/                datafusion-wasm query executor, and the manifest wire mirror, because
                            a run HANDS THAT BACK — except `Channel`/`Scale`, in `types/` because
                            `draw/` reads one and 22 MB of wasm is the wrong price for an interface
-  types/                   SourceHost, the one host contract, and resolveDocuments, the one IO
-                           loop over it; FossilTheme; the `channels:` wire shape
+  types/                   Host — `connections()` + `credentials(scope, access)` — the one host
+                           contract, and StorageCredential (Iceberg REST's, verbatim); the
+                           Engine; FossilTheme; the `channels:` wire shape. Types only
+  storage/                 how every package reaches storage from a vended credential, over
+                           `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
+                           expires−5min, refcounted per prefix; Azure lent file by file),
+                           `read`/`write` (SigV4-signed requests), and `resolveDocuments`.
+                           No host ever signs a URL for fossil
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
                            and not an editor. FIVE of them, not two: highlighting from
                            `tokenize()` + `tokenKinds()`, squiggles from `check()` through

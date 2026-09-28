@@ -60,7 +60,7 @@ export default function App() {
         const dc = duck.duckdbCost();
         if (dc) say(`duckdb-wasm  ${KB(dc.bytes)}  ${dc.ms} ms`);
 
-        const opened = await checker.load(PROGRAM);
+        const opened = await checker.load();
         const cc = checker.checkerCost();
         if (cc) say(`fossil-wasm  ${KB(cc.bytes)}  ${cc.ms} ms`);
 

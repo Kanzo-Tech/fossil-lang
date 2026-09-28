@@ -227,6 +227,9 @@ importers:
 
   packages/corpus:
     dependencies:
+      '@fossil-lang/storage':
+        specifier: workspace:*
+        version: link:../storage
       '@fossil-lang/types':
         specifier: workspace:*
         version: link:../types
@@ -262,6 +265,9 @@ importers:
 
   packages/executor:
     dependencies:
+      '@fossil-lang/storage':
+        specifier: workspace:*
+        version: link:../storage
       '@fossil-lang/types':
         specifier: workspace:*
         version: link:../types
@@ -275,6 +281,9 @@ importers:
 
   packages/introspect:
     dependencies:
+      '@fossil-lang/storage':
+        specifier: workspace:*
+        version: link:../storage
       '@fossil-lang/types':
         specifier: workspace:*
         version: link:../types
@@ -304,11 +313,12 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)(happy-dom@15.11.7)(lightningcss@1.32.0)
 
-  packages/types:
+  packages/storage:
+    dependencies:
+      '@fossil-lang/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
-      happy-dom:
-        specifier: ^15.0.0
-        version: 15.11.7
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
@@ -316,8 +326,17 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)(happy-dom@15.11.7)(lightningcss@1.32.0)
 
+  packages/types:
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
   packages/wasm:
     dependencies:
+      '@fossil-lang/storage':
+        specifier: workspace:*
+        version: link:../storage
       '@fossil-lang/types':
         specifier: workspace:*
         version: link:../types

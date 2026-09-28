@@ -8,16 +8,14 @@
  *
  * The host's job in `run` is spelled out by the crate: enumerate the sources, stage each
  * one's bytes, hand them over. Natively the bytes come from disk; in keasy's shape they
- * come from a signed URL. Here they come from a build-time import, and the executor cannot
+ * come from a request signed with a credential the host vends. Here they come from a build-time import, and the executor cannot
  * tell — which is what makes «the source data never leaves the machine» a property of the
  * architecture rather than a promise in a README.
  */
 import type { ExecutorResult, SourceInput } from '@fossil-lang/executor';
 
 import { measured, type BundleCost } from './check.js';
-import { resolveDocuments } from '@fossil-lang/types';
-
-import { absolutise, DEST, HOST, SOURCE_BYTES } from './example.js';
+import { absolutise, DEST, registerBundled, SOURCE_BYTES } from './example.js';
 
 let cost: BundleCost | null = null;
 
@@ -45,11 +43,12 @@ export async function run(program: string): Promise<ExecutorResult> {
   // URI's scheme+authority, and a relative path has neither. The checker never sees this.
   const executor = new FossilExecutor(absolutise(program));
   try {
-    // The shape document arrives the way the checker's does, through `HOST`: the run
+    // The shape document arrives the way the checker's does, from the bundle: the run
     // decodes its output contract from it and refuses without it.
-    const { unread } = await resolveDocuments(executor, HOST);
-    if (unread.length > 0) {
-      throw new Error(`the program names ${unread.map((d) => d.key).join(', ')}, which this playground has no text for.`);
+    registerBundled(executor);
+    const missing = executor.missingDocuments();
+    if (missing.length > 0) {
+      throw new Error(`the program names ${missing.map((d) => d.key).join(', ')}, which this playground has no text for.`);
     }
 
     // `sources()` is pure — it reads the program and says what to fetch, without fetching.

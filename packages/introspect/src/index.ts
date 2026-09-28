@@ -5,13 +5,11 @@
  * source" is a single fossil capability. Which sources a program reads is not
  * this package's question: fossil answers it from the AST
  * (`FossilPlayground.sources`), with every `@conn/path` already expanded into
- * a locator. This package signs those locators through the host's
- * `SourceHost`, DESCRIBEs each one through the host's DuckDB, and owns the
- * DESCRIBE SQL, the DuckDB→primitive table and the descriptor shape.
- *
- * Framework-agnostic, and no runtime dependency: `@fossil-lang/types` is
- * type-only, and the engine arrives as two callbacks — the same injection as
- * `@fossil-lang/corpus`'s `QueryFn`, which is why DuckDB-WASM is not a peer.
+ * a locator and the connection it goes through. This package reads each one
+ * through the host's DuckDB under the credential the host vends for that
+ * connection (`@fossil-lang/storage`), and owns the DESCRIBE SQL, the
+ * DuckDB→primitive table and the descriptor shape. The engine is the host's,
+ * which is why DuckDB-WASM is not a peer.
  *
  * The primitive union below is the wire form of `fossil-graph-schema`'s
  * `Primitive`. A value outside the union is rejected when the descriptor is
@@ -26,7 +24,8 @@
  * two diverge.
  */
 
-import type { Engine, ProgramSource, SourceHost } from "@fossil-lang/types";
+import { mount, type Mount } from "@fossil-lang/storage";
+import type { Engine, Host, ProgramSource } from "@fossil-lang/types";
 
 import {
   NATIVE_READERS,
@@ -59,7 +58,7 @@ export interface InferredColumn {
 export interface InferredDescriptor {
   /**
    * The source's `ProgramSource.key` — what the program wrote
-   * (`@warehouse/users.csv`), not its locator and not the signed URL. It is
+   * (`@warehouse/users.csv`), not its locator. It is
    * the key the compiler looks the descriptor up under, and a connection that
    * moves changes the locator without moving the key.
    */
@@ -191,8 +190,7 @@ export function describeSql(
  * rows).
  *
  * `freshnessToken` is what the host knows about the source's state — an ETag
- * or `Last-Modified` off the fetch that fed the DESCRIBE is the cheap one in a
- * browser. Omitted, it is `""`: never fresh, so the compiler re-introspects
+ * or a `Last-Modified` is the cheap one. Omitted, it is `""`: never fresh, so the compiler re-introspects
  * every time. That is the correct default for a host that has not wired one,
  * and it is not a hash of the columns — a token derived from the answer cannot
  * tell you whether to ask the question.
@@ -211,24 +209,16 @@ export function buildDescriptor(
   return { uri, columns, freshness_token: freshnessToken };
 }
 
-/**
- * What a host lends introspection: its credentials and the page's engine.
- *
- * Each source is lent to the engine as `sources/<key>`, so the DESCRIBE reads what the
- * program wrote, the signature never enters SQL text or the error DuckDB raises about it, and
- * the name cannot meet a corpus's. Describing a source again under a fresh signature swaps
- * the lease — {@link Engine.lend}'s rule.
- */
+/** What a host gives introspection: its credentials and the page's engine. */
 export interface IntrospectIO {
-  host: SourceHost;
+  host: Host;
   engine: Engine;
   /**
-   * A token for the state of the file behind `url` — an ETag, a
-   * `Last-Modified`, a version id. Only the host can produce one cheaply.
-   * Absent, descriptors carry `""` and the compiler re-introspects on every
-   * compile.
+   * A token for the state of the source — an ETag, a `Last-Modified`, a version id. Only the host
+   * can produce one cheaply. Absent, descriptors carry `""` and the compiler re-introspects on
+   * every compile.
    */
-  freshness?(source: ProgramSource, url: string): Promise<string> | string;
+  freshness?(source: ProgramSource): Promise<string> | string;
   /** Per-source failure sink; defaults to `console.warn`. */
   onWarn?(message: string, err: unknown): void;
 }
@@ -239,13 +229,13 @@ function defaultWarn(message: string, err: unknown): void {
 }
 
 /**
- * Describe every native source and return the descriptors, in `sources`
- * order. Every locator is signed in one `host.sign` call.
+ * Describe every native source and return the descriptors, in `sources` order. The host is asked
+ * once per connection named, and the credential it vends is given back when this returns.
  *
- * Best-effort: a source the host will not sign, or one DuckDB cannot read, is
- * reported through `onWarn` and skipped, never thrown — the editor degrades
- * to no field completion for that source. The host registers the returned
- * descriptors with the checker.
+ * Best-effort: a source the host vends nothing for, or one DuckDB cannot read, is reported
+ * through `onWarn` and skipped, never thrown — the editor degrades to no field completion for that
+ * source. A source with no connection is read as it is only when it is a public `http(s)` URL. The
+ * host registers the returned descriptors with the checker.
  */
 export async function introspect(
   sources: readonly ProgramSource[],
@@ -255,26 +245,43 @@ export async function introspect(
   const native = sources.filter(isNative);
   if (native.length === 0) return [];
 
-  const signed = await io.host.sign([...new Set(native.map((s) => s.locator))]);
-  const described = await Promise.all(
-    native.map(async (source) => {
-      const url = signed[source.locator];
-      try {
-        if (!url) throw new Error("the host does not sign this locator");
-        const name = `sources/${source.key}`;
-        await io.engine.lend({ [name]: url });
-        const rows = (await io.engine.query(
-          describeSql(name, source.format, source.option),
-        )) as DescribeRow[];
-        return buildDescriptor(source.key, rows, await io.freshness?.(source, url));
-      } catch (err) {
-        warn(
-          `[introspect] source \`${source.binding}\` (\`${source.key}\`) failed`,
-          err,
-        );
-        return undefined;
-      }
-    }),
-  );
-  return described.filter((d): d is InferredDescriptor => d !== undefined);
+  const mounts = new Map<string, Promise<Mount>>();
+  const mountOf = (connection: string): Promise<Mount> => {
+    let pending = mounts.get(connection);
+    if (pending === undefined) {
+      pending = mount(io.engine, io.host, { connection }, "read");
+      mounts.set(connection, pending);
+    }
+    return pending;
+  };
+  try {
+    const described = await Promise.all(
+      native.map(async (source) => {
+        try {
+          let name = source.locator;
+          if (source.connection !== undefined) {
+            const mounted = await mountOf(source.connection);
+            name = (await mounted.files([source.locator]))[0] ?? name;
+          } else if (!/^https?:\/\//.test(source.locator)) {
+            throw new Error("it names no connection and is not a public URL");
+          }
+          const rows = (await io.engine.query(
+            describeSql(name, source.format, source.option),
+          )) as DescribeRow[];
+          return buildDescriptor(source.key, rows, await io.freshness?.(source));
+        } catch (err) {
+          warn(
+            `[introspect] source \`${source.binding}\` (\`${source.key}\`) failed`,
+            err,
+          );
+          return undefined;
+        }
+      }),
+    );
+    return described.filter((d): d is InferredDescriptor => d !== undefined);
+  } finally {
+    await Promise.all(
+      [...mounts.values()].map(async (pending) => (await pending.catch(() => undefined))?.close()),
+    );
+  }
 }

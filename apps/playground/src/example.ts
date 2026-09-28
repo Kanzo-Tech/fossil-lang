@@ -11,7 +11,7 @@
  *
  * `vite.config.ts` allows the repo root in `server.fs` for exactly this.
  */
-import type { SourceHost } from '@fossil-lang/types';
+import type { DocumentWorkspace, Host } from '@fossil-lang/types';
 
 import helloFossil from '../../../examples/hello.fossil?raw';
 import helloShex from '../../../examples/hello.shex?raw';
@@ -34,21 +34,21 @@ export const SHEX = helloShex;
 export const CSV = usersCsv;
 
 /**
- * The playground's {@link SourceHost}: no connections, and every bundled document
- * "signed" as a `data:` URL of its own text. Fossil asks for `hello.shex` by the locator
- * the program's reference resolves to; the bundle answers, and nothing leaves the tab.
+ * The playground's {@link Host}: no connections, so it vends nothing. The documents the
+ * example names are already in the bundle, so they are registered straight into the
+ * workspace under the key the program wrote ({@link registerBundled}) and nothing is read.
  */
+export const HOST: Host = {
+  connections: async () => ({}),
+  credentials: async () => [],
+};
+
 const BUNDLED: Record<string, string> = { [SHEX_PATH]: SHEX };
 
-export const HOST: SourceHost = {
-  connections: async () => ({}),
-  sign: async (locators) =>
-    Object.fromEntries(
-      locators
-        .filter((locator) => locator in BUNDLED)
-        .map((locator) => [locator, `data:text/plain;charset=utf-8,${encodeURIComponent(BUNDLED[locator]!)}`]),
-    ),
-};
+/** Register every bundled document into `workspace`, before anything asks what is missing. */
+export function registerBundled(workspace: Pick<DocumentWorkspace, 'registerDocument'>): void {
+  for (const [key, text] of Object.entries(BUNDLED)) workspace.registerDocument(key, text);
+}
 
 /**
  * The base every relative source path is resolved against before the RUN. See

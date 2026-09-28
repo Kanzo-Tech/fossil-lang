@@ -21,7 +21,7 @@ import type { ExecutorResult, SourceDescriptor, SourceInput } from './index.js';
  * {@link free} when done to release the wasm-side handle.
  *
  * It is a {@link DocumentWorkspace}: hand it to `resolveDocuments` from
- * `@fossil-lang/types` before {@link sources} or {@link run}, so every document
+ * `@fossil-lang/storage` before {@link sources} or {@link run}, so every document
  * the program names — its output shape among them — is registered. The run
  * decodes its output contract from those registrations and refuses without them.
  *
@@ -46,7 +46,7 @@ export class FossilExecutor implements DocumentWorkspace {
     this.#raw.registerDocument(key, text);
   }
 
-  /** The sources to sign and fetch — `uri` is the locator fossil resolved. */
+  /** The sources to read — `uri` is the locator fossil resolved. */
   sources(): SourceDescriptor[] {
     return this.#raw.sources() as SourceDescriptor[];
   }
