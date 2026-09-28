@@ -257,8 +257,7 @@ fn resolve_policy(
 
 // `connection_urls` and `apply_source_creds` went with it, and `mod creds` with
 // them. This crate takes a `HashMap<String, String>` of connection URLs and
-// never sees a secret — which is what lets it drop `fossil-resolver`, whose own
-// wasm32 tripwire says cloud credentials must not cross that boundary.
+// never sees a secret.
 /// The local filesystem directory a dest URL writes under, or `None` for a cloud
 /// object store (which needs no directory pre-creation).
 fn local_dest_dir(url: &str) -> Option<PathBuf> {

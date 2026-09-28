@@ -43,6 +43,9 @@ schemars = { version = "0.8" }
 # producer in fossil-layout tests). Already a transitive dep via duckdb/parquet;
 # WASM-safe (no C/FFI) though only used in a native-only dev dependency here.
 sha2 = "0.10"
+# HMAC over `sha2` for SigV4 request signing in `fossil-storage` — the same
+# RustCrypto `digest` 0.10 generation, pure Rust, wasm32-clean.
+hmac = "0.12"
 
 # === Input descriptors (declared here for inheritance) ===
 csv = "1.3"
@@ -155,9 +158,9 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["e
 
 # === Credentials ===
 # `secrecy` zeroes its inner memory on drop and forbids `Debug`/`Display` from
-# leaking the wrapped value. Adopted in `fossil-resolver` (the resolver
-# carries provider-specific cloud-auth keys: `azure_storage_account_key`,
-# `aws_access_key_secret`, etc.) per the cross-project secrecy-always rule.
+# leaking the wrapped value. Adopted in `fossil-storage` (a vended storage
+# credential's keys, SAS tokens and session tokens) per the cross-project
+# secrecy-always rule.
 # Same pin as keasy/server (0.10 + `serde` feature) so the auth values
 # round-trip through the keasy config layer without a version mismatch.
 secrecy = { version = "0.10", features = ["serde"] }

@@ -20,13 +20,10 @@
 //!
 //! # Credentials came too, and they had to
 //!
-//! [`creds`] holds `RunCreds` — the `--creds-stdin` payload. It names
-//! `fossil-resolver`, which carries its OWN `wasm32` tripwire because cloud
-//! credentials must not cross the wasm boundary. So a native host that
-//! still parsed credentials could not be wasm-clean no matter what happened to
-//! `DuckDB`. Introspection and credentials are the same concern anyway: the
-//! secret exists so that the `DESCRIBE` over a cloud `@conn` source
-//! authenticates.
+//! [`creds`] holds `RunCreds` — the `--creds-stdin` payload, rendered into a
+//! `CREATE SECRET` by `fossil-storage`. Introspection and credentials are the
+//! same concern: the secret exists so that the `DESCRIBE` over a cloud `@conn`
+//! source authenticates.
 //!
 //! The host therefore takes a `HashMap<String, String>` of connection
 //! URLs and never sees a secret.
@@ -250,6 +247,7 @@ pub fn pre_introspect_and_register(
             locator,
             format,
             option,
+            ..
         } = source;
         // The constructor chooses the reader: a JSON array read as CSV
         // introspects to one column named `[`. A materialised row (`io.rdf`)
@@ -364,7 +362,7 @@ pub fn connection_urls(connections: &HashMap<String, ConnectionCreds>) -> HashMa
 ///
 /// This ran through `fossil_layout::install_secret`, and that indirection is
 /// gone. The rendering — which is the part with a decision in it, and the part
-/// with tests — is [`fossil_resolver::ResolvedPath::create_secret_sql`], in `fossil-resolver`,
+/// with tests — is [`fossil_storage::ResolvedPath::create_secret_sql`], in `fossil-storage`,
 /// and it has not moved. What wrapped it was `conn.execute_batch(sql)` under an
 /// error enum that both of its two callers immediately flattened to a string.
 /// A crate does not need a dependency to run one statement on a connection it
@@ -378,7 +376,7 @@ pub fn apply_source_creds(
     for (i, c) in connections.values().enumerate() {
         if let Some(spec) = &c.secret {
             let resolved =
-                fossil_resolver::ResolvedPath::with_secret(&c.url, spec.to_cloud_secret());
+                fossil_storage::ResolvedPath::with_secret(&c.url, spec.to_cloud_secret());
             if let Some(sql) = resolved.create_secret_sql(&format!("__fossil_src_{i}")) {
                 conn.execute_batch(&sql)
                     .map_err(|e| miette::miette!("install source secret: {e}"))?;

@@ -28,10 +28,8 @@ fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # `Primitive`, the lattice a DuckDB column type maps onto.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # `ResolvedPath::create_secret_sql` — the ONE place a `CREATE SECRET` is
-# rendered. It is native-only by intent (cloud credentials must not cross the
-# wasm boundary) and that tripwire is half of why this crate exists: an engine
-# that parses credentials cannot be wasm-clean.
-fossil-resolver = { path = "../fossil-resolver" }
+# rendered, for the native `--creds-stdin` secret and a vended credential alike.
+fossil-storage = { path = "../fossil-storage" }
 
 # The engine that DESCRIBES, on this side of the seam. The browser's side is the
 # host's DuckDB-WASM, reached through `@fossil-lang/introspect` — same engine,

@@ -154,7 +154,10 @@ crates/
   fossil-mir/              typed operator algebra; `src/op.rs` is the operator enum
   fossil-shex/             ShExDescriptor over `shex_ast` — backward target-shape checking
   fossil-descriptors-{input,output}/   trait + impls (ShEx, inferred)
-  fossil-resolver/         host-injected cloud path resolution (s3://, az://)  [NATIVE-ONLY]
+  fossil-storage/          a vended `StorageCredential` (Iceberg REST's) → a scoped DuckDB secret,
+                           an Azure SAS lend, or a SigV4-signed request. Sans-IO, wasm-clean,
+                           and the one renderer of a `CREATE SECRET`, native hosts' included
+  fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
   fossil-sinks/            the canonical GraphAr manifest model, plus `generated.rs` — the
                            writer's column table from `corpus.bnf`, which lives here because
@@ -180,8 +183,8 @@ crates/
                            calls it before the compile. It links `DuckDB` on a normal edge, and
                            it is not the only crate that does — `cargo tree -e normal -i duckdb
                            --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
-                           holds it against `deny.toml`. Native by that edge and by
-                           `fossil-resolver`, without a tripwire of its own. Which sources it
+                           holds it against `deny.toml`. Native by that edge, without a
+                           tripwire of its own. Which sources it
                            DESCRIBEs is `fossil_lineage::program_sources` — the list the
                            browser's `sources()` returns — so it links the compiler front-end,
                            as every host does

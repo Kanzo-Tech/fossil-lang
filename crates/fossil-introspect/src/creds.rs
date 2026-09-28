@@ -33,7 +33,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 
-use fossil_resolver::CloudSecret;
+use fossil_storage::CloudSecret;
 use secrecy::SecretString;
 use serde::Deserialize;
 
@@ -148,7 +148,7 @@ mod tests {
         let secret = creds.connections["sales"].secret.as_ref().expect("secret");
         assert_eq!(secret.secret_type, "s3");
         assert_eq!(secret.params["REGION"].expose_secret(), "eu-west-1");
-        let sql = fossil_resolver::ResolvedPath::with_secret("s3://b", secret.to_cloud_secret())
+        let sql = fossil_storage::ResolvedPath::with_secret("s3://b", secret.to_cloud_secret())
             .create_secret_sql("s")
             .expect("sql");
         assert!(sql.contains("TYPE s3"), "type missing: {sql}");

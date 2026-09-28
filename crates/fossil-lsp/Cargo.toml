@@ -95,7 +95,7 @@ fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 # every transitive linker from `cargo metadata` and requires each to be named in
 # `deny.toml`, so this edge IS reviewed by a gate, and so is the next one.
 #
-# `fossil-introspect` is native-only by its `fossil-resolver` edge and so is
+# `fossil-introspect` is native-only by its `DuckDB` edge and so is
 # this crate (the `wasm32` `compile_error!` at the top of `main.rs`), so nothing
 # here reaches a wasm shell: `cargo xtask wasm-check` walks down from the cdylib
 # roots and never enters a binary crate. The LANGUAGE layer is untouched —

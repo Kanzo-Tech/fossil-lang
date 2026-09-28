@@ -1,0 +1,26 @@
+[package]
+name = "fossil-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Storage access from a vended credential — Iceberg REST's StorageCredential turned into a scoped DuckDB secret, an Azure SAS URL, or a SigV4-signed request. Sans-IO and wasm32-clean."
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+# Key ids, secrets, session tokens and SAS tokens ride `SecretString`: never
+# `Debug`-printed, zeroed on drop.
+secrecy = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

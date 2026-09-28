@@ -22,7 +22,7 @@ use duckdb::Connection;
 use fossil_graph::executor::quote_ident;
 use fossil_graph::manifest::{Manifest, ManifestSource, edge_table_name};
 use fossil_graph::{GraphError, Operation, Result as GraphResult};
-use fossil_resolver::{CloudSecret, ResolvedPath};
+use fossil_storage::{CloudSecret, ResolvedPath};
 use fossil_sinks::manifest::{Container, TILES_FILE};
 use secrecy::SecretString;
 use serde::Deserialize;
@@ -90,7 +90,7 @@ pub fn open(dataset: &Dataset) -> std::result::Result<(Connection, Manifest), St
         );
         // `fossil_layout::install_secret` stood here and was this crate's ONLY
         // use of `fossil-layout`, so the dependency is gone with it. The
-        // rendering is `ResolvedPath::create_secret_sql`, in `fossil-resolver`,
+        // rendering is `ResolvedPath::create_secret_sql`, in `fossil-storage`,
         // which this crate already depends on and which is where the tests are.
         if let Some(sql) = resolved.create_secret_sql("__fossil_mcp_dest") {
             conn.execute_batch(&sql).map_err(|e| e.to_string())?;
