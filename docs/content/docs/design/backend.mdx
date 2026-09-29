@@ -151,7 +151,7 @@ type Filter =
 ```
 
 `Box` keeps today's half-open rectangle, `x <= v.x < x + w` and the same in `y`. `CorpusTypes`,
-`CorpusRelation`, `PlacedVertex` and the two errors are the ones `packages/corpus/src/corpus.ts`
+`CorpusRelation`, `PlacedVertex` and the two errors are the ones `packages/corpus/src/index.ts`
 already exports, with one addition: each vertex type carries its manifest's `channels:` block, which
 the reader parses and does not surface today. `Direction`, `Gap` and `GapReason` are the ones
 `packages/corpus/src/address.ts` exports — `src` reads the source-aligned half of a relation and
@@ -221,7 +221,7 @@ with one referent, and a cell row grows a pair per channel, each naming its own.
 | Iceberg | fossil | taken or departed, and why |
 | --- | --- | --- |
 | `Catalog.load_table`, `StaticTable.from_metadata(metadata_location)` | `open(url, { engine })`, `open(job, { engine, host })` | **Taken.** A corpus has no catalog service, so the URL case is the static table; the job case reuses what [storage access](/docs/design/prior-art#storage-access) already took from the REST catalog — a vended credential scoped to one prefix. |
-| `Table.schema()` | `corpus.types` | **Taken**, read off the bytes at `open` for the reason `packages/corpus/src/corpus.ts, open` gives: the manifest declares three properties against seven columns on disk. |
+| `Table.schema()` | `corpus.types` | **Taken**, read off the bytes at `open` for the reason `packages/corpus/src/open.ts, open` gives: the manifest declares three properties against seven columns on disk. |
 | `Table.scan(row_filter, selected_fields, case_sensitive, snapshot_id, options, limit)` | `corpus.scan({ type, filter, select })` | **Departs twice.** No `snapshot_id`: a corpus is written once and never appended to, so there is one snapshot and nothing to name. **No `limit`**: a task is a tile, and a tile holds at most `tileRows` rows by construction, so every read is bounded by its address rather than by a clause. No zoom and no box either, though a camera always has both: a scan is planned once over every zoom, and which of its tasks a camera sees is the view's cull against the boxes `tileMatrix` publishes. |
 | `EqualTo`, `In`, `IsNull`, `And`, `Or`, `Not`; `UnboundPredicate.bind(schema)` | `Filter`, bound in `scan()` | **Taken**, including the timing: an unknown column is an error at bind, before anything is planned. Spelled as JSON rather than classes so it crosses a worker boundary as it is. `StartsWith` and `IsNaN` are left out until something asks. |
 | `plan_files()` → `FileScanTask { file, delete_files, residual }`; iceberg-rust adds `start`, `length`, `record_count` | `plan()` → `ScanTask { z, tile, rows, bbox, residual }` | **Departs on the unit.** A task is a **tile**, which under `container: rowgroups` is one row group — iceberg-rust's `start`/`length` split, not PyIceberg's whole file. No delete files: nothing is ever deleted from a corpus. The byte range stays inside the reader; a view keys on the address. |
@@ -365,7 +365,7 @@ mechanism.
 
 A read selects one tile with **one conjunctive range** on the aligned column — `dense_id` for a
 vertex tile, `src_dense` or `dst_dense` for an adjacency — and never a disjunction of them. That is
-the one shape the engine is measured to prune row groups on. `packages/corpus/src/corpus.ts,
+the one shape the engine is measured to prune row groups on. `packages/corpus/src/identity.ts,
 indexRanges` records DuckDB pruning a conjunctive range and declining a disjunction over a string
 column, and `crates/fossil-graph/src/lib.rs` records 179 `BETWEEN … OR …` ranges evaluated per row
 rather than skipped — which is why a batch of tiles is a batch of reads and not one read with an
@@ -381,9 +381,9 @@ tiles becomes one read and the per-tile form costs round trips for nothing.
 
 ### The writer publishes what the reader used to read from footers
 
-`packages/corpus/src/corpus.ts, footers` reads every tile's footer while the corpus opens, and does it
-there on purpose: a level that arrived as a promise would be a request between the camera moving and
-an address being computable. The rule survives and the cost does not. **The writer already has every
+`packages/corpus/src/tile-manifest.ts, footers` reads every tile's footer while the corpus opens,
+and does it there on purpose: a level that arrived as a promise would be a request between the camera
+moving and an address being computable. The rule survives and the cost does not. **The writer already has every
 number the footer sweep recovers**, so it writes them once, beside the bytes, and `open` reads one
 file per type instead of one footer per tile.
 
@@ -415,23 +415,28 @@ against the latency of a cancel on the host's engine.
 
 ## How the reader splits
 
-`packages/corpus/src/corpus.ts` is 2,570 lines, and the seams above are where it comes apart. Each
+`packages/corpus/src/corpus.ts` was 2,570 lines, and the seams above are where it came apart. Each
 module follows one of the two references and none of them reaches 500 lines.
 
 | module | follows | what it holds | out of `corpus.ts` |
 | --- | --- | --- | --- |
-| `open.ts` | Iceberg's `load_table` | the two shapes, the manifest read, lending, the catalog's holders and `close` | `open`, `vended`, `opened`'s preamble |
+| `open.ts` | Iceberg's `load_table` | the two shapes, the manifest read, lending, the catalog's holders and `close`, and the `Corpus` assembled from one factory per module | `open`, `vended`, `opened` |
 | `tile-matrix.ts` | OGC 17-083r4 | the matrices from the manifest: `z`, shift, counts, the parent and the child range | `levelForCanvas`'s arithmetic, what `levelsOf` and `strideOf` spelled |
-| `tile-manifest.ts` | Iceberg's manifest | reading the published per-tile statistics once per type | `tileBoxes`, `footers`, `bytesOf`, `runsOf` |
+| `tile-manifest.ts` | Iceberg's manifest | reading the published per-tile statistics once per type | `tileBoxes`, `footers`, `bytesOf`, `runsOf`, `extent` |
 | `expression.ts` | Iceberg's expressions | `Filter`, binding it to a matrix's columns, the inclusive and strict evaluators, and rendering the residual as SQL | the box predicate `boxOf` |
 | `scan.ts` | Iceberg's `Table.scan` | `scan`, `plan`, `read` | the tile selection in `sampledRead` and `rows` |
-| `edges.ts` | CSR and CSC | `edges`, over the adjacency at `Z` and the quotient below it | `readEdges`, `adjacencyFor` |
-| `identity.ts` | — | `node`: the index seek, its key ranges, byte-order comparison | `findByIdentity`, `indexRanges`, `couldHold` |
+| `frame.ts` | — | `frame` and its types, until step 5 retires them | `frame`, `Frame`, `FrameParams`, `FrameCost`, `CoarseSource` |
+| `edges.ts` | CSR and CSC | `edges`, over the adjacency at `Z` and the quotient below it | `readEdges`, `adjacencyFor`, `neighbours` |
+| `identity.ts` | — | `node`: the index seek, its key ranges, byte-order comparison | `findByIdentity`, `indexRanges`, `couldHold`, `vertexOf` |
 | `verbs.ts` | — | the views the verbs read, `schema`, `relations`, `executeSql` | `verbs`, `relations` |
-| `sql.ts` | — | literals, identifiers and the 64-bit id guard | `lit`, `ident`, `list`, `idOf`, `floatOf` |
+| `sql.ts` | — | literals, identifiers and the 64-bit id guard | `lit`, `ident`, `list`, `idOf`, `floatOf`, `CorpusReadError` |
 
-`address.ts` stays the one bridge to `crates/fossil-graph/src/plan.rs, ReadPlan`, and shrinks by
-everything a level was. `index.ts` stays the barrel.
+`corpus.ts` keeps the surface's own types — `Corpus`, `SqlCorpus`, `CorpusTypes`, `CorpusRelation` —
+and each member's types went with the member. `frame.ts` is the one module no reference names: the
+composition `frame` runs has no seam of its own, and holding it apart is what lets step 5 delete a
+file rather than carve one. `address.ts` stays the one bridge to
+`crates/fossil-graph/src/plan.rs, ReadPlan`, and shrinks by everything a level was. `index.ts` stays
+the barrel.
 
 **What would reverse it.** A module that cannot be stated against its reference without importing
 another module's internals. That is the sign the seam is wrong, and it is moved rather than the
