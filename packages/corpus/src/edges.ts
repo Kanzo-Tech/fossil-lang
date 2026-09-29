@@ -1,6 +1,7 @@
 /**
- * The relations incident to a set of vertices, read out of the adjacency the corpus stores twice —
- * `by_source` is CSR and `by_target` is CSC — one tile of it at a time.
+ * The relations incident to a tile, read out of the adjacency the corpus stores twice — `by_source`
+ * is CSR and `by_target` is CSC — at `z = Z`, and out of the rung's quotient below it; one tile of
+ * it at a time. And, until step 5 retires them, the incidence `rows` and `neighbours` read.
  */
 
 import type {
@@ -11,8 +12,44 @@ import type {
   ProjectionAddress,
 } from './address.js';
 import { vertexOf, type Identity, type PlacedVertex } from './identity.js';
-import type { QueryFn } from './query.js';
-import { ascending, CorpusReadError, distinct, ident, idOf, list } from './sql.js';
+import type { QueryFn, Reads } from './query.js';
+import { ascending, CorpusReadError, distinct, ident, idOf, list, lit } from './sql.js';
+import type { TileAddress, Zooms } from './tile-matrix.js';
+
+/** What {@link Corpus.edges} takes: one tile, the half of the relation aligned on it, and a signal. */
+export interface EdgesParams {
+  readonly from: TileAddress;
+  /**
+   * Which endpoint the tile holds: `src` reads the source-aligned half — the edges leaving the
+   * tile — and `dst` the target-aligned one, the edges arriving in it.
+   */
+  readonly direction: Direction;
+  /** One relation by label, which also admits one whose far end is another type. */
+  readonly relation?: string;
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * One relation's edges out of one tile, as columns. At `z = Z` the two ends are `dense_id`s and
+ * `weight` is `null`. Below it they are the rung's cell ids and `weight` is how many edges a
+ * quotient edge stands for — and the quotient is **undirected**, one row per cell pair keyed on the
+ * lower cell (`crates/fossil-layout/src/layout/cells.rs, pair_edges`), so `src` is the lower of the
+ * two and not the source of anything.
+ */
+export interface EdgeBatch {
+  readonly edgeType: string;
+  readonly srcType: string;
+  readonly dstType: string;
+  readonly src: BigUint64Array;
+  readonly dst: BigUint64Array;
+  readonly weight: BigUint64Array | null;
+}
+
+/** What {@link Corpus.edges} answers: the relations read, and the ones declined with why. */
+export interface EdgeAnswer {
+  readonly batches: readonly EdgeBatch[];
+  readonly declined: readonly Gap[];
+}
 
 /**
  * One edge, **once**, however many orientations found it.
@@ -85,6 +122,7 @@ export interface NeighboursParams {
 }
 
 export interface Edges {
+  edges(params: EdgesParams): Promise<EdgeAnswer>;
   readEdges(
     vertexTypeName: string,
     groups: readonly EdgeTiles[],
@@ -96,11 +134,121 @@ export interface Edges {
 
 export function edgesOf(reads: {
   readonly query: QueryFn;
+  readonly reads: Reads;
   readonly addressing: CorpusAddressing;
   readonly identity: Identity;
+  readonly zooms: (type: string) => Zooms;
 }): Edges {
   const { query, addressing } = reads;
   const { findByIdentity } = reads.identity;
+
+  const wide = (values: ArrayLike<unknown> | undefined): BigUint64Array =>
+    BigUint64Array.from(Array.from(values ?? [], (v) => BigInt(v as number | bigint)));
+
+  /**
+   * One tile's edges out of one edge set, by one conjunctive range on the aligned column — the
+   * shape `scan.read` selects a tile with, for the reason it gives.
+   */
+  const edgeBatch = async (
+    sql: { readonly url: string; readonly key: string; readonly span: bigint; readonly tile: number },
+    columns: readonly [string, string] | readonly [string, string, string],
+    signal: AbortSignal | undefined,
+  ) => {
+    const lo = BigInt(sql.tile) * sql.span;
+    const batch = await reads.reads.batch(
+      `SELECT ${columns.map(ident).join(', ')} FROM read_parquet(${lit(sql.url)}) ` +
+        `WHERE ${ident(sql.key)} >= ${lo} AND ${ident(sql.key)} < ${lo + sql.span}`,
+      columns,
+      signal,
+    );
+    return {
+      src: wide(batch.getChild(columns[0])?.toArray()),
+      dst: wide(batch.getChild(columns[1])?.toArray()),
+      weight: columns[2] === undefined ? null : wide(batch.getChild(columns[2])?.toArray()),
+    };
+  };
+  const none = () => ({ src: new BigUint64Array(), dst: new BigUint64Array(), weight: null });
+
+  /**
+   * **The relations incident to one tile** — CSR or CSC at `Z`, the quotient below it.
+   *
+   * A relation cut on the tile's type in this orientation is read from the one tile of its
+   * adjacency the address names, unless the tile manifest says that tile has no edges, in which
+   * case nothing is asked. A relation whose far end is another type is declined as `other-space`
+   * unless `relation` names it; an orientation the corpus does not publish is `not-declared`.
+   * Below `Z` the quotient is tiled on its lower cell and stored once, so `src` reads the pairs
+   * whose lower cell is in the tile and `dst` is always declined: the pairs whose UPPER cell is
+   * there are in the tiles below it, and no one range selects them.
+   */
+  const edges = async (params: EdgesParams): Promise<EdgeAnswer> => {
+    const { from, direction, relation, signal } = params;
+    const zoom = reads.zooms(from.type).zoom(from);
+    const batches: EdgeBatch[] = [];
+    const declined: Gap[] = [];
+    if (zoom.rung === null) {
+      const incident = addressing
+        .incident(from.type)
+        .filter((e) => relation === undefined || e.edgeType === relation);
+      if (relation !== undefined && incident.length === 0) {
+        throw new CorpusReadError(`${relation} is not a relation incident to ${from.type}`);
+      }
+      for (const edge of incident) {
+        if ((direction === 'src' ? edge.srcType : edge.dstType) !== from.type) continue;
+        if ((direction === 'src' ? edge.dstType : edge.srcType) !== from.type && relation === undefined) {
+          declined.push({ edgeType: edge.edgeType, direction, reason: 'other-space' });
+          continue;
+        }
+        const adjacency = edge.adjacency(direction);
+        if (adjacency === null) {
+          declined.push({ edgeType: edge.edgeType, direction, reason: 'not-declared' });
+          continue;
+        }
+        const published = zoom.adjacencies.find(
+          (a) =>
+            a.edgeType === edge.edgeType &&
+            a.srcType === edge.srcType &&
+            a.dstType === edge.dstType &&
+            a.alignedBy === direction,
+        );
+        const read =
+          published !== undefined && !published.tiles.has(from.tile)
+            ? none()
+            : await edgeBatch(
+                {
+                  url: adjacency.tileUrl(from.tile),
+                  key: adjacency.column,
+                  span: BigInt(adjacency.chunkSize),
+                  tile: from.tile,
+                },
+                ['src_dense', 'dst_dense'],
+                signal,
+              );
+        batches.push({ edgeType: edge.edgeType, srcType: edge.srcType, dstType: edge.dstType, ...read });
+      }
+      return { batches, declined };
+    }
+    const tree = addressing.vertexType(from.type).cells!;
+    const label = tree.relations.join('+');
+    const whole = relation === undefined || (tree.relations.length === 1 && tree.relations[0] === relation);
+    if (!whole || direction === 'dst' || zoom.quotient === null) {
+      declined.push({ edgeType: relation ?? label, direction, reason: 'not-declared' });
+      return { batches, declined };
+    }
+    const read = !zoom.quotient.has(from.tile)
+      ? { ...none(), weight: new BigUint64Array() }
+      : await edgeBatch(
+          {
+            url: zoom.quotientUrl(from.tile)!,
+            key: 'src_cell',
+            span: BigInt(zoom.matrix.tileRows),
+            tile: from.tile,
+          },
+          ['src_cell', 'dst_cell', 'weight'],
+          signal,
+        );
+    batches.push({ edgeType: label, srcType: from.type, dstType: from.type, ...read });
+    return { batches, declined };
+  };
 
   /**
    * The adjacency this window reads for one edge label, or the reason it does not.
@@ -170,6 +318,7 @@ export function edgesOf(reads: {
   };
 
   return {
+    edges,
     readEdges,
 
     /**

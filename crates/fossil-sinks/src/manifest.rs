@@ -1199,7 +1199,7 @@ impl CellTree {
     /// **The completeness is arithmetic, and not a picture anybody asks for.**
     /// This read *a reader zoomed all the way out wants four marks rather than
     /// four thousand*, and no reader in this tree can ask for four marks:
-    /// `packages/corpus/src/corpus.ts, levelForCanvas` spends `pixels.w *
+    /// `packages/corpus/src/tile-matrix.ts, levelForCanvas` spends `pixels.w *
     /// pixels.h` marks, and the viewer that calls it passes a mark budget of
     /// thousands rather than a handful, so the coarse end of this list is a
     /// region nothing reads.
@@ -1415,7 +1415,7 @@ pub struct GraphInfo {
     pub container: Container,
     /// The privacy bound this corpus declares — here once, because the bound is
     /// a property of the **whole release** and not of a column, and because
-    /// `packages/corpus/src/corpus.ts` takes the payload vocabulary from the
+    /// `packages/corpus/src/open.ts` takes the payload vocabulary from the
     /// bytes rather than from a projection's `properties`: a field the reader never opens
     /// is not a policy. See [`Privacy`].
     ///

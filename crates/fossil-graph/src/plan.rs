@@ -45,6 +45,10 @@ use serde_yaml_ng::Value;
 
 use crate::{GraphError, Result};
 
+mod declared;
+
+pub use declared::{CellsAddress, ChannelAddress, QuotientAddress, RungAddress};
+
 /// Dataset-relative location of the aggregate index. The one path a reader is told.
 pub const GRAPH_INFO_PATH: &str = "graph.graph.yml";
 
@@ -367,6 +371,16 @@ pub struct VertexAddress {
     /// without a file for it, and what a written one changes is which bytes
     /// answer it.
     pub projections: Vec<ProjectionAddress>,
+    /// **The zooms below the payload** — the cell tree, when the document
+    /// declares one. See [`CellsAddress`].
+    pub cells: Option<CellsAddress>,
+    /// Where the type's tile manifest is, resolved against the corpus base, or
+    /// `None` where the document names none.
+    pub tile_manifest: Option<String>,
+    /// The coordinate system `x` and `y` are in, by name, where declared.
+    pub coordinates: Option<String>,
+    /// What a view can draw the type with — the document's `channels:`.
+    pub channels: Vec<ChannelAddress>,
     /// The manifest file this was read from, for the error messages that name it.
     #[serde(skip)]
     path: String,
@@ -386,6 +400,13 @@ impl VertexAddress {
     #[must_use]
     pub fn tile_url(&self, tile: u64) -> String {
         tile_url_for(&self.prefix, PROJECTION_STEM, self.container, tile)
+    }
+
+    /// Rung `k` of the cell tree, from 1 at the finest, or `None` where the
+    /// type declares no such rung.
+    #[must_use]
+    pub fn rung(&self, rung: u32) -> Option<&RungAddress> {
+        self.cells.as_ref()?.rungs.iter().find(|r| r.rung == rung)
     }
 
     /// One projection of this type by its scale, or `None` when the manifest
@@ -653,17 +674,26 @@ impl ReadPlan {
             t.projections
                 .iter()
                 .filter_map(|p| p.files().ok())
-                .chain(t.index.as_ref().and_then(|i| i.files(&t.path, &t.vertex_type).ok()))
+                .chain(
+                    t.index
+                        .as_ref()
+                        .and_then(|i| i.files(&t.path, &t.vertex_type).ok()),
+                )
                 .flatten()
         });
-        let edge = self
-            .edges
-            .iter()
-            .flat_map(|e| e.projections.iter().filter_map(|p| p.files().ok()).flatten());
+        let edge = self.edges.iter().flat_map(|e| {
+            e.projections
+                .iter()
+                .filter_map(|p| p.files().ok())
+                .flatten()
+        });
         // A set beside the list: this one is every tile of the corpus, and the
         // linear `distinct` the per-projection lists use would be quadratic here.
         let mut seen = std::collections::HashSet::new();
-        vertex.chain(edge).filter(|url| seen.insert(url.clone())).collect()
+        vertex
+            .chain(edge)
+            .filter(|url| seen.insert(url.clone()))
+            .collect()
     }
 
     /// The edge types incident to `vertex_type` — as source, as destination, or
@@ -1041,6 +1071,8 @@ fn vertex_address(
     let count = optional_count(doc, "vertex_count");
     let tiles = count.and_then(|c| tiles_of(c, chunk_size));
     let index = index_address(&prefix, path, doc, count, container)?;
+    let cells = declared::cells_address(&prefix, path, doc, chunk_size, container)?;
+    let tile_manifest = declared::tile_manifest_path(&prefix, doc);
 
     let mut address = VertexAddress {
         vertex_type,
@@ -1052,6 +1084,10 @@ fn vertex_address(
         container,
         index,
         projections: Vec::new(),
+        cells,
+        tile_manifest,
+        coordinates: declared::coordinates_of(doc),
+        channels: declared::channels_of(doc),
         path: path.to_string(),
     };
     // Every projection of this type, addressed against the type's own cut and

@@ -6,7 +6,7 @@
 import { strideOf, type CorpusAddressing, type Gap } from './address.js';
 import { boxOf, type Box } from './expression.js';
 import type { QueryFn } from './query.js';
-import type { Scan } from './scan.js';
+import type { Rectangles } from './rows.js';
 import { ascending, CorpusReadError, distinct, floatOf, ident, idOf, list } from './sql.js';
 import type { TileManifest } from './tile-manifest.js';
 import { levelForCanvas, type Pixels } from './tile-matrix.js';
@@ -197,11 +197,11 @@ export function frameOf(reads: {
   readonly fieldsOf: (type: string) => readonly { readonly name: string }[];
   readonly has: (type: string, column: string) => boolean;
   readonly manifest: TileManifest;
-  readonly scan: Scan;
+  readonly rectangles: Rectangles;
 }): (params: FrameParams) => Promise<Frame> {
   const { query, addressing, fieldsOf, has } = reads;
   const { bytesOf, footers } = reads.manifest;
-  const { sampledRead, selectedTiles } = reads.scan;
+  const { sampledRead, selectedTiles } = reads.rectangles;
 
   return async (params) => {
     const started = Date.now();

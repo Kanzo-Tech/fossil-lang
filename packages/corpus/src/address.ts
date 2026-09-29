@@ -246,6 +246,52 @@ export interface VertexAddress {
    * `l{k}/` is the one failure a reader cannot tell from an empty level.
    */
   projectionFiles(scale: number | bigint): readonly string[];
+  /** The zooms below the payload — the cell tree, when the document declares one. */
+  readonly cells: CellsAddress | null;
+  /** The file rung `k`'s tile `t` is in, or `null` where the type declares no such rung. */
+  rungTileUrl(rung: number, tile: number | bigint): string | null;
+  /** The file rung `k`'s quotient tile `t` is in, or `null` where the rung publishes none. */
+  quotientTileUrl(rung: number, tile: number | bigint): string | null;
+  /** Where the tile manifest is, or `null` where the document names none. */
+  readonly tileManifest: string | null;
+  /** The coordinate system `x` and `y` are in, by name, where declared. */
+  readonly coordinates: string | null;
+  /** What a view can draw the type with — the document's `channels:`. */
+  readonly channels: readonly Channel[];
+}
+
+/** One `channels:` entry — what a view can colour or size a type by. */
+export interface Channel {
+  readonly name: string;
+  /** The payload column it reads. */
+  readonly column: string;
+  readonly scale: 'categorical' | 'quantitative' | string;
+  /** A categorical's value count over the writer's ordinal `0..domain`, where declared. */
+  readonly domain: number | null;
+  readonly derivedBy: string | null;
+}
+
+/** A vertex type's cell tree — `fossil_graph::plan::CellsAddress` as it crosses. */
+export interface CellsAddress {
+  readonly verticesPerCell: number;
+  /** The relations a quotient and an internal weight sum, by label. */
+  readonly relations: readonly string[];
+  /** Which channel a rung's `mode` is the mode of, by name. */
+  readonly modeChannel: string | null;
+  /** Every rung, finest first. */
+  readonly rungs: readonly RungAddress[];
+}
+
+/** One rung: `k`, how many bits of `dense_id` a cell drops, and its quotient. */
+export interface RungAddress {
+  readonly rung: number;
+  readonly prefix: string;
+  /** `B + 2(k − 1)` — a cell id is `dense_id >> shift`. */
+  readonly shift: number;
+  readonly cellCount: bigint;
+  readonly tiles: bigint;
+  /** The quotient's own edge count, or `null` where the rung publishes none. */
+  readonly quotient: { readonly prefix: string; readonly edgeCount: bigint } | null;
 }
 
 /**
@@ -552,6 +598,28 @@ interface VertexSnapshot {
   readonly container: Container;
   readonly index: IndexSnapshot | null;
   readonly projections: readonly ProjectionSnapshot[];
+  readonly cells: {
+    readonly vertices_per_cell: bigint;
+    readonly relations: readonly string[];
+    readonly mode_channel: string | null;
+    readonly rungs: ReadonlyArray<{
+      readonly rung: number;
+      readonly prefix: string;
+      readonly shift: number;
+      readonly cell_count: bigint;
+      readonly tiles: bigint;
+      readonly quotient: { readonly prefix: string; readonly edge_count: bigint } | null;
+    }>;
+  } | null;
+  readonly tile_manifest: string | null;
+  readonly coordinates: string | null;
+  readonly channels: ReadonlyArray<{
+    readonly name: string;
+    readonly column: string;
+    readonly scale: string;
+    readonly domain: bigint | null;
+    readonly derived_by: string | null;
+  }>;
 }
 
 interface IndexSnapshot {
@@ -730,6 +798,37 @@ function vertexAddress(reader: CorpusReader, declared: VertexSnapshot): VertexAd
     },
     tileUrl: (tile) => asked(() => reader.vertexTileUrl(type, BigInt(tile))),
     files: () => asked(() => reader.vertexFiles(type)),
+    cells:
+      declared.cells === null
+        ? null
+        : {
+            verticesPerCell: Number(declared.cells.vertices_per_cell),
+            relations: declared.cells.relations,
+            modeChannel: declared.cells.mode_channel,
+            rungs: declared.cells.rungs.map((r) => ({
+              rung: r.rung,
+              prefix: r.prefix,
+              shift: r.shift,
+              cellCount: r.cell_count,
+              tiles: r.tiles,
+              quotient:
+                r.quotient === null
+                  ? null
+                  : { prefix: r.quotient.prefix, edgeCount: r.quotient.edge_count },
+            })),
+          },
+    rungTileUrl: (rung, tile) => asked(() => reader.rungTileUrl(type, rung, BigInt(tile))) ?? null,
+    quotientTileUrl: (rung, tile) =>
+      asked(() => reader.quotientTileUrl(type, rung, BigInt(tile))) ?? null,
+    tileManifest: declared.tile_manifest,
+    coordinates: declared.coordinates,
+    channels: declared.channels.map((c) => ({
+      name: c.name,
+      column: c.column,
+      scale: c.scale,
+      domain: c.domain === null ? null : Number(c.domain),
+      derivedBy: c.derived_by,
+    })),
   };
 }
 

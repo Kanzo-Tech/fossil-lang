@@ -179,8 +179,9 @@ Everything else — which tiles, which run of `dense_id`, which residues survive
 arithmetic this package already performs in TypeScript before a character of SQL exists.
 
 **It still cannot come out, and the reason is the host contract.** `@fossil-lang/corpus` asks a
-host for exactly one capability — `query(sql) => Record<string, unknown>[]` — and links no engine
-(see the argument in `packages/corpus/src/query.ts`). SQL is not a language choice here; it is the
+host for exactly one capability — an engine whose `query(sql, { signal })` answers in Arrow-shaped
+columns (`packages/types/src/engine.ts, Engine`) — and links no engine of its own (see the argument
+in `packages/corpus/src/query.ts`). SQL is not a language choice here; it is the
 *only channel* through which a byte of a corpus reaches this package. Arithmetic that stays in
 TypeScript is arithmetic performed on rows that already crossed that boundary.
 

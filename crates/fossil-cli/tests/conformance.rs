@@ -293,35 +293,67 @@ fn addressed(payload: &str, key: &str, shift: u32) -> String {
 
 /// How many published tile statistics disagree with the footers — `0` when the
 /// tile manifest at `manifest` says exactly what the Parquet under `prefix`
-/// says, tile for tile and column for column.
+/// says, tile for tile and column for column, and says it of the edge sets cut
+/// on those tiles too: each adjacency orientation in `adjacencies` — its part
+/// name, as the manifest spells the orientation, and its file — at the payload's
+/// zoom, and each rung's quotient below it.
 ///
 /// **Both sides are read by `DuckDB` and neither through fossil's types**:
-/// `read_json_objects` over the manifest, `parquet_metadata` over the payload
-/// and every rung. The zoom of each file is the arithmetic the manifest is
-/// held to — rung `k` of `R` is `z = R − k`, the payload is `z = R` — and a
-/// `FULL JOIN` on `(z, tile, column)` makes a missing entry on either side a
-/// mismatch rather than an absence nothing counts.
+/// `read_json_objects` over the manifest, `parquet_metadata` over the payload,
+/// every rung and every edge set. The zoom of each file is the arithmetic the
+/// manifest is held to — rung `k` of `R` is `z = R − k`, the payload is `z = R`
+/// — and a `FULL JOIN` on `(z, part, tile, column)` makes a missing entry on
+/// either side a mismatch rather than an absence nothing counts.
+///
+/// An edge set's tile is its row group's lower bound on the aligned column,
+/// shifted by the type's tile shift, because a tile with no edges writes no row
+/// group and the ordinals stop being tiles there.
 ///
 /// A bound is compared in the footer's own physical type, because a `float`
 /// column's footer prints `0.1` where the manifest prints the `f32` exactly; a
 /// string column must carry no bound at all.
-fn tile_manifest_mismatches(conn: &Connection, prefix: &Path, manifest: &Path) -> i64 {
+fn tile_manifest_mismatches(
+    conn: &Connection,
+    prefix: &Path,
+    manifest: &Path,
+    adjacencies: &[(&str, &Path, &str)],
+    shift: u32,
+) -> i64 {
     let rungs = std::fs::read_dir(prefix.join("cell"))
         .map(|dir| dir.filter_map(Result::ok).count())
         .unwrap_or(0);
     let top = rungs;
-    let mut files = vec![(top, prefix.join("tiles.parquet"))];
+    // (z, part, file, the aligned column an edge set's tile is read off)
+    let mut files = vec![(top, String::new(), prefix.join("tiles.parquet"), None)];
     for k in 1..=rungs {
-        files.push((top - k, prefix.join(format!("cell/r{k}/tiles.parquet"))));
+        files.push((
+            top - k,
+            String::new(),
+            prefix.join(format!("cell/r{k}/tiles.parquet")),
+            None,
+        ));
+        let quotient = prefix.join(format!("cell/r{k}/quotient/tiles.parquet"));
+        if quotient.exists() {
+            files.push((top - k, "quotient".to_string(), quotient, Some("src_cell")));
+        }
+    }
+    for (part, file, key) in adjacencies {
+        files.push((top, (*part).to_string(), file.to_path_buf(), Some(*key)));
     }
     let values = files
         .iter()
-        .map(|(z, f)| format!("({z}, '{}')", f.display()))
+        .map(|(z, part, f, key)| {
+            format!(
+                "({z}, '{part}', '{}', {})",
+                f.display(),
+                key.map_or_else(|| "NULL".to_string(), |k| format!("'{k}'"))
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let list = files
         .iter()
-        .map(|(_, f)| format!("'{}'", f.display()))
+        .map(|(_, _, f, _)| format!("'{}'", f.display()))
         .collect::<Vec<_>>()
         .join(", ");
     let manifest = manifest.display();
@@ -330,19 +362,27 @@ fn tile_manifest_mismatches(conn: &Connection, prefix: &Path, manifest: &Path) -
         &format!(
             "WITH m AS (SELECT unnest(json_extract(json, '$.matrices[*]')) AS m \
              FROM read_json_objects('{manifest}')), \
-             t AS (SELECT (m->>'z')::INT AS z, unnest(json_extract(m, '$.tiles[*]')) AS t FROM m), \
+             a AS (SELECT (m->>'z')::INT AS z, unnest(json_extract(m, '$.adjacencies[*]')) AS a FROM m), \
+             t AS (SELECT (m->>'z')::INT AS z, '' AS part, unnest(json_extract(m, '$.tiles[*]')) AS t FROM m \
+             UNION ALL SELECT (m->>'z')::INT, 'quotient', unnest(json_extract(m, '$.quotient[*]')) FROM m \
+             UNION ALL SELECT z, concat_ws(':', a->>'edge_type', a->>'src_type', a->>'dst_type', a->>'aligned_by'), \
+             unnest(json_extract(a, '$.tiles[*]')) FROM a), \
              published AS ( \
-             SELECT z, (t->>'tile')::BIGINT AS tile, (t->>'record_count')::BIGINT AS rows, \
+             SELECT z, part, (t->>'tile')::BIGINT AS tile, (t->>'record_count')::BIGINT AS rows, \
              k.key AS col, k.value::BIGINT AS nulls, \
              t->'lower_bounds'->>k.key AS lo, t->'upper_bounds'->>k.key AS hi \
              FROM t, json_each(t->'null_value_counts') k), \
              footer AS ( \
-             SELECT v.z, p.row_group_id AS tile, p.row_group_num_rows AS rows, \
+             SELECT v.z, v.part, \
+             coalesce(key.stats_min_value::UBIGINT >> {shift}, p.row_group_id)::BIGINT AS tile, \
+             p.row_group_num_rows AS rows, \
              p.path_in_schema AS col, p.type, p.stats_null_count AS nulls, \
              p.stats_min_value AS lo, p.stats_max_value AS hi \
-             FROM (VALUES {values}) v(z, f) \
-             JOIN parquet_metadata([{list}]) p ON p.file_name = v.f) \
-             SELECT count(*) FROM published p FULL JOIN footer f USING (z, tile, col) \
+             FROM (VALUES {values}) v(z, part, f, k) \
+             JOIN parquet_metadata([{list}]) p ON p.file_name = v.f \
+             LEFT JOIN parquet_metadata([{list}]) key ON key.file_name = p.file_name \
+             AND key.row_group_id = p.row_group_id AND key.path_in_schema = v.k) \
+             SELECT count(*) FROM published p FULL JOIN footer f USING (z, part, tile, col) \
              WHERE p.rows IS DISTINCT FROM f.rows OR p.nulls IS DISTINCT FROM f.nulls \
              OR CASE WHEN f.type IN ('BYTE_ARRAY', 'FIXED_LEN_BYTE_ARRAY', 'BOOLEAN') \
              THEN p.lo IS NOT NULL OR p.hi IS NOT NULL \
@@ -967,10 +1007,12 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
 
     // 14. The tile manifest says what the footers say. The writer reads it off
     //     the footers it closes, so this is the check that it READ them — every
-    //     tile of the payload and of every rung, every column's null count, and
-    //     every numeric column's bounds, against `parquet_metadata` read back
-    //     off the disk. Then once more against a copy with one bound moved by
-    //     one unit, because a comparison that nothing can fail is not one.
+    //     tile of the payload and of every rung, both adjacency orientations cut
+    //     on the payload's tiles and every rung's quotient, every column's null
+    //     count, and every numeric column's bounds, against `parquet_metadata`
+    //     read back off the disk. Then once more against a copy with one bound
+    //     moved by one unit, and against one with an adjacency tile dropped,
+    //     because a comparison that nothing can fail is not one.
     let person_yml = dest.join("vertex/Person.vertex.yml");
     let named = manifest_line(&person_yml, "tile_manifest: ")
         .expect("the vertex document names its tile manifest");
@@ -991,10 +1033,57 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         tiles > 3,
         "the tile manifest lists {tiles} tile(s) — the payload alone has three"
     );
+    let tile_shift = manifest_number(&person_yml, "chunk_size").trailing_zeros();
+    let edge_dir = dest.join("edge/Person_knows_Person");
+    let (source_file, target_file) = (
+        edge_dir.join("by_source/tiles.parquet"),
+        edge_dir.join("by_target/tiles.parquet"),
+    );
+    let adjacencies = [
+        (
+            "knows:Person:Person:src",
+            source_file.as_path(),
+            "src_dense",
+        ),
+        (
+            "knows:Person:Person:dst",
+            target_file.as_path(),
+            "dst_dense",
+        ),
+    ];
+    let quotients = std::fs::read_dir(prefix.join("cell"))
+        .map(|rungs| {
+            rungs
+                .filter_map(Result::ok)
+                .filter(|r| r.path().join("quotient/tiles.parquet").exists())
+                .count()
+        })
+        .unwrap_or(0);
+    assert!(
+        quotients > 0,
+        "no rung carries a quotient, so the manifest's quotient entries go unchecked"
+    );
     assert_eq!(
-        tile_manifest_mismatches(&conn, &prefix, &manifest),
+        tile_manifest_mismatches(&conn, &prefix, &manifest, &adjacencies, tile_shift),
         0,
         "the tile manifest disagrees with the footers it was read off"
+    );
+    let mut dropped: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest).expect("read the tile manifest"))
+            .expect("the tile manifest is JSON");
+    let top = dropped["matrices"]
+        .as_array_mut()
+        .and_then(|m| m.last_mut())
+        .expect("a payload zoom");
+    top["adjacencies"][0]["tiles"]
+        .as_array_mut()
+        .expect("the source-aligned orientation lists its tiles")
+        .pop();
+    let without = dir.path().join("without-a-tile.json");
+    std::fs::write(&without, dropped.to_string()).expect("write the tampered manifest");
+    assert!(
+        tile_manifest_mismatches(&conn, &prefix, &without, &adjacencies, tile_shift) > 0,
+        "an adjacency tile dropped from the manifest went unnoticed"
     );
     let text = std::fs::read_to_string(&manifest).expect("read the tile manifest");
     let moved = text.replacen(
@@ -1006,7 +1095,7 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     let tampered = dir.path().join("tampered.json");
     std::fs::write(&tampered, moved).expect("write the tampered manifest");
     assert!(
-        tile_manifest_mismatches(&conn, &prefix, &tampered) > 0,
+        tile_manifest_mismatches(&conn, &prefix, &tampered, &adjacencies, tile_shift) > 0,
         "a bound moved by a digit went unnoticed — the comparison is vacuous"
     );
 

@@ -10,10 +10,12 @@ import { frameOf } from './frame.js';
 import { IDENTITY, identityOf } from './identity.js';
 import { initFossilGraphWasm, type InitInput } from './load.js';
 import { join, paths, scan } from './manifest.js';
-import type { QueryFn, QueryRow } from './query.js';
+import { callbackReads, engineReads, type QueryFn, type QueryRow, type Reads } from './query.js';
+import { rowsOf } from './rows.js';
 import { scanOf } from './scan.js';
 import { CorpusReadError, ident, list, lit, text } from './sql.js';
-import { tileManifestOf } from './tile-manifest.js';
+import { published, tileManifestOf } from './tile-manifest.js';
+import { zoomsOf, type Zooms } from './tile-matrix.js';
 import { verbsOf } from './verbs.js';
 import { mount } from '@fossil-lang/storage';
 import type { Engine, Host } from '@fossil-lang/types';
@@ -36,24 +38,28 @@ export type SqlPolicy = 'withheld' | 'allowed';
 /**
  * What {@link open} takes.
  *
- * **An engine is required**: {@link engine} with {@link host} for a job's corpus, or {@link query}
- * for one at a URL. Every member of a {@link Corpus} needs bytes, so there is nothing to answer
- * without one. {@link manifestFiles} beside `query` only saves the door its own manifest reads.
+ * **An engine is required**: {@link engine} with {@link host} for a job's corpus, and {@link engine}
+ * alone — or, until step 5 retires it, {@link query} — for one at a URL. Every member of a
+ * {@link Corpus} needs bytes, so there is nothing to answer without one. {@link manifestFiles}
+ * only saves the door its own manifest reads.
  */
 export interface OpenOptions {
   /**
-   * The page's engine, for a job's corpus: `open(job, { engine, host })`.
+   * The page's engine: `open(url, { engine })` for a corpus at a URL, `open(job, { engine, host })`
+   * for a job's. It is what `scan.read` and `edges` interrupt a stale statement through.
    *
-   * The first argument then names the job and not a URL. The corpus is the one prefix the host
-   * vends `read` on for `{ job }`, and every file of it — manifests included — is read through the
-   * engine under that credential, which `@fossil-lang/storage` renews before it expires for as
-   * long as the corpus is open.
+   * With {@link host} the first argument names the job and not a URL. The corpus is the one prefix
+   * the host vends `read` on for `{ job }`, and every file of it — manifests included — is read
+   * through the engine under that credential, which `@fossil-lang/storage` renews before it expires
+   * for as long as the corpus is open.
    */
   engine?: Engine;
   /** What vends the job's credential. Required with {@link engine}. */
   host?: Host;
   /**
-   * The host's engine. One method, and see `./query.ts` for why it is the only one.
+   * A query callback, for a corpus at a URL — the engine as it was before {@link engine} answered
+   * in columns and took a signal. Retired in step 5; a read through it drops a stale answer rather
+   * than stopping it.
    */
   query?: QueryFn;
   /**
@@ -148,6 +154,11 @@ export function open(
 ): Promise<Corpus>;
 export function open(
   url: string,
+  options: OpenOptions & { engine: Engine; sql: 'allowed' },
+): Promise<SqlCorpus>;
+export function open(url: string, options: OpenOptions & { engine: Engine }): Promise<Corpus>;
+export function open(
+  url: string,
   options: OpenOptions & { query: QueryFn; sql: 'allowed' },
 ): Promise<SqlCorpus>;
 export function open(
@@ -155,13 +166,16 @@ export function open(
   options: OpenOptions & { query: QueryFn },
 ): Promise<Corpus>;
 export async function open(url: string, options: OpenOptions): Promise<Corpus> {
-  if (options.engine !== undefined) return vended(url, options, options.engine);
-  const { query, manifestFiles: held } = options;
-  if (typeof query !== 'function') {
+  const { engine, host, manifestFiles: held } = options;
+  if (engine !== undefined && host !== undefined) return vended(url, options, engine);
+  if (engine === undefined && typeof options.query !== 'function') {
     throw new TypeError(
-      'open() needs an engine: engine with host (a job\'s corpus) or query (a corpus at a URL)',
+      "open() needs an engine: engine with host (a job's corpus), engine alone or query (a corpus " +
+        'at a URL)',
     );
   }
+  const reads = engine !== undefined ? engineReads(engine) : callbackReads(options.query!);
+  const query = reads.rows;
   // Before anything is resolved, because resolving is what needs it: the addressing is
   // `fossil_graph::plan` behind this module, not a second implementation of it on this side. The
   // boot is memoised, so a second corpus in the same process costs the check and nothing else.
@@ -197,7 +211,11 @@ export async function open(url: string, options: OpenOptions): Promise<Corpus> {
     );
   }
 
-  return opened(url, options, manifestFiles, query);
+  const texts = async (urls: readonly string[]): Promise<Map<string, string>> => {
+    const rows = await query(`SELECT filename, content FROM read_text(${list(urls)})`);
+    return new Map(rows.map((row) => [text(row, 'filename'), text(row, 'content')]));
+  };
+  return opened(url, options, manifestFiles, reads, texts);
 }
 
 /**
@@ -209,10 +227,7 @@ const holders = new WeakMap<object, Map<string, number>>();
 
 /** A job's corpus: the one prefix the host vends `read` on, read through the engine. */
 async function vended(job: string, options: OpenOptions, engine: Engine): Promise<Corpus> {
-  const host = options.host;
-  if (host === undefined) {
-    throw new TypeError('open(job, { engine }) needs host: a corpus is read with what it vends');
-  }
+  const host = options.host!;
   await initFossilGraphWasm(options.wasm);
   const storage = await mount(engine, host, { job }, 'read');
   try {
@@ -222,7 +237,8 @@ async function vended(job: string, options: OpenOptions, engine: Engine): Promis
       );
     }
     const prefix = storage.prefixes[0]!;
-    const query: QueryFn = (sql) => engine.query(sql);
+    const reads = engineReads(engine);
+    const query = reads.rows;
     const read = async (relative: readonly string[]): Promise<Record<string, string>> => {
       if (relative.length === 0) return {};
       const names = await storage.files(relative.map((path) => `${prefix}${path}`));
@@ -247,7 +263,15 @@ async function vended(job: string, options: OpenOptions, engine: Engine): Promis
     const base = storage.name(prefix);
     const files = addressManifests(manifestFiles, base).files();
     await storage.files(files.map((file) => `${prefix}${file.slice(base.length)}`));
-    return await opened(base, options, manifestFiles, query, {
+    // The tile manifests are named by the documents just read, so they are lent and read here —
+    // one more round trip, the one `/docs/design/backend` measured the file for.
+    const texts = async (urls: readonly string[]): Promise<Map<string, string>> => {
+      const names = await storage.files(urls.map((u) => `${prefix}${u.slice(base.length)}`));
+      const rows = await query(`SELECT filename, content FROM read_text(${list(names)})`);
+      const byName = new Map(rows.map((row) => [text(row, 'filename'), text(row, 'content')]));
+      return new Map(urls.map((u, i) => [u, byName.get(names[i]!) ?? '']));
+    };
+    return await opened(base, options, manifestFiles, reads, texts, {
       holder: engine,
       drop: () => storage.close(),
     });
@@ -267,9 +291,11 @@ async function opened(
   url: string,
   options: OpenOptions,
   manifestFiles: Record<string, string>,
-  query: QueryFn,
+  reads: Reads,
+  texts: (urls: readonly string[]) => Promise<Map<string, string>>,
   holding?: Holding,
 ): Promise<Corpus> {
+  const query = reads.rows;
   // The policy, read once. Both consequences come off this one binding — the hatch below and
   // `read`'s predicate — so there is no way to wire half of it. See `SqlPolicy`.
   const rawSql = options.sql === 'allowed';
@@ -278,7 +304,7 @@ async function opened(
   // The catalog the verbs' views live in, named after the corpus: a database of its own, so two
   // corpora with a `Person` each never resolve to each other's, and closing is one `DETACH`.
   const catalog = url;
-  const holder: object = holding?.holder ?? query;
+  const holder: object = holding?.holder ?? options.engine ?? options.query ?? query;
   const held = holders.get(holder) ?? new Map<string, number>();
   holders.set(holder, held);
   held.set(catalog, (held.get(catalog) ?? 0) + 1);
@@ -330,6 +356,7 @@ async function opened(
       identity: has(type.type, IDENTITY) ? IDENTITY : null,
       geometry: has(type.type, 'x') && has(type.type, 'y'),
       indexed: type.index !== null,
+      channels: type.channels,
     })),
     edges: addressing.edges.map((edge) => ({
       edgeType: edge.edgeType,
@@ -340,10 +367,38 @@ async function opened(
     })),
   };
 
+  // Every type's tile manifest, in one round trip, parsed into its matrices while the corpus opens:
+  // `tileMatrix` and `plan` are synchronous because nothing is left to fetch.
+  const zoomsByType = new Map<string, Zooms>();
+  const named = addressing.types.filter((t) => t.tileManifest !== null);
+  const relative = (u: string): string => u.slice(url.length).replace(/^\/+/, '');
+  const unheld = named.filter((t) => manifestFiles[relative(t.tileManifest!)] === undefined);
+  const fetched =
+    unheld.length === 0 ? new Map<string, string>() : await texts(unheld.map((t) => t.tileManifest!));
+  for (const type of named) {
+    const where = type.tileManifest!;
+    const body = manifestFiles[relative(where)] ?? fetched.get(where);
+    if (body === undefined || body === '') {
+      throw new CorpusManifestError(`${where} is named by the manifest and did not read`);
+    }
+    zoomsByType.set(type.type, zoomsOf(type, published(body, where), fieldsOf(type.type)));
+  }
+  const zooms = (name: string): Zooms => {
+    const type = addressing.vertexType(name).type;
+    const found = zoomsByType.get(type);
+    if (found === undefined) {
+      throw new CorpusReadError(
+        `${type} publishes no tile manifest, so it has no tile matrix to plan against — a corpus ` +
+          'written before the field; its footers still answer `rows` and `frame`',
+      );
+    }
+    return found;
+  };
+
   const manifest = await tileManifestOf({ query, addressing, payloadFiles, has });
   const identity = identityOf({ query, addressing, payloadFiles, has });
-  const edges = edgesOf({ query, addressing, identity });
-  const scanner = scanOf({ query, addressing, payloadFiles, fieldsOf, has, manifest, edges });
+  const edges = edgesOf({ query, reads, addressing, identity, zooms });
+  const rectangles = rowsOf({ query, addressing, payloadFiles, fieldsOf, has, manifest, edges });
   const verbs = verbsOf({ query, addressing, manifestFiles, catalog, payloadFiles, fieldsOf });
 
   const corpus: Corpus = {
@@ -366,8 +421,11 @@ async function opened(
     schema: verbs.schema,
     relations: verbs.relations,
     extent: manifest.extent,
-    rows: scanner.rows,
-    frame: frameOf({ query, addressing, fieldsOf, has, manifest, scan: scanner }),
+    tileMatrix: (type) => zooms(type).set,
+    scan: scanOf({ reads, zooms }),
+    edges: edges.edges,
+    rows: rectangles.rows,
+    frame: frameOf({ query, addressing, fieldsOf, has, manifest, rectangles }),
     node: identity.node,
     neighbours: edges.neighbours,
   };

@@ -250,8 +250,16 @@ names, so a reader plans without opening a footer: one request per type instead 
      "lower_bounds":      {"cell_id": 0, "count": 10000, "x": 31795.1328125, …},
      "upper_bounds":      {"cell_id": 0, "count": 10000, "x": 31795.1328125, …}}]},
   …
-  {"z": 6, "tiles": [ … the payload, one entry per row group … ]}]}
+  {"z": 6, "tiles": [ … the payload, one entry per row group … ],
+   "adjacencies": [
+     {"edge_type": "knows", "src_type": "Person", "dst_type": "Person", "aligned_by": "src",
+      "tiles": [ … one entry per tile of sources that has edges … ]},
+     {"edge_type": "knows", "src_type": "Person", "dst_type": "Person", "aligned_by": "dst",
+      "tiles": [ … ]}]}]}
 ```
+
+A rung below the payload carries its quotient the same way, as `"quotient": [ … ]` beside its
+`tiles`, where the document declares one.
 
 - **`matrices`** are coarsest first. `z = 0` is the rung holding a single cell and the payload is the
   last, `z = Z`: rung `k` of a type with `R` rungs is `z = R − k`, and a type with no cell tree has
@@ -271,12 +279,26 @@ names, so a reader plans without opening a footer: one request per type instead 
 
 The numbers are the footers' and nothing else: fossil's writer reads them off the footer it has just
 closed, which is how Iceberg's writers fill a manifest. `tile-manifest` holds the file against the
-footers read back from disk — every tile, every null count, every bound, a float compared as the
-`f32` it is — and fails a string with a bound. What it cannot prove is what `footer-is-the-index`
+footers read back from disk — every tile of every zoom and of every edge set, every null count, every
+bound, a float compared as the `f32` it is — and fails a string with a bound. What it cannot prove is what `footer-is-the-index`
 cannot: that the footers are true.
 
-An adjacency's and a quotient's tiles are not in the file: an adjacency tile is found by its
-footer's box, because its ordinals skip where a tile of sources holds no edges.
+**The edges a type's tiles address are in its file too.** At the payload's `z`, `adjacencies` lists
+every orientation cut on this type's tiles — `by_source` of a relation it is the source of,
+`by_target` of one it is the target of — named by the edge document's `edge_type`, `src_type`,
+`dst_type` and `aligned_by`. Below it, a rung's `quotient` lists the quotient's tiles, cut on the
+cell tile of each pair's lower cell. The four statistics are the same; what differs is `tile`, which
+here is **the aligned tile the entry's rows are cut on** — the row group's lower bound on the aligned
+column, shifted — and not the ordinal, because a tile of sources with no edges writes no row group
+and the ordinals stay dense while the tiles skip. **An absent tile is a tile with no edges**, which is
+what lets a reader skip the request. Where a writer's row groups do not fall on tiles — DuckDB sizes
+a row-group container's groups by rows — a tile is folded over the row groups it is made of, and an
+orientation whose row groups straddle two tiles has no entry to publish and is left out, which a
+reader treats as knowing nothing about it.
+
+No entry carries a byte range. DuckDB reads no row group by its offset: a tile is selected by one
+conjunctive range on its aligned column, pruned against the row groups' own statistics, so an offset
+would be a field with no reader.
 
 ## Two containers, one address
 

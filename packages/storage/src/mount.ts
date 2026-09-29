@@ -173,10 +173,10 @@ async function renew(engine: Engine, host: Host, entry: Held): Promise<void> {
 
 async function requireHttpfs(engine: Engine): Promise<void> {
   if (httpfs.has(engine)) return;
-  const rows = await engine.query(
+  const answer = await engine.query(
     "SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'httpfs'",
   );
-  if (rows[0]?.loaded !== true) {
+  if (answer.numRows === 0 || answer.getChild('loaded')?.get(0) !== true) {
     throw new Error(
       'the engine has no httpfs loaded: fossil reads s3:// through a scoped secret, and the ' +
         "host's engine loads httpfs before handing it over",

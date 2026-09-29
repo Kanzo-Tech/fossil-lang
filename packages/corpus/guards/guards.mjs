@@ -20,7 +20,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { lit, query, scalar } from "./duck.mjs";
-import { fileList, footerSql, payload, rowGroups } from "./inspect.mjs";
+import { fileList, partOf, payload, rowGroups, tileSql } from "./inspect.mjs";
 import {
   TILE_ROWS,
   morton2,
@@ -1738,6 +1738,11 @@ export const GUARDS = [
       "numeric column's lower and upper bound equal the footer's, with no bound published for a " +
       "string. A reader plans a scan off this file and never opens a footer to do it, so a wrong " +
       "bound is a tile pruned that held the match, and nothing downstream can notice.\n\n" +
+      "**The edges a tile addresses are held the same way.** Every adjacency orientation cut on the " +
+      "type's tiles, at the payload's `z`, and every rung's quotient below it: each entry numbered by " +
+      "the tile its rows are cut on — the row group's lower bound on the aligned column, shifted — " +
+      "and folded over the row groups that tile is made of. A tile of sources with no edges has no " +
+      "entry and no row group, and one side missing a tile the other lists is a failure.\n\n" +
       "**A float is compared as the `f32` it is.** The footer prints `0.1` and the manifest prints " +
       "the widened value; both are cast to the column's physical type before they are compared, so " +
       "the check is exact rather than approximate and a manifest that printed the short decimal " +
@@ -1750,9 +1755,13 @@ export const GUARDS = [
       "lift it.\n\n" +
       "That a rung is where this looks. The manifest scanner reads one level of nesting and the " +
       "rungs are deeper, so a rung is found at `<cells.prefix>/r{k}/` — the naming fossil's writer " +
-      "uses — and not at whatever `path` the tree declares. A writer that names its rungs " +
-      "otherwise is reported as a manifest listing zooms with no bytes under them.\n\n" +
-      "The statistics of an adjacency or a quotient. The manifest does not publish them yet.",
+      "uses — and its quotient at `quotient/` under it, not at whatever `path` the tree declares. A " +
+      "writer that names them otherwise is reported as a manifest listing zooms with no bytes " +
+      "under them.\n\n" +
+      "That an orientation left out had to be. An adjacency whose row groups straddle two tiles — " +
+      "DuckDB cuts a row-group container by row count, not on tile boundaries — has no per-tile " +
+      "statistics to publish, so its absence is reported; an orientation left out whose row groups " +
+      "do fall on tiles is a failure, and this cannot tell a writer that forgot from one that chose.",
     run(corpus) {
       const failures = [];
       const notes = [];
@@ -1788,48 +1797,101 @@ export const GUARDS = [
               `and ${onDisk} are on disk`,
           );
         }
+        const shift = type.shift === null ? null : Number(type.shift);
         const zooms = type.files.map((f) => ({ z: top, path: f.path, tile: f.tile }));
         for (let k = 1; k <= top; k += 1) {
           for (const f of payload(join(cellRoot, `r${k}`))) {
             zooms.push({ z: top - k, path: f.path, tile: f.tile });
           }
+          for (const f of payload(join(cellRoot, `r${k}`, "quotient"))) {
+            zooms.push({ z: top - k, part: "quotient", path: f.path, tile: f.tile, key: "src_cell", shift });
+          }
+        }
+        // Every orientation cut on this type's tiles. One whose row groups straddle a tile boundary
+        // has no entry to hold, and the manifest leaving it out is the answer rather than a gap.
+        const published = new Set(
+          query(
+            `SELECT DISTINCT a->>'edge_type' AS edge_type, a->>'src_type' AS src_type,
+                    a->>'dst_type' AS dst_type, a->>'aligned_by' AS aligned_by
+               FROM (SELECT unnest(json_extract(m, '$.adjacencies[*]')) AS a
+                       FROM (SELECT unnest(json_extract(json, '$.matrices[*]')) AS m
+                               FROM read_json_objects('${manifest}')))`,
+          ).map(partOf),
+        );
+        for (const edge of corpus.edges) {
+          for (const side of [edge.bySource, edge.byTarget]) {
+            const aligned = side.alignedBy === "src" ? edge.srcType : edge.dstType;
+            if (aligned !== type.name || side.tiles.length === 0) continue;
+            const part = partOf({
+              edge_type: edge.edgeType,
+              src_type: edge.srcType,
+              dst_type: edge.dstType,
+              aligned_by: side.alignedBy,
+            });
+            const files = side.tiles.map((f) => ({ z: top, part, path: f.path, tile: f.tile, key: side.column, shift }));
+            if (!published.has(part)) {
+              const straddles = query(`SELECT bool_or(straddles) AS s FROM (${tileSql(files)})`)[0]?.s === true;
+              (straddles ? notes : failures).push(
+                straddles
+                  ? `${type.name}: ${edge.edgeType} ${side.name} has row groups across tile boundaries, so it publishes no entries`
+                  : `${type.name}: ${edge.edgeType} ${side.name} is cut on this type's tiles and the manifest lists none of them`,
+              );
+              continue;
+            }
+            zooms.push(...files);
+          }
         }
         const mismatches = query(`
           WITH m AS (SELECT unnest(json_extract(json, '$.matrices[*]')) AS m
                        FROM read_json_objects('${manifest}')),
-               t AS (SELECT (m->>'z')::INTEGER AS z, unnest(json_extract(m, '$.tiles[*]')) AS t FROM m),
+               a AS (SELECT (m->>'z')::INTEGER AS z, unnest(json_extract(m, '$.adjacencies[*]')) AS a FROM m),
+               t AS (SELECT (m->>'z')::INTEGER AS z, '' AS part, unnest(json_extract(m, '$.tiles[*]')) AS t FROM m
+                     UNION ALL
+                     SELECT (m->>'z')::INTEGER, 'quotient', unnest(json_extract(m, '$.quotient[*]')) FROM m
+                     UNION ALL
+                     SELECT z, concat_ws(':', a->>'edge_type', a->>'src_type', a->>'dst_type', a->>'aligned_by'),
+                            unnest(json_extract(a, '$.tiles[*]')) FROM a),
                published AS (
-                 SELECT z, (t->>'tile')::BIGINT AS tile, (t->>'record_count')::BIGINT AS rows,
+                 SELECT z, part, (t->>'tile')::BIGINT AS tile, (t->>'record_count')::BIGINT AS rows,
                         k.key AS col, k.value::BIGINT AS nulls,
                         t->'lower_bounds'->>k.key AS lo, t->'upper_bounds'->>k.key AS hi
                    FROM t, json_each(t->'null_value_counts') k),
-               footer AS (${footerSql(zooms)})
-          SELECT coalesce(p.z, f.z) AS z, coalesce(p.tile, f.tile) AS tile, coalesce(p.col, f.col) AS col,
+               footer AS (${tileSql(zooms)})
+          SELECT coalesce(p.z, f.z) AS z, coalesce(p.part, f.part) AS part,
+                 coalesce(p.tile, f.tile) AS tile, coalesce(p.col, f.col) AS col,
                  p.rows AS p_rows, f.rows AS f_rows, p.nulls AS p_nulls, f.nulls AS f_nulls,
-                 p.lo AS p_lo, f.lo AS f_lo, p.hi AS p_hi, f.hi AS f_hi
-            FROM published p FULL JOIN footer f USING (z, tile, col)
-           WHERE p.rows IS DISTINCT FROM f.rows OR p.nulls IS DISTINCT FROM f.nulls
+                 p.lo AS p_lo, f.lo AS f_lo, p.hi AS p_hi, f.hi AS f_hi, f.straddles
+            FROM published p FULL JOIN footer f USING (z, part, tile, col)
+           WHERE f.straddles OR p.rows IS DISTINCT FROM f.rows OR p.nulls IS DISTINCT FROM f.nulls
               OR CASE WHEN f.type = 'FLOAT'
                         THEN p.lo::FLOAT IS DISTINCT FROM f.lo::FLOAT OR p.hi::FLOAT IS DISTINCT FROM f.hi::FLOAT
                       WHEN f.type = 'DOUBLE'
                         THEN p.lo::DOUBLE IS DISTINCT FROM f.lo::DOUBLE OR p.hi::DOUBLE IS DISTINCT FROM f.hi::DOUBLE
                       ELSE p.lo::HUGEINT IS DISTINCT FROM f.lo::HUGEINT OR p.hi::HUGEINT IS DISTINCT FROM f.hi::HUGEINT END
-           ORDER BY 1, 2, 3`);
+           ORDER BY 1, 2, 3, 4`);
         for (const row of mismatches.slice(0, 5)) {
+          const where = `z ${row.z}${row.part === "" ? "" : ` ${row.part}`} tile ${row.tile}`;
           failures.push(
-            `${type.name}: z ${row.z} tile ${row.tile} \`${row.col}\` — the manifest says ` +
-              `rows ${row.p_rows}, nulls ${row.p_nulls}, [${row.p_lo}, ${row.p_hi}] and the footer ` +
-              `says rows ${row.f_rows}, nulls ${row.f_nulls}, [${row.f_lo}, ${row.f_hi}]`,
+            row.straddles === true
+              ? `${type.name}: ${where} shares a row group with the next tile, so no entry describes it`
+              : `${type.name}: ${where} \`${row.col}\` — the manifest says ` +
+                  `rows ${row.p_rows}, nulls ${row.p_nulls}, [${row.p_lo}, ${row.p_hi}] and the footer ` +
+                  `says rows ${row.f_rows}, nulls ${row.f_nulls}, [${row.f_lo}, ${row.f_hi}]`,
           );
         }
         if (mismatches.length > 5) {
           failures.push(`${type.name}: … and ${mismatches.length - 5} more disagreement(s)`);
         }
-        const entries = Number(
-          scalar(`SELECT count(DISTINCT (z, tile)) FROM (${footerSql(zooms)})`),
+        const counted = query(
+          `SELECT count(DISTINCT (z, tile)) FILTER (WHERE part = '') AS tiles,
+                  count(DISTINCT (z, part, tile)) FILTER (WHERE part <> '') AS edges
+             FROM (${tileSql(zooms)})`,
+        )[0];
+        checked += Number(counted.tiles) + Number(counted.edges);
+        notes.push(
+          `${type.name}: ${counted.tiles} tile(s) over ${top + 1} zoom(s) and ${counted.edges} edge ` +
+            `tile(s) held against their footers`,
         );
-        checked += entries;
-        notes.push(`${type.name}: ${entries} tile(s) over ${top + 1} zoom(s) held against their footers`);
       }
       return result(failures, [`${checked} tile(s) checked`, ...notes]);
     },

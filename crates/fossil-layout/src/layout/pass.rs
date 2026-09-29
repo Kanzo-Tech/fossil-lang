@@ -12,7 +12,7 @@ use super::community::{
 };
 use super::morton::{morton_codes, morton_ranks};
 use super::place::{CLUSTER_BUDGET, cluster_layout, place_after};
-use super::statistics::{manifest, tile_statistics};
+use super::statistics::{manifest, numbered, tile_statistics};
 // ──────────────────────────────────────────────────────────────────────────
 // W3.1b — integration: apply the pure layout to the written GraphAr vertices.
 // ──────────────────────────────────────────────────────────────────────────
@@ -28,7 +28,7 @@ use fossil_tile_writer::TileWriter;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
 use fossil_sinks::manifest::{CELL_PREFIX, CellTree, Channel, TILES_FILE, VertexLevels};
-use fossil_sinks::tiles::{TileManifest, TileStatistics};
+use fossil_sinks::tiles::{AdjacencyTiles, TileManifest, TileStatistics};
 
 /// `row_of_dense[d]` when no row of the vertex file carries `dense_id` `d`.
 ///
@@ -938,8 +938,11 @@ pub fn enrich_layout_with(
     let mut counts: Vec<u64> = vec![0; targets.len()];
 
     // Each type's payload tile statistics, off the footer its writer closes —
-    // the finest matrix of the tile manifest the report declares at the end.
+    // the finest matrix of the tile manifest the report declares at the end —
+    // and the adjacency orientations cut on its tiles, which the adjacency loop
+    // fills in beside it.
     let mut payload_tiles: Vec<Vec<TileStatistics>> = vec![Vec::new(); targets.len()];
+    let mut adjacency_tiles: Vec<Vec<AdjacencyTiles>> = vec![Vec::new(); targets.len()];
 
     for (index, target) in targets.iter().enumerate() {
         // What names this type in an error and in the memory report. It was the
@@ -1436,6 +1439,7 @@ pub fn enrich_layout_with(
         // the seventy million the relation is.
         let payload = format!("{}{TILES_FILE}", adjacency.tile_prefix);
         let mut writer = open_tiles(io, &payload, Arc::clone(&schema))?;
+        let mut written: Vec<u64> = Vec::new();
         let mut start = 0usize;
         while start < keys.len() {
             let tile = (keys[start] >> 32) >> tile_shift;
@@ -1445,9 +1449,25 @@ pub fn enrich_layout_with(
             }
             let batch = unpack(&schema, alabel, &keys[start..end], adjacency.ordered_by)?;
             writer.tile(&batch).map_err(write_err(&payload))?;
+            written.push(tile);
             start = end;
         }
-        writer.finish().map_err(write_err(&payload))?;
+        let footer = writer.finish().map_err(write_err(&payload))?;
+        // The orientation's entries, numbered by the aligned tile each row group
+        // holds — which is why they are numbered at all: the ordinals are dense
+        // and these tiles are not. They go in the tile manifest of the type the
+        // orientation is cut on, beside the payload tiles they are addressed by.
+        adjacency_tiles[index_of(endpoint_type, alabel)?].push(AdjacencyTiles {
+            edge_type: adjacency.label.clone(),
+            src_type: adjacency.src_type.clone(),
+            dst_type: adjacency.dst_type.clone(),
+            aligned_by: match adjacency.ordered_by {
+                Endpoint::Src => "src",
+                Endpoint::Dst => "dst",
+            }
+            .to_string(),
+            tiles: numbered(tile_statistics(&footer, &schema), &written),
+        });
         probe.sample(&format!("{step}: write tiles"));
 
         // The pyramid of EDGES, written once per relation and from the
@@ -1483,10 +1503,11 @@ pub fn enrich_layout_with(
             continue;
         }
         let payload = std::mem::take(&mut payload_tiles[index]);
+        let cut = std::mem::take(&mut adjacency_tiles[index]);
         let Some(pyramid) = pyramids[index].as_mut() else {
             report
                 .tiles
-                .push((target.type_name.clone(), manifest(payload, Vec::new())));
+                .push((target.type_name.clone(), manifest(payload, cut, Vec::new())));
             continue;
         };
         // **The self-relations, source-ordered**, which is what a cell's
@@ -1520,7 +1541,7 @@ pub fn enrich_layout_with(
         report.pyramids.push((target.type_name.clone(), tree));
         report
             .tiles
-            .push((target.type_name.clone(), manifest(payload, rungs)));
+            .push((target.type_name.clone(), manifest(payload, cut, rungs)));
         probe.mark(&format!("write cells — {}", target.type_name));
     }
 

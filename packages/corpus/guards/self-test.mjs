@@ -601,6 +601,42 @@ const MUTATIONS = [
   },
   {
     guard: "tile-manifest",
+    what: "one `by_target` tile's upper `src_dense` is published one above its footer's",
+    layout: "files",
+    mutate(dir) {
+      const path = join(dir, VERTEX_DIR, "tile-manifest.json");
+      const manifest = JSON.parse(readFileSync(path, "utf8"));
+      const top = manifest.matrices[manifest.matrices.length - 1];
+      top.adjacencies.find((a) => a.aligned_by === "dst").tiles[0].upper_bounds.src_dense += 1;
+      writeFileSync(path, JSON.stringify(manifest));
+    },
+  },
+  {
+    guard: "tile-manifest",
+    what: "the manifest drops one `by_source` tile, so a reader skips a tile that has edges",
+    layout: "files",
+    mutate(dir) {
+      const path = join(dir, VERTEX_DIR, "tile-manifest.json");
+      const manifest = JSON.parse(readFileSync(path, "utf8"));
+      const top = manifest.matrices[manifest.matrices.length - 1];
+      top.adjacencies.find((a) => a.aligned_by === "src").tiles.splice(1, 1);
+      writeFileSync(path, JSON.stringify(manifest));
+    },
+  },
+  {
+    guard: "tile-manifest",
+    what: "the manifest leaves out an orientation whose row groups fall on tiles",
+    layout: "files",
+    mutate(dir) {
+      const path = join(dir, VERTEX_DIR, "tile-manifest.json");
+      const manifest = JSON.parse(readFileSync(path, "utf8"));
+      const top = manifest.matrices[manifest.matrices.length - 1];
+      top.adjacencies = top.adjacencies.filter((a) => a.aligned_by !== "dst");
+      writeFileSync(path, JSON.stringify(manifest));
+    },
+  },
+  {
+    guard: "tile-manifest",
     what: "the manifest publishes a bound for `subject`, a string no planner may compare",
     layout: "rowgroups",
     mutate(dir) {
@@ -699,6 +735,16 @@ console.log("\nThe tree's `mode` resolves into the list rather than being guesse
       `the fixture publishes a tile manifest and the guard holds it against the footers (${layout})`,
       `${checked} tile(s) checked`,
     );
+    // And the edge tiles, under the container whose adjacency row groups fall on tiles: a file per
+    // tile. Green with none held would be the adjacency half passing on nothing.
+    if (layout === "files") {
+      const edges = Number(/and (\d+) edge tile\(s\)/.exec(notes.join("\n"))?.[1] ?? 0);
+      assert(
+        edges > 0,
+        "the fixture publishes adjacency entries and the guard holds them against the footers",
+        `${edges} edge tile(s) held`,
+      );
+    }
   }
 }
 

@@ -38,7 +38,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ProgramSource } from "@fossil-lang/types";
+import type { ProgramSource, Table } from "@fossil-lang/types";
 import { describe, expect, it } from "vitest";
 import {
   duckdbTypeToFossilPrimitive,
@@ -239,6 +239,9 @@ function sourcesFor(formats: readonly SourceFormat[], option?: string): ProgramS
   }));
 }
 
+/** No rows, in the columns an engine answers in. */
+const empty: Table = { numRows: 0, schema: { fields: [] }, getChild: () => null };
+
 /** The DESCRIBE `introspect` sends for each source, in order. */
 async function describesOf(sources: ProgramSource[]): Promise<string[]> {
   const seen: string[] = [];
@@ -252,7 +255,7 @@ async function describesOf(sources: ProgramSource[]): Promise<string[]> {
       drop: async () => {},
       query: async (sql) => {
         seen.push(sql);
-        return [];
+        return empty;
       },
     },
     onWarn: (message, err) => {

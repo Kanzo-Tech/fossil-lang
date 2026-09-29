@@ -424,6 +424,45 @@ impl Corpus {
             .map(|p| p.tile_url(tile)))
     }
 
+    /// The file tile `t` of rung `k` of a vertex type's cell tree is in, or
+    /// `null` when the type declares no such rung — a zoom below the payload,
+    /// addressed by the same container rule a payload tile is.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest.
+    #[wasm_bindgen(js_name = rungTileUrl)]
+    pub fn rung_tile_url(
+        &self,
+        vertex_type: Option<String>,
+        rung: u32,
+        tile: u64,
+    ) -> Result<Option<String>, JsError> {
+        Ok(self
+            .vertex(vertex_type.as_deref())?
+            .rung(rung)
+            .map(|r| r.tile_url(tile)))
+    }
+
+    /// The file tile `t` of rung `k`'s quotient is in, or `null` when the rung
+    /// publishes no quotient — which is an answer, not a 404.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` when the type is not in the manifest.
+    #[wasm_bindgen(js_name = quotientTileUrl)]
+    pub fn quotient_tile_url(
+        &self,
+        vertex_type: Option<String>,
+        rung: u32,
+        tile: u64,
+    ) -> Result<Option<String>, JsError> {
+        Ok(self
+            .vertex(vertex_type.as_deref())?
+            .rung(rung)
+            .and_then(|r| r.quotient_tile_url(tile)))
+    }
+
     /// Every file of one projection of a vertex type, in order and distinct.
     ///
     /// # Errors

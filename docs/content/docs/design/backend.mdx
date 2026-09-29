@@ -43,10 +43,11 @@ infrastructure, and it would belong in a package between the two, still not in t
 
 ## The contract
 
-This is everything that crosses. The types are the ones the reader will export; `Engine` and `Host`
-are `@fossil-lang/types`' own (`packages/types/src/engine.ts, Engine`,
-`packages/types/src/host.ts, Host`), and `SchemaResult` and the SQL pair are the verbs' generated
-shapes, unchanged.
+This is everything that crosses. `tileMatrix`, `scan` and `edges` are built and exported beside the
+members they replace, which step 5 deletes; the `open` shapes that take a `query` callback go with
+them and are not listed. `Engine` and `Host` are `@fossil-lang/types`' own
+(`packages/types/src/engine.ts, Engine`, `packages/types/src/host.ts, Host`), and `SchemaResult` and
+the SQL pair are the verbs' generated shapes, unchanged.
 
 ```ts
 declare function open(url: string, options: OpenOptions & { engine: Engine; sql: 'allowed' }): Promise<SqlCorpus>;
@@ -76,8 +77,8 @@ interface SqlCorpus extends Corpus {
 }
 interface TileMatrixSet {
   readonly type: string;
-  readonly extent: Box;
-  readonly coordinates: string;
+  readonly extent: Box | null;
+  readonly coordinates: string | null;
   readonly tileMatrices: readonly TileMatrix[];
 }
 interface TileMatrix {
@@ -91,7 +92,7 @@ interface TileMatrix {
 interface TileInfo {
   readonly tile: number;
   readonly rows: number;
-  readonly bbox: Box;
+  readonly bbox: Box | null;
 }
 interface TileAddress {
   readonly type: string;
@@ -100,7 +101,7 @@ interface TileAddress {
 }
 interface ScanTask extends TileAddress {
   readonly rows: number;
-  readonly bbox: Box;
+  readonly bbox: Box | null;
   readonly residual: Filter | null;
 }
 interface ScanParams {
@@ -150,12 +151,17 @@ type Filter =
   | { not: Filter };
 ```
 
-`Box` keeps today's half-open rectangle, `x <= v.x < x + w` and the same in `y`. `CorpusTypes`,
-`CorpusRelation`, `PlacedVertex` and the two errors are the ones `packages/corpus/src/index.ts`
-already exports, with one addition: each vertex type carries its manifest's `channels:` block, which
-the reader parses and does not surface today. `Direction`, `Gap` and `GapReason` are the ones
-`packages/corpus/src/address.ts` exports — `src` reads the source-aligned half of a relation and
-`dst` the target-aligned one.
+`Box` keeps the half-open rectangle `rows` takes, `x <= v.x < x + w` and the same in `y` — except as
+a tile's `bbox`, where it is the tile's bounds and closed on both edges. A `bbox` and an `extent` are
+`null` for a type with no `x` and `y`, and `coordinates` is `null` where the document declares no
+coordinate system; the contract had all three total, and a type without geometry still has tiles.
+`CorpusTypes`, `CorpusRelation`, `PlacedVertex` and the two errors are the ones
+`packages/corpus/src/index.ts` already exported, with one addition: each vertex type carries its
+manifest's `channels:` block. The page said the reader parsed it and did not surface it; nothing on
+the reader's side parsed it at all, so `fossil_graph::plan` reads it now
+(`crates/fossil-graph/src/plan/declared.rs, channels_of`) with the cell tree and the coordinate
+system beside it. `Direction`, `Gap` and `GapReason` are the ones `packages/corpus/src/address.ts`
+exports — `src` reads the source-aligned half of a relation and `dst` the target-aligned one.
 
 What each member answers, in one line each:
 
@@ -177,13 +183,23 @@ What each member answers, in one line each:
 - **`scan.read(address)`** — one tile, as a columnar batch, cancelled by its signal. It takes any
   address in the matrix, not only a planned one: a view builds `{ type, z, tile }` from what it sees,
   and the far end of an edge is the tile its `dense_id` shifts to. At `z = Z` a batch holds at most
-  `tileRows` rows — 4,096 — so a finest tile can always be drawn as vertices.
+  `tileRows` rows — 4,096 — so a finest tile can always be drawn as vertices. **How it addresses one
+  tile**: DuckDB's Parquet reader reads no row group by number, so the statement names the tile's file
+  and ONE conjunctive range on the column its rows are a range of — `dense_id` at `Z`, `cell_id`
+  below — which the engine prunes against every row group's statistics in the footer. Under
+  `rowgroups` that is the tile's row group and no other; under `files` the file is the tile.
 - **`edges({ from, direction })`** — the relations incident to one tile out of the half aligned on
   `direction`, **and the ones it declined, with fossil's `GapReason`**: `not-declared` for an
   orientation the corpus does not publish, `other-space` for a relation whose far end is another
   type, which is read only when `relation` names it. At `z = Z` a batch is the adjacency's two
-  columns; below it, the rung's quotient — `src_cell`, `dst_cell` and a `weight` — where the writer
-  published one, source-aligned only.
+  columns, and a tile the tile manifest lists no entry for is answered empty without a request;
+  below it, the rung's quotient — `src_cell`, `dst_cell` and a `weight` — where the writer published
+  one. **The quotient is undirected**, and the page said source-aligned: one row per cell pair, keyed
+  and tiled on the pair's LOWER cell (`crates/fossil-layout/src/layout/cells.rs, pair_edges`), so
+  `src` reads the pairs whose lower cell is in the tile, `dst` is declined, and the pairs whose upper
+  cell is in the tile are in the tiles below it. Mass is conserved either way, which is the
+  obligation cells states; what the orientation costs is the view's, which draws a rung's lines from
+  the tiles it holds and the ones below them.
 - **`node`, `schema`, `relations`, `executeSql`** — unchanged: identity through the index, the
   verbs' introspection, what a SQL host registers, and the escape hatch behind `sql: 'allowed'`.
 
@@ -200,7 +216,9 @@ rather than as a second path.
 
 At `z = Z` a row is a vertex: the payload's columns, of which `select` chooses. `node` answers one by
 identity with its `x` and `y`, so a pinned or searched vertex is placed without a scan, and its tile
-is `denseId` over `tileRows`.
+is `denseId` over `tileRows`. `select` does not reach below `Z`: a cell row carries every cell column
+whatever it names, because they are not a projection of the payload's and there is nothing of them to
+choose.
 
 Below `Z` a row is a cell, and its columns are the writer's, not a projection of the payload's
 (`crates/fossil-sinks/src/generated.rs, CELL_COLUMNS`): `cell_id`; `x` and `y`, **the centroid of
@@ -223,10 +241,10 @@ with one referent, and a cell row grows a pair per channel, each naming its own.
 | `Catalog.load_table`, `StaticTable.from_metadata(metadata_location)` | `open(url, { engine })`, `open(job, { engine, host })` | **Taken.** A corpus has no catalog service, so the URL case is the static table; the job case reuses what [storage access](/docs/design/prior-art#storage-access) already took from the REST catalog — a vended credential scoped to one prefix. |
 | `Table.schema()` | `corpus.types` | **Taken**, read off the bytes at `open` for the reason `packages/corpus/src/open.ts, open` gives: the manifest declares three properties against seven columns on disk. |
 | `Table.scan(row_filter, selected_fields, case_sensitive, snapshot_id, options, limit)` | `corpus.scan({ type, filter, select })` | **Departs twice.** No `snapshot_id`: a corpus is written once and never appended to, so there is one snapshot and nothing to name. **No `limit`**: a task is a tile, and a tile holds at most `tileRows` rows by construction, so every read is bounded by its address rather than by a clause. No zoom and no box either, though a camera always has both: a scan is planned once over every zoom, and which of its tasks a camera sees is the view's cull against the boxes `tileMatrix` publishes. |
-| `EqualTo`, `In`, `IsNull`, `And`, `Or`, `Not`; `UnboundPredicate.bind(schema)` | `Filter`, bound in `scan()` | **Taken**, including the timing: an unknown column is an error at bind, before anything is planned. Spelled as JSON rather than classes so it crosses a worker boundary as it is. `StartsWith` and `IsNaN` are left out until something asks. |
+| `EqualTo`, `In`, `IsNull`, `And`, `Or`, `Not`; `UnboundPredicate.bind(schema)`, `rewrite_not` | `Filter`, bound in `scan()` | **Taken**, including the timing: an unknown column is an error at bind, before anything is planned, and a `not` is pushed to the leaves as `rewrite_not` does. Spelled as JSON rather than classes so it crosses a worker boundary as it is. `StartsWith` and `IsNaN` are left out until something asks, and NaN is Iceberg's: not a literal, and matched by no comparison — the rendered SQL says `NOT isnan(x)` beside `x > v`, because DuckDB orders NaN above every number. Nulls are SQL's. |
 | `plan_files()` → `FileScanTask { file, delete_files, residual }`; iceberg-rust adds `start`, `length`, `record_count` | `plan()` → `ScanTask { z, tile, rows, bbox, residual }` | **Departs on the unit.** A task is a **tile**, which under `container: rowgroups` is one row group — iceberg-rust's `start`/`length` split, not PyIceberg's whole file. No delete files: nothing is ever deleted from a corpus. The byte range stays inside the reader; a view keys on the address. |
 | `_InclusiveMetricsEvaluator` over `lower_bounds`, `upper_bounds`, `null_value_counts` — *rows might match* | the planner over the tile manifest | **Taken as the pruning rule**: a tile is dropped only when its statistics prove no row can match, and a tile with no statistics for a column is kept. |
-| `StrictMetricsEvaluator` — *rows must match*, which PyIceberg's planner does not use | `ScanTask.residual` | **Taken further than Iceberg takes it.** A tile whose bounds satisfy the filter outright carries a `null` residual and is read with no predicate beyond the range that selects it. |
+| `StrictMetricsEvaluator` — *rows must match*, which PyIceberg's planner does not use | `ScanTask.residual` | **Taken further than Iceberg takes it.** A tile whose bounds satisfy the filter outright carries a `null` residual and is read with no predicate beyond the range that selects it — except for a comparison on a float, which never settles: the manifest counts no NaN, because Parquet's footer does not, and Iceberg's `nan_value_counts` is the statistic that would let it. |
 | `ManifestEvaluator` over the manifest list's partition summaries | the zoom | **Departs.** A corpus has no partitions; the only coarse cut is `z`, every `z` is planned, and the view picks among them. |
 | `to_arrow()`, `to_arrow_batch_reader()` over the whole scan | `scan.read(task)` per task | **Departs.** There is no whole-scan read, because the unit a view caches and cancels is the task. iceberg-rust's reader streams per task too; fossil makes that the only form. |
 
@@ -300,9 +318,9 @@ without it.
 
 What is kept from [cells](/docs/design/cells) unchanged: the base is declared and never derived;
 the partition is quaternary, so a cell carries no `parent` column; a rung is summarised from the
-payload, never folded from the rung below; the quotient is source-aligned and tiled on its source
-cell's tile (`crates/fossil-layout/src/layout/cells.rs, write_quotient`); and a cell is not an entity,
-so `node` never returns one.
+payload, never folded from the rung below; the quotient is one undirected row per cell pair, tiled on
+the pair's lower cell's tile (`crates/fossil-layout/src/layout/cells.rs, write_quotient`); and a cell
+is not an entity, so `node` never returns one.
 
 **What would reverse it.** A base that is not a power of four. Then a rung's shift stops being an
 integer number of bits and the parent stops being a shift — which is why
@@ -361,6 +379,35 @@ mechanism.
 | 9 | every slice re-uploaded every GPU buffer and rendered twice | per-tile batches a renderer can append rather than replace | view |
 | 10 | no `by_target` read: an edge whose source is off-screen was never drawn | `edges({ direction: 'dst' })` reads the target-aligned adjacency | backend |
 
+### What the backend's half measures at a million vertices
+
+Measured on 2026-09-29 over a corpus the layout pass wrote — `crates/fossil-layout/examples/enrich_memory`'s
+fixture, 1,000,000 vertices at mean degree 14 (6,993,608 edges), 4,096 rows a tile, pyramid base 16,
+`rowgroups` — for a window of 1% of the extent, a tenth of it on each axis at its centre. The finest
+zoom whose planned tiles fit 65,536 rows is `Z` itself: the box filter plans **8 of 245** payload
+tiles, 32,768 rows, of which 9,265 are in the window, exactly the vertices `rows` returns. Bytes and
+requests are every statement replayed through the `duckdb` CLI's `httpfs` against a local HTTP origin
+that counts what it serves; times are medians of seven through DuckDB-WASM 1.32 over local files in
+Node, Mac16,8.
+
+| read | files | requests | bytes | time, WASM | time, native over HTTP |
+| --- | --- | --- | --- | --- | --- |
+| `plan()` | — | 0 | 0 | 0.8 ms | — |
+| `scan` + 8 `read`s, 4 columns | 1 | 37 | 0.54 MB | 121 ms | 84 ms |
+| `scan` + 8 `read`s, every column | 1 | 25 | 4.55 MB | — | 75 ms |
+| `edges`, both halves of the 8 tiles | 2 | 51 | 2.36 MB | 126 ms | 131 ms |
+| `rows` over the same box, today | 3 | 493 | 37.55 MB | 172 ms | 102 ms |
+
+Cost #1 and #3 are the difference, and they are the adjacency: `rows` reads its edges with an `IN`
+over the window's ids and no range on the aligned column, so the engine reads 17.5 MB of the 33 MB
+`by_source` and 16.5 MB of `by_target` in 525 requests, where `edges` reads one row group of each per
+tile. What the tiles do not buy is the vertex side at `Z`: the same 4.55 MB either way, in 25
+requests over 8 statements against `rows`' 10 in one — each statement reads the footer again and
+cannot coalesce ranges across tiles — and the reads are sequential because a view keeps one in
+flight. The edge count
+is the other half of the trade — the tiles' edges are every edge of the 8 tiles, 458,204, against the
+91,652 incident to the window's vertices — and it is the view's to cull, per tile, once, and cache.
+
 ### Pruning is the manifest's, at tile granularity
 
 A read selects one tile with **one conjunctive range** on the aligned column — `dense_id` for a
@@ -396,10 +443,13 @@ fill one; bounds are published for every numeric column and for no string, and a
 coordinate columns' bounds rather than a field of its own. The format is
 [the tile manifest](/docs/format/conventions/addressing#the-tile-manifest-is-the-footers-published-once).
 
-What it does not carry yet is the rest of what this section asks of it: an entry per adjacency
-orientation and per quotient, and a row group's byte range. Those land with `edges` in step 3, where
-the first reader of them does — an adjacency's row-group ordinal skips where a tile of sources has no
-edges, so its entries are the ones that stop a reader having to find the ordinal out.
+The edge sets are in it too, since step 3: at the payload's `z` an entry per adjacency orientation cut
+on the type's tiles, and below it each rung's quotient, numbered by the aligned tile because an edge
+set's row-group ordinals skip where a tile of sources has no edges. `edges` is their first reader, and
+an absent entry is a tile it answers without a request. **The byte range did not land, and the
+section said it would**: DuckDB reads no row group by offset — a tile is one conjunctive range the
+engine prunes against the footer it reads anyway — so an offset would be a field with no reader.
+What would bring it is a host that issues its own `Range` request for a row group.
 
 **What would reverse it.** A writer other than fossil's. The statistics are then a claim the reader
 has to check rather than trust, and the check exists: `packages/corpus/guards`' `tile-manifest` holds
@@ -434,7 +484,8 @@ module follows one of the two references and none of them reaches 500 lines.
 | `tile-matrix.ts` | OGC 17-083r4 | the matrices from the manifest: `z`, shift, counts, the parent and the child range | `levelForCanvas`'s arithmetic, what `levelsOf` and `strideOf` spelled |
 | `tile-manifest.ts` | Iceberg's manifest | reading the published per-tile statistics once per type | `tileBoxes`, `footers`, `bytesOf`, `runsOf`, `extent` |
 | `expression.ts` | Iceberg's expressions | `Filter`, binding it to a matrix's columns, the inclusive and strict evaluators, and rendering the residual as SQL | the box predicate `boxOf` |
-| `scan.ts` | Iceberg's `Table.scan` | `scan`, `plan`, `read` | the tile selection in `sampledRead` and `rows` |
+| `scan.ts` | Iceberg's `Table.scan` | `scan`, `plan`, `read` | — |
+| `rows.ts` | — | `rows` and the tile selection `frame` reads, until step 5 retires them | the tile selection in `sampledRead` and `rows` |
 | `frame.ts` | — | `frame` and its types, until step 5 retires them | `frame`, `Frame`, `FrameParams`, `FrameCost`, `CoarseSource` |
 | `edges.ts` | CSR and CSC | `edges`, over the adjacency at `Z` and the quotient below it | `readEdges`, `adjacencyFor`, `neighbours` |
 | `identity.ts` | — | `node`: the index seek, its key ranges, byte-order comparison | `findByIdentity`, `indexRanges`, `couldHold`, `vertexOf` |
@@ -442,9 +493,13 @@ module follows one of the two references and none of them reaches 500 lines.
 | `sql.ts` | — | literals, identifiers and the 64-bit id guard | `lit`, `ident`, `list`, `idOf`, `floatOf`, `CorpusReadError` |
 
 `corpus.ts` keeps the surface's own types — `Corpus`, `SqlCorpus`, `CorpusTypes`, `CorpusRelation` —
-and each member's types went with the member. `frame.ts` is the one module no reference names: the
-composition `frame` runs has no seam of its own, and holding it apart is what lets step 5 delete a
-file rather than carve one. `address.ts` stays the one bridge to
+and each member's types went with the member. `frame.ts` and `rows.ts` are the two modules no
+reference names: the compositions they run have no seam of their own, and holding them apart is what
+lets step 5 delete two files rather than carve two. `query.ts` is where the engine's two faces meet —
+rows for the members that still walk objects, a `Batch` for the ones a view draws — and
+`address.ts`, at 950 lines, is the one module over the bound: the rung, channel and coordinate
+shapes it gained are `fossil_graph::plan`'s as they cross, and it sheds everything a level was in
+step 5. `address.ts` stays the one bridge to
 `crates/fossil-graph/src/plan.rs, ReadPlan`, and shrinks by everything a level was. `index.ts` stays
 the barrel.
 
@@ -472,7 +527,10 @@ The order is fixed by one rule: **nothing is deleted while something still reads
    not the diff that changes it.
 3. **`tileMatrix`, `scan` and `edges` land** on those modules, reading the tile manifest. The
    conformance suite holds `scan` at `Z` against `rows` over the same box, and a rung read through
-   `scan` against the aggregation obligations of [cells](/docs/design/cells).
+   `scan` against the aggregation obligations of [cells](/docs/design/cells). Landed, with the
+   adjacency and quotient entries the writer now publishes and `Engine.query`'s signal; the rung
+   corpus is written by `@fossil-lang/executor`, the layout pass in wasm, because the JS fixture
+   writes no rung.
 4. **kanzo-ui moves `@kanzo-tech/graph` onto them.** That is kanzo-ui's phase, and fossil waits for it.
 5. **The reader's retired members go**, with every type that only they named.
 6. **The writer stops emitting the level files**, the manifest stops declaring them, and the fixture is
@@ -519,8 +577,14 @@ rows.
 
 **`Engine.query` takes an `AbortSignal` and returns Arrow-shaped data.** The signal reaches the
 running statement, and the answer is a table a `Batch` reads, so no reader turns columns into objects
-and back. It lands in `packages/types/src/engine.ts, Engine` in phase 4, and every host that
-implements `Engine` moves with it — keasy among them.
+and back. It is `packages/types/src/engine.ts, Engine` now, with `Table` and `Column` beside it —
+the part of apache-arrow's `Table` fossil reads — and every host in this repository moved with it.
+DuckDB-WASM interrupts through the pending-query API: `AsyncDuckDBConnection.send` then
+`cancelSent()`, and the blocking bindings' `startPendingQuery`, `pollPendingQuery` and
+`cancelPendingQuery` underneath, which is what `packages/corpus/tests/engine.ts` drives. Measured
+there, a statement over twenty billion rows aborted at 50 ms rejects at about 200 ms — one polling
+interval — and the connection answers the next statement. Hosts outside it — kanzo-ui's `engine()`,
+keasy — move with step 4.
 
 **What would reverse it.** A host engine that can neither interrupt a statement nor answer in
 columns. Then the reader converts at the boundary and drops a stale answer instead, and both costs
