@@ -60,7 +60,7 @@ This is not larger-than-RAM for the layout pass. It is a declaration that has st
 that the number means something; what it does not buy is the run.
 
 **The budget never changes what the pass writes**, only whether it runs, and that is structural
-rather than cautious. `fossil run` and the playground tab write the same tree byte for byte through
+rather than cautious. `fossil run` and the wasm executor write the same tree byte for byte through
 one `LayoutIo`, and only one of them has a flag to declare a budget with — so a budget that degraded
 the output would make the two paths disagree exactly when somebody declared one.
 `crates/fossil-layout/tests/budget.rs` runs one input corpus twice, once unbounded and once under a

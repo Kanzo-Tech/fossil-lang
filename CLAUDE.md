@@ -246,14 +246,12 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            the one view layer, in kanzo-ui. The Rust crates
                            keep their names — `fossil-graph` IS a verb surface over a property
                            graph, and a crate name is not in npm's import space.
-                           ONE name at three depths, because the capability the caller brings
-                           decides how deep the answer is: `{ query }` is the whole corpus,
-                           `{ readText }` the manifests alone, `{ manifestFiles }` no request at
-                           all. `resolveCorpus` is gone rather than renamed and all three are
-                           ASYNC; `corpus.addressing` is what the first already resolved. The
-                           boot is internal: the `.wasm` is a bundler asset (`new URL(…,
-                           import.meta.url)` in the glue), and `wasm` on the options is for a
-                           host with no bundler
+                           ONE door, and it always takes an engine: `{ engine, host }` for a
+                           job's corpus, `{ query }` for one at a URL. `resolveCorpus` is gone
+                           rather than renamed; `corpus.addressing` is what the open already
+                           resolved. The boot is internal: the `.wasm` is a bundler asset (`new
+                           URL(…, import.meta.url)` in the glue), and `wasm` on the options is for
+                           a host with no bundler
   executor/                datafusion-wasm query executor, and the manifest wire mirror, because
                            a run HANDS THAT BACK
   types/                   Host — `connections()` + `credentials(scope, access)` — the one host

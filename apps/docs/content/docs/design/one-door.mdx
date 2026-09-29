@@ -128,7 +128,7 @@ thing the design refuses: the far end is the vertex, where the payload puts it. 
 reads it, and [the reference viewer](/docs/design/reference-viewer) says so as the general rule
 this one is a special case of.
 
-Measured rather than argued: `apps/playground/scripts/measure-frame.mjs` puts every one of ten
+Measured rather than argued: the playground's `scripts/measure-frame.mjs` (deleted after `2fa5f22`) puts every one of ten
 camera rectangles at level 1, 2 or 3 **with links asked for** — 322 to 62,024 of them. Not one at
 level 0.
 
@@ -216,10 +216,10 @@ Adding `frame` as a third would have re-run the argument that removal settled.
 `resolveCorpus` needed no engine and spent no round trip, so deleting it looked like withdrawing a
 capability rather than removing a duplicate — which is why it outlived both subpaths. What the
 objection never established is that the capability needs a name: it is what the CALLER brings, so
-it is an argument. `open(base, { manifestFiles })` and `open(url, { readText })` answer with the
-addressing, `open(url, { query })` answers with the corpus, and the rule for choosing is no longer
-a rule — it is which capability the caller has. The price was the synchronous
-form, which had no production consumer: every rung is `await`ed now.
+it is an argument. For a while `open(base, { manifestFiles })` and `open(url, { readText })`
+answered with the addressing beside `open(url, { query })`; their one consumer was a viewer this
+repository no longer has, and every open now takes an engine and publishes the addressing as
+`corpus.addressing`. The price was the synchronous form, which had no production consumer.
 
 `frame` and `rows` are **two members and not two doors**, and the invariant that keeps them one
 contract is asserted rather than asserted-about: `frame` at level 0 selects what `rows` selects over

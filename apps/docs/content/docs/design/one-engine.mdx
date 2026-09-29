@@ -25,7 +25,6 @@ prose.
 | crate | reaches `duckdb` | `wasm32` | what it is |
 | --- | --- | --- | --- |
 | `fossil-introspect` | **directly** | no | the `DESCRIBE`, and the credentials that reach a cloud source |
-| `fossil-mcp` | **directly** | no | the native binding for the corpus verbs |
 | `fossil-cli` | via `fossil-introspect` | no — `run` writes a directory | **the** native host: it introspects, compiles, runs, and is the binary over all three |
 | `fossil-lsp` | via `fossil-introspect` | no | a host, for the reason `fossil check` is one |
 | `fossil-layout` | dev-dependency only | **yes** | the post-pass, over Parquet through `arrow-rs` |
@@ -74,7 +73,7 @@ vends into a store, routed by the longest prefix that covers a path and renewed 
 and the executor registers those stores. The browser reads a cloud source by range requests and
 writes its output through the job's store — measured 2026-09-29 in Chrome against MinIO with
 credentials keasy vended: a ranged GET, a PUT, a three-part multipart upload, and a 403 outside the
-prefix. A host with no storage (the playground) hands the executor `InMemory` stores, and the run
+prefix. A host with no storage hands the executor `InMemory` stores, and the run
 cannot tell.
 
 **The native host does not yet.** Measured 2026-08-23 against a real S3 (MinIO in Docker), reading
@@ -89,8 +88,7 @@ engine one. `crates/fossil-cli/tests/cloud_source.rs` pins both halves and asser
 different decision from this one rather than the same one taken twice.
 
 That row is about the corpus **read** path, where `fossil-graph` builds verb SQL and a host executes
-it — `@fossil-lang/corpus` through a host-provided DuckDB-WASM callback, `fossil-mcp` through a
-connection. Rewriting it as DataFusion plan construction costs roughly nine hundred lines, adds
+it — `@fossil-lang/corpus` through a host-provided DuckDB-WASM callback. Rewriting it as DataFusion plan construction costs roughly nine hundred lines, adds
 several megabytes to the read path, and loses the range-request file system that makes reading a
 corpus over plain HTTP work at all. Still rejected.
 

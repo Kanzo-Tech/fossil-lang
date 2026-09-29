@@ -236,7 +236,7 @@ that decides between the two partitions rather than a preference between them.
 
 Where the structure genuinely is: modularity climbs from 0.6356 to 0.8092 and the levels whose
 quotient is still sparse enough to lay out are **2 and 3** — 9,248 and 1,696 groups at mean quotient
-degree 11.6 and 23.5. That is the measurement `crates/fossil-layout/examples/hierarchy_stats.rs, read_edges`
+degree 11.6 and 23.5. That is the measurement `read_edges` in `hierarchy_stats.rs` (deleted after `2fa5f22`)
 exists to produce, and it says the hierarchy is real and its published levels are an accident of
 where the algorithm's sweeps happened to stop.
 
@@ -274,7 +274,7 @@ arrives with. **Both structures cut the same dendrogram.**
 depth-first walk of the hierarchy, so a run of consecutive group ids is a subtree; the buddy frontier
 on [where x and y come from](/docs/design/position) turns that into a run of consecutive Morton
 codes, hence a contiguous interval of `dense_id`. Measured over com-DBLP by
-`crates/fossil-layout/examples/hierarchy_stats.rs, plane_report`: **55,712 of 55,712 placement groups
+`plane_report` in `hierarchy_stats.rs` (deleted after `2fa5f22`): **55,712 of 55,712 placement groups
 fall in a single run of `dense_id`, and the id axis is monotone in group order.** Every coarser level
 of the dendrogram is therefore a contiguous interval as well, and a cell — a fixed count of
 consecutive ranks — is a window onto that same order rather than onto something orthogonal to it.
@@ -310,7 +310,7 @@ and what is left between them is binning noise.
 [A fidelity measure has a resolution, and below one bin per mark it is measuring itself](/docs/design/camera#a-fidelity-measure-has-a-resolution-and-below-one-bin-per-mark-it-is-measuring-itself)
 is the general form of the trap. Re-measured on a grid fitted to each arm — about `sqrt(marks)` bins
 per axis, so nothing fills more bins than it has points —
-`crates/fossil-layout/tests/level_vs_rung.rs, fidelity` puts rung 4 at **0.2230 against a null of
+`fidelity` in `level_vs_rung.rs` (deleted after `2fa5f22`) puts rung 4 at **0.2230 against a null of
 0.3700**, a margin of **+0.1470**, wider than rung 1 gets on the old ruler (+0.0784). The margin
 **grows** down the pyramid rather than decaying: +0.0956, +0.1168, +0.1318, +0.1470, +0.1814,
 +0.2543, +0.3341 through rung 7.
@@ -318,7 +318,7 @@ per axis, so nothing fills more bins than it has points —
 **So reach is restored as a measurement, and it still is not much of an argument — for a reason that
 has nothing to do with fidelity.** A camera spends a budget in *marks*, and the smallest budget
 anything in this tree spends is **15,000** — `SCREEN_MARKS`, the number the base of the pyramid is
-picked with; `apps/playground/src/tiles.ts` spends `BOUNDED_DEFAULTS.limit`'s 20,000, and a 1,200 px
+picked with; the playground's `src/tiles.ts` (deleted after `2fa5f22`) spends `BOUNDED_DEFAULTS.limit`'s 20,000, and a 1,200 px
 canvas at three pixels a mark would ask 160,000. Only **rung 1, at 19,818, is above that floor**, and
 the holarchy's 1,696 groups is below it too. The extra six rungs are a margin in a region nothing
 reads. What the decision above rests on is untouched either way: a cell is `dense_id >> shift` and a
@@ -678,7 +678,7 @@ picture.
 The table above is over the 16-bit quaternary of positions, which is the tree the Morton order
 imposes rather than the one the writer emits. Over the **written** rungs the same saturation is
 there, and it arrives sooner. Measured on com-DBLP by
-`crates/fossil-layout/tests/level_vs_rung.rs, what_a_level_costs_and_what_a_rung_costs_on_com_dblp`:
+`what_a_level_costs_and_what_a_rung_costs_on_com_dblp` in `level_vs_rung.rs` (deleted after `2fa5f22`):
 
 | rung | cells | quotient density | bytes per mark, at the whole extent | fidelity: TV against a null of the same mark count, each on a grid fitted to that count |
 | --- | --- | --- | --- | --- |
@@ -716,12 +716,12 @@ rungs running, which is what a saturated statistic looks like and not what losin
 like. [A fidelity measure has a resolution](/docs/design/camera#a-fidelity-measure-has-a-resolution-and-below-one-bin-per-mark-it-is-measuring-itself)
 is the general rule, now stated beside the measure it qualifies.
 
-Re-measured on a grid fitted to each arm, `crates/fossil-layout/tests/level_vs_rung.rs, fidelity`
+Re-measured on a grid fitted to each arm, `fidelity` in `level_vs_rung.rs` (deleted after `2fa5f22`)
 gets the column above: **every rung beats its null, and the margin grows down the pyramid** rather
 than decaying — +0.0956 at rung 1 to +0.3341 at rung 7. That is what count-weighted centroids should
 do against an unstructured subsample. A rung carries the exact mass of its members and has no
 sampling noise at all; its null has nothing else, and the null's noise grows as the sample shrinks.
-`crates/fossil-layout/tests/level_vs_rung.rs, resolution_sweep` is the evidence and it is kept
+`resolution_sweep` in `level_vs_rung.rs` (deleted after `2fa5f22`) is the evidence and it is kept
 rather than replaced by its conclusion: across both corpora at five resolutions, **no arm measured
 at one bin per mark or finer fails, and every failure sits at two bins per mark or coarser** — 130
 rows, 72 of them in range, zero counterexamples either way.
@@ -853,7 +853,7 @@ The rename waited on one condition, and the condition was met before it was take
 partitions spatially, so that nothing in the tree is a community any more*. That writer exists — the
 pass writes `crates/fossil-layout/src/layout/cells.rs, Pyramid`, and
 `crates/fossil-layout/src/layout/community.rs, Cut` is reached only from tests and from
-`crates/fossil-layout/examples/hierarchy_stats.rs, main`. So nothing in a written tree is a
+`main` in `hierarchy_stats.rs` (deleted after `2fa5f22`). So nothing in a written tree is a
 community, and the old name described a thing that no longer exists in the artefact.
 
 The three sections below are what it cost, and they are kept because two of the three estimates this
@@ -977,9 +977,9 @@ them», which the tree states in three places.**
 A camera spends a budget in *marks* and takes the coarsest artefact that still carries them, so the
 floor on what anything is read at is the smallest budget anything spends — not the deepest zoom, since
 zooming in shrinks what the rectangle holds and answers level 0 off the payload.
-`crates/fossil-layout/tests/level_vs_rung.rs, asked_for` collects the three budgets that exist in
+`asked_for` in `level_vs_rung.rs` (deleted after `2fa5f22`) collects the three budgets that exist in
 this tree: **15,000** marks (`SCREEN_MARKS`, the number the pyramid's own base is picked with),
-**20,000** (`BOUNDED_DEFAULTS.limit`, what `apps/playground/src/tiles.ts` actually spends), and
+**20,000** (`BOUNDED_DEFAULTS.limit`, what the playground's `src/tiles.ts` (deleted after `2fa5f22`) actually spends), and
 **160,000** (a 1,200 px canvas at three pixels a mark, if the door ever took the canvas). The
 smallest decides, and on com-DBLP **only rung 1, at 19,818 cells, is above it**. Eight of the nine
 rungs are below anything's budget, and they are **958 kB of the cell pyramid's 2,322** — 41% of it,

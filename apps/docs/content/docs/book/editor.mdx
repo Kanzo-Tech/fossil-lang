@@ -16,7 +16,7 @@ that speaks the protocol. It reads stdin, writes stdout, and has no configuratio
 ## What it answers
 
 Everything below is served by both hosts: the native binary, and the same compiler built to
-WebAssembly behind a browser playground.
+WebAssembly behind a browser editor.
 
 | you ask for | native | browser | and it answers |
 | --- | --- | --- | --- |
@@ -72,7 +72,7 @@ sequenceDiagram
 The third is the browser's short path and it exists because the second needs a client. A page that
 already calls the checker in-process should not have to stand up an LSP client, an id table and a
 second copy of every buffer to ask what type is under a cursor — so hover, completion and definition
-are also plain methods on the wasm workspace, and the playground calls them. Two rules fall out of
+are also plain methods on the wasm workspace, and a browser editor calls them. Two rules fall out of
 that and both are enforced rather than asserted: those three methods take a *shared* borrow, because
 none of them mutates and an editor asks at three different rates; and every one of them owes the
 caller's current text, because they answer about the last edit that was pushed.

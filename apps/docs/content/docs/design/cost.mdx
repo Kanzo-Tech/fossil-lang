@@ -316,9 +316,9 @@ Three of the four go red when the defect is put back; the fourth does not, becau
 the number of statements. That is worth stating: each assertion covers a different property, and a
 guard nobody has watched fail is a sentence rather than a guard.
 
-**And one bench, which is not a test.** `apps/playground/scripts/measure-frame.mjs` walks ten
+**And one bench, which is not a test.** The playground's `scripts/measure-frame.mjs` (deleted after `2fa5f22`) walks ten
 written-down rectangles over a bench corpus and reports the door's ledger per frame — carried
-forward onto `apps/playground/src/tiles.ts, SliceCost`, which adds what was drawn to what was read.
+forward onto `SliceCost` in the playground's `src/tiles.ts` (deleted after `2fa5f22`), which adds what was drawn to what was read.
 Each frame is asked three times and **every cost column but the clock must be identical across the
 repeats or the script exits 1 naming the frame that moved**, because a bench that flaps is not
 evidence. What it cannot see is anything after the upload: no fps, no draw call, no overdraw. It

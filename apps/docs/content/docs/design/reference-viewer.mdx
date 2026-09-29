@@ -147,7 +147,7 @@ compressed weight of the columns the query projects, over the row groups the rea
 **both** halves of a frame — the vertex artefact that answered and the relation's. What shows it
 holds is that the number *moves with the selection*: a frame reading 3 tiles of 62 reported
 21.76 MB, more than the entire 21.40 MB payload it had not opened; it reports **1.21 MB**.
-`apps/playground/scripts/measure-frame.mjs` is the measurement, and the second item below is what
+The playground's `scripts/measure-frame.mjs` (deleted after `2fa5f22`) is the measurement, and the second item below is what
 is left of this one.
 
 ## What a frame costs
@@ -158,7 +158,7 @@ level **3** for over the four levels this corpus writes. Every byte is `total_co
 of the Parquet footer, because DuckDB issues its reads from inside a Worker where no thread here
 can weigh them; anything derived rather than measured says so in the cell.
 
-**One convention now, and there were two.** `FrameCost.bytes` and `apps/playground/src/whole.ts`
+**One convention now, and there were two.** `FrameCost.bytes` and the playground's `src/whole.ts` (deleted after `2fa5f22`)
 weigh a read by the same rule — `total_compressed_size` over the columns the query projects, across
 both the vertex artefact and the relation's. What differs between them is the scope and not the
 rule: `whole.ts` weighs every row group because it loads every row, and the door weighs the row
@@ -206,10 +206,10 @@ outermost frame is the level.**
 Rows (c) and (d) are the same picture at two prices, and (c) is **not** that picture. Its anchors
 are four times its marks and they are real vertices at real coordinates, so dropping them turns a
 zoomed-out view into a sparse cloud with holes rather than a cheaper version of what was there.
-`apps/playground/src/tiles.ts` records that correction against its own earlier decision, and it is
+The playground's `src/tiles.ts` (deleted after `2fa5f22`) records that correction against its own earlier decision, and it is
 why the app asks for links at all. What it pays for them is row (d): the same picture off both
 pyramids, one range request and 1,533 kB, which is what
-`apps/playground/scripts/measure-frame.mjs` reports for the frame the app opens on.
+the playground's `scripts/measure-frame.mjs` (deleted after `2fa5f22`) reports for the frame the app opens on.
 
 Row (d) is the one the model wants, and it is the one `Corpus.frame` produces for a caller that asks
 for links at a level both pyramids are written at. The edge level at *k*=3 holds
@@ -328,7 +328,7 @@ one the item never named, and it is the one that made the number useless in prac
 `rowgroups` every tile of a set names the same URL**, so a sum over `parquet_metadata(urls)` weighed
 the whole *file* rather than the row groups the rectangle selected. The vertex half only looked
 selected because a level read names a small file; the edge half named the entire relation. The
-symptom is one column of `apps/playground/scripts/measure-frame.mjs`: **`bytes` did not fall with
+symptom is one column of the playground's `scripts/measure-frame.mjs` (deleted after `2fa5f22`): **`bytes` did not fall with
 `tiles`.** A frame reading 3 tiles of 62 reported 21.76 MB — more than the whole 21.40 MB payload it
 had not opened — and a camera closing in reported the same figure four moves running.
 
@@ -376,7 +376,7 @@ same claim as a statement of fact — a callout
 titled *the edges get no pyramid* — and that one was corrected rather than left, because it was
 measuring the induced set to answer a question about the incident one.
 
-**5 · The instrument measures half of it.** `apps/playground/scripts/measure-pyramid.mjs` asks one
+**5 · The instrument measures half of it.** The playground's `scripts/measure-pyramid.mjs` (deleted after `2fa5f22`) asks one
 rectangle twice, with links and without, and reports the byte ratio between them — which is the
 whole of row (c) and none of row (d). The door it measures through now answers row (d) as well, so
 what stopped it is gone — and it must keep measuring through the door, because an instrument that
@@ -449,8 +449,8 @@ the sample.
 
 **Nobody clicks.** There is no click handler, no hover, no tooltip, no bookmark and no deep link
 anywhere on the coarse path in this repository. `Frame` carries `denseIds`, positions, categories
-and links, and no `subject` — `packages/draw/src/encoding.ts` says so with a measurement beside
-it, `Slice.subjects` costing 1.87× the tile, and `apps/playground/src/crossfilter.ts` excludes the
+and links, and no `subject` — `@fossil-lang/draw`'s `encoding.ts` (deleted after `2fa5f22`) says so with a measurement beside
+it, `Slice.subjects` costing 1.87× the tile, and the playground's `src/crossfilter.ts` (deleted after `2fa5f22`) excludes the
 column from its view for the same reason. The identity verbs take an IRI *in* and know nothing about
 levels. This page already conceded the other half of it above: there is no level of detail for the
 identity index.
@@ -461,8 +461,8 @@ working:
 
 | what it does | why a cell cannot serve it |
 | --- | --- |
-| `apps/playground/src/crossfilter.ts` paints a `Uint8Array` mask indexed by `dense_id`, on every brush, at whatever level the camera settled at | a cell has no `dense_id`, so there is no index entry to paint — the mask is not wrong, it is impossible |
-| `packages/draw/src/residency.ts` pools answers taken at *different* levels into one interim picture and dedupes them by `dense_id` | coherent only because level `k+1`'s rows are a **subset** of level `k`'s. Rung `k+1`'s cells are a disjoint space from rung `k`'s, with no containment a set can see |
+| the playground's `src/crossfilter.ts` (deleted after `2fa5f22`) paints a `Uint8Array` mask indexed by `dense_id`, on every brush, at whatever level the camera settled at | a cell has no `dense_id`, so there is no index entry to paint — the mask is not wrong, it is impossible |
+| `@fossil-lang/draw`'s `residency.ts` (deleted after `2fa5f22`) pools answers taken at *different* levels into one interim picture and dedupes them by `dense_id` | coherent only because level `k+1`'s rows are a **subset** of level `k`'s. Rung `k+1`'s cells are a disjoint space from rung `k`'s, with no containment a set can see |
 | `packages/corpus/src/corpus.ts` exempts `pinned` from the level and pays a second payload read to serve it | there is nothing to exempt over an artefact whose rows are not addressable |
 
 So a coarse mark has to **be** a row, even though nothing in this tree ever names one.
@@ -488,7 +488,7 @@ boundary.**
 
 The economic half of the argument goes the other way, and it is worth stating against the decision
 rather than around it. Measured on com-DBLP by
-`crates/fossil-layout/tests/level_vs_rung.rs, what_a_level_costs_and_what_a_rung_costs_on_com_dblp`,
+`what_a_level_costs_and_what_a_rung_costs_on_com_dblp` in `level_vs_rung.rs` (deleted after `2fa5f22`),
 at the fifteen thousand marks a megapixel canvas asks for — where the pairing is level 2 against
 rung 1, both at 19,818 marks:
 
@@ -536,7 +536,7 @@ measured:
 1,239 marks do not clear the camera's tolerance. That narrowing is withdrawn.** It came from measuring
 310 marks against a fixed 48×48 grid — **7.43 bins per mark**, where the rung and its null both pin
 against TV 1 and the −0.0016 between them is binning noise. Re-measured at about `sqrt(marks)` bins
-per axis by `crates/fossil-layout/tests/level_vs_rung.rs, fidelity`, rung 4 beats its null by
+per axis by `fidelity` in `level_vs_rung.rs` (deleted after `2fa5f22`), rung 4 beats its null by
 **+0.1470** and rung 7 by **+0.3341**, a margin that grows rather than decays down the pyramid.
 [A fidelity measure has a resolution](/docs/design/camera#a-fidelity-measure-has-a-resolution-and-below-one-bin-per-mark-it-is-measuring-itself)
 is the general rule the mistake violated, and
@@ -546,7 +546,7 @@ carries the full retraction.
 **What this bullet can honestly claim is the complement, and the reason is not fidelity at all:** a
 rung is the only artefact below 1,239 marks, it carries a real picture there — and **nothing in this
 repository ever asks for one.** A camera spends a budget in marks and the smallest budget anything
-here spends is 15,000; `apps/playground/src/tiles.ts` spends 20,000. Only rung 1, at 19,818, is above
+here spends is 15,000; the playground's `src/tiles.ts` (deleted after `2fa5f22`) spends 20,000. Only rung 1, at 19,818, is above
 that. So the cell pyramid's depth is not capped by what it can draw; it is uncapped and unvisited.
 Whether the writer should keep emitting rungs nothing asks for is
 [open](/docs/design/cells#what-this-does-not-settle).
