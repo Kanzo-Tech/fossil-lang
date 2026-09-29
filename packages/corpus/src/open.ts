@@ -13,7 +13,8 @@ import { join, paths, scan } from './manifest.js';
 import { callbackReads, engineReads, type QueryFn, type QueryRow, type Reads } from './query.js';
 import { scanOf } from './scan.js';
 import { CorpusReadError, ident, list, lit, text } from './sql.js';
-import { tileManifestOf } from './tile-manifest.js';
+import { published, tileManifestOf } from './tile-manifest.js';
+import { zoomsOf, type Zooms } from './tile-matrix.js';
 import { verbsOf } from './verbs.js';
 import { mount } from '@fossil-lang/storage';
 import type { Engine, Host } from '@fossil-lang/types';
@@ -209,7 +210,11 @@ export async function open(url: string, options: OpenOptions): Promise<Corpus> {
     );
   }
 
-  return opened(url, options, manifestFiles, reads);
+  const texts = async (urls: readonly string[]): Promise<Map<string, string>> => {
+    const rows = await query(`SELECT filename, content FROM read_text(${list(urls)})`);
+    return new Map(rows.map((row) => [text(row, 'filename'), text(row, 'content')]));
+  };
+  return opened(url, options, manifestFiles, reads, texts);
 }
 
 /**
@@ -257,7 +262,15 @@ async function vended(job: string, options: OpenOptions, engine: Engine): Promis
     const base = storage.name(prefix);
     const files = addressManifests(manifestFiles, base).files();
     await storage.files(files.map((file) => `${prefix}${file.slice(base.length)}`));
-    return await opened(base, options, manifestFiles, reads, {
+    // The tile manifests are named by the documents just read, so they are lent and read here —
+    // one more round trip, the one `/docs/design/backend` measured the file for.
+    const texts = async (urls: readonly string[]): Promise<Map<string, string>> => {
+      const names = await storage.files(urls.map((u) => `${prefix}${u.slice(base.length)}`));
+      const rows = await query(`SELECT filename, content FROM read_text(${list(names)})`);
+      const byName = new Map(rows.map((row) => [text(row, 'filename'), text(row, 'content')]));
+      return new Map(urls.map((u, i) => [u, byName.get(names[i]!) ?? '']));
+    };
+    return await opened(base, options, manifestFiles, reads, texts, {
       holder: engine,
       drop: () => storage.close(),
     });
@@ -278,6 +291,7 @@ async function opened(
   options: OpenOptions,
   manifestFiles: Record<string, string>,
   reads: Reads,
+  texts: (urls: readonly string[]) => Promise<Map<string, string>>,
   holding?: Holding,
 ): Promise<Corpus> {
   const query = reads.rows;
@@ -341,6 +355,7 @@ async function opened(
       identity: has(type.type, IDENTITY) ? IDENTITY : null,
       geometry: has(type.type, 'x') && has(type.type, 'y'),
       indexed: type.index !== null,
+      channels: type.channels,
     })),
     edges: addressing.edges.map((edge) => ({
       edgeType: edge.edgeType,
@@ -349,6 +364,34 @@ async function opened(
       count: edge.count,
       directions: edge.directions,
     })),
+  };
+
+  // Every type's tile manifest, in one round trip, parsed into its matrices while the corpus opens:
+  // `tileMatrix` and `plan` are synchronous because nothing is left to fetch.
+  const zoomsByType = new Map<string, Zooms>();
+  const named = addressing.types.filter((t) => t.tileManifest !== null);
+  const relative = (u: string): string => u.slice(url.length).replace(/^\/+/, '');
+  const unheld = named.filter((t) => manifestFiles[relative(t.tileManifest!)] === undefined);
+  const fetched =
+    unheld.length === 0 ? new Map<string, string>() : await texts(unheld.map((t) => t.tileManifest!));
+  for (const type of named) {
+    const where = type.tileManifest!;
+    const body = manifestFiles[relative(where)] ?? fetched.get(where);
+    if (body === undefined || body === '') {
+      throw new CorpusManifestError(`${where} is named by the manifest and did not read`);
+    }
+    zoomsByType.set(type.type, zoomsOf(type, published(body, where), fieldsOf(type.type)));
+  }
+  const zooms = (name: string): Zooms => {
+    const type = addressing.vertexType(name).type;
+    const found = zoomsByType.get(type);
+    if (found === undefined) {
+      throw new CorpusReadError(
+        `${type} publishes no tile manifest, so it has no tile matrix to plan against — a corpus ` +
+          'written before the field; its footers still answer `rows` and `frame`',
+      );
+    }
+    return found;
   };
 
   const manifest = await tileManifestOf({ query, addressing, payloadFiles, has });
@@ -377,6 +420,7 @@ async function opened(
     schema: verbs.schema,
     relations: verbs.relations,
     extent: manifest.extent,
+    tileMatrix: (type) => zooms(type).set,
     rows: scanner.rows,
     frame: frameOf({ query, addressing, fieldsOf, has, manifest, scan: scanner }),
     node: identity.node,

@@ -120,7 +120,7 @@ export type { NodeParams, PlacedVertex } from './identity.js';
 export type { OpenOptions, SqlPolicy } from './open.js';
 export type { RowsAnswer, RowsParams } from './scan.js';
 export type { Extent } from './tile-manifest.js';
-export type { Pixels } from './tile-matrix.js';
+export type { Pixels, TileAddress, TileInfo, TileMatrix, TileMatrixSet } from './tile-matrix.js';
 
 // What `Corpus.addressing` is. Named here because the member is: a public member whose type cannot be
 // written down is worse than no member.
@@ -135,6 +135,8 @@ export type { Pixels } from './tile-matrix.js';
 // `ResolveCorpusOptions` is NOT replaced by another name: `OpenOptions` is what it became.
 export type {
   AddressedTiles,
+  CellsAddress,
+  Channel,
   Container,
   CorpusAddressing,
   Direction,
@@ -145,6 +147,7 @@ export type {
   GapReason,
   IndexAddress,
   ProjectionAddress,
+  RungAddress,
   VertexAddress,
 } from './address.js';
 

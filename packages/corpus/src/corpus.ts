@@ -68,7 +68,7 @@
  * vertex type**, which the addressing's `tilesFor` cannot name unambiguously. See {@link Corpus.rows}.
  */
 
-import type { CorpusAddressing, Direction } from './address.js';
+import type { Channel, CorpusAddressing, Direction } from './address.js';
 import type { Neighbourhood, NeighboursParams } from './edges.js';
 import type { Frame, FrameParams } from './frame.js';
 import type {
@@ -80,6 +80,7 @@ import type {
 import type { NodeParams, PlacedVertex } from './identity.js';
 import type { RowsAnswer, RowsParams } from './scan.js';
 import type { Extent } from './tile-manifest.js';
+import type { TileMatrixSet } from './tile-matrix.js';
 
 /** One column of a vertex payload, as the bytes declare it. */
 export interface CorpusField {
@@ -112,6 +113,12 @@ export interface CorpusVertexType {
    * them apart discovers the difference by measuring.
    */
   readonly indexed: boolean;
+  /**
+   * What a view can draw the type with — the manifest's `channels:`, as declared. A cell tree's
+   * `mode` is the mode of the one its `modeChannel` names, and a categorical's `domain` is the
+   * value count a legend is drawn from.
+   */
+  readonly channels: readonly Channel[];
 }
 
 /** What one edge type is. `count` covers both orientations: they are one relation stored twice. */
@@ -206,6 +213,17 @@ export interface Corpus {
    * to put in the box.
    */
   extent(type?: string): Promise<Extent | null>;
+  /**
+   * **One vertex type's tile matrices** — OGC's `TileMatrixSet`: its extent, and one matrix per
+   * `z`, coarsest first, the payload last, each listing every tile with its rows and its box.
+   *
+   * Synchronous and total: it is the tile manifest `open` read, and no tile of any matrix is empty,
+   * so a view picks its zoom — the finest whose visible tiles' rows fit its budget — without a
+   * request.
+   *
+   * @throws {CorpusReadError} for a type that publishes no tile manifest.
+   */
+  tileMatrix(type: string): TileMatrixSet;
   /** The vertices in a rectangle and the edges among them, entire. */
   rows(params: RowsParams): Promise<RowsAnswer>;
   /**
