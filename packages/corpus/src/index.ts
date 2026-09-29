@@ -113,7 +113,15 @@ export type {
   CorpusVertexType,
   SqlCorpus,
 } from './corpus.js';
-export type { Answer, Neighbourhood, NeighboursParams, PlacedEdge } from './edges.js';
+export type {
+  Answer,
+  EdgeAnswer,
+  EdgeBatch,
+  EdgesParams,
+  Neighbourhood,
+  NeighboursParams,
+  PlacedEdge,
+} from './edges.js';
 export type { Box, Filter, Literal } from './expression.js';
 export type { Batch } from './query.js';
 export type { Scan, ScanParams, ScanTask } from './scan.js';

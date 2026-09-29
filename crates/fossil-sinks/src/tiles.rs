@@ -29,6 +29,22 @@
 //! **The box is not a field.** A tile's box is the bounds of its coordinate
 //! columns, which this already publishes; a `bbox` beside them would be a second
 //! statement of four numbers.
+//!
+//! **The edges a tile addresses are entries too.** At `z = Z` each adjacency
+//! orientation aligned on this type lists its tiles, and below it each rung's
+//! quotient does — the same four statistics, numbered by the aligned tile
+//! rather than by the row group. The two numbers differ there and only there:
+//! a tile of sources with no edges writes no row group, so the ordinals stay
+//! dense while the tiles skip, and an entry is how a reader learns that a tile
+//! has no edges without asking the engine.
+//!
+//! **No byte range, and that is a finding rather than an omission.**
+//! `DuckDB`'s Parquet reader has no read by row group: a tile is selected by one
+//! conjunctive range on its aligned column, which the engine prunes against each
+//! row group's own statistics in the footer it reads anyway. So a published
+//! offset would have no reader, and a document carries a fact exactly when a
+//! reader needs it. What would reverse it is an engine that reads a row group
+//! by its byte range — a `Range` request a host issues itself.
 
 use std::collections::BTreeMap;
 
@@ -46,7 +62,7 @@ pub struct TileManifest {
     pub matrices: Vec<TileMatrix>,
 }
 
-/// One zoom's tiles.
+/// One zoom's tiles, and the tiles of the edges its rows address.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TileMatrix {
     /// The zoom: `0` for the coarsest rung, `Z` for the payload.
@@ -55,16 +71,48 @@ pub struct TileMatrix {
     /// empty — `dense_id` is gapless and so is a rung's `cell_id` — so the list
     /// is complete and `tiles[t].tile == t`.
     pub tiles: Vec<TileStatistics>,
+    /// At `z = Z`, every adjacency orientation whose tiles are cut on this
+    /// type's — `by_source` of a relation this type is the source of, and
+    /// `by_target` of one it is the target of. Empty below `Z`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adjacencies: Vec<AdjacencyTiles>,
+    /// Below `Z`, the rung's quotient where the writer published one, tiled on
+    /// its source cell's tile. `None` at `Z`, and on a rung whose cells have no
+    /// edge between them — which is also when the document declares none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quotient: Option<Vec<TileStatistics>>,
+}
+
+/// One orientation of one relation, as the tiles of the type it is cut on.
+///
+/// Sparse where a vertex zoom is not: a tile of the aligned type whose vertices
+/// have no edge in this orientation has no row group and no entry, so an absent
+/// tile is a read that answers nothing and need not be made.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdjacencyTiles {
+    /// The relation's label, as the edge document writes `edge_type`.
+    pub edge_type: String,
+    /// The type `src_dense` indexes.
+    pub src_type: String,
+    /// The type `dst_dense` indexes.
+    pub dst_type: String,
+    /// Which endpoint the tiles are cut on — the edge document's `aligned_by`,
+    /// `src` for `by_source` and `dst` for `by_target`.
+    pub aligned_by: String,
+    /// The orientation's tiles, ascending, each numbered by the aligned type's
+    /// tile it holds the edges of.
+    pub tiles: Vec<TileStatistics>,
 }
 
 /// One tile's entry: Iceberg's `data_file` metrics, for a row group.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TileStatistics {
-    /// The tile's number within its zoom, which is its row group's ordinal.
+    /// The tile's number within its zoom — its row group's ordinal on a vertex
+    /// zoom, and the aligned tile on an adjacency or a quotient.
     ///
-    /// Stated although it is the entry's position, because the shape is meant to
-    /// carry an adjacency next, and an adjacency's tiles are sparse: a tile of
-    /// sources with no edges writes no row group.
+    /// Stated although it is the entry's position on a vertex zoom, because an
+    /// edge set's tiles are sparse: a tile of sources with no edges writes no
+    /// row group, so there the ordinal and the tile part.
     pub tile: u64,
     /// Rows in the tile.
     pub record_count: u64,
@@ -144,12 +192,14 @@ impl Bound {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bound, TileManifest, TileMatrix, TileStatistics};
+    use super::{AdjacencyTiles, Bound, TileManifest, TileMatrix, TileStatistics};
 
     fn one_tile() -> TileManifest {
         TileManifest {
             matrices: vec![TileMatrix {
                 z: 0,
+                adjacencies: Vec::new(),
+                quotient: None,
                 tiles: vec![TileStatistics {
                     tile: 0,
                     record_count: 3,
@@ -189,6 +239,43 @@ mod tests {
         #[allow(clippy::cast_possible_truncation)]
         let narrow = wide.0 as f32;
         assert_eq!(narrow.to_bits(), 0.1f32.to_bits());
+    }
+
+    /// An edge set's entries are numbered by the aligned tile, so a manifest
+    /// that skips one says so in the numbers and keeps saying it after a trip
+    /// through text; a vertex zoom with no edge set writes neither key.
+    #[test]
+    fn edge_entries_round_trip_and_stay_out_of_a_zoom_without_them() {
+        let mut manifest = one_tile();
+        let text = manifest.to_json().expect("emit");
+        assert!(
+            !text.contains("adjacencies") && !text.contains("quotient"),
+            "{text}"
+        );
+        let sparse = |tile| TileStatistics {
+            tile,
+            ..one_tile().matrices[0].tiles[0].clone()
+        };
+        manifest.matrices[0].adjacencies.push(AdjacencyTiles {
+            edge_type: "knows".to_string(),
+            src_type: "Person".to_string(),
+            dst_type: "Person".to_string(),
+            aligned_by: "src".to_string(),
+            tiles: vec![sparse(0), sparse(2)],
+        });
+        manifest.matrices.insert(
+            0,
+            TileMatrix {
+                z: 0,
+                tiles: vec![sparse(0)],
+                adjacencies: Vec::new(),
+                quotient: Some(vec![sparse(0)]),
+            },
+        );
+        let text = manifest.to_json().expect("emit");
+        let back: TileManifest = serde_json::from_str(&text).expect("parse");
+        assert_eq!(back, manifest, "{text}");
+        assert_eq!(back.matrices[1].adjacencies[0].tiles[1].tile, 2);
     }
 
     #[test]

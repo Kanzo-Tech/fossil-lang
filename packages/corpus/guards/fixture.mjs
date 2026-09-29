@@ -28,11 +28,11 @@
  * has to be small enough to read by hand declares a smaller one and is addressed identically.
  */
 
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execute, lit, query, scalar } from "./duck.mjs";
 import { TILE_ROWS, mortonOf } from "./arithmetic.mjs";
-import { footerSql } from "./inspect.mjs";
+import { partOf, tileSql } from "./inspect.mjs";
 
 /**
  * The base a cell tree declares, in vertices per cell.
@@ -116,38 +116,63 @@ function bound(type, text) {
 }
 
 /**
- * The tile manifest of a payload, read off the footers that were just written — the only honest
- * source, and the one fossil's writer reads too. One zoom, `z = 0`, because this fixture writes no
- * rung. Keys are sorted, as the Rust writer's maps sort them.
+ * The tile manifest of a payload and the adjacencies cut on it, read off the footers that were just
+ * written — the only honest source, and the one fossil's writer reads too. One zoom, `z = 0`,
+ * because this fixture writes no rung. Keys are sorted, as the Rust writer's maps sort them, and an
+ * entry's keys are in the order its structs declare them.
+ *
+ * `adjacencies` is `[{ entry, zooms }]`: the orientation's identity as the manifest spells it, and
+ * its files as {@link tileSql} takes them. An orientation whose row groups straddle two tiles is
+ * left out rather than approximated — DuckDB cuts a row-group container by row count, so under
+ * `rowgroups` an adjacency's groups do not fall on tile boundaries, and a tile sharing a footer with
+ * its neighbour has no statistics of its own. A reader then reads that orientation's tiles without
+ * knowing in advance which are empty.
  */
-function tileManifest(zooms) {
-  const tiles = new Map();
-  for (const row of query(footerSql(zooms))) {
-    const key = `${row.z}/${row.tile}`;
-    if (!tiles.has(key)) {
-      tiles.set(key, { z: Number(row.z), tile: Number(row.tile), rows: String(row.rows), nulls: [], lower: [], upper: [] });
+function tileManifest(zooms, adjacencies = []) {
+  const entries = (rows) => {
+    const tiles = new Map();
+    for (const row of rows) {
+      const key = `${row.z}/${row.tile}`;
+      if (!tiles.has(key)) {
+        tiles.set(key, { z: Number(row.z), tile: Number(row.tile), rows: String(row.rows), nulls: [], lower: [], upper: [] });
+      }
+      const entry = tiles.get(key);
+      entry.nulls.push([row.col, String(row.nulls)]);
+      if (row.lo !== null) entry.lower.push([row.col, bound(row.type, row.lo)]);
+      if (row.hi !== null) entry.upper.push([row.col, bound(row.type, row.hi)]);
     }
-    const entry = tiles.get(key);
-    entry.nulls.push([row.col, String(row.nulls)]);
-    if (row.lo !== null) entry.lower.push([row.col, bound(row.type, row.lo)]);
-    if (row.hi !== null) entry.upper.push([row.col, bound(row.type, row.hi)]);
-  }
+    return [...tiles.values()].sort((a, b) => a.z - b.z || a.tile - b.tile);
+  };
   const object = (pairs) =>
     `{${pairs
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([k, v]) => `${JSON.stringify(k)}:${v}`)
       .join(",")}}`;
+  const spell = (entry) =>
+    `{"tile":${entry.tile},"record_count":${entry.rows},"null_value_counts":${object(entry.nulls)},` +
+    `"lower_bounds":${object(entry.lower)},"upper_bounds":${object(entry.upper)}}`;
   const byZ = new Map();
-  for (const entry of [...tiles.values()].sort((a, b) => a.z - b.z || a.tile - b.tile)) {
+  for (const entry of entries(query(tileSql(zooms)))) {
     if (!byZ.has(entry.z)) byZ.set(entry.z, []);
-    byZ
-      .get(entry.z)
-      .push(
-        `{"tile":${entry.tile},"record_count":${entry.rows},"null_value_counts":${object(entry.nulls)},` +
-          `"lower_bounds":${object(entry.lower)},"upper_bounds":${object(entry.upper)}}`,
-      );
+    byZ.get(entry.z).push(spell(entry));
   }
-  const matrices = [...byZ].map(([z, list]) => `{"z":${z},"tiles":[${list.join(",")}]}`);
+  const cut = [];
+  for (const { entry, zooms: files } of adjacencies) {
+    const rows = files.length === 0 ? [] : query(tileSql(files));
+    if (rows.some((row) => row.straddles === true)) continue;
+    cut.push(
+      `{"edge_type":${JSON.stringify(entry.edge_type)},"src_type":${JSON.stringify(entry.src_type)},` +
+        `"dst_type":${JSON.stringify(entry.dst_type)},"aligned_by":${JSON.stringify(entry.aligned_by)},` +
+        `"tiles":[${entries(rows).map(spell).join(",")}]}`,
+    );
+  }
+  const top = Math.max(...byZ.keys());
+  const matrices = [...byZ].map(
+    ([z, list]) =>
+      `{"z":${z},"tiles":[${list.join(",")}]` +
+      (z === top && cut.length > 0 ? `,"adjacencies":[${cut.join(",")}]` : "") +
+      "}",
+  );
   return `{"matrices":[${matrices.join(",")}]}`;
 }
 
@@ -559,6 +584,21 @@ export function write(
             tile: k,
           }))
         : [{ z: 0, path: join(vertexPrefix, "tiles.parquet"), tile: null }],
+      [
+        ["by_source", "src", "src_dense"],
+        ["by_target", "dst", "dst_dense"],
+      ].map(([orientation, alignedBy, key]) => {
+        const entry = { edge_type: "knows", src_type: "Person", dst_type: "Person", aligned_by: alignedBy };
+        const at = join(edgeDir, orientation);
+        const shift = Math.log2(tileRows);
+        const zooms =
+          layout === "files"
+            ? Array.from({ length: tiles }, (_, k) => join(at, `chunk${k}.parquet`))
+                .filter((path) => existsSync(path))
+                .map((path) => ({ z: 0, part: partOf(entry), path, tile: Number(/chunk(\d+)/.exec(path)[1]), key, shift }))
+            : [{ z: 0, part: partOf(entry), path: join(at, "tiles.parquet"), tile: null, key, shift }];
+        return { entry, zooms };
+      }),
     ),
   );
   writeFileSync(

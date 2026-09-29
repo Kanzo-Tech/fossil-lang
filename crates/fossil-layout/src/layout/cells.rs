@@ -80,7 +80,7 @@ use fossil_sinks::manifest::{
 use fossil_sinks::tiles::TileStatistics;
 
 use super::pass::LayoutError;
-use super::statistics::tile_statistics;
+use super::statistics::{RungTiles, numbered, tile_statistics};
 use crate::io::{LayoutIo, Sink};
 use fossil_tile_writer::TileWriter;
 
@@ -272,21 +272,22 @@ impl Pyramid {
     /// what it wrote, and the plan is the part it checks itself against rather
     /// than the part it reports.
     ///
-    /// Beside the declaration, each rung's tile statistics, rung 1 first — read
-    /// off the footer each rung's writer closes, for the tile manifest.
+    /// Beside the declaration, each rung's tile statistics and its quotient's,
+    /// rung 1 first — read off the footer each writer closes, for the tile
+    /// manifest.
     ///
     /// # Errors
     ///
     /// [`LayoutError`] on the first failing write, or on a prefix naming a
     /// scheme the pass cannot dereference.
-    pub(crate) fn write(
+    pub(super) fn write(
         &mut self,
         io: &dyn LayoutIo,
         prefix: &str,
         chunk_size: u64,
         vertex_count: u64,
         edges: &[Edges<'_>],
-    ) -> Result<(CellTree, Vec<Vec<TileStatistics>>), LayoutError> {
+    ) -> Result<(CellTree, Vec<RungTiles>), LayoutError> {
         let cell_schema = schema_of(CELL_COLUMNS, "a cell row");
         let quotient_schema = schema_of(QUOTIENT_COLUMNS, "a quotient edge");
         let tile = usize::try_from(chunk_size).unwrap_or(usize::MAX).max(1);
@@ -334,14 +335,17 @@ impl Pyramid {
                 lo = hi;
             }
             let footer = writer.finish().map_err(write_err(&url))?;
-            statistics.push(tile_statistics(&footer, &cell_schema));
 
             // The rung, as the manifest states it: the count it holds, and a
             // quotient only where one was written.
             let mut entry = CellRung::at(at, rows as u64, declared_properties(CELL_COLUMNS));
-            if let Some(count) = quotient {
-                entry = entry.with_quotient(count, declared_properties(QUOTIENT_COLUMNS));
+            if let Some((count, _)) = &quotient {
+                entry = entry.with_quotient(*count, declared_properties(QUOTIENT_COLUMNS));
             }
+            statistics.push(RungTiles {
+                cells: tile_statistics(&footer, &cell_schema),
+                quotient: quotient.map(|(_, tiles)| tiles),
+            });
             declared.push(entry);
         }
 
@@ -402,7 +406,7 @@ impl Pyramid {
         tile: usize,
         pairs: &[u64],
         schema: &SchemaRef,
-    ) -> Result<Option<u64>, LayoutError> {
+    ) -> Result<Option<(u64, Vec<TileStatistics>)>, LayoutError> {
         // Skip the runs that are absorbed; what is left is the quotient.
         let crossing = |&key: &u64| (key >> 32) as u32 != key as u32;
         if !pairs.iter().any(crossing) {
@@ -423,6 +427,10 @@ impl Pyramid {
         let mut dst = Vec::new();
         let mut weight = Vec::new();
         let mut open: Option<u32> = None;
+        // The cell tile each row group holds, in the order they are written —
+        // what the tile manifest numbers the quotient's entries by, because a
+        // tile of cells with no crossing edge writes no row group.
+        let mut written: Vec<u64> = Vec::new();
         let mut start = 0usize;
         while start < pairs.len() {
             let mut end = start + 1;
@@ -432,10 +440,11 @@ impl Pyramid {
             let (a, b) = ((pairs[start] >> 32) as u32, pairs[start] as u32);
             if a != b {
                 let at = a / width;
-                if open.is_some_and(|previous| previous != at) {
+                if let Some(previous) = open.filter(|&previous| previous != at) {
                     writer
                         .tile(&quotient_rows(schema, &mut src, &mut dst, &mut weight))
                         .map_err(write_err(&url))?;
+                    written.push(u64::from(previous));
                 }
                 open = Some(at);
                 src.push(a);
@@ -445,13 +454,17 @@ impl Pyramid {
             }
             start = end;
         }
-        if !src.is_empty() {
+        if let Some(last) = open.filter(|_| !src.is_empty()) {
             writer
                 .tile(&quotient_rows(schema, &mut src, &mut dst, &mut weight))
                 .map_err(write_err(&url))?;
+            written.push(u64::from(last));
         }
-        writer.finish().map_err(write_err(&url))?;
-        Ok(Some(edges))
+        let footer = writer.finish().map_err(write_err(&url))?;
+        Ok(Some((
+            edges,
+            numbered(tile_statistics(&footer, schema), &written),
+        )))
     }
 }
 

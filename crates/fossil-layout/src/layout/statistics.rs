@@ -9,7 +9,7 @@
 //! disk. [`fossil_sinks::tiles`] has the model and which columns carry bounds.
 
 use arrow::datatypes::{DataType, Schema};
-use fossil_sinks::tiles::{Bound, TileManifest, TileMatrix, TileStatistics};
+use fossil_sinks::tiles::{AdjacencyTiles, Bound, TileManifest, TileMatrix, TileStatistics};
 use parquet::file::metadata::ParquetMetaData;
 use parquet::file::statistics::Statistics;
 
@@ -52,25 +52,51 @@ pub(super) fn tile_statistics(meta: &ParquetMetaData, schema: &Schema) -> Vec<Ti
         .collect()
 }
 
-/// A type's tile manifest, out of its payload's entries and its rungs', the
-/// rungs in rung order — rung 1, the finest, first.
+/// The same entries renumbered by the tile each row group holds, for an edge
+/// set whose tiles are sparse — `tiles[k]` is the tile row group `k` was
+/// written for, in the order the writer wrote them.
+pub(super) fn numbered(mut entries: Vec<TileStatistics>, tiles: &[u64]) -> Vec<TileStatistics> {
+    debug_assert_eq!(entries.len(), tiles.len(), "one tile number per row group");
+    for (entry, &tile) in entries.iter_mut().zip(tiles) {
+        entry.tile = tile;
+    }
+    entries
+}
+
+/// One rung's entries: its cells, and its quotient's where one was written.
+pub(super) struct RungTiles {
+    pub(super) cells: Vec<TileStatistics>,
+    pub(super) quotient: Option<Vec<TileStatistics>>,
+}
+
+/// A type's tile manifest, out of its payload's entries, the adjacency
+/// orientations cut on its tiles, and its rungs', the rungs in rung order —
+/// rung 1, the finest, first.
 ///
 /// The zooms are `/docs/design/backend`'s: rung `k` of `R` is `z = R − k` and
 /// the payload is `z = R`, so the list comes out coarsest first.
 pub(super) fn manifest(
     payload: Vec<TileStatistics>,
-    rungs: Vec<Vec<TileStatistics>>,
+    adjacencies: Vec<AdjacencyTiles>,
+    rungs: Vec<RungTiles>,
 ) -> TileManifest {
     let top = u32::try_from(rungs.len()).unwrap_or(u32::MAX);
     let mut matrices: Vec<TileMatrix> = rungs
         .into_iter()
         .rev()
         .zip(0..)
-        .map(|(tiles, z)| TileMatrix { z, tiles })
+        .map(|(rung, z)| TileMatrix {
+            z,
+            tiles: rung.cells,
+            adjacencies: Vec::new(),
+            quotient: rung.quotient,
+        })
         .collect();
     matrices.push(TileMatrix {
         z: top,
         tiles: payload,
+        adjacencies,
+        quotient: None,
     });
     TileManifest { matrices }
 }

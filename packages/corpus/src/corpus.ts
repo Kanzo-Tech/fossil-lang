@@ -69,7 +69,7 @@
  */
 
 import type { Channel, CorpusAddressing, Direction } from './address.js';
-import type { Neighbourhood, NeighboursParams } from './edges.js';
+import type { EdgeAnswer, EdgesParams, Neighbourhood, NeighboursParams } from './edges.js';
 import type { Frame, FrameParams } from './frame.js';
 import type {
   ExecuteSqlParams,
@@ -232,6 +232,11 @@ export interface Corpus {
    * @throws {CorpusReadError} for a column no zoom carries, in the filter or the projection.
    */
   scan(params: ScanParams): Scan;
+  /**
+   * **The relations incident to one tile**, out of the half aligned on `direction` — the adjacency
+   * at `z = Z`, the rung's quotient below it — and the ones declined, with fossil's `GapReason`.
+   */
+  edges(params: EdgesParams): Promise<EdgeAnswer>;
   /** The vertices in a rectangle and the edges among them, entire. */
   rows(params: RowsParams): Promise<RowsAnswer>;
   /**

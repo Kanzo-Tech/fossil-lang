@@ -200,27 +200,68 @@ function cellsOf(info) {
  * Every row group of a set of zooms, one row per column, with what its footer says: the SQL a
  * tile manifest is written from and checked against.
  *
- * `zooms` is `[{ z, path, tile }]`: `tile` is the tile a file-per-tile file holds, or `null` where
- * the file is a row-group container and the ordinal is the tile. A bound is kept only for a column
- * of an integer or floating-point type — `INT32`/`INT64` with no converted type or an integer one,
- * `FLOAT`, `DOUBLE` — which is the set `crates/fossil-sinks/src/tiles.rs` publishes; a string, a
- * date or a boolean is counted for nulls and not bounded.
+ * `zooms` is `[{ z, path, tile, part?, key?, shift? }]`. `tile` is the tile a file-per-tile file
+ * holds, or `null` where the file is a row-group container. There the tile is the row group's
+ * ordinal on a vertex zoom, and on an edge set — an adjacency orientation or a quotient, named by
+ * `part` — it is the row group's lower bound on `key` shifted by `shift`, because a tile of sources
+ * with no edges writes no row group and the ordinals stop being tiles. `tile_hi` is the same shift
+ * of the upper bound, so a row group that straddles two tiles is visible rather than filed under
+ * the first. A bound is kept only for a column of an integer or floating-point type —
+ * `INT32`/`INT64` with no converted type or an integer one, `FLOAT`, `DOUBLE` — which is the set
+ * `crates/fossil-sinks/src/tiles.rs` publishes; a string, a date or a boolean is counted for nulls
+ * and not bounded.
  */
 export function footerSql(zooms) {
-  const values = zooms.map((z) => `(${z.z}, '${lit(z.path)}', ${z.tile === null ? "NULL" : z.tile})`);
+  const text = (value) => (value === undefined || value === null ? "NULL" : `'${lit(String(value))}'`);
+  const values = zooms.map(
+    (z) =>
+      `(${z.z}, ${text(z.part ?? "")}, '${lit(z.path)}', ${z.tile === null ? "NULL" : z.tile}, ` +
+      `${text(z.key)}, ${z.shift ?? "NULL"})`,
+  );
   const list = `[${zooms.map((z) => `'${lit(z.path)}'`).join(", ")}]`;
   const bounded =
     "(m.type IN ('FLOAT', 'DOUBLE') OR (m.type IN ('INT32', 'INT64') AND " +
     "(s.converted_type IS NULL OR regexp_matches(s.converted_type, '^U?INT_(8|16|32|64)$'))))";
-  return `SELECT v.z::INTEGER AS z, coalesce(v.t, m.row_group_id)::BIGINT AS tile, m.row_group_id,
-                 m.row_group_num_rows AS rows, m.path_in_schema AS col, m.type,
+  return `SELECT v.z::INTEGER AS z, v.part,
+                 coalesce(v.t, k.stats_min_value::UBIGINT >> v.sh, m.row_group_id)::BIGINT AS tile,
+                 coalesce(v.t, k.stats_max_value::UBIGINT >> v.sh, m.row_group_id)::BIGINT AS tile_hi,
+                 m.row_group_id, m.row_group_num_rows AS rows, m.path_in_schema AS col, m.type,
                  m.stats_null_count AS nulls,
                  CASE WHEN ${bounded} THEN m.stats_min_value END AS lo,
                  CASE WHEN ${bounded} THEN m.stats_max_value END AS hi
-            FROM (VALUES ${values.join(", ")}) v(z, f, t)
+            FROM (VALUES ${values.join(", ")}) v(z, part, f, t, key, sh)
             JOIN parquet_metadata(${list}) m ON m.file_name = v.f
-            JOIN parquet_schema(${list}) s ON s.file_name = m.file_name AND s.name = m.path_in_schema`;
+            JOIN parquet_schema(${list}) s ON s.file_name = m.file_name AND s.name = m.path_in_schema
+            LEFT JOIN parquet_metadata(${list}) k
+              ON k.file_name = m.file_name AND k.row_group_id = m.row_group_id AND k.path_in_schema = v.key`;
 }
+
+/**
+ * {@link footerSql} per TILE rather than per row group: what a tile manifest entry says.
+ *
+ * A tile is one row group wherever fossil's writer cut it, and a run of them where a writer that
+ * sizes row groups by rows did — a file-per-tile adjacency holding more edges than one group, or
+ * DuckDB's own `ROW_GROUP_SIZE`. The entry is then the run's statistics folded the way Iceberg folds
+ * a file's: rows and nulls summed, the lower bound the least and the upper the greatest, compared
+ * in the column's own domain. `straddles` is whether any row group of the tile reaches into the
+ * next one — a tile no entry can describe, because its rows share a footer with another tile's.
+ */
+export function tileSql(zooms) {
+  const typed = (fn, column) =>
+    `CASE WHEN any_value(type) IN ('FLOAT', 'DOUBLE') THEN ${fn}(${column}::DOUBLE)::VARCHAR ` +
+    `ELSE ${fn}(${column}::HUGEINT)::VARCHAR END`;
+  return `SELECT z, part, tile, col, any_value(type) AS type, sum(rows)::BIGINT AS rows,
+                 sum(nulls)::BIGINT AS nulls, ${typed("min", "lo")} AS lo, ${typed("max", "hi")} AS hi,
+                 bool_or(tile_hi <> tile) AS straddles
+            FROM (${footerSql(zooms)}) GROUP BY z, part, tile, col`;
+}
+
+/**
+ * The name one edge set goes by in a tile manifest check: an adjacency orientation as its relation
+ * and the endpoint it is cut on, a quotient as the word. Both sides of the check spell it here.
+ */
+export const partOf = (entry) =>
+  `${entry.edge_type}:${entry.src_type}:${entry.dst_type}:${entry.aligned_by}`;
 
 /**
  * The projections a manifest declares, resolved against the type's own prefix.

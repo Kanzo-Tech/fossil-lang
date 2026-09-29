@@ -397,7 +397,7 @@ async function opened(
 
   const manifest = await tileManifestOf({ query, addressing, payloadFiles, has });
   const identity = identityOf({ query, addressing, payloadFiles, has });
-  const edges = edgesOf({ query, addressing, identity });
+  const edges = edgesOf({ query, reads, addressing, identity, zooms });
   const rectangles = rowsOf({ query, addressing, payloadFiles, fieldsOf, has, manifest, edges });
   const verbs = verbsOf({ query, addressing, manifestFiles, catalog, payloadFiles, fieldsOf });
 
@@ -423,6 +423,7 @@ async function opened(
     extent: manifest.extent,
     tileMatrix: (type) => zooms(type).set,
     scan: scanOf({ reads, zooms }),
+    edges: edges.edges,
     rows: rectangles.rows,
     frame: frameOf({ query, addressing, fieldsOf, has, manifest, rectangles }),
     node: identity.node,
