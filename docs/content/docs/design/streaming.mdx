@@ -396,7 +396,7 @@ now prints when it refuses: **the number is this stage's.**
 
 ## The pass takes a filesystem it does not own
 
-The layout pass is arithmetic over Arrow — Louvain, a Morton renumbering, a gather, one sort — and
+The layout pass is arithmetic over Arrow — Louvain, a Hilbert renumbering, a gather, one sort — and
 only eight functions of it were ever about files. Every one of those was `std::fs`, which is the
 single reason a crate declaring `[package.metadata.fossil] wasm = true` could not actually run in a
 browser: it compiled for `wasm32` and then had nothing to open. `LayoutIo` is the narrowest seam that
@@ -524,7 +524,7 @@ The honest answer is a bounded working set, and each step of the layout pass bou
 | --- | --- | --- |
 | connected components by union-find | one entry per vertex, O(V) | intrinsic, but edges are consumed in sequence and never resident |
 | placement by the golden angle (phyllotaxis) | a counter | closed-form in the index: no neighbourhood, no iteration, nothing to stream |
-| ordering by Morton code | the sort | arithmetic per point, and a sort is the operator class that spills |
+| ordering by Hilbert code | the sort | arithmetic per point, and a sort is the operator class that spills |
 
 **wasm32 has roughly four gigabytes of address space and nowhere to spill**, so a browser tab cannot
 make this promise — cannot, the way a machine with no disk cannot promise durability. It lives in the

@@ -2,7 +2,7 @@
 title: The backend
 description: fossil is the backend and kanzo-ui is the view, with one path between them — a corpus read the way Apache Iceberg reads a table and addressed the way an OGC tile matrix set addresses a tile, with the cell pyramid as the zoom levels, the level files retired, and the reader split into modules that each follow one of the two.
 direction:
-  summary: "`@fossil-lang/corpus` answers every view through `open`, `tileMatrix`, `scan` (`plan` and `read`) and `edges`, planning each read as a single tile out of statistics the writer published, and `frame`, `rows`, `extent`, `neighbours`, `levelsOf` and the level files are gone."
+  summary: "`@fossil-lang/corpus` answers every view through `open`, `tileMatrix`, `scan` (`plan` and `read`) and `edges`, planning by tile out of statistics the writer published and reading each run of consecutive tiles as one range, and `frame`, `rows`, `extent`, `neighbours`, `levelsOf` and the level files are gone."
 ---
 
 **fossil is the backend. The view is `@kanzo-tech/graph` and the rest of kanzo-ui, and there is one
@@ -27,9 +27,9 @@ what crosses it.
 
 | layer | what it owns | what it does not |
 | --- | --- | --- |
-| **writer** — `fossil run`, the layout pass | the bytes: payload tiles in Morton order, both adjacency orientations, the identity index, the cell pyramid and its quotients — and **the statistics of every tile it wrote** | any reader's question: which tiles a window needs, what a view draws |
+| **writer** — `fossil run`, the layout pass | the bytes: payload tiles in Hilbert order, both adjacency orientations, the identity index, the cell pyramid and its quotients — and **the statistics of every tile it wrote** | any reader's question: which tiles a window needs, what a view draws |
 | **manifest** — `graph.graph.yml` and one file per type | what a reader cannot recover without reading every footer: counts, the declared base of the pyramid, the tile matrix, and the per-tile statistics | anything derivable from what it already says |
-| **reader** — `@fossil-lang/corpus` | planning (which tiles a scan needs, from the manifest alone) and reading (one tile, through the host's engine) | policy: caching, cancelling what went stale, drawing a parent while a child loads, prefetching — all of it is the view's |
+| **reader** — `@fossil-lang/corpus` | planning (which tiles a scan needs, from the manifest alone) and reading (a batch per tile, through the host's engine) | policy: caching, cancelling what went stale, drawing a parent while a child loads, prefetching — all of it is the view's |
 
 The line under the reader is the one that matters. **A reader that caches is a second view.** The
 reader's answers are pure functions of an address, a filter and a projection, which is what lets a
@@ -67,7 +67,7 @@ interface Corpus {
   relations(): Promise<readonly CorpusRelation[]>;
   tileMatrix(type: string): TileMatrixSet;
   scan(params: ScanParams): Scan;
-  edges(params: EdgesParams): Promise<EdgeAnswer>;
+  edges(params: EdgesParams): Promise<readonly EdgeAnswer[]>;
   node(id: string, params?: { type?: string }): Promise<PlacedVertex | null>;
   schema(params?: SchemaParams): Promise<SchemaResult>;
   close(): Promise<void>;
@@ -112,10 +112,10 @@ interface ScanParams {
 interface Scan {
   readonly params: ScanParams;
   plan(): readonly ScanTask[];
-  read(task: TileAddress, options?: { signal?: AbortSignal }): Promise<Batch>;
+  read(addresses: readonly TileAddress[], options?: { signal?: AbortSignal }): Promise<readonly Batch[]>;
 }
 interface EdgesParams {
-  from: TileAddress;
+  from: readonly TileAddress[];
   direction: Direction;
   relation?: string;
   signal?: AbortSignal;
@@ -180,15 +180,19 @@ What each member answers, in one line each:
 - **`scan.plan()`** — Iceberg's `plan_files`: the tasks the scan needs **at every zoom**, pruned by
   the manifest's per-tile statistics and each carrying its residual. Synchronous for the same reason
   as `tileMatrix`. A filter naming a column cells do not carry has no task below `Z`.
-- **`scan.read(address)`** — one tile, as a columnar batch, cancelled by its signal. It takes any
-  address in the matrix, not only a planned one: a view builds `{ type, z, tile }` from what it sees,
-  and the far end of an edge is the tile its `dense_id` shifts to. At `z = Z` a batch holds at most
-  `tileRows` rows — 4,096 — so a finest tile can always be drawn as vertices. **How it addresses one
-  tile**: DuckDB's Parquet reader reads no row group by number, so the statement names the tile's file
-  and ONE conjunctive range on the column its rows are a range of — `dense_id` at `Z`, `cell_id`
-  below — which the engine prunes against every row group's statistics in the footer. Under
-  `rowgroups` that is the tile's row group and no other; under `files` the file is the tile.
-- **`edges({ from, direction })`** — the relations incident to one tile out of the half aligned on
+- **`scan.read(addresses)`** — a columnar batch per address, in the order given, cancelled by one
+  signal. It takes any address in the matrix, not only a planned one: a view builds `{ type, z, tile }`
+  from what it sees, and the far end of an edge is the tile its `dense_id` shifts to. At `z = Z` a
+  batch holds at most `tileRows` rows — 4,096 — so a finest tile can always be drawn as vertices.
+  **How it addresses tiles**: DuckDB's Parquet reader reads no row group by number, so a statement
+  names the tiles' file and ONE conjunctive range on the column their rows are a range of —
+  `dense_id` at `Z`, `cell_id` below — which the engine prunes against every row group's statistics
+  in the footer. Consecutive tiles of one zoom are one range, so **a run is one statement**, split
+  back into a batch per tile on that column; tiles that are not consecutive are separate statements,
+  never a disjunction. Under `rowgroups` the range is the run's row groups and no others; under
+  `files` the files are the tiles. [The ruling](#a-read-does-not-cost-the-corpus) is below.
+- **`edges({ from, direction })`** — an answer per tile of `from`, each the relations incident to it
+  out of the half aligned on
   `direction`, **and the ones it declined, with fossil's `GapReason`**: `not-declared` for an
   orientation the corpus does not publish, `other-space` for a relation whose far end is another
   type, which is read only when `relation` names it. At `z = Z` a batch is the adjacency's two
@@ -246,7 +250,7 @@ with one referent, and a cell row grows a pair per channel, each naming its own.
 | `_InclusiveMetricsEvaluator` over `lower_bounds`, `upper_bounds`, `null_value_counts` — *rows might match* | the planner over the tile manifest | **Taken as the pruning rule**: a tile is dropped only when its statistics prove no row can match, and a tile with no statistics for a column is kept. |
 | `StrictMetricsEvaluator` — *rows must match*, which PyIceberg's planner does not use | `ScanTask.residual` | **Taken further than Iceberg takes it.** A tile whose bounds satisfy the filter outright carries a `null` residual and is read with no predicate beyond the range that selects it — except for a comparison on a float, which never settles: the manifest counts no NaN, because Parquet's footer does not, and Iceberg's `nan_value_counts` is the statistic that would let it. |
 | `ManifestEvaluator` over the manifest list's partition summaries | the zoom | **Departs.** A corpus has no partitions; the only coarse cut is `z`, every `z` is planned, and the view picks among them. |
-| `to_arrow()`, `to_arrow_batch_reader()` over the whole scan | `scan.read(task)` per task | **Departs.** There is no whole-scan read, because the unit a view caches and cancels is the task. iceberg-rust's reader streams per task too; fossil makes that the only form. |
+| `to_arrow()`, `to_arrow_batch_reader()` over the whole scan | `scan.read(addresses)`, a batch per task | **Departs.** There is no whole-scan read, because the unit a view caches and cancels is the task, and a batch comes back per task whatever was read together. iceberg-rust's reader streams per task too; fossil reads a run of consecutive tasks in one statement, because the statement is what costs a round trip and a footer. |
 
 **The filter is data, not a SQL fragment**, and it is the filter language that was refused for
 `read`'s `where` while `read` existed. The refusal does not transfer, because what it weighed is
@@ -269,7 +273,7 @@ over `plan()` in that consumer, not a member here.
 | `TileMatrixSet { id, crs, boundingBox, tileMatrices }` | `TileMatrixSet { type, coordinates, extent, tileMatrices }` | **Taken.** One set per vertex type. `coordinates` names the type's declared coordinate system ([where x and y come from](/docs/design/position)) where OGC names a CRS. `extent` is informative, exactly as the standard says `boundingBox` is: tiles are located by their own statistics, never by it. |
 | `TileMatrix { id, scaleDenominator, cellSize, tileWidth, tileHeight, matrixWidth, matrixHeight }` | `TileMatrix { z, count, shift, tileRows, tiles }` | **Departs on the axis.** The matrix is one-dimensional: `tileRows` is `tileWidth` with `tileHeight` fixed at one, `tiles` is `matrixWidth` with `matrixHeight` at one, and `shift` plays `cellSize` — how many `dense_id`s one row at this `z` stands for, as a power of two. |
 | tile address `(tileMatrix, tileRow, tileCol)`, `tileMatrix` a string id | `(type, z, tile)` | **Departs**, for the axis's reason. `z` is a number because it is compared and subtracted. |
-| Annex I: tile indices from a bbox by arithmetic over `pointOfOrigin` and `cellSize` | every tile's box, published in the manifest and listed by `tileMatrix` | **Departs, and this is the one that is forced.** `dense_id` is a vertex's **rank** in the Morton order of its position, not its Morton code, and where a rank falls on the plane depends on how the positions are distributed — which no field of any matrix can carry. So the arithmetic that locates a tile runs on the rank axis, and which tiles a rectangle touches is read off the tiles' own boxes. |
+| Annex I: tile indices from a bbox by arithmetic over `pointOfOrigin` and `cellSize` | every tile's box, published in the manifest and listed by `tileMatrix` | **Departs, and this is the one that is forced.** `dense_id` is a vertex's **rank** in the Hilbert order of its position, not its Hilbert code, and where a rank falls on the plane depends on how the positions are distributed — which no field of any matrix can carry. So the arithmetic that locates a tile runs on the rank axis, and which tiles a rectangle touches is read off the tiles' own boxes. |
 | `tileMatrixSetLimits`: per matrix, the tile rows and columns that exist | a box and a row count per tile, in the manifest | **Taken and widened.** The standard publishes the range so a client does not compute it; a rank axis needs the box of every tile for the same reason. |
 | WebMercatorQuad: matrix `z` is `2^z × 2^z`, four children per tile | the parent of `(z, t)` is `(z − 1, t >> (shift(z−1) − shift(z)))` | **Taken.** Between two rungs the difference is two bits — four children per tile, the quad tree's own branching. From the rows to the first rung it is the declared base, four bits at sixteen vertices per cell. |
 | an out-of-range tile is a 404 or a 400 | `read` of an address outside `tiles` throws `CorpusReadError` | **Taken.** |
@@ -402,29 +406,29 @@ Cost #1 and #3 are the difference, and they are the adjacency: `rows` reads its 
 over the window's ids and no range on the aligned column, so the engine reads 17.5 MB of the 33 MB
 `by_source` and 16.5 MB of `by_target` in 525 requests, where `edges` reads one row group of each per
 tile. What the tiles do not buy is the vertex side at `Z`: the same 4.55 MB either way, in 25
-requests over 8 statements against `rows`' 10 in one — each statement reads the footer again and
-cannot coalesce ranges across tiles — and the reads are sequential because a view keeps one in
-flight. The edge count
+requests over 8 statements against `rows`' 10 in one — each statement read the footer again and
+could not coalesce ranges across tiles, which [a read does not cost the corpus](#a-read-does-not-cost-the-corpus)
+closes — and the reads are sequential because a view keeps one in flight. The edge count
 is the other half of the trade — the tiles' edges are every edge of the 8 tiles, 458,204, against the
 91,652 incident to the window's vertices — and it is the view's to cull, per tile, once, and cache.
 
 ### Pruning is the manifest's, at tile granularity
 
-A read selects one tile with **one conjunctive range** on the aligned column — `dense_id` for a
-vertex tile, `src_dense` or `dst_dense` for an adjacency — and never a disjunction of them. That is
+A statement selects its tiles with **one conjunctive range** on the aligned column — `dense_id` for
+a vertex tile, `src_dense` or `dst_dense` for an adjacency — and never a disjunction of them. That is
 the one shape the engine is measured to prune row groups on. `packages/corpus/src/identity.ts,
 indexRanges` records DuckDB pruning a conjunctive range and declining a disjunction over a string
 column, and `crates/fossil-graph/src/lib.rs` records 179 `BETWEEN … OR …` ranges evaluated per row
-rather than skipped — which is why a batch of tiles is a batch of reads and not one read with an
-`OR`.
+rather than skipped — which is why a run of consecutive tiles is one read and two runs are two reads,
+and not one read with an `OR`.
 
 What the planner prunes with is the tile manifest: a lower and an upper bound for every ordered
 column of every tile. `cluster_id` is the one worth naming — communities are placed together, so a
 filter on it prunes tiles a camera would otherwise read. The box is in the same manifest and prunes
 nothing here: which tiles a camera sees is the view's cull, against the boxes `tileMatrix` lists.
 
-**What would reverse it.** An engine that prunes a disjunction of ranges, measured: then a batch of
-tiles becomes one read and the per-tile form costs round trips for nothing.
+**What would reverse it.** An engine that prunes a disjunction of ranges, measured: then every tile a
+window needs becomes one read and the per-run form costs round trips for nothing.
 
 ### The writer publishes what the reader used to read from footers
 
@@ -459,8 +463,9 @@ against `parquet_metadata` the same way.
 
 ### Cancellation is a signal the engine honours
 
-`read` and `edges` take an `AbortSignal` and hand it to the host's engine; a view that moved past a
-tile aborts it. **The reader does not decide what is stale** — that is the view's cache — it only
+`read` and `edges` take an `AbortSignal` and hand it to the host's engine; a view that moved past its
+tiles aborts them. One signal covers a call, so a view that wants to cancel one run and keep another
+makes two calls. **The reader does not decide what is stale** — that is the view's cache — it only
 makes a stale read stoppable.
 
 **The signal has to reach the running query, not the queue.** A DuckDB-WASM connection runs one
@@ -635,31 +640,32 @@ over — at ten million that gap is 32 ms, and a corpus read across an ocean has
 that. Then one request fewer is worth more than the parse, and the entries move into the YAML under
 the same four names.
 
-## Proposal: a tile's box is its own area, and a read does not cost the corpus
+## The id is a Hilbert rank
 
-<Callout type="warn" title="A proposal for the owner, not a ruling">
-Nothing below has been decided. It is the investigation kanzo-ui's graph view asked for, on branch
-`investigate/tile-compactness`, with a prototype of the option it recommends. The ruling is the
-owner's, and until it is taken `dense_id` stays the Morton rank the rest of this page and
-[the format](/docs/format/conventions/addressing) say it is.
-</Callout>
+**`dense_id` is a vertex's rank in the Hilbert order of its quantised position, and the tile manifest
+keeps one box per tile.** Ruled on 2026-09-30, on the investigation kanzo-ui's graph view asked for.
+The curve is Wikipedia's `xy2d` at `n = 2^16` over the same binary32 quantisation the Z-curve used,
+published with vectors on [addressing](/docs/format/conventions/addressing#the-arithmetic) and in
+`corpus.bnf`'s gloss, and written by `crates/fossil-layout/src/layout/hilbert.rs, hilbert2`. Nothing
+reads both orders: every corpus is written again, and one written before the ruling fails
+`hilbert-order`.
 
-**The finding, as the view reported it.** A window holding about 5,000 vertices still draws cells:
-the payload tiles whose boxes it intersects hold more rows than the view's 20,000, so the finest
-zoom that fits is a rung. And one payload tile costs about 230 ms, as three sequential statements —
-`scan.read` and both halves of `edges`.
+**The finding, as the view reported it.** A window holding about 5,000 vertices still drew cells:
+the payload tiles whose boxes it intersected held more rows than the view's 20,000, so the finest
+zoom that fit was a rung. And one payload tile cost about 230 ms, as three sequential statements —
+`scan.read` and both halves of `edges`. The second half is [the next ruling](#a-read-does-not-cost-the-corpus).
 
 ### What a payload tile's box claims, measured
 
-Measured on 2026-09-29 by `crates/fossil-layout/examples/tile_compactness.rs` over three corpora of
-1,000,000 vertices: the bench corpus kanzo-ui's view was built against, `enrich_memory`'s fixture at
-mean degree 14 through the real layout pass, and the same fixture through the prototype below.
+Measured on 2026-09-29 and again after the ruling by `crates/fossil-layout/examples/tile_compactness.rs`
+over three corpora of 1,000,000 vertices: the bench corpus kanzo-ui's view was built against, and
+`enrich_memory`'s fixture at mean degree 14 through the real layout pass, in each order.
 *Compactness* is a tile's box over the area its rows would cover on a uniformly filled extent — one
 is a square of exactly its own rows. Windows are 400 squares centred on random vertices; *tiles
 holding* counts the tiles that have a vertex inside the window, which is the best any box of any
 shape can do with the same tiles.
 
-| | kanzo-ui's bench | `enrich_memory` | `enrich_memory`, Hilbert prototype |
+| | kanzo-ui's bench, Z-curve | `enrich_memory`, Z-curve | `enrich_memory`, **Hilbert** |
 | --- | --- | --- | --- |
 | compactness p50 · p90 · max | 2.03 · 4.82 · 23.1 | 1.89 · 5.67 · 17.9 | **1.41 · 1.76 · 1.9** |
 | ~5,000-vertex window: tiles hit p50 · p90 | 7 · 10 — 28,672 · 40,960 rows | 7 · 10 — 28,672 · 40,960 rows | **5 · 7 — 20,480 · 28,672 rows** |
@@ -670,132 +676,129 @@ shape can do with the same tiles.
 
 The archive corpus is 1,543 vertices, one tile, and has nothing to measure; com-DBLP was not rebuilt.
 
-**The boxes are not wide in the sense the report meant.** The median tile is twice its own area,
+**The boxes were not wide in the sense the report meant.** The median tile was twice its own area,
 not the extent, and the `spatial-tiles` guard's bound of one half is two orders of magnitude away.
-But a window opens 1.4× the tiles that hold its vertices at the median and at p90, and that is the
+But a window opened 1.4× the tiles that hold its vertices at the median and at p90, and that was the
 geometry's share of the cost.
 
-### Where it comes from
+### Where it came from
 
-**`dense_id` is already a pure Morton rank**, and the community-major order is not a second sort
+**`dense_id` was already a pure curve rank**, and the community-major order is not a second sort
 underneath it. On all three corpora the written order is exactly the order of the recomputed codes —
-the `morton-order` guard's rule — and the groups come out contiguous because
+the `hilbert-order` guard's rule — and the groups come out contiguous because
 `crates/fossil-layout/src/layout/place.rs, cluster_layout` gives each one an aligned block of the
-quaternary, and an aligned block is one interval of codes. So there is no community order to trade
-away for a spatial one: they are the same order by construction.
+quaternary, and an aligned block is one interval of codes on either curve. So there was no community
+order to trade away for a spatial one: they are the same order by construction.
 
-**It is not outliers.** Trimming each tile's box to its 1st–99th percentile moves compactness from
+**It was not outliers.** Trimming each tile's box to its 1st–99th percentile moved compactness from
 1.89 to 1.84 at the median and from 5.67 to 4.6 at p90; the phyllotaxis discs are compact, and no
 tile is inflated by a few members placed far away.
 
-**It is the Z-curve.** A run of 4,096 ranks that crosses a quad boundary at depth *d* leaves one
+**It was the Z-curve.** A run of 4,096 ranks that crosses a quad boundary at depth *d* leaves one
 quad at its far corner and enters the next at its near one — the Z's diagonal — so its box is the
-hull of both. Of 245 tiles, one straddles the root split, six a depth-1 boundary and 24 a depth-2
-one; all five tiles above 10× are among the first seven. The same jump is the residue
-[position](/docs/design/position) names and leaves standing — *the Z-curve makes long jumps at the
-boundaries of the large quads* — seen from the tile's side instead of the cell's.
+hull of both. Of 245 tiles, one straddled the root split, six a depth-1 boundary and 24 a depth-2
+one; all five tiles above 10× were among the first seven. The same jump is the residue
+[position](/docs/design/position) named — *the Z-curve makes long jumps at the boundaries of the
+large quads* — seen from the tile's side instead of the cell's.
 
 **And the rest is the tile, not its box.** A window of *N* vertices over a uniformly filled plane
 touches about (√*N*/64 + 1)² tiles of 4,096 however they are drawn: for 5,000 that is 4.4 tiles,
-18,000 rows. The *tiles holding* row says the same from the data — five at the median, 20,480 rows —
-so **no box, however tight, puts a 5,000-vertex window under a 20,000-row budget at this tile
+18,000 rows. The *tiles holding* row says the same from the data — four or five at the median — so
+**no box, however tight, puts every 5,000-vertex window under a 20,000-row budget at this tile
 size**. That half of the finding is the view's: a budget of 20,000 rows is four tiles, and a budget
 in rows has to be stated against the tile granularity.
 
-What the geometry's half does to that budget is larger than the medians suggest, because a view
+What the geometry's half did to that budget was larger than the medians suggest, because a view
 falls back to a rung whenever a window lands badly. The share of 300 windows, centred on random
-vertices of `enrich_memory`'s fixture, whose intersected tiles exceed 20,000 rows:
+vertices of `enrich_memory`'s fixture, whose intersected tiles exceed 20,000 rows — the last line
+`tile_compactness` prints:
 
-| window | ~385 vertices | ~855 | ~1,500 | ~2,350 | ~3,400 |
-| --- | --- | --- | --- | --- | --- |
-| Morton, as written | 27% | 46% | 62% | 77% | 88% |
-| Hilbert prototype | 1% | 4% | 11% | 26% | 46% |
+| window | ~385 vertices | ~855 | ~1,500 | ~2,350 | ~3,400 | ~5,000 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Z-curve | 26% | 44% | 56% | 72% | 85% | 91% |
+| **Hilbert** | **0%** | **2%** | **7%** | **18%** | **38%** | **58%** |
 
-Under Morton a window of a few hundred vertices draws cells one time in four, because it only has to
-touch one tile that straddles a large quad.
+Under the Z-curve a window of a few hundred vertices drew cells one time in four, because it only
+had to touch one tile that straddled a large quad.
 
 ### The options, measured
 
 Every row over `enrich_memory`'s fixture, the ~5,000-vertex window, p50 · p90. The sub-box and
-quadtree rows were simulated over the written corpus; the Hilbert row is the pass itself.
+quadtree rows were simulated over the corpus the Z-curve wrote; the Hilbert row is the pass itself.
+The ones not taken are on [what was discarded](/docs/design/discarded), each with what would bring
+it back.
 
 | option | tiles hit | rows read | what cells keep | what it costs |
 | --- | --- | --- | --- | --- |
-| as written: Morton rank, 4,096 rows | 7 · 10 | 28,672 · 40,960 | — | — |
+| the Z-curve's rank, 4,096 rows | 7 · 10 | 28,672 · 40,960 | — | — |
 | up to four boxes per tile, cut at the tile's largest Z jumps | 5 · 7 | 20,480 · 28,672 | unchanged, and so is the rung-1 cell area spread of 5,030× | `TileInfo.bbox` becomes a list, four boxes per tile in the manifest and its guard, and the view culls against a union |
 | sixteen equal sub-boxes per tile | 6 · 9 | 24,576 · 36,864 | unchanged | the same, sixteen boxes |
 | tiles cut on quad boundaries — quadtree leaves of at most 4,096 | 4 · 7 | 14,742 · 22,022 | **breaks** `tile = dense_id >> 12`: 364 tiles of 3,656 rows at the median, so a tile stops being arithmetic and cells stop nesting in tiles | the addressing becomes a table |
-| **Hilbert rank, 4,096 rows** — `crates/fossil-layout/src/layout/morton.rs, hilbert2` | **5 · 7** | **20,480 · 28,672** | every `cluster_id` one run (995 of 995); the share of cells spanning two clusters identical at every rung; rung-1 cell area spread **5,030× → 428×**, rung 3 **571× → 21×**, rung 6 **11× → 3×** | the order the format publishes, its vectors and guards, and every conformance corpus regenerated |
-| 1,024-row tiles, Morton · Hilbert | 15 · 19 and 11 · 14 | 15,360 · 19,456 and 11,264 · 14,336 | cells nest in tiles to 4⁵ | four times the statements, at a per-statement cost measured below to grow with the corpus |
+| **the Hilbert rank, 4,096 rows** — taken | **5 · 7** | **20,480 · 28,672** | every `cluster_id` one run (995 of 995); the share of cells spanning two clusters identical at every rung; rung-1 cell area spread **5,030× → 428×**, rung 3 **571× → 21×**, rung 6 **11× → 3×** | the order the format publishes, its vectors and guards, and every conformance corpus regenerated |
+| 1,024-row tiles, Z-curve · Hilbert | 15 · 19 and 11 · 14 | 15,360 · 19,456 and 11,264 · 14,336 | cells nest in tiles to 4⁵ | four times the statements, at a per-statement cost measured below to grow with the corpus |
 
 **Hilbert is the only row that is a change to the order rather than to what is published about it.**
-Every aligned `2^k` square is one interval of `4^k` Hilbert indices exactly as it is of Morton codes,
+Every aligned `2^k` square is one interval of `4^k` Hilbert indices exactly as it is of Z-curve codes,
 so the whole quaternary argument survives: a group's block is still one run, a cell is still
-`dense_id >> shift`, and a tile is still `[t·4,096, (t+1)·4,096)`. What changes is the one thing Morton
-gets wrong — an interval that is *not* an aligned square is edge-connected on a Hilbert curve, so
-its hull is never far from its area. It closes the geometry's share entirely: tiles hit equals tiles
-holding, to within one, at every percentile measured. And it buys the cells more than the tiles:
-the Z-jump residue [position](/docs/design/position) could only name is gone, and a coarse rung is
-within 3× of uniform area.
+`dense_id >> shift`, and a tile is still `[t·4,096, (t+1)·4,096)`. What changes is the one thing the
+Z-curve got wrong — an interval that is *not* an aligned square is edge-connected on a Hilbert curve,
+so its hull is never far from its area. It closes the geometry's share: tiles hit is tiles holding
+plus one at the median and at p90, and equal to it at 1% of the extent. And it buys the cells more
+than the tiles: the jump residue [position](/docs/design/position) could only name is gone, and a
+coarse rung is within 3× of uniform area.
 
 The sub-box row matches it on this window and is the Iceberg-shaped answer — tighten the statistics
-so pruning works. It is not preferred because it publishes a second geometry to describe a first one
+so pruning works. It is not taken because it publishes a second geometry to describe a first one
 that is worse than it needs to be: it widens the contract, quadruples the boxes a guard has to hold,
 and leaves every rung's cells as uneven as they are.
 
-The prototype changes two functions. `crates/fossil-layout/src/layout/morton.rs, morton_codes`
-codes with `hilbert2` over the same 16-bit binary32 quantisation, and
-`crates/fossil-layout/src/layout/place.rs, cluster_layout` walks its frontier in the same curve —
-block `b` of a root of `4^K` blocks is the `b`-th aligned sub-square of the order-16 curve, and its
-corner is its alignment rather than its first cell, because Hilbert enters a block at whichever
-corner the block's orientation puts first. The first attempt missed that and put 24,570 ids inside
-foreign groups, which `crates/fossil-layout/tests/cells.rs, a_cluster_is_one_run_of_dense_id` caught.
-Every `fossil-layout` test passes, and two processes write a byte-identical tree of 25 Parquet
-files at 200,000 vertices.
-
-**What it would cost, and nothing here pays it yet.**
-
-- **Writer**: the two functions above and a rename — `morton_codes`, `morton_ranks` and the module
-  stop being named for a curve they no longer draw, and the prototype keeps the names only so the
-  diff is the change.
-- **Format**: `dense_id` becomes the rank in Hilbert order on
-  [addressing](/docs/format/conventions/addressing) and in `corpus.bnf`'s gloss; `vectors.json`'s
-  `morton2` table becomes a `hilbert2` table, because a curve is exactly the arithmetic Iceberg
-  publishes vectors for and PMTiles left every port to re-derive
-  ([prior art](/docs/design/prior-art#the-corpus-and-how-a-format-ships)); `guards/arithmetic.mjs`
-  gains the function and `guards.mjs`'s `mortonSql` becomes sixteen unrolled steps of SQL.
-- **Conformance**: `packages/corpus/conformance/corpus` and every fixture a test writes through the
-  pass are regenerated, since each vertex's `dense_id` moves; the answers that are sets do not change
-  and the ones keyed by `dense_id` do.
-- **kanzo-ui**: no view code — it culls against the boxes it is handed, and they are tighter. Its
-  bench corpora are rebuilt, and its row budget is its own call, which the floor above bounds.
-
-**Recommended ruling.** `dense_id` is a vertex's rank in the **Hilbert** order of its quantised
-position, published with vectors like the Morton code it replaces, and the tile manifest keeps one
-box per tile.
+**What it cost, paid in one change.** The writer's two functions —
+`crates/fossil-layout/src/layout/hilbert.rs, hilbert_codes` codes with `hilbert2`, and
+`crates/fossil-layout/src/layout/place.rs, cluster_layout` walks its frontier along the same curve,
+taking a block's corner from its alignment because Hilbert enters a block at whichever corner its
+orientation puts first (reading the first cell put 24,570 ids inside foreign groups, and
+`crates/fossil-layout/tests/cells.rs, a_cluster_is_one_run_of_dense_id` caught it). The format: the
+rule on [addressing](/docs/format/conventions/addressing#the-order-that-makes-an-interval-mean-something),
+`corpus.bnf`'s gloss, and `vectors.json`'s `hilbert2` table where `morton2` was — written by
+`crates/fossil-layout/examples/hilbert_vectors.rs` from the writer's own curve and held against it by
+a Rust test, because a curve is exactly the arithmetic Iceberg publishes vectors for and PMTiles left
+every port to re-derive ([prior art](/docs/design/prior-art#the-corpus-and-how-a-format-ships)).
+`guards/arithmetic.mjs` carries the function and `guards.mjs` sixteen unrolled steps of SQL for the
+`hilbert-order` guard. `packages/corpus/conformance/corpus` was regenerated from its recipe and every
+test corpus is written through the pass. kanzo-ui changes no view code — it culls against the boxes
+it is handed, and they are tighter — and rebuilds its bench corpora; its row budget is its own call,
+which the floor above bounds.
 
 **What would reverse it.** A reader that computes which ids a rectangle holds from the codes
 themselves rather than from published boxes — BIGMIN/LITMAX over a Z-curve is a few bit operations,
 and its Hilbert equivalent is a state machine a port would have to get right. No reader here does
 that since [the anchor was discarded](/docs/design/discarded); a corpus whose positions sit on a
 writer-fixed grid, the reversal named under the OGC table above, would be the one that asks. Or a
-measured corpus on which Hilbert tiles are not tighter than Morton's, which would mean the gain here
-is this placement's rather than the curve's.
+measured corpus on which Hilbert tiles are not tighter than the Z-curve's, which would mean the gain
+here is this placement's rather than the curve's.
 
-That anchor's own row names the condition that brings it back — *a read where the 13% is the
-difference between fitting a budget and not* — and this is that read: at a 5,000-vertex window the
-over-read is 1.4×, and it is the difference. It does not come back, because the curve closes the
+That anchor's own row named the condition that would bring it back — *a read where the 13% is the
+difference between fitting a budget and not* — and this was that read: at a 5,000-vertex window the
+over-read was 1.4×, and it was the difference. It does not come back, because the curve closes the
 gap the anchor would have closed, with no second index.
+
+## A read does not cost the corpus
+
+**`scan.read` and `edges` take a list of addresses and answer one batch per address, and a run of
+consecutive tiles of one zoom is read as one statement with one conjunctive range, split back into
+batches on the aligned column.** And **a host's engine caches Parquet metadata** —
+`SET parquet_metadata_cache = true`, once — which `packages/types/src/engine.ts, Engine` now says a
+host should, beside the interrupt it already requires. Ruled on 2026-09-30.
 
 ### Three statements a tile, and what they actually cost
 
-The same nine tiles a ~5,000-vertex window at the centre of kanzo-ui's bench corpus opens, with
-both halves of their edges: 591,937 rows. *A* is today — three statements a tile. *B* folds a
-tile's three into one `UNION ALL BY NAME`; *C* one statement per part across the nine; *D* one
-statement for the window; *E* one statement per part with each run of consecutive tiles read as one
-conjunctive range. DuckDB-WASM 1.32 in Node over local files, medians of seven; native DuckDB 1.5
-over HTTP against a local origin that counts, medians of five, and again with 10 ms added to every
-response.
+The same nine tiles a ~5,000-vertex window at the centre of kanzo-ui's bench corpus opened under the
+Z-curve, with both halves of their edges: 591,937 rows. *A* was the contract as it stood — three
+statements a tile. *B* folds a tile's three into one `UNION ALL BY NAME`; *C* one statement per part
+across the nine; *D* one statement for the window; *E* one statement per part with each run of
+consecutive tiles read as one conjunctive range. DuckDB-WASM 1.32 in Node over local files, medians
+of seven; native DuckDB 1.5 over HTTP against a local origin that counts, medians of five, and again
+with 10 ms added to every response.
 
 | shape | statements | WASM | WASM, metadata cached | HTTP: requests · MB · ms | HTTP, metadata cached | HTTP at 10 ms · cached |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -807,7 +810,7 @@ response.
 
 **Merging statements buys nothing.** B, C and D read exactly the requests and bytes A does, and are
 no faster: every `read_parquet` branch plans its own scan and reads its own footer, one statement or
-many. The 230 ms the view measured is round trips — at 10 ms a request, A is 190 ms a tile — and
+many. The 230 ms the view measured was round trips — at 10 ms a request, A is 190 ms a tile — and
 two things make them, neither of which is the statement count.
 
 **The footer is read again by every statement, and it grows with the corpus.** Without the metadata
@@ -816,25 +819,60 @@ at ten million**, because the container is one file with a row group per tile an
 every one. Cached, it is still planned against: natively a vertex statement costs 1.3 ms at a
 million and **14.7 ms at ten million** with the metadata already in memory, 26.3 ms without — against
 0.66 ms for the same statement over a file of 64 row groups. At ten million the same nine tiles cost
-**2,960 ms** in WASM as A, 1,754 ms cached, and 958 ms cached and coalesced. A tile read is O(*V*)
-today, and that is the container's, not the curve's.
+**2,960 ms** in WASM as A, 1,754 ms cached, and 958 ms cached and coalesced. A tile read is O(*V*),
+and that is the container's, not the curve's.
 
-**Recommended, in order of what it costs:**
+### What the two rulings do together, measured
 
-1. **The host's engine caches Parquet metadata** — `SET parquet_metadata_cache = true`, once, in
-   kanzo-ui's `engine()`. No contract change: 2.2× in WASM, 2.5× over a 10 ms link. `Engine`'s
-   documentation says a host should, beside the interrupt it already requires.
-2. **The reader reads a run of consecutive tiles as one range** — another 1.7–1.8× on top, and still
-   one conjunctive range per run, the one shape this page measured the engine to prune. It needs a
-   `read` over several addresses answering a batch per address, which is a contract addition and the
-   view's to ask for. Under Hilbert the ~5,000-vertex window's tiles fall in 2 runs at the median and
-   3 at p90, against Morton's 3 and 5, so the two proposals compound.
-3. **The container stops being one file per type** — the only lever that makes a tile read O(1)
-   rather than O(*V*). The one-file ruling was measured on whole-window reads, 5.6 range requests
-   against 22.3 at five million, and whole-window reads no longer exist; a file per `z − 3` tile, 64
-   row groups, is the obvious candidate. **Not proposed here**: it wants its own end-to-end
-   measurement over HTTP, opens and all, before it is argued.
+After both, over `enrich_memory`'s fixture at a million vertices in each order, `rowgroups`: a square
+at the centre of the extent holding about 5,000 vertices (5,019 under the Z-curve, 5,027 under
+Hilbert), the exact statements the reader issues run through DuckDB-WASM 1.32 in Node over local
+files, medians of seven after a warm-up. *Runs* is how the window's tiles fall along the id axis;
+over 300 random ~5,000-vertex windows the Z-curve's tiles fall in 3 runs at the median and 5 at p90,
+Hilbert's in 2 and 3, so the two rulings compound.
+
+| shape | Z-curve (7 tiles, 5 runs): statements | ms, uncached → cached | Hilbert (6 tiles, 3 runs): statements | ms, uncached → cached |
+| --- | --- | --- | --- | --- |
+| vertices, a statement a tile | 7 | 84.1 → 25.9 | 6 | 78.7 → 22.9 |
+| vertices, a statement a run | 5 | 59.0 → 18.6 | 3 | 37.5 → 11.7 |
+| edges, both halves, a statement a tile | 14 | 78.5 → 42.0 | 12 | 68.8 → 38.7 |
+| edges, both halves, a statement a run | 10 | 60.2 → 31.6 | 6 | 35.3 → 20.1 |
+| **the window, a statement a tile** | 21 | 162.1 → 70.0 | 18 | 141.9 → 60.2 |
+| **the window, a statement a run** | 15 | 115.8 → 52.0 | 9 | 71.6 → **33.4** |
+
+The cache is 2.3× on its own; runs are another 1.35× under the Z-curve and 1.8× under Hilbert,
+because the curve puts the same window in fewer of them. The window the view reported at 230 ms a
+tile, read the way it is read now, is **33.4 ms for all six** — 4.9× below the same window under the
+Z-curve, uncached, a statement a tile. `edges` takes addresses for the same reason `read` does: its
+half of the window halved, 38.7 → 20.1 ms.
+
+### One signature, and why it is not a `readRun`
+
+`read(addresses)` replaces `read(address)` rather than standing beside it, and one tile is a list of
+one. A `readRun` next to `read` would be two ways to read a tile, and it would put the run in the
+view's hands — a view would have to know which of its tiles are consecutive, which is arithmetic
+over the matrix and the reader's. The answer stays **a batch per address**, so the unit a view
+caches and cancels is still `(type, z, tile)`, and nothing about the seam in
+[three layers](#three-layers-and-what-each-owns) moves: how tiles are grouped into statements is a
+fact about the engine, and it stays under the reader.
+
+Inside the reader: addresses are grouped by zoom — by edge set, for `edges` — and sorted, and each
+maximal run of consecutive tiles is one statement. A tile whose statistics exclude it answers empty
+with no request and breaks the run; a run whose tiles carry different residuals is read under the
+scan's whole filter, which selects the same rows on each. The aligned column is selected whether or
+not the scan named it, the answer is cut at `key / span`, and a column the scan did not select is
+dropped from each batch. `packages/corpus/tests/scan.test.ts` holds a run as one statement with one
+range and no `OR`, every batch of a run against the same tile read alone, and an abort mid-run.
 
 **What would reverse it.** A host engine that shares footers across statements without being told
-to, which makes the first item a no-op; or a DuckDB whose per-scan cost stops scaling with the
-footer's row-group count, which makes the third one unnecessary.
+to, which makes the cache a no-op; a DuckDB that prunes a disjunction of ranges, which makes a whole
+window one statement and a run an unnecessary grouping; or a view that has to cancel one run of a
+call and keep another often enough that one signal per call is the wrong grain.
+
+### What neither ruling touches: the container
+
+**The container stops being one file per type** is the only lever that makes a tile read O(1)
+rather than O(*V*). The one-file ruling was measured on whole-window reads, 5.6 range requests
+against 22.3 at five million, and whole-window reads no longer exist; a file per `z − 3` tile, 64
+row groups, is the obvious candidate. **Not ruled**: it wants its own end-to-end measurement over
+HTTP, opens and all, before it is argued.

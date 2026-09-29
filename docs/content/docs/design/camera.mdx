@@ -146,7 +146,8 @@ not grow with the grid the way a χ² statistic does.
 **The tolerance is measured, not chosen.** Any subsample of size *n* carries sampling noise, so the
 question is not "is the distance small" but "is it larger than a subsample of the same size with no
 spatial structure at all". The null is `hash(dense_id) % 4^k = 0` — the same population, drawn
-pseudo-randomly instead of by the Morton stride, over the same grid.
+pseudo-randomly instead of by the stride along `dense_id`, over the same grid — measured when the
+order was still the Z-curve's.
 
 | level | drawn | TV from level 0 | random subsample of the same size | ratio |
 | --- | --- | --- | --- | --- |
@@ -155,7 +156,7 @@ pseudo-randomly instead of by the Morton stride, over the same grid.
 | 6 | 15,625 | **0.0644** | 0.1326 | 2.1× |
 | 8 | 3,907 | **0.1727** | 0.2489 | 1.4× |
 
-The Morton decimation beats an unstructured subsample of its own size at every level, which is the
+The decimation beats an unstructured subsample of its own size at every level, which is the
 form the claim has to take: it is not "the error is small", it is "the error is smaller than the
 error you cannot avoid".
 

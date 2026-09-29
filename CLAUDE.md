@@ -191,7 +191,7 @@ crates/
                            DESCRIBEs is `fossil_lineage::program_sources` — the list the
                            browser's `sources()` returns — so it links the compiler front-end,
                            as every host does
-  fossil-layout/           the layout post-pass — Louvain + Morton over Parquet through
+  fossil-layout/           the layout post-pass — Louvain + Hilbert over Parquet through
                            arrow-rs. It links no engine: `DuckDB` and `fossil-df` are both
                            dev-dependencies, the second since `TileWriter` became
                            `fossil-tile-writer` and stopped dragging `DataFusion` and
