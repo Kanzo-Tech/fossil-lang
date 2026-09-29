@@ -77,7 +77,8 @@ never sees a tile's bytes and has nothing to cache. So the 3.3× is not this lay
 the engine's, which is precisely what `directIO = false` is there for.
 
 What this thread can hold is **answers** — a rectangle already asked about, and the rows that came
-back. That is what `@fossil-lang/draw`'s `residency.ts` (deleted after `2fa5f22`) holds, and the measured win is the one
+back. [The backend](/docs/design/backend) moves the seam so that an answer is one tile, which makes
+the answer cache a tile cache after all, held by the view. That is what `@fossil-lang/draw`'s `residency.ts` (deleted after `2fa5f22`) held, and the measured win was the one
 latency predicted rather than the one bytes did: a rectangle already held settles in 3 ms against
 175, and the frames in between get an interim in 8 to 18 ms.
 </Callout>
@@ -126,10 +127,10 @@ its edges.
 
 ## The three properties
 
-The playground's `scripts/verify-properties.mjs` (deleted after `2fa5f22`) is the measurement, and it runs against a real
+The playground's `scripts/verify-properties.mjs` (deleted after `2fa5f22`) was the measurement, and it ran against a real
 million-vertex corpus on disk through a real engine — no browser, no GPU, no
-`requestAnimationFrame`. What it cannot check is the picture. What it checks is every claim the
-picture rests on.
+`requestAnimationFrame`. What it could not check was the picture. What it checked was every claim
+the picture rests on.
 
 ### 1. Fidelity — a coarse view is the same image with fewer points
 

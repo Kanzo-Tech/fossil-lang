@@ -117,13 +117,14 @@ community does not exist in the source, hashing the member set changes the momen
 a counter is not stable across reorderings, and every reference dangles.
 
 That argument still holds, and under *the partition is arbitrary* it no longer has to be made.
-**Nothing but the camera reads the tree.** `crates/fossil-graph/src/operations/mod.rs, Verb` is the
-six-verb surface, and none of them descends a rung: `read`, `expand` and `path` return **vertices**,
-because a cell is not one, and a verb that returned a cell would be answering a question about the
-plane in a language about the graph. That is the split the door already draws between its addressed
-half and its queried half — the camera computes addresses and asks for bytes, the verbs run SQL —
-and `crates/fossil-graph/src/lib.rs` states it as *no verb draws; the camera is addressed, not
-queried*. [One door](/docs/design/one-door) is where the seam itself is argued.
+**Nothing but the camera reads the tree.** `crates/fossil-graph/src/operations/mod.rs, Verb` has two
+variants, `schema` and `execute_sql`, and neither descends a rung: a verb answers in relations, and a
+verb that returned a cell would be answering a question about the plane in a language about the
+graph. That is the split the door already draws between its addressed half and its queried half —
+the camera computes addresses and asks for bytes, the verbs run SQL — and
+`crates/fossil-graph/src/lib.rs` states it as *no verb draws; the camera is addressed, not queried*.
+[The backend](/docs/design/backend) is where the tree gets its reader: a rung is a zoom of the tile
+matrix, read by a scan and never by a verb.
 
 So the question *is a cell an entity?* disappears without being answered, which is where the
 identity argument in [what was discarded](/docs/design/discarded) ran aground: it had to say what a
@@ -145,13 +146,8 @@ declared list rather than a convention a second writer could spell differently.
 
 The obvious home for a cell tree is `levels:` — the pyramid is already a hierarchy, the addressing
 is already arithmetic, and a cell level looks like a coarse level. It cannot go there, and the
-ruling is not made on this page. [The reference viewer](/docs/design/reference-viewer) states the
-model's one load-bearing decision and what contradicts it:
-
-> The model is one decision deep, and it is the decision to make a level a **subset of real rows**
-> rather than a summary. […] That would be a **third** artefact and not a replacement — a level that
-> answers a different question under a different name, which is the one thing the one-contract
-> invariant forbids doing under the same one.
+ruling is made here: **a level is a subset of real rows and a cell is a summary of them**, so a cell
+answers a different question and has to do it under a different name.
 
 A level in `crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex whose `dense_id` is a
 multiple of `4^k`. Every row is a real vertex at the position the payload gives it; nothing is
@@ -168,7 +164,7 @@ So: its own block, its own prefix, its own name. It is
 | the block declares | because |
 | --- | --- |
 | a `prefix`, and a `path` per rung | a tile's URL is the one part a reader cannot compute, and there is no listing over HTTP |
-| a `chunk_size` of its own | tile `k` of a rung is the `k`th run of **cell** rows, and a rung is not as long as the payload — the number that slices it is its own even where the two arithmetics agree |
+| no `chunk_size` of its own | tile `k` of a rung is the `k`th run of **cell** rows at the type's own `chunk_size`, because a rung's ids are a shift of the payload's and there is no second number to declare |
 | a `cell_count` per rung | the sibling of `vertex_count`: a hole in the middle is caught by the addressing and a missing tail is caught by nothing |
 | the `relations` it was computed over | mass conservation has no population without them, and a type may be the source of several |
 | `properties` per rung | a group id, a position, a member count, a parent and an internal weight are columns that exist nowhere else in the corpus |
@@ -184,8 +180,9 @@ labels with no relation to the id space.
 
 Under a quaternary partition they are not arbitrary. **Cell `r` of rung `k` covers exactly
 `[r·4^k, (r+1)·4^k)`**, so a cell id is `dense_id >> 2k` — `tile_of` with a different shift — and
-the alignment the argument denied is the whole mechanism. What survives is the weaker reason the row
-now gives: a rung is a different *length* from the payload, so it slices at its own number.
+the alignment the argument denied is the whole mechanism. What survives is that a rung is a different
+*length* from the payload, and a length is `cell_count` — not a second tile size, so the row now says
+the block carries none.
 
 `VertexIndex`'s own argument is untouched, because an index really is a second order and a rung is
 not.
@@ -904,8 +901,7 @@ along.
 claim that `crates/fossil-graph` *contains no occurrence of* `holon`, `rung`, `cell` or `quotient`.
 That claim was already false before the rename — `packages/corpus`, named in the same sentence,
 carries `cell_id` in its generated vocabulary — and the rename made it false twice over. It is
-restated on [the reference viewer](/docs/design/reference-viewer) and in [what was
-discarded](/docs/design/discarded) as what it always meant: no verb, no plan and no type in that
+restated in [what was discarded](/docs/design/discarded) as what it always meant: no verb, no plan and no type in that
 crate names a rung, a cell or a quotient. A grep over a four-letter word is not evidence about a
 read surface.
 
@@ -962,7 +958,10 @@ silence is still there in `serde`, and the thing that breaks on it is a guard th
 
 ## What this does not settle
 
-**Whether the writer should stop emitting the rungs nothing asks for.**
+**Whether the writer should stop emitting the rungs nothing asks for.** [The backend](/docs/design/backend)
+settles it in its direction, the way the tree already leans: every rung is a zoom of the tile matrix,
+from the root at `z = 0`, so a view that opens on the whole extent of a large corpus asks for exactly
+the rungs below rung 1. What follows is the question as it stands until a reader does.
 
 <Callout type="warn">
 **This question was posed as «whether the writer should stop emitting the rungs that fail fidelity»,

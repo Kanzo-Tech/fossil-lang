@@ -1,8 +1,8 @@
 ---
 title: The corpus
-description: A graph in columnar files, addressable by byte range with no service in the path; which of GraphAr's field names are borrowed and where borrowing stops; and the six verbs that read one, none of which draws.
+description: A graph in columnar files, addressable by byte range with no service in the path; which of GraphAr's field names are borrowed and where borrowing stops; and the two verbs that read one, neither of which draws.
 direction:
-  summary: "`Operation` has six variants, none of them returns geometry, and every tile access goes through `address.ts` without reading a byte."
+  summary: "`Operation` has two variants, neither returns geometry, and every tile access is planned by the reader out of the manifest without reading a byte."
 ---
 
 A fossil program produces a **corpus**: a graph written to disk as columnar files with a manifest
@@ -24,8 +24,9 @@ which is the worst distribution of a failure a design can have. The lineage is e
 ### Where a wildcard survives, counted
 
 The rule has one exception left in the tree, and it is bounded rather than argued.
-`fossil-mcp`'s `register_views_sql` composes every path a verb reads, and
-`fossil-mcp`'s `src/lib.rs` (deleted after `2fa5f22`) measures what is left over the conformance corpus in both containers:
+`packages/corpus/src/corpus.ts, verbs` composes every path a verb reads, and what is left was
+measured over the conformance corpus in both containers by `fossil-mcp`'s `src/lib.rs` (deleted after
+`2fa5f22`), which composed the same paths the same way:
 
 | container | globs registered | where |
 | --- | --- | --- |
@@ -329,7 +330,7 @@ independently, which is why the one federation system that shipped an equivalent
 atomic renames, lock files, visibility protocols and transaction logs exist to protect a reader from
 a half-written state; with no such reader they are cost without benefit.
 
-## The verb surface: six, and none of them draws
+## The verb surface: two, and neither draws
 
 `fossil-graph` defines the surface; the in-process TS package, through `fossil-graph-wasm`, is the
 one binding over it. **It closed at six on 2026-08-05 and is two now**: `read`, `expand`, `path` and
@@ -442,9 +443,9 @@ positions, nothing contracted, and it nests because its vertices do —
 
 What this page refuses is unchanged and it is the same refusal twice: an edge between two survivors
 standing in for a path through vertices nobody drew is synthetic, and replacing it with the real path
-as the camera zooms moves every line on screen. The reader's half is outstanding — see
-[the reference viewer](/docs/design/reference-viewer), which carries what a frame costs with and
-without it, and until it lands links come from the payload's own `by_source` tiles.
+as the camera zooms moves every line on screen. `Corpus.frame` reads it where every
+relation it draws has the level written, and [the backend](/docs/design/backend) retires it with the
+vertex levels — the argument, and the price, are there.
 </Callout>
 
 ### Which tiles a rectangle touches is the footers' answer, and only theirs
@@ -500,9 +501,9 @@ a size — and no Zarr reader opens a corpus of typed tables with a subject IRI 
 ### The npm package is named for the corpus; the crates are named for the surface
 
 The published binding was `@fossil-lang/graph` and it is now **`@fossil-lang/corpus`**. The section
-title is the reason: none of the six draws, the package's door is `open`, and every type it
+title is the reason: no verb draws, the package's door is `open`, and every type it
 exports is `Corpus*`. What forced the rename rather than merely recommending it is that the thing
-which *does* draw arrived and took the obvious name — the playground's `package.json` (deleted after `2fa5f22`) lists
+which *does* draw arrived and took the obvious name — the playground's `package.json` (deleted after `2fa5f22`) listed
 `@kanzo-tech/graph`, a GPU canvas, and listed `@fossil-lang/graph` beside it. Two dependencies
 called `graph`, one addressing files and one painting vertices, and no import statement said which.
 
@@ -558,76 +559,65 @@ graph LR
 Deleting the four stubs took `GraphError::NotImplemented` with them, so **the `match` is exhaustive
 and a verb can no longer be declared without being wired.**
 
-<Callout title="The rule that keeps it at six">
+<Callout title="The rule that keeps it small">
 A new verb enters only if it serves a case the single path demonstrably cannot, and that
 demonstration is a measurement. Not an argument.
 </Callout>
 
-### The reader keeps an addressing pair beside the verbs, and that is a correction
+### Identity and incidence are addressed, not queried
 
-The reader package offers `node` and `neighbours` alongside `read` and `expand`, and they read as
-duplicates of them. They were to be deleted on exactly that reading, and the deletion was wrong.
+The reader answers `node` and `neighbours` by computing which files to open, and they once had verb
+twins — `read` and `expand` — that looked like duplicates. They were not, and the twins are what went.
+**A verb names a relation and lets the engine choose bytes; these compute which files to open.**
+`expand` was a recursive CTE over the whole edge relation, and it **did not return in 45 seconds at a
+million vertices**; `neighbours` opens the adjacency tiles its frontier's addresses name and no
+others, once per hop. The identity index is reachable the same way or not at all: it is addressing by
+construction, and no verb sees it.
 
-**A verb names a relation and lets the engine choose bytes; these compute which files to open.** It
-is the same line that keeps `extent` and `window`, and the one the crate doc draws when it says
-pruning is the tiles' job and not a verb's. The two are not interchangeable in either direction:
-`expand` is a recursive CTE over the whole edge relation — the query `neighbours` exists because of,
-and which **did not return in 45 seconds at a million vertices**. It answers in IRIs where a canvas
-needs placements, it walks the source-ordered relation only where a neighbourhood is undirected, and
-it reports no `complete`, `gaps` or `frontier`, so an answer whose outermost ring is missing its own
-edges looks whole in a count.
+[The backend](/docs/design/backend) keeps the rule and moves the member: incidence becomes `edges`
+from a tile, in either orientation, and a walk of more than one hop is the caller's loop over it.
 
-Deleting them would also have left the identity index unreadable through the package, because **no
-verb sees it** — the index is addressing by construction, and a surface with only verbs on it has no
-way to ask.
+### `execute_sql` reaches the engine unparsed, and one token opens it
 
-### `read`'s `where` is SQL, and carries `execute_sql`'s authority
+`execute_sql` takes a **raw SQL string**, evaluated by the host's engine; it is not a parsed
+predicate language, and nothing that reaches it is. The permission is enforced by one argument
+rather than a check:
 
-`read { vertex_type, where?, order_by?, descending, limit }` takes `where` as a **raw SQL fragment**,
-evaluated by the engine `execute_sql` reaches. It is not a parsed predicate language. So the
-permission travels with it: **a binding that gates `execute_sql` gates `read`'s `where` with the same
-permission.** Gating the escape hatch and leaving `where` open is the same surface with a second
-door.
+- The field is `RawSql`, a newtype whose only constructor takes a `RawSqlAccess` token.
+- `RawSql` has **no `Deserialize` impl**. That propagates: `ExecuteSqlParams` and `Operation` itself
+  cannot derive one either.
+- So the one door from wire JSON is `Operation::from_wire(value, sql: Option<RawSqlAccess>)`. `None`
+  refuses `execute_sql` and `Some` admits it, and a binding cannot parse the verb without having
+  taken the decision.
 
-That sentence used to end *"the rule is written on the type, where a binding author reads it as they
-type"* — which is an obligation discharged by remembering, the same shape the
-[privacy bound](/docs/design/privacy) rejects an anonymisation operator for. It is enforced now, and
-the mechanism is one argument rather than a check:
-
-- The two fields are `RawSql`, a newtype whose only constructor takes a `RawSqlAccess` token.
-- `RawSql` has **no `Deserialize` impl**. That propagates: `ReadParams`, `ExecuteSqlParams` and
-  `Operation` itself cannot derive one either.
-- So the one door from wire JSON is `Operation::from_wire(value, sql: Option<RawSqlAccess>)`, and
-  that single argument answers for both fields. `None` refuses a `read` carrying a `where` **and**
-  refuses `execute_sql`; `Some` admits both. **There is no spelling that opens one and closes the
-  other**, which is exactly what the comment was asking for and had no way to get.
-
+It held two fields together while `read` carried a `where` of the same authority, which is what the
+mechanism was built for: a binding that gated the hatch and left `where` open would have had the same
+surface with a second door. `read` is gone and the token still does the other half of its job.
 `crates/fossil-graph/src/operations/raw_sql.rs` carries the argument, and
-`crates/fossil-graph/tests/schemas.rs` exercises all four combinations.
+`crates/fossil-graph/tests/schemas.rs` exercises it.
 
 Two things it does not claim. It does not stop a binding *granting* access — withholding SQL is a
-policy and a library cannot hold a policy for its consumers; what the type holds is the coupling,
-so whatever the policy is, it lands on both fields at once. And `RawSql` is not a sanitiser: it
+policy and a library cannot hold a policy for its consumers. And `RawSql` is not a sanitiser: it
 parses, validates and escapes nothing, because [there is no chokepoint to sanitise
 towards](/docs/design/privacy).
 
 <Callout title="It cost nothing on the wire">
-The published JSON Schemas are byte-identical across the change apart from prose — `where` and `sql`
-are still `{"type": "string"}`, because `RawSql` is `#[schemars(transparent)]`. Measured by the
+The published JSON Schemas were byte-identical across the change apart from prose — `where` and `sql`
+stayed `{"type": "string"}`, because `RawSql` is `#[schemars(transparent)]`. Measured by the
 snapshot diff in `crates/fossil-graph/tests/snapshots/`: two files touched, and both diffs are a
 `description:` line. No binding that speaks the wire has anything to update.
 </Callout>
 
-<Callout type="warn" title="Six is enumerated; nothing says six is right">
+<Callout type="warn" title="Two is enumerated; nothing says two is right">
 The operation envelope snapshot is the wire contract every binding consumes and it enumerates
-exactly these six, so a seventh cannot land without it changing. What nothing on disk asserts is a
+exactly these two, so a third cannot land without it changing. What nothing on disk asserts is a
 target *count*. The closed set is a discipline, argued in
 [tooling for machines](/docs/design/tooling-for-machines).
 </Callout>
 
 <Callout type="warn" title="Nothing answers a camera today">
 `viewport` was deleted **before its replacement existed** — `c6c87fa` records the breakage as
-expected and accepted, and **none of the six verbs answers a camera** — which is the decision, and
+expected and accepted, and **neither verb answers a camera** — which is the decision, and
 it holds: the camera is addressed, not queried.
 
 What used to stand here beside it was that there is no tile emission and no tile index anywhere in
@@ -645,66 +635,26 @@ and that it is tiled by the same shift as the vertices it addresses. There is st
 
 The verbs do not draw and the corpus is addressed rather than queried, which leaves one thing
 unstated: *something* has to put a million points on a screen, and fossil does not ship it. What
-fossil publishes is the address — `open` with no engine lent to it, one reader, no bytes — and
-what draws is `@kanzo-tech/graph`, a bounded WebGL canvas over cosmos.gl whose whole data contract
-is one method:
+draws is `@kanzo-tech/graph`, a WebGL canvas over cosmos.gl, and it is the only viewer: the
+playground that was a second one here was deleted for being one.
 
-```ts
-interface BoundedSource {
-  slice(request: { view, limit, fill?, pinned?, perPixel? }): Promise<Slice>;
-  total?(): Promise<number>;
-  extent?(): Promise<Viewport>;
-}
-```
+**The division is: the view owns the picture and every policy over it, fossil owns the address and
+the bytes.** Where the seam sits and what crosses it is [the backend](/docs/design/backend) — a
+tile matrix per vertex type, a scan planned out of the manifest, and one tile per read.
 
-Both sides had already written the same sentence about the same deleted verb. `fossil-graph` says
-the camera is addressed and not queried; that package's own reader says *what replaces `viewport` is
-a tile brought by a computed URL, which is another source*. The playground's `src/tiles.ts` (deleted after `2fa5f22`) is that
-other source, and it is a *consumer* of [the one door](/docs/design/one-door): a viewport becomes a
-finite box, the renderer's `perPixel` becomes the canvas it is drawn into, `frame` answers, and what
-is left in the file is the mapping between two vocabularies. Nothing in it knows how cosmos.gl holds
-a buffer, and nothing in the renderer knows what a corpus is.
+### What addressing costs a camera, measured
 
-**The division is: the renderer owns the contract and the picture, fossil owns the address.** That
-package ships a fossil reader of its own — `openCorpus`, on its `duckdb` subpath — and the
-playground does not call it, for a reason that is a 404 rather than a preference: it composes
-`chunk{k}.parquet` and `by_source/tile{k}.parquet`, which is `container: files`, and fossil's writer
-emits `container: rowgroups`. It also re-derives the addressing from a line scan over six manifest
-keys, which is the arithmetic
-[`@fossil-lang/corpus` exists to publish](/docs/format/conventions/addressing#the-address-is-published-not-described)
-so that nobody has to. What reverses this is that reader learning `rowgroups` — better, addressing
-through the published module — at which point the source here becomes a call to it.
+A 10% window over a million vertices opened **17 of 245 tiles in 6 range requests and 1,466 kB** —
+2.56% of the corpus, 1.13× over-read at tile granularity — measured through the playground's
+`src/Canvas.tsx` (deleted after `2fa5f22`) and checked against bytes over a real HTTP server. The
+extent and the total were answered off the footers and the manifest, so the opening frame issued no
+query at all.
 
-### What the adoption costs, measured
-
-A 10% window over a million vertices opens **17 of 245 tiles in 6 range requests and 1,466 kB** —
-2.56% of the corpus, 1.13× over-read at tile granularity — and the camera is asked again on every
-move. `extent()` and `total()` are answered off the footer and the manifest, so the *opening* frame
-issues no query at all. The panel is the playground's `src/Canvas.tsx` (deleted after `2fa5f22`); the arithmetic is checked
-against bytes over a real HTTP server by `pnpm --filter @fossil-lang/playground verify-stream`, and
-the source itself — every array against the window it claims to describe — by `verify-canvas`.
-
-Two things that adoption does **not** buy, and one it must not cost:
-
-- **No crossfilter.** The renderer's Mosaic bindings are the way a graph joins the same crossfilter
-  as the charts beside it, through an `IdSetClient` that publishes `id IN (…)` precisely because a
-  position living in a GPU simulation is not a column anybody can filter on. It is the right adapter
-  and there are no charts beside this canvas: a coordinator with one client in it is a crossfilter
-  with nothing to cross.
-- **No second engine, and this is the constraint rather than the preference.** Those bindings are a
-  peer of `@uwdata/mosaic-core`, which hard-depends on a *different* DuckDB-WASM from the one the
-  playground pins. Two of them in one tab is not a size problem, it is two engines and therefore two
-  crossfilters that cannot hear each other — the exact failure the single re-export of `Coordinator`
-  exists to prevent. So the condition is a build artifact and not an intention: the playground
-  bundle emits **one** `duckdb-*.wasm` — 34,242.59 kB, the version the app pins — and the day it
-  emits two the adoption has gone wrong. That is checked by counting the assets of
-  `pnpm --filter @fossil-lang/playground... build`, which is also the only build that type-checks:
-  three workspace dependencies shell out to cargo, and without the recursive form a stale `dist/`
-  is what fails.
-- **No engine in `@fossil-lang/corpus`.** The renderer needs bytes; the *host* reads them, and the
-  package still links none. What it no longer offers is a *WASM-free* way in — the
-  `@fossil-lang/corpus/address` subpath was that, and composing a URL now loads
-  `fossil-graph-wasm`, which is what the addressing having one implementation costs.
+One constraint on any view, and it holds of kanzo-ui as it held of the playground: **no engine in
+`@fossil-lang/corpus`.** The view needs bytes; the *host* reads them, and the package links none.
+What it does not offer is a *WASM-free* way in — the `@fossil-lang/corpus/address` subpath was that,
+and composing a URL loads `fossil-graph-wasm`, which is what the addressing having one implementation
+costs.
 
 ### A palette has a capacity, and a corpus does not know it
 
@@ -827,7 +777,8 @@ stages no Parquet at all, and the tiles are the first and only time the payload 
 does not retire the lesson, because the defect was a reader composing a path the manifest had not
 given it.
 
-It composes both paths from the manifest now: `container` says whether a tile is a file or a row
+It composed both paths from the manifest before it was deleted, and
+`packages/corpus/src/corpus.ts, verbs` composes them the same way: `container` says whether a tile is a file or a row
 group and `prefix` says where the set is, so under the container fossil writes each relation is one
 named file and there is nothing to expand. Under the other one a vertex type's tiles are enumerated
 from `vertex_count` and `chunk_size`, which is why the count is declared. The single wildcard left is

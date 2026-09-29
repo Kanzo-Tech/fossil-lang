@@ -515,7 +515,8 @@ a sibling rather than a redesign.
 the bench corpus has 128 communities: folded into the capacity by remainder,
 `937,496 of a million vertices` come back sharing seven other communities' slots. A declared domain
 does not change that by one vertex — the fold is a property of the palette and the capacity, and
-the playground's `src/Canvas.tsx` (deleted after `2fa5f22`) reads the capacity off the live cascade where it belongs.
+the playground's `src/Canvas.tsx` (deleted after `2fa5f22`) read the capacity off the live cascade where it belongs, and the
+view does so now.
 
 What changes is **when** the mismatch is knowable. Today 128 and 8 are known on two sides of a
 boundary and nowhere together, so the picture is the first place the reader finds out. With the
@@ -600,6 +601,6 @@ irreproducible when nothing that mattered changed. What would settle it is one i
 layout change that moved positions, with somebody needing to know.
 
 **Whether the far view gets a third artefact.** A density raster is not a subset of rows, so it is
-not a level — [the reference viewer](/docs/design/reference-viewer) sets out why a level is a
-decimation and what a summary would have to be instead. The 183 kB above was measured outside the
+not a level — a level is a decimation, and a summary is what [cells](/docs/design/cells) are,
+which [the backend](/docs/design/backend) makes the only coarse artefact. The 183 kB above was measured outside the
 corpus, and bringing it inside is a separate decision from this one.
