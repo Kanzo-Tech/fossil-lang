@@ -1,4 +1,4 @@
-import type { Access, Engine, Host, Scope, StorageCredential } from '@fossil-lang/types';
+import type { Access, Engine, Host, Scope, StorageCredential, Table } from '@fossil-lang/types';
 
 export const s3 = (prefix: string, key: string, expiresAtMs?: number): StorageCredential => ({
   prefix,
@@ -18,6 +18,18 @@ export const azure = (prefix: string, sas: string): StorageCredential => ({
   config: { 'adls.sas-token.acct.dfs.core.windows.net': sas },
 });
 
+/** A one-row, one-column answer, or an empty one — the shape an engine answers in. */
+export function table(column: string, values: readonly unknown[]): Table {
+  return {
+    numRows: values.length,
+    schema: { fields: [{ name: column }] },
+    getChild: (name) =>
+      name === column
+        ? { length: values.length, get: (i) => values[i] ?? null, toArray: () => values }
+        : null,
+  };
+}
+
 /** An engine that records what it was asked and answers `httpfs` as `loaded`. */
 export function recordingEngine(loaded = true) {
   const sql: string[] = [];
@@ -25,9 +37,9 @@ export function recordingEngine(loaded = true) {
   const dropped: string[][] = [];
   const engine: Engine = {
     async query(text) {
-      if (text.includes('duckdb_extensions()')) return [{ loaded }];
+      if (text.includes('duckdb_extensions()')) return table('loaded', [loaded]);
       sql.push(text);
-      return [];
+      return table('Success', []);
     },
     async lend(files) {
       leases.push(files);

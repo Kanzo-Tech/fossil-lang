@@ -10,7 +10,21 @@
  * DuckDB-WASM has no extension for, and bytes the page already holds.
  */
 export interface Engine {
-  query(sql: string): Promise<Record<string, unknown>[]>;
+  /**
+   * Run one statement and answer in columns.
+   *
+   * **The signal reaches the running statement, not a queue.** A DuckDB-WASM connection runs one
+   * statement at a time, so an abort that only dropped queued work would leave the one that matters
+   * — the running, stale one — to finish. An engine interrupts it (`AsyncDuckDBConnection.send`
+   * then `cancelSent()` in DuckDB-WASM, `interrupt()` on a native connection) and rejects with the
+   * signal's reason, an `AbortError`; the connection answers the next statement as if the aborted
+   * one had never been sent.
+   *
+   * **Columns, because a reader draws columns.** apache-arrow's `Table` is a {@link Table}
+   * structurally, so a host hands back what DuckDB-WASM already produced and nothing turns columns
+   * into objects and back.
+   */
+  query(sql: string, options?: { readonly signal?: AbortSignal }): Promise<Table>;
   /**
    * Make each URL readable under its name. The same URL again is a no-op and a new URL
    * replaces the lease behind the name — DuckDB-WASM's `registerFileURL` refuses a second URL
@@ -19,4 +33,25 @@ export interface Engine {
   lend(files: Record<string, string>): Promise<void>;
   /** Forget the names. A name the engine does not hold is ignored. */
   drop(names: readonly string[]): Promise<void>;
+}
+
+/**
+ * An answer, in columns — the part of apache-arrow's `Table` fossil reads, so an Arrow table is one
+ * without a conversion and without this package depending on Arrow.
+ */
+export interface Table {
+  readonly numRows: number;
+  readonly schema: { readonly fields: readonly { readonly name: string }[] };
+  /** One column by name, or `null` when the answer has none of that name. */
+  getChild(name: string): Column | null;
+}
+
+/**
+ * One column of a {@link Table}. `get` answers `null` for a null; `toArray` is the column's own
+ * array — a typed array for a fixed-width type, in which a null reads as that type's zero.
+ */
+export interface Column {
+  readonly length: number;
+  get(index: number): unknown;
+  toArray(): ArrayLike<unknown>;
 }

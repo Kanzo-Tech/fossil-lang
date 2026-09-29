@@ -265,9 +265,15 @@ export async function introspect(
           } else if (!/^https?:\/\//.test(source.locator)) {
             throw new Error("it names no connection and is not a public URL");
           }
-          const rows = (await io.engine.query(
+          const described = await io.engine.query(
             describeSql(name, source.format, source.option),
-          )) as DescribeRow[];
+          );
+          const names = described.getChild("column_name");
+          const types = described.getChild("column_type");
+          const rows: DescribeRow[] = Array.from({ length: described.numRows }, (_, i) => ({
+            column_name: names?.get(i),
+            column_type: types?.get(i),
+          }));
           return buildDescriptor(source.key, rows, await io.freshness?.(source));
         } catch (err) {
           warn(

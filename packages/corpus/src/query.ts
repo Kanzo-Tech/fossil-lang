@@ -25,22 +25,15 @@
  * `fetch` capability**, because there is nothing a separate one could reach that the engine cannot:
  * it has to see the tiles or it cannot answer a window.
  *
- * **Three things it deliberately does not carry**, each because a host would have to lie to
- * provide it:
- *
- * - **No cancellation.** A camera that moves fast supersedes its own windows, so an `AbortSignal`
- *   is the obvious fifth parameter. DuckDB-WASM's blocking node bindings run a query to
- *   completion and cannot honour one. A seam that accepted a signal and ignored it would be worse than one that
- *   does not have it. Supersede-cancellation stays in the reader, where it can drop an answer.
- * - **No parameter binding.** Every value reaches SQL as a literal, so the caller of this callback
- *   owns quoting — the reader routes every URL, IRI and column name through one escaper each in
- *   `sql.ts`, and every id through `BigInt`'s own decimal rendering. Binding would be a second method and a
- *   second dialect question; one string is what a host already accepts.
- * - **No streaming.** The rows are materialised as an array, so a window over a dense region is in
- *   JS memory all at once. A cursor or an Arrow table would fix that and would put a shape from
- *   somebody else's library in the seam — which is the dependency this package does not take. The
- *   bound belongs in the box the caller asks for.
+ * **What it does not carry, and what replaced it.** It has no cancellation, no columns and no
+ * parameter binding. The first two are {@link Engine}'s now — `Engine.query` takes an
+ * `AbortSignal` and answers in Arrow-shaped columns — and a corpus opened with an engine reads
+ * through that; a `query` callback is kept for the members `/docs/design/backend` retires in step
+ * 5, and a read through it drops a stale answer rather than stopping it. Binding is still absent,
+ * and deliberately: every value reaches SQL as a literal through the one escaper each in `sql.ts`.
  */
+
+import type { Engine, Table } from '@fossil-lang/types';
 
 /** One row of a result, as a plain `{ column: value }` object. */
 export type QueryRow = Record<string, unknown>;
@@ -67,3 +60,74 @@ export type QueryRow = Record<string, unknown>;
  * width, and the corpus API coerces it at the boundary rather than trusting any of them.
  */
 export type QueryFn = (sql: string) => Promise<QueryRow[]>;
+
+/**
+ * **A read's answer, in columns** — what `scan.read` hands back. apache-arrow's `Table` is one, so
+ * an engine's answer passes through untouched; a `query` callback's rows are turned into one.
+ */
+export interface Batch {
+  readonly numRows: number;
+  getChild(name: string): { toArray(): ArrayLike<unknown> } | null;
+}
+
+/**
+ * **How every module reads**, whichever the host gave: rows for the members that walk objects,
+ * batches for the ones a view draws.
+ */
+export interface Reads {
+  readonly rows: QueryFn;
+  /**
+   * One statement's answer as a {@link Batch}, carrying `columns` even when it has no row. An
+   * aborted signal rejects with its reason — an `AbortError` — whether or not the engine stopped
+   * the statement, so a stale answer never reaches a caller that moved on.
+   */
+  batch(sql: string, columns: readonly string[], signal?: AbortSignal): Promise<Batch>;
+}
+
+/** Rows out of an engine's columns — for the members that still walk objects. */
+export function rowsOfTable(table: Table): QueryRow[] {
+  const names = table.schema.fields.map((f) => f.name);
+  const columns = names.map((name) => table.getChild(name));
+  return Array.from({ length: table.numRows }, (_, i) => {
+    const row: QueryRow = {};
+    names.forEach((name, k) => {
+      row[name] = columns[k]?.get(i) ?? null;
+    });
+    return row;
+  });
+}
+
+/** Columns out of rows, `columns` named even when there is no row. */
+export function batchOf(rows: readonly QueryRow[], columns: readonly string[]): Batch {
+  const names = new Set([...columns, ...rows.flatMap((row) => Object.keys(row))]);
+  return {
+    numRows: rows.length,
+    getChild: (name) => (names.has(name) ? { toArray: () => rows.map((row) => row[name]) } : null),
+  };
+}
+
+/** Reads through the host's {@link Engine}: the signal reaches the running statement. */
+export function engineReads(engine: Engine): Reads {
+  return {
+    rows: async (sql) => rowsOfTable(await engine.query(sql)),
+    async batch(sql, _columns, signal) {
+      signal?.throwIfAborted();
+      const table = await (signal === undefined ? engine.query(sql) : engine.query(sql, { signal }));
+      signal?.throwIfAborted();
+      return table;
+    },
+  };
+}
+
+/** Reads through a `query` callback, which cannot stop a statement and so drops a stale answer. */
+export function callbackReads(query: QueryFn): Reads {
+  return {
+    rows: query,
+    async batch(sql, columns, signal) {
+      signal?.throwIfAborted();
+      const rows = await query(sql);
+      signal?.throwIfAborted();
+      return batchOf(rows, columns);
+    },
+  };
+}

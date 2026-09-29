@@ -1,6 +1,6 @@
 import "./boot.js";
 
-import type { Access, ProgramSource, Scope, StorageCredential } from "@fossil-lang/types";
+import type { Access, ProgramSource, Scope, StorageCredential, Table } from "@fossil-lang/types";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildDescriptor,
@@ -10,6 +10,24 @@ import {
   type DescribeRow,
   type IntrospectIO,
 } from "../src/index.js";
+
+
+/** Rows as the columns an engine answers in. */
+function tableOf(rows: readonly Record<string, unknown>[]): Table {
+  const names = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+  return {
+    numRows: rows.length,
+    schema: { fields: names.map((name) => ({ name })) },
+    getChild: (name) =>
+      names.includes(name)
+        ? {
+            length: rows.length,
+            get: (i) => rows[i]?.[name] ?? null,
+            toArray: () => rows.map((row) => row[name]),
+          }
+        : null,
+  };
+}
 
 describe("duckdbTypeToFossilPrimitive", () => {
   it("maps integer family to integer", () => {
@@ -146,9 +164,9 @@ describe("introspect", () => {
       host: { connections: async () => ({ w: W }), credentials },
       engine: {
         query: async (text) => {
-          if (text.includes("duckdb_extensions()")) return [{ loaded: true }];
+          if (text.includes("duckdb_extensions()")) return tableOf([{ loaded: true }]);
           sql.push(text);
-          return text.startsWith("DESCRIBE") ? query(text) : [];
+          return tableOf(text.startsWith("DESCRIBE") ? await query(text) : []);
         },
         lend: async () => {},
         drop: async () => {},

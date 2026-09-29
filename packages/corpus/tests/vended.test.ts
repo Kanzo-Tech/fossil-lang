@@ -51,7 +51,7 @@ beforeAll(async () => {
   engine = {
     lent,
     async query(sql) {
-      return conn.query(sql).toArray().map((row: { toJSON(): Record<string, unknown> }) => row.toJSON());
+      return conn.query(sql);
     },
     async lend(files) {
       for (const [name, url] of Object.entries(files)) {
@@ -83,7 +83,7 @@ const host: Host = {
 };
 
 const catalogs = async (): Promise<string[]> =>
-  (await engine.query(`SELECT database_name AS d FROM duckdb_databases()`)).map((r) => String(r['d']));
+  Array.from((await engine.query(`SELECT database_name AS d FROM duckdb_databases()`)).getChild('d')!.toArray(), String);
 
 describe('open(job, { engine, host })', () => {
   it('reads each job under its own prefix, so two corpora of one shape never meet', async () => {
