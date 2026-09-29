@@ -71,6 +71,7 @@ beforeAll(async () => {
   );
   await db.instantiate();
   const conn = db.connect();
+  conn.query(`SET parquet_metadata_cache = true`);
   const spill = mkdtempSync(join(tmpdir(), 'fossil-view-spill-'));
   scratch.push(spill);
   conn.query(`SET temp_directory = '${spill}'`);

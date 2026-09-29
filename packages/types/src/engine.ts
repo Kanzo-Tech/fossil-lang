@@ -8,6 +8,12 @@
  * reaches SQL text, an error message, a query-cache key or a view definition, and it rotates under
  * a view that stays. `lend` and `drop` are for what a secret cannot reach — an Azure file, which
  * DuckDB-WASM has no extension for, and bytes the page already holds.
+ *
+ * **A host should cache Parquet metadata** — `SET parquet_metadata_cache = true`, once, when it
+ * boots. A corpus's payload is one file per type with a row group per tile, so its footer lists
+ * every tile and grows with the corpus, and without the cache every statement fetches and parses it
+ * again: a tile read costs the corpus rather than the tile. Measured in `/docs/design/backend`, it
+ * is 2.2× on a window's reads in DuckDB-WASM and 2.5× over a 10 ms link.
  */
 export interface Engine {
   /**

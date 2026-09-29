@@ -38,6 +38,8 @@ export async function duckdb(spill?: string): Promise<{
   );
   await db.instantiate();
   const conn = db.connect();
+  // What `Engine` asks of a host: the footer is read once per file, not once per statement.
+  conn.query(`SET parquet_metadata_cache = true`);
   if (spill !== undefined) conn.query(`SET temp_directory = '${spill}'`);
   const engine: Engine = {
     query: (sql, options = {}) =>
