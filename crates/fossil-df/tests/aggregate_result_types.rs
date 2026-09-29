@@ -266,7 +266,7 @@ async fn nulls_do_not_move_the_type() {
 /// All four rows resolve in the registry, all four declare `Float -> Float`,
 /// and all four are named by `RegistryEntry::agg_fn` — so a program can write
 /// any of them inside a `group_by` and the `Float` is what the row hands the
-/// checker. `apps/docs/programs/group-by/group-by.fossil` is the program that
+/// checker. `docs/programs/group-by/group-by.fossil` is the program that
 /// does it for `math.sum`.
 #[test]
 fn every_aggregate_row_is_reachable_and_declares_float() {

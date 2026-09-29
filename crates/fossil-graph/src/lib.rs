@@ -70,7 +70,7 @@
 //! ## The executor is a trait, and both impls exist
 //!
 //! This crate depends on [`fossil_sinks`] (manifest types — WASM clean) and on
-//! nothing else of fossil's; `apps/docs/content.test.ts` fails if that list is
+//! nothing else of fossil's; `docs/content.test.ts` fails if that list is
 //! ever anything but `["fossil-sinks"]`. It carries no wasm32 tripwire, because
 //! the verb logic is WASM-safe.
 //!

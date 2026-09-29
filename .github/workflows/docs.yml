@@ -18,21 +18,23 @@ name: docs
 on:
   pull_request:
     paths:
-      - 'apps/docs/**'
+      - 'docs/**'
       - 'crates/**'
       - 'grammar.bnf'
       - 'pnpm-workspace.yaml'
       - 'pnpm-lock.yaml'
       - '.github/workflows/docs.yml'
+      - '.github/workflows/deploy-docs.yml'
   push:
     branches: [main]
     paths:
-      - 'apps/docs/**'
+      - 'docs/**'
       - 'crates/**'
       - 'grammar.bnf'
       - 'pnpm-workspace.yaml'
       - 'pnpm-lock.yaml'
       - '.github/workflows/docs.yml'
+      - '.github/workflows/deploy-docs.yml'
 
 jobs:
   docs:
@@ -62,6 +64,12 @@ jobs:
       # that no longer exists, and a page that does not compile.
       - name: Build (content guard, then Next)
         run: pnpm --filter @fossil-lang/docs build
+
+      # What `deploy-docs.yml` publishes on main, built here so a PR cannot merge a site that only
+      # fails to export: a route handler without `generateStaticParams`, a page reading a request.
+      # The guard already ran above, and runs again inside `build:static`; it takes seconds.
+      - name: Static export (what Pages gets)
+        run: pnpm --filter @fossil-lang/docs build:static
 
       - name: Type-check
         run: pnpm --filter @fossil-lang/docs typecheck

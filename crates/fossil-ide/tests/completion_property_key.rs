@@ -17,7 +17,7 @@
 //! **The position.** It fired wherever the cursor was inside a mapping whose
 //! shape resolved — the header, the right-hand side of `=`, and after a member
 //! access. Measured before, against the `shop` corpus program
-//! (`apps/docs/programs/shop`, whose `Person` has a third predicate `shop:phone`):
+//! (`docs/programs/shop`, whose `Person` has a third predicate `shop:phone`):
 //!
 //! | position                       | total | FUNCTION | FIELD              |
 //! |--------------------------------|-------|----------|--------------------|

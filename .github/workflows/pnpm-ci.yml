@@ -79,7 +79,7 @@ jobs:
       # There is no exclusion here any more. `@fossil-lang/examples` was carved
       # out because its variations harness built `fossil-cli` (datafusion/duckdb
       # — minutes) just to spawn `fossil check`, and `examples.yml` owned that
-      # gate. Both are gone: the acceptance corpus is `apps/docs/programs/`, run
+      # gate. Both are gone: the acceptance corpus is `docs/programs/`, run
       # by `crates/fossil-cli/tests/programs.rs`, which is a Rust test on the
       # Rust side of the seam and never enters a pnpm filter.
       # For `apps/corpus`'s `integration/` suites, two steps down. They were

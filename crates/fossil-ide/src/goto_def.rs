@@ -394,7 +394,7 @@ fn brace_members(node: &SyntaxNode) -> Vec<String> {
 /// 2. **a prefixed name**, when the document declares a prefix whose expansion
 ///    the IRI starts with. `PREFIX shop: <https://shop.example/voc#>` makes
 ///    `https://shop.example/voc#Person` findable as `shop:Person`, which is how
-///    every `.shex` in `apps/docs/programs/` actually spells its shapes —
+///    every `.shex` in `docs/programs/` actually spells its shapes —
 ///    asserted here for months and now held by
 ///    [`tests::every_corpus_shape_is_reached_through_tier_2`], which walks the
 ///    directory. A document with no `PREFIX` line makes tier 2 unreachable and
@@ -614,7 +614,7 @@ shop:Person {
             .parent()
             .and_then(std::path::Path::parent)
             .expect("crates/fossil-ide is two levels below the repo root")
-            .join("apps/docs/programs")
+            .join("docs/programs")
     }
 
     /// Every `.shex` under [`corpus_dir`], as `(path, text)`.

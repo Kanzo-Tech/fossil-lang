@@ -492,7 +492,7 @@ const fn expr_name(e: &Expr<'_>) -> &'static str {
 /// that come out, and until this module existed nothing in `src/plan.rs` was
 /// tested at all. The case every test below is built on is the one `8184c1f`
 /// measured, and it is the case **no count can see**:
-/// `apps/docs/programs/compound-key` joins on two columns, and dropping the
+/// `docs/programs/compound-key` joins on two columns, and dropping the
 /// `tenant` conjunct takes the join from four rows to seven while the seven mint
 /// the same four subjects — so the vertex count, the property list and the
 /// mapping census are all equal across the break. The predicate rendered into
@@ -628,7 +628,7 @@ mod tests {
     /// against it exactly as the program's own run resolves it, which is what
     /// makes these the artefact's rows and not a copy of them.
     fn compound_key_dir() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/docs/programs/compound-key")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/programs/compound-key")
     }
 
     /// `LineRow.join(OrderRow, on = …)` over that program's two CSVs, executed.

@@ -1,11 +1,11 @@
-//! The catalogue, projected onto the reference page — `apps/docs/content/generated/stdlib.mdx`.
+//! The catalogue, projected onto the reference page — `docs/content/generated/stdlib.mdx`.
 //!
 //! # Why this exists
 //!
 //! The catalogue is DATA and a compiler reads it. `crate::catalogue` parses
 //! `catalogue.bnf`; this turns the same parse into the page's tables.
 //!
-//! `apps/docs/content/docs/book/stdlib.mdx` was that table written a second
+//! `docs/content/docs/book/stdlib.mdx` was that table written a second
 //! time, by hand, in Markdown — and the second copy had drifted, which is what
 //! a second copy does. Measured on 2026-08-23, before this file existed:
 //!
@@ -70,7 +70,7 @@ use crate::catalogue::{Catalogue, FnRow, Lowering, Reads, Row, Signature, is_nam
 /// that directory, so a partial living there would be a page of the site.
 /// `remarkInclude` resolves `<include>` against the INCLUDING file's directory,
 /// so `book/stdlib.mdx` reaches it as `../../generated/stdlib.mdx`.
-pub const PARTIAL: &str = "apps/docs/content/generated/stdlib.mdx";
+pub const PARTIAL: &str = "docs/content/generated/stdlib.mdx";
 
 /// The receiver head of a dotted catalogue name — `str` of `str.trim`.
 fn head_of(name: &str) -> &str {

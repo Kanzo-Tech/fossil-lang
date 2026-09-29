@@ -8,7 +8,7 @@
 //! log level, and the only trace left was an `edge_count` smaller than the
 //! source's row count, which nobody has to compare against anything.
 //!
-//! Measured on `apps/docs/programs/reviews/` before the count existed: three
+//! Measured on `docs/programs/reviews/` before the count existed: three
 //! reviews, two people, `edge_count: 2`, and no output of any kind naming the
 //! third.
 //!

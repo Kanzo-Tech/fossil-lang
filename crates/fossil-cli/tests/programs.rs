@@ -1,21 +1,21 @@
-//! **The conformance set, executed.** `apps/docs/programs/` — twenty-one clean
+//! **The conformance set, executed.** `docs/programs/` — twenty-one clean
 //! programs,
 //! compiled by the production path, each one's output or diagnostic kept as an
 //! artefact.
 //!
 //! `grammar.bnf`'s header names this directory as the language's only mechanical
-//! control: *«THE CONFORMANCE SET is `apps/docs/programs/` … Nothing mechanically
+//! control: *«THE CONFORMANCE SET is `docs/programs/` … Nothing mechanically
 //! checks this file against the parser today, so those 26 programs are the only
 //! check it has.»* Until this file existed that sentence was false in the one way
 //! that matters — **nobody compiled them.** They were transcluded by the
 //! documentation, and the only thing checked was that the file and its
-//! `// #region` were on disk (`apps/docs/lib/programs.ts`). A stale example rotted
+//! `// #region` were on disk (`docs/lib/programs.ts`). A stale example rotted
 //! in silence instead of failing to compile, and the five `expected/diagnostic.txt`
 //! were hand-written prose that no compiler produced and nothing compared.
 //!
 //! # Why here and not in the web app
 //!
-//! The thing that has to go red is the COMPILER. A script under `apps/docs` that
+//! The thing that has to go red is the COMPILER. A script under `docs/` that
 //! shelled out to `fossil check` would put the failure on the documentation
 //! build, which is the wrong side of the seam: a parser regression is not a docs
 //! problem, and the docs build already has two ways to be red for reasons that
@@ -47,7 +47,7 @@
 //!
 //! # What replaces the `file:line` citation check
 //!
-//! `apps/docs/content.test.ts` scans every MDX page for `` `path/to/file.rs:12` ``
+//! `docs/content.test.ts` scans every MDX page for `` `path/to/file.rs:12` ``
 //! and asserts the line exists — **that the line exists, not that it says what
 //! the page claims.** This file is the replacement for the claims that are
 //! PROGRAMS. It is not a replacement for the ones that are not.
@@ -239,7 +239,7 @@ const EXPECTED_FAILING: usize = 6;
 
 /// One program of the set.
 struct Program {
-    /// `hello`, `errors/wrong-type` — relative to `apps/docs/programs/`, and what
+    /// `hello`, `errors/wrong-type` — relative to `docs/programs/`, and what
     /// every failure line names.
     name: String,
     /// The `.fossil` file.
@@ -252,9 +252,9 @@ struct Program {
 
 fn programs_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../apps/docs/programs")
+        .join("../../docs/programs")
         .canonicalize()
-        .expect("apps/docs/programs is on disk")
+        .expect("docs/programs is on disk")
 }
 
 /// Every `.fossil` under the corpus, discovered rather than listed.

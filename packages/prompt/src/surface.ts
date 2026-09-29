@@ -1,7 +1,7 @@
 /**
  * The hand-written half of the prompt — and every sentence of it is held to something.
  *
- * - {@link EXAMPLE} is `apps/docs/programs/shop/shop.fossil` with its region markers removed: a
+ * - {@link EXAMPLE} is `docs/programs/shop/shop.fossil` with its region markers removed: a
  *   conformance program `crates/fossil-cli/tests/programs.rs` runs, so the example a model copies
  *   is one that compiles and produces its expected corpus.
  * - Every other fossil line in {@link SURFACE} is a line of SOME conformance program. A form the
@@ -19,9 +19,9 @@
  */
 
 /** SHA-256 of the `grammar.bnf` {@link SURFACE} and {@link FORBIDDEN} were last reviewed against. */
-export const GRAMMAR_DIGEST = 'd51ab17d525bfc02058a605587c1611cc64c45e3bf291bdfda16e0074bf95b99';
+export const GRAMMAR_DIGEST = '81d2f74cf36367e5a58b520608f0d139a40ea3ea9101fe352e0c7980be477265';
 
-/** A complete program: `apps/docs/programs/shop/shop.fossil`, region markers removed. */
+/** A complete program: `docs/programs/shop/shop.fossil`, region markers removed. */
 export const EXAMPLE = `type { Person, Order } := io.shex("shop.shex")
 
 User     := io.csv("data/users.csv")

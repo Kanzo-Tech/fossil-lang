@@ -16,7 +16,7 @@
 //! - **That the option reaches either engine.** `fossil-mir` carries it into
 //!   `SourceFormat::Csv` and `fossil-df` turns it into a `CsvReadOptions`
 //!   delimiter; both have their own tests, and
-//!   `apps/docs/programs/pipe-delimited` is the one artefact that proves the
+//!   `docs/programs/pipe-delimited` is the one artefact that proves the
 //!   whole thread at once.
 //! - **That the WORD is `delimiter`.** It is the catalogue's, read back by
 //!   `reader_option_of`; `crates/fossil-hir/src/def_map.rs`'s own

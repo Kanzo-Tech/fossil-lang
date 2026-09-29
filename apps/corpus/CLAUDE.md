@@ -11,10 +11,10 @@ guards' own fixture and reads it back through `packages/corpus/src`, which is wh
 cost, the container comparison, the cost model and the pyramid read are measured.
 
 The prose half was a second Next.js site living beside this directory. It is gone: the pages are
-`apps/docs/content/docs/format/`, and what it cost was nine runtime dependencies identical version
+`docs/content/docs/format/`, and what it cost was nine runtime dependencies identical version
 for version to the ones next door, a second bundler, a second search index and a second build, for
 twelve pages. Its two server components moved with it —
-`apps/docs/components/{guard-index,vector-table}.tsx` — and they still read the files here.
+`docs/components/{guard-index,vector-table}.tsx` — and they still read the files here.
 
 **That reach matters.** `guard-index.tsx` imports `guards/guards.mjs` and `vector-table.tsx` reads
 `guards/vectors.json`, both at build time. Renaming or moving either one breaks the documentation

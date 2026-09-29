@@ -33,7 +33,7 @@
 (*    mandatory, and the user declares no functions — are stated at    *)
 (*    the production they bind.                                        *)
 (*                                                                     *)
-(*  THE CONFORMANCE SET is `apps/docs/programs/` — 29 programs with    *)
+(*  THE CONFORMANCE SET is `docs/programs/` — 29 programs with         *)
 (*  their shape documents and data, 6 of which are expected to fail    *)
 (*  the checker and carry the diagnostic they must produce. Every one  *)
 (*  of the 29 is derivable from the productions below, and no          *)

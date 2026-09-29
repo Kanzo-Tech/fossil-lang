@@ -86,7 +86,7 @@ failure.
 catalogue.bnf ──cargo├─▶ crates/fossil-hir/src/stdlib/generated.rs
               xtask  ├─▶ packages/introspect/src/catalogue.generated.ts
             catalogue├─▶ packages/executor/src/catalogue.generated.ts
-                     ├─▶ apps/docs/content/generated/stdlib.mdx
+                     ├─▶ docs/content/generated/stdlib.mdx
                      └─▶ packages/prompt/src/catalogue.generated.ts
 
 corpus.bnf ─────cargo┌─▶ crates/fossil-sinks/src/generated.rs
@@ -195,9 +195,9 @@ them repealed. A second reference does not stay true; it stays *cited*.
 
 So:
 
-- **The decision itself** is the page that states the rule. `apps/docs/content/docs/design/`
-  for the language, `apps/docs/content/docs/format/` for the artifact, `grammar.bnf` for the
-  syntax, `apps/docs/content/docs/design/typing.mdx` for the static semantics.
+- **The decision itself** is the page that states the rule. `docs/content/docs/design/`
+  for the language, `docs/content/docs/format/` for the artifact, `grammar.bnf` for the
+  syntax, `docs/content/docs/design/typing.mdx` for the static semantics.
 - **The alternative you rejected** goes to `design/discarded.mdx`, in its four fields —
   the idea, why it is attractive, the evidence against it, and **what would bring it
   back**. An entry that cannot state the last field does not go on the page. That field
@@ -209,7 +209,7 @@ So:
 
 There is no `Status` field, because a page has no status. A page says what is true; one
 describing something not yet built carries a `direction:` — one sentence, plus the page
-here that argues for it — and that is the only mark. `apps/docs/content.test.ts` fails
+here that argues for it — and that is the only mark. `docs/content.test.ts` fails
 the build if a direction has no summary, or names an argument that is not a page of the
 site. There was a second register carrying a path to a file that would go red; it was
 retired after eight of forty-nine such citations were measured pointing at a line that

@@ -1,0 +1,76 @@
+# Publishes the documentation to GitHub Pages, at kanzo-tech.github.io/fossil-lang.
+#
+# It does not re-run the checks as a separate gate — `docs.yml` owns those on the same push — but
+# `build:static` runs the content guard before it exports, the same way `build` does, so a page
+# citing a path that is gone never reaches the published site either.
+#
+# The build differs from the local one in two variables, set by `build:static` so the difference is
+# one command away rather than only reachable from here:
+#
+# · `DOCS_STATIC_EXPORT=1` turns on `output: "export"`, which removes the server; see
+#   `docs/next.config.ts` for what had to become a file for that.
+# · `NEXT_PUBLIC_BASE_PATH=/fossil-lang` is the project-page prefix. A project page is served from
+#   `<org>.github.io/<repo>`, and the same variable reaches the client, because the search index
+#   and a page's Markdown source are `fetch`ed and Next prefixes no `fetch`.
+#
+# `NEXT_PUBLIC_SITE_URL` is set here and nowhere else: `llms.txt` advertises it as the origin the
+# paths resolve against, and leaves the host out rather than guess it when it is unset.
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and never cancel one in flight: a half-uploaded artefact is a broken site,
+# and the queued run would publish the same commit a minute later anyway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: static export
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Only this app and what it needs, as in `docs.yml`: the site imports no @fossil-lang package,
+      # and a root install would pull several that need the Rust toolchain to build.
+      - name: Install (docs and its dependencies only)
+        run: pnpm install --frozen-lockfile --filter @fossil-lang/docs...
+
+      - name: Static export
+        run: pnpm --filter @fossil-lang/docs build:static
+        env:
+          NEXT_PUBLIC_SITE_URL: https://kanzo-tech.github.io/fossil-lang
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/out
+
+  deploy:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

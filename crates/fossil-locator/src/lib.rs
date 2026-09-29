@@ -18,7 +18,7 @@
 //! pre-introspected against `path.parent()` while `run` executed against the
 //! cwd, so the two commands disagreed about where the same file was. And a
 //! program changed meaning when you `cd`: `fossil run
-//! apps/docs/programs/hello/hello.fossil` from the repository root looked for
+//! docs/programs/hello/hello.fossil` from the repository root looked for
 //! `<root>/data/people.csv`.
 //!
 //! # The rule
@@ -219,10 +219,10 @@ mod tests {
     #[test]
     fn a_relative_path_anchors_to_the_program_and_not_the_cwd() {
         let c = conns(&[]);
-        let anchor = SourceAnchor::new(Path::new("apps/docs/programs/hello"), &c);
+        let anchor = SourceAnchor::new(Path::new("docs/programs/hello"), &c);
         assert_eq!(
             anchor.locator("data/people.csv"),
-            "apps/docs/programs/hello/data/people.csv"
+            "docs/programs/hello/data/people.csv"
         );
     }
 
@@ -257,8 +257,8 @@ mod tests {
     #[test]
     fn program_dir_is_the_directory_the_program_lives_in() {
         assert_eq!(
-            program_dir("apps/docs/programs/hello/hello.fossil"),
-            Path::new("apps/docs/programs/hello")
+            program_dir("docs/programs/hello/hello.fossil"),
+            Path::new("docs/programs/hello")
         );
     }
 

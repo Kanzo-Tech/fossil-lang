@@ -175,7 +175,7 @@ struct Comment {
     text: String,
 }
 
-/// The banner heading, cut at the parenthetical, exactly as `apps/docs/content.test.ts` cuts it
+/// The banner heading, cut at the parenthetical, exactly as `docs/content.test.ts` cuts it
 /// for a section citation. The two extractors agree by construction because the file
 /// writes the banner one way.
 fn banner(line: &str) -> Option<String> {
@@ -237,7 +237,7 @@ fn comments(src: &str) -> Vec<Comment> {
 }
 
 /// Every name the file DEFINES — the left of a `:=`, terminals included, and a comma list on the
-/// left defines both (`LPAREN, RPAREN := '(' ')'`). The same rule `apps/docs/content.test.ts`
+/// left defines both (`LPAREN, RPAREN := '(' ')'`). The same rule `docs/content.test.ts`
 /// uses to resolve a citation.
 fn defined(src: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
