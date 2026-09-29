@@ -369,7 +369,7 @@ fn a_release_that_clears_the_bound_is_sealed_with_numbers_a_stranger_can_recompu
     );
 
     // And the number is re-derivable from the bytes by somebody who has none of
-    // this — which is what `apps/corpus`'s `declared-privacy` does in
+    // this — which is what `packages/corpus/guards`' `declared-privacy` does in
     // JavaScript and what this does in SQL. Two implementations, one artefact.
     let conn = Connection::open_in_memory().expect("duckdb");
     let tiles = dest.join("vertex/Person/tiles.parquet");

@@ -23,7 +23,7 @@ import { open } from '../src/corpus.js';
 // exactly what DuckDB-WASM's registry refuses unless the lease is dropped first.
 
 const require = createRequire(import.meta.url);
-const CORPUS = fileURLToPath(new URL('../../../apps/corpus/conformance/corpus', import.meta.url));
+const CORPUS = fileURLToPath(new URL('../conformance/corpus', import.meta.url));
 const VERTEX_COUNT = 300;
 
 let db: DuckDBBindings;

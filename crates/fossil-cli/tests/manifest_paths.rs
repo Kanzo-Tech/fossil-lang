@@ -31,7 +31,7 @@
 //! no row group, the ordinals are dense where the tile numbers are not, and
 //! neither existence nor a count of row groups is a predicate arithmetic
 //! predicts. Only summing them against `edge_count` is right.
-//! `apps/corpus`'s `declared-count` guard is where that is done, over a corpus
+//! `packages/corpus/guards`' `declared-count` guard is where that is done, over a corpus
 //! this crate does not write.
 
 #![cfg(not(target_arch = "wasm32"))]

@@ -117,7 +117,7 @@ mod tests {
     /// belongs to a writer rather than to the format: `DuckDB` emits row groups in
     /// multiples of its 2,048-row vector and clamps a smaller `ROW_GROUP_SIZE`
     /// without a warning, so 300 rows at `ROW_GROUP_SIZE 64` come back as ONE
-    /// group of 300 — which is why `apps/corpus`'s fixture, which writes through
+    /// group of 300 — which is why `packages/corpus/guards`' fixture, which writes through
     /// `DuckDB`, cannot put a `chunk_size` 64 corpus in this container.
     ///
     /// fossil writes through `arrow-rs`, so the limit is not fossil's. The

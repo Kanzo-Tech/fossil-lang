@@ -103,7 +103,7 @@ There is **one** reference, in three pieces:
   teaches the language, `/docs/format` specifies the corpus, and behind a maintainers' divider `/docs/design`
   is the argument for why any of it is shaped this way. A page describing something not yet built
   says so in a `direction:` field rather than in its tone; everything else describes what is there.
-- [`apps/corpus/`](apps/corpus/) — the artifact's contract, executable: the guards that make a
+- [`packages/corpus/`](packages/corpus/) — the artifact's contract, executable: the guards that make a
   convention checkable and the conformance corpus that makes two readers agree. Copy `guards/`
   somewhere else and it runs — `node` and a `duckdb` binary, no install, no build.
 - [`apps/docs/programs/`](apps/docs/programs/) — the conformance programs. Every program the

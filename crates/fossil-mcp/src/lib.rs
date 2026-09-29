@@ -391,7 +391,7 @@ mod tests {
         use std::path::Path;
 
         let corpus = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../apps/corpus/conformance/corpus")
+            .join("../../packages/corpus/conformance/corpus")
             .canonicalize()
             .expect("the conformance corpus is on disk");
 
@@ -487,7 +487,7 @@ mod tests {
     /// decides it, passing [`Container::RowGroups`] unconditionally. So **a
     /// corpus fossil wrote registers no wildcard at all.**
     ///
-    /// The fixture below is the other one on purpose. `apps/corpus`'s
+    /// The fixture below is the other one on purpose. `packages/corpus`'s
     /// conformance corpus is `container: files` — it is written through `DuckDB`,
     /// which clamps a row group under its 2,048-row vector, so a `chunk_size`
     /// 64 corpus cannot be in the row-group container — which makes it the
@@ -506,7 +506,7 @@ mod tests {
         use std::path::Path;
 
         let corpus = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../apps/corpus/conformance/corpus")
+            .join("../../packages/corpus/conformance/corpus")
             .canonicalize()
             .expect("the conformance corpus is on disk");
 

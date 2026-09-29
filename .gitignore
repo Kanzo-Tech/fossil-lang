@@ -47,7 +47,7 @@ packages/wasm/pkg/
 packages/corpus/pkg/
 packages/executor/pkg/
 # The playground's large demo corpus: ~56 MB of Parquet written by
-# `apps/playground/scripts/bench-corpus.mjs` from `apps/corpus/guards/fixture.mjs`. A build
+# `apps/playground/scripts/bench-corpus.mjs` from `packages/corpus/guards/fixture.mjs`. A build
 # artifact of a private app, regenerated in about five seconds, and the generator is the
 # checked-in thing rather than its output.
 apps/playground/public/bench/

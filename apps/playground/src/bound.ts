@@ -12,7 +12,7 @@
  *
  * A badge reading `k: 5 ✓` is worth very little. It restates the producer's own claim in a
  * larger font, and the producer is the party the recipient cannot check. Recomputing is a
- * different act: it is the guard `apps/corpus/guards/check.mjs` runs natively —
+ * different act: it is the guard `packages/corpus/guards/check.mjs` runs natively —
  * `declared-privacy` — performed by the reader, on the reader's machine, against the bytes the
  * reader actually holds. What that demonstrates is a property of the FORMAT, not a property of
  * this corpus.
@@ -70,7 +70,7 @@ export type Declaration =
  * Read the `privacy:` block out of a manifest.
  *
  * A line scanner, deliberately, and the same shape `packages/corpus/src/manifest.ts` and
- * `apps/corpus/guards/manifest.mjs` use: two spaces of indent, `key: scalar`, no sequences.
+ * `packages/corpus/guards/manifest.mjs` use: two spaces of indent, `key: scalar`, no sequences.
  * The crate that writes it asserts that shape precisely so four independent parsers agree.
  */
 export function readDeclaration(manifest: string): Declaration {

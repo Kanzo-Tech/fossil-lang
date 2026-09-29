@@ -132,7 +132,7 @@ pub async fn dispatch_graph(
 // lines of TypeScript composing the same URLs from the same manifest, agreeing
 // with [`fossil_graph::plan`] because people kept making it agree — and it is
 // gone. What is left below is the binding it reaches this one through, so
-// `apps/corpus/conformance/expected.json` is now executed by exactly two
+// `packages/corpus/conformance/expected.json` is now executed by exactly two
 // implementations that mean it (plain Node in `conformance/verify.mjs`, and
 // `fossil_graph::plan` natively in `crates/fossil-graph/tests/conformance.rs`)
 // plus one that re-enters this one from JavaScript
@@ -145,7 +145,7 @@ pub async fn dispatch_graph(
 // directions. JavaScript's `>>` truncates to 32 bits *before* it shifts and its
 // `Number` stops being exact at 2^53, so a `u64` that arrived as a double would
 // have lost the two borders the published vectors
-// (`apps/corpus/guards/vectors.json`) exist to pin.
+// (`packages/corpus/guards/vectors.json`) exist to pin.
 
 use fossil_graph::plan::{
     Direction, EdgeAddress, ProjectionAddress, ReadPlan, VertexAddress, resolve,

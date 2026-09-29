@@ -7,7 +7,7 @@
 //! resolve blank nodes, and it will not accept a document that says the same
 //! thing a different way.
 //!
-//! That is the same call `apps/corpus/guards/manifest.mjs` makes about the
+//! That is the same call `packages/corpus/guards/manifest.mjs` makes about the
 //! manifest, for the same reason and with the same price. Full JSON-LD
 //! processing means a dependency with a network fetcher in it — remote contexts
 //! are how JSON-LD works — and a compile-time document whose meaning depends on

@@ -22,7 +22,7 @@
  *
  * Exit `0` when the reader's addresses match what the writer wrote, `1` when they do not, `2` when
  * the harness could not run — no `fossil`, no `duckdb`. **`2` is not a pass.** This is the one check
- * in `apps/corpus/` that needs a third tool, which is why it is here and not in `guards/`: the claim
+ * in `packages/corpus/` that needs a third tool, which is why it is here and not in `guards/`: the claim
  * on `guards/README.md` is that the directory runs on `node` and `duckdb` alone, and it stays true.
  *
  * **What it proves.** That the four manifest fields a reader addresses with (`prefix`, `chunk_size`,

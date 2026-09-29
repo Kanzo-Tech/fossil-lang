@@ -106,7 +106,7 @@ const ok = (label, condition, detail = '') => {
 /**
  * The manifest, read by hand — **a third parser, deliberately, and that is the point of it.**
  *
- * `packages/corpus/src/manifest.ts` and `apps/corpus/guards/manifest.mjs` are two of the others,
+ * `packages/corpus/src/manifest.ts` and `packages/corpus/guards/manifest.mjs` are two of the others,
  * and `src/bound.ts` is the app's reader of the `privacy:` block. This script must not import that
  * one: it reaches `src/duckdb.js`, which imports a browser wasm bundle through a Vite `?url`
  * specifier and does not resolve in Node. So the facts this check needs are read off the text here,

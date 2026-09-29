@@ -22,7 +22,7 @@
 //!
 //! **What this cannot prove, and where the rest of it is now.** This is one
 //! writer read by one engine. The cross-implementation half is real and it is
-//! not here: `apps/corpus/conformance/expected.json` is a table of addresses
+//! not here: `packages/corpus/conformance/expected.json` is a table of addresses
 //! executed by three legs that none of them wrote — plain Node
 //! (`conformance/reader.mjs`), `fossil_graph::plan` natively in
 //! `crates/fossil-graph/tests/conformance.rs`, and the same plan at wasm32
@@ -35,7 +35,7 @@
 //!
 //! What still has one side is the seam between the two: that table resolves
 //! against a checked-in corpus, and the corpus THIS file writes is read back by
-//! one reader, `apps/corpus/conformance/writer.mjs`. A writer change that moved
+//! one reader, `packages/corpus/conformance/writer.mjs`. A writer change that moved
 //! an address would be caught there, by that reader, and by nothing else — which
 //! is a smaller gap than the one this paragraph used to describe and is still a
 //! gap. It is named rather than closed because closing it means running the wasm

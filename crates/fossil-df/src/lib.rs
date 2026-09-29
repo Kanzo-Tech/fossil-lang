@@ -124,7 +124,7 @@ pub struct GraphArData {
     /// to `graph.graph.yml` as such. That is the whole mitigation for the
     /// binding being a host argument today: forgetting it does not produce a
     /// corpus that looks bounded, it produces one that says out loud that
-    /// nothing was checked, and `apps/corpus`'s `declared-privacy` says so
+    /// nothing was checked, and `packages/corpus/guards`' `declared-privacy` says so
     /// again to whoever receives it.
     pub privacy: Privacy,
     /// **The cell pyramid each vertex type carries**, keyed by its label — and
@@ -767,7 +767,7 @@ async fn execute_edge(
     // identifies at most one vertex: a type materialised without dedup can hold
     // two rows with the same `subject`, and then one candidate resolves to two
     // edges. That corpus already violates `identity-is-the-subject`
-    // (`apps/corpus/guards/guards.mjs`), which is the guard that catches it.
+    // (`packages/corpus/guards/guards.mjs`), which is the guard that catches it.
     //
     // **Against `matched` and not against what was written**, because the two
     // stopped being the same number when the dedup above landed. `dropped` says
@@ -2069,7 +2069,7 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
     // `is_primary` marks the IDENTITY, and the identity is `subject`.
     //
     // This writer said `dense_id`, and it was the only thing in the tree that
-    // did: `apps/corpus/guards/guards.mjs`'s `identity-is-the-subject` says
+    // did: `packages/corpus/guards/guards.mjs`'s `identity-is-the-subject` says
     // "`dense_id` is an address and cannot also be an identity", the
     // conformance corpus's `vertex/Person.vertex.yml` marks `subject`, and
     // `packages/corpus`'s reader keys on the column name precisely because it
@@ -2142,7 +2142,7 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
     // an identity index and the manifest says so. Declared here, beside the
     // properties that make it possible, rather than after the layout pass that
     // fills it — which is the same order `prefix` is already declared in: the
-    // manifest is the plan, and `apps/corpus`'s `index-agrees-with-the-payload`
+    // manifest is the plan, and `packages/corpus/guards`' `index-agrees-with-the-payload`
     // is what goes red if the pass does not deliver it.
     //
     // The same `chunk_size` as the payload because there is no reason yet for

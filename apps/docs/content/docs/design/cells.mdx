@@ -791,7 +791,7 @@ before the field or by a writer that is not this one. Absent means *nobody said*
 *the mode is of nothing*, because no such rung exists.
 
 **The reference is checked in two places, and neither could make the other's claim.** A name that
-resolves to nothing is the failure a reference introduces, so `apps/corpus/guards` carries
+resolves to nothing is the failure a reference introduces, so `packages/corpus/guards` carries
 `mode-names-a-channel` over the document — the name is one of the type's own channels, and the entry
 it lands on is `categorical`, because a measure has no majority to take. That guard cannot reach
 bytes. `crates/fossil-layout/tests/cells.rs` can and does: the pyramid's fifth obligation no longer
@@ -884,7 +884,7 @@ remaining 548 by what a rename actually had to do to each:
 | Rust code — `CellTree`, `CellRung`, `CellQuotient`, `CELL_PREFIX`, `cell_count`, `cells_at`, `with_cells` and the test fns | 260 | 11 | mechanical, and the compiler found every one |
 | Rust doc and line comments | 137 | 15 | prose, and the compiler found none of it |
 | design pages on this site | 116 | 7 | prose |
-| guard code under `apps/corpus/guards/` | 22 | 4 | **two of these read the manifest key** |
+| guard code under `packages/corpus/guards/` | 22 | 4 | **two of these read the manifest key** |
 | a corpus on disk — the conformance manifest and one snapshot | 7 | 2 | **the format change, and the whole of it** |
 | TypeScript and JavaScript comments | 3 | 3 | prose |
 | `corpus.bnf` | 2 | 1 | prose; its columns already said `cell` |
@@ -951,9 +951,9 @@ that is allowed. Nothing is released and no corpus written by anyone else exists
 buys is a property of a set with nothing in it.
 
 What holds the two halves together instead is the guard, and it was made to hold *before* the
-rename rather than after. `apps/corpus/guards/inspect.mjs, cellsOf` is the one function in the tree
-that reads the key; `mode-names-a-channel` in `apps/corpus/guards/guards.mjs` counts the trees it
-examined, and `apps/corpus/guards/self-test.mjs` asserts that count is non-zero against a fixture
+rename rather than after. `packages/corpus/guards/inspect.mjs, cellsOf` is the one function in the tree
+that reads the key; `mode-names-a-channel` in `packages/corpus/guards/guards.mjs` counts the trees it
+examined, and `packages/corpus/guards/self-test.mjs` asserts that count is non-zero against a fixture
 that writes one. A writer that renames the key and a reader that does not now produces *zero trees
 examined* and a red self-test naming the missing pyramid — which is what a silent `null` would
 otherwise have been reported as a note. That exchange is the whole answer to the callout above: the
@@ -1019,7 +1019,7 @@ vertex outside the current bounding box requantises every position and renumbers
 chooses them; nothing here says what a reader should do with two trees over the same type, and
 `relations` is a list because refusing to answer that is cheaper than answering it wrongly.
 
-**What a guard would have to grow to read a rung.** `apps/corpus/guards/manifest.mjs` is a line
+**What a guard would have to grow to read a rung.** `packages/corpus/guards/manifest.mjs` is a line
 scanner that reads a nested mapping one level deep and skips what is deeper, so it sees the tree's
 `prefix` and `chunk_size` and not its rungs — the same wall `index:` hit, and the same fix.
 Nothing reads a rung today, which is why it is a design question and not a gap.

@@ -62,8 +62,8 @@
 //!   value. `let v = "gar".to_string() + "/v1"` defeats it, as does reading the
 //!   string from a fixture file. The defect it closes is the one that happened
 //!   seven times, not every defect of its shape.
-//! - **Anything outside `crates/`.** `apps/corpus`'s conformance manifests and
-//!   `packages/corpus`'s fixtures carry the string as DATA — YAML on disk, the
+//! - **Anything outside `crates/`.** `packages/corpus`'s conformance manifests and
+//!   test fixtures carry the string as DATA — YAML on disk, the
 //!   bytes a reader is handed — and a Rust constant cannot reach them. They are
 //!   a separate problem with a separate answer, and this guard is silent on it
 //!   rather than pretending to cover it.

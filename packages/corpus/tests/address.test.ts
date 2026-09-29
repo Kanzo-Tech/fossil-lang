@@ -10,7 +10,7 @@ import { open } from '../src/corpus.js';
 /**
  * The addressing binding, on the manifests the rest of this package already uses.
  *
- * The *contract* lives in `apps/corpus/conformance/expected.json` and is executed by
+ * The *contract* lives in `packages/corpus/conformance/expected.json` and is executed by
  * `conformance.test.ts`, by `crates/fossil-graph/tests/conformance.rs` and by a second
  * implementation with no npm at all. What is here is the behaviour a table of addresses cannot
  * express: what the arithmetic refuses, and what a corpus that declares no adjacency at all
@@ -30,14 +30,14 @@ const manifestFiles: Record<string, string> = JSON.parse(
 /**
  * The published vectors, **executed rather than restated**.
  *
- * `apps/corpus/guards/vectors.json` is the deliverable — the file a third party copies — and every
+ * `packages/corpus/guards/vectors.json` is the deliverable — the file a third party copies — and every
  * other implementation reads it instead of transcribing it: the guard `published-vectors`, and a
  * Rust test on the writer's side. A table transcribed here would be a fourth copy that drifts
  * silently, which is the pathology the whole file exists to argue against.
  */
 const vectors = JSON.parse(
   await readFile(
-    fileURLToPath(new URL('../../../apps/corpus/guards/vectors.json', import.meta.url)),
+    fileURLToPath(new URL('../guards/vectors.json', import.meta.url)),
     'utf8',
   ),
 ) as {
@@ -217,7 +217,7 @@ describe('the declared count', () => {
     //
     // **`tail_rows` is not asserted here any more**, and that is the one column this package lost
     // when its arithmetic went: a tail is a free function of the reader and no resolved corpus
-    // publishes it. `apps/corpus/guards` still executes that column, in plain Node.
+    // publishes it. `packages/corpus/guards` still executes that column, in plain Node.
     expect(vectors.declared_count.vectors.length).toBeGreaterThan(0);
     for (const v of vectors.declared_count.vectors) {
       const type = (await corpusOf({
@@ -264,7 +264,7 @@ describe('open — the engine-free rung', () => {
     expect(2 ** person.shift).toBe(declared);
     // The fixture declares `container: rowgroups`, which is what fossil writes: every tile of the
     // set names one file and the footer's box on `dense_id` says which row groups are the tile.
-    // The ordinal-in-the-name half of the claim is `apps/corpus/integration/containers.test.ts`'s
+    // The ordinal-in-the-name half of the claim is `packages/corpus/integration/containers.test.ts`'s
     // and the vector table's.
     expect(person.tileUrl(0)).toBe('/bench/1000000/vertex/Person/tiles.parquet');
     // The boundary is what the shift is FOR, so it is asserted at the boundary

@@ -17,7 +17,6 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "//exports": "ONE entry, and there were four. `.` is the door and it exports FOUR values plus the writer's role table: `open`, `levelsOf` and the two errors. **`resolveCorpus` came off it and did not come back under another name — it IS `open` now**: the engine-free route was never a second door, it was the same call with a smaller capability, so `open(base, { manifestFiles })` and `open(url, { readText })` answer with the addressing and `open(url, { query })` answers with the corpus. `GRAPH_INFO_PATH` and `initFossilGraphWasm` stay off: the boot is awaited inside the door, and the index's file name is the door's business — but that second reason had been applied to the engine-free route, which cannot read anything for itself, and the cost was three hand-written copies of the index scan (two here, one in another repository). `readText` publishes the SEQUENCE instead of the file name, which is what those copies were re-implementing. Every part of this still needs the WASM — `corpus.js`, `client.js`, `load.js` and `address.js` all static-import `../pkg/fossil_graph_wasm.js`, so a consumer without that build output cannot load the barrel at all. `./corpus` went when the door reached the verbs. `./address` went when the addressing did: its whole justification was a closure that reached no WASM, and the only way to keep that promise was a second implementation of `crates/fossil-graph/src/plan.rs` in TypeScript. Composing a URL now costs loading a wasm module and an `await`, and that is the price of there being one reader behind one name.",
-
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -34,13 +33,22 @@
     "README.md",
     "LICENSE"
   ],
+  "//contract": "`conformance/`, `guards/` and `integration/` are the corpus contract, and they live beside the reader that fulfils it rather than in a private app of their own: a private app beside a package is a second workspace name for one directory, and the package's own tests already reached into it by path. None of the three is in `files`, so npm never sees them. `guards/` stays plain ESM with no dependencies and no build — node plus the `duckdb` binary — because it is the directory a third party copies. **`test` is still `vitest run` over `tests/` and nothing else**, and that is the constraint this move must not break: `release.yml` runs `pnpm --filter \"./packages/*\" test` before publishing, and a suite that spawns `duckdb` in that step is what took `v0.3.0-alpha.4` down. The contract runs under its own names: `test:contract` is the guards' self-test and the conformance chain (`--without-wasm`, as `corpus.yml` runs it), `conformance` is every leg and FAILS without `pkg/`, and `test:integration` is the four suites that write a corpus with the `duckdb` binary and read it back through `src/`, under their own vitest config.",
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
     "gen:types": "bash scripts/gen-types.sh",
     "build": "pnpm run build:wasm && pnpm run gen:types && tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:contract": "node guards/self-test.mjs && node conformance/containers.mjs && node guards/check.mjs conformance/corpus && node conformance/provenance.mjs && node conformance/verify.mjs --without-wasm",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "check": "node guards/check.mjs",
+    "self-test": "node guards/self-test.mjs",
+    "fixture": "node guards/fixture.mjs",
+    "conformance": "node conformance/verify.mjs",
+    "provenance": "node conformance/provenance.mjs",
+    "containers": "node conformance/containers.mjs"
   },
   "sideEffects": false,
   "dependencies": {

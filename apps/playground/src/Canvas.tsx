@@ -430,7 +430,7 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
 
       <p className="str-note">
         <strong>The bars are all the same height, and that is the fixture rather than the chart.</strong>{' '}
-        <code>apps/corpus/guards/fixture.mjs</code> assigns <code>birth_year</code> uniformly, so the
+        <code>packages/corpus/guards/fixture.mjs</code> assigns <code>birth_year</code> uniformly, so the
         million vertices fall 50,000 to a bin across twenty bins of two years — measured, not
         assumed. A flat histogram is the correct picture of a flat column, and the thing worth
         watching is not the bars but the canvas underneath them: because the layout pass placed
@@ -503,7 +503,7 @@ export default function Canvas({ bench, boxes }: CanvasProps) {
         </strong>{' '}
         A bounded reader can only draw an edge whose far end it has a position for, and it has
         positions for the tiles it fetched. This demo corpus is{' '}
-        <code>apps/corpus/guards/fixture.mjs</code>, whose edges are a <em>ring over the
+        <code>packages/corpus/guards/fixture.mjs</code>, whose edges are a <em>ring over the
         pre-layout index</em> plus one chord per vertex inside its cluster — so after the Morton
         renumbering the destinations are scattered across the whole id space. Measured over its{' '}
         {n(bench.stamp.edges)} edges, at the four windows{' '}

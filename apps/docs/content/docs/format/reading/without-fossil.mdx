@@ -38,7 +38,7 @@ is the one name known in advance and it names every per-type manifest. A vertex 
 `type`, a `vertex_count`, a `prefix`, a `chunk_size` and optionally an `index:` block; an edge
 manifest carries `src_type`, `edge_type`, `dst_type`, an `edge_count`, a `prefix`, and the
 `src_chunk_size` and `dst_chunk_size` that tie each orientation's tiles to its own endpoint type's.
-They are small and flat, so `apps/corpus/guards/manifest.mjs` reads them with a line scan and no
+They are small and flat, so `packages/corpus/guards/manifest.mjs` reads them with a line scan and no
 YAML library, refusing what it cannot parse instead of guessing at it.
 
 ```

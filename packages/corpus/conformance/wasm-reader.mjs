@@ -14,7 +14,7 @@
  *
  * # This is the one thing here that is not `node` plus a `duckdb` binary
  *
- * Everything else under `apps/corpus/` runs in a checkout where nothing has been installed, which
+ * Everything else under `conformance/` and `guards/` runs in a checkout where nothing has been installed, which
  * is the position the third party this format is for is in — `guards/README.md` says take this
  * directory, it is meant to be copied, and `guards/` keeps that claim intact. This file does not:
  * it imports `packages/corpus/pkg/`, which `pnpm --filter @fossil-lang/corpus build:wasm` writes and
@@ -42,7 +42,7 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Where `packages/corpus/scripts/build-wasm.sh` writes its output. */
-export const PKG_DIR = join(HERE, "..", "..", "..", "packages", "corpus", "pkg");
+export const PKG_DIR = join(HERE, "..", "pkg");
 
 const SHIM = join(PKG_DIR, "fossil_graph_wasm.js");
 const BINARY = join(PKG_DIR, "fossil_graph_wasm_bg.wasm");

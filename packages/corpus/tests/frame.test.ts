@@ -39,7 +39,7 @@ import type { QueryFn, QueryRow } from '../src/query.js';
  */
 
 const require = createRequire(import.meta.url);
-const CORPUS = fileURLToPath(new URL('../../../apps/corpus/conformance/corpus', import.meta.url));
+const CORPUS = fileURLToPath(new URL('../conformance/corpus', import.meta.url));
 
 /** The manifest's own numbers, so a hard-coded stride shows up as a failure. */
 const VERTEX_COUNT = 300;

@@ -31,11 +31,13 @@ name: corpus
 # built that output by the time it gets there, and the native run of the same table is
 # `crates/fossil-graph/tests/conformance.rs` in `ci.yml`.
 #
-# `packages/corpus/**` is in the path filter because `apps/corpus/conformance/expected.json`
-# is the contract BOTH implementations execute: an addressing change in the package has
-# to run the reader that shares nothing with it.
+# The path filter is `packages/corpus/**` because the contract lives beside the reader
+# that fulfils it: `conformance/expected.json` is the table every implementation executes,
+# and an addressing change in `src/` has to run the reader that shares nothing with it.
+# Every step below runs in `packages/corpus` without `pnpm install` — `guards/` and
+# `conformance/` import nothing but each other and `node:`.
 #
-# **`apps/corpus/integration/` is not run here, and that is the same refusal.** Those four
+# **`packages/corpus/integration/` is not run here, and that is the same refusal.** Those four
 # suites are vitest, they need the workspace's `@duckdb/duckdb-wasm`, and they read a corpus
 # back through `packages/corpus/src`, whose barrel static-imports the gitignored `pkg/` — so
 # they want `pnpm install`, `node_modules` and a Rust toolchain, which are exactly the three
@@ -45,13 +47,11 @@ name: corpus
 on:
   pull_request:
     paths:
-      - 'apps/corpus/**'
       - 'packages/corpus/**'
       - '.github/workflows/corpus.yml'
   push:
     branches: [main]
     paths:
-      - 'apps/corpus/**'
       - 'packages/corpus/**'
       - '.github/workflows/corpus.yml'
 
@@ -86,14 +86,14 @@ jobs:
       # against a corpus broken in exactly the way it exists to catch. A guard nobody has
       # seen fail is a guard nobody has tested, and this is the step that has seen them.
       - name: Guards self-test
-        working-directory: apps/corpus
+        working-directory: packages/corpus
         run: node guards/self-test.mjs
 
       # The checked-in conformance corpus, through the guards. It has bytes — 300 vertices
       # in five tiles, both orientations — so the addresses `verify.mjs` composes below name
       # files that are on disk rather than URLs that compose cleanly and 404 in a browser.
       - name: Guards against the conformance corpus
-        working-directory: apps/corpus
+        working-directory: packages/corpus
         run: node guards/check.mjs conformance/corpus
 
       # Where the checked-in corpus came from. It is twenty Parquet files and three manifests
@@ -102,12 +102,12 @@ jobs:
       # like a stale fixture. It is `clusters`, and at 16 the generator reproduces this corpus
       # byte for byte. The recipe is in the file and this step is what keeps it true.
       - name: The conformance corpus reproduces from its recorded recipe
-        working-directory: apps/corpus
+        working-directory: packages/corpus
         run: node conformance/provenance.mjs
 
       # The plain-Node reader of the table. The other two — the published TypeScript and the
       # wasm32 build of the Rust one — run in `pnpm-ci.yml`; all three execute
       # `conformance/expected.json` and none of them wrote it.
       - name: Conformance
-        working-directory: apps/corpus
+        working-directory: packages/corpus
         run: node conformance/verify.mjs --without-wasm

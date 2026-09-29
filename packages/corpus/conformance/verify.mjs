@@ -27,7 +27,7 @@
  * runs the same table natively in `crates/fossil-graph/tests/conformance.rs`; what runs here is the
  * wasm32 build of it, which is a different claim — `usize` is 64 bits there and 32 here.
  *
- * The wasm leg needs `packages/corpus/pkg/`, which is the one thing under `apps/corpus/` that is not
+ * The wasm leg needs `packages/corpus/pkg/`, which is the one thing `conformance/` needs that is not
  * `node` plus a `duckdb` binary. It is therefore **required by default and refused explicitly**:
  * `--without-wasm` is the opt-out, and `.github/workflows/corpus.yml` — which installs `node` and
  * `duckdb` and nothing else — is where it is passed and where the reason is written down. A leg

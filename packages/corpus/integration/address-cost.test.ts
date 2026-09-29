@@ -23,14 +23,14 @@
  *
  * ## The corpus
  *
- * Written here by `apps/corpus/guards/fixture.mjs`, which is JavaScript against the published
+ * Written here by `packages/corpus/guards/fixture.mjs`, which is JavaScript against the published
  * conventions and imports nothing of ours — the same second implementation `cost.test.ts` uses, for
  * the same reason. Point `FOSSIL_ADDRESS_CORPUS` at a corpus directory (with
  * `FOSSIL_ADDRESS_COUNT`) to run the same windows over a bigger one.
  *
- * It needs the `duckdb` binary, which is why it lives in `apps/corpus/integration/` beside the
+ * It needs the `duckdb` binary, which is why it lives in `packages/corpus/integration/` beside the
  * guards that speak to it and not in `packages/corpus/tests/`. The dependency is DECLARED —
- * `pnpm --filter @fossil-lang/corpus-contract test:integration` is the script that has it, and the
+ * `pnpm --filter @fossil-lang/corpus test:integration` is the script that has it, and the
  * package's own `pnpm test` no longer does. It is not probed and this file does not skip:
  * `describe.skipIf` skips the TESTS and runs the describe BODY, so the probe it was guarding
  * never guarded the fixture write, and a suite that vanishes with its dependency reads as

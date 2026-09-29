@@ -437,7 +437,7 @@ is `null`, never a string), a tile size that disagrees with the vertex type addr
 tiles a rectangle touches, which comes from the footer boxes.
 
 The seam is tested by the question it exists to answer: **can a reader that is not fossil's open the
-same corpus with only what fossil publishes?** `apps/corpus/conformance/reader.mjs` is that reader —
+same corpus with only what fossil publishes?** `packages/corpus/conformance/reader.mjs` is that reader —
 plain Node, no npm, no build. `verify.mjs` runs it against the same table of addresses the module
 does; `writer.mjs` runs it against a corpus `fossil run` has just written, because the first cannot
 catch two readers being wrong *together*.
@@ -445,7 +445,7 @@ catch two readers being wrong *together*.
 ## The published vectors
 
 The arithmetic ships as a formula **and a table of vectors**, because the vectors are what gets
-copied. Every value below is a border, they live in `apps/corpus/guards/vectors.json`, the guard
+copied. Every value below is a border, they live in `packages/corpus/guards/vectors.json`, the guard
 `published-vectors` executes that file, and these tables are rendered from it.
 
 <VectorTable of="tile_of" />
@@ -473,7 +473,7 @@ The last row of the pair on `vertex/Person/` is the one that separates the conta
 a set is the same file, and a reader that hands the same path to `read_parquet` once per tile scans
 the relation once per tile — 9,240 vertices where the window holds 1,848, exactly five times over
 five tiles. Guard: `published-vectors`; harness:
-`apps/corpus/conformance/containers.mjs`, which writes one graph both ways and requires every answer
+`packages/corpus/conformance/containers.mjs`, which writes one graph both ways and requires every answer
 to match.
 
 ## The payload format is open

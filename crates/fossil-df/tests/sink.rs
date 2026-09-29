@@ -77,7 +77,7 @@ async fn write_manifests_lays_out_the_graphar_manifests_and_no_payload() {
 
     // **And no payload, which is the phase order made assertable.** A staged
     // vertex Parquet beside the tiles that replace it is two containers for one
-    // set of rows, which is what `apps/corpus`'s `exactly-once` and
+    // set of rows, which is what `packages/corpus/guards`' `exactly-once` and
     // `declared-tiling` fail a corpus for. It used to be deleted by whoever ran
     // the layout afterwards; it is not written.
     for rel in [

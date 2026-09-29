@@ -79,19 +79,19 @@ pub struct RunReport {
 /// 1. **No reader can verify it.** `vertex_count` and `edge_count` earn their
 ///    place in the manifest by being answerable to the payload: summing the
 ///    tiles either reaches the declared number or does not, which is what
-///    `apps/corpus`'s `declared-count` guard does. A dropped count is about rows
+///    `packages/corpus/guards`' `declared-count` guard does. A dropped count is about rows
 ///    that are *not* there and never were. No guard can be written for it, and a
 ///    manifest field no guard can reach is a claim a reader has to take on
 ///    trust.
 /// 2. **A third-party writer has no such number.** The format is documented so
-///    that somebody else's writer can produce a corpus; `apps/corpus/guards/fixture.mjs`
+///    that somebody else's writer can produce a corpus; `packages/corpus/guards/fixture.mjs`
 ///    is one, in JavaScript, and it emits edge manifests without ever performing
 ///    a join. A required field (and `vertex_count`'s own docblock argues at
 ///    length that an optional count is not a count) would make a conforming
 ///    corpus impossible to write without a fact only fossil's pipeline has.
 /// 3. **It would not deserialise the corpora that exist.** `EdgeInfo` is parsed
 ///    out of any corpus fossil is pointed at, including
-///    `apps/corpus/conformance/corpus`, whose edge manifest is committed and has
+///    `packages/corpus/conformance/corpus`, whose edge manifest is committed and has
 ///    no such key.
 ///
 /// So it sits beside [`RunReport::dest`], which is the other fact about the run

@@ -61,7 +61,7 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
     // declared prefix, the identity index beside them, and the staged
     // single-file payload GONE — it is never written now, where it used to be
     // written, read by the pass and removed from the map. Left in, it is a
-    // second, stale copy of every vertex and `apps/corpus`'s `exactly-once`
+    // second, stale copy of every vertex and `packages/corpus/guards`' `exactly-once`
     // fails a corpus for it.
     let paths: Vec<&str> = out.files.iter().map(|f| f.rel_path.as_str()).collect();
     assert!(

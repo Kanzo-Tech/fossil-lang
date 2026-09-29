@@ -11,11 +11,11 @@ import { open } from '../src/corpus.js';
 /**
  * The conformance corpus, executed against the published module.
  *
- * `apps/corpus/conformance/expected.json` is a table of addresses — what a reader must compose from
+ * `packages/corpus/conformance/expected.json` is a table of addresses — what a reader must compose from
  * a manifest and what it must refuse to compose. This file runs it through the wasm32 build that
  * actually ships, which is a different claim from `crates/fossil-graph/tests/conformance.rs`
  * running the same reader natively: `usize` is 64 bits there and 32 here, and 2^53 is where a port
- * that went through a double stops being exact. `apps/corpus/conformance/verify.mjs` is the leg
+ * that went through a double stops being exact. `packages/corpus/conformance/verify.mjs` is the leg
  * that is a separate implementation, in plain Node with no npm at all, because the format's claim
  * is that a reader who has never heard of this package can open the same corpus. None of the three
  * wrote the table.
@@ -26,7 +26,7 @@ import { open } from '../src/corpus.js';
  * browser with no type error and no failing test.
  */
 
-const CONFORMANCE = fileURLToPath(new URL('../../../apps/corpus/conformance/', import.meta.url));
+const CONFORMANCE = fileURLToPath(new URL('../conformance/', import.meta.url));
 
 interface Adjacency {
   direction: Direction;
