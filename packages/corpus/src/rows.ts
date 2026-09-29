@@ -1,6 +1,7 @@
 /**
- * Which tiles a read needs and what reading them answers — Iceberg's `Table.scan`, which today is
- * the tile selection a rectangle makes and the `sampled` read a frame resolves.
+ * `rows` and the tile selection `frame` reads through — the rectangle read over the footers, which
+ * step 5 of `/docs/design/backend` deletes with both members. Held apart from `./scan.ts` for the
+ * reason `./frame.ts` is: so the deletion is a file rather than a carving.
  */
 
 import type { CorpusAddressing, Direction, Gap, VertexAddress } from './address.js';
@@ -110,7 +111,7 @@ export interface SampledRead {
   readonly matchedAt: number;
 }
 
-export interface Scan {
+export interface Rectangles {
   selectedTiles(type: VertexAddress, box: Box): readonly number[];
   sampledRead(params: {
     readonly address: VertexAddress;
@@ -123,7 +124,7 @@ export interface Scan {
   rows(params: RowsParams): Promise<RowsAnswer>;
 }
 
-export function scanOf(reads: {
+export function rowsOf(reads: {
   readonly query: QueryFn;
   readonly addressing: CorpusAddressing;
   readonly payloadFiles: ReadonlyMap<string, readonly string[]>;
@@ -131,7 +132,7 @@ export function scanOf(reads: {
   readonly has: (type: string, column: string) => boolean;
   readonly manifest: TileManifest;
   readonly edges: Edges;
-}): Scan {
+}): Rectangles {
   const { query, addressing, payloadFiles, fieldsOf, has } = reads;
   const { tileBoxes, footers } = reads.manifest;
   const { readEdges } = reads.edges;

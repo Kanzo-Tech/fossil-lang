@@ -78,7 +78,7 @@ import type {
   SchemaResult,
 } from './generated.js';
 import type { NodeParams, PlacedVertex } from './identity.js';
-import type { RowsAnswer, RowsParams } from './scan.js';
+import type { RowsAnswer, RowsParams } from './rows.js';
 import type { Extent } from './tile-manifest.js';
 import type { TileMatrixSet } from './tile-matrix.js';
 

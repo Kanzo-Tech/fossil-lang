@@ -3,7 +3,7 @@
  *
  * **The footers ARE the index** — `footer-is-the-index` — and this is the measurement of the one
  * path that survives that convention: every tile whose Parquet-footer `x`/`y` box intersects the
- * rectangle, which is what `intersecting` in `packages/corpus/src/scan.ts` does with the boxes
+ * rectangle, which is what `intersecting` in `packages/corpus/src/rows.ts` does with the boxes
  * `open` reads once. Both halves of the question are here: it must MISS nothing, and what it over-reads
  * for that is reported in tiles, in `Range` requests and in kilobytes.
  *

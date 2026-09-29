@@ -11,7 +11,7 @@ import { IDENTITY, identityOf } from './identity.js';
 import { initFossilGraphWasm, type InitInput } from './load.js';
 import { join, paths, scan } from './manifest.js';
 import { callbackReads, engineReads, type QueryFn, type QueryRow, type Reads } from './query.js';
-import { scanOf } from './scan.js';
+import { rowsOf } from './rows.js';
 import { CorpusReadError, ident, list, lit, text } from './sql.js';
 import { published, tileManifestOf } from './tile-manifest.js';
 import { zoomsOf, type Zooms } from './tile-matrix.js';
@@ -397,7 +397,7 @@ async function opened(
   const manifest = await tileManifestOf({ query, addressing, payloadFiles, has });
   const identity = identityOf({ query, addressing, payloadFiles, has });
   const edges = edgesOf({ query, addressing, identity });
-  const scanner = scanOf({ query, addressing, payloadFiles, fieldsOf, has, manifest, edges });
+  const rectangles = rowsOf({ query, addressing, payloadFiles, fieldsOf, has, manifest, edges });
   const verbs = verbsOf({ query, addressing, manifestFiles, catalog, payloadFiles, fieldsOf });
 
   const corpus: Corpus = {
@@ -421,8 +421,8 @@ async function opened(
     relations: verbs.relations,
     extent: manifest.extent,
     tileMatrix: (type) => zooms(type).set,
-    rows: scanner.rows,
-    frame: frameOf({ query, addressing, fieldsOf, has, manifest, scan: scanner }),
+    rows: rectangles.rows,
+    frame: frameOf({ query, addressing, fieldsOf, has, manifest, rectangles }),
     node: identity.node,
     neighbours: edges.neighbours,
   };

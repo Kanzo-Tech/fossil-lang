@@ -118,7 +118,7 @@ export type { Box, Filter, Literal } from './expression.js';
 export type { Frame, FrameCost, FrameParams } from './frame.js';
 export type { NodeParams, PlacedVertex } from './identity.js';
 export type { OpenOptions, SqlPolicy } from './open.js';
-export type { RowsAnswer, RowsParams } from './scan.js';
+export type { RowsAnswer, RowsParams } from './rows.js';
 export type { Extent } from './tile-manifest.js';
 export type { Pixels, TileAddress, TileInfo, TileMatrix, TileMatrixSet } from './tile-matrix.js';
 
