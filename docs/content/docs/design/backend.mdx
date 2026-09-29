@@ -634,3 +634,207 @@ with corpora whose tile count keeps the parse gap below one round trip on the li
 over — at ten million that gap is 32 ms, and a corpus read across an ocean has a longer trip than
 that. Then one request fewer is worth more than the parse, and the entries move into the YAML under
 the same four names.
+
+## Proposal: a tile's box is its own area, and a read does not cost the corpus
+
+<Callout type="warn" title="A proposal for the owner, not a ruling">
+Nothing below has been decided. It is the investigation kanzo-ui's graph view asked for, on branch
+`investigate/tile-compactness`, with a prototype of the option it recommends. The ruling is the
+owner's, and until it is taken `dense_id` stays the Morton rank the rest of this page and
+[the format](/docs/format/conventions/addressing) say it is.
+</Callout>
+
+**The finding, as the view reported it.** A window holding about 5,000 vertices still draws cells:
+the payload tiles whose boxes it intersects hold more rows than the view's 20,000, so the finest
+zoom that fits is a rung. And one payload tile costs about 230 ms, as three sequential statements —
+`scan.read` and both halves of `edges`.
+
+### What a payload tile's box claims, measured
+
+Measured on 2026-09-29 by `crates/fossil-layout/examples/tile_compactness.rs` over three corpora of
+1,000,000 vertices: the bench corpus kanzo-ui's view was built against, `enrich_memory`'s fixture at
+mean degree 14 through the real layout pass, and the same fixture through the prototype below.
+*Compactness* is a tile's box over the area its rows would cover on a uniformly filled extent — one
+is a square of exactly its own rows. Windows are 400 squares centred on random vertices; *tiles
+holding* counts the tiles that have a vertex inside the window, which is the best any box of any
+shape can do with the same tiles.
+
+| | kanzo-ui's bench | `enrich_memory` | `enrich_memory`, Hilbert prototype |
+| --- | --- | --- | --- |
+| compactness p50 · p90 · max | 2.03 · 4.82 · 23.1 | 1.89 · 5.67 · 17.9 | **1.41 · 1.76 · 1.9** |
+| ~5,000-vertex window: tiles hit p50 · p90 | 7 · 10 — 28,672 · 40,960 rows | 7 · 10 — 28,672 · 40,960 rows | **5 · 7 — 20,480 · 28,672 rows** |
+| … tiles holding a window vertex p50 · p90 | 5 · 7 | 5 · 7 | 4 · 6 |
+| 1% of the extent (~9,500 vertices): tiles hit p50 · p90 | 10 · 13 | 10 · 13 | **7 · 9** |
+| … tiles holding a window vertex p50 · p90 | 8 · 10 | 8 · 10 | 7 · 9 |
+| the `spatial-tiles` guard's mean box share | — | 1.13% | 0.57% |
+
+The archive corpus is 1,543 vertices, one tile, and has nothing to measure; com-DBLP was not rebuilt.
+
+**The boxes are not wide in the sense the report meant.** The median tile is twice its own area,
+not the extent, and the `spatial-tiles` guard's bound of one half is two orders of magnitude away.
+But a window opens 1.4× the tiles that hold its vertices at the median and at p90, and that is the
+geometry's share of the cost.
+
+### Where it comes from
+
+**`dense_id` is already a pure Morton rank**, and the community-major order is not a second sort
+underneath it. On all three corpora the written order is exactly the order of the recomputed codes —
+the `morton-order` guard's rule — and the groups come out contiguous because
+`crates/fossil-layout/src/layout/place.rs, cluster_layout` gives each one an aligned block of the
+quaternary, and an aligned block is one interval of codes. So there is no community order to trade
+away for a spatial one: they are the same order by construction.
+
+**It is not outliers.** Trimming each tile's box to its 1st–99th percentile moves compactness from
+1.89 to 1.84 at the median and from 5.67 to 4.6 at p90; the phyllotaxis discs are compact, and no
+tile is inflated by a few members placed far away.
+
+**It is the Z-curve.** A run of 4,096 ranks that crosses a quad boundary at depth *d* leaves one
+quad at its far corner and enters the next at its near one — the Z's diagonal — so its box is the
+hull of both. Of 245 tiles, one straddles the root split, six a depth-1 boundary and 24 a depth-2
+one; all five tiles above 10× are among the first seven. The same jump is the residue
+[position](/docs/design/position) names and leaves standing — *the Z-curve makes long jumps at the
+boundaries of the large quads* — seen from the tile's side instead of the cell's.
+
+**And the rest is the tile, not its box.** A window of *N* vertices over a uniformly filled plane
+touches about (√*N*/64 + 1)² tiles of 4,096 however they are drawn: for 5,000 that is 4.4 tiles,
+18,000 rows. The *tiles holding* row says the same from the data — five at the median, 20,480 rows —
+so **no box, however tight, puts a 5,000-vertex window under a 20,000-row budget at this tile
+size**. That half of the finding is the view's: a budget of 20,000 rows is four tiles, and a budget
+in rows has to be stated against the tile granularity.
+
+What the geometry's half does to that budget is larger than the medians suggest, because a view
+falls back to a rung whenever a window lands badly. The share of 300 windows, centred on random
+vertices of `enrich_memory`'s fixture, whose intersected tiles exceed 20,000 rows:
+
+| window | ~385 vertices | ~855 | ~1,500 | ~2,350 | ~3,400 |
+| --- | --- | --- | --- | --- | --- |
+| Morton, as written | 27% | 46% | 62% | 77% | 88% |
+| Hilbert prototype | 1% | 4% | 11% | 26% | 46% |
+
+Under Morton a window of a few hundred vertices draws cells one time in four, because it only has to
+touch one tile that straddles a large quad.
+
+### The options, measured
+
+Every row over `enrich_memory`'s fixture, the ~5,000-vertex window, p50 · p90. The sub-box and
+quadtree rows were simulated over the written corpus; the Hilbert row is the pass itself.
+
+| option | tiles hit | rows read | what cells keep | what it costs |
+| --- | --- | --- | --- | --- |
+| as written: Morton rank, 4,096 rows | 7 · 10 | 28,672 · 40,960 | — | — |
+| up to four boxes per tile, cut at the tile's largest Z jumps | 5 · 7 | 20,480 · 28,672 | unchanged, and so is the rung-1 cell area spread of 5,030× | `TileInfo.bbox` becomes a list, four boxes per tile in the manifest and its guard, and the view culls against a union |
+| sixteen equal sub-boxes per tile | 6 · 9 | 24,576 · 36,864 | unchanged | the same, sixteen boxes |
+| tiles cut on quad boundaries — quadtree leaves of at most 4,096 | 4 · 7 | 14,742 · 22,022 | **breaks** `tile = dense_id >> 12`: 364 tiles of 3,656 rows at the median, so a tile stops being arithmetic and cells stop nesting in tiles | the addressing becomes a table |
+| **Hilbert rank, 4,096 rows** — `crates/fossil-layout/src/layout/morton.rs, hilbert2` | **5 · 7** | **20,480 · 28,672** | every `cluster_id` one run (995 of 995); the share of cells spanning two clusters identical at every rung; rung-1 cell area spread **5,030× → 428×**, rung 3 **571× → 21×**, rung 6 **11× → 3×** | the order the format publishes, its vectors and guards, and every conformance corpus regenerated |
+| 1,024-row tiles, Morton · Hilbert | 15 · 19 and 11 · 14 | 15,360 · 19,456 and 11,264 · 14,336 | cells nest in tiles to 4⁵ | four times the statements, at a per-statement cost measured below to grow with the corpus |
+
+**Hilbert is the only row that is a change to the order rather than to what is published about it.**
+Every aligned `2^k` square is one interval of `4^k` Hilbert indices exactly as it is of Morton codes,
+so the whole quaternary argument survives: a group's block is still one run, a cell is still
+`dense_id >> shift`, and a tile is still `[t·4,096, (t+1)·4,096)`. What changes is the one thing Morton
+gets wrong — an interval that is *not* an aligned square is edge-connected on a Hilbert curve, so
+its hull is never far from its area. It closes the geometry's share entirely: tiles hit equals tiles
+holding, to within one, at every percentile measured. And it buys the cells more than the tiles:
+the Z-jump residue [position](/docs/design/position) could only name is gone, and a coarse rung is
+within 3× of uniform area.
+
+The sub-box row matches it on this window and is the Iceberg-shaped answer — tighten the statistics
+so pruning works. It is not preferred because it publishes a second geometry to describe a first one
+that is worse than it needs to be: it widens the contract, quadruples the boxes a guard has to hold,
+and leaves every rung's cells as uneven as they are.
+
+The prototype changes two functions. `crates/fossil-layout/src/layout/morton.rs, morton_codes`
+codes with `hilbert2` over the same 16-bit binary32 quantisation, and
+`crates/fossil-layout/src/layout/place.rs, cluster_layout` walks its frontier in the same curve —
+block `b` of a root of `4^K` blocks is the `b`-th aligned sub-square of the order-16 curve, and its
+corner is its alignment rather than its first cell, because Hilbert enters a block at whichever
+corner the block's orientation puts first. The first attempt missed that and put 24,570 ids inside
+foreign groups, which `crates/fossil-layout/tests/cells.rs, a_cluster_is_one_run_of_dense_id` caught.
+Every `fossil-layout` test passes, and two processes write a byte-identical tree of 25 Parquet
+files at 200,000 vertices.
+
+**What it would cost, and nothing here pays it yet.**
+
+- **Writer**: the two functions above and a rename — `morton_codes`, `morton_ranks` and the module
+  stop being named for a curve they no longer draw, and the prototype keeps the names only so the
+  diff is the change.
+- **Format**: `dense_id` becomes the rank in Hilbert order on
+  [addressing](/docs/format/conventions/addressing) and in `corpus.bnf`'s gloss; `vectors.json`'s
+  `morton2` table becomes a `hilbert2` table, because a curve is exactly the arithmetic Iceberg
+  publishes vectors for and PMTiles left every port to re-derive
+  ([prior art](/docs/design/prior-art#the-corpus-and-how-a-format-ships)); `guards/arithmetic.mjs`
+  gains the function and `guards.mjs`'s `mortonSql` becomes sixteen unrolled steps of SQL.
+- **Conformance**: `packages/corpus/conformance/corpus` and every fixture a test writes through the
+  pass are regenerated, since each vertex's `dense_id` moves; the answers that are sets do not change
+  and the ones keyed by `dense_id` do.
+- **kanzo-ui**: no view code — it culls against the boxes it is handed, and they are tighter. Its
+  bench corpora are rebuilt, and its row budget is its own call, which the floor above bounds.
+
+**Recommended ruling.** `dense_id` is a vertex's rank in the **Hilbert** order of its quantised
+position, published with vectors like the Morton code it replaces, and the tile manifest keeps one
+box per tile.
+
+**What would reverse it.** A reader that computes which ids a rectangle holds from the codes
+themselves rather than from published boxes — BIGMIN/LITMAX over a Z-curve is a few bit operations,
+and its Hilbert equivalent is a state machine a port would have to get right. No reader here does
+that since [the anchor was discarded](/docs/design/discarded); a corpus whose positions sit on a
+writer-fixed grid, the reversal named under the OGC table above, would be the one that asks. Or a
+measured corpus on which Hilbert tiles are not tighter than Morton's, which would mean the gain here
+is this placement's rather than the curve's.
+
+That anchor's own row names the condition that brings it back — *a read where the 13% is the
+difference between fitting a budget and not* — and this is that read: at a 5,000-vertex window the
+over-read is 1.4×, and it is the difference. It does not come back, because the curve closes the
+gap the anchor would have closed, with no second index.
+
+### Three statements a tile, and what they actually cost
+
+The same nine tiles a ~5,000-vertex window at the centre of kanzo-ui's bench corpus opens, with
+both halves of their edges: 591,937 rows. *A* is today — three statements a tile. *B* folds a
+tile's three into one `UNION ALL BY NAME`; *C* one statement per part across the nine; *D* one
+statement for the window; *E* one statement per part with each run of consecutive tiles read as one
+conjunctive range. DuckDB-WASM 1.32 in Node over local files, medians of seven; native DuckDB 1.5
+over HTTP against a local origin that counts, medians of five, and again with 10 ms added to every
+response.
+
+| shape | statements | WASM | WASM, metadata cached | HTTP: requests · MB · ms | HTTP, metadata cached | HTTP at 10 ms · cached |
+| --- | --- | --- | --- | --- | --- | --- |
+| A — three a tile | 27 | 194 ms | 88 ms | 108 + 27 HEAD · 6.17 · 259 | 54 · 2.45 · 106 | 1,711 · 689 ms |
+| B — one a tile | 9 | 217 ms | 112 ms | 108 + 27 · 6.17 · 254 | 54 · 2.45 · 116 | 1,732 · 698 ms |
+| C — one a part | 3 | 200 ms | 96 ms | 108 + 3 · 6.17 · 209 | 54 · 2.45 · 106 | 1,478 · 688 ms |
+| D — one | 1 | 216 ms | 114 ms | 108 + 3 · 6.17 · 222 | 54 · 2.45 · 111 | 1,560 · 692 ms |
+| E — one a part, runs coalesced | 3 | **109 ms** | **52 ms** | 84 + 3 · 4.52 · 118 | 54 · 2.45 · **60** | 811 · **384 ms** |
+
+**Merging statements buys nothing.** B, C and D read exactly the requests and bytes A does, and are
+no faster: every `read_parquet` branch plans its own scan and reads its own footer, one statement or
+many. The 230 ms the view measured is round trips — at 10 ms a request, A is 190 ms a tile — and
+two things make them, neither of which is the statement count.
+
+**The footer is read again by every statement, and it grows with the corpus.** Without the metadata
+cache, 3.7 of A's 6.17 MB are footers: the payload's is 176 kB at a million vertices and **2.24 MB
+at ten million**, because the container is one file with a row group per tile and the footer lists
+every one. Cached, it is still planned against: natively a vertex statement costs 1.3 ms at a
+million and **14.7 ms at ten million** with the metadata already in memory, 26.3 ms without — against
+0.66 ms for the same statement over a file of 64 row groups. At ten million the same nine tiles cost
+**2,960 ms** in WASM as A, 1,754 ms cached, and 958 ms cached and coalesced. A tile read is O(*V*)
+today, and that is the container's, not the curve's.
+
+**Recommended, in order of what it costs:**
+
+1. **The host's engine caches Parquet metadata** — `SET parquet_metadata_cache = true`, once, in
+   kanzo-ui's `engine()`. No contract change: 2.2× in WASM, 2.5× over a 10 ms link. `Engine`'s
+   documentation says a host should, beside the interrupt it already requires.
+2. **The reader reads a run of consecutive tiles as one range** — another 1.7–1.8× on top, and still
+   one conjunctive range per run, the one shape this page measured the engine to prune. It needs a
+   `read` over several addresses answering a batch per address, which is a contract addition and the
+   view's to ask for. Under Hilbert the ~5,000-vertex window's tiles fall in 2 runs at the median and
+   3 at p90, against Morton's 3 and 5, so the two proposals compound.
+3. **The container stops being one file per type** — the only lever that makes a tile read O(1)
+   rather than O(*V*). The one-file ruling was measured on whole-window reads, 5.6 range requests
+   against 22.3 at five million, and whole-window reads no longer exist; a file per `z − 3` tile, 64
+   row groups, is the obvious candidate. **Not proposed here**: it wants its own end-to-end
+   measurement over HTTP, opens and all, before it is argued.
+
+**What would reverse it.** A host engine that shares footers across statements without being told
+to, which makes the first item a no-op; or a DuckDB whose per-scan cost stops scaling with the
+footer's row-group count, which makes the third one unnecessary.
