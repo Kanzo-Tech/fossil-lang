@@ -2,20 +2,24 @@
 
 The query layer for whatever draws the graph. **Fossil ships no viewer.**
 
-**One door, and it is one function.** `open(url, { query })`
-returns discovery, the camera (`extent`, `frame`, `rows`, `node`, `neighbours`)
-and the verbs (`schema`, `relations`, and `executeSql` when the host asks) on
-one object. No tiles, no `dense_id`, no Morton, no `by_source`, no prefixes, no
-footers.
+**One door, and it is one function.** `open(url, { engine })` returns
+discovery, the read path a view is built on (`tileMatrix`, `scan`, `edges`,
+`node`), and the verbs (`schema`, `relations`, and `executeSql` when the host
+asks) on one object — and, until step 5 of `/docs/design/backend` deletes them,
+the members that path replaces (`extent`, `frame`, `rows`, `neighbours`).
 
-**It needs an engine, and the engine is the host's.** A job's corpus is opened
-through the page's engine under the credential the host vends; a corpus at a
-URL through a `query` callback:
+**It needs an engine, and the engine is the host's.** `@fossil-lang/types`'
+`Engine`: `query(sql, { signal })` answering in Arrow-shaped columns — an
+apache-arrow `Table` is one — and interrupting the running statement when the
+signal aborts. A job's corpus is opened through it under the credential the host
+vends; a corpus at a URL through it alone, or through the `query` callback that
+retires in step 5:
 
 ```ts
 await open(job, { engine, host })          // a job's corpus
-await open(url, { query })                 // a corpus at a URL
-await open(url, { query, manifestFiles })  // the same, with the manifests in hand
+await open(url, { engine })                // a corpus at a URL
+await open(url, { query })                 // the same through a row callback — retiring
+await open(url, { engine, manifestFiles }) // with the manifests in hand
 ```
 
 Giving neither `engine` nor `query` is a `TypeError`. `corpus.addressing` is the
@@ -82,23 +86,72 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
   ├─ src/generated.ts   verb Params/Result types — codegen'd from schemars JSON Schema
   ├─ src/load.ts        the memoised wasm boot (internal; open awaits it)
   ├─ src/client.ts      the verb transport, dispatched through by the door (not exported)
-  ├─ src/query.ts       QueryFn — the engine a host lends
+  ├─ src/query.ts       the engine's two faces: rows, and a Batch a read hands back
   ├─ src/manifest.ts    graph.graph.yml, scanned for the paths to fetch next
   ├─ src/address.ts     addressManifests + levelsOf — the binding, not the reader
-  ├─ src/open.ts        open(url, { query } | { engine, host }) — THE DOOR
+  ├─ src/open.ts        open(url, { engine } | { engine, host }) — THE DOOR
   ├─ src/corpus.ts      the Corpus surface's types
-  ├─ src/tile-manifest.ts   the footers: tile boxes, bytes, runs, extent
-  ├─ src/tile-matrix.ts the level a canvas can show
-  ├─ src/expression.ts  the box predicate
-  ├─ src/scan.ts        tile selection, the sampled read, rows
-  ├─ src/frame.ts       frame
-  ├─ src/edges.ts       the adjacency reads, neighbours
+  ├─ src/tile-manifest.ts   the published per-tile statistics; the footers `frame` still reads
+  ├─ src/tile-matrix.ts OGC's tile matrix set: every zoom, every tile, its rows and box
+  ├─ src/expression.ts  Iceberg's Filter: bind, inclusive + strict evaluators, residual SQL
+  ├─ src/scan.ts        Table.scan: plan() over every zoom, read() of one tile
+  ├─ src/rows.ts        rows and frame's tile selection — step 5 deletes it
+  ├─ src/frame.ts       frame — step 5 deletes it
+  ├─ src/edges.ts       edges(): CSR/CSC at Z, the quotient below; neighbours
   ├─ src/identity.ts    node: the index seek and its key ranges
   ├─ src/verbs.ts       the views the verbs read, schema, relations, executeSql
   └─ src/sql.ts         literals, identifiers, the 64-bit id guard
 ```
 
 ## Usage
+
+The read path a view is built on is three members, and every one of them is
+planned from the tile manifest `open` read — Iceberg's scan over OGC's tile
+matrix, `/docs/design/backend`:
+
+```ts
+import { open } from '@fossil-lang/corpus';
+
+const corpus = await open(url, { engine });
+
+// The zooms: the payload at Z, every rung of the cell pyramid below it, coarsest
+// first, every tile with its rows and its box. Synchronous — nothing to fetch.
+const set = corpus.tileMatrix('Person');
+
+// A scan is built once per filter, not once per camera move. The filter is data.
+const scan = corpus.scan({
+  type: 'Person',
+  filter: { column: 'cluster_id', op: 'in', values: [3, 7] },
+  select: ['dense_id', 'x', 'y', 'cluster_id'],
+});
+const tasks = scan.plan();                     // every zoom, pruned, each with its residual
+const visible = tasks.filter((t) => t.z === z && overlaps(t.bbox, camera));
+const batch = await scan.read(visible[0], { signal }); // one tile, columns, cancellable
+
+// The relations incident to one tile: CSR at `src`, CSC at `dst`, the rung's
+// quotient below Z; and what was declined, with fossil's reason.
+const { batches, declined } = await corpus.edges({ from: visible[0], direction: 'src', signal });
+```
+
+- **`tileMatrix(type)`** — OGC 17-083r4's `TileMatrixSet`: `extent`,
+  `coordinates`, and `tileMatrices[z]` with `kind` (`rows` at `Z`, `cells`
+  below), `count`, `shift`, `tileRows` and every tile's `{ tile, rows, bbox }`.
+  Throws for a type that publishes no tile manifest.
+- **`scan({ type, filter?, select? })`** — Iceberg's `Table.scan`, bound when it
+  is built (an unknown column throws here). `plan()` is `plan_files` at every
+  zoom, pruned by the inclusive metrics evaluator over the published bounds and
+  null counts, each task carrying the residual the strict evaluator could not
+  settle; a filter on a payload column has no task below `Z`. `read(address)`
+  reads one tile by one conjunctive range on `dense_id` (or `cell_id`) — the
+  row group under `rowgroups`, the file under `files` — and an abort rejects
+  with `AbortError`.
+- **`edges({ from, direction, relation?, signal })`** — the adjacency's aligned
+  half at `Z` (`by_source` or `by_target`), the rung's quotient below it
+  (undirected, one row per cell pair, keyed on the lower cell; `dst` is
+  declined there), skipping a tile the manifest says has none. A relation to
+  another type is declined as `other-space` unless `relation` names it.
+
+What follows is the surface those three replace, which kanzo-ui still reads:
 
 ```ts
 import { open } from '@fossil-lang/corpus';

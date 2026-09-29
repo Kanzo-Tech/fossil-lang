@@ -26,7 +26,7 @@ pub const GRAPH_INFO_PATH: &str = "graph.graph.yml";
 ///
 /// **Every column the writer emits**, which is the whole payload table and not a
 /// subset of it — and that is the distinction this used to lose. It was five
-/// names written here, against four written in `packages/corpus/src/corpus.ts`,
+/// names written here, against four written in `packages/corpus/src/identity.ts, RESERVED`,
 /// and the two meant different questions: this one is *what is not user data*,
 /// that one is *what the struct already surfaces as a named member*. Naming the
 /// table instead of the names makes the difference legible and makes a column
