@@ -387,15 +387,25 @@ an address being computable. The rule survives and the cost does not. **The writ
 number the footer sweep recovers**, so it writes them once, beside the bytes, and `open` reads one
 file per type instead of one footer per tile.
 
-It is a manifest in Iceberg's sense: a columnar file of per-tile statistics, one row per tile of
-every artefact of the type — payload, each rung, each quotient, each adjacency orientation — carrying
-the tile's address, its row group, its byte range, its row count, its box and its column bounds. A
-row group that was never written, because the tile's vertices have no edges, has no row; the
-adjacency's row-group ordinal stops being something a reader has to find out.
+It is a manifest in Iceberg's sense, and it is published: one JSON file per vertex type, named by the
+type's `tile_manifest:` and written beside its tiles, listing every tile of every zoom — the payload
+and each rung — with Iceberg's `record_count`, `null_value_counts`, `lower_bounds` and
+`upper_bounds` (`crates/fossil-sinks/src/tiles.rs, TileManifest`). The writer reads the numbers off
+the footer each container closes rather than computing them twice, which is how Iceberg's own writers
+fill one; bounds are published for every numeric column and for no string, and a tile's box is its
+coordinate columns' bounds rather than a field of its own. The format is
+[the tile manifest](/docs/format/conventions/addressing#the-tile-manifest-is-the-footers-published-once).
+
+What it does not carry yet is the rest of what this section asks of it: an entry per adjacency
+orientation and per quotient, and a row group's byte range. Those land with `edges` in step 3, where
+the first reader of them does — an adjacency's row-group ordinal skips where a tile of sources has no
+edges, so its entries are the ones that stop a reader having to find the ordinal out.
 
 **What would reverse it.** A writer other than fossil's. The statistics are then a claim the reader
-has to check rather than trust, and a guard over the footers is the check —
-`packages/corpus/guards` is where it would live.
+has to check rather than trust, and the check exists: `packages/corpus/guards`' `tile-manifest` holds
+the file against the footers read back from disk, tile for tile and bound for bound, and
+`crates/fossil-cli/tests/conformance.rs` holds a corpus `fossil run` wrote — payload and every rung —
+against `parquet_metadata` the same way.
 
 ### Cancellation is a signal the engine honours
 
@@ -452,7 +462,7 @@ module being allowed to grow.
 The order is fixed by one rule: **nothing is deleted while something still reads it.**
 
 1. **The writer publishes the tile manifest**, and a guard holds it against the footers. Additive; no
-   reader changes.
+   reader changes. Landed, for the vertex zooms; where it lives is ruled [below](#where-the-tile-manifest-lives).
 2. **`corpus.ts` splits into the modules above**, behaviour unchanged, so the diff that moves code is
    not the diff that changes it.
 3. **`tileMatrix`, `scan` and `edges` land** on those modules, reading the tile manifest. The
@@ -511,9 +521,47 @@ implements `Engine` moves with it — keasy among them.
 columns. Then the reader converts at the boundary and drops a stale answer instead, and both costs
 are measured rather than assumed.
 
-## What this does not settle
+## Where the tile manifest lives
 
-**Where the tile manifest lives.** One file per vertex type, named from its YAML, is Iceberg's
-manifest-list-to-manifest shape. Inline in the YAML is one fewer request and a larger document to
-parse on every open. It is decided in phase 4 by one measurement: the open time of both at ten
-million vertices.
+**One file per vertex type, named from the type's YAML** — Iceberg's manifest-list-to-manifest shape,
+`tile_manifest: tile-manifest.json` — and not inline in the YAML. It was decided by building both
+behind a switch, measuring them, and deleting the loser.
+
+Measured on 2026-09-29 over corpora the layout pass wrote (`crates/fossil-layout/examples/enrich_memory`'s
+fixture at mean degree 14, pyramid base 16, seven payload columns of which four are numeric), with the
+manifest served over local HTTP and parsed the way the reader parses it: the YAML by
+`fossil-graph-wasm`'s `Corpus`, the file by `JSON.parse`. Medians of 31 opens and of 31 verb calls,
+Mac16,8, Node 23.
+
+| | 1,000,000 | 3,000,000 | 10,000,000 |
+| --- | --- | --- | --- |
+| tiles at every zoom | 272 | 801 | 2,654 |
+| inline: the vertex YAML | 130 kB | 358 kB | 1,156 kB |
+| file: the vertex YAML · the tile manifest | 13 kB · 83 kB | 14 kB · 244 kB | 15 kB · 808 kB |
+| open, inline — fetch and parse | 8.3 ms | 16.9 ms | 46.0 ms |
+| open, file — fetch and parse both, **plus one round trip** | 5.4 ms | 5.9 ms | 14.2 ms |
+| every `schema` or `execute_sql` call, inline | 4.6 ms | 12.9 ms | 56.7 ms |
+| every `schema` or `execute_sql` call, file | 0.38 ms | 0.43 ms | 0.44 ms |
+
+Two costs decide it and they point the same way above a million vertices.
+
+- **Open.** The file costs one more serial request than inline — the path is in the YAML, so the
+  manifest cannot be fetched beside it — and inline costs a YAML parse that grows with the tile count.
+  At ten million the parse is 31.8 ms more than the file's, so the file opens faster over any link
+  whose round trip is under about 32 ms, and the break-even rises with the corpus: it was 2.9 ms at a
+  million and 11 ms at three. Gzipped the two transfers are within 7 kB of each other at ten million
+  (75 kB against 69 kB), so bandwidth does not move it.
+- **Every verb after it.** `fossil-graph-wasm`'s `dispatch_graph` loads the manifest set on every
+  call, so an inline tile manifest is parsed again for every `schema` and every `execute_sql`:
+  56.7 ms a call at ten million, against 0.44 ms. That cost is paid for the life of the corpus, and
+  the file's round trip is paid once.
+
+And a third that is not a timing: `DuckDB` reads JSON, so the guard that holds the file against the
+footers is one SQL join in the `guards/` directory a stranger copies, where an inline block would need
+a second YAML reader past `guards/manifest.mjs`'s one level of nesting.
+
+**What would reverse it.** A reader that parses the manifest set once rather than per verb, together
+with corpora whose tile count keeps the parse gap below one round trip on the links they are read
+over — at ten million that gap is 32 ms, and a corpus read across an ocean has a longer trip than
+that. Then one request fewer is worth more than the parse, and the entries move into the YAML under
+the same four names.

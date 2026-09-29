@@ -234,6 +234,50 @@ box for the column the whole address is built on. And the **page index** (`Colum
 indivisible unit. It is the obvious reason to prefer one Parquet writer over another and it is the
 wrong one.
 
+### The tile manifest is the footers, published once
+
+Where a vertex type's document names one, the footers are also a file of their own: a
+`tile_manifest:` key under the type gives its path relative to the type's `prefix`, and fossil writes
+it as `tile-manifest.json`. It lists **every tile of the type at every zoom** — the payload and each
+cell rung — with the statistics Apache Iceberg's manifests carry for a data file, under Iceberg's own
+names, so a reader plans without opening a footer: one request per type instead of one per tile.
+
+```json
+{"matrices": [
+  {"z": 0, "tiles": [
+    {"tile": 0, "record_count": 1,
+     "null_value_counts": {"cell_id": 0, "count": 0, "x": 0, …},
+     "lower_bounds":      {"cell_id": 0, "count": 10000, "x": 31795.1328125, …},
+     "upper_bounds":      {"cell_id": 0, "count": 10000, "x": 31795.1328125, …}}]},
+  …
+  {"z": 6, "tiles": [ … the payload, one entry per row group … ]}]}
+```
+
+- **`matrices`** are coarsest first. `z = 0` is the rung holding a single cell and the payload is the
+  last, `z = Z`: rung `k` of a type with `R` rungs is `z = R − k`, and a type with no cell tree has
+  one matrix, its payload, at `z = 0`.
+- **`tile`** is the row-group ordinal within that zoom's container — or the file's own number where
+  the container is one file per tile — and a vertex zoom lists every one, because no vertex tile is
+  empty.
+- **`record_count`** is the row group's rows; **`null_value_counts`** holds every column.
+- **`lower_bounds`** and **`upper_bounds`** are inclusive and hold **every column of an integer or
+  floating-point type, and no other**. A string's footer bound is truncated by the encoder, orders by
+  UTF-8 bytes where a JavaScript planner orders by UTF-16 code units, and over `subject` prunes
+  nothing, because tiles are in Morton order and identities are not. A tile's box is the bounds of
+  its coordinate columns, so there is no `bbox` beside them.
+- **A `float` bound is the column's `f32` printed as the double it widens to** — `0.1f32` is
+  `0.10000000149011612`. The footer's shortest spelling, `0.1`, is a smaller number than the value it
+  names, and a planner comparing against it would prune the tile holding the match.
+
+The numbers are the footers' and nothing else: fossil's writer reads them off the footer it has just
+closed, which is how Iceberg's writers fill a manifest. `tile-manifest` holds the file against the
+footers read back from disk — every tile, every null count, every bound, a float compared as the
+`f32` it is — and fails a string with a bound. What it cannot prove is what `footer-is-the-index`
+cannot: that the footers are true.
+
+An adjacency's and a quotient's tiles are not in the file: an adjacency tile is found by its
+footer's box, because its ordinals skip where a tile of sources holds no edges.
+
 ## Two containers, one address
 
 Which container carries a tile is a second question, and both answers are addressed by the same
