@@ -20,14 +20,21 @@
 //!   window. No box of any shape can do better with the same tiles, so the gap
 //!   between the two is the part of the cost the geometry owns, and what is left
 //!   is the tile granularity.
+//! - **falls back to cells** — the share of windows whose intersected tiles hold
+//!   more than a view's 20,000-row budget, so the finest zoom that fits is a
+//!   rung, at window sizes from a few hundred vertices to five thousand.
 //!
 //! It reads the payload directly rather than the tile manifest, because the
 //! manifest's box IS the tile's `x`/`y` bounds and this also needs the rows.
+
+use std::fmt::Write as _;
 
 use duckdb::Connection;
 
 const TILE: usize = 4096;
 const WINDOWS: usize = 400;
+/// The row budget kanzo-ui's view reported a window falling back at.
+const BUDGET: usize = 20_000;
 
 #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
 fn main() {
@@ -138,6 +145,32 @@ fn main() {
             pct(&holding, 0.9),
         );
     }
+
+    // The share of windows a view with a 20,000-row budget draws as cells,
+    // over the first 300 centres: a window falls back when the rows of the
+    // tiles its box intersects exceed the budget.
+    let mut line = String::from("  falls back to cells at 20,000 rows:");
+    for target in [385, 855, 1_500, 2_350, 3_400, 5_000] {
+        let side = side_holding(&points, &centres, ew, eh, target);
+        let (hw, hh) = ((side * ew / 2.0) as f32, (side * eh / 2.0) as f32);
+        let over = centres[..300]
+            .iter()
+            .filter(|&&c| {
+                let (cx, cy) = points[c];
+                let rows: usize = boxes
+                    .iter()
+                    .zip(points.chunks(TILE))
+                    .filter(|(b, _)| {
+                        b[1] >= cx - hw && b[0] <= cx + hw && b[3] >= cy - hh && b[2] <= cy + hh
+                    })
+                    .map(|(_, tile)| tile.len())
+                    .sum();
+                rows > BUDGET
+            })
+            .count();
+        let _ = write!(line, " ~{target} {}%", over * 100 / 300);
+    }
+    println!("{line}");
 }
 
 fn pct(sorted: &[f64], q: f64) -> f64 {
