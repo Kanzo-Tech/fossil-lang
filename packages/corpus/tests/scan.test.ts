@@ -280,8 +280,8 @@ describe('edges', () => {
 
   it('reads the source-aligned half out of the tile at src, and the target-aligned one at dst', async () => {
     for (const tile of [0, 2, 4]) {
-      const out = await corpus.edges({ from: { type: 'Person', z: 0, tile }, direction: 'src' });
-      const into = await corpus.edges({ from: { type: 'Person', z: 0, tile }, direction: 'dst' });
+      const out = (await corpus.edges({ from: [{ type: 'Person', z: 0, tile }], direction: 'src' }))[0]!;
+      const into = (await corpus.edges({ from: [{ type: 'Person', z: 0, tile }], direction: 'dst' }))[0]!;
       expect(out.declined).toEqual([]);
       expect(out.batches.map((b) => [b.edgeType, b.srcType, b.dstType, b.weight])).toEqual([['knows', 'Person', 'Person', null]]);
       expect(pairs(out.batches[0]!.src, out.batches[0]!.dst)).toEqual(await adjacency('by_source', 'src_dense', tile));
@@ -289,8 +289,30 @@ describe('edges', () => {
     }
   });
 
+  it('reads a run of tiles in one statement per half, and answers each tile as it answers alone', async () => {
+    const sent: string[] = [];
+    const counted = await open(CORPUS, {
+      engine: {
+        ...engine,
+        query(sql, options) {
+          sent.push(sql);
+          return engine.query(sql, options);
+        },
+      },
+    });
+    const from = [3, 0, 1, 2, 4].map((tile) => ({ type: 'Person', z: 0, tile }));
+    for (const direction of ['src', 'dst'] as const) {
+      sent.length = 0;
+      const answers = await counted.edges({ from, direction });
+      expect(sent).toHaveLength(1);
+      for (const [k, address] of from.entries()) {
+        expect(answers[k]).toEqual((await counted.edges({ from: [address], direction }))[0]);
+      }
+    }
+  });
+
   it('declines a relation it cannot read, with fossil’s reason', async () => {
-    await expect(corpus.edges({ from: { type: 'Person', z: 0, tile: 0 }, direction: 'src', relation: 'likes' })).rejects.toThrow(
+    await expect(corpus.edges({ from: [{ type: 'Person', z: 0, tile: 0 }], direction: 'src', relation: 'likes' })).rejects.toThrow(
       /likes is not a relation incident to Person/,
     );
   });

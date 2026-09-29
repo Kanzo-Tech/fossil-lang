@@ -234,10 +234,11 @@ export interface Corpus {
    */
   scan(params: ScanParams): Scan;
   /**
-   * **The relations incident to one tile**, out of the half aligned on `direction` — the adjacency
-   * at `z = Z`, the rung's quotient below it — and the ones declined, with fossil's `GapReason`.
+   * **The relations incident to each tile**, out of the half aligned on `direction` — the adjacency
+   * at `z = Z`, the rung's quotient below it — and the ones declined, with fossil's `GapReason`: one
+   * answer per address, a run of consecutive tiles read in one statement.
    */
-  edges(params: EdgesParams): Promise<EdgeAnswer>;
+  edges(params: EdgesParams): Promise<readonly EdgeAnswer[]>;
   /** The vertices in a rectangle and the edges among them, entire. */
   rows(params: RowsParams): Promise<RowsAnswer>;
   /**
