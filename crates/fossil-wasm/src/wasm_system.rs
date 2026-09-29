@@ -30,8 +30,8 @@ use fossil_descriptors_input::DescriptorCache;
 #[derive(Debug, Default)]
 pub(crate) struct WasmSystem {
     /// Keyed by the source URI the program writes:
-    /// the descriptors the playground introspected with DuckDB-WASM and
-    /// pushed in via [`crate::FossilPlayground::register_inferred_descriptor`]
+    /// the descriptors the host introspected with DuckDB-WASM and
+    /// pushed in via [`crate::FossilWorkspace::register_inferred_descriptor`]
     /// BEFORE invoking `check()`. Consumed by
     /// `fossil-hir::infer::resolve_source_scope` inside the typecheck query.
     descriptors: DescriptorCache,
@@ -52,7 +52,7 @@ impl System for WasmSystem {
         Some(&self.descriptors)
     }
 
-    /// The playground CHECKS programs — it is the LSP server-side in the
+    /// The workspace CHECKS programs — it is the LSP server-side in the
     /// browser — so it installs the same rows the native host
     /// does. A host with no rows checks every program against no output
     /// contract, which would make the editor's target-side hover and

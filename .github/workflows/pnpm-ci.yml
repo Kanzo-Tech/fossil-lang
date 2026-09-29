@@ -70,9 +70,9 @@ jobs:
       - name: Build wasm
         run: pnpm --filter "@fossil-lang/wasm" run build:wasm || echo "no @fossil-lang/wasm yet"
 
-      # Scoped to packages/ because the workspace also holds `apps/*`, which this
+      # Scoped to packages/ because the workspace also holds `docs`, which this
       # job must not build: the ceiling below is already 60 minutes for a cold
-      # cargo build, and the docs app has its own path-filtered `docs.yml`.
+      # cargo build, and the docs have their own path-filtered `docs.yml`.
       - name: Build all packages
         run: pnpm --filter "./packages/*" build
 

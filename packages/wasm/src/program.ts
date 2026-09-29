@@ -2,7 +2,7 @@
  * One program, open in a workspace, answering an editor — what every host of the checker wrote by
  * hand before this existed.
  *
- * `FossilPlayground` is the workspace and it is right that it stays general: it holds any number
+ * `FossilWorkspace` is the workspace and it is right that it stays general: it holds any number
  * of files and answers about each. What a host with ONE program in ONE editor needs on top of it
  * is always the same protocol, and two copies of it had already diverged in their comments:
  *
@@ -34,7 +34,7 @@
 import { resolveDocuments } from '@fossil-lang/storage';
 import type { Host, ProgramSource } from '@fossil-lang/types';
 
-import { FossilPlayground, tokenize, tokenKinds } from './client.js';
+import { FossilWorkspace, tokenize, tokenKinds } from './client.js';
 import type {
   CheckRow,
   CompletionRow,
@@ -88,7 +88,7 @@ export interface FossilProgram {
    */
   registerDescriptor(descriptor: InferredDescriptorJson): void;
   /** The workspace underneath, for the rare question this surface does not ask. */
-  readonly workspace: FossilPlayground;
+  readonly workspace: FossilWorkspace;
   /** Free the workspace. Every member fails after it. */
   close(): void;
 }
@@ -103,7 +103,7 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
   const { host, text = '', wasm } = options;
   await initFossilWasm(wasm);
 
-  const workspace = new FossilPlayground();
+  const workspace = new FossilWorkspace();
   const handle = workspace.openFile(uri, text);
   let pushed = text;
 

@@ -111,8 +111,8 @@ jobs:
       # cdylib, and `fossil-layout`'s `wasm = true` — and it pulls datafusion,
       # which hardcodes `arrow-ipc[zstd]`, so the wasm32 zstd-sys C build needs a
       # wasm-capable clang. `crates/fossil-df/Cargo.toml` says so in the
-      # imperative; `pnpm-ci.yml` and `playground.yml` both install it and this
-      # job did not, which is the one place the sentence was addressed to.
+      # imperative; `pnpm-ci.yml` installs it and this job did not, which is
+      # the one place the sentence was addressed to.
       - name: Install LLVM for the wasm32 zstd-sys C build
         run: |
           sudo apt-get update -qq

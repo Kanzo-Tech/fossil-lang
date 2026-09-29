@@ -1,5 +1,5 @@
 //! `InferredDescriptor` — input schema produced by host-side runtime introspection
-//! (`DuckDB` `DESCRIBE read_csv_auto` in the playground; `duckdb::Connection` in
+//! (`DuckDB` `DESCRIBE read_csv_auto` in the browser; `duckdb::Connection` in
 //! the native CLI). A host ships no schema sidecar: it introspects the source
 //! and hands over the column list.
 //!

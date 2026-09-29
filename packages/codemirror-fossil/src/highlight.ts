@@ -31,7 +31,7 @@
  * ## Cost, and the ceiling
  *
  * O(document) per change: one wasm call plus one `RangeSetBuilder` pass. On the
- * `hello.fossil` the playground opens that is microseconds. `maxLength` caps it —
+ * `hello.fossil` that is microseconds. `maxLength` caps it —
  * past that the plugin emits nothing rather than tokenizing a megabyte on every
  * keystroke, and a document that large is not what this editor is for.
  */

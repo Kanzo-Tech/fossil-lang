@@ -76,7 +76,7 @@
 //! Same reason as `engine_reach.rs`, `substrate_reach.rs` and
 //! `tokio_placement.rs`: the claim is about the repository, not about any one
 //! crate, so it cannot live in a crate that is part of what it measures.
-//! `fossil-sinks` cannot assert that `fossil-mcp` does not spell a literal.
+//! `fossil-sinks` cannot assert that `fossil-graph` does not spell a literal.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -14,7 +14,7 @@ to make this a GraphAr corpus — `/docs/design/corpus` states the boundary once
 and measures the divergences.
 
 **Status:** pre-v0.1, in active development. Nothing is published; the surface
-is still changing. `playground.kanzo.dev` is not live.
+is still changing.
 
 ## Quick look
 

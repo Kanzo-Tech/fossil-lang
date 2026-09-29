@@ -77,7 +77,7 @@ use serde_json::{Value, json};
 const WASM_ONLY_METHODS: &[(&str, &str)] = &[
     (
         "fossil/checkAll",
-        "the playground's workspace-wide drain, for a UI panel that lists every \
+        "the wasm workspace's drain, for a UI panel that lists every \
          open file's diagnostics at once. An editor gets the same information \
          from the per-file publishDiagnostics it already receives, so there is \
          nothing for the native server to answer.",
@@ -270,18 +270,18 @@ fn native() -> Answers {
 /// Drive the worker's `dispatch` in process — the same JSON envelopes, minus
 /// the framing and the `postMessage` hop.
 fn worker() -> Answers {
-    let mut pg = fossil_wasm::FossilPlayground::new();
+    let mut ws = fossil_wasm::FossilWorkspace::new();
     let uri = program_uri();
     let doc = document_uri();
 
-    let capabilities = dispatch(&mut pg, 1, "initialize", &json!({}))["capabilities"].clone();
-    notify(&mut pg, "initialized", &json!({}));
+    let capabilities = dispatch(&mut ws, 1, "initialize", &json!({}))["capabilities"].clone();
+    notify(&mut ws, "initialized", &json!({}));
     notify(
-        &mut pg,
+        &mut ws,
         "textDocument/didOpen",
         &open_params(&doc, DOCUMENT),
     );
-    let published = notify(&mut pg, "textDocument/didOpen", &open_params(&uri, PROGRAM))
+    let published = notify(&mut ws, "textDocument/didOpen", &open_params(&uri, PROGRAM))
         .into_iter()
         .filter(|n| n.pointer("/params/uri").and_then(Value::as_str) == Some(uri.as_str()))
         .next_back()
@@ -293,7 +293,7 @@ fn worker() -> Answers {
         .enumerate()
         .map(|(i, (method, params))| {
             dispatch(
-                &mut pg,
+                &mut ws,
                 i64::try_from(i).expect("probe index fits i64") + 10,
                 method,
                 &params,
@@ -313,14 +313,9 @@ fn open_params(uri: &str, text: &str) -> Value {
 }
 
 /// One request through the worker; the `result`, or a panic naming the error.
-fn dispatch(
-    pg: &mut fossil_wasm::FossilPlayground,
-    id: i64,
-    method: &str,
-    params: &Value,
-) -> Value {
+fn dispatch(ws: &mut fossil_wasm::FossilWorkspace, id: i64, method: &str, params: &Value) -> Value {
     let out = fossil_wasm::__dispatch_for_test(
-        pg,
+        ws,
         json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
     );
     let resp = out
@@ -335,9 +330,9 @@ fn dispatch(
 }
 
 /// One notification through the worker; the `publishDiagnostics` it emitted.
-fn notify(pg: &mut fossil_wasm::FossilPlayground, method: &str, params: &Value) -> Vec<Value> {
+fn notify(ws: &mut fossil_wasm::FossilWorkspace, method: &str, params: &Value) -> Vec<Value> {
     let out = fossil_wasm::__dispatch_for_test(
-        pg,
+        ws,
         json!({ "jsonrpc": "2.0", "method": method, "params": params }),
     );
     assert!(
@@ -508,9 +503,9 @@ fn the_method_sets_differ_only_where_declared() {
     frames.push(notif("exit", Value::Null));
     let t = drive(&frames);
 
-    let mut pg = fossil_wasm::FossilPlayground::new();
+    let mut ws = fossil_wasm::FossilWorkspace::new();
     notify(
-        &mut pg,
+        &mut ws,
         "textDocument/didOpen",
         &open_params(&program_uri(), PROGRAM),
     );
@@ -523,7 +518,7 @@ fn the_method_sets_differ_only_where_declared() {
             native_missing.push(m);
         }
         let out = fossil_wasm::__dispatch_for_test(
-            &mut pg,
+            &mut ws,
             json!({ "jsonrpc": "2.0", "id": 1, "method": m,
                     "params": { "textDocument": { "uri": program_uri() } } }),
         );
@@ -602,10 +597,10 @@ fn did_close_clears_the_buffer_on_both() {
         "a request for a closed buffer must answer null: it is not open"
     );
 
-    let mut pg = fossil_wasm::FossilPlayground::new();
-    notify(&mut pg, "textDocument/didOpen", &open_params(&uri, PROGRAM));
+    let mut ws = fossil_wasm::FossilWorkspace::new();
+    notify(&mut ws, "textDocument/didOpen", &open_params(&uri, PROGRAM));
     let closed = notify(
-        &mut pg,
+        &mut ws,
         "textDocument/didClose",
         &json!({ "textDocument": { "uri": uri } }),
     );
@@ -620,7 +615,7 @@ fn did_close_clears_the_buffer_on_both() {
     );
     assert_eq!(
         dispatch(
-            &mut pg,
+            &mut ws,
             11,
             "textDocument/documentSymbol",
             &json!({ "textDocument": { "uri": uri } }),

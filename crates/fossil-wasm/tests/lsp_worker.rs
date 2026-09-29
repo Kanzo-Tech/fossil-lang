@@ -14,7 +14,7 @@
 // is the idiomatic builder shape.
 #![allow(clippy::needless_pass_by_value)]
 
-use fossil_wasm::FossilPlayground;
+use fossil_wasm::FossilWorkspace;
 
 /// Build an LSP request envelope (has `id`).
 fn req(method: &str, id: i32, params: serde_json::Value) -> serde_json::Value {
@@ -38,9 +38,9 @@ fn hello_fossil_source() -> String {
 
 #[test]
 fn initialize_returns_capabilities() {
-    let mut pg = FossilPlayground::new();
+    let mut ws = FossilWorkspace::new();
     let out =
-        fossil_wasm::__dispatch_for_test(&mut pg, req("initialize", 1, serde_json::json!({})));
+        fossil_wasm::__dispatch_for_test(&mut ws, req("initialize", 1, serde_json::json!({})));
     let resp = out.response.expect("initialize must respond");
     assert!(
         resp.error.is_none(),
@@ -72,9 +72,9 @@ fn initialize_returns_capabilities() {
 
 #[test]
 fn did_open_then_hover_routes_to_fossil_ide() {
-    let mut pg = FossilPlayground::new();
+    let mut ws = FossilWorkspace::new();
     let _ = fossil_wasm::__dispatch_for_test(
-        &mut pg,
+        &mut ws,
         notif(
             "textDocument/didOpen",
             serde_json::json!({
@@ -88,7 +88,7 @@ fn did_open_then_hover_routes_to_fossil_ide() {
         ),
     );
     let out = fossil_wasm::__dispatch_for_test(
-        &mut pg,
+        &mut ws,
         req(
             "textDocument/hover",
             2,
@@ -104,9 +104,9 @@ fn did_open_then_hover_routes_to_fossil_ide() {
 
 #[test]
 fn unknown_method_returns_method_not_found() {
-    let mut pg = FossilPlayground::new();
+    let mut ws = FossilWorkspace::new();
     let out =
-        fossil_wasm::__dispatch_for_test(&mut pg, req("not/a/method", 3, serde_json::json!({})));
+        fossil_wasm::__dispatch_for_test(&mut ws, req("not/a/method", 3, serde_json::json!({})));
     let resp = out.response.expect("requests with id must always respond");
     let err = resp.error.expect("unknown method must produce an error");
     assert_eq!(
@@ -121,9 +121,9 @@ fn did_open_emits_per_file_publish_diagnostics() {
     // publish_diagnostics is per-file. didOpen on uri B
     // must emit publishDiagnostics scoped to B's uri ONLY — never carrying
     // diagnostics from a previously-opened A.
-    let mut pg = FossilPlayground::new();
+    let mut ws = FossilWorkspace::new();
     let _ = fossil_wasm::__dispatch_for_test(
-        &mut pg,
+        &mut ws,
         notif(
             "textDocument/didOpen",
             serde_json::json!({
@@ -137,7 +137,7 @@ fn did_open_emits_per_file_publish_diagnostics() {
         ),
     );
     let out_b = fossil_wasm::__dispatch_for_test(
-        &mut pg,
+        &mut ws,
         notif(
             "textDocument/didOpen",
             serde_json::json!({
@@ -172,9 +172,9 @@ fn did_change_invokes_set_text_revision_bump() {
     // Behavioral assertion: after didOpen + didChange, documentSymbol on
     // the new content path must succeed (proves set_text path took effect
     // and the file revision bumped).
-    let mut pg = FossilPlayground::new();
+    let mut ws = FossilWorkspace::new();
     let _ = fossil_wasm::__dispatch_for_test(
-        &mut pg,
+        &mut ws,
         notif(
             "textDocument/didOpen",
             serde_json::json!({
@@ -188,7 +188,7 @@ fn did_change_invokes_set_text_revision_bump() {
         ),
     );
     let _ = fossil_wasm::__dispatch_for_test(
-        &mut pg,
+        &mut ws,
         notif(
             "textDocument/didChange",
             serde_json::json!({
@@ -200,7 +200,7 @@ fn did_change_invokes_set_text_revision_bump() {
         ),
     );
     let out = fossil_wasm::__dispatch_for_test(
-        &mut pg,
+        &mut ws,
         req(
             "textDocument/documentSymbol",
             4,
@@ -221,9 +221,9 @@ fn did_change_invokes_set_text_revision_bump() {
 fn did_close_publishes_empty_diagnostics() {
     // LSP spec: on close, server should publish an empty diagnostics list
     // for the closed URI so the client clears any remaining squigglies.
-    let mut pg = FossilPlayground::new();
+    let mut ws = FossilWorkspace::new();
     let _ = fossil_wasm::__dispatch_for_test(
-        &mut pg,
+        &mut ws,
         notif(
             "textDocument/didOpen",
             serde_json::json!({
@@ -237,7 +237,7 @@ fn did_close_publishes_empty_diagnostics() {
         ),
     );
     let out = fossil_wasm::__dispatch_for_test(
-        &mut pg,
+        &mut ws,
         notif(
             "textDocument/didClose",
             serde_json::json!({
@@ -264,9 +264,9 @@ fn did_close_publishes_empty_diagnostics() {
 fn initialized_and_exit_are_silent_notifications() {
     // `initialized` and `exit` are notifications with no diagnostic side
     // effects — dispatch must return empty `DispatchOutput`.
-    let mut pg = FossilPlayground::new();
+    let mut ws = FossilWorkspace::new();
     for method in ["initialized", "exit"] {
-        let out = fossil_wasm::__dispatch_for_test(&mut pg, notif(method, serde_json::json!({})));
+        let out = fossil_wasm::__dispatch_for_test(&mut ws, notif(method, serde_json::json!({})));
         assert!(out.response.is_none(), "{method} must not respond");
         assert!(
             out.diagnostics.is_empty(),
@@ -277,8 +277,8 @@ fn initialized_and_exit_are_silent_notifications() {
 
 #[test]
 fn shutdown_request_responds_null() {
-    let mut pg = FossilPlayground::new();
-    let out = fossil_wasm::__dispatch_for_test(&mut pg, req("shutdown", 99, serde_json::json!({})));
+    let mut ws = FossilWorkspace::new();
+    let out = fossil_wasm::__dispatch_for_test(&mut ws, req("shutdown", 99, serde_json::json!({})));
     let resp = out.response.expect("shutdown must respond");
     assert!(resp.error.is_none());
     assert_eq!(resp.result, Some(serde_json::Value::Null));
@@ -287,9 +287,9 @@ fn shutdown_request_responds_null() {
 /// Sibling sanity — `fossil/checkAll` route returns an array (possibly empty).
 #[test]
 fn fossil_check_all_routes() {
-    let mut pg = FossilPlayground::new();
+    let mut ws = FossilWorkspace::new();
     let out =
-        fossil_wasm::__dispatch_for_test(&mut pg, req("fossil/checkAll", 2, serde_json::json!({})));
+        fossil_wasm::__dispatch_for_test(&mut ws, req("fossil/checkAll", 2, serde_json::json!({})));
     let resp = out.response.expect("fossil/checkAll must respond");
     assert!(resp.error.is_none());
     let rows = resp.result.expect("fossil/checkAll must carry a result");

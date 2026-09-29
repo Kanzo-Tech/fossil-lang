@@ -248,9 +248,8 @@ fn the_levels_on_disk_are_the_levels_the_plan_names() {
 /// written* branch for a reader to carry. That is the floor `CellTree::planned`
 /// argues for in its own doc. It is NOT that *a reader zoomed all the way out
 /// wants four marks rather than two hundred*, which that doc used to say and
-/// this one cited: no reader in this tree can ask for four marks, the smallest
-/// mark budget anything spends being `SCREEN_MARKS`' 15,000 in `level_vs_rung.rs`
-/// beside this file. The two floors differ on purpose, so this asserts the level
+/// this one cited: no reader in this tree can ask for four marks, every mark
+/// budget a viewer spends being in the thousands. The two floors differ on purpose, so this asserts the level
 /// rule and lets the rung rule state itself.
 #[test]
 fn a_small_type_writes_no_levels_at_all() {
@@ -356,17 +355,14 @@ fn level_cost_against_the_whole_type() {
 /// are what a level read would lose **if a level of a relation did not exist**.
 /// Against today's camera the answer is 100% at every level: an edge level draws
 /// every mark-incident edge past the floor, because it carries the far end
-/// itself. `crates/fossil-layout/tests/level_vs_rung.rs` reports both columns
-/// side by side, and the vertex-only one reproduces these numbers exactly, which
-/// is also how the two instruments are held to the same graph.
+/// itself.
 ///
 /// It is kept rather than corrected because the figure it prints is the cost of
 /// NOT writing edge levels, and that is the number anyone weighing whether to
 /// keep writing them needs.
 ///
-/// The floor is the app's: `@kanzo-tech/graph`'s `BOUNDED_DEFAULTS.minLinkPixels`
-/// is 3, `apps/playground/src/tiles.ts` multiplies it by the corpus units a
-/// pixel covers, and at the whole extent on a 1,200-pixel canvas that is
+/// The floor is the viewer's: `@kanzo-tech/graph`'s `BOUNDED_DEFAULTS.minLinkPixels`
+/// is 3, multiplied by the corpus units a pixel covers, and at the whole extent on a 1,200-pixel canvas that is
 /// `3 · width / 1200`.
 ///
 /// Same fixture as `level_cost_against_the_whole_type`, deliberately: the byte

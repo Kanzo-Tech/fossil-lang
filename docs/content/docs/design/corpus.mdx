@@ -25,7 +25,7 @@ which is the worst distribution of a failure a design can have. The lineage is e
 
 The rule has one exception left in the tree, and it is bounded rather than argued.
 `fossil-mcp`'s `register_views_sql` composes every path a verb reads, and
-`crates/fossil-mcp/src/lib.rs` measures what is left over the conformance corpus in both containers:
+`fossil-mcp`'s `src/lib.rs` (deleted after `2fa5f22`) measures what is left over the conformance corpus in both containers:
 
 | container | globs registered | where |
 | --- | --- | --- |
@@ -213,7 +213,7 @@ nothing ever looks at it.
 | **a reader that decides anything on it** | **0** | **0** |
 
 **The five that bypass the constant are their own finding.** `crates/fossil-graph/src/manifest.rs`,
-`crates/fossil-graph/src/executor.rs`, `crates/fossil-mcp/src/lib.rs` and two examples/tests beside
+`crates/fossil-graph/src/executor.rs`, `fossil-mcp`'s `src/lib.rs` (deleted after `2fa5f22`) and two examples/tests beside
 them write `"gar/v1"` as a literal rather than reading `GRAPHAR_VERSION`, so *changing the constant
 does not change the string* in three crates. Whatever is decided, that is a defect today: there is
 one name for the version and six places that state it.
@@ -331,18 +331,15 @@ a half-written state; with no such reader they are cost without benefit.
 
 ## The verb surface: six, and none of them draws
 
-`fossil-graph` defines the surface; MCP, HTTP, the CLI and the in-process TS package are bindings
-over it. **It closed at six on 2026-08-05**, and the six are the variants of `Operation`
-(`crates/fossil-graph/src/operations/mod.rs`).
+`fossil-graph` defines the surface; the in-process TS package, through `fossil-graph-wasm`, is the
+one binding over it. **It closed at six on 2026-08-05 and is two now**: `read`, `expand`, `path` and
+`aggregate` went with the MCP server that was their other caller. What is left are the variants of
+`Operation` (`crates/fossil-graph/src/operations/mod.rs`).
 
 | verb | what it answers |
 | --- | --- |
-| `read` | rows of one vertex type, filtered, ordered and capped |
-| `expand{into\|all}` | the neighbourhood of a *set* of vertices, one hop |
-| `path` | a route between two vertices |
-| `aggregate` | a grouped, bounded summary — over values or over ranges |
 | `schema` | what types, fields and relations exist, with field stats on request |
-| `execute_sql` | the escape hatch, which a binding may hide behind a permission — and in `fossil-mcp` that is [literal](/docs/design/tooling-for-machines): the tool is registered or it is not |
+| `execute_sql` | the escape hatch, which a host withholds unless it opens the corpus with `sql: 'allowed'` |
 
 The algebra answers questions and **does not draw**, because drawing is addressing: the camera works
 out which level and which tiles it needs and asks for bytes, with no bbox in flight and no database
@@ -505,7 +502,7 @@ a size — and no Zarr reader opens a corpus of typed tables with a subject IRI 
 The published binding was `@fossil-lang/graph` and it is now **`@fossil-lang/corpus`**. The section
 title is the reason: none of the six draws, the package's door is `open`, and every type it
 exports is `Corpus*`. What forced the rename rather than merely recommending it is that the thing
-which *does* draw arrived and took the obvious name — `apps/playground/package.json` lists
+which *does* draw arrived and took the obvious name — the playground's `package.json` (deleted after `2fa5f22`) lists
 `@kanzo-tech/graph`, a GPU canvas, and listed `@fossil-lang/graph` beside it. Two dependencies
 called `graph`, one addressing files and one painting vertices, and no import statement said which.
 
@@ -662,7 +659,7 @@ interface BoundedSource {
 
 Both sides had already written the same sentence about the same deleted verb. `fossil-graph` says
 the camera is addressed and not queried; that package's own reader says *what replaces `viewport` is
-a tile brought by a computed URL, which is another source*. `apps/playground/src/tiles.ts` is that
+a tile brought by a computed URL, which is another source*. The playground's `src/tiles.ts` (deleted after `2fa5f22`) is that
 other source, and it is a *consumer* of [the one door](/docs/design/one-door): a viewport becomes a
 finite box, the renderer's `perPixel` becomes the canvas it is drawn into, `frame` answers, and what
 is left in the file is the mapping between two vocabularies. Nothing in it knows how cosmos.gl holds
@@ -683,7 +680,7 @@ through the published module — at which point the source here becomes a call t
 A 10% window over a million vertices opens **17 of 245 tiles in 6 range requests and 1,466 kB** —
 2.56% of the corpus, 1.13× over-read at tile granularity — and the camera is asked again on every
 move. `extent()` and `total()` are answered off the footer and the manifest, so the *opening* frame
-issues no query at all. The panel is `apps/playground/src/Canvas.tsx`; the arithmetic is checked
+issues no query at all. The panel is the playground's `src/Canvas.tsx` (deleted after `2fa5f22`); the arithmetic is checked
 against bytes over a real HTTP server by `pnpm --filter @fossil-lang/playground verify-stream`, and
 the source itself — every array against the window it claims to describe — by `verify-canvas`.
 

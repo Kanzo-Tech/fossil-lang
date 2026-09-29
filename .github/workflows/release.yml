@@ -91,10 +91,7 @@ jobs:
       # It read `pnpm -r test`, which reached the corpus contract — then a
       # private app, whose test script hard-requires the `duckdb` binary this job never installs, so the gate
       # before publishing exited 2 on a missing dependency rather than on a
-      # failing package. `apps/` is `private: true` and nothing here publishes
-      # it; CLAUDE.md states the filter as the invariant that makes an app
-      # unpublishable by accident, and this was the one step that did not honour
-      # it. The `@fossil-lang/examples` exclusion the old comment mentioned is
+      # failing package. `docs` is `private: true` and nothing here publishes it. The `@fossil-lang/examples` exclusion the old comment mentioned is
       # gone because that package is.
       #
       # **The filter was necessary and was not sufficient**, which is what
@@ -131,8 +128,8 @@ jobs:
       # `workspace:*` deps to this same version automatically at publish time.
       #
       # `--filter "./packages/*"` is load-bearing, not tidiness. The workspace also
-      # contains `apps/*`, which is never published; unfiltered, this step would
-      # stamp a release version into an app that has no `version` to speak of.
+      # contains `docs`, which is never published; unfiltered, this step would
+      # stamp a release version into it.
       - name: Stamp version into all published packages
         run: pnpm --filter "./packages/*" exec npm pkg set version="${{ steps.rel.outputs.version }}"
 

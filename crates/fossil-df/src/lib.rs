@@ -21,7 +21,7 @@
 // runtime — so a future that is not `Send` costs nothing here. Nor is the bound
 // available: `DataFusion`'s `DataFrame`/`ExecutionPlan` futures are not `Send`,
 // so satisfying the nursery lint would mean a `Send` wrapper over every await in
-// the crate. `fossil-df-wasm`, `fossil-graph` and `fossil-mcp` allow it in the
+// the crate. `fossil-df-wasm` and `fossil-graph` allow it in the
 // same place for the same reason.
 #![allow(clippy::future_not_send)]
 
@@ -668,9 +668,9 @@ async fn execute_edge(
     // `unnest_columns` on a `Utf8` is `"trying to unnest on invalid data type"`,
     // a DataFusion internal error at run time with no diagnostic in front of it.
     // That is 8 of LDBC-SNB's 21 relationships — `knows`, `likes`, `hasMember`,
-    // `hasTag`, `hasInterest`, `studyAt`, `workAt` — and it is why
-    // `apps/playground/bench/dblp/dblp.shex` carries a comment calling its own
-    // `;` a defect rather than a modelling choice.
+    // `hasTag`, `hasInterest`, `studyAt`, `workAt` — and a shape that wrote
+    // `;` where it meant `*` to dodge it was recording a defect, not a
+    // modelling choice.
     let dst_is_list = matches!(
         edge_src
             .schema()

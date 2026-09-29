@@ -1,18 +1,9 @@
 //! Escape-hatch verb — `execute_sql`.
 //!
-//! Bindings MAY hide this verb behind a permission flag. The keasy proxy
-//! gates it: only org admins reach this tool; participant-role users see the
-//! other five verbs but not this one. The reason is dual:
-//!
-//! 1. SQL is unbounded — a bad query brings down the WASM `DuckDB` heap.
-//! 2. The other five verbs cover the supported question shapes with
-//!    predictable cost. `execute_sql` is the LLM's last resort when none
-//!    of those fit — useful but not for every caller.
-//!
-//! **`read`'s `where` is the same authority**, and a binding that gates this
-//! verb gates that field with it — not by remembering to, but because both
-//! fields are [`RawSql`] and one token fills them.
-//! [`raw_sql`](super::raw_sql) is the argument.
+//! Bindings MAY hide this verb behind a permission: SQL is unbounded, and a
+//! bad query can bring down the WASM `DuckDB` heap. Its `sql` is [`RawSql`],
+//! which only a permission token fills — [`raw_sql`](super::raw_sql) is the
+//! argument.
 //!
 //! When exposed, the result shape is the DuckDB-row-as-JSON form. Rows are
 //! `serde_json::Value`s because the schema is unknown at verb-call time.
@@ -31,13 +22,17 @@ pub struct ExecuteSqlParams {
     pub row_cap: u32,
 }
 
-/// [`ExecuteSqlParams`] as it arrives. See [`WireReadParams`] for why the
-/// mirror exists and where its drift is caught.
+/// [`ExecuteSqlParams`] as it arrives — the same fields with `sql` still a
+/// bare `String`, because a permission has not been applied to it yet.
 ///
-/// [`WireReadParams`]: super::discovery::WireReadParams
+/// **The one risk this shape carries is drifting from the struct it mirrors**,
+/// and `crates/fossil-graph/tests/schemas.rs` is where that is caught: it
+/// derives both schemas and asserts they are the same document, down to the
+/// per-field prose. A field added above and not here fails there rather than
+/// silently becoming unreachable from the wire.
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(super) struct WireExecuteSqlParams {
+pub struct WireExecuteSqlParams {
     pub sql: String,
     /// Hard cap on rows returned to the caller. The executor MUST apply an
     /// outer `LIMIT` regardless of what the user's SQL contains.

@@ -50,7 +50,7 @@ export interface CheckRowLike {
  * Project `CheckRow`s onto CodeMirror `Diagnostic`s against a given document.
  *
  * `uri` filters to one buffer. The workspace-wide `check()` returns rows for every
- * open file — the `.shex` shape document the playground had to open, any second
+ * open file — the `.shex` shape document a program names, any second
  * program — and painting another file's errors onto this one's text is worse than
  * showing nothing.
  */
@@ -94,7 +94,7 @@ export interface LinterOptions {
    * **This is the coalescing, and it is the library's job rather than the app's.**
    * `@codemirror/lint` waits out the delay and then waits for the promise before
    * scheduling again, so no two checks overlap no matter how fast anyone types —
-   * which is what `apps/playground` was doing by hand with a `setTimeout` and a
+   * which is what a host used to do by hand with a `setTimeout` and a
    * `busy` flag to stay clear of a wasm re-entrancy defect. That defect is fixed
    * in `crates/fossil-wasm` now, but the scheduling was always the right shape for
    * an editor: an LSP client coalesces `didChange` rather than emitting one
@@ -105,7 +105,7 @@ export interface LinterOptions {
    */
   delay?: number;
   /** Called with every batch, before filtering. A host that renders its own
-   *  diagnostics panel — the playground does — reads it here rather than running
+   *  diagnostics panel reads it here rather than running
    *  a second check. */
   onDiagnostics?: (rows: readonly CheckRowLike[]) => void;
 }

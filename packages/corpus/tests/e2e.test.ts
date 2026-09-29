@@ -85,42 +85,6 @@ describe('@fossil-lang/corpus verbs e2e against DuckDB-WASM', () => {
     expect(vertices[0]!.fields).toEqual(['age', 'name']);
   });
 
-  it('aggregate: count grouped by a user field', async () => {
-    const { rows } = await graph.aggregate({
-      vertex_type: 'Person',
-      agg: 'count',
-      group_by: 'name',
-    });
-    // 3 distinct names → 3 groups, each count 1.
-    expect(rows).toHaveLength(3);
-    expect(rows.every((r) => r.value === 1)).toBe(true);
-  });
-
-  it('aggregate: bins real ages over ranges', async () => {
-    const { rows, edges } = await graph.aggregate({
-      vertex_type: 'Person',
-      group_by: 'age',
-      agg: 'count',
-      bins: 4,
-    });
-    expect(edges).toHaveLength(5); // bins + 1
-    expect(rows).toHaveLength(4); // dense: one row per bin
-    // Every age (25, 30, 41) lands in some bin; the counts sum to 3.
-    expect(rows.reduce((a, r) => a + r.value, 0)).toBe(3);
-  });
-
-  it('read: descending order_by returns the real ordering', async () => {
-    const { rows } = (await graph.read({
-      vertex_type: 'Person',
-      order_by: 'age',
-      descending: true,
-      limit: 2,
-    })) as { rows: Array<Record<string, unknown>> };
-    expect(rows).toHaveLength(2);
-    expect(rows[0]!.name).toBe('Bob'); // age 41
-    expect(rows[1]!.name).toBe('Alice'); // age 30
-  });
-
   it('schema: a named field carries distinct + datatype + samples', async () => {
     const { fields } = await graph.schema({ vertex_type: 'Person', field: 'age' });
     expect(fields).toHaveLength(1);

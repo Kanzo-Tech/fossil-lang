@@ -23,7 +23,6 @@ ignore = [
     # --- Unreachable code paths in a transitive RDF stack ---
     { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.37.5: quadratic time checking a start tag for duplicate attribute names — a DoS on hostile XML. Reached only as oxrdfxml/sparesults inside oxigraph, pulled in wholesale by rudof_rdf <- shex_ast <- fossil-shex. Nothing in `crates/` parses RDF/XML or SPARQL results: `grep -rn 'rdf.\\?xml\\|quick_xml\\|oxigraph\\|sparql' crates/*/src` finds one unrelated comment. Not a lockfile fix — the patch is quick-xml >=0.41 and oxigraph 0.5.8 requires ^0.37, so it lands when oxigraph bumps. FAILS AGAIN / DELETE ME: the day any crate here reads RDF/XML or SPARQL-results XML, or oxigraph ships the bump." },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.37.5: unbounded namespace-declaration allocation in `NsReader`, memory-exhaustion DoS. Same crate, same unreachable path, same expiry as RUSTSEC-2026-0194 above — the two are one dependency bump apart." },
-    { id = "RUSTSEC-2026-0189", reason = "rmcp 0.16.0: DNS rebinding in the Streamable HTTP server transport. The advisory itself states stdio and child-process transports are NOT affected, and `fossil-mcp` is stdio only — the workspace enables `features = [\"server\", \"macros\", \"transport-io\"]` and `main.rs` calls `.serve(stdio())`. No HTTP listener is compiled, let alone bound. FAILS AGAIN / DELETE ME: the instant a `transport-streamable-http-server` or `transport-sse-server` feature appears in the rmcp dep line, or `fossil-mcp` grows an HTTP transport; the clean fix is rmcp >=1.4.0, a major bump this change does not own." },
 
     # --- Unmaintained, compile-time only, and there is no upgrade to take ---
     { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 unmaintained. A proc-macro: it runs at compile time and contributes no code to any shipped binary or wasm module, so `unmaintained` here is a supply-chain concern, not a runtime one. RUSTSEC lists no safe upgrade. Two independent paths — `parquet` 58 and the rudof stack — so no single dependency choice of ours removes it. FAILS AGAIN / DELETE ME: when `cargo tree -i paste` comes back empty, i.e. when both parquet and rudof have dropped it." },
@@ -126,7 +125,6 @@ deny = [
         # out of the native host, and naming this crate is the review the rule
         # exists to force.
         "fossil-introspect",
-        "fossil-mcp",
         # Links it TRANSITIVELY, through `fossil-introspect`. Both are hosts, and
         # a host is where introspection belongs. `fossil-cli` is ALSO a direct
         # parent by a dev edge, to read written Parquet back — it absorbed
@@ -136,7 +134,7 @@ deny = [
         # A direct parent by a DEV edge only — to bring an engine to a test. Not
         # a ring crossing, and cargo-deny still counts it as a direct parent.
         "fossil-layout",
-    ], reason = "The engine layer, plus the hosts that introspect a source before compiling it. The language layer may not link a database: it must start in milliseconds and it must compile to wasm32, and `fossil-base`/`-syntax`/`-hir`/`-mir`/`-ide` are none of them here. `fossil-lsp` is the fourth host beside `fossil-cli`, `fossil-mcp` and `fossil-wasm` — a native-only binary outside every wasm closure — and it reaches `duckdb` through `fossil-introspect` for the same reason `fossil check` does: without the columns a DESCRIBE finds, the editor is silent on every diagnostic whose evidence is a source's schema, which was measured on 2026-08-23 and is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`. It reads only what it can `stat`, never the network. The previous reason string said `fossil-cli` kept `duckdb` as a dev-dependency; `cargo tree -e normal` says it links it through `fossil-introspect`, which is exactly the transitive edge this list could not see." },
+    ], reason = "The engine layer, plus the hosts that introspect a source before compiling it. The language layer may not link a database: it must start in milliseconds and it must compile to wasm32, and `fossil-base`/`-syntax`/`-hir`/`-mir`/`-ide` are none of them here. `fossil-lsp` is the third host beside `fossil-cli` and `fossil-wasm` — a native-only binary outside every wasm closure — and it reaches `duckdb` through `fossil-introspect` for the same reason `fossil check` does: without the columns a DESCRIBE finds, the editor is silent on every diagnostic whose evidence is a source's schema, which was measured on 2026-08-23 and is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`. It reads only what it can `stat`, never the network. The previous reason string said `fossil-cli` kept `duckdb` as a dev-dependency; `cargo tree -e normal` says it links it through `fossil-introspect`, which is exactly the transitive edge this list could not see." },
     { name = "datafusion", wrappers = [
         # Links it, directly.
         "fossil-df",

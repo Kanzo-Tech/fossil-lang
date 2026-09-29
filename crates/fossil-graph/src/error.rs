@@ -1,8 +1,7 @@
 //! Typed errors for verb dispatch and execution.
 //!
 //! Surface-level only — each binding translates `GraphError` into its own
-//! error shape: a JSON-RPC error in `fossil-mcp`, a `JsError` in
-//! `fossil-graph-wasm`.
+//! error shape — a `JsError` in `fossil-graph-wasm`, the one binding.
 
 use thiserror::Error;
 

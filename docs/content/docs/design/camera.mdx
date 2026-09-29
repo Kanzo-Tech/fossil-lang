@@ -52,11 +52,11 @@ residency draws that frame from what it holds, and re-reads nothing.
 <Callout type="warn">
 **That is a claim about bytes and the bytes here are not weighed.** Every figure in the `bytes`
 column is footer arithmetic — the size of the tiles the rectangle selected — and
-`apps/playground/src/tiles.ts` says why it can be nothing else: DuckDB issues the real requests from
+the playground's `src/tiles.ts` (deleted after `2fa5f22`) says why it can be nothing else: DuckDB issues the real requests from
 inside its Worker, where the calling thread cannot see them. So the column says what those tiles
 *weigh*, never what crossed the wire.
 
-And the engine already caches. `apps/playground/src/duckdb.ts, engine` passes `directIO =
+And the engine already caches. `engine` in the playground's `src/duckdb.ts` (deleted after `2fa5f22`) passes `directIO =
 false` with the reason written beside it — *DuckDB caches what it has already read, which is what
 makes the footer bought-once rather than bought-per-query*. If that cache also spans the payload
 reads the canvas issues, the 12,805,975 of row two was **banked before residency existed**, and
@@ -77,7 +77,7 @@ never sees a tile's bytes and has nothing to cache. So the 3.3× is not this lay
 the engine's, which is precisely what `directIO = false` is there for.
 
 What this thread can hold is **answers** — a rectangle already asked about, and the rows that came
-back. That is what `packages/draw/src/residency.ts` holds, and the measured win is the one
+back. That is what `@fossil-lang/draw`'s `residency.ts` (deleted after `2fa5f22`) holds, and the measured win is the one
 latency predicted rather than the one bytes did: a rectangle already held settles in 3 ms against
 175, and the frames in between get an interim in 8 to 18 ms.
 </Callout>
@@ -103,7 +103,7 @@ progressive refinement needs — with no change to the renderer and no second me
 backwards.** It said the coarse frame could be the return and the refined one arrive through
 `watch`. It cannot: `slice` is a pure function of `(rect, level)`, [path
 independence](#3-path-independence) is measured against its RETURN, and
-`apps/playground/scripts/verify-properties.mjs` and `measure-frame.mjs` both read that return as
+the playground's `scripts/verify-properties.mjs` (deleted after `2fa5f22`) and `measure-frame.mjs` both read that return as
 the answer. So **`slice` returns the settled answer and `watch` carries the interim** — which lands
 on screen exactly like a returned one, because `useQueryLoop` registers its own setter as the
 callback, and is superseded rather than merged.
@@ -126,7 +126,7 @@ its edges.
 
 ## The three properties
 
-`apps/playground/scripts/verify-properties.mjs` is the measurement, and it runs against a real
+The playground's `scripts/verify-properties.mjs` (deleted after `2fa5f22`) is the measurement, and it runs against a real
 million-vertex corpus on disk through a real engine — no browser, no GPU, no
 `requestAnimationFrame`. What it cannot check is the picture. What it checks is every claim the
 picture rests on.
@@ -186,7 +186,7 @@ rung 1 gets at 48×48.
 and the retraction is on [cells](/docs/design/cells#the-quotient-saturates-down-the-pyramid-and-the-marks-do-not).
 The tell was in the numbers the whole time: a gap that collapses from ~0.1 to ~0.002 and then holds at
 ~0.002 for six rungs running is a saturated statistic, not six artefacts losing information at six
-different scales. `crates/fossil-layout/tests/level_vs_rung.rs, resolution_sweep` is the instrument
+different scales. `resolution_sweep` in `level_vs_rung.rs` (deleted after `2fa5f22`) is the instrument
 that separates the two, and it is kept in the tree rather than retired with its conclusion: measured
 across two corpora at five resolutions, **no arm at one bin per mark or finer fails, and every failure
 is at two bins per mark or coarser** — 130 rows, zero counterexamples in either direction.

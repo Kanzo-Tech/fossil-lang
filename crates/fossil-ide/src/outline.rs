@@ -24,7 +24,7 @@
 //! | `Source`         | `VARIABLE`       | a `:=` binds a name to a value      |
 //!
 //! WASM-clean: returns `lsp_types::DocumentSymbol` directly (`lsp-types` itself
-//! is wasm32-clean), so the playground consumes it with no translation.
+//! is wasm32-clean), so the wasm workspace consumes it with no translation.
 
 use crate::{SymbolEntry, SymbolIndex, SymbolKind as FossilSymbolKind};
 use fossil_base::SourceFile;

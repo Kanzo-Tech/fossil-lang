@@ -914,8 +914,7 @@ impl Dendrogram {
     /// [`flatten_to_budget`] is the existing half of this — it walks the
     /// hierarchy and picks **one** level that fits a budget. This is the same
     /// walk choosing a **sequence**, and it exists because the levels Louvain
-    /// emits are not a holarchy. Measured over com-DBLP by
-    /// `crates/fossil-layout/examples/hierarchy_stats.rs` they contract 5.7×,
+    /// emits are not a holarchy. Measured over com-DBLP they contract 5.7×,
     /// 6.0×, 5.5×, then **2.5×** and **1.2×**: the last two steps change almost
     /// nothing on screen, and a reader ascending them takes a step that buys
     /// nothing. A cut states what a step must be worth and takes the levels that

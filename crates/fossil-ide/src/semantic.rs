@@ -1,11 +1,11 @@
 //! `textDocument/semanticTokens/full` — full-document semantic tokens.
 //!
-//! # Why this is load-bearing for the playground
+//! # Why this exists
 //!
-//! Monaco renders the playground **inert** (no syntax coloring) without LSP
-//! semantic tokens: Fossil ships no `TextMate` grammar to the *playground* —
-//! the browser editor relies on the LSP `semanticTokensProvider`. So this module
-//! is the *only* source of syntax highlighting in the v0.1 playground.
+//! Fossil ships no `TextMate` grammar, so an LSP client colours a program from
+//! these or not at all. The CodeMirror layer (`@fossil-lang/codemirror-fossil`)
+//! highlights from `tokenize()` instead; semantic tokens reach a browser only
+//! over the LSP Worker.
 //!
 //! # Shape (LSP spec)
 //!

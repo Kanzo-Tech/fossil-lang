@@ -32,7 +32,7 @@ listing over HTTP and the format asks for none.
 **The corpus carries two coarse faces and neither of them was deleted.** The level pyramid *samples*
 — `dense_id % scale == 0`, real rows sharing the payload's own numbering — and the cell pyramid
 *aggregates* into synthetic rows that no scale describes. They draw different pictures rather than
-being two prices for one, which is why `crates/fossil-layout/tests/level_vs_rung.rs` weighs them on
+being two prices for one, which is why `level_vs_rung.rs` (deleted after `2fa5f22`) weighs them on
 ONE corpus: two instruments over two graphs compare two graphs.
 [Cells](/docs/design/cells) is the argument for the cell pyramid being a third artefact.
 
@@ -62,21 +62,19 @@ Louvain will find; and `reached` on `crates/fossil-sinks/src/manifest.rs, KAnony
 
 ## What the reader is
 
-**One door, one name, three depths, all of them asynchronous** —
-`packages/corpus/src/corpus.ts, open`. `resolveCorpus` and `openCorpus` are both gone into it, and
-the depth follows from the capability the caller brings, which is the whole of why there is one
-name:
+**One door, one name, and it always takes an engine** — `packages/corpus/src/corpus.ts, open`.
+`resolveCorpus` and `openCorpus` are both gone into it, and the addressing either of them answered
+with is `corpus.addressing`:
 
 ```ts
-await open(url,  { query })          // Corpus — the whole door
-await open(url,  { readText })       // CorpusAddressing — the manifests, no payload
-await open(base, { manifestFiles })  // CorpusAddressing — no request at all
+await open(job, { engine, host })  // a job's corpus, under the credential the host vends
+await open(url, { query })         // a corpus at a URL
 ```
 
-`sql: 'allowed'` widens the first of those to `SqlCorpus`; it is a widening and not a fourth depth.
+`sql: 'allowed'` widens either to `SqlCorpus`.
 
 **What comes back has two halves, and the line between them is which bytes get chosen.** `extent`,
-`rows`, `frame`, `node` and `neighbours` compute which files to open and open those. The six verbs —
+`rows`, `frame`, `node` and `neighbours` compute which files to open and open those. The verbs —
 `crates/fossil-graph/src/operations/mod.rs, Operation`, compiled to wasm32 — name a table and let the
 engine decide. The two halves meet at exactly one point, the host's `query` callback, and the reader
 brings no engine of its own to either.
@@ -88,12 +86,11 @@ as a `WHERE` reads the whole file, so pruning stays the tiles' job and this chan
 anything. [One door](/docs/design/one-door) argues the surface;
 [the reference viewer](/docs/design/reference-viewer) argues what a frame may answer with.
 
-The reader's **policy** over that contract is a second published package and deliberately not on the
-door: `@fossil-lang/draw` holds what a corpus is drawn WITH
-(`packages/draw/src/encoding.ts, encodingFor`) and what is already LOADED
-(`packages/draw/src/residency.ts, residency`). A channel is read off a manifest, but an encoding is a
-reader's ranking of what to do with one and a residency budget is a number measured against one
-renderer on one corpus. Neither is a property of the artefact.
+The reader's **policy** over that contract is deliberately not on the door, and not in this
+repository: what a corpus is drawn WITH and what is already LOADED belong to the viewer,
+`@kanzo-tech/graph`. A channel is read off a manifest, but an encoding is a reader's ranking of what
+to do with one and a residency budget is a number measured against one renderer on one corpus.
+Neither is a property of the artefact.
 
 ## What is declared and what is derived
 
@@ -150,7 +147,7 @@ graph LR
   L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 4 crates<br/>df · df-wasm · cli · introspect"]
-  C["<b>corpus</b> · 10 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · tile-writer · storage · storage-wasm<br/>policy · kanon"]
+  C["<b>corpus</b> · 9 crates<br/>graph · graph-wasm · layout<br/>sinks · tile-writer · storage · storage-wasm<br/>policy · kanon"]
   X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
   E -->|18| L
@@ -208,7 +205,7 @@ way for the same reason `fossil-policy` does, and it is **not** the objection th
 predicate was declared with. `fossil-storage` is still a leaf. It **cost** an edge rather than saving one — `fossil-df → fossil-sinks`,
 `fossil-cli → fossil-sinks` and `fossil-introspect → fossil-storage` used to be internal to the
 engine, three that started crossing against two that stopped — and it bought the cycle:
-`fossil-graph → fossil-sinks` and `fossil-mcp → fossil-storage` are now inside `corpus`, so the
+`fossil-graph → fossil-sinks` and `fossil-mcp → fossil-storage` (a crate since deleted) moved inside `corpus`, so the
 return leg went from three edges to one — and that one has since gone too, which is the section
 above. There are still two cores; there is no longer a stitch closing the loop.
 [One engine](/docs/design/one-engine) is where the rest of the filing gets settled.

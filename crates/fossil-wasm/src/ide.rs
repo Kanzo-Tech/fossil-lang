@@ -5,7 +5,7 @@
 //!
 //! [`crate::lsp_worker`] is a `postMessage` transport, and a transport needs
 //! somebody on the other end of it: a Worker that owns its own
-//! [`crate::FossilPlayground`], a JSON-RPC client, an id table, and a second
+//! [`crate::FossilWorkspace`], a JSON-RPC client, an id table, and a second
 //! copy of every buffer to keep the two workspaces in step. That is an LSP
 //! client, it is a real piece of work, and a browser tab that already calls
 //! `check()` synchronously does not need one to answer *what is the type under
@@ -26,7 +26,7 @@
 //! Hover fires on mouse-move, completion on nearly every keystroke, and the
 //! checker on a 120 ms debounce — three different rates against one workspace,
 //! which is exactly the arrangement that poisoned a session before
-//! (`WasmPlayground`'s type-level note has the defect). It cannot recur here,
+//! (`WasmWorkspace`'s type-level note has the defect). It cannot recur here,
 //! and not because of scheduling: **none of these three mutates**. Each takes
 //! `try_borrow`, and shared borrows nest, so a hover during a live `check` — or
 //! two of them at once — returns an answer rather than an error. Only
@@ -36,9 +36,9 @@
 //! The consequence a caller owes is the other half: these read the text of the
 //! LAST `update_file`, so a position query issued mid-debounce answers about
 //! text one keystroke old and its ranges land one keystroke wrong. The host
-//! pushes the buffer before it asks — `apps/playground/src/check.ts` does it
-//! with a string compare, so the common case (nothing changed since the check)
-//! costs one comparison and takes no exclusive borrow at all. That is what an
+//! pushes the buffer before it asks — `@fossil-lang/codemirror-fossil` passes
+//! the text with every query, and a host that compares it against what it last
+//! sent pays one comparison in the common case and takes no exclusive borrow. That is what an
 //! LSP client's ordering guarantee buys for free and a direct caller has to
 //! arrange.
 //!
@@ -55,7 +55,7 @@
 use fossil_base::SourceFile;
 use lsp_types::{CompletionItemKind, Range};
 
-use crate::FossilPlayground;
+use crate::FossilWorkspace;
 
 /// What is under the cursor, rendered — the payload of `textDocument/hover`
 /// with the LSP envelope taken off.
@@ -153,9 +153,9 @@ pub const fn kind_name(kind: Option<CompletionItemKind>) -> &'static str {
     }
 }
 
-impl FossilPlayground {
+impl FossilWorkspace {
     /// Native-reachable hover — the pure-Rust half of
-    /// [`crate::WasmPlayground::hover`].
+    /// [`crate::WasmWorkspace::hover`].
     ///
     /// `None` for an unknown handle AND for a cursor with no type-bearing
     /// expression under it, which are the same answer to a host: nothing to
@@ -178,7 +178,7 @@ impl FossilPlayground {
     }
 
     /// Native-reachable completion — the pure-Rust half of
-    /// [`crate::WasmPlayground::completions`].
+    /// [`crate::WasmWorkspace::completions`].
     ///
     /// An unknown handle is an empty list rather than an error: a completion
     /// request racing a `closeFile` is a normal thing for an editor to do, and
@@ -206,7 +206,7 @@ impl FossilPlayground {
     }
 
     /// Native-reachable goto-definition — the pure-Rust half of
-    /// [`crate::WasmPlayground::goto_definition`].
+    /// [`crate::WasmWorkspace::goto_definition`].
     ///
     /// Empty when the handle is unknown, when nothing is under the cursor, and
     /// when the thing under it has no definition anywhere in the open set —

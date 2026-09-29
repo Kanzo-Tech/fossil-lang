@@ -102,7 +102,7 @@ pub struct NavigationTarget {
 /// Resolve the definition(s) of the identifier at an LSP position.
 ///
 /// `files` is the host's open-file set (the LSP `LspState.files` or the
-/// playground's multi-panel set); `file` is the file the cursor is in.
+/// wasm workspace's open files); `file` is the file the cursor is in.
 ///
 /// Three positions are recognised, and the first two leave the `.fossil` file:
 ///
@@ -290,7 +290,7 @@ fn document_targets(
 
     let Some(doc_file) = doc_file else {
         // The document is named and not registered — an unsaved buffer the host
-        // has not opened, a path that does not exist, a playground with no
+        // has not opened, a path that does not exist, a browser host with no
         // filesystem. The binding line is a real definition site for the NAME,
         // so a shape lands there; a predicate does not, because the binding says
         // nothing about which predicates the document declares.

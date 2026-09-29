@@ -23,7 +23,7 @@
 //! The pure-Rust [`Executor`] (target-agnostic — `cargo test` drives it on a
 //! tokio runtime) holds all the logic; the `#[wasm_bindgen]` [`FossilExecutor`]
 //! wrapper only marshals JS values (and is driven by JS's event loop in the
-//! browser, no tokio). Mirrors `fossil-wasm`'s `FossilPlayground` split.
+//! browser, no tokio). Mirrors `fossil-wasm`'s `FossilWorkspace` split.
 
 // The executor is single-threaded by construction (the browser has no threads;
 // native callers drive it on a current-thread runtime), so its futures need not
@@ -408,7 +408,7 @@ async fn register_rdf_sources(
 
 /// The JS-facing executor — `FossilExecutor` on the JS side, a `RefCell`
 /// around the Rust [`Executor`], for the reason `fossil-wasm`'s
-/// `WasmPlayground` gives: a `&mut self` export borrows wasm-bindgen's cell
+/// `WasmWorkspace` gives: a `&mut self` export borrows wasm-bindgen's cell
 /// exclusively, a failed borrow panics, and on `wasm32` that poisons the object
 /// for good. Every export takes `&self`; a register while a run is in flight
 /// returns a catchable `Error` instead.

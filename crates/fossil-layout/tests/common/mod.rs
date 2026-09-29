@@ -244,15 +244,7 @@ pub(crate) fn fixture(root: PathBuf, rows: u32, mean_degree: u32) -> Fixture {
     over(root, rows, &edges)
 }
 
-/// The same fixture over an edge list the caller already has — **a real graph,
-/// read off disk, rather than one [`planted`] made up.**
-///
-/// `tests/level_vs_rung.rs` is the one caller: it feeds com-DBLP through, and
-/// the whole reason it can is that everything below `planted` is independent of
-/// where the pairs came from. Factored out rather than copied, for this
-/// module's own reason — a second construction of the vertex batches and the two
-/// orientations is a second fixture the moment one of them is edited.
-pub(crate) fn over(root: PathBuf, rows: u32, edges: &[(u32, u32)]) -> Fixture {
+fn over(root: PathBuf, rows: u32, edges: &[(u32, u32)]) -> Fixture {
     fs::create_dir_all(root.join("chunks")).expect("create the tile directory");
     Fixture {
         chunk_size: 4_096,

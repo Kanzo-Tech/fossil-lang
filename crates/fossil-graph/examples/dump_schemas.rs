@@ -14,7 +14,7 @@
 //! cargo run -p fossil-graph --example dump_schemas
 //! ```
 
-use fossil_graph::operations::{Operation, aggregate, discovery, schema, sql};
+use fossil_graph::operations::{Operation, schema, sql};
 use schemars::r#gen::SchemaGenerator;
 use serde_json::{Map, Value, json};
 
@@ -27,10 +27,6 @@ fn main() {
     generator.subschema_for::<Operation>();
 
     generator.subschema_for::<schema::SchemaResult>();
-    generator.subschema_for::<discovery::ReadResult>();
-    generator.subschema_for::<discovery::ExpandResult>();
-    generator.subschema_for::<discovery::PathResult>();
-    generator.subschema_for::<aggregate::AggregateResult>();
     generator.subschema_for::<sql::ExecuteSqlResult>();
 
     // The schemars 0.8 default puts named schemas under `#/definitions/<Ident>`.

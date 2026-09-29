@@ -3,14 +3,6 @@ import type {
   Operation,
   SchemaParams,
   SchemaResult,
-  ReadParams,
-  ReadResult,
-  ExpandParams,
-  ExpandResult,
-  PathParams,
-  PathResult,
-  AggregateParams,
-  AggregateResult,
   ExecuteSqlParams,
   ExecuteSqlResult,
 } from './generated.js';
@@ -36,7 +28,7 @@ export interface CreateGraphClientOpts {
 }
 
 /**
- * The typed verb surface: six methods, one per `fossil-graph` verb, each
+ * The typed verb surface: one method per `fossil-graph` verb, each
  * forwarding to the WASM `dispatch_graph` with the shared `query` +
  * `manifestFiles`. Params and results are the codegen'd shapes from the
  * schemars JSON Schemas (`./generated.ts`) — single source of truth with the
@@ -55,25 +47,6 @@ export interface GraphClient {
    * pays for a second query.
    */
   schema(params?: SchemaParams): Promise<SchemaResult>;
-  /**
-   * Rows of one vertex type: a `where` predicate, an order, a limit. The
-   * general bounded read — reading one vertex is `where: "subject = '…'"`.
-   * `where` is SQL and carries the same authority as `executeSql`: gate it
-   * with the same permission.
-   */
-  read(params: ReadParams): Promise<ReadResult>;
-  /**
-   * The neighbourhood of a set of vertices: `all` walks outward up to `depth`,
-   * `into` keeps only the edges whose both ends are in the set.
-   */
-  expand(params: ExpandParams): Promise<ExpandResult>;
-  /** The shortest route between two vertices. */
-  path(params: PathParams): Promise<PathResult>;
-  /**
-   * One grouping, over values or — with `bins` — over equal-width ranges of
-   * the column. Binning is grouping, so there is no separate histogram verb.
-   */
-  aggregate(params: AggregateParams): Promise<AggregateResult>;
   executeSql(params: ExecuteSqlParams): Promise<ExecuteSqlResult>;
   /** Escape hatch: dispatch a raw `{ verb, params }` operation. */
   dispatch(op: Operation): Promise<unknown>;
@@ -98,10 +71,6 @@ export function createGraphClient(opts: CreateGraphClientOpts): GraphClient {
 
   return {
     schema: (params = {}) => call({ verb: 'schema', params }),
-    read: (params) => call({ verb: 'read', params }),
-    expand: (params) => call({ verb: 'expand', params }),
-    path: (params) => call({ verb: 'path', params }),
-    aggregate: (params) => call({ verb: 'aggregate', params }),
     executeSql: (params) => call({ verb: 'execute_sql', params }),
     dispatch,
   };

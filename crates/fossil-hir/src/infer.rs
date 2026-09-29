@@ -23,7 +23,7 @@
 //! 1. **`InferredDescriptor`** (preferred). When the host has pre-registered
 //!    a descriptor for the mapping's source **URI** via
 //!    `db.system().descriptors()` (browser-side `DuckDB-WASM` via
-//!    `FossilPlayground::registerInferredDescriptor`; the native engine via
+//!    `FossilWorkspace::registerInferredDescriptor`; the native engine via
 //!    the `duckdb` crate), `resolve_source_scope` consumes that descriptor and
 //!    builds the [`Record`] directly — nothing is read from disk.
 //!

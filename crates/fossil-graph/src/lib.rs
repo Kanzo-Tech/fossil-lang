@@ -6,46 +6,26 @@
 //! once and consumed by every transport binding without hand-written JSON:
 //!
 //! ```text
-//!         fossil-graph (this crate)        ← verbs + schemas
-//!                  ▲
-//!         ┌────────┴────────┐
-//!         │                 │
-//!   fossil-mcp        fossil-graph-wasm
-//!    (stdio            (wasm-bindgen; and
-//!     JSON-RPC          @fossil-lang/corpus
-//!     for AI            on top of it —
-//!     agents)           in-process TS,
-//!                       DuckDB-WASM)
+//!   fossil-graph (this crate)   ← verbs + schemas + the addressing plan
+//!          ▲
+//!   fossil-graph-wasm           ← wasm-bindgen; `@fossil-lang/corpus` on top,
+//!                                  in-process TS over the host's DuckDB-WASM
 //! ```
 //!
-//! **Two bindings, and the list is derived rather than remembered**: the crates
-//! whose `[dependencies]` name this one are exactly `fossil-mcp` and
-//! `fossil-graph-wasm`. This figure used to draw four — it named `fossil-cli`,
-//! which does not depend on this crate at all (its subcommands are `check`,
-//! `run`, `providers`, `refs`, and none of them is a verb), and an `HTTP+SSE`
-//! transport "for the keasy proxy" whose only occurrence anywhere in the tree
-//! was this diagram, and no crate manifest declares an HTTP server. The ASCII
-//! had drifted with it: four stems, three names, four captions.
+//! **One binding, and the list is derived rather than remembered**: the crates
+//! whose `[dependencies]` name this one are exactly `fossil-graph-wasm`. There
+//! was a native MCP server beside it; it had no consumer and was deleted.
 //!
-//! The pattern follows fossil's existing split between logic and protocol —
-//! `fossil-ide` carries IDE features, `fossil-lsp` carries the LSP wire.
-//! **MCP is one transport, not the protocol**: calling the entire surface
-//! "MCP" would lock fossil into an AI-agent framing when the same verbs already
-//! serve the browser through the other binding, and are exercised by tests that
-//! speak neither wire (`crates/fossil-mcp/tests/graph_verbs.rs`).
-//!
-//! ## Verbs (6)
+//! ## Verbs (2)
 //!
 //! ```text
-//! Read:         read · expand{into|all} · path
-//! Aggregation:  aggregate            ← binning included; it is a grouping
 //! Introspect:   schema               ← the lists, and field stats on request
 //! Escape:       execute_sql          ← text2sql lives HERE
 //! ```
 //!
 //! Each verb is a variant on [`Operation`]; the `Params` and `Result` shapes
-//! are pure data with no transport coupling. Transport bindings implement
-//! `dispatch(op, ctx) → Result` by matching on the enum.
+//! are pure data with no transport coupling. The binding runs one through
+//! [`dispatch`], which matches on the enum.
 //!
 //! **No verb draws. The camera is addressed, not queried** — the LOD is a
 //! different RELATION and not a filter, and a `WHERE` cannot change which table
@@ -67,18 +47,15 @@
 //! and the canvas masks its resident tiles with them — one mechanism, not a
 //! second renderer.
 //!
-//! ## The executor is a trait, and both impls exist
+//! ## The executor is a trait
 //!
 //! This crate depends on [`fossil_sinks`] (manifest types — WASM clean) and on
 //! nothing else of fossil's; `docs/content.test.ts` fails if that list is
 //! ever anything but `["fossil-sinks"]`. It carries no wasm32 tripwire, because
 //! the verb logic is WASM-safe.
 //!
-//! The native `DuckExecutor` impl is `fossil-mcp`'s `ConnectionExecutor`
-//! (`crates/fossil-mcp/src/executor.rs`), NOT `fossil-layout`: that crate is the
-//! layout post-pass and does not depend on this one. The browser impl is
-//! `fossil-graph-wasm`'s `JsExecutor`, not `fossil-wasm`, which does not depend
-//! on this crate at all.
+//! The one `DuckExecutor` impl is `fossil-graph-wasm`'s `JsExecutor`, not
+//! `fossil-wasm`, which does not depend on this crate at all.
 //!
 //! ## What bounds a verb
 //!

@@ -569,7 +569,7 @@ describe("every workspace citation names a file that is there", () => {
   });
 
   it("reads items out of a cited file", () => {
-    expect(workspaceItemsOf("packages/draw/src/encoding.ts").has("encodingFor")).toBe(true);
+    expect(workspaceItemsOf("packages/corpus/src/corpus.ts").has("open")).toBe(true);
   });
 
   it.each(workspaceCitations)("$where cites $id", ({ path, anchor }) => {

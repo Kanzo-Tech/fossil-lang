@@ -2,7 +2,7 @@
  * @fossil-lang/corpus — open a corpus from a URL and read it.
  *
  * The query layer for whatever draws the graph — fossil ships no viewer. Verb→SQL runs in WASM
- * (`fossil-graph-wasm`, single-source with the native runtime), and SQL execution is delegated to a
+ * (`fossil-graph-wasm`, single-source with the Rust verb structs), and SQL execution is delegated to a
  * host-provided DuckDB-WASM `query` callback (e.g. keasy's Mosaic coordinator). This is what makes
  * a viewer larger-than-RAM: the host's DuckDB streams Parquet over httpfs; the binding never
  * materialises rows in JS.
@@ -14,7 +14,6 @@
  * corpus.types                                  // what is inside
  * await corpus.frame({ ...box, pixels })        // a rectangle at a resolution, ready to draw
  * await corpus.node(iri)
- * await corpus.aggregate({ vertex_type: 'Person', group_by: 'age', agg: 'count', bins: 20 })
  * ```
  *
  * # One door, one name, and the depth is an argument
@@ -22,24 +21,15 @@
  * *«There is no second reference»* is the repo's rule and this package has now enforced it against
  * itself three times — `createGraphClient` is not exported, the `./address` subpath was deleted
  * because its only justification forced a second implementation of the addressing, and
- * **`resolveCorpus` is gone into {@link open}**, which is the one that had survived two
- * previous passes.
- *
- * It survived them because the objection to removing it was real and is still real: it needed no
- * engine and spent no round trip, so deleting it withdrew a capability rather than a duplicate.
- * What that argument never established is that the capability needs a NAME of its own. It does not.
- * The capability is what the CALLER brings, so it is an argument:
+ * **`resolveCorpus` is gone into {@link open}**, whose engine-free rungs went with the viewer that
+ * was their only consumer:
  *
  * ```ts
- * await open(url,  { query })          // Corpus — the door
- * await open(url,  { readText })       // CorpusAddressing — manifests only
- * await open(base, { manifestFiles })  // CorpusAddressing — no request at all
+ * await open(job, { engine, host })  // a job's corpus
+ * await open(url, { query })         // a corpus at a URL
  * ```
  *
- * Three rungs, one name, and `corpus.addressing` is still what the first rung already resolved for
- * a caller who paid for it. What it cost: the call is now always asynchronous — the synchronous
- * form had no production consumer, measured, and both engine-free call sites in this repository
- * already awaited it.
+ * `corpus.addressing` is what the open already resolved, for a caller who wants the URLs.
  *
  * Also off the barrel, each for its own reason:
  *
@@ -48,13 +38,8 @@
  *   calls in the right order. {@link open} awaits it, and the module finds its own `.wasm`
  *   through `new URL(…, import.meta.url)`, which the host's bundler emits as an asset.
  *   `OpenOptions.wasm` is left for the host with no bundler (Node: the bytes).
- * - **`GRAPH_INFO_PATH`** — the index's file name is the door's business and not a consumer's.
- *   **That reasoning did not extend to the engine-free route and it was applied there anyway**,
- *   which is what made a hand-written scan of the index's `vertices:`/`edges:` lists the price of
- *   addressing a corpus you had not already fetched — three copies of it, one of them in another
- *   repository. The file name stays off the surface and the SEQUENCE is published instead, as
- *   `OpenOptions.readText`: lend the package a text reader and it reads the index, the
- *   per-type manifests and nothing else. See {@link ReadTextFn}.
+ * - **`GRAPH_INFO_PATH`** — the index's file name is the door's business and not a consumer's:
+ *   every open reads the index and the manifests it names through the engine it was given.
  * - **`export type *`** — an unbounded star publishes whatever the codegen makes, now and later,
  *   with nobody deciding. The seventeen the surviving surface names are re-exported below; the
  *   rest of `./generated.ts` (`Operation`, `FossilGraphSchemas`, the verb row
@@ -63,15 +48,14 @@
  * # What is here and why
  *
  * **`Corpus.levels()` is `levelsOf` in `./address.ts`** — three calls to that module and no fourth
- * fact, which is why it is not a member of the door. It IS re-exported here, and was not: the
- * grounds were that a consumer never names a level file, and two do. See the export.
+ * fact, which is why it is not a member of the door. It is not on the barrel either: the two
+ * readers outside this package that named a level file were verifier scripts in a viewer this
+ * repository no longer has.
  *
- * **The four `PAYLOAD_*` role constants**, because the check found a consumer:
- * `@fossil-lang/draw`'s `encoding.ts` reads all three of `PAYLOAD_ADDRESS`, `PAYLOAD_COORDINATES`
- * and `PAYLOAD_CATEGORICAL`, and `apps/playground/scripts/verify-encoding.mjs` reads the last of
- * them through it. Internalising them puts `cluster_id` back in a hand-written line — which is the
- * six-statements-of-one-fact this table was generated to end. That consumer was in an app when this
- * was written and is a published package now, which makes the reason stronger rather than weaker.
+ * **The four `PAYLOAD_*` role constants**, because a consumer reads them: `@kanzo-tech/graph`
+ * takes `PAYLOAD_ADDRESS`, `PAYLOAD_COORDINATES` and `PAYLOAD_IDENTITY` rather than spelling the
+ * writer's columns again. Internalising them puts `cluster_id` back in a hand-written line — which
+ * is the six-statements-of-one-fact this table was generated to end.
  */
 
 // The door — one name, three depths — and the two errors an `instanceof` is a legitimate part of a
@@ -80,21 +64,12 @@
 // caller can retry one of those against a different corpus and never the other.
 export { CorpusManifestError, CorpusReadError, open } from './corpus.js';
 
-// Which levels of detail a type has, and which of them the writer spent bytes on.
-//
-// It came off `Corpus` in the same change and did not leave the tree — every line of it is
-// addressing. It is back on the barrel because two readers outside this package name a level file:
-// `apps/playground/scripts/measure-frame.mjs` and `measure-pyramid.mjs` report the written levels
-// beside what a frame cost. `Frame.matchedAt` is a member of the door and reports a level; what
-// makes that number readable has to be reachable from the same surface.
-export { levelsOf } from './address.js';
-
 // The writer's column table, by ROLE — `corpus.bnf` through `cargo xtask corpus`, and the same
 // table `crates/fossil-sinks/src/generated.rs` carries on the Rust side.
 //
 // Exported because the alternative is a consumer spelling the names again. `cluster_id` was
 // written down in `corpus.bnf`, in this package's generated file, twice in this package, and three
-// times in `apps/playground` — six statements of one fact, of which the only machine-readable one
+// times in a viewer app — six statements of one fact, of which the only machine-readable one
 // had no consumer. A reader asks for the ROLE it means and gets whatever the writer calls it.
 //
 // **All four and not the three with a consumer today.** They are one generated table with one
@@ -108,13 +83,11 @@ export {
   PAYLOAD_IDENTITY,
 } from './vocabulary.generated.js';
 
-// The capabilities a host supplies — the engine for every member of the door, and the text reader
-// for the rung that has no engine to lend. See `./query.ts` for why the second exists at all.
-export type { QueryFn, QueryRow, ReadTextFn } from './query.js';
+// The capability a host supplies — the engine every member of the door reads through.
+export type { QueryFn, QueryRow } from './query.js';
 
 // The door's own types. `SqlCorpus` is what `sql: 'allowed'` widens the answer to — see
-// `SqlPolicy` for why one option decides both raw-SQL doors, and `crates/fossil-mcp/src/tools.rs`
-// for the native surface this is the port of.
+// `SqlPolicy` for what the option decides.
 //
 // **`OpenOptions` is the one exported type with no `Corpus` in its name, and that is decided
 // rather than overlooked.** The prefix on every other name here is doing real work — `Corpus`,
@@ -155,8 +128,7 @@ export type {
   SqlPolicy,
 } from './corpus.js';
 
-// What `Corpus.addressing` is — and, since the collapse, what the two engine-free rungs of
-// `open` answer with. Named here because the member is: a public member whose type cannot be
+// What `Corpus.addressing` is. Named here because the member is: a public member whose type cannot be
 // written down is worse than no member.
 //
 // **`Container` is on this list and was not, which was the same omission one layer down.**
@@ -178,12 +150,11 @@ export type {
   Gap,
   GapReason,
   IndexAddress,
-  LevelInfo,
   ProjectionAddress,
   VertexAddress,
 } from './address.js';
 
-// The twelve the verbs name in their own signatures, plus the five a reader of `Corpus.schema`
+// The four the verbs name in their own signatures, plus the five a reader of `Corpus.schema`
 // names — from the schemars codegen, single source of truth with the Rust verb structs. This list
 // replaces `export type *`: a name reaches a consumer because the surviving surface mentions it,
 // and for no other reason.
@@ -198,20 +169,12 @@ export type {
 // of a host keeping its own copy. The rest of `./generated.ts` (`Operation`,
 // `FossilGraphSchemas`, the verb row shapes) stays reachable structurally.
 export type {
-  AggregateParams,
-  AggregateResult,
   ExecuteSqlParams,
   ExecuteSqlResult,
-  ExpandParams,
   EdgeTypeSummary,
-  ExpandResult,
   FieldKind,
   FieldRole,
   FieldStat,
-  PathParams,
-  PathResult,
-  ReadParams,
-  ReadResult,
   SchemaParams,
   SchemaResult,
   VertexTypeSummary,

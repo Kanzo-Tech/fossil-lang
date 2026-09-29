@@ -15,8 +15,8 @@
  * is debounced — so a source that only took `(line, character)` would let a host
  * ask about text it had not pushed, and get a range one keystroke wrong. Passing
  * the text makes the push and the query one step. The host still decides whether
- * that push costs anything: `apps/playground/src/check.ts` compares against what
- * it last sent and skips the call, so the common case is a string comparison.
+ * that push costs anything: comparing against what it last sent and skipping the
+ * call makes the common case a string comparison.
  *
  * ## The Markdown
  *

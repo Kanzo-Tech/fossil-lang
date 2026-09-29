@@ -36,7 +36,7 @@
  *
  * `openProgram` is `@fossil-lang/wasm`'s, and it is the protocol below written once: one
  * workspace, the text pushed before every answer, the documents it names resolved before a
- * check. A host wiring `FossilPlayground` by hand owes the same.
+ * check. A host wiring `FossilWorkspace` by hand owes the same.
  *
  * **Every source takes the text**, and that repetition is the design. The wasm
  * workspace answers about the text of the last `updateFile`; the checker is
@@ -50,7 +50,7 @@
  *
  * ## Why one workspace, and not one per rate
  *
- * They could have been separate — a second `FossilPlayground` for the position
+ * They could have been separate — a second `FossilWorkspace` for the position
  * queries would put hover on its own Salsa store and end the question. It would
  * also double the interning, double the memory, and answer from a *different*
  * revision than the squiggles the user is looking at, which is the defect it was
@@ -121,8 +121,8 @@ export interface FossilOptions
   uri: string;
   /** Run a check over the current text and return the workspace's rows.
    *
-   *  The natural implementation updates the file and drains: `pg.updateFile(h,
-   *  text); return pg.check();`. Doing both here rather than in two extensions is
+   *  The natural implementation updates the file and drains: `ws.updateFile(h,
+   *  text); return ws.check();`. Doing both here rather than in two extensions is
    *  deliberate — the edit and the check are one step, and splitting them is how a
    *  host ends up checking text it has not yet pushed. */
   check: CheckSource;

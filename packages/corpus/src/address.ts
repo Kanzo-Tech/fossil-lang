@@ -3,8 +3,8 @@
  *
  * A tile is a fixed range of `dense_id` and its address is a shift, so a reader computes every URL
  * it wants before it emits the first request. That arithmetic used to be written twice: once in
- * `crates/fossil-graph/src/plan.rs`, for `fossil-mcp`, which is a native server with no JS runtime
- * and therefore cannot be the one that goes; and once here, in a thousand lines of TypeScript that
+ * `crates/fossil-graph/src/plan.rs`, which the writer's side also reads; and once here, in a
+ * thousand lines of TypeScript that
  * agreed with it because people kept making it agree. Nothing compared the two. This module is what
  * is left of the second one: the shapes the answers arrive in, and the calls that ask.
  *
@@ -29,12 +29,11 @@
  * `open` in `./corpus.ts` is the layer that reads those footers, by taking an engine from the
  * host rather than growing one. It sits **on** this module and does not absorb it.
  *
- * **Nothing here is on the barrel except the shapes and {@link levelsOf}.** `resolveCorpus` was,
+ * **Nothing here is on the barrel except the shapes.** `resolveCorpus` was,
  * and it was a second name for a depth of the door — `openCorpus` as the door was spelled then.
- * Both took a corpus and answered about it, and which one a caller wanted was decided by whether
- * it had an engine to lend. That is now an argument rather than an import — `open(base,
- * { manifestFiles })` is this module's answer and `open(url, { query })` is the door's, out of one
- * name. {@link addressManifests} is the resolution itself, reached only from `./corpus.ts`.
+ * Both took a corpus and answered about it. Every `open` resolves this module's answer first and
+ * hands it on as `corpus.addressing`, so there is one name. {@link addressManifests} is the
+ * resolution itself, reached only from `./corpus.ts`.
  *
  * @see {@link CorpusAddressing}
  */
@@ -157,12 +156,8 @@ export interface LevelInfo {
  * with nothing answering that, eight assertions in `tests/frame.test.ts` and
  * `packages/corpus/integration/frame-levels.test.ts` would have had to re-derive these three calls
  * themselves — a second statement of the arithmetic, which is the rule the door was being narrowed
- * for. Moved, not
- * deleted — and re-exported from the barrel after all, because two consumers outside this package
- * do name a level file: `apps/playground/scripts/measure-frame.mjs` and `measure-pyramid.mjs` both
- * report which levels a corpus WROTE beside what a frame cost, and neither is in a position to
- * re-derive `strideOf`/`rowsAt`/`projection` for itself. `Frame.matchedAt` is on the door, so what
- * makes `matchedAt` readable has to be reachable from it.
+ * for. Moved, not deleted, and not on the barrel: no reader outside this repository names a level
+ * file.
  */
 export function levelsOf(addressing: CorpusAddressing, type?: string): readonly LevelInfo[] {
   const address = addressing.vertexType(type);
@@ -776,10 +771,9 @@ function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress 
  * half of `open`, and not a door of its own.**
  *
  * This was `resolveCorpus`, exported beside the door — `openCorpus` as it was spelled then — and
- * the two were one question asked at two depths: give the door an engine and it reads bytes, hand
- * this the manifests and it names URLs. Which one a caller wanted was decided by what the caller
- * had, which is an argument and not an import — so `open(base, { manifestFiles })` is how this is
- * reached and the module surface has one name on it. `./corpus.ts` is the only caller.
+ * the two were one question asked at two depths: the door reads bytes, this names URLs. Every
+ * open resolves this first and publishes it as `corpus.addressing`, so the module surface has one
+ * name on it. `./corpus.ts` is the only caller.
  *
  * **It is synchronous and stays synchronous**, because the boot is the caller's problem one layer
  * up: `open` awaits the boot before it gets here, exactly as it does for a verb.

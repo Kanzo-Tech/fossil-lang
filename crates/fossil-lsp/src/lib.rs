@@ -92,13 +92,13 @@
 //!   the network, and
 //!   `tests/introspected_diagnostics.rs::a_remote_source_is_not_introspected_by_the_editor`
 //!   is what keeps it from going quiet.
-//! - **`fossil/checkAll`.** A workspace-wide drain for a playground panel. An
+//! - **`fossil/checkAll`.** A workspace-wide drain for a diagnostics panel. An
 //!   editor already receives one `publishDiagnostics` per file.
 
 #[cfg(target_arch = "wasm32")]
 compile_error!(
     "fossil-lsp is native-only (lsp-server uses crossbeam-channel + stdio); \
-     the playground exposes LSP features via fossil-wasm directly, not through this binary"
+     the browser reaches LSP features through fossil-wasm directly, not through this binary"
 );
 
 use std::collections::HashMap;
@@ -150,7 +150,7 @@ use lsp_types::{
 /// reports ``nmae` is not a field of `User`` and exits 1, and the editor
 /// published **zero** diagnostics for the same bytes. Every diagnostic whose
 /// evidence is a source's schema was absent from the editor and present in the
-/// CLI and in the browser playground.
+/// CLI and in the browser.
 ///
 /// The table is `Mutex`-guarded and reached through `&self`, so this stays
 /// behind the `Arc<dyn System>` on [`LspDb`] and needs no mutable path.

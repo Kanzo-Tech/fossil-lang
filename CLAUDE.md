@@ -214,7 +214,6 @@ crates/
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract
   fossil-graph/            the typed verb surface over a GraphAr corpus. It EMITS SQL in
                            DuckDB's dialect and links no engine to run it (WASM-clean)
-  fossil-mcp/              that same verb surface as a native server-side service
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
   fossil-cli/              fossil's native HOST *and* the binary over it: `src/host.rs` is the
                            `System` the compiler runs against, the shape documents a program
@@ -224,7 +223,7 @@ crates/
                            consumer — this one. `fossil-lsp` and `fossil-wasm` keep their hosts
                            inside themselves too: three hosts, three crates  [NATIVE-ONLY]
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
-  fossil-wasm/             WASM host shim (FossilPlayground API + the tokenizer the editor reuses)
+  fossil-wasm/             WASM host shim (FossilWorkspace API + the tokenizer the editor reuses)
   fossil-df-wasm/          the fossil-df executor exposed to JS
   fossil-graph-wasm/       wasm-bindgen binding for the fossil-graph verb surface
   xtask/                   repo automation. Three commands: `wasm-check` derives the wasm32
@@ -249,32 +248,21 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            release gate runs it without `duckdb`; the contract is
                            `test:contract` (`corpus.yml`) and `test:integration` (`pnpm-ci.yml`).
                            It was `@fossil-lang/graph` and it is not a graph: its door is
-                           `open` and the thing that DOES draw one, `@kanzo-tech/graph`,
-                           sits beside it in the playground's `package.json`. The Rust crates
+                           `open` and the thing that DOES draw one is `@kanzo-tech/graph`,
+                           the one view layer, in kanzo-ui. The Rust crates
                            keep their names — `fossil-graph` IS a verb surface over a property
                            graph, and a crate name is not in npm's import space.
-                           ONE name at three depths, because the capability the caller brings
-                           decides how deep the answer is: `{ query }` is the whole corpus,
-                           `{ readText }` the manifests alone, `{ manifestFiles }` no request at
-                           all. `resolveCorpus` is gone rather than renamed and all three are
-                           ASYNC; `corpus.addressing` is what the first already resolved. The
-                           boot is internal: the `.wasm` is a bundler asset (`new URL(…,
-                           import.meta.url)` in the glue), and `wasm` on the options is for a
-                           host with no bundler
-  draw/                    the half of drawing a corpus that is NOT a renderer — no canvas, no
-                           GPU, no camera, and fossil still ships no viewer. What a corpus is
-                           drawn WITH (the `channels:` block, its three states, the derivation
-                           for a corpus that declares nothing) and what is already LOADED (the
-                           frames a door answered, and the interim assembled from them). NOT part
-                           of `corpus/`: a corpus has no opinion about which column deserves a
-                           histogram, and every part of `corpus/` static-imports the wasm while
-                           nothing here needs one
+                           ONE door, and it always takes an engine: `{ engine, host }` for a
+                           job's corpus, `{ query }` for one at a URL. `resolveCorpus` is gone
+                           rather than renamed; `corpus.addressing` is what the open already
+                           resolved. The boot is internal: the `.wasm` is a bundler asset (`new
+                           URL(…, import.meta.url)` in the glue), and `wasm` on the options is for
+                           a host with no bundler
   executor/                datafusion-wasm query executor, and the manifest wire mirror, because
-                           a run HANDS THAT BACK — except `Channel`/`Scale`, in `types/` because
-                           `draw/` reads one and 22 MB of wasm is the wrong price for an interface
+                           a run HANDS THAT BACK
   types/                   Host — `connections()` + `credentials(scope, access)` — the one host
                            contract, and StorageCredential (Iceberg REST's, verbatim); the
-                           Engine; FossilTheme; the `channels:` wire shape. Types only
+                           Engine. Types only
   storage/                 how every package reaches storage from a vended credential, over
                            `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
                            expires−5min, refcounted per prefix; Azure lent file by file),
@@ -284,7 +272,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            and not an editor. FIVE of them, not two: highlighting from
                            `tokenize()` + `tokenKinds()`, squiggles from `check()` through
                            `@codemirror/lint`, and hover / completion / goto-definition
-                           over the three position queries `FossilPlayground` grew. The
+                           over the three position queries `FossilWorkspace` grew. The
                            two that stay OUT are semantic tokens (they come back only
                            over the Worker) and code actions (the two quick fixes hang
                            off a structured diagnostic the `CheckRow` wire shape
@@ -301,28 +289,12 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            **pnpm** test — editing that Rust turns it red and `cargo test` will
                            not tell you.
 
-apps/                      NOT published, and no RECURSIVE CI step reaches them (all are
-                           filtered to `./packages/*` by path — see release.yml). Each gets its
-                           own path-filtered workflow instead: `docs.yml`.
-  docs/                    Next.js + fumadocs, and ALL of the prose: the book, the corpus
+docs/                      Next.js + fumadocs, and ALL of the prose: the book, the corpus
                            format, and the design argument behind a maintainers' divider.
+                           NOT published to npm, and no RECURSIVE CI step reaches it (all are
+                           filtered to `./packages/*`); `docs.yml` checks it on PRs and
+                           `deploy-docs.yml` publishes it to GitHub Pages.
                            `docs/CLAUDE.md` has the editorial rules
-  playground/              the architectural claim, clickable: check → run → query in one
-                           browser tab, no server. It imports `examples/hello.fossil` rather
-                           than copying it, and produces the same five subjects the walking
-                           skeleton asserts natively. It runs the REAL layout pass — Louvain
-                           and Morton through `fossil-layout` over a `MemoryFs` — so the corpus
-                           the tab writes is byte-identical to the one `fossil run` writes. Its
-                           editor is `@kanzo-tech/ui`'s `CodeEditor` with
-                           `packages/codemirror-fossil` inside it, and its canvas IS
-                           `@kanzo-tech/graph` — this line said it was not, and the tree
-                           won. What the app does NOT take is `@kanzo-tech/mosaic`: that
-                           subpath is an OPTIONAL peer, and taking it pulls
-                           `@uwdata/mosaic-core`, which hard-depends on a SECOND
-                           DuckDB-WASM. `src/tiles.ts` implements `BoundedSource` over the
-                           app's own connection instead; `pnpm --filter
-                           @fossil-lang/playground... build` emitting one `duckdb-*.wasm`
-                           asset is the condition that keeps it true
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
@@ -360,7 +332,7 @@ over somebody else's editor, and the somebody else is `@kanzo-tech/ui`.
 - **Run the WASM smoke test:** build the nodejs bindgen target, then
   `node crates/fossil-wasm/test-wasm-workspace.js` — the build precondition is in that file's
   header. `crates/fossil-wasm/tests/workspace.rs` is its native mirror and runs on every PR.
-- **Add an app:** it goes under `apps/`, carries `private: true`, and needs nothing else — every recursive CI step and every root script is already filtered to `./packages/*`, so an app cannot be version-stamped or published by accident. Give it its own path-filtered workflow rather than a step in `pnpm-ci.yml`, whose 60-minute ceiling exists for a cold cargo build.
+- **There are no apps.** fossil is the backend; the views are `@kanzo-tech/graph` and the rest of kanzo-ui. A second viewer here is the thing `apps/playground` was, and it was deleted for it.
 
 ## Anti-patterns
 

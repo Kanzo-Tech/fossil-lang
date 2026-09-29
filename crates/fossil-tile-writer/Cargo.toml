@@ -10,8 +10,8 @@
 # `fossil-sinks` was the obvious other home and is the wrong one twice over: it
 # takes `arrow-schema` ALONE to keep `arrow-ipc`/`mio` out of the browser bundle,
 # and it is a plan + manifest generator that declares the tiling and byte-writes
-# nothing. A Parquet encoder there would contradict both, and `fossil-graph`,
-# `fossil-graph-wasm` and `fossil-mcp` would link a writer none of them calls.
+# nothing. A Parquet encoder there would contradict both, and `fossil-graph`
+# and `fossil-graph-wasm` would link a writer neither of them calls.
 [package]
 name = "fossil-tile-writer"
 version.workspace = true

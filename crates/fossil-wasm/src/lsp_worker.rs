@@ -1,7 +1,7 @@
 //! LSP-over-postMessage transport. The Web Worker host calls
 //! [`start_lsp_worker`] exactly once; that installs an `onmessage`
 //! handler that drains LSP JSON-RPC requests off the postMessage
-//! channel, dispatches them to the [`FossilPlayground`] + `fossil-ide`,
+//! channel, dispatches them to the [`FossilWorkspace`] + `fossil-ide`,
 //! and posts the JSON-RPC response back. Notifications produce no
 //! response but trigger `textDocument/publishDiagnostics`.
 //!
@@ -17,7 +17,7 @@
 //! input, not a program — landed here in `353228c` and there in `470a13b`, a day
 //! later, so for a day an editor put twenty-one squiggles down the length of the
 //! user's `ShEx` and the browser did not. And this file's
-//! `publishDiagnostics` republished the playground's [`CheckRow`] verbatim, so
+//! `publishDiagnostics` republished the workspace's [`CheckRow`] verbatim, so
 //! the payload carried `related` where LSP says `relatedInformation` and a flat
 //! `uri`/`range` where LSP says a nested `location`: a client reading the spec
 //! found nothing there.
@@ -40,7 +40,7 @@
 //!
 //! ## Per-file diagnostics drain
 //!
-//! [`publish_diagnostics`] takes `(&FossilPlayground, &str)` and returns
+//! [`publish_diagnostics`] takes `(&FossilWorkspace, &str)` and returns
 //! `Option<serde_json::Value>` — drains for the SINGLE file named by `uri`
 //! (never all open files) and constructs the LSP
 //! `textDocument/publishDiagnostics` notification. The caller (the
@@ -75,7 +75,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
-use crate::FossilPlayground;
+use crate::FossilWorkspace;
 
 // ---------- JSON-RPC wire types ----------
 
@@ -142,9 +142,9 @@ pub fn start_lsp_worker() -> Result<(), JsError> {
     let global = js_sys::global()
         .dyn_into::<DedicatedWorkerGlobalScope>()
         .map_err(|_| JsError::new("start_lsp_worker must be called from a DedicatedWorker"))?;
-    let pg = Rc::new(RefCell::new(FossilPlayground::new()));
+    let ws = Rc::new(RefCell::new(FossilWorkspace::new()));
     let global_for_handler = global.clone();
-    let pg_for_handler = pg.clone();
+    let pg_for_handler = ws.clone();
 
     let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |evt: MessageEvent| {
         let data = evt.data();
@@ -206,14 +206,14 @@ fn post<T: serde::Serialize>(g: &DedicatedWorkerGlobalScope, v: &T) -> Result<()
 /// caller must post out-of-band. Per-file drain.
 ///
 /// Test-reachable from native via `__dispatch_for_test` in the crate root.
-pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOutput {
+pub(crate) fn dispatch(ws: &mut FossilWorkspace, req: LspRequest) -> DispatchOutput {
     let LspRequest {
         id, method, params, ..
     } = req;
     let id_val = id.unwrap_or(serde_json::Value::Null);
 
     // ----- Notifications (no response) -----
-    if let Some(diagnostics) = handle_notification(pg, &method, params.clone()) {
+    if let Some(diagnostics) = handle_notification(ws, &method, params.clone()) {
         return DispatchOutput {
             response: None,
             diagnostics,
@@ -227,15 +227,15 @@ pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOu
             "serverInfo": { "name": "fossil-wasm-lsp", "version": env!("CARGO_PKG_VERSION") }
         })),
         "shutdown" => Ok(serde_json::Value::Null),
-        "textDocument/hover" => handle_hover(pg, params),
-        "textDocument/definition" => handle_definition(pg, params),
-        "textDocument/completion" => handle_completion(pg, params),
-        "textDocument/documentSymbol" => handle_document_symbol(pg, params),
-        "textDocument/semanticTokens/full" => handle_semantic_tokens_full(pg, params),
-        "textDocument/codeAction" => handle_code_action(pg, params),
+        "textDocument/hover" => handle_hover(ws, params),
+        "textDocument/definition" => handle_definition(ws, params),
+        "textDocument/completion" => handle_completion(ws, params),
+        "textDocument/documentSymbol" => handle_document_symbol(ws, params),
+        "textDocument/semanticTokens/full" => handle_semantic_tokens_full(ws, params),
+        "textDocument/codeAction" => handle_code_action(ws, params),
         // Custom fossil/* methods.
-        "fossil/checkAll" => handle_check_all(pg),
-        "fossil/registerInferredDescriptor" => handle_register_inferred_descriptor(pg, &params),
+        "fossil/checkAll" => handle_check_all(ws),
+        "fossil/registerInferredDescriptor" => handle_register_inferred_descriptor(ws, &params),
         other => Err(LspError {
             code: -32601, // MethodNotFound
             message: format!("method not found: {other}"),
@@ -269,7 +269,7 @@ pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOu
 /// when `method` is not a notification — caller falls through to request
 /// handling.
 fn handle_notification(
-    pg: &mut FossilPlayground,
+    ws: &mut FossilWorkspace,
     method: &str,
     params: serde_json::Value,
 ) -> Option<Vec<serde_json::Value>> {
@@ -279,8 +279,8 @@ fn handle_notification(
         "textDocument/didOpen" => {
             if let Ok(p) = serde_json::from_value::<DidOpenTextDocumentParams>(params) {
                 let uri = p.text_document.uri.to_string();
-                let _ = pg.open_file_native(uri.clone(), p.text_document.text);
-                if let Some(n) = publish_diagnostics(pg, &uri) {
+                let _ = ws.open_file_native(uri.clone(), p.text_document.text);
+                if let Some(n) = publish_diagnostics(ws, &uri) {
                     diagnostics.push(n);
                 }
             }
@@ -289,15 +289,15 @@ fn handle_notification(
         "textDocument/didChange" => {
             if let Ok(p) = serde_json::from_value::<DidChangeTextDocumentParams>(params) {
                 let uri = p.text_document.uri.to_string();
-                if let Some(handle) = pg.lookup_handle_by_uri(&uri) {
+                if let Some(handle) = ws.lookup_handle_by_uri(&uri) {
                     // LSP `TextDocumentSyncKind::FULL` — the last content
                     // change carries the full document text; intermediate
                     // changes (if any) are dropped (matches `fossil-lsp`).
                     if let Some(change) = p.content_changes.into_iter().next_back() {
-                        let _ = pg.update_file_native(handle, change.text);
+                        let _ = ws.update_file_native(handle, change.text);
                     }
                 }
-                if let Some(n) = publish_diagnostics(pg, &uri) {
+                if let Some(n) = publish_diagnostics(ws, &uri) {
                     diagnostics.push(n);
                 }
             }
@@ -306,8 +306,8 @@ fn handle_notification(
         "textDocument/didClose" => {
             if let Ok(p) = serde_json::from_value::<DidCloseTextDocumentParams>(params) {
                 let uri = p.text_document.uri.to_string();
-                if let Some(handle) = pg.lookup_handle_by_uri(&uri) {
-                    let _ = pg.close_file_native(handle);
+                if let Some(handle) = ws.lookup_handle_by_uri(&uri) {
+                    let _ = ws.close_file_native(handle);
                 }
                 // Per the LSP spec: on file close, publish an empty
                 // diagnostics list so the client clears any remaining
@@ -362,7 +362,7 @@ fn server_capabilities() -> serde_json::Value {
 ///
 /// # This published a shape that was not an LSP diagnostic
 ///
-/// It sent [`crate::CheckRow`] — the playground's `check()` row — straight into
+/// It sent [`crate::CheckRow`] — the workspace's `check()` row — straight into
 /// `params.diagnostics`, and that type's own docblock said it «mirrors the LSP
 /// `Diagnostic` shape exactly so the LSP Worker can republish each row as-is».
 /// It did not: every entry carried an extra `uri` the spec has no field for, and
@@ -371,12 +371,12 @@ fn server_capabilities() -> serde_json::Value {
 /// spec read no related information at all.
 ///
 /// `CheckRow` is a fine shape for what it is — a flat workspace-wide array for
-/// a playground panel, keyed by whatever path the host opened a buffer under,
+/// a diagnostics panel, keyed by whatever path the host opened a buffer under,
 /// which in the browser is not always a URI. It is not the wire, and this is the
 /// wire: [`fossil_ide::lsp_diagnostics`], the same call `fossil-lsp` makes.
-pub(crate) fn publish_diagnostics(pg: &FossilPlayground, uri: &str) -> Option<serde_json::Value> {
-    let file = pg.lookup_file_by_uri(uri)?;
-    let diagnostics = fossil_ide::lsp_diagnostics(pg.base_db(), file);
+pub(crate) fn publish_diagnostics(ws: &FossilWorkspace, uri: &str) -> Option<serde_json::Value> {
+    let file = ws.lookup_file_by_uri(uri)?;
+    let diagnostics = fossil_ide::lsp_diagnostics(ws.base_db(), file);
     Some(serde_json::json!({
         "jsonrpc": "2.0",
         "method": "textDocument/publishDiagnostics",
@@ -387,7 +387,7 @@ pub(crate) fn publish_diagnostics(pg: &FossilPlayground, uri: &str) -> Option<se
 // ---------- Request handlers ----------
 
 fn handle_hover(
-    pg: &FossilPlayground,
+    ws: &FossilWorkspace,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, LspError> {
     let p: HoverParams = serde_json::from_value(params).map_err(|e| invalid_params(&e))?;
@@ -397,12 +397,12 @@ fn handle_hover(
         .uri
         .to_string();
     let pos = p.text_document_position_params.position;
-    let Some(file) = pg.lookup_file_by_uri(&uri) else {
+    let Some(file) = ws.lookup_file_by_uri(&uri) else {
         return Ok(serde_json::Value::Null);
     };
-    let info = fossil_ide::hover_bidirectional(pg.base_db(), file, pos.line, pos.character);
+    let info = fossil_ide::hover_bidirectional(ws.base_db(), file, pos.line, pos.character);
     let payload = info.map(|hi| {
-        let index = fossil_ide::line_index(pg.base_db(), file);
+        let index = fossil_ide::line_index(ws.base_db(), file);
         Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
@@ -415,24 +415,24 @@ fn handle_hover(
 }
 
 fn handle_definition(
-    pg: &FossilPlayground,
+    ws: &FossilWorkspace,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, LspError> {
     let p: TextDocumentPositionParams =
         serde_json::from_value(params).map_err(|e| invalid_params(&e))?;
     let uri = p.text_document.uri.to_string();
     let pos = p.position;
-    let Some(file) = pg.lookup_file_by_uri(&uri) else {
+    let Some(file) = ws.lookup_file_by_uri(&uri) else {
         return Ok(serde_json::Value::Null);
     };
-    let files = pg.open_source_files();
-    let targets = fossil_ide::goto_definition(pg.base_db(), &files, file, pos.line, pos.character);
+    let files = ws.open_source_files();
+    let targets = fossil_ide::goto_definition(ws.base_db(), &files, file, pos.line, pos.character);
     let locations: Vec<Location> = targets
         .into_iter()
         .filter_map(|t| {
-            let path = t.file.path(pg.base_db()).clone();
+            let path = t.file.path(ws.base_db()).clone();
             let uri = uri_from_str_maybe(&path)?;
-            let index = fossil_ide::line_index(pg.base_db(), t.file);
+            let index = fossil_ide::line_index(ws.base_db(), t.file);
             Some(Location {
                 uri,
                 range: byte_range_to_lsp_range(&index, t.range),
@@ -444,7 +444,7 @@ fn handle_definition(
 }
 
 fn handle_completion(
-    pg: &FossilPlayground,
+    ws: &FossilWorkspace,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, LspError> {
     // CompletionParams's full shape is verbose; we only need the
@@ -458,12 +458,12 @@ fn handle_completion(
     let p: CompletionParamsSubset =
         serde_json::from_value(params).map_err(|e| invalid_params(&e))?;
     let uri = p.text_document.uri.to_string();
-    let Some(file) = pg.lookup_file_by_uri(&uri) else {
+    let Some(file) = ws.lookup_file_by_uri(&uri) else {
         return Ok(serde_json::Value::Null);
     };
-    let files = pg.open_source_files();
+    let files = ws.open_source_files();
     let items = fossil_ide::completions(
-        pg.base_db(),
+        ws.base_db(),
         &files,
         file,
         p.position.line,
@@ -473,7 +473,7 @@ fn handle_completion(
 }
 
 fn handle_document_symbol(
-    pg: &FossilPlayground,
+    ws: &FossilWorkspace,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, LspError> {
     #[derive(serde::Deserialize)]
@@ -484,16 +484,16 @@ fn handle_document_symbol(
     let p: DocumentSymbolParamsSubset =
         serde_json::from_value(params).map_err(|e| invalid_params(&e))?;
     let uri = p.text_document.uri.to_string();
-    let Some(file) = pg.lookup_file_by_uri(&uri) else {
+    let Some(file) = ws.lookup_file_by_uri(&uri) else {
         return Ok(serde_json::Value::Null);
     };
-    let symbols = fossil_ide::document_symbols(pg.base_db(), file);
+    let symbols = fossil_ide::document_symbols(ws.base_db(), file);
     let payload = DocumentSymbolResponse::Nested(symbols);
     Ok(serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null))
 }
 
 fn handle_semantic_tokens_full(
-    pg: &FossilPlayground,
+    ws: &FossilWorkspace,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, LspError> {
     #[derive(serde::Deserialize)]
@@ -504,10 +504,10 @@ fn handle_semantic_tokens_full(
     let p: SemanticTokensParamsSubset =
         serde_json::from_value(params).map_err(|e| invalid_params(&e))?;
     let uri = p.text_document.uri.to_string();
-    let Some(file) = pg.lookup_file_by_uri(&uri) else {
+    let Some(file) = ws.lookup_file_by_uri(&uri) else {
         return Ok(serde_json::Value::Null);
     };
-    let data = fossil_ide::semantic_tokens(pg.base_db(), file);
+    let data = fossil_ide::semantic_tokens(ws.base_db(), file);
     let tokens: Vec<lsp_types::SemanticToken> = data
         .chunks_exact(5)
         .map(|c| lsp_types::SemanticToken {
@@ -526,7 +526,7 @@ fn handle_semantic_tokens_full(
 }
 
 fn handle_code_action(
-    pg: &FossilPlayground,
+    ws: &FossilWorkspace,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, LspError> {
     #[derive(serde::Deserialize)]
@@ -538,13 +538,13 @@ fn handle_code_action(
     let p: CodeActionParamsSubset =
         serde_json::from_value(params).map_err(|e| invalid_params(&e))?;
     let uri = p.text_document.uri.to_string();
-    let Some(file) = pg.lookup_file_by_uri(&uri) else {
+    let Some(file) = ws.lookup_file_by_uri(&uri) else {
         return Ok(serde_json::Value::Null);
     };
     // Re-derive the structured `Diagnostic` carriers (the wire form drops
     // `did_you_mean` / `suggestion_source`). Mirrors `fossil-lsp`.
-    let diagnostics = pg.drain_diagnostics_for_file(file);
-    let actions = fossil_ide::code_actions(pg.base_db(), file, p.range, &diagnostics);
+    let diagnostics = ws.drain_diagnostics_for_file(file);
+    let actions = fossil_ide::code_actions(ws.base_db(), file, p.range, &diagnostics);
     let payload: Vec<CodeActionOrCommand> = actions
         .into_iter()
         .map(CodeActionOrCommand::CodeAction)
@@ -558,25 +558,25 @@ fn handle_code_action(
 // cannot fail today, but the `Result` keeps the handler-shape symmetry with
 // the rest of the routes.
 #[allow(clippy::unnecessary_wraps)]
-fn handle_check_all(pg: &FossilPlayground) -> Result<serde_json::Value, LspError> {
-    let rows = pg.check_rows();
+fn handle_check_all(ws: &FossilWorkspace) -> Result<serde_json::Value, LspError> {
+    let rows = ws.check_rows();
     Ok(serde_json::to_value(&rows).unwrap_or(serde_json::Value::Null))
 }
 
 /// `fossil/registerInferredDescriptor` — host-injected source schema (the
-/// connection's catalog): the columns the playground introspected with
+/// connection's catalog): the columns the host introspected with
 /// DuckDB-WASM, which the program cannot name for itself. `params` IS the
 /// `InferredDescriptorJson` object (`{ uri, columns, freshness_token }`);
 /// the native API takes the JSON string, so we re-serialise the already-parsed
 /// value rather than threading a second param shape. Once registered on the
-/// worker's `FossilPlayground`, source-field completion + forward type-check
+/// worker's `FossilWorkspace`, source-field completion + forward type-check
 /// see the source's columns.
 fn handle_register_inferred_descriptor(
-    pg: &FossilPlayground,
+    ws: &FossilWorkspace,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value, LspError> {
     let json = serde_json::to_string(params).map_err(|e| invalid_params(&e))?;
-    pg.register_inferred_descriptor_native(&json)
+    ws.register_inferred_descriptor_native(&json)
         .map_err(|e| LspError {
             code: -32000,
             message: e.to_string(),
@@ -624,23 +624,23 @@ fn uri_from_str_maybe(s: &str) -> Option<lsp_types::Uri> {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::FossilPlayground;
+    use crate::FossilWorkspace;
 
     /// `fossil/registerInferredDescriptor` dispatch registers the catalog on
-    /// the worker's own `FossilPlayground` — the instance that drives editor
+    /// the worker's own `FossilWorkspace` — the instance that drives editor
     /// completion.
     #[test]
     fn register_inferred_descriptor_dispatch_registers_on_worker_pg() {
-        let pg = FossilPlayground::new();
+        let ws = FossilWorkspace::new();
         let params = serde_json::json!({
             "uri": "u.csv",
             "columns": [{ "name": "name", "primitive": "string" }],
             "freshness_token": ""
         });
-        handle_register_inferred_descriptor(&pg, &params).expect("dispatch ok");
-        let desc = pg
+        handle_register_inferred_descriptor(&ws, &params).expect("dispatch ok");
+        let desc = ws
             .inferred_descriptor_native("u.csv")
-            .expect("descriptor registered on the worker's playground");
+            .expect("descriptor registered on the worker's workspace");
         assert_eq!(desc.uri.as_str(), "u.csv");
         assert_eq!(desc.columns.len(), 1);
     }
@@ -648,8 +648,8 @@ mod tests {
     /// Malformed params surface as an LSP error, not a panic.
     #[test]
     fn register_inferred_descriptor_dispatch_rejects_malformed() {
-        let pg = FossilPlayground::new();
+        let ws = FossilWorkspace::new();
         let bad = serde_json::json!({ "uri": "u.csv" }); // missing `columns`
-        assert!(handle_register_inferred_descriptor(&pg, &bad).is_err());
+        assert!(handle_register_inferred_descriptor(&ws, &bad).is_err());
     }
 }

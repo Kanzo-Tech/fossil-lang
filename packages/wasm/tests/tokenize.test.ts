@@ -3,7 +3,7 @@
  *
  * Boots the wasm-bindgen --target web module in a Node Vitest run, then
  * exercises the JS-side public surface (tokenize, semanticLegend,
- * FossilPlayground class). The cargo-test suite already covers the
+ * FossilWorkspace class). The cargo-test suite already covers the
  * Rust side (tokenize_native); this suite covers the JsValue → TS-shape
  * serialization boundary the Rust tests can't reach.
  */
@@ -14,7 +14,7 @@ import {
   initFossilWasm,
   tokenize,
   semanticLegend,
-  FossilPlayground,
+  FossilWorkspace,
 } from '../src/index.js';
 import type { TokenRow } from '@fossil-lang/types';
 
@@ -78,11 +78,11 @@ describe('@fossil-lang/wasm — semanticLegend', () => {
   });
 });
 
-describe('@fossil-lang/wasm — FossilPlayground class', () => {
+describe('@fossil-lang/wasm — FossilWorkspace class', () => {
   it('constructs without throwing', () => {
-    const pg = new FossilPlayground();
-    expect(pg).toBeInstanceOf(FossilPlayground);
-    pg.free();
+    const ws = new FossilWorkspace();
+    expect(ws).toBeInstanceOf(FossilWorkspace);
+    ws.free();
   });
 
   // A `classification()` test sat here. The method is gone on both sides of the
@@ -91,9 +91,9 @@ describe('@fossil-lang/wasm — FossilPlayground class', () => {
   // have turned it into a `TypeError`, and a stale build output is not a fixture.
 
   it('openFile + check returns diagnostics array for an opened file', () => {
-    const pg = new FossilPlayground();
+    const ws = new FossilWorkspace();
     try {
-      const handle = pg.openFile(
+      const handle = ws.openFile(
         'file:///test.fossil',
         'users := io.csv("u.csv")\n',
       );
@@ -102,7 +102,7 @@ describe('@fossil-lang/wasm — FossilPlayground class', () => {
       // round-trips through subsequent operations (closeFile in the finally
       // block), which is the actual contract that matters to consumers.
       expect(handle).toBeDefined();
-      const diags = pg.check();
+      const diags = ws.check();
       expect(Array.isArray(diags)).toBe(true);
       // A lone source binding is incomplete (no mapping rules) — the type
       // checker emits at least one diagnostic. We assert structural shape
@@ -114,9 +114,9 @@ describe('@fossil-lang/wasm — FossilPlayground class', () => {
         expect(diags[0]).toHaveProperty('severity');
         expect(diags[0]).toHaveProperty('message');
       }
-      pg.closeFile(handle);
+      ws.closeFile(handle);
     } finally {
-      pg.free();
+      ws.free();
     }
   });
 });

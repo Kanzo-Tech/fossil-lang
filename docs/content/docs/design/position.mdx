@@ -141,7 +141,7 @@ Measured, 2026-09-11, two processes each, same binary:
 
 | what was run | over | result |
 | --- | --- | --- |
-| `community_hierarchy`, via `crates/fossil-layout/examples/hierarchy_stats.rs, read_edges` | com-DBLP, 317,080 vertices / 1,049,866 edges, 5 levels | all five levels' membership **and** quotient outputs byte-identical |
+| `community_hierarchy`, via `read_edges` in `hierarchy_stats.rs` (deleted after `2fa5f22`) | com-DBLP, 317,080 vertices / 1,049,866 edges, 5 levels | all five levels' membership **and** quotient outputs byte-identical |
 | the whole pass — `enrich_layout` — via `crates/fossil-layout/examples/enrich_memory.rs, planted` | 200,000 vertices at mean degree 10, 999,079 edges | the entire written tree byte-identical: the Morton-permuted payload, both adjacency orientations, the identity index, all five tiles and all three level directories |
 
 Two graph shapes — a real co-authorship network and a planted partition — and both halves of the
@@ -189,7 +189,7 @@ anyway. What the sentence was really protecting is that the placement is a funct
 cell needs are the ones the function already counts.
 
 Built and measured, both placements over the same partition, by
-`crates/fossil-layout/examples/hierarchy_stats.rs, plane_report`:
+`plane_report` in `hierarchy_stats.rs` (deleted after `2fa5f22`):
 
 | | uniform pitch | a cell per group |
 | --- | --- | --- |
@@ -417,7 +417,7 @@ question twice over.* The sentence is retracted, and what retracts it is not an 
 the field already exists and is the wrong one.
 
 <Callout type="warn" title="The declaration was already being made, by a privacy field and by a generated constant nobody read">
-`packages/draw/src/encoding.ts, encodingFor` picked the column whose distribution it offers to
+`encodingFor` in `@fossil-lang/draw`'s `encoding.ts` (deleted after `2fa5f22`) picked the column whose distribution it offers to
 brush by ranking the numeric columns and preferring the ones `quasi_identifiers` names. That field
 is specified on [privacy](/docs/format/conventions/privacy) as *the one field a reader cannot
 derive, and the one the whole bound turns on* — a disclosure-control vocabulary, doing encoding work
@@ -436,7 +436,7 @@ And the honest statement existed on the other side, unread. `corpus.bnf` marks `
 one**, and wrote the string `cluster_id` itself instead.
 
 Counted at the time: the name was written down in `corpus.bnf`, in the generated TypeScript, in
-`packages/draw/src/encoding.ts, categoricalOf`, in `packages/corpus/src/corpus.ts` as
+`categoricalOf` in `@fossil-lang/draw`'s `encoding.ts` (deleted after `2fa5f22`), in `packages/corpus/src/corpus.ts` as
 `FrameParams.fill`'s default, in `crates/fossil-graph/src/manifest.rs`, and at eight script call
 sites. Six statements of one fact, and the only machine-readable one had no consumer. Two of the six
 are now reads of it — the door's default and `packages/draw`'s fallback both resolve
@@ -515,7 +515,7 @@ a sibling rather than a redesign.
 the bench corpus has 128 communities: folded into the capacity by remainder,
 `937,496 of a million vertices` come back sharing seven other communities' slots. A declared domain
 does not change that by one vertex — the fold is a property of the palette and the capacity, and
-`apps/playground/src/Canvas.tsx` reads the capacity off the live cascade where it belongs.
+the playground's `src/Canvas.tsx` (deleted after `2fa5f22`) reads the capacity off the live cascade where it belongs.
 
 What changes is **when** the mismatch is knowable. Today 128 and 8 are known on two sides of a
 boundary and nowhere together, so the picture is the first place the reader finds out. With the
@@ -546,13 +546,13 @@ block does is make the row's number checkable from the artefact instead of from 
 - **The reader collapsing to a read.** `categoricalOf`'s preference-then-first-integral derivation
   becomes *read what is declared*, with today's rule kept as what an undeclared corpus gets. Not
   deleted: a corpus written before the field has to keep drawing. **Done**, in
-  `packages/draw/src/encoding.ts, categoricalOf` — with the derivation intact beneath it, and
-  `packages/draw/src/encoding.ts, readChannels` as the scanner over the block.
+  `categoricalOf` in `@fossil-lang/draw`'s `encoding.ts` (deleted after `2fa5f22`) — with the derivation intact beneath it, and
+  `readChannels` in `@fossil-lang/draw`'s `encoding.ts` (deleted after `2fa5f22`) as the scanner over the block.
 - **The chart's ranking, which is the defect this section opened with.** Which numeric column's
   distribution is worth a chart was answered by `quasi_identifiers`, and there is a declaration for
   it now: a declared `quantitative` channel is the chart's column, the privacy field ranks what is
   left only where the block declares none, and the first numeric column stays the last resort.
-  **Done**, in `packages/draw/src/encoding.ts, encodingFor`. An empty block does not silence the
+  **Done**, in `encodingFor` in `@fossil-lang/draw`'s `encoding.ts` (deleted after `2fa5f22`). An empty block does not silence the
   chart the way it silences the colour: `categorical` **is** the colour role, so declaring none of
   it says there is nothing to colour by, while a histogram over a column nobody called a channel is
   still a histogram. And the crossfilter's projection lists the brushed column outright now, where
@@ -563,7 +563,7 @@ block does is make the row's number checkable from the artefact instead of from 
   sequence-of-mappings, and silently skips anything deeper. A `channels:` entry that nests is a
   `channels:` entry half its readers cannot see.
 - **The inverted assertion, reframed rather than deleted.**
-  `apps/playground/scripts/verify-encoding.mjs` asserted that withholding the declaration
+  the playground's `scripts/verify-encoding.mjs` (deleted after `2fa5f22`) asserted that withholding the declaration
   leaves the colour unchanged — *it never came from the declaration*. That is the invariant this
   section inverts, and the honest replacement is the three-state one: a corpus that declares nothing
   draws exactly as it did, and a corpus that declares something is drawn by what it declares.

@@ -79,8 +79,8 @@ fn a_budget_the_corpus_cannot_fit_is_refused_before_anything_is_written() {
 ///
 /// This is the invariant that rules out the other design. Degrading under
 /// pressure — fewer levels, coarser tiles, a second pass — is the obvious way to
-/// honour a budget, and it is unavailable here: `fossil run` and the playground
-/// tab write the same tree byte for byte through the same `LayoutIo`, and only
+/// honour a budget, and it is unavailable here: `fossil run` and the wasm
+/// executor (`fossil-df-wasm`) write the same tree byte for byte through the same `LayoutIo`, and only
 /// one of them has a `--memory-gib`. A budget that changed the output would
 /// break that identity precisely when someone declared one.
 ///

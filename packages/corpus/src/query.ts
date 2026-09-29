@@ -1,11 +1,7 @@
 /**
- * The capabilities this package asks a host for — **run SQL and hand back rows, or, for a caller
- * that only wants addresses, read one text file.**
+ * The capability this package asks a host for — **run SQL and hand back rows.**
  *
- * {@link QueryFn} is the engine and it is the only thing the door needs. {@link ReadTextFn} buys
- * strictly less: it cannot answer a verb, cannot read a footer and cannot decode a byte of Parquet,
- * and it exists because the manifests are text and the engine-free route had no way to say so. See
- * its own doc for the measured reason it is a capability rather than a documented file name.
+ * {@link QueryFn} is the engine and it is the only thing the door needs.
  *
  * It lived in `client.ts` as the verb surface's `QueryFn`, reachable only through a barrel that
  * static-imports the wasm-bindgen output. {@link open} needs the same thing and must not need
@@ -14,9 +10,8 @@
  *
  * **Why a callback and not a decoder.** Three of the four members of the corpus API have to decode
  * Parquet, and this package has zero runtime dependencies. Bundling a decoder would make it a
- * driver; injecting one makes it a seam. Both hosts already have the engine: DuckDB-WASM in the
- * browser (`tests/e2e.test.ts` boots it) and a native `duckdb::Connection` on the server
- * (`crates/fossil-mcp/src/executor.rs`'s `ConnectionExecutor`). And an engine buys more than
+ * driver; injecting one makes it a seam. The host already has the engine — DuckDB-WASM in the
+ * browser (`tests/e2e.test.ts` boots it). And an engine buys more than
  * decoding: DuckDB prunes Parquet row groups off the footer statistics by itself, which is the one
  * piece of the read path that would otherwise have to be written twice.
  *
@@ -34,14 +29,13 @@
  * provide it:
  *
  * - **No cancellation.** A camera that moves fast supersedes its own windows, so an `AbortSignal`
- *   is the obvious fifth parameter. Neither real caller can honour one: DuckDB-WASM's blocking node
- *   bindings run a query to completion, and `ConnectionExecutor::run` is synchronous Rust wrapped
- *   in a ready future. A seam that accepted a signal and ignored it would be worse than one that
+ *   is the obvious fifth parameter. DuckDB-WASM's blocking node bindings run a query to
+ *   completion and cannot honour one. A seam that accepted a signal and ignored it would be worse than one that
  *   does not have it. Supersede-cancellation stays in the reader, where it can drop an answer.
  * - **No parameter binding.** Every value reaches SQL as a literal, so the caller of this callback
  *   owns quoting — `corpus.ts` routes every URL, IRI and column name through one escaper each, and
  *   every id through `BigInt`'s own decimal rendering. Binding would be a second method and a
- *   second dialect question; one string is what both hosts already accept.
+ *   second dialect question; one string is what a host already accepts.
  * - **No streaming.** The rows are materialised as an array, so a window over a dense region is in
  *   JS memory all at once. A cursor or an Arrow table would fix that and would put a shape from
  *   somebody else's library in the seam — which is the dependency this package does not take. The
@@ -66,46 +60,10 @@ export type QueryRow = Record<string, unknown>;
  * (Mosaic returns an Arrow table; the binding's WASM core expects row objects, so the host adapts
  * once here — keeping this package free of an Arrow/Mosaic dependency.)
  *
- * **What a value in a row may be is not narrowed, and that is not laziness.** The two hosts already
- * disagree about the width they hand back: DuckDB-WASM gives a `UINTEGER` as a `Number` and a
- * `UBIGINT` as a `BigInt`, and `ConnectionExecutor` turns both into JSON numbers. So a `dense_id`
- * arrives as a `number`, a `bigint` or a string depending on the host and the column's declared
+ * **What a value in a row may be is not narrowed, and that is not laziness.** A host decides the width
+ * it hands back: DuckDB-WASM gives a `UINTEGER` as a `Number` and a `UBIGINT` as a `BigInt`, and a
+ * host that goes through JSON turns both into numbers. So a `dense_id` arrives as a `number`, a
+ * `bigint` or a string depending on the host and the column's declared
  * width, and the corpus API coerces it at the boundary rather than trusting any of them.
  */
 export type QueryFn = (sql: string) => Promise<QueryRow[]>;
-
-/**
- * The host's text reader: given an absolute URL, hand back what is at it.
- *
- * ```ts
- * const addressing = await open(base, {
- *   readText: async (url) => (await fetch(url)).text(),
- * });
- * ```
- *
- * **It exists because the engine-free route could not say which files to read, and three readers
- * paid for that.** `open(base, { manifestFiles })` takes the manifests already in hand, and
- * to have them in hand you must know that the index is `graph.graph.yml` and that its `vertices:`
- * and `edges:` lists name the rest. That file name came off the barrel on the grounds that *«the
- * index's file name is the door's business»* — true of the engine-bearing route, which reads it
- * itself, and false of the other one, which was left to hand-write a twelve-line scan of the two
- * lists. `apps/playground/src/bench.ts` wrote it, `apps/playground/scripts/verify-canvas.mjs`
- * wrote it, and a third reader outside this repository wrote it again, which is the second
- * reference the rule names. Both copies here are deleted and pass this instead.
- *
- * **Why a capability and not an exported `GRAPH_INFO_PATH` plus a `manifestPathsOf(index)`.** That
- * pair is the same two facts published as data for the caller to re-assemble: it hands back a list
- * of paths, and every caller then writes the same join, the same fetch loop and the same error
- * when one is missing. The door already owns that sequence — it is step 1 of `open` — and
- * what the engine-free caller was missing was not the file name but the SEQUENCE. So it lends the
- * one thing it has that the package does not, and gets the sequence back. It is also what keeps
- * the index's file name off the surface, which was the right half of the original decision.
- *
- * **It is not a second `query`.** A host with an engine passes `query` and never this; a host with
- * neither passes `manifestFiles`. The three are one ladder — engine, fetcher, bytes in hand — and
- * `open` takes exactly one rung.
- *
- * Synchronous is accepted, for a host reading off a local disk (`readFileSync`) — which is what
- * every verifier script under `apps/playground/scripts` is.
- */
-export type ReadTextFn = (url: string) => Promise<string> | string;
