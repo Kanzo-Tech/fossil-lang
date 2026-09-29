@@ -564,62 +564,17 @@ describe('the verbs, through the same door', () => {
     for (const r of relations) for (const f of r.files) expect(granted.has(f)).toBe(true);
   }, 30_000);
 
-  it('reads one vertex the way the verb surface says to — `where: subject = …`', async () => {
-    const id = await seedOf(7);
-    const { rows } = await corpus.read({ vertex_type: 'Person', where: `subject = ${lit(id)}` });
-    expect(rows).toHaveLength(1);
-    // The manifest's vocabulary, which is now `subject` and the two quasi-identifiers the
-    // declared privacy bound is measured over. `node` on the same identity answers from the
-    // BYTES instead, so it has `x`, `y` and `cluster_id` that this does not — and this has a
-    // bare `subject` that `node` reports as the identity rather than as a field. The
-    // divergence the pair pins is which columns each side can see, not how many: it read one
-    // against five before the fixture grew the two, and it is three against seven now.
-    expect(rows[0]).toEqual({ subject: id, birth_year: 1955, postcode: 'PC0' });
-    const placed = await corpus.node(id);
-    expect(placed!.id).toBe(id);
-    expect(Object.keys(placed!.fields)).toEqual(['birth_year', 'postcode', 'cluster_id']);
-  }, 30_000);
-
-  it('withholds both raw-SQL doors by default, and opens both together', async () => {
-    // `crates/fossil-graph/tests/schemas.rs` asserts the pair on the Rust side —
-    // `Verb::reaches_raw_sql()` is `["read", "execute_sql"]` — and `crates/fossil-mcp/src/tools.rs`
-    // is the surface this ports: the closed policy drops the hatch from the list AND refuses the
-    // predicate. There is no fifth combination to test, because there is no spelling of
-    // `open` that opens one and closes the other.
+  it('withholds the hatch by default, and admits it when the host says so', async () => {
+    // A withheld corpus does not carry a member that refuses: it does not carry the member.
     const closed = await open(CORPUS, { query });
     expect('executeSql' in closed).toBe(false);
-    await expect(
-      closed.read({ vertex_type: 'Person', where: 'birth_year > 1900' }),
-    ).rejects.toThrow(/same authority as execute_sql/);
-    // A predicate-free read is unaffected: what is withheld is the SQL, not the verb.
-    expect((await closed.read({ vertex_type: 'Person', limit: 1 })).rows).toHaveLength(1);
 
-    // And the corpus this file opened with the permission has both.
+    // And the corpus this file opened with the permission has it.
     expect('executeSql' in corpus).toBe(true);
     const permitted = corpus as typeof corpus & {
       executeSql(params: { sql: string }): Promise<{ rows: unknown[] }>;
     };
     expect((await permitted.executeSql({ sql: 'SELECT 1 AS n' })).rows).toHaveLength(1);
-  }, 30_000);
-
-  it('expands over the whole relation, in identities, where neighbours walks tiles', async () => {
-    const seed = await seedOf(7);
-    const reached = await corpus.expand({ from: [seed], depth: 1 });
-    const walked = await corpus.neighbours([seed], { depth: 1 });
-
-    // **They do not answer the same question, and the counts are how you can tell.** `expand`
-    // reads the source-ordered relation and walks OUT: seed plus out-neighbours. `neighbours`
-    // defaults to both orientations, because an undirected neighbourhood is what a drawing means
-    // by one and the corpus stores the adjacency twice so it can have it. Neither is a filter on
-    // the other.
-    expect(reached.vertices.length).toBeGreaterThan(0);
-    expect(reached.vertices.length).toBeLessThan(walked.vertices.length);
-    // One answers in IRIs and hops, the other in addresses and positions.
-    expect(typeof reached.vertices[0]!.iri).toBe('string');
-    expect(typeof walked.vertices[0]!.denseId).toBe('bigint');
-    // And only one of them says what it is missing.
-    expect(walked.frontier.length).toBeGreaterThan(0);
-    expect(walked.complete).toBe(false);
   }, 30_000);
 
   it('keeps its relations in a catalog of its own, beside a host table of the same name', async () => {

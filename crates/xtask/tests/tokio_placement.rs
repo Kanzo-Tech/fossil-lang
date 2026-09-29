@@ -54,10 +54,10 @@
 //!   one is treated as out of the wasm artefact. That is true of the artefact
 //!   and says nothing about whether the build script itself is sane.
 //! - **That the justification comments exist.** `CLAUDE.md` also requires each
-//!   `tokio` dependency to say why beside itself in its own `Cargo.toml`. Two
-//!   of the four in the tree do not, and that clause is still prose.
+//!   `tokio` dependency to say why beside itself in its own `Cargo.toml`, and
+//!   that clause is still prose.
 //! - **That the crate holding `tokio` should hold it.** Nothing here has an
-//!   opinion about whether `fossil-mcp` needs a runtime; only about whether a
+//!   opinion about whether a native host needs a runtime; only about whether a
 //!   wasm artefact can reach one.
 //!
 //! # Why it lives in `xtask`

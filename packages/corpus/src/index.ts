@@ -2,7 +2,7 @@
  * @fossil-lang/corpus — open a corpus from a URL and read it.
  *
  * The query layer for whatever draws the graph — fossil ships no viewer. Verb→SQL runs in WASM
- * (`fossil-graph-wasm`, single-source with the native runtime), and SQL execution is delegated to a
+ * (`fossil-graph-wasm`, single-source with the Rust verb structs), and SQL execution is delegated to a
  * host-provided DuckDB-WASM `query` callback (e.g. keasy's Mosaic coordinator). This is what makes
  * a viewer larger-than-RAM: the host's DuckDB streams Parquet over httpfs; the binding never
  * materialises rows in JS.
@@ -14,7 +14,6 @@
  * corpus.types                                  // what is inside
  * await corpus.frame({ ...box, pixels })        // a rectangle at a resolution, ready to draw
  * await corpus.node(iri)
- * await corpus.aggregate({ vertex_type: 'Person', group_by: 'age', agg: 'count', bins: 20 })
  * ```
  *
  * # One door, one name, and the depth is an argument
@@ -88,8 +87,7 @@ export {
 export type { QueryFn, QueryRow } from './query.js';
 
 // The door's own types. `SqlCorpus` is what `sql: 'allowed'` widens the answer to — see
-// `SqlPolicy` for why one option decides both raw-SQL doors, and `crates/fossil-mcp/src/tools.rs`
-// for the native surface this is the port of.
+// `SqlPolicy` for what the option decides.
 //
 // **`OpenOptions` is the one exported type with no `Corpus` in its name, and that is decided
 // rather than overlooked.** The prefix on every other name here is doing real work — `Corpus`,
@@ -156,7 +154,7 @@ export type {
   VertexAddress,
 } from './address.js';
 
-// The twelve the verbs name in their own signatures, plus the five a reader of `Corpus.schema`
+// The four the verbs name in their own signatures, plus the five a reader of `Corpus.schema`
 // names — from the schemars codegen, single source of truth with the Rust verb structs. This list
 // replaces `export type *`: a name reaches a consumer because the surviving surface mentions it,
 // and for no other reason.
@@ -171,20 +169,12 @@ export type {
 // of a host keeping its own copy. The rest of `./generated.ts` (`Operation`,
 // `FossilGraphSchemas`, the verb row shapes) stays reachable structurally.
 export type {
-  AggregateParams,
-  AggregateResult,
   ExecuteSqlParams,
   ExecuteSqlResult,
-  ExpandParams,
   EdgeTypeSummary,
-  ExpandResult,
   FieldKind,
   FieldRole,
   FieldStat,
-  PathParams,
-  PathResult,
-  ReadParams,
-  ReadResult,
   SchemaParams,
   SchemaResult,
   VertexTypeSummary,

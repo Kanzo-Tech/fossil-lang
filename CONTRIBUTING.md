@@ -257,19 +257,12 @@ local enforcement, put `cargo fmt --all -- --check`, `cargo clippy --workspace
 
 ## Releasing
 
-One rmlext release publishes **three artifacts at the same version `vX.Y.Z`**, and keasy consumes
-all three:
+One rmlext release publishes the `@fossil-lang/*` npm packages at version `vX.Y.Z`, through
+`.github/workflows/release.yml` (changesets). The version's source of truth is the git tag `vX.Y.Z`
+that `changesets/action` creates when it publishes. There is no image: the OCI image that carried
+`fossil` and an MCP server had no consumer and was deleted.
 
-| Artifact | Registry | Workflow |
-|---|---|---|
-| `@fossil-lang/*` (npm packages) | npmjs.org (public) | `.github/workflows/release.yml` (changesets) |
-| `ghcr.io/kanzo-tech/fossil:X.Y.Z` (`fossil` + `fossil-mcp`) | GHCR | `.github/workflows/fossil-image.yml` |
-
-The version's source of truth is the git tag `vX.Y.Z` that `changesets/action` creates when it
-publishes. `fossil-image.yml` triggers on `push: tags: ['v*']`, so npm and the image land on the
-same tag with no manual coordination.
-
-**Nothing has been published yet, and three one-time operator actions gate the first release.**
+**Two one-time operator actions gate the first release.**
 
 1. **npm Trusted Publisher.** npmjs.com → scope `@fossil-lang` → Settings → Trusted Publishers →
    repository `Kanzo-Tech/fossil-lang`, workflow `release.yml`, environment blank. Without it the
@@ -277,20 +270,16 @@ same tag with no manual coordination.
    working, not a bug** — do not debug it as one.
 2. **The first stable version.** The linked `@fossil-lang/*` group sits at `0.3.0-alpha.0`. When
    merging the "Version Packages" PR, confirm it lands on `0.3.0` rather than jumping to `1.0.0`.
-3. **GHCR visibility.** Public means keasy's `COPY --from` needs no auth, which is the simple path.
-   Private means keasy's image build must `docker login ghcr.io` first, with an org-visible package
-   or a PAT carrying `read:packages`. GitHub → org → Packages → `fossil` → visibility.
 
 After that the per-release flow has no manual step beyond one merge: land changes with
 `pnpm changeset`; `release.yml` opens the "Version Packages" PR; merging it publishes to npm and
-creates the tag; the tag builds and pushes the image with provenance; keasy's Renovate opens one
-grouped PR bumping the packages, the git-dep tag and the image together.
+creates the tag; keasy's Renovate opens one grouped PR bumping the packages and the git-dep tag
+together.
 
-Two dry runs, neither of which publishes:
+A dry run, which does not publish:
 
 ```bash
 pnpm --filter @fossil-lang/wasm pack --dry-run   # confirm pkg/fossil_wasm_bg.wasm is listed
-docker build -t fossil:local . && docker run --rm fossil:local --help
 ```
 
 ## Issues, PRs, communication

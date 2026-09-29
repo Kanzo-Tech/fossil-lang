@@ -4,7 +4,7 @@ The query layer for whatever draws the graph. **Fossil ships no viewer.**
 
 **One door, and it is one function.** `open(url, { query })`
 returns discovery, the camera (`extent`, `frame`, `rows`, `node`, `neighbours`)
-and the five bounded verbs (`read`, `expand`, `path`, `aggregate`, `schema`) on
+and the verbs (`schema`, `relations`, and `executeSql` when the host asks) on
 one object. No tiles, no `dense_id`, no Morton, no `by_source`, no prefixes, no
 footers.
 
@@ -39,7 +39,7 @@ all:
   which hands the bytes. (Vite's dev server: see `@fossil-lang/wasm`'s README for
   the one `optimizeDeps` line.)
 - `export type *` — an unbounded star publishes whatever the codegen makes, now
-  and later, with nobody deciding. The twelve params/results the members name
+  and later, with nobody deciding. The params/results the members name
   are re-exported by name instead.
 
 `Corpus.levels()` is `levelsOf(addressing, type?)` inside the package, because
@@ -58,8 +58,8 @@ synchronous arithmetic over a parsed manifest, importable by a notebook, a CLI
 or a server with a Parquet reader of its own and no WebAssembly.
 
 Keeping that promise meant keeping a second implementation of the addressing.
-`crates/fossil-graph/src/plan.rs` is the first — `fossil-mcp` is a native server
-with no JS runtime, so it cannot be the one that goes — and 1,058 lines of
+`crates/fossil-graph/src/plan.rs` is the first, and the conformance suite runs it
+natively — and 1,058 lines of
 TypeScript beside it composed the same URLs from the same manifest, agreeing
 with it because people kept making them agree. Nothing compared the two.
 
@@ -121,17 +121,10 @@ const one = await corpus.node('https://example.org/person/15');
 const hood = await corpus.neighbours([one.id], { depth: 2 });
 
 const { vertices } = await corpus.schema();
-const hist = await corpus.aggregate({
-  vertex_type: 'Person',
-  group_by: 'age',
-  agg: 'count',
-  bins: 20,
-});
 ```
 
 **One argument is the corpus and the other is the engine.** The host brings a
-`query` callback — DuckDB-WASM in a browser, a native `duckdb::Connection` on a
-server — and this package keeps its zero runtime dependencies. Three of the four
+`query` callback — DuckDB-WASM in a browser — and this package keeps its zero runtime dependencies. Three of the four
 members have to decode Parquet, and an engine also does the footer pruning a
 rectangle read would otherwise re-derive by hand. `read_text`, `read_parquet` and
 `parquet_metadata` are the whole of what it is asked for.
@@ -166,11 +159,11 @@ twice.
 
 ## The verbs
 
-`read` · `expand` · `path` · `aggregate` · `schema`, and `executeSql` when the
-host asks for it.
+`schema`, and `executeSql` when the host asks for it; `relations` is one bare
+`schema` shaped for a host that registers the corpus.
 
-Verb→SQL runs in WASM (`fossil-graph-wasm`, single-source with the native
-runtime and with `fossil-mcp`'s server-side surface); SQL **execution** goes
+Verb→SQL runs in WASM (`fossil-graph-wasm`, single-source with the Rust verb
+structs); SQL **execution** goes
 through the same `query` callback everything else does. The host's DuckDB
 streams Parquet over httpfs, so the binding never materialises rows in JS —
 that is what lets a host scale past RAM.
@@ -179,26 +172,18 @@ that is what lets a host scale past RAM.
 views they expect on the first verb call, over paths the manifest already gave
 it — `CREATE OR REPLACE TEMP VIEW "Person"`, and `TEMP` because a host's own
 `Person` table is not unlikely and a temp view shadows it rather than replacing
-it. `crates/fossil-mcp` does the identical thing for the identical reason.
+it.
 
 **A verb reads the manifest's vocabulary; the camera reads the bytes.** A verb
 composes SQL before it has seen a byte, so its column list is the payload
 projection's declared `properties`;
 `open` had a round trip to spend and spent it on a `DESCRIBE`. On the
 conformance corpus that is **three** declared properties against **seven**
-columns on disk, so `read` answers with `subject`, `birth_year` and `postcode`
+columns on disk, so `schema` lists `subject`, `birth_year` and `postcode`
 while `corpus.types` reports all seven — the four the manifest never names are
 `dense_id`, `x`, `y` and `cluster_id`, which the writer puts there and the
 vocabulary does not. Neither is wrong and they are not the same question.
 
-- **`read`** — rows of one vertex type under a `where` predicate, an order and
-  a limit. `where` is SQL and carries the same authority as `executeSql`, so it
-  is governed by the same option and refused with it.
-- **`expand`** — the neighbourhood of a set of vertices. `all` walks outward up
-  to `depth`; `into` keeps only the edges whose both ends are in the set.
-- **`path`** — the shortest route between two vertices.
-- **`aggregate`** — one grouping, over values or, with `bins`, over equal-width
-  ranges. Binning is grouping, so there is no histogram verb.
 - **`schema`** — the vertex and edge types with their counts. Name a
   `vertex_type` for its per-field statistics, and a `field` for its samples;
   a bare call runs no per-field query. `{ stats: true }` puts every type's
@@ -206,21 +191,16 @@ vocabulary does not. Neither is wrong and they are not the same question.
   type — the call a schema panel makes. Each `FieldStat` carries a `role`
   (a chart-axis guess from name and cardinality) and a `kind` —
   `numeric` · `temporal` · `categorical`, read off the GraphAr spelling — which
-  is what decides whether `aggregate` may bin it. A host asks for the kind and
+  is what decides whether an axis may bin it. A host asks for the kind and
   keeps no table of spellings.
-- **`executeSql`** — the escape hatch, for the question the other five cannot
-  shape. **Withheld unless the host asks**: `open(url, { query })` returns
-  a `Corpus` with no `executeSql` member and a `read` that refuses a `where`;
-  `open(url, { query, sql: 'allowed' })` returns a `SqlCorpus` with both.
-
-  One option, two consequences, no second knob — `crates/fossil-graph`'s
-  `Verb::reaches_raw_sql()` is `["read", "execute_sql"]`, so deleting the hatch
-  would have left the other door open. This is `crates/fossil-mcp`'s `SqlPolicy`
-  ported: closed by default because the five bounded verbs cost a function of the
-  answer and the hatch costs a function of whatever was typed. It is not a
-  sanitiser and not a security boundary — the engine and the files are the
-  host's; see [`/docs/design/privacy`]. What it holds is the coupling, and the
-  fact that a host has to write the word down.
+- **`executeSql`** — the escape hatch: SQL over the views `relations` names.
+  **Withheld unless the host asks**: `open(url, { query })` returns a `Corpus`
+  with no `executeSql` member; `open(url, { query, sql: 'allowed' })` returns a
+  `SqlCorpus` with it. Closed by default because every other member costs a
+  function of the answer and the hatch costs a function of whatever was typed.
+  It is not a sanitiser and not a security boundary — the engine and the files
+  are the host's; see [`/docs/design/privacy`]. What it holds is the fact that a
+  host has to write the word down.
 
 **None of them draws.** The camera is addressed, not queried — the
 LOD is not a filter but a different relation, and a `WHERE` cannot change which

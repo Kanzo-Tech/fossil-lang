@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Graph query surface over a GraphAr corpus. Verb-level operations with JSON Schema contracts; emits DuckDB-dialect SQL and links no engine to run it. Transport-agnostic — the bindings are fossil-mcp and fossil-graph-wasm."
+description = "Graph query surface over a GraphAr corpus. Verb-level operations with JSON Schema contracts; emits DuckDB-dialect SQL and links no engine to run it. Transport-agnostic; the binding is fossil-graph-wasm."
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -16,8 +16,7 @@ workspace = true
 [dependencies]
 # Verb contracts: each operation's params/result derives serde + JsonSchema
 # The same schema is emitted by every transport binding so the
-# wire contract stays single-source — no hand-written JSON Schema files, no
-# divergence between fossil-mcp and @fossil-lang/corpus.
+# wire contract stays single-source — no hand-written JSON Schema files.
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }

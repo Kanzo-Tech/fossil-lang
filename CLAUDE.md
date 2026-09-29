@@ -214,7 +214,6 @@ crates/
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract
   fossil-graph/            the typed verb surface over a GraphAr corpus. It EMITS SQL in
                            DuckDB's dialect and links no engine to run it (WASM-clean)
-  fossil-mcp/              that same verb surface as a native server-side service
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
   fossil-cli/              fossil's native HOST *and* the binary over it: `src/host.rs` is the
                            `System` the compiler runs against, the shape documents a program

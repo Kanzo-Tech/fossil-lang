@@ -13,8 +13,8 @@
  * opened — there is no engine-free door beside it. See {@link open} and {@link OpenOptions}.
  *
  * **The object has two halves and the line between them is not a spelling.** `extent`, `rows`,
- * `node` and `neighbours` compute which FILES to open and open those; `schema`, `read`, `expand`,
- * `path`, `aggregate` and `executeSql` name a relation and let the engine decide. The camera is
+ * `node` and `neighbours` compute which FILES to open and open those; `schema`, `relations` and
+ * `executeSql` name a relation and let the engine decide. The camera is
  * addressed, not queried — an LOD is a different relation and not a filter — and `fossil-graph`'s
  * own crate doc states the same rule from the other side: *pruning is which bytes are read, and
  * that is the tiles' job, not a verb's*. See {@link Corpus.neighbours} for the one place the two
@@ -32,7 +32,6 @@
  * await corpus.node(iri)
  * await corpus.neighbours([iri], { depth: 2 })
  * await corpus.schema({ vertex_type: 'Person' })
- * await corpus.aggregate({ vertex_type: 'Person', group_by: 'age', agg: 'count', bins: 20 })
  * ```
  *
  * **The one thing a host brings is an engine.** See `./query.ts` for why the capability is a single
@@ -90,16 +89,8 @@ import {
   PAYLOAD_IDENTITY,
 } from './vocabulary.generated.js';
 import type {
-  AggregateParams,
-  AggregateResult,
   ExecuteSqlParams,
   ExecuteSqlResult,
-  ExpandParams,
-  ExpandResult,
-  PathParams,
-  PathResult,
-  ReadParams,
-  ReadResult,
   SchemaParams,
   SchemaResult,
 } from './generated.js';
@@ -185,15 +176,8 @@ export interface Extent {
 /**
  * One vertex, **placed** — an address, a position, and every column the row carries.
  *
- * **`GraphVertex` is the other one, and neither is a lossy spelling of the other.** That is what
- * `expand` and `path` answer with: an IRI, a label, a vertex type and a hop count, generated from
- * the Rust structs and single-source with them. It carries no `x`, no `y` and no `dense_id`,
- * because a verb reads a relation and those are the tiles' columns; this carries all three,
- * because a camera reads tiles and a canvas cannot draw an identity.
- *
- * They were both called something ending in `Vertex` with a prefix that named where they came
- * from rather than what they hold, which is how one becomes a candidate for deleting the other.
- * The name says what it holds now.
+ * It carries an `x`, a `y` and a `dense_id` because a camera reads tiles and a canvas cannot draw
+ * an identity.
  */
 export interface PlacedVertex {
   readonly type: string;
@@ -223,7 +207,7 @@ export interface PlacedVertex {
  * never store one: {@link Corpus.node} says why.
  */
 export interface PlacedEdge {
-  /** `GraphEdge` is the verbs' answer: a predicate IRI and two subject IRIs. This is two addresses. */
+  /** Two addresses, not two IRIs: an edge a canvas draws between placed vertices. */
   readonly edgeType: string;
   readonly src: bigint;
   readonly dst: bigint;
@@ -601,34 +585,18 @@ export interface Corpus {
   /**
    * Everything within `depth` hops of a set of identities.
    *
-   * **{@link Corpus.expand} is not this, and neither one is a spelling of the other.** They were
-   * going to be merged, on the reading that a neighbourhood asked twice is a neighbourhood asked
-   * twice. Three differences say otherwise, and each is the same difference:
-   *
-   * - **How it walks.** This turns the frontier into tile numbers by shifting the addresses it
-   *   already holds, opens those adjacency tiles and no others, and does it once per hop.
-   *   `expand` is a recursive CTE over the whole edge relation — the query this member exists
-   *   because of, and which did not return in 45 seconds at a million vertices.
-   * - **What it answers with.** Placements: an address, an `x`, a `y`, and every payload column.
-   *   `expand` answers with IRIs and hop counts, which a canvas cannot draw without reading the
-   *   tiles again. The corpus stores the adjacency as two `dense_id` columns and nothing else, so
-   *   naming the far endpoint of every edge means opening the tile it lives in — and a
-   *   neighbourhood's edges point outward by construction.
-   * - **What it admits.** {@link Answer.complete}, {@link Answer.gaps} and
-   *   {@link Neighbourhood.frontier}: the orientations not read and the boundary the depth bound
-   *   cut. `ExpandResult` is two lists. An answer whose outermost ring is missing its own edges
-   *   looks whole in a count, which is why the boundary is a field here.
-   *
-   * `expand` also walks the source-ordered relation only, so it is directed where this defaults to
-   * both orientations. That is the smallest of the three and the easiest to mistake for the whole
-   * of it.
+   * It turns the frontier into tile numbers by shifting the addresses it already holds, opens those
+   * adjacency tiles and no others, and does it once per hop — where a recursive CTE over the whole
+   * edge relation did not return in 45 seconds at a million vertices. It answers with placements,
+   * and admits {@link Answer.complete}, {@link Answer.gaps} and {@link Neighbourhood.frontier}: the
+   * orientations not read and the boundary the depth bound cut, because an answer whose outermost
+   * ring is missing its own edges looks whole in a count.
    */
   neighbours(ids: Iterable<string>, params?: NeighboursParams): Promise<Neighbourhood>;
 
   // ── The verbs ─────────────────────────────────────────────────────────────────────────────
   //
-  // Six methods whose SQL is written in Rust — `fossil-graph`, single-source with the native
-  // runtime and with `fossil-mcp`'s server-side surface — and dispatched here through
+  // Methods whose SQL is written in Rust — `fossil-graph` — and dispatched here through
   // `fossil-graph-wasm`. They were `createGraphClient`, a second entry point with no rule for
   // choosing between it and this one; it is the transport now, and this is the door.
   //
@@ -643,7 +611,7 @@ export interface Corpus {
   // refuses to take the column list off the payload's declared `properties` and reads the bytes
   // instead, with the count that decided it; the verbs have no bytes at the time they compose SQL,
   // so they take the manifest at its word. On the conformance corpus that is three declared
-  // properties against seven columns on disk, so `read` answers with `subject`, `birth_year` and
+  // properties against seven columns on disk, so `schema` lists `subject`, `birth_year` and
   // `postcode` while `types` reports all seven. Neither is wrong, and they are not the same —
   // see {@link Corpus.types}.
 
@@ -673,28 +641,6 @@ export interface Corpus {
    */
   relations(): Promise<readonly CorpusRelation[]>;
   /**
-   * Rows of one vertex type under a `where` predicate, an order and a limit.
-   *
-   * **`where` is SQL and carries the same authority as {@link SqlCorpus.executeSql}**, so it is
-   * governed by the same {@link SqlPolicy} and refused with it: a corpus opened without
-   * `sql: 'allowed'` has no `executeSql` member AND rejects a `where`. There is no spelling of
-   * `open` that opens one door and closes the other — see {@link SqlPolicy}.
-   */
-  read(params: ReadParams): Promise<ReadResult>;
-  /**
-   * The neighbourhood of a set of vertices as IRIs — `all` walks outward up to `depth`, `into`
-   * keeps only the edges whose both ends are in the set.
-   *
-   * **Not the same call as {@link Corpus.neighbours}**, which is why both are here. This one is a
-   * recursive CTE over the whole edge relation and answers in identities; that one is tile
-   * arithmetic over the adjacency and answers in placements. See {@link Corpus.neighbours}.
-   */
-  expand(params: ExpandParams): Promise<ExpandResult>;
-  /** The shortest route between two vertices. */
-  path(params: PathParams): Promise<PathResult>;
-  /** One grouping, over values or — with `bins` — over equal-width ranges. */
-  aggregate(params: AggregateParams): Promise<AggregateResult>;
-  /**
    * Give back what opening took from the engine: the catalog the verbs' views live in and, for a
    * job's corpus, the credential it was read with. Another open corpus of the same job on the
    * same engine keeps both until it closes too.
@@ -711,31 +657,22 @@ export interface Corpus {
  * has, and would have said nothing at all to a caller of a closed one.
  */
 export interface SqlCorpus extends Corpus {
-  /** The escape hatch, for the question the other five cannot shape. */
+  /** The escape hatch: SQL over the views {@link Corpus.relations} names. */
   executeSql(params: ExecuteSqlParams): Promise<ExecuteSqlResult>;
 }
 
 /**
  * Whether this corpus puts a caller's SQL in front of the engine.
  *
- * The default is `'withheld'`, and the asymmetry is deliberate: the five bounded verbs cost a
+ * The default is `'withheld'`, and the asymmetry is deliberate: every other member costs a
  * function of the answer, and the escape hatch costs a function of whatever was typed. A host that
- * wants the hatch says so.
- *
- * **It is one option and it has two consequences, on purpose.** `'withheld'` drops
- * {@link SqlCorpus.executeSql} from the object AND makes {@link Corpus.read} refuse a `where`,
- * because that field carries the same authority — it reaches the same engine unparsed. There is no
- * second knob to set inconsistently: a corpus that offers the hatch admits the predicate, and one
- * that hides it refuses both. This is `fossil-mcp`'s `SqlPolicy` ported to the browser door;
- * `crates/fossil-graph/src/operations/raw_sql.rs` is the argument, and
- * `crates/fossil-graph/tests/schemas.rs` is the assertion that `read` and `execute_sql` are the two
- * verbs the permission covers — the rejected alternative, deleting `executeSql`, leaves the other
- * one open.
+ * wants the hatch says so. `'withheld'` drops {@link SqlCorpus.executeSql} from the object;
+ * `crates/fossil-graph/src/operations/raw_sql.rs` is the Rust half of the same permission.
  *
  * **What it does NOT claim.** It is not a sanitiser and it is not a security boundary: the engine
  * is the host's, the corpus is files the host already holds, and `/docs/design/privacy` is why a
- * read-time gate has no chokepoint to stand on. What this holds is the *coupling* — whatever the
- * policy is, it lands on both doors at once — and the fact that a host must write the word down.
+ * read-time gate has no chokepoint to stand on. What this holds is the fact that a host must
+ * write the word down.
  */
 export type SqlPolicy = 'withheld' | 'allowed';
 
@@ -893,9 +830,9 @@ function couldHold(key: Uint8Array, lo: Uint8Array, hi: Uint8Array): boolean {
  *
  * The corpus contract's second obligation is that a 64-bit id is a `BigInt` at the TypeScript
  * boundary, and it records exactly this hole: *"an id read out of a Parquet column into an untyped
- * value is outside it."* The two hosts disagree about what they hand back — DuckDB-WASM gives a
- * `UINTEGER` as a `Number` and a `UBIGINT` as a `BigInt`, and `ConnectionExecutor` turns both into
- * JSON numbers — so this is where the width is enforced instead of assumed. A `Number` that is not
+ * value is outside it."* Hosts disagree about what they hand back — DuckDB-WASM gives a
+ * `UINTEGER` as a `Number` and a `UBIGINT` as a `BigInt`, and a host that goes through JSON turns
+ * both into numbers — so this is where the width is enforced instead of assumed. A `Number` that is not
  * a safe integer is refused rather than rounded, because rounding a `dense_id` addresses a
  * different vertex and nothing downstream can tell.
  */
@@ -1759,10 +1696,8 @@ async function opened(
    *
    * **The verbs name tables and this corpus is files, so something has to bridge that.** Every
    * statement `fossil-graph` composes reads `FROM "Person"` or `FROM "Person_knows_Person"` — it
-   * is the same SQL the native runtime and `fossil-mcp` run, and it is single-source with them
-   * precisely because it does not know where the bytes are. So the door registers the views the
-   * verbs expect, over the paths the manifest already gave it, and `crates/fossil-mcp/src/lib.rs`
-   * does the identical thing for the identical reason on the other side.
+   * is single-source with the Rust precisely because it does not know where the bytes are. So the
+   * door registers the views the verbs expect, over the paths the manifest already gave it.
    *
    * **`TEMP`, and that is not a detail.** A plain `CREATE OR REPLACE VIEW "Person"` would
    * overwrite a host's own table of that name — `Person` is not an unlikely name for one, and
@@ -1777,7 +1712,7 @@ async function opened(
    * list containing one absent file is an error, not an empty relation. The rule this file states
    * elsewhere — never glob — is about the vertex payload, where a glob picks up the staged
    * single-file copy beside the tiles and counts every row twice; `<adjacency>/chunk*.parquet` has
-   * no such sibling inside it. `fossil-mcp` makes the same exception and says so.
+   * no such sibling inside it.
    *
    * **`chunk*` and not `tile*`**: the adjacency is the projection at `scale: 1` and spells its
    * files like every other projection. `tile{k}` is the identity index's alone, being the one
@@ -2127,34 +2062,6 @@ async function opened(
       });
       return [...vertices, ...edges];
     },
-    async read(params) {
-      // `where` is the second raw-SQL door and it is refused HERE rather than by the transport,
-      // because the transport is `fossil-graph-wasm` and that binding grants the permission
-      // unconditionally — deliberately, since in a browser the engine, the tab and the files are
-      // all the caller's already (`crates/fossil-graph-wasm/src/lib.rs` says so). The policy this
-      // door holds is the HOST's, over an embedding where the two are not the same party.
-      //
-      // A `TypeError` rather than a third error class: the caller asked for a door this corpus was
-      // not opened with, which is a programming error at the call site and not the corpus
-      // disagreeing with its manifest — which is what `CorpusReadError` means and all it means.
-      if (!rawSql && params.where != null) {
-        throw new TypeError(
-          `read.where is SQL and carries the same authority as execute_sql, and this corpus was ` +
-            `opened without it. Pass sql: 'allowed' to open to admit both.`,
-        );
-      }
-      return (await verbs()).read(params);
-    },
-    async expand(params) {
-      return (await verbs()).expand(params);
-    },
-    async path(params) {
-      return (await verbs()).path(params);
-    },
-    async aggregate(params) {
-      return (await verbs()).aggregate(params);
-    },
-
     async extent(type) {
       const address = vertexType(type);
       if (extents.has(address.type)) return extents.get(address.type)!;
@@ -2650,10 +2557,8 @@ async function opened(
   };
 
   // The hatch is ADDED rather than gated, which is the whole of `SqlPolicy` in one line: a
-  // withheld corpus does not carry a member that refuses — it does not carry the member. That is
-  // `fossil-mcp`'s `VerbSurface::tools` filtering `execute_sql` out of the list rather than
-  // publishing a tool that says no, and for the same reason: what is not on the surface cannot be
-  // reached by a caller that forgot to check.
+  // withheld corpus does not carry a member that refuses — it does not carry the member, because
+  // what is not on the surface cannot be reached by a caller that forgot to check.
   if (!rawSql) return corpus;
   const widened: SqlCorpus = {
     ...corpus,

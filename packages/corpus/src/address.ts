@@ -3,8 +3,8 @@
  *
  * A tile is a fixed range of `dense_id` and its address is a shift, so a reader computes every URL
  * it wants before it emits the first request. That arithmetic used to be written twice: once in
- * `crates/fossil-graph/src/plan.rs`, for `fossil-mcp`, which is a native server with no JS runtime
- * and therefore cannot be the one that goes; and once here, in a thousand lines of TypeScript that
+ * `crates/fossil-graph/src/plan.rs`, which the writer's side also reads; and once here, in a
+ * thousand lines of TypeScript that
  * agreed with it because people kept making it agree. Nothing compared the two. This module is what
  * is left of the second one: the shapes the answers arrive in, and the calls that ask.
  *

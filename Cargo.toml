@@ -34,7 +34,7 @@ serde_json = "1"
 serde_yaml_ng = "0.10"
 # `schemars` derives JSON Schema from Rust types. Adopted in `fossil-graph`
 # to publish a per-verb param/result schema once and have every
-# transport binding (fossil-mcp, fossil-cli, @fossil-lang/corpus) consume the
+# transport binding (@fossil-lang/corpus, through fossil-graph-wasm) consume the
 # SAME schema — no hand-written contract duplicated across bindings. Pin 0.8
 # because 0.9 is in alpha and the keasy-side TS codegen depends on the 0.8
 # JSON Schema draft-07 dialect for openapi-typescript interop.
@@ -122,7 +122,7 @@ bytes = "1"
 
 # === The native engine — NATIVE ONLY ===
 # `fossil-introspect` is the one crate on a normal edge; `fossil-engine`,
-# `fossil-layout`, `fossil-mcp` and `fossil-cli` keep it as a dev-dependency, to
+# `fossil-layout` and `fossil-cli` keep it as a dev-dependency, to
 # read written Parquet back or to bring an engine to a test. `deny.toml`'s
 # `duckdb` wrappers list is the enforced version of that sentence.
 #
@@ -171,11 +171,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["e
 # round-trip through the keasy config layer without a version mismatch.
 secrecy = { version = "0.10", features = ["serde"] }
 
-# `rmcp` — the official Rust MCP SDK. `fossil-mcp` exposes the verb surface as
-# MCP tools over stdio (server) and keasy invokes it as a subprocess (the host
-# uses the client side). Native-only (spawns a child + DuckDB); never WASM.
-rmcp = { version = "0.16", features = ["server", "macros", "transport-io"] }
-# Async runtime for the MCP server (rmcp is tokio-based).
+# Async runtime for the native hosts; each crate says where it keeps it.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 
 # === Dev / testing ===

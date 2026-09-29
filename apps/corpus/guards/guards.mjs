@@ -415,9 +415,9 @@ export const GUARDS = [
       // The asymmetry was never argued; it is the difference between a staging artefact that is
       // deleted and one that is published.
       //
-      // It matters because the two are read by different consumers. `fossil-mcp` registers its
-      // views over `by_source.parquet` and the reference reader addresses the tiles, so the corpus
-      // has two readers disagreeing about where its bytes are — which is the failure this whole
+      // It matters because the two are read by different consumers. A reader that registers its
+      // views over `by_source.parquet` and the reference reader, which addresses the tiles, are two
+      // readers disagreeing about where the corpus's bytes are — which is the failure this whole
       // suite exists to make impossible.
       for (const edge of corpus.edges) {
         for (const side of [edge.bySource, edge.byTarget]) {
