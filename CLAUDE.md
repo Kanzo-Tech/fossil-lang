@@ -255,20 +255,11 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            boot is internal: the `.wasm` is a bundler asset (`new URL(…,
                            import.meta.url)` in the glue), and `wasm` on the options is for a
                            host with no bundler
-  draw/                    the half of drawing a corpus that is NOT a renderer — no canvas, no
-                           GPU, no camera, and fossil still ships no viewer. What a corpus is
-                           drawn WITH (the `channels:` block, its three states, the derivation
-                           for a corpus that declares nothing) and what is already LOADED (the
-                           frames a door answered, and the interim assembled from them). NOT part
-                           of `corpus/`: a corpus has no opinion about which column deserves a
-                           histogram, and every part of `corpus/` static-imports the wasm while
-                           nothing here needs one
   executor/                datafusion-wasm query executor, and the manifest wire mirror, because
-                           a run HANDS THAT BACK — except `Channel`/`Scale`, in `types/` because
-                           `draw/` reads one and 22 MB of wasm is the wrong price for an interface
+                           a run HANDS THAT BACK
   types/                   Host — `connections()` + `credentials(scope, access)` — the one host
                            contract, and StorageCredential (Iceberg REST's, verbatim); the
-                           Engine; the `channels:` wire shape. Types only
+                           Engine. Types only
   storage/                 how every package reaches storage from a vended credential, over
                            `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
                            expires−5min, refcounted per prefix; Azure lent file by file),
