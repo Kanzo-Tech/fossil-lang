@@ -118,7 +118,7 @@ const wide = (batch: Batch, name: string): bigint[] =>
 const floats = (batch: Batch, name: string): number[] => Array.from(batch.getChild(name)!.toArray(), Number);
 const every = async (z: number, select?: readonly string[]): Promise<Batch[]> => {
   const scan = corpus.scan({ type: 'Person', ...(select === undefined ? {} : { select }) });
-  return Promise.all(scan.plan().filter((t) => t.z === z).map((t) => scan.read(t)));
+  return [...(await scan.read(scan.plan().filter((t) => t.z === z)))];
 };
 
 describe('the tile matrix set is the cell pyramid', () => {
@@ -160,7 +160,7 @@ describe('scan at Z against rows — the rowgroups container fossil writes', () 
       const top = set.tileMatrices.length - 1;
       const tasks = scan.plan().filter((t) => t.z === top);
       expect(tasks.length).toBeLessThan(set.tileMatrices[top]!.tiles.length + 1);
-      const read = (await Promise.all(tasks.map((t) => scan.read(t)))).flatMap((b) => wide(b, 'dense_id'));
+      const read = (await scan.read(tasks)).flatMap((b) => wide(b, 'dense_id'));
       const rows = (await corpus.rows({ x, y, w, h, directions: ['src'] })).vertices.map((v) => v.denseId);
       const order = (a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0);
       expect(read.sort(order)).toEqual(rows.sort(order));
@@ -172,7 +172,7 @@ describe('scan at Z against rows — the rowgroups container fossil writes', () 
     const top = set.tileMatrices.length - 1;
     const payload = corpus.scan({ type: 'Person', filter: { column: 'cluster_id', op: '=', value: 0 } });
     expect(new Set(payload.plan().map((t) => t.z))).toEqual(new Set([top]));
-    await expect(payload.read({ type: 'Person', z: top - 1, tile: 0 })).rejects.toThrow(/no answer below/);
+    await expect(payload.read([{ type: 'Person', z: top - 1, tile: 0 }])).rejects.toThrow(/no answer below/);
     const cells = corpus.scan({ type: 'Person', filter: { column: 'count', op: '>', value: 0 } });
     expect(cells.plan().some((t) => t.z === top)).toBe(false);
     expect(cells.plan().filter((t) => t.z === 0)).toHaveLength(1);

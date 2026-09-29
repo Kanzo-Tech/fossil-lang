@@ -227,7 +227,8 @@ export interface Corpus {
   tileMatrix(type: string): TileMatrixSet;
   /**
    * **Iceberg's `Table.scan`** — a type, a filter and a projection, bound when it is built, with
-   * `plan()` over every zoom and `read(address)` of one tile. See {@link Scan}.
+   * `plan()` over every zoom and `read(addresses)` of a batch per tile, a run of consecutive tiles in
+   * one statement. See {@link Scan}.
    *
    * @throws {CorpusReadError} for a column no zoom carries, in the filter or the projection.
    */

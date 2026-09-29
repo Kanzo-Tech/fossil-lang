@@ -64,8 +64,8 @@ describe('tileMatrix', () => {
 
   it('refuses an address outside the matrix, as OGC answers one with a 404', async () => {
     const scan = corpus.scan({ type: 'Person' });
-    await expect(scan.read({ type: 'Person', z: 0, tile: 5 })).rejects.toThrow(CorpusReadError);
-    await expect(scan.read({ type: 'Person', z: 1, tile: 0 })).rejects.toThrow(/z = 0 to 0/);
+    await expect(scan.read([{ type: 'Person', z: 0, tile: 5 }])).rejects.toThrow(CorpusReadError);
+    await expect(scan.read([{ type: 'Person', z: 1, tile: 0 }])).rejects.toThrow(/z = 0 to 0/);
   });
 });
 
@@ -74,7 +74,7 @@ describe('scan', () => {
     const scan = corpus.scan({ type: 'Person', select: ['dense_id', 'x'] });
     const plan = scan.plan();
     expect(plan.map((t) => [t.tile, t.residual])).toEqual([0, 1, 2, 3, 4].map((t) => [t, null]));
-    const batches = await Promise.all(plan.map((t) => scan.read(t)));
+    const batches = await scan.read(plan);
     expect(batches.map((b) => b.numRows)).toEqual([64, 64, 64, 64, 44]);
     expect(batches[0]!.getChild('subject')).toBeNull();
     expect(batches.flatMap((b) => column(b, 'dense_id'))).toEqual(Array.from({ length: 300 }, (_, i) => BigInt(i)));
@@ -90,7 +90,7 @@ describe('scan', () => {
     ];
     for (const box of boxes) {
       const scan = corpus.scan({ type: 'Person', filter: inBox(box), select: ['dense_id'] });
-      const read = (await Promise.all(scan.plan().map((t) => scan.read(t)))).flatMap((b) => column(b, 'dense_id'));
+      const read = (await scan.read(scan.plan())).flatMap((b) => column(b, 'dense_id'));
       const rows = (await corpus.rows({ ...box, directions: ['src'] })).vertices.map((v) => v.denseId).sort((a, b) => (a < b ? -1 : 1));
       expect(read).toEqual(rows);
     }
@@ -142,14 +142,108 @@ describe('scan', () => {
     const held = await open(CORPUS, { engine: slow });
     const scan = held.scan({ type: 'Person' });
     const controller = new AbortController();
-    const reading = scan.read({ type: 'Person', z: 0, tile: 1 }, { signal: controller.signal });
+    const reading = scan.read([{ type: 'Person', z: 0, tile: 1 }], { signal: controller.signal });
     setTimeout(() => controller.abort(), 10);
     await expect(reading).rejects.toMatchObject({ name: 'AbortError' });
     expect(seen.at(-1)).toBe(controller.signal);
-    const again = await scan.read({ type: 'Person', z: 0, tile: 1 });
-    expect(again.numRows).toBe(64);
+    const [again] = await scan.read([{ type: 'Person', z: 0, tile: 1 }]);
+    expect(again!.numRows).toBe(64);
     const aborted = AbortSignal.abort();
-    await expect(scan.read({ type: 'Person', z: 0, tile: 1 }, { signal: aborted })).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(scan.read([{ type: 'Person', z: 0, tile: 1 }], { signal: aborted })).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+describe('read coalesces a run of consecutive tiles into one statement', () => {
+  const counting = () => {
+    const sent: string[] = [];
+    const counted: Engine = {
+      ...engine,
+      query(sql, options) {
+        sent.push(sql);
+        return engine.query(sql, options);
+      },
+    };
+    return { sent, counted };
+  };
+  const at = (tile: number) => ({ type: 'Person', z: 0, tile });
+  const values = (batch: Batch, name: string) => Array.from(batch.getChild(name)!.toArray(), (v) => String(v));
+  /** One conjunctive range on the aligned column and no disjunction — the shape the engine prunes. */
+  const oneRange = (sql: string) => {
+    expect(sql.match(/"?dense_id"? >= \d+ AND "?dense_id"? < \d+/g)).toHaveLength(1);
+    expect(sql).not.toMatch(/\bOR\b/);
+  };
+
+  it('reads consecutive tiles in one statement and scattered ones in one each', async () => {
+    const { sent, counted } = counting();
+    const scan = (await open(CORPUS, { engine: counted })).scan({ type: 'Person', select: ['x'] });
+    sent.length = 0;
+    await scan.read([at(3), at(1), at(2)]);
+    expect(sent).toHaveLength(1);
+    sent.forEach(oneRange);
+    sent.length = 0;
+    await scan.read([at(0), at(2), at(4)]);
+    expect(sent).toHaveLength(3);
+    sent.forEach(oneRange);
+    sent.length = 0;
+    await scan.read([at(0), at(1), at(3), at(4), at(1)]);
+    expect(sent).toHaveLength(2);
+  });
+
+  it('splits a run into the batch each tile answers alone, in the order asked', async () => {
+    for (const select of [['dense_id', 'x'], ['x', 'y']]) {
+      const scan = corpus.scan({ type: 'Person', select });
+      const order = [4, 0, 2, 1, 3, 2].map(at);
+      const run = await scan.read(order);
+      expect(run).toHaveLength(order.length);
+      for (const [k, address] of order.entries()) {
+        const [alone] = await scan.read([address]);
+        expect(run[k]!.numRows).toBe(alone!.numRows);
+        for (const name of select) expect(values(run[k]!, name)).toEqual(values(alone!, name));
+        if (!select.includes('dense_id')) expect(run[k]!.getChild('dense_id')).toBeNull();
+      }
+    }
+  });
+
+  it('keeps a run whole when its tiles carry different residuals, and each tile its own rows', async () => {
+    const { sent, counted } = counting();
+    const filter: Filter = { and: [{ column: 'dense_id', op: '>=', value: 100 }, { column: 'dense_id', op: '<', value: 200 }] };
+    const scan = (await open(CORPUS, { engine: counted })).scan({ type: 'Person', filter, select: ['dense_id'] });
+    sent.length = 0;
+    const batches = await scan.read([at(1), at(2), at(3)]);
+    expect(sent).toHaveLength(1);
+    expect(batches.map((b) => b.numRows)).toEqual([28, 64, 8]);
+    expect(batches.flatMap((b) => column(b, 'dense_id'))).toEqual(Array.from({ length: 100 }, (_, i) => BigInt(100 + i)));
+  });
+
+  it('answers a tile its statistics exclude with no request, and that tile breaks the run', async () => {
+    const { sent, counted } = counting();
+    const scan = (await open(CORPUS, { engine: counted })).scan({
+      type: 'Person',
+      filter: { or: [{ column: 'dense_id', op: '<', value: 100 }, { column: 'dense_id', op: '>=', value: 256 }] },
+      select: ['dense_id'],
+    });
+    sent.length = 0;
+    const batches = await scan.read([at(0), at(1), at(2), at(3), at(4)]);
+    expect(batches.map((b) => b.numRows)).toEqual([64, 36, 0, 0, 44]);
+    expect(sent).toHaveLength(2);
+  });
+
+  it('rejects the whole read with AbortError when aborted mid-run, and the engine answers the next', async () => {
+    const slow: Engine = {
+      ...engine,
+      async query(sql, options) {
+        await new Promise((r) => setTimeout(r, 50));
+        options?.signal?.throwIfAborted();
+        return engine.query(sql, options);
+      },
+    };
+    const scan = (await open(CORPUS, { engine: slow })).scan({ type: 'Person' });
+    const controller = new AbortController();
+    const reading = scan.read([at(0), at(1), at(2), at(4)], { signal: controller.signal });
+    setTimeout(() => controller.abort(), 10);
+    await expect(reading).rejects.toMatchObject({ name: 'AbortError' });
+    const again = await scan.read([at(0), at(1), at(2), at(4)]);
+    expect(again.map((b) => b.numRows)).toEqual([64, 64, 64, 44]);
   });
 });
 
