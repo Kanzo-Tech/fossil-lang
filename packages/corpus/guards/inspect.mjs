@@ -52,7 +52,7 @@ function declaredCount(value) {
  * disorder per orientation the moment it does. A file whose name claims no tile keeps its place by
  * name, since there is no number to sort it by.
  */
-function payload(dir) {
+export function payload(dir) {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
   return readdirSync(dir)
     .filter((name) => name.endsWith(".parquet"))
@@ -192,7 +192,34 @@ function cellsOf(info) {
   // written that way has declared no field this reads.
   const tree = Array.isArray(declared) ? {} : declared;
   const named = tree.mode_channel === undefined ? null : String(tree.mode_channel).trim();
-  return { modeChannel: named === "" ? null : named };
+  const prefix = String(tree.prefix ?? "").replace(/\/+$/, "");
+  return { modeChannel: named === "" ? null : named, prefix: prefix === "" ? null : prefix };
+}
+
+/**
+ * Every row group of a set of zooms, one row per column, with what its footer says: the SQL a
+ * tile manifest is written from and checked against.
+ *
+ * `zooms` is `[{ z, path, tile }]`: `tile` is the tile a file-per-tile file holds, or `null` where
+ * the file is a row-group container and the ordinal is the tile. A bound is kept only for a column
+ * of an integer or floating-point type — `INT32`/`INT64` with no converted type or an integer one,
+ * `FLOAT`, `DOUBLE` — which is the set `crates/fossil-sinks/src/tiles.rs` publishes; a string, a
+ * date or a boolean is counted for nulls and not bounded.
+ */
+export function footerSql(zooms) {
+  const values = zooms.map((z) => `(${z.z}, '${lit(z.path)}', ${z.tile === null ? "NULL" : z.tile})`);
+  const list = `[${zooms.map((z) => `'${lit(z.path)}'`).join(", ")}]`;
+  const bounded =
+    "(m.type IN ('FLOAT', 'DOUBLE') OR (m.type IN ('INT32', 'INT64') AND " +
+    "(s.converted_type IS NULL OR regexp_matches(s.converted_type, '^U?INT_(8|16|32|64)$'))))";
+  return `SELECT v.z::INTEGER AS z, coalesce(v.t, m.row_group_id)::BIGINT AS tile, m.row_group_id,
+                 m.row_group_num_rows AS rows, m.path_in_schema AS col, m.type,
+                 m.stats_null_count AS nulls,
+                 CASE WHEN ${bounded} THEN m.stats_min_value END AS lo,
+                 CASE WHEN ${bounded} THEN m.stats_max_value END AS hi
+            FROM (VALUES ${values.join(", ")}) v(z, f, t)
+            JOIN parquet_metadata(${list}) m ON m.file_name = v.f
+            JOIN parquet_schema(${list}) s ON s.file_name = m.file_name AND s.name = m.path_in_schema`;
 }
 
 /**
@@ -295,6 +322,15 @@ export function inspect(root) {
        * holds the two together: nothing in either block can see the other.
        */
       cells: cellsOf(info),
+      /**
+       * The tile manifest this type names, as a path under the corpus root, or `null` for a type
+       * that names none — a reader then reads the footers, which is every corpus written before
+       * the field. `tile-manifest` is what holds the file against those footers.
+       */
+      tileManifest:
+        info.tile_manifest === undefined || String(info.tile_manifest).trim() === ""
+          ? null
+          : join(root, prefix, String(info.tile_manifest).trim()),
       /**
        * Every projection this type declares, the payload included — see {@link projectionsOf}.
        *

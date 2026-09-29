@@ -427,6 +427,7 @@ pub fn run(
     // pass just chose. Nothing in front of the bytes knows how many communities
     // Louvain will find.
     graph.declare_channels(report.channels);
+    graph.declare_tiles(report.tiles);
     graph
         .write_manifests(&dest_dir)
         .map_err(|e| miette::miette!("write manifests: {e}"))?;

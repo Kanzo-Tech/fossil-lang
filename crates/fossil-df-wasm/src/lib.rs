@@ -211,6 +211,7 @@ impl Executor {
         // not exist until the pass has run. The tab declares them because the tab
         // ran the pass — see this function's doc for why it is not allowed to skip.
         graph.declare_channels(layout.channels);
+        graph.declare_tiles(layout.tiles);
         // **The report is built here — after every declaration — and the position of
         // this line is the whole of what it says.** [`RunReport::of`] takes a
         // snapshot of `graph.manifest()`, so a report built earlier states the

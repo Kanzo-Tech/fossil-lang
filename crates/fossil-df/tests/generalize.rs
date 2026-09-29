@@ -164,6 +164,7 @@ fn corpus(batches: usize, null_postcodes: usize) -> GraphArData {
         // And no channels, for the same reason: a domain is a measurement
         // and the pass is what takes it.
         channels: Vec::new(),
+        tiles: Vec::new(),
         schema: GraphSchema {
             nodes: vec![NodeType {
                 label: "Person".to_string(),

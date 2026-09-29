@@ -72,6 +72,21 @@ SELECT file_name, row_group_id, path_in_schema,
  WHERE path_in_schema IN ('x', 'y');
 ```
 
+Where the type's document names a `tile_manifest:`, the same boxes are one file, and no footer is
+opened to learn them
+([the tile manifest](/docs/format/conventions/addressing#the-tile-manifest-is-the-footers-published-once)):
+
+```sql
+WITH m AS (SELECT unnest(json_extract(json, '$.matrices[*]')) AS m
+             FROM read_json_objects('vertex/Person/tile-manifest.json')),
+     t AS (SELECT (m->>'z')::INT AS z, unnest(json_extract(m, '$.tiles[*]')) AS t FROM m)
+SELECT z, t->>'tile' AS tile,
+       t->'lower_bounds'->>'x' AS x_lo, t->'upper_bounds'->>'x' AS x_hi,
+       t->'lower_bounds'->>'y' AS y_lo, t->'upper_bounds'->>'y' AS y_hi
+  FROM t
+ WHERE z = (SELECT max((m->>'z')::INT) FROM m);
+```
+
 Take `min_value`/`max_value` before `min`/`max`: the deprecated pair is signed-comparison only and
 is empty for an unsigned column, which is every addressing column there is. Keep the tiles whose box
 meets the window and **hand them over as a set of files, never as a `WHERE` over the ranges** —

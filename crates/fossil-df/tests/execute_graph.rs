@@ -140,7 +140,7 @@ async fn execute_graph_emits_one_manifest_and_the_report_repeats_it() {
             "edge/Order_placedBy_Person/Order_placedBy_Person.edge.yml",
         ],
     );
-    let person_yml = &manifests[1].yaml;
+    let person_yml = &manifests[1].text;
     assert!(person_yml.contains("type: Person"), "{person_yml}");
     assert!(
         person_yml.contains("iri: https://example.org/Person"),

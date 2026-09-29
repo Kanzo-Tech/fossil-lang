@@ -58,6 +58,7 @@ pub mod community;
 pub mod morton;
 pub mod pass;
 pub mod place;
+mod statistics;
 
 pub use community::{community_hierarchy, weakly_connected_components};
 pub use pass::{

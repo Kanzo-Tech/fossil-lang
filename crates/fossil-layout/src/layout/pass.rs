@@ -12,6 +12,7 @@ use super::community::{
 };
 use super::morton::{morton_codes, morton_ranks};
 use super::place::{CLUSTER_BUDGET, cluster_layout, place_after};
+use super::statistics::{manifest, tile_statistics};
 // ──────────────────────────────────────────────────────────────────────────
 // W3.1b — integration: apply the pure layout to the written GraphAr vertices.
 // ──────────────────────────────────────────────────────────────────────────
@@ -27,6 +28,7 @@ use fossil_tile_writer::TileWriter;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
 use fossil_sinks::manifest::{CELL_PREFIX, CellTree, Channel, TILES_FILE, VertexLevels};
+use fossil_sinks::tiles::{TileManifest, TileStatistics};
 
 /// `row_of_dense[d]` when no row of the vertex file carries `dense_id` `d`.
 ///
@@ -260,6 +262,14 @@ pub struct LayoutReport {
     /// declaration about a column no writer produces, which is the error
     /// `/docs/design/discarded` counts at nine scales.
     pub channels: Vec<(String, Vec<Channel>)>,
+    /// **Every tile the pass wrote for a vertex type, with its statistics** —
+    /// the tile manifest, one entry per type that has rows, keyed by
+    /// [`VertexLayoutTarget::type_name`].
+    ///
+    /// A measurement for the reason [`Self::pyramids`] is one: the bounds are
+    /// read off the footers the pass closes, and nothing in front of the bytes
+    /// knows them.
+    pub tiles: Vec<(String, TileManifest)>,
 }
 
 /// Failure modes of [`enrich_layout`].
@@ -927,6 +937,10 @@ pub fn enrich_layout_with(
     // same number the levels are planned from.
     let mut counts: Vec<u64> = vec![0; targets.len()];
 
+    // Each type's payload tile statistics, off the footer its writer closes —
+    // the finest matrix of the tile manifest the report declares at the end.
+    let mut payload_tiles: Vec<Vec<TileStatistics>> = vec![Vec::new(); targets.len()];
+
     for (index, target) in targets.iter().enumerate() {
         // What names this type in an error and in the memory report. It was the
         // vertex Parquet's URL, which was a fine label right up until there was
@@ -1207,7 +1221,8 @@ pub fn enrich_layout_with(
             )?;
             writer.tile(&enriched).map_err(write_err(&payload))?;
         }
-        writer.finish().map_err(write_err(&payload))?;
+        let footer = writer.finish().map_err(write_err(&payload))?;
+        payload_tiles[index] = tile_statistics(&footer, &batch_refs[0].schema());
         probe.mark("gather + write vertex tiles");
 
         // The pyramid, when the type is big enough to have earned one.
@@ -1464,7 +1479,14 @@ pub fn enrich_layout_with(
     // comes back declared — see `Pyramid::write` for why the writer is what
     // states it rather than a plan written in front of the bytes.
     for (index, target) in targets.iter().enumerate() {
+        if counts[index] == 0 {
+            continue;
+        }
+        let payload = std::mem::take(&mut payload_tiles[index]);
         let Some(pyramid) = pyramids[index].as_mut() else {
+            report
+                .tiles
+                .push((target.type_name.clone(), manifest(payload, Vec::new())));
             continue;
         };
         // **The self-relations, source-ordered**, which is what a cell's
@@ -1494,8 +1516,11 @@ pub fn enrich_layout_with(
 
         let prefix = format!("{}{CELL_PREFIX}", target.chunk_prefix);
         io.ensure_prefix(&prefix)?;
-        let tree = pyramid.write(io, &prefix, target.chunk_size, counts[index], &edges)?;
+        let (tree, rungs) = pyramid.write(io, &prefix, target.chunk_size, counts[index], &edges)?;
         report.pyramids.push((target.type_name.clone(), tree));
+        report
+            .tiles
+            .push((target.type_name.clone(), manifest(payload, rungs)));
         probe.mark(&format!("write cells — {}", target.type_name));
     }
 

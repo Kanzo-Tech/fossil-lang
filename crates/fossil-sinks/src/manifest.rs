@@ -64,6 +64,11 @@ pub const GRAPHAR_VERSION: &str = "gar/v1";
 /// tiles. `@fossil-lang/corpus` spells the same constant.
 pub const TILES_FILE: &str = "tiles.parquet";
 
+/// The tile manifest of a vertex type, under its [`VertexInfo::prefix`]: JSON,
+/// one per type, named from the type's document by
+/// [`VertexInfo::tile_manifest`]. See [`crate::tiles`].
+pub const TILE_MANIFEST_FILE: &str = "tile-manifest.json";
+
 /// The filename stem of a **level set**, under a vertex type's own
 /// [`VertexInfo::prefix`]: level `k` lives under `<prefix>l{k}/`, and inside it
 /// the container rules apply unchanged. See [`VertexLevels`].
@@ -333,6 +338,20 @@ pub struct VertexInfo {
     /// one of their readers something about a partition nobody computed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cells: Option<CellTree>,
+    /// **Where this type's tile manifest is**, relative to [`Self::prefix`] —
+    /// every tile at every zoom with the statistics a planner prunes on. See
+    /// [`crate::tiles`].
+    ///
+    /// A path and not the manifest, and that was measured: inline, the entries
+    /// are parsed again by every reader of this document on every verb call —
+    /// 56.7 ms per call at ten million vertices against 0.44 ms with the path —
+    /// and opening costs 46.0 ms against 14.2 plus one round trip.
+    /// `/docs/design/backend` has the table and what would reverse it.
+    ///
+    /// `None` is a statement about the writer: a corpus written before the
+    /// field, or by a writer that publishes none, is read from its footers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tile_manifest: Option<String>,
     /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
     pub version: String,
 }
@@ -1627,6 +1646,9 @@ impl VertexInfo {
             // quotient per rung, which the caller that decides to pay for it
             // declares with `with_cells`.
             cells: None,
+            // No tile manifest until a writer that read its footers says where
+            // it put one, with `with_tile_manifest`.
+            tile_manifest: None,
             version: GRAPHAR_VERSION.to_string(),
         }
     }
@@ -1688,6 +1710,14 @@ impl VertexInfo {
     #[must_use]
     pub fn with_cells(mut self, cells: CellTree) -> Self {
         self.cells = Some(cells);
+        self
+    }
+
+    /// Declare that this type's tile manifest is published, at
+    /// [`TILE_MANIFEST_FILE`] under [`Self::prefix`].
+    #[must_use]
+    pub fn with_tile_manifest(mut self) -> Self {
+        self.tile_manifest = Some(TILE_MANIFEST_FILE.to_string());
         self
     }
 

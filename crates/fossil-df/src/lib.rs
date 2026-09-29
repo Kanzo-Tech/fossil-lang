@@ -151,6 +151,11 @@ pub struct GraphArData {
     /// the same statement as declaring an empty list — see
     /// `fossil_sinks::manifest::VertexInfo::channels` for the three states.
     pub channels: Vec<(String, Vec<fossil_sinks::manifest::Channel>)>,
+    /// **The tile manifest each vertex type's tiles are described by**, keyed by
+    /// its label — the statistics of every tile the layout pass wrote, read off
+    /// the footers it closed. Empty until the pass has run, for
+    /// [`Self::pyramids`]' reason.
+    pub tiles: Vec<(String, fossil_sinks::tiles::TileManifest)>,
 }
 
 /// A materialised edge's adjacency data in both orientations — `by_source` (CSR,
@@ -172,11 +177,12 @@ pub struct EdgeTable {
     pub dropped: u64,
 }
 
-/// One emitted `GraphAr` manifest YAML + its dataset-relative path.
+/// One emitted manifest document + its dataset-relative path: a `GraphAr`
+/// YAML, or a vertex type's JSON tile manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManifestFile {
     pub rel_path: String,
-    pub yaml: String,
+    pub text: String,
 }
 
 /// Execute a whole program's mappings into the `GraphAr` graph.
@@ -265,6 +271,7 @@ pub async fn execute_graph<'db>(
         privacy: Privacy::Undeclared,
         pyramids: Vec::new(),
         channels: Vec::new(),
+        tiles: Vec::new(),
         schema,
         vertices,
         edges,
@@ -1878,6 +1885,14 @@ impl GraphArData {
         self.pyramids = pyramids;
     }
 
+    /// **Record the tile manifests the layout pass read off its footers.**
+    ///
+    /// [`Self::declare_pyramids`]' seam and its rule: the list **is** the
+    /// declaration, so this replaces rather than appends.
+    pub fn declare_tiles(&mut self, tiles: Vec<(String, fossil_sinks::tiles::TileManifest)>) {
+        self.tiles = tiles;
+    }
+
     /// **Record the channels the layout pass measured a domain for.**
     ///
     /// [`Self::declare_pyramids`]' seam and its rule: the list **is** the
@@ -1997,6 +2012,13 @@ impl GraphArData {
                 {
                     info = info.with_channels(declared.clone());
                 }
+                // **And where its tile manifest is**, for a type the pass read
+                // footers for. The path goes in the document and the entries in
+                // a file of their own — see `VertexInfo::tile_manifest` for the
+                // measurement that put them there.
+                if self.tiles.iter().any(|(label, _)| *label == node.label) {
+                    info = info.with_tile_manifest();
+                }
                 info
             })
             .collect();
@@ -2043,29 +2065,44 @@ impl GraphArData {
         })
     }
 
-    /// [`Self::manifest`] as YAML documents and the paths they go to:
-    /// the top-level `graph.graph.yml` index, one `vertex/<Type>.vertex.yml` per
-    /// node type, and one `edge/<dir>/<dir>.edge.yml` per edge type.
+    /// [`Self::manifest`] as documents and the paths they go to: the
+    /// top-level `graph.graph.yml` index, one `vertex/<Type>.vertex.yml` per
+    /// node type, the tile manifest each of those names, and one
+    /// `edge/<dir>/<dir>.edge.yml` per edge type.
     ///
     /// # Errors
-    /// Propagates `serde_yaml_ng` serialization errors (cannot fail for these
-    /// plain structs, but the signature is honest).
-    pub fn manifests(&self) -> Result<Vec<ManifestFile>, serde_yaml_ng::Error> {
+    /// Propagates serialization errors (cannot fail for these plain structs,
+    /// but the signature is honest).
+    pub fn manifests(&self) -> Result<Vec<ManifestFile>, files::EncodeError> {
         let (graph, vertices, edges) = self.manifest();
         let mut out = vec![ManifestFile {
             rel_path: "graph.graph.yml".to_string(),
-            yaml: graph.to_yaml()?,
+            text: graph.to_yaml()?,
         }];
         for (rel_path, info) in graph.vertices.iter().zip(&vertices) {
             out.push(ManifestFile {
                 rel_path: rel_path.clone(),
-                yaml: info.to_yaml()?,
+                text: info.to_yaml()?,
+            });
+        }
+        for info in &vertices {
+            let (Some(name), Some((_, tiles))) = (
+                &info.tile_manifest,
+                self.tiles
+                    .iter()
+                    .find(|(label, _)| *label == info.vertex_type),
+            ) else {
+                continue;
+            };
+            out.push(ManifestFile {
+                rel_path: format!("{}{name}", info.prefix),
+                text: tiles.to_json()?,
             });
         }
         for (rel_path, info) in graph.edges.iter().zip(&edges) {
             out.push(ManifestFile {
                 rel_path: rel_path.clone(),
-                yaml: info.to_yaml()?,
+                text: info.to_yaml()?,
             });
         }
         Ok(out)

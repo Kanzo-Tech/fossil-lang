@@ -32,6 +32,10 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # byte-writes Parquet, so the only emission here is YAML.
 serde = { workspace = true }
 serde_yaml_ng = { workspace = true }
+# The tile manifest's encoding (`src/tiles.rs`): JSON, because a reader parses
+# it on every open and `JSON.parse` is what a browser has natively. A leaf, and
+# wasm-clean.
+serde_json = { workspace = true }
 # `arrow-schema` sub-crate ONLY — NOT the `arrow` umbrella crate, whose default features
 # pull `arrow-ipc`/`arrow-csv`, and with them `mio`, which wasm32 cannot build.
 # `arrow_schema::DataType` is the single authority for GraphAr `data_type` spellings, and it
@@ -43,6 +47,4 @@ arrow-schema = { workspace = true }
 insta = { workspace = true }
 # Dev-only, and for one test: `tests/level_plan_vectors.rs` reads
 # `packages/corpus/guards/vectors.json` at runtime rather than transcribing its rows,
-# so a border edited on the other writer's side turns this crate red. It is a
-# dev-dependency, so it reaches no wasm build and no consumer.
-serde_json = { workspace = true }
+# so a border edited on the other writer's side turns this crate red.

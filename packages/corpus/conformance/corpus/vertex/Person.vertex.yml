@@ -44,4 +44,5 @@ cells:
   - knows
   mode_channel: community
   rungs: []
+tile_manifest: tile-manifest.json
 version: gar/v1

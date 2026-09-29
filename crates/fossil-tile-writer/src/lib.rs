@@ -24,6 +24,7 @@ use std::io::Write;
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use parquet::arrow::ArrowWriter;
+use parquet::file::metadata::ParquetMetaData;
 use parquet::file::properties::WriterProperties;
 
 /// One payload set as ONE Parquet whose row groups **are** its tiles: each
@@ -90,12 +91,17 @@ impl<W: Write + Send> TileWriter<W> {
         self.0.flush()
     }
 
-    /// Close the file, writing the footer that IS the reader's index.
+    /// Close the file, writing the footer that IS the reader's index, and hand
+    /// that footer back.
+    ///
+    /// Returned rather than dropped because it is what the tile manifest is read
+    /// off: the statistics a planner prunes on are the footer's, and a writer
+    /// that holds the footer it just wrote has no reason to compute them twice.
     ///
     /// # Errors
     /// Parquet encode failures.
-    pub fn finish(self) -> Result<(), parquet::errors::ParquetError> {
-        self.0.close().map(|_| ())
+    pub fn finish(self) -> Result<ParquetMetaData, parquet::errors::ParquetError> {
+        self.0.close()
     }
 }
 
