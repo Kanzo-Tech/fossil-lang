@@ -50,6 +50,8 @@ pub enum EncodeError {
     Parquet(#[from] parquet::errors::ParquetError),
     #[error("manifest yaml: {0}")]
     Yaml(#[from] serde_yaml_ng::Error),
+    #[error("tile manifest json: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 impl GraphArData {
@@ -84,10 +86,10 @@ impl GraphArData {
         &self,
         mut emit: impl FnMut(GraphArFile) -> Result<(), E>,
     ) -> Result<(), E> {
-        for manifest in self.manifests().map_err(EncodeError::from)? {
+        for manifest in self.manifests().map_err(E::from)? {
             emit(GraphArFile {
                 rel_path: manifest.rel_path,
-                bytes: manifest.yaml.into_bytes(),
+                bytes: manifest.text.into_bytes(),
             })?;
         }
         Ok(())

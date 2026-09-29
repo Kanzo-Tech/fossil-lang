@@ -38,7 +38,7 @@
 
 use std::path::Path;
 
-use fossil_sinks::manifest::{TILES_FILE, VertexInfo};
+use fossil_sinks::manifest::{TILE_MANIFEST_FILE, TILES_FILE, VertexInfo};
 
 const PROGRAM: &str = "\
 type { Person } := io.shex(\"person.shex\")
@@ -176,11 +176,12 @@ fn the_vertices_are_the_tile_prefix_and_the_staged_parquet_is_gone() {
         "the staged single-file Parquet is the layout pass's input and it is deleted"
     );
 
-    // ONE payload file under the prefix, beside the identity index, and nothing
-    // else. It counted `.parquet` entries against the tile count, which is the
-    // same question asked of the container that existed then: `chunk{k}` files
-    // are gone, so the entry that must be there is `tiles.parquet` and a second
-    // `.parquet` beside it is two containers for one set of rows.
+    // ONE payload file under the prefix, beside the identity index and the tile
+    // manifest the type's document names, and nothing else. It counted
+    // `.parquet` entries against the tile count, which is the same question
+    // asked of the container that existed then: `chunk{k}` files are gone, so
+    // the entry that must be there is `tiles.parquet` and a second `.parquet`
+    // beside it is two containers for one set of rows.
     let mut emitted: Vec<String> = std::fs::read_dir(dest.join(&vertex.prefix))
         .expect("the prefix is a directory")
         .filter_map(std::result::Result::ok)
@@ -189,8 +190,12 @@ fn the_vertices_are_the_tile_prefix_and_the_staged_parquet_is_gone() {
     emitted.sort();
     assert_eq!(
         emitted,
-        vec!["index".to_string(), TILES_FILE.to_string()],
-        "the prefix holds the payload and the index, and nothing else"
+        vec![
+            "index".to_string(),
+            TILE_MANIFEST_FILE.to_string(),
+            TILES_FILE.to_string()
+        ],
+        "the prefix holds the payload, the index and the tile manifest, and nothing else"
     );
 
     // And the tiles are in the footer, which is where the count moved: a

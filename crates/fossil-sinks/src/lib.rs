@@ -17,3 +17,4 @@
 /// none grows an edge to reach the table.
 pub mod generated;
 pub mod manifest;
+pub mod tiles;

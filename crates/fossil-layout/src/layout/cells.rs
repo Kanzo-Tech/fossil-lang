@@ -77,8 +77,10 @@ use fossil_sinks::manifest::{
     CellRung, CellTree, CoordinateSystem, QUOTIENT_PREFIX, TILES_FILE, arrow_type,
     declared_properties,
 };
+use fossil_sinks::tiles::TileStatistics;
 
 use super::pass::LayoutError;
+use super::statistics::tile_statistics;
 use crate::io::{LayoutIo, Sink};
 use fossil_tile_writer::TileWriter;
 
@@ -270,6 +272,9 @@ impl Pyramid {
     /// what it wrote, and the plan is the part it checks itself against rather
     /// than the part it reports.
     ///
+    /// Beside the declaration, each rung's tile statistics, rung 1 first — read
+    /// off the footer each rung's writer closes, for the tile manifest.
+    ///
     /// # Errors
     ///
     /// [`LayoutError`] on the first failing write, or on a prefix naming a
@@ -281,7 +286,7 @@ impl Pyramid {
         chunk_size: u64,
         vertex_count: u64,
         edges: &[Edges<'_>],
-    ) -> Result<CellTree, LayoutError> {
+    ) -> Result<(CellTree, Vec<Vec<TileStatistics>>), LayoutError> {
         let cell_schema = schema_of(CELL_COLUMNS, "a cell row");
         let quotient_schema = schema_of(QUOTIENT_COLUMNS, "a quotient edge");
         let tile = usize::try_from(chunk_size).unwrap_or(usize::MAX).max(1);
@@ -290,6 +295,7 @@ impl Pyramid {
         // one number in the document that is a measurement, so the declaration
         // is built out of what the loop found rather than patched into a plan.
         let mut declared = Vec::with_capacity(self.rungs.len());
+        let mut statistics = Vec::with_capacity(self.rungs.len());
         for index in 0..self.rungs.len() {
             let at = u32::try_from(index + 1).unwrap_or(u32::MAX);
             let here = format!("{prefix}{}", CellTree::rung_prefix(at));
@@ -327,7 +333,8 @@ impl Pyramid {
                     .map_err(write_err(&url))?;
                 lo = hi;
             }
-            writer.finish().map_err(write_err(&url))?;
+            let footer = writer.finish().map_err(write_err(&url))?;
+            statistics.push(tile_statistics(&footer, &cell_schema));
 
             // The rung, as the manifest states it: the count it holds, and a
             // quotient only where one was written.
@@ -370,11 +377,12 @@ impl Pyramid {
         // referent is nowhere in the column, so the channel it summarises is
         // NAMED — the name the pass declared the partition under, carried here
         // since `summarise` rather than spelled a second time.
-        Ok(CellTree::new(self.vertices_per_cell, relations, declared)
+        let tree = CellTree::new(self.vertices_per_cell, relations, declared)
             .with_coordinates(vec![CoordinateSystem::derived(
                 "cell", "x", "y", DERIVED_BY,
             )])
-            .with_mode_channel(self.mode_channel.clone()))
+            .with_mode_channel(self.mode_channel.clone());
+        Ok((tree, statistics))
     }
 
     /// One rung's quotient, or `None` where the rung has no cross edges.
