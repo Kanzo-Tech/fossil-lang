@@ -166,7 +166,7 @@ mod tests {
     /// This is the rule as a test: the footer of a written type
     /// must carry one `x`/`y` box per addressable tile, and it does that only if
     /// the row groups are cut at the tile boundary. What it cannot prove is that
-    /// the boxes prune well — that is a property of the Morton order upstream,
+    /// the boxes prune well — that is a property of the Hilbert order upstream,
     /// and `examples/tile_layout.rs` is where it is measured.
     // The fixture's own numbers: two tiles and a remainder of seven, so every
     // cast here is over a value this function wrote and none is over an input.

@@ -6,7 +6,8 @@
  * the format goes wrong. Iceberg publishes its bucket transform as a formula plus a table of
  * vectors — `34 → 2017239379` — and searching for that constant finds it in the tests of
  * independent implementations that copied it. PMTiles dispatches its Hilbert curve with a link to
- * Wikipedia, and every port re-derives it differently.
+ * Wikipedia, and every port re-derives it differently — which is why this curve, which is also
+ * Hilbert's, is published with a table of its own.
  *
  * This file is written to be copied. It has no imports.
  *
@@ -21,8 +22,9 @@
  *     cell ids anyway, because a `Number` carries 53 bits and a cell id carries 64. A binding does
  *     not protect a language boundary that cannot hold the value.
  *
- * The Morton half is 32-bit by construction: two `u16` quantised coordinates interleave into a
- * `u32`, and every operation below is masked to stay inside it.
+ * The curve is 32-bit by construction: two `u16` quantised coordinates index into a `u32`, and the
+ * index is accumulated in a `Number`, which holds it exactly, rather than through `|`, which would
+ * make it signed.
  */
 
 /** How many bits a `dense_id` is shifted right by to name the tile holding it. */
@@ -145,31 +147,38 @@ export function tailRows(count, chunkSize = TILE_ROWS) {
   return tiles === 0n ? 0n : count - (tiles - 1n) * chunkSize;
 }
 
-/** Spread the low 16 bits of `n` into the even bit positions of a `u32`. */
-function spread(n) {
-  let v = n & 0xffff;
-  v = (v | (v << 8)) & 0x00ff00ff;
-  v = (v | (v << 4)) & 0x0f0f0f0f;
-  v = (v | (v << 2)) & 0x33333333;
-  v = (v | (v << 1)) & 0x55555555;
-  return v >>> 0;
-}
-
 /**
- * Interleave two quantised coordinates into a 32-bit Morton (Z-order) code — `x` in the even bits,
- * `y` in the odd ones.
+ * A quantised position's index on the order-16 Hilbert curve — Wikipedia's `xy2d` at `n = 2^16`.
  *
- * `spread(y) << 1` reaches bit 31, so the result is a signed negative `Number` unless it is coerced
- * back to unsigned. That coercion is not a detail: a port that omits it sorts the top half of the
- * plane before the bottom half and produces a corpus that satisfies every count-based check and
- * addresses nothing.
+ * For each bit from the top, the quadrant contributes `s·s·((3·rx) ^ ry)` and the frame turns: when
+ * `ry` is 0 the coordinates are reflected across the grid (if `rx` is 1) and then swapped. Every
+ * aligned `2^k` square is one interval of `4^k` indices, which is what keeps a tile and a cell ranges
+ * of `dense_id`, and consecutive indices are always edge-adjacent cells.
+ *
+ * **The index is not accumulated with bit operators.** One step adds up to `3·2^30` and the total
+ * reaches `2^32 − 1`, so `|` or `+=` into an `Int32` would go negative at bit 31 — a port that does
+ * that sorts the second half of the curve first and writes a corpus every count-based check
+ * accepts. The coordinates stay under 16 bits, where `^` is safe.
  *
  * @param {number} x 0..65535
  * @param {number} y 0..65535
  * @returns {number} 0..4294967295
  */
-export function morton2(x, y) {
-  return (spread(x) | (spread(y) << 1)) >>> 0;
+export function hilbert2(x, y) {
+  let d = 0;
+  for (let s = 1 << 15; s > 0; s >>= 1) {
+    const rx = (x & s) !== 0 ? 1 : 0;
+    const ry = (y & s) !== 0 ? 1 : 0;
+    d += s * s * ((3 * rx) ^ ry);
+    if (ry === 0) {
+      if (rx === 1) {
+        x ^= 0xffff;
+        y ^= 0xffff;
+      }
+      [x, y] = [y, x];
+    }
+  }
+  return d;
 }
 
 /**
@@ -180,14 +189,14 @@ export function morton2(x, y) {
  * dividing by zero.
  *
  * **Every step is binary32**, which is why each one is wrapped in `Math.fround`. The writer is
- * `morton_codes` in `crates/fossil-layout/src/layout.rs`, whose positions, extent and intermediate
+ * `hilbert_codes` in `crates/fossil-layout/src/layout/hilbert.rs`, whose positions, extent and intermediate
  * ratio are all `f32`; JavaScript's own arithmetic is binary64, so a literal transcription of the
  * formula is a *different function*. It differs on 8 of the 44,850 integer cases with `lo = 0` and
  * `hi ∈ 2..299` — `quantize(147, 0, 167)` is 57687 in binary32 and 57686 in binary64 — and one unit
- * here is a different Morton code, a different rank, a different `dense_id` and a different tile.
+ * here is a different Hilbert code, a different rank, a different `dense_id` and a different tile.
  * `vectors.json` carries that case; the four rows beside it are exact in both widths and cannot.
  *
- * The DuckDB half of the guard (`mortonSql` in `guards.mjs`) spells the same thing `::FLOAT`.
+ * The DuckDB half of the guard (`hilbertSql` in `guards.mjs`) spells the same thing `::FLOAT`.
  *
  * @param {number} v
  * @param {number} lo
@@ -202,13 +211,13 @@ export function quantize(v, lo, hi) {
 }
 
 /**
- * The Morton code of a position within an extent — quantise, then interleave.
+ * The Hilbert code of a position within an extent — quantise, then index on the curve.
  *
  * @param {number} x
  * @param {number} y
  * @param {{minX: number, maxX: number, minY: number, maxY: number}} extent
  * @returns {number}
  */
-export function mortonOf(x, y, extent) {
-  return morton2(quantize(x, extent.minX, extent.maxX), quantize(y, extent.minY, extent.maxY));
+export function hilbertOf(x, y, extent) {
+  return hilbert2(quantize(x, extent.minX, extent.maxX), quantize(y, extent.minY, extent.maxY));
 }

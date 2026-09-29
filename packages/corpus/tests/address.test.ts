@@ -237,7 +237,7 @@ describe('the declared count', () => {
   it('still carries a row a Number implementation would fail', () => {
     // The table proves nothing about the width if every row fits in 53 bits. This is the check that
     // the separating row has not been dropped, which is how a published table quietly stops being
-    // evidence — the same guard the Morton half carries for its binary32 row.
+    // evidence — the same guard the quantisation carries for its binary32 row.
     const beyond = vectors.declared_count.vectors.filter(
       (v) => !Number.isSafeInteger(Number(v.count)),
     );

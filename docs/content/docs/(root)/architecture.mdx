@@ -22,7 +22,7 @@ and every reader names the ROLE it means rather than the name, because the eight
 emits were 545 string literals with no declaration any of them derived from.
 
 **Every one of the four is addressed by a shift, and nothing is listed.** `dense_id` is a vertex's
-rank in the Morton order of its own position; a tile is
+rank in the Hilbert order of its own position; a tile is
 `crates/fossil-sinks/src/manifest.rs, tile_of`, a level's address is the payload's shift plus `2k`
 by `crates/fossil-sinks/src/manifest.rs, STRIDE_BITS`, and a cell of rung `k` is `dense_id >> shift`
 with parent `r >> 2` — `crates/fossil-layout/src/layout/cells.rs, Pyramid`. There is no directory
@@ -44,7 +44,7 @@ true in.
 | the loop | where | what it produces |
 | --- | --- | --- |
 | every vertex, then every edge, with a hard barrier between them | `crates/fossil-df/src/lib.rs, execute_graph` | the payload columns and both adjacency orientations, as Arrow in memory |
-| partition, place, renumber into Morton order, tile | `crates/fossil-layout/src/layout/pass.rs, enrich_layout` | the payload on disk and the level pyramid |
+| partition, place, renumber into Hilbert order, tile | `crates/fossil-layout/src/layout/pass.rs, enrich_layout` | the payload on disk and the level pyramid |
 | one linear scan per rung, over the payload rather than the rung below | `crates/fossil-layout/src/layout/cells.rs, Pyramid` | the cell rows and the quotient edges |
 
 Nothing is staged and read back: the rows reach the pass as the batches the executor already held.

@@ -46,6 +46,7 @@ beforeAll(async () => {
   );
   await db.instantiate();
   const conn = db.connect();
+  conn.query(`SET parquet_metadata_cache = true`);
   conn.query(`SET temp_directory = '${spill}'`);
   const lent = new Map<string, string>();
   engine = {

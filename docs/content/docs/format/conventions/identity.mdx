@@ -62,13 +62,13 @@ vertex on hover, measured against one that names it on selection only.
 
 ## Searching for one is a second table, not a second column
 
-The payload is in Morton order, which is what makes a window a range and a tile a shift. A lookup by
+The payload is in Hilbert order, which is what makes a window a range and a tile a shift. A lookup by
 identity needs the other order, and **a table has one order**: a second key would break the first,
 and the first is the one every window depends on. So a vertex type may carry the same rows a **second
 time**, sorted by identity, as its own tiled table beside the payload:
 
 ```yaml
-# vertex/Person/chunk{k}.parquet        the payload — every column, in Morton order
+# vertex/Person/chunk{k}.parquet        the payload — every column, in Hilbert order
 # vertex/Person/index/tile{k}.parquet   the index — subject and dense_id, lexicographic
 index:
   prefix: index/
@@ -80,18 +80,18 @@ index:
 indexes that column instead, and a `prefix` without it names files whose sort a reader would have to
 guess. **The index is the one artefact of a corpus that is not a
 [projection](/docs/format/conventions/addressing#projections-the-payload-and-the-levels-in-one-list):
-it is a second ORDER over the same rows, so the Morton cut does not address it.** Everything else is
+it is a second ORDER over the same rows, so the spatial cut does not address it.** Everything else is
 that one sequence at some `scale`, whose tile `k` is a `dense_id` range; tile `k` here is the `k`th
 slice of the **sorted** order. Hence its own `chunk_size`, no `scale`, and files spelled `tile{k}`
 where a projection's are `chunk{k}`.
 
 ### Disjoint ranges are the whole mechanism
 
-Morton order and lexicographic order have nothing to do with each other, so a payload tile's footer
+Hilbert order and lexicographic order have nothing to do with each other, so a payload tile's footer
 for `subject` claims almost the whole alphabet. The index tiles are sorted, so theirs do not overlap:
 
 ```
-the payload, Morton order                index/, lexicographic order
+the payload, Hilbert order               index/, lexicographic order
 footer min/max for `subject`             footer min/max for `subject`
 
 chunk0     ex:a01 … ex:z98   ✗           tile0      ex:a01 … ex:a44

@@ -103,7 +103,7 @@ export const strideBits = (level: number): number => bitsPerLevel(level);
  * How many `dense_id`s one row of level `k` stands for — `4^k`.
  *
  * The decimation level *k* means **the vertices whose `dense_id` is a multiple of this**. Over a
- * Morton-ordered `dense_id` that is one vertex per quadtree cell of depth *k*, so a level is a level
+ * Hilbert-ordered `dense_id` that is one vertex per quadtree cell of depth *k*, so a level is a level
  * of the same curve the tile address is read off — not a sample, not a budget, not a cap.
  */
 export const strideOf = (level: number): bigint => idsPerLevelRow(level);
@@ -298,14 +298,14 @@ export interface RungAddress {
  * Where a vertex type's identity index lives.
  *
  * **The one artefact of a corpus that is not a {@link ProjectionAddress}**: it is a second ORDER
- * over the same rows, so the Morton cut does not address it — which is why it carries a
+ * over the same rows, so the spatial cut does not address it — which is why it carries a
  * {@link IndexAddress.chunkSize} of its own, no scale, and keeps the `tile{k}` filename stem every
  * projection gave up. It cannot be a column of the payload: one table has one sort, the payload's
- * is Morton because the spatial order IS the id space, and a lookup by identity needs the other.
+ * is Hilbert because the spatial order IS the id space, and a lookup by identity needs the other.
  *
  * Its tiles are sorted by {@link IndexAddress.orderedBy} with disjoint ranges, which is what lets a
  * reader binary-search the footers to one tile — the thing the payload's own footers cannot do for
- * `subject`, because Morton order and lexicographic order have nothing to do with each other and
+ * `subject`, because Hilbert order and lexicographic order have nothing to do with each other and
  * every tile's range overlaps every other's.
  */
 export interface IndexAddress {

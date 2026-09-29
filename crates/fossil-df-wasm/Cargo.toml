@@ -24,7 +24,7 @@ workspace = true
 [dependencies]
 # The executor itself (lower_to_mir_pg → DataFusion → GraphArData → to_files).
 fossil-df = { path = "../fossil-df" }
-# The layout pass — Louvain communities and the Morton renumbering — run here,
+# The layout pass — Louvain communities and the Hilbert renumbering — run here,
 # in memory, after `execute_graph`. It is the same crate and the same entry
 # point the native host calls, driven through `fossil_layout::io::MemoryFs`
 # because a browser has no filesystem. Without this edge the tab wrote the

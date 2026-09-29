@@ -42,8 +42,8 @@
 //!   milliseconds are not measured at all.
 //! - **The community structure is stipulated, not computed.** `community_hierarchy`
 //!   is not run — the corpus is `k` equal-sized clusters laid out by the same
-//!   `cluster_layout` phyllotaxis-on-a-Z-grid the writer uses, then renumbered by
-//!   the same Morton rank. What the measurement depends on is Morton order over a
+//!   `cluster_layout` phyllotaxis-on-a-Hilbert-grid the writer uses, then renumbered
+//!   by the same Hilbert rank. What the measurement depends on is that order over a
 //!   clumpy 2-D placement, and that is reproduced exactly; what is not reproduced
 //!   is a skewed community-size distribution, which would change the *needed*
 //!   counts and is untested here.
@@ -134,7 +134,7 @@ struct Corpus {
     x: Vec<f32>,
     y: Vec<f32>,
     cluster: Vec<u32>,
-    /// The pre-Morton id, which is what the subject IRI is built from. `dense_id`
+    /// The pre-renumbering id, which is what the subject IRI is built from. `dense_id`
     /// is an ADDRESS and the subject IRI is the identity: redoing the layout
     /// renumbers every `dense_id`, so it cannot also be what a vertex is.
     orig: Vec<u32>,
@@ -159,7 +159,8 @@ const CELL_UNIT: f32 = 2.0 * INTRA_CLUSTER_RADIUS * (1.0 + CLUSTER_MARGIN_RATIO)
 
 /// `fossil_layout::layout::cluster_layout`, verbatim in behaviour: every group
 /// an aligned square of the quaternary sized to its own membership, handed out
-/// by bumping a Z-order frontier over the whole root square, phyllotaxis inside.
+/// by bumping a Hilbert-order frontier over the whole root square, phyllotaxis
+/// inside.
 ///
 /// The clusters this example builds are all the same size, so the only part of
 /// that rule it exercises is the block size — which is exactly what it needs:
@@ -180,6 +181,7 @@ fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
         .map(|&m| next_power_of_four(u64::from(m)))
         .sum();
     let root = next_power_of_four(demand);
+    let root_order = root.trailing_zeros() / 2;
     let mut centre = vec![(0.0f32, 0.0f32); num_clusters as usize];
     let (mut next, mut asked) = (0u64, 0u64);
     for (c, &members) in sizes.iter().enumerate() {
@@ -196,7 +198,13 @@ fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
         let start = next.max(spread).div_ceil(blocks) * blocks;
         next = start + blocks;
 
-        let (col, row) = morton_decode(u32::try_from(start).unwrap_or(u32::MAX));
+        let fine = 2 * (16 - root_order);
+        let (col, row) = hilbert_decode(u32::try_from(start << fine).unwrap_or(u32::MAX));
+        let side_bits = blocks.trailing_zeros() / 2 + fine / 2;
+        let (col, row) = (
+            (col >> side_bits) << (side_bits - fine / 2),
+            (row >> side_bits) << (side_bits - fine / 2),
+        );
         let half = (blocks as f32).sqrt() * (CELL_UNIT / 2.0);
         centre[c] = (
             (col as f32).mul_add(CELL_UNIT, half),
@@ -229,33 +237,53 @@ const fn next_power_of_four(n: u64) -> u64 {
     blocks
 }
 
-/// Inverse of [`morton2`] — the grid cell a cluster id occupies.
-const fn morton_decode(code: u32) -> (u32, u32) {
-    const fn compact(mut n: u32) -> u32 {
-        n &= 0x5555_5555;
-        n = (n | (n >> 1)) & 0x3333_3333;
-        n = (n | (n >> 2)) & 0x0f0f_0f0f;
-        n = (n | (n >> 4)) & 0x00ff_00ff;
-        n = (n | (n >> 8)) & 0x0000_ffff;
-        n
+/// `fossil_layout::layout::hilbert::hilbert_decode` — the grid cell at index
+/// `d` of the order-16 curve.
+const fn hilbert_decode(index: u32) -> (u32, u32) {
+    let (mut col, mut row) = (0u32, 0u32);
+    let mut rest = index;
+    let mut side = 1u32;
+    while side < (1 << 16) {
+        let rx = 1 & (rest / 2);
+        let ry = 1 & (rest ^ rx);
+        if ry == 0 {
+            if rx == 1 {
+                col = side - 1 - col;
+                row = side - 1 - row;
+            }
+            std::mem::swap(&mut col, &mut row);
+        }
+        col += side * rx;
+        row += side * ry;
+        rest /= 4;
+        side <<= 1;
     }
-    (compact(code), compact(code >> 1))
+    (col, row)
 }
 
-/// Interleave the low 16 bits of `x` and `y` — `fossil_layout::layout::morton2`.
-fn morton2(x: u16, y: u16) -> u32 {
-    fn spread(n: u16) -> u32 {
-        let mut n = u32::from(n);
-        n = (n | (n << 8)) & 0x00ff_00ff;
-        n = (n | (n << 4)) & 0x0f0f_0f0f;
-        n = (n | (n << 2)) & 0x3333_3333;
-        n = (n | (n << 1)) & 0x5555_5555;
-        n
+/// `fossil_layout::layout::hilbert::hilbert2` — a quantised position's index on
+/// the order-16 curve.
+fn hilbert2(x: u16, y: u16) -> u32 {
+    let (mut x, mut y) = (u32::from(x), u32::from(y));
+    let mut d = 0u32;
+    let mut s = 1u32 << 15;
+    while s > 0 {
+        let rx = u32::from(x & s != 0);
+        let ry = u32::from(y & s != 0);
+        d += s * s * ((3 * rx) ^ ry);
+        if ry == 0 {
+            if rx == 1 {
+                x ^= 0xffff;
+                y ^= 0xffff;
+            }
+            std::mem::swap(&mut x, &mut y);
+        }
+        s >>= 1;
     }
-    spread(x) | (spread(y) << 1)
+    d
 }
 
-/// `k` equal clusters over `n` vertices, placed and then renumbered into Morton
+/// `k` equal clusters over `n` vertices, placed and then renumbered into Hilbert
 /// order — which is what `enrich_layout` does, minus the community detection
 /// that decides the cluster ids.
 fn build_corpus(n: usize, k: u32, full: bool) -> Corpus {
@@ -280,10 +308,10 @@ fn build_corpus(n: usize, k: u32, full: bool) -> Corpus {
     };
     let codes: Vec<u32> = positions
         .iter()
-        .map(|&(x, y)| morton2(quantize(x, min_x, max_x), quantize(y, min_y, max_y)))
+        .map(|&(x, y)| hilbert2(quantize(x, min_x, max_x), quantize(y, min_y, max_y)))
         .collect();
 
-    // The new `dense_id` is the Morton rank, so emit the rows in that order.
+    // The new `dense_id` is the Hilbert rank, so emit the rows in that order.
     let mut order: Vec<u32> = (0..n as u32).collect();
     order.sort_unstable_by_key(|&i| (codes[i as usize], i));
 
@@ -859,7 +887,7 @@ fn main() {
         max_y = max_y.max(corpus.y[i]);
     }
     let span = (max_x - min_x).max(max_y - min_y);
-    // Nine centres spread through `dense_id`, which is Morton order, so they
+    // Nine centres spread through `dense_id`, which is Hilbert order, so they
     // are spread over the canvas and every one lands on a vertex. A literal pan
     // — one centre, nine steps of a half-width — walks off the edge of a corpus
     // this shape and measures three empty windows, which is what the first run

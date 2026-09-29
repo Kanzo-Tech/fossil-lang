@@ -31,7 +31,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execute, lit, query, scalar } from "./duck.mjs";
-import { TILE_ROWS, mortonOf } from "./arithmetic.mjs";
+import { TILE_ROWS, hilbertOf } from "./arithmetic.mjs";
 import { partOf, tileSql } from "./inspect.mjs";
 
 /**
@@ -68,7 +68,7 @@ function positions(count, clusters) {
 }
 
 /**
- * The renumbering, which is the whole of the spatial order: rank every vertex by the Morton code of
+ * The renumbering, which is the whole of the spatial order: rank every vertex by the Hilbert code of
  * its quantised position and let that rank *be* its `dense_id`. Ties break on the pre-layout index,
  * so the ranking is total and the same input always produces the same corpus.
  */
@@ -83,8 +83,8 @@ function renumber(points) {
     if (p.y < extent.minY) extent.minY = p.y;
     if (p.y > extent.maxY) extent.maxY = p.y;
   }
-  const coded = points.map((p, index) => ({ ...p, index, morton: mortonOf(p.x, p.y, extent) }));
-  coded.sort((a, b) => a.morton - b.morton || a.index - b.index);
+  const coded = points.map((p, index) => ({ ...p, index, code: hilbertOf(p.x, p.y, extent) }));
+  coded.sort((a, b) => a.code - b.code || a.index - b.index);
   const denseOf = new Array(points.length);
   coded.forEach((p, dense) => {
     denseOf[p.index] = dense;
@@ -318,7 +318,7 @@ export function write(
   // of by position, carrying only the identity and the address it maps to.
   //
   // It cannot be a column of the payload, and that is the whole reason it is a
-  // second table: one table has one sort, the payload's is Morton because the
+  // second table: one table has one sort, the payload's is Hilbert because the
   // spatial order IS the id space, and a lookup by identity needs the other one.
   // Tiled with the same arithmetic in whichever container the corpus declares —
   // an index tile is a fixed slice of a total order, so a row group of
@@ -521,7 +521,7 @@ export function write(
       "    is_primary: false",
       ...levelProjections(levels, []),
       // The identity index, and the ONE artefact here that is not a projection: it is a second
-      // ORDER over the same rows, so the Morton cut does not address it and it carries a
+      // ORDER over the same rows, so the spatial cut does not address it and it carries a
       // `chunk_size` of its own instead of a scale.
       "index:",
       "  prefix: index/",

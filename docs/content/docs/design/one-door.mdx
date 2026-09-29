@@ -172,7 +172,7 @@ on a level.
 ## The relational work is two clauses, and the SQL still cannot go
 
 `crates/fossil-layout` makes the argument from the writer's side — *the relational work was never
-relational*: a tile is a slice of a Morton-ordered file, a stride is a modulo, a level is a modulo.
+relational*: a tile is a slice of a Hilbert-ordered file, a stride is a modulo, a level is a modulo.
 Read against `frame`, that is true of most of what the query says. Only two clauses are relational:
 the box test `x BETWEEN … AND y BETWEEN …`, and the join that finds the edges among the drawn set.
 Everything else — which tiles, which run of `dense_id`, which residues survive the level — is

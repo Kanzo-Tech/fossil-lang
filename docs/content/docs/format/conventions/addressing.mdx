@@ -1,6 +1,6 @@
 ---
 title: Addressing
-description: A tile is 4,096 rows of dense_id ordered by Morton code, its address is a shift, and the Parquet footer turns that address into a byte range. There is no tile tree and no index to discover.
+description: A tile is 4,096 rows of dense_id ordered by Hilbert code, its address is a shift, and the Parquet footer turns that address into a byte range. There is no tile tree and no index to discover.
 ---
 
 **A tile is a fixed range of 4,096 rows of `dense_id`**, and tile `i` *is* the range
@@ -27,35 +27,42 @@ does not have an address. Guard: `declared-tiling`.
 
 ## The order that makes an interval mean something
 
-**`dense_id` ascends with the Morton code of the vertex's position.** The id space *is* the spatial
+**`dense_id` ascends with the Hilbert code of the vertex's position.** The id space *is* the spatial
 order. Without it `dense_id >> 12` still names a tile, and that tile holds 4,096 vertices scattered
 across the whole canvas.
 
-A rectangle over a Morton order breaks into **O(√n) contiguous segments** — a property of the curve,
-not of the data. On an 8×8 quantised grid, window `x ∈ [2,5], y ∈ [1,4]` bracketed:
+A rectangle over a Hilbert order breaks into **O(√n) contiguous segments** — a property of the curve,
+not of the data. The order-16 curve read at an 8×8 grid, window `x ∈ [2,5], y ∈ [1,4]` bracketed:
 
 ```
   y
-  7 │ 42  43  46  47  58  59  62  63
-  6 │ 40  41  44  45  56  57  60  61
-  5 │ 34  35  38  39  50  51  54  55
-  4 │ 32  33 [36][37][48][49] 52  53
-  3 │ 10  11 [14][15][26][27] 30  31
-  2 │  8   9 [12][13][24][25] 28  29
-  1 │  2   3 [ 6][ 7][18][19] 22  23
-  0 │  0   1   4   5  16  17  20  21
+  7 │ 21  22  25  26  37  38  41  42
+  6 │ 20  23  24  27  36  39  40  43
+  5 │ 19  18  29  28  35  34  45  44
+  4 │ 16  17 [30][31][32][33] 46  47
+  3 │ 15  12 [11][10][53][52] 51  48
+  2 │ 14  13 [ 8][ 9][54][55] 50  49
+  1 │  1   2 [ 7][ 6][57][56] 61  62
+  0 │  0   3   4   5  58  59  60  63
     └────────────────────────────────
        0   1   2   3   4   5   6   7  x
 ```
 
-Sixteen ids, six runs, nothing over-read:
-`6·7 │ 12·13·14·15 │ 18·19 │ 24·25·26·27 │ 36·37 │ 48·49`. At five million vertices a window of 20,000 is **179 runs covering exactly 20,007 ids** — 0.4% of the
-corpus, zero over-read at run granularity. At tile granularity nine windows select **11–25 tiles
-where 10–21 are needed: 1.10×–1.20×, mean 1.14×**.
+Sixteen ids, three runs, nothing over-read: `6…11 │ 30…33 │ 52…57`. The Z-curve over the same window
+is six runs, and that is not the difference that matters. **Consecutive Hilbert codes are always
+neighbouring cells**, so a run that is *not* an aligned square — a tile, which starts wherever the
+ranks put it — is one connected patch, and its box is close to its own area. A Z-curve run that
+crosses a quad boundary jumps diagonally across its parent, and its box is the hull of both ends.
 
-The community hierarchy does not produce those runs: `community` is eight groups of 625,000 vertices
-each broken into **5,461 runs** of `dense_id`, and `cluster_id` is 15,310 groups with a median of 1
-vertex. The hierarchy gives the levels of *aggregation*; the curve gives the ranges of *bytes*.
+Measured over a million vertices the layout pass wrote (`crates/fossil-layout/examples/tile_compactness.rs`
+over `enrich_memory`'s fixture at mean degree 14), a tile's box is **1.41×** the area its rows would
+cover on a uniformly filled extent at the median and **1.9×** at worst, and a window of about 5,000
+vertices intersects **5 tiles at the median and 7 at p90** where 4 and 6 hold one of its vertices.
+
+The community hierarchy rides on the same runs rather than producing them: the placement gives every
+group an aligned square of the quaternary, and an aligned square is one interval of codes, so every
+`cluster_id` is one run of `dense_id` — 995 of 995 on that corpus. The hierarchy gives the levels
+of *aggregation*; the curve gives the ranges of *bytes*.
 
 **A new placement produces a new numbering**, so `dense_id` cannot also be the identity — that is
 [the subject IRI](/docs/format/conventions/identity#the-identity-is-the-subject-iri). Positions moved
@@ -72,23 +79,33 @@ q = round(clamp((v − lo) / (hi − lo), 0, 1) × 65535)
 
 <VectorTable of="quantize" />
 
-**Interleave** the quantised coordinates into a 32-bit code, `x` in the even bits, `y` in the odd.
+**Index** the quantised pair on the order-16 Hilbert curve — Wikipedia's `xy2d` at `n = 2^16`, the
+spelling a port is most likely to start from:
 
 ```
-morton = spread(x) | (spread(y) << 1)
+d = 0
+for s = 2^15, 2^14, …, 1:
+  rx = (x & s) > 0;  ry = (y & s) > 0
+  d += s · s · ((3 · rx) ^ ry)
+  if ry = 0:
+    if rx = 1:  x = 65535 − x;  y = 65535 − y
+    swap(x, y)
 ```
 
-<VectorTable of="morton2" />
+<VectorTable of="hilbert2" />
 
-`x = 0, y = 32768` is the row that matters most: `spread(y) << 1` reaches bit 31, so in a signed
-32-bit accumulator the result is negative and a port that does not coerce it back to unsigned sorts
-the top half of the plane first. That corpus satisfies every count-based check ever written and
-addresses nothing.
+`x = 65535, y = 32767` and `x = 32768, y = 32768` are the rows that matter most: one step adds
+`3 · 2^30`, the total reaches bit 31, and a port that keeps `d` in a signed 32-bit integer sorts the
+second half of the curve first. That corpus satisfies every count-based check ever written and
+addresses nothing. The pair `x = 32768, y = 0` and `x = 65535, y = 32767` is the reflection: a port
+that swaps without reflecting gives each the other's index. The table is written by the engine's own
+curve (`crates/fossil-layout/examples/hilbert_vectors.rs`) and held against it by a Rust test, so
+neither can move without the other going red.
 
 <Callout type="warn" title="The quantisation is binary32, and the width is part of the contract">
 The subtraction, the division, the multiply by 65535 and the rounding are all single-precision. Two
 implementations that agree on the formula and disagree on the width differ by one at the boundaries,
-and one unit is a different Morton code and a different order.
+and one unit is a different Hilbert code and a different order.
 
 `v = 147, hi = 167` is what says so: **57687 in binary32, 57686 in binary64**. The other four rows are
 exact in both widths, so a table without it passes against a binary64 port — and the table is checked
@@ -98,11 +115,11 @@ rather than restating it. Neither reaches the `::FLOAT` half of the contract ins
 SQL, or the bounding box the layout derives before quantising.
 </Callout>
 
-Two guards ask different questions of the result. `morton-order` recomputes the code from the
+Two guards ask different questions of the result. `hilbert-order` recomputes the code from the
 corpus's own `x` and `y` and asserts it **never decreases** as `dense_id` increases — non-decreasing,
 because two vertices can quantise to the same cell. `spatial-tiles` asks what the order was *for*,
 using only the footer: the average tile's box covers at most half the corpus extent. On the fixture,
-70,000 vertices in 18 tiles, Morton-ordered measures **12.4%** and the same vertices renumbered at
+70,000 vertices in 18 tiles, Hilbert-ordered measures **8.0%** and the same vertices renumbered at
 random measure **99%**. It separates having a spatial order from not having one, and is not a quality
 target.
 
@@ -183,7 +200,7 @@ and costs 9.4 requests.
 ## The footer is the index
 
 Arithmetic says **which tiles exist**. Which tiles **intersect the window** is a second question,
-and `chunk_size` does not answer it: `dense_id` is a vertex's *rank* by Morton code and not its
+and `chunk_size` does not answer it: `dense_id` is a vertex's *rank* by Hilbert code and not its
 code, and where a code falls in a ranking is a function of how the positions are distributed. What
 answers it is the per-tile `x`/`y` bounding boxes Parquet writes into the footer, and one request
 buys all of them. Under `container: rowgroups` that same footer is also what turns a run of tiles
@@ -271,7 +288,7 @@ A rung below the payload carries its quotient the same way, as `"quotient": [ �
 - **`lower_bounds`** and **`upper_bounds`** are inclusive and hold **every column of an integer or
   floating-point type, and no other**. A string's footer bound is truncated by the encoder, orders by
   UTF-8 bytes where a JavaScript planner orders by UTF-16 code units, and over `subject` prunes
-  nothing, because tiles are in Morton order and identities are not. A tile's box is the bounds of
+  nothing, because tiles are in Hilbert order and identities are not. A tile's box is the bounds of
   its coordinate columns, so there is no `bbox` beside them.
 - **A `float` bound is the column's `f32` printed as the double it widens to** — `0.1f32` is
   `0.10000000149011612`. The footer's shortest spelling, `0.1`, is a smaller number than the value it
@@ -387,11 +404,11 @@ nodes are empty.
 
 **The level-of-detail pyramid is not that tree either**, and it is not the aggregation this
 paragraph used to describe. It said a level tile holds *super-nodes that do not exist at level 0*,
-each level carrying its own `dense_id` space and its own Morton renumbering. What was built is a
+each level carrying its own `dense_id` space and its own renumbering. What was built is a
 **decimation**, for the reason the design page gives at length: a synthetic centroid cannot nest, so
 replacing it with its children moves every point on screen.
 
-**Level `k` is the vertices whose `dense_id` is a multiple of `4^k`.** Over a Morton-ordered
+**Level `k` is the vertices whose `dense_id` is a multiple of `4^k`.** Over a Hilbert-ordered
 `dense_id` that is one vertex per quadtree cell of depth `k`. Quarters and not halves because that
 is what a camera does: a zoom step doubles the linear scale, quadruples the area, and so quadruples
 the points, which makes one level exactly one zoom step. Three things follow from the definition

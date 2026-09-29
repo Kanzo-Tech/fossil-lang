@@ -85,7 +85,7 @@
 (* A role says what a column IS, not what anyone does with it.
 
    address      the row's position in the ordering. `dense_id` is the vertex's
-                rank in Morton order of its position, so it is an ADDRESS and
+                rank in Hilbert order of its position, so it is an ADDRESS and
                 never an identity: re-running the layout renumbers every vertex.
                 `/docs/design/identity` is the argument.
    identity     what a bookmark keys on and what survives a rebuild.

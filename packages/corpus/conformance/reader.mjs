@@ -244,7 +244,7 @@ export function resolve(root, base = "") {
       // plausible stranger instead of nothing.
       //
       // It is also the ONE artefact of a corpus that is not a projection: a second ORDER over the
-      // same rows, so the Morton cut does not address it — which is why it carries a `chunk_size`
+      // same rows, so the spatial cut does not address it — which is why it carries a `chunk_size`
       // of its own, and why its tiles are the only ones spelled `tile{k}` rather than `chunk{k}`.
       index: (() => {
         const declared = info.index;

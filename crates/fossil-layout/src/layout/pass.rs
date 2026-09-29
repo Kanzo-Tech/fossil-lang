@@ -1,16 +1,16 @@
 //! The pass itself: read the staged Parquet, apply the partition and the
-//! placement, renumber into Morton order, and write the payload, the tiles and
+//! placement, renumber into Hilbert order, and write the payload, the tiles and
 //! the level pyramids back.
 //!
 //! Split out of `layout.rs` unchanged. This is the half that touches files;
-//! [`super::community`], [`super::place`] and [`super::morton`] are the halves
+//! [`super::community`], [`super::place`] and [`super::hilbert`] are the halves
 //! that do not, which is what lets them be unit-tested without a filesystem.
 
 use super::cells::{Edges, Pyramid};
 use super::community::{
     Csr, CsrBuilder, Weighted, flatten_to_budget, group_count, hierarchy, order_by_hierarchy,
 };
-use super::morton::{morton_codes, morton_ranks};
+use super::hilbert::{hilbert_codes, hilbert_ranks};
 use super::place::{CLUSTER_BUDGET, cluster_layout, place_after};
 use super::statistics::{manifest, numbered, tile_statistics};
 // ──────────────────────────────────────────────────────────────────────────
@@ -438,7 +438,7 @@ pub enum LayoutError {
 /// | `self_loops`, `degrees` (`f64`) | 16 |
 /// | Louvain `community`, `totals`, `levels[0]` | 16 |
 /// | [`Neighbourhood`], and [`Weighted::contract`]'s counting sort under it | 21 |
-/// | `clusters`, `placement`, `positions`, `morton`, `new_ids`, `order` | 28 |
+/// | `clusters`, `placement`, `positions`, `codes`, `new_ids`, `order` | 28 |
 /// | `row_of_dense`, `gather`, `new_dense`, `xs`, `ys`, `cluster_ids` | 24 |
 /// | the cell pyramid, at [`fossil_sinks::manifest::DEFAULT_VERTICES_PER_CELL`] | 3 |
 ///
@@ -691,14 +691,14 @@ pub const fn estimated_peak_bytes(
 
 /// Replace the W0b placeholder `x`/`y`/`cluster_id` columns of each vertex
 /// Parquet with a real community partition + deterministic placement, and
-/// **renumber `dense_id` into Morton order**, remapping every adjacency list.
+/// **renumber `dense_id` into Hilbert order**, remapping every adjacency list.
 ///
 /// # Why the renumbering is here and not in the writer
 ///
 /// `GraphAr` defines chunk *i* as the `dense_id` range `[i·chunk_size,
 /// (i+1)·chunk_size)`, so a chunk is a spatial tile only if `dense_id` ascends
 /// with position. `finalize_vertex` numbers in IRI order, and this pass used to
-/// reorder the *rows* by Morton code while leaving the *values* alone — which
+/// reorder the *rows* by their spatial code while leaving the *values* alone — which
 /// made the file's physical order spatial and its chunk definition not. Measured
 /// on the five-million corpus in 41 chunks, a window touched 41 of 41 chunks by
 /// `dense_id` and 6 of 41 by physical row order.
@@ -738,7 +738,7 @@ pub const fn estimated_peak_bytes(
 /// Vertices first, all of them, because an adjacency spans two types and cannot
 /// be rewritten until both mappings exist. Per type: count vertices, walk the
 /// self-edges, run [`super::community::community_hierarchy`] + [`cluster_layout`], derive the
-/// Morton rank of each vertex, and keep `dense_id → (new_dense_id, x, y,
+/// Hilbert rank of each vertex, and keep `dense_id → (new_dense_id, x, y,
 /// cluster_id)` as four arrays. The enriched vertices are then emitted **as tiles** under
 /// [`VertexLayoutTarget::chunk_prefix`] — one Parquet whose `k`th row group is
 /// tile `k`, `chunk_size` rows each. That emission is the **only** time the
@@ -1106,16 +1106,16 @@ pub fn enrich_layout_with(
         let mut positions = cluster_layout(&placement);
         probe.mark("flatten + order + place");
 
-        // Slide this type clear of the ones already placed. The Morton codes are
+        // Slide this type clear of the ones already placed. The Hilbert codes are
         // computed *after* the shift, because they quantise against the position
         // list's own bounding box — coding first would sort the rows by a
         // geometry the file no longer has, and the row-group statistics a bbox
         // query prunes on would describe somewhere else.
         origin_x = place_after(&mut positions, origin_x);
 
-        let morton = morton_codes(&positions);
-        let (new_ids, order) = morton_ranks(&morton);
-        probe.mark("morton codes + ranks");
+        let codes = hilbert_codes(&positions);
+        let (new_ids, order) = hilbert_ranks(&codes);
+        probe.mark("hilbert codes + ranks");
 
         // The gather that replaces the staging table, the join and the ORDER BY.
         //
@@ -1188,7 +1188,7 @@ pub fn enrich_layout_with(
         // the same tiles as 1,221 files, and the same bytes stored.
         //
         // A range and not a filter. Ordering by the new id *is* ordering by
-        // Morton code — that is what the new id is — and the ids are a gapless
+        // Hilbert code — that is what the new id is — and the ids are a gapless
         // `0..n`, so tile `k` is the row range `[k·size, (k+1)·size)` of the
         // permutation. The `WHERE dense_id >= lo AND dense_id < hi` that used to
         // stand here was a range predicate over a staging table whose row-group
@@ -1263,10 +1263,10 @@ pub fn enrich_layout_with(
         // maps to.
         //
         // It cannot be a column of the tiles above and that is the whole reason
-        // it is a second table: one table has one sort, this one's is Morton
+        // it is a second table: one table has one sort, this one's is Hilbert
         // because the spatial order IS the id space, and a lookup by identity
         // needs the other one. Without it `node(iri)` reads the `subject` column
-        // of every tile of the type — the rows are in Morton order and subjects
+        // of every tile of the type — the rows are in Hilbert order and subjects
         // are not, so no footer prunes — which at five million vertices is about
         // 40 MB per lookup.
         //
@@ -1781,7 +1781,7 @@ struct Enriched<'a> {
 /// # What a level is
 ///
 /// Level `k` is the rows whose `dense_id` is a multiple of `4^k`, which over a
-/// Morton-ordered `dense_id` is one vertex per quadtree cell of depth `k`. Every
+/// Hilbert-ordered `dense_id` is one vertex per quadtree cell of depth `k`. Every
 /// row is a real vertex at its real position — there is no synthetic centroid
 /// here, because a centroid cannot nest: replace it with its children and every
 /// point on screen moves. A decimation nests by construction, so zooming in only

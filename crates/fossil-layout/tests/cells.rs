@@ -534,7 +534,7 @@ fn every_rung_says_what_the_level_below_it_says() {
 ///
 /// # Why this is a budget and not a zero
 ///
-/// The chain has one link the placement does not own. `morton_codes` quantises
+/// The chain has one link the placement does not own. `hilbert_codes` quantises
 /// each axis over the extent the positions turned out to have, independently —
 /// so the blocks map onto the addressing's own grid exactly when the placement
 /// filled a square, and the placement fills its square to within the margins of

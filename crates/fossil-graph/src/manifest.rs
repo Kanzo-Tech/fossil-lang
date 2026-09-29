@@ -225,7 +225,7 @@ mod tests {
                 name: "dense_id".into(),
                 data_type: "uint32".into(),
                 // The ADDRESS, and it cannot also be the identity: the layout
-                // pass reranks by Morton code and gives this number away.
+                // pass reranks by Hilbert code and gives this number away.
                 is_primary: false,
                 is_nullable: Some(false),
                 cardinality: Some(Cardinality::Single),

@@ -43,6 +43,7 @@ beforeAll(async () => {
   );
   await db.instantiate();
   const conn = db.connect();
+  conn.query(`SET parquet_metadata_cache = true`);
 
   // GraphAr-shaped tables the verb SQL targets (`FROM "Person"` etc.). The
   // vertex carries the reserved `dense_id` + `subject` plus user fields; the

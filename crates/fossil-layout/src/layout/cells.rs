@@ -1,7 +1,7 @@
 //! The pyramid: **one summary row per region of the plane, per rung.**
 //!
 //! A rung is a mipmap level over the corpus, and the corpus was already a mipmap
-//! without its interior rows. `dense_id` is a vertex's rank in the Morton order
+//! without its interior rows. `dense_id` is a vertex's rank in the Hilbert order
 //! of its position, so a quaternary cell at any depth is a **contiguous interval
 //! of `dense_id`** — exactly, not approximately, and with no tree on disk to
 //! walk. Cell `r` of rung `k` is `[r·4^k, (r+1)·4^k)`, a cell id is

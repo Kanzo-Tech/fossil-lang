@@ -56,8 +56,8 @@ The format did not have to be argued into this shape. It is in it.
 `crates/fossil-sinks/src/manifest.rs, TILE_SHIFT` is 12, and 4,096 is 4⁶.
 `crates/fossil-sinks/src/manifest.rs, STRIDE_BITS` is 2, so
 `crates/fossil-sinks/src/manifest.rs, stride` is `4^k` and a level's address is the payload's shift
-plus `2k`. And `dense_id` is not a name a writer chose: it is a vertex's **rank in the Morton order
-of its own position**, which is what `crates/fossil-layout/src/layout/morton.rs, morton_ranks`
+plus `2k`. And `dense_id` is not a name a writer chose: it is a vertex's **rank in the Hilbert order
+of its own position**, which is what `crates/fossil-layout/src/layout/hilbert.rs, hilbert_ranks`
 computes and what
 [the order that makes an interval mean something](/docs/format/conventions/addressing#the-order-that-makes-an-interval-mean-something)
 specifies. `crates/fossil-sinks/src/manifest.rs, tile_of` states the consequence in its own doc:
@@ -90,7 +90,7 @@ size means nothing; a *writer* that fills the plane unevenly gets the same thing
 ## What makes a cell a region of the plane, and it is not this page
 
 The addressing above is exact and the geometry under it is borrowed. `dense_id` is a rank in the
-Morton order of a position, so an interval of ids is an interval of the Z-curve — a compact run,
+Hilbert order of a position, so an interval of ids is an interval of the curve — one connected patch,
 always — but the **area** that run covers is whatever the placement put there, and the placement
 today is `crates/fossil-layout/src/layout/place.rs, cluster_layout` on a grid whose pitch is fixed
 by the largest group.
@@ -107,8 +107,11 @@ What repaired it is a change to the placement and to nothing here:
 [a cell per group](/docs/design/position) gives every group a block of its own size, which makes the
 density uniform, which makes a rank interval an area interval. The same rung now runs 4,911 to
 34,618,064 — **7,049×** — and the coarse rungs, where a mark actually stands for a region, land at
-302× by rung 3 and 11× by rung 6. What is left is bounded and named over there: a power-of-four
-rounding, and the Z-curve's own jumps.
+302× by rung 3 and 11× by rung 6, under the Z-curve the order was then. The curve's own jumps were
+half of what was left, and taking the Hilbert curve instead removed them: over a million vertices
+through the pass, rung 1 goes from 5,030× to **428×**, rung 3 from 571× to **21×** and rung 6 from
+11× to **3×** ([where x and y come from](/docs/design/position)). What remains is the power-of-four
+rounding of a disc into its block.
 
 **The pyramid does not change shape.** Same base, same `ceil(V / 4^k)` per rung, same files, same
 columns, and the same `dense_id >> shift` computing a cell id. It changes what one of its rows is
@@ -279,7 +282,7 @@ arrives with. **Both structures cut the same dendrogram.**
 
 `crates/fossil-layout/src/layout/community.rs, order_by_hierarchy` numbers the placement groups by a
 depth-first walk of the hierarchy, so a run of consecutive group ids is a subtree; the buddy frontier
-on [where x and y come from](/docs/design/position) turns that into a run of consecutive Morton
+on [where x and y come from](/docs/design/position) turns that into a run of consecutive Hilbert
 codes, hence a contiguous interval of `dense_id`. Measured over com-DBLP by
 `plane_report` in `hierarchy_stats.rs` (deleted after `2fa5f22`): **55,712 of 55,712 placement groups
 fall in a single run of `dense_id`, and the id axis is monotone in group order.** Every coarser level
@@ -391,7 +394,7 @@ construction, and each level is a quarter of the one below it all the way down. 
 never full**, and the whole difference between the two lives at the base.
 
 Measured over com-DBLP, quantised to 16 bits per axis — a quaternary tree of depth 16 over square
-cells, which is the grid the Morton order already imposes. Read *level k* as cells of side `2^k`, so
+cells, which is the grid the Hilbert order already imposes. Read *level k* as cells of side `2^k`, so
 level `k` has at most `4^(16−k)` of them.
 
 Below the scale where cells start to touch, merging four buys almost nothing — the occupied count
@@ -475,7 +478,7 @@ Claimed in comments, never run. Measured 2026-09-11, two processes per row:
 | what | over | result |
 | --- | --- | --- |
 | `crates/fossil-layout/src/layout/community.rs, community_hierarchy` | com-DBLP, 5 levels | every level's membership **and** quotient byte-identical |
-| `crates/fossil-layout/src/layout/pass.rs, enrich_layout`, the whole pass | 200,000 vertices, 999,079 edges, via `crates/fossil-layout/examples/enrich_memory.rs, planted` | the entire written tree byte-identical — Morton-permuted payload, both adjacency orientations, identity index, tiles and level directories |
+| `crates/fossil-layout/src/layout/pass.rs, enrich_layout`, the whole pass | 200,000 vertices, 999,079 edges, via `crates/fossil-layout/examples/enrich_memory.rs, planted` | the entire written tree byte-identical — the payload in its curve order, both adjacency orientations, identity index, tiles and level directories |
 
 **The property holds.** Had it come out red, the two properties below would not be worth stating.
 A spatial partition inherits it for free and for a duller reason — a cell id is a shift of a number
@@ -682,7 +685,7 @@ picture.
 
 ### The quotient saturates down the pyramid, and the marks do not
 
-The table above is over the 16-bit quaternary of positions, which is the tree the Morton order
+The table above is over the 16-bit quaternary of positions, which is the tree the Hilbert order
 imposes rather than the one the writer emits. Over the **written** rungs the same saturation is
 there, and it arrives sooner. Measured on com-DBLP by
 `what_a_level_costs_and_what_a_rung_costs_on_com_dblp` in `level_vs_rung.rs` (deleted after `2fa5f22`):

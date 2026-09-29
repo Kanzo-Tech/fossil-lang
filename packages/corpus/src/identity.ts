@@ -237,7 +237,7 @@ export function identityOf(reads: {
       if (index === null) {
         // **The scan**, and it is the whole cost this member has. There is no index from a
         // subject to an address, and the payload's own footers do not help: the rows are in
-        // Morton order and subjects are not, so every tile's `min`/`max` for `subject` overlaps
+        // Hilbert order and subjects are not, so every tile's `min`/`max` for `subject` overlaps
         // every other's and the engine skips nothing. At five million vertices the `subject`
         // column is 8.016 compressed bytes per row, so one lookup reads about 40 MB — column
         // pruning is the only thing keeping it off the other six.
@@ -253,7 +253,7 @@ export function identityOf(reads: {
       //
       // First the index: two columns over tiles sorted by the key with disjoint ranges, which is
       // the arrangement that lets a reader go to the one tile a value can be in. The payload cannot
-      // be arranged that way and keep the Morton order a window depends on, which is why the index
+      // be arranged that way and keep the Hilbert order a window depends on, which is why the index
       // is a second table rather than a second sort.
       //
       // **The arrangement is right and DuckDB does not exploit it**, so the list of files is what
@@ -320,7 +320,7 @@ export function identityOf(reads: {
      * index tiles whose own footers say a key could be in them, because this engine prunes no
      * disjunction over a string column and {@link indexRanges} is where that is made up for. Where
      * the type declares no index, it is a scan of the `subject` column over
-     * every tile, because the rows are in Morton order and subjects are not, so every tile's
+     * every tile, because the rows are in Hilbert order and subjects are not, so every tile's
      * `min`/`max` overlaps every other's and the footers prune nothing. At five million vertices
      * that column is 8.016 compressed bytes per row, so one lookup reads about 40 MB. Both answers
      * are the same row; only one is cheap.

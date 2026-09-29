@@ -118,7 +118,7 @@ const wide = (batch: Batch, name: string): bigint[] =>
 const floats = (batch: Batch, name: string): number[] => Array.from(batch.getChild(name)!.toArray(), Number);
 const every = async (z: number, select?: readonly string[]): Promise<Batch[]> => {
   const scan = corpus.scan({ type: 'Person', ...(select === undefined ? {} : { select }) });
-  return Promise.all(scan.plan().filter((t) => t.z === z).map((t) => scan.read(t)));
+  return [...(await scan.read(scan.plan().filter((t) => t.z === z)))];
 };
 
 describe('the tile matrix set is the cell pyramid', () => {
@@ -160,7 +160,7 @@ describe('scan at Z against rows — the rowgroups container fossil writes', () 
       const top = set.tileMatrices.length - 1;
       const tasks = scan.plan().filter((t) => t.z === top);
       expect(tasks.length).toBeLessThan(set.tileMatrices[top]!.tiles.length + 1);
-      const read = (await Promise.all(tasks.map((t) => scan.read(t)))).flatMap((b) => wide(b, 'dense_id'));
+      const read = (await scan.read(tasks)).flatMap((b) => wide(b, 'dense_id'));
       const rows = (await corpus.rows({ x, y, w, h, directions: ['src'] })).vertices.map((v) => v.denseId);
       const order = (a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0);
       expect(read.sort(order)).toEqual(rows.sort(order));
@@ -172,7 +172,7 @@ describe('scan at Z against rows — the rowgroups container fossil writes', () 
     const top = set.tileMatrices.length - 1;
     const payload = corpus.scan({ type: 'Person', filter: { column: 'cluster_id', op: '=', value: 0 } });
     expect(new Set(payload.plan().map((t) => t.z))).toEqual(new Set([top]));
-    await expect(payload.read({ type: 'Person', z: top - 1, tile: 0 })).rejects.toThrow(/no answer below/);
+    await expect(payload.read([{ type: 'Person', z: top - 1, tile: 0 }])).rejects.toThrow(/no answer below/);
     const cells = corpus.scan({ type: 'Person', filter: { column: 'count', op: '>', value: 0 } });
     expect(cells.plan().some((t) => t.z === top)).toBe(false);
     expect(cells.plan().filter((t) => t.z === 0)).toHaveLength(1);
@@ -240,7 +240,7 @@ describe('a rung read through scan keeps the aggregation obligations', () => {
     const { shift } = set.tileMatrices[top - 1]!;
     let edges = 0;
     for (const from of tilesAt(top)) {
-      const { batches, declined } = await corpus.edges({ from, direction: 'src' });
+      const { batches, declined } = (await corpus.edges({ from: [from], direction: 'src' }))[0]!;
       expect(declined).toEqual([]);
       for (const b of batches) {
         edges += b.src.length;
@@ -260,7 +260,7 @@ describe('a rung read through scan keeps the aggregation obligations', () => {
       let cross = 0n;
       const quotient = new Map<string, bigint>();
       for (const from of tilesAt(z)) {
-        const answer = await corpus.edges({ from, direction: 'src' });
+        const answer = (await corpus.edges({ from: [from], direction: 'src' }))[0]!;
         for (const b of answer.batches) {
           expect(b.weight).not.toBeNull();
           b.src.forEach((s, i) => {
@@ -269,7 +269,7 @@ describe('a rung read through scan keeps the aggregation obligations', () => {
           });
         }
         if (answer.batches.length > 0) checked += 1;
-        expect((await corpus.edges({ from, direction: 'dst' })).declined).toEqual([
+        expect((await corpus.edges({ from: [from], direction: 'dst' }))[0]!.declined).toEqual([
           { edgeType: 'knows', direction: 'dst', reason: 'not-declared' },
         ]);
       }
@@ -289,7 +289,7 @@ describe('edges at Z, both halves, against the adjacency on disk', () => {
         ['src', 'by_source', 'src_dense'],
         ['dst', 'by_target', 'dst_dense'],
       ] as const) {
-        const [batch] = (await corpus.edges({ from: { type: 'Person', z: top, tile }, direction })).batches;
+        const [batch] = (await corpus.edges({ from: [{ type: 'Person', z: top, tile }], direction }))[0]!.batches;
         const truth = await query(
           `SELECT count(*) AS n FROM read_parquet('${root}/edge/Person_knows_Person/${dir}/tiles.parquet')
             WHERE ${key} >> 12 = ${tile}`,
@@ -299,4 +299,41 @@ describe('edges at Z, both halves, against the adjacency on disk', () => {
       }
     }
   });
+});
+
+describe('a run of consecutive tiles is one statement, split back per tile', () => {
+  it('answers scan.read and edges over every tile of every zoom exactly as each tile alone', async () => {
+    const sent: string[] = [];
+    const counted = await open(corpus.url, {
+      engine: {
+        ...engine,
+        query(sql, options) {
+          sent.push(sql);
+          return engine.query(sql, options);
+        },
+      },
+    });
+    const top = set.tileMatrices.length - 1;
+    const scan = counted.scan({ type: 'Person' });
+    for (let z = 0; z <= top; z += 1) {
+      const addresses = set.tileMatrices[z]!.tiles.map((t) => ({ type: 'Person', z, tile: t.tile }));
+      const key = z === top ? 'dense_id' : 'cell_id';
+      sent.length = 0;
+      const run = await scan.read(addresses);
+      expect(sent).toHaveLength(1);
+      sent.length = 0;
+      const answers = await counted.edges({ from: addresses, direction: 'src' });
+      // A rung whose quotient lists no tile — the root's, one cell — is answered without one.
+      if (z === top) expect(sent).toHaveLength(1);
+      else expect(sent.length).toBeLessThanOrEqual(1);
+      for (const [k, address] of addresses.entries()) {
+        const [alone] = await scan.read([address]);
+        expect(run[k]!.numRows).toBe(alone!.numRows);
+        for (const name of [key, 'x', 'y']) {
+          expect(Array.from(run[k]!.getChild(name)!.toArray(), String)).toEqual(Array.from(alone!.getChild(name)!.toArray(), String));
+        }
+        expect(answers[k]).toEqual((await counted.edges({ from: [address], direction: 'src' }))[0]);
+      }
+    }
+  }, 120_000);
 });

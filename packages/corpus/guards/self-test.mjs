@@ -227,7 +227,7 @@ const MUTATIONS = [
     what: "`dense_id` is stored as a string, so nothing can shift it",
     layout: "rowgroups",
     // The rows keep their order and every other column: the subquery sorts on the
-    // original numeric column, so the tiling and the Morton order survive and the
+    // original numeric column, so the tiling and the Hilbert order survive and the
     // only thing that changed is the type under the name.
     mutate: (dir) =>
       rewrite(
@@ -324,7 +324,7 @@ const MUTATIONS = [
     },
   },
   {
-    guard: "morton-order",
+    guard: "hilbert-order",
     what: "two distant vertices swap positions, so the code falls where the id rises",
     layout: "rowgroups",
     mutate: (dir) =>

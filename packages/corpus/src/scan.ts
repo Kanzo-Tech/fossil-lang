@@ -1,7 +1,7 @@
 /**
  * Iceberg's `Table.scan` over a tile matrix set: a scan is a type, a filter and a projection,
- * bound once; `plan` is `plan_files` over the published statistics at every zoom; `read` is one
- * task, one tile, one statement.
+ * bound once; `plan` is `plan_files` over the published statistics at every zoom; `read` answers a
+ * batch per tile, and reads each run of consecutive tiles in one statement.
  */
 
 import {
@@ -14,8 +14,8 @@ import {
   type Box,
   type Filter,
 } from './expression.js';
-import { batchOf, type Batch, type Reads } from './query.js';
-import { CorpusReadError, ident, lit } from './sql.js';
+import { batchOf, runsOf, splitByTile, type Batch, type Reads } from './query.js';
+import { CorpusReadError, ident, list, lit } from './sql.js';
 import type { TileAddress, Zoom, Zooms } from './tile-matrix.js';
 import { CELL_NAMES } from './vocabulary.generated.js';
 
@@ -55,20 +55,25 @@ export interface Scan {
    */
   plan(): readonly ScanTask[];
   /**
-   * **One tile, as a columnar batch.** Any address in the matrix, planned or not — a view builds
-   * `{ type, z, tile }` from what it sees. The filter's residual on that tile is applied; a tile
-   * its statistics exclude answers with no rows and no request.
+   * **One columnar batch per address, in the order given.** Any address in the matrix, planned or
+   * not — a view builds `{ type, z, tile }` from what it sees. The filter's residual on each tile is
+   * applied; a tile its statistics exclude answers with no rows and no request.
    *
-   * **How one tile is addressed.** DuckDB's Parquet reader has no read by row group, so a tile is
-   * selected by ONE conjunctive range on the column its rows are a range of — `dense_id` at `Z`,
-   * `cell_id` below — which the engine prunes against every row group's statistics in the footer.
-   * Under `rowgroups` that is the tile's one row group and no other; under `files` the file is the
-   * tile and the range is a no-op. Never a disjunction, which the engine evaluates per row.
+   * **A run of consecutive tiles is one statement.** DuckDB's Parquet reader has no read by row
+   * group, so a tile is selected by ONE conjunctive range on the column its rows are a range of —
+   * `dense_id` at `Z`, `cell_id` below — which the engine prunes against every row group's
+   * statistics in the footer. Tiles `t … t + n − 1` of one zoom are one range, so they are read in
+   * one statement and split back into a batch per tile on that column: a statement pays a footer
+   * and a round trip whatever it reads, and a view's window falls in a few runs of the curve.
+   * Never a disjunction of ranges, which the engine evaluates per row.
    *
    * @throws {CorpusReadError} for an address outside the matrix, or at a zoom the filter cannot
-   *   apply to. An abort rejects with the signal's reason.
+   *   apply to — before any statement runs. An abort rejects with the signal's reason.
    */
-  read(task: TileAddress, options?: { readonly signal?: AbortSignal }): Promise<Batch>;
+  read(
+    addresses: readonly TileAddress[],
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<readonly Batch[]>;
 }
 
 export function scanOf(reads: {
@@ -127,29 +132,79 @@ export function scanOf(reads: {
     };
 
     const read = async (
-      task: TileAddress,
+      addresses: readonly TileAddress[],
       options: { readonly signal?: AbortSignal } = {},
-    ): Promise<Batch> => {
-      const zoom: Zoom = zooms.zoom(task);
-      const bound = bounds[task.z]!;
-      if (bound === null) {
-        throw new CorpusReadError(
-          `the filter names ${columnsOf(filter!).filter((c) => !zoom.columns.has(c)).join(', ')}, ` +
-            `which a row at z = ${task.z} does not carry: a filter on a payload column has no ` +
-            `answer below z = ${zooms.zooms.length - 1}`,
-        );
+    ): Promise<readonly Batch[]> => {
+      const out: Batch[] = new Array(addresses.length);
+      // Every address is checked before a statement is sent, so a bad one costs no read.
+      const byZoom = new Map<number, { tile: number; at: number; left: Bound }[]>();
+      addresses.forEach((address, at) => {
+        const zoom = zooms.zoom(address);
+        const bound = bounds[address.z]!;
+        if (bound === null) {
+          throw new CorpusReadError(
+            `the filter names ${columnsOf(filter!).filter((c) => !zoom.columns.has(c)).join(', ')}, ` +
+              `which a row at z = ${address.z} does not carry: a filter on a payload column has no ` +
+              `answer below z = ${zooms.zooms.length - 1}`,
+          );
+        }
+        const left = residual(bound, zoom.entries[address.tile]!);
+        if (left === false) {
+          out[at] = batchOf([], zoom.rung === null ? select : CELL_NAMES);
+          return;
+        }
+        const wanted = byZoom.get(address.z) ?? [];
+        wanted.push({ tile: address.tile, at, left });
+        byZoom.set(address.z, wanted);
+      });
+
+      const statements: Promise<void>[] = [];
+      for (const [z, wanted] of byZoom) {
+        const zoom = zooms.zooms[z]!;
+        const columns = zoom.rung === null ? select : CELL_NAMES;
+        wanted.sort((a, b) => a.tile - b.tile);
+        for (const run of runsOf(wanted)) {
+          statements.push(readRun(zoom, columns, run, options.signal, out));
+        }
       }
-      const columns = zoom.rung === null ? select : CELL_NAMES;
-      const left = residual(bound, zoom.entries[task.tile]!);
-      if (left === false) return batchOf([], columns);
+      await Promise.all(statements);
+      return out;
+    };
+
+    /**
+     * One statement for a run of consecutive tiles, split back into a batch per tile. The predicate
+     * beyond the range is the tiles' shared residual, or the whole filter where they differ — which
+     * is the same rows on every tile, since a residual is the filter with what the tile's statistics
+     * settled taken out.
+     */
+    const readRun = async (
+      zoom: Zoom,
+      columns: readonly string[],
+      run: readonly { tile: number; at: number; left: Bound }[],
+      signal: AbortSignal | undefined,
+      out: Batch[],
+    ): Promise<void> => {
+      const first = run[0]!.tile;
+      const last = run[run.length - 1]!.tile;
       const span = BigInt(zoom.matrix.tileRows);
-      const lo = BigInt(task.tile) * span;
+      const lo = BigInt(first) * span;
+      const hi = (BigInt(last) + 1n) * span;
+      const where = run.every((r) => sqlOf(r.left) === sqlOf(run[0]!.left)) ? run[0]!.left : bounds[zoom.matrix.z]!;
+      const single = first === last;
+      const keyed = single || columns.includes(zoom.key) ? columns : [...columns, zoom.key];
+      const urls = [...new Set(run.map((r) => zoom.tileUrl(r.tile)))];
       const key = ident(zoom.key);
       const sql =
-        `SELECT ${columns.map(ident).join(', ')} FROM read_parquet(${lit(zoom.tileUrl(task.tile))}) ` +
-        `WHERE ${key} >= ${lo} AND ${key} < ${lo + span}` +
-        (left === true ? '' : ` AND ${sqlOf(left)}`);
-      return reads.reads.batch(sql, columns, options.signal);
+        `SELECT ${keyed.map(ident).join(', ')} FROM read_parquet(${urls.length === 1 ? lit(urls[0]!) : list(urls)}) ` +
+        `WHERE ${key} >= ${lo} AND ${key} < ${hi}` +
+        (where === true ? '' : ` AND ${sqlOf(where as Exclude<Bound, boolean>)}`);
+      const batch = await reads.reads.batch(sql, keyed, signal);
+      if (single) {
+        for (const r of run) out[r.at] = batch;
+        return;
+      }
+      const tiles = splitByTile(batch, zoom.key, Number(span), columns);
+      for (const r of run) out[r.at] = tiles.get(r.tile) ?? batchOf([], columns);
     };
 
     return { params, plan, read };

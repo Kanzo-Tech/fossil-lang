@@ -126,11 +126,11 @@ const scan = corpus.scan({
 });
 const tasks = scan.plan();                     // every zoom, pruned, each with its residual
 const visible = tasks.filter((t) => t.z === z && overlaps(t.bbox, camera));
-const batch = await scan.read(visible[0], { signal }); // one tile, columns, cancellable
+const batches = await scan.read(visible, { signal }); // a batch per tile, cancellable
 
-// The relations incident to one tile: CSR at `src`, CSC at `dst`, the rung's
-// quotient below Z; and what was declined, with fossil's reason.
-const { batches, declined } = await corpus.edges({ from: visible[0], direction: 'src', signal });
+// The relations incident to each tile: CSR at `src`, CSC at `dst`, the rung's
+// quotient below Z; and what was declined, with fossil's reason. One answer a tile.
+const answers = await corpus.edges({ from: visible, direction: 'src', signal });
 ```
 
 - **`tileMatrix(type)`** — OGC 17-083r4's `TileMatrixSet`: `extent`,
@@ -141,11 +141,12 @@ const { batches, declined } = await corpus.edges({ from: visible[0], direction: 
   is built (an unknown column throws here). `plan()` is `plan_files` at every
   zoom, pruned by the inclusive metrics evaluator over the published bounds and
   null counts, each task carrying the residual the strict evaluator could not
-  settle; a filter on a payload column has no task below `Z`. `read(address)`
-  reads one tile by one conjunctive range on `dense_id` (or `cell_id`) — the
-  row group under `rowgroups`, the file under `files` — and an abort rejects
-  with `AbortError`.
-- **`edges({ from, direction, relation?, signal })`** — the adjacency's aligned
+  settle; a filter on a payload column has no task below `Z`. `read(addresses)`
+  answers a batch per address, reading each run of consecutive tiles as one
+  statement with one conjunctive range on `dense_id` (or `cell_id`) and
+  splitting it back per tile; an abort rejects with `AbortError`.
+- **`edges({ from, direction, relation?, signal })`** — an answer per address in
+  `from`, a run of consecutive tiles in one statement: the adjacency's aligned
   half at `Z` (`by_source` or `by_target`), the rung's quotient below it
   (undirected, one row per cell pair, keyed on the lower cell; `dst` is
   declined there), skipping a tile the manifest says has none. A relation to

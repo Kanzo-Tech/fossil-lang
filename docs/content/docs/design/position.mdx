@@ -142,7 +142,7 @@ Measured, 2026-09-11, two processes each, same binary:
 | what was run | over | result |
 | --- | --- | --- |
 | `community_hierarchy`, via `read_edges` in `hierarchy_stats.rs` (deleted after `2fa5f22`) | com-DBLP, 317,080 vertices / 1,049,866 edges, 5 levels | all five levels' membership **and** quotient outputs byte-identical |
-| the whole pass — `enrich_layout` — via `crates/fossil-layout/examples/enrich_memory.rs, planted` | 200,000 vertices at mean degree 10, 999,079 edges | the entire written tree byte-identical: the Morton-permuted payload, both adjacency orientations, the identity index, all five tiles and all three level directories |
+| the whole pass — `enrich_layout` — via `crates/fossil-layout/examples/enrich_memory.rs, planted` | 200,000 vertices at mean degree 10, 999,079 edges | the entire written tree byte-identical: the payload permuted into its curve order, both adjacency orientations, the identity index, all five tiles and all three level directories |
 
 Two graph shapes — a real co-authorship network and a planted partition — and both halves of the
 pass. **The property holds.** What it does not yet have is a test that keeps it holding, and that is
@@ -181,8 +181,8 @@ The code said why the pitch was uniform, and the reason read like a good one:
 > id alone — that is what makes the placement a pure function of `cluster_ids` and reproducible
 > without carrying a table.
 
-**Nobody ever asked.** `crates/fossil-layout/src/layout/morton.rs, morton_decode` — the function
-that turns a cluster id into a grid cell — has exactly one caller in the workspace and it is
+**Nobody ever asked.** The function that turned a cluster id into a grid cell — the curve's decode,
+`crates/fossil-layout/src/layout/hilbert.rs, hilbert_decode` now — has exactly one caller in the workspace and it is
 `cluster_layout` itself, and a reader locates a group by reading `x` and `y`, which it is opening
 anyway. What the sentence was really protecting is that the placement is a function of
 `cluster_ids` and of nothing else, and that survives a per-group cell untouched: the sizes such a
@@ -262,7 +262,7 @@ second artefact at all: it is a change to where the groups go, and it is the sec
 
 **Every group gets a cell of its own size.** A group of `m` members is given an aligned square of
 the quaternary whose side is the next power of two above its own packing disc, and the squares are
-handed out by bumping a Z-order frontier — a buddy allocator's addressing, over the allocation order
+handed out by bumping a frontier along the curve — a buddy allocator's addressing, over the allocation order
 the hierarchy has already fixed.
 
 `crates/fossil-layout/src/layout/place.rs, cluster_layout` keeps its signature and its purity. The
@@ -273,7 +273,7 @@ code was protecting, and it survives intact:
 | | as placed | with a cell per group |
 | --- | --- | --- |
 | a group's cell | one of a uniform grid, pitch `2·12·√20,459 + 100` | an aligned square, side `2·12·√m` plus a proportional margin, rounded up to a power of two |
-| where that cell is | `morton_decode(id)` — the id **is** the address | the Z-order frontier, bumped once per group in id order |
+| where that cell is | the curve's decode of the id — the id **is** the address | the frontier along the curve, bumped once per group in id order |
 | the gap between two groups | 100 units, whatever the two groups are | a fraction of the disc it surrounds |
 | what finds a group's cell | its id alone | its size, which the placement already counts |
 
@@ -283,13 +283,13 @@ Three decisions sit inside that, and each one is load-bearing.
 
 A phyllotaxis disc of `m` members has an area proportional to `m`, so a cell sized to its own disc
 puts the same number of vertices under every unit of plane. And `dense_id` is the **rank** of a
-vertex in the Morton order of its position — `crates/fossil-layout/src/layout/morton.rs,
-morton_ranks` — so a rank axis over a plane of uniform density *is* an area axis: an interval of `n`
+vertex in the Hilbert order of its position — `crates/fossil-layout/src/layout/hilbert.rs,
+hilbert_ranks` — so a rank axis over a plane of uniform density *is* an area axis: an interval of `n`
 ids covers `n/δ` of plane wherever on the plane it is taken.
 
 Under the uniform pitch it covers whatever the emptiness there happens to be, and the spread is not
 a rounding. Measured over com-DBLP at the declared base of sixteen vertices per cell, taking each
-cell's own bounding box:
+cell's own bounding box, when the order was still the Z-curve's:
 
 | cell area, per rung | uniform pitch | a cell per group |
 | --- | --- | --- |
@@ -303,11 +303,27 @@ out where the median group is are five whole groups in five whole grid cells, 69
 **Same rung, same count.** That is the whole of why [a cell is claimed to be a region of the
 plane](/docs/design/cells) and was not one.
 
-**What is left after the repair is named rather than swept.** A rung-1 cell still spans 7,049× from
-smallest to largest, and the residue is two things: a group packs at one density inside its disc
-while the disc sits in a block rounded up to a power of four, and the Z-curve makes long jumps at
-the boundaries of the large quads. Both are bounded, and neither is the emptiness. The median says
-the same thing from the other side — 25,426,112 down to 44,823, on a plane 864× smaller.
+**What was left after the repair was named rather than swept, and half of it is gone.** A rung-1 cell
+still spanned 7,049× from smallest to largest, and the residue was two things: a group packs at one
+density inside its disc while the disc sits in a block rounded up to a power of four, and the
+Z-curve makes long jumps at the boundaries of the large quads. The median said the same thing from
+the other side — 25,426,112 down to 44,823, on a plane 864× smaller.
+
+**The jumps were the curve's, and the curve is Hilbert's now** ([the ruling](/docs/design/backend#the-id-is-a-hilbert-rank)).
+A run of consecutive Hilbert codes is always one connected patch, so an interval of ids that is not
+an aligned square — a cell straddling a quad boundary — stops being the hull of two far corners.
+Over a million vertices through the pass (`crates/fossil-layout/examples/enrich_memory.rs`'s fixture,
+mean degree 14), the same cell-area spread, Z-curve against Hilbert:
+
+| cell area, smallest to largest | Z-curve | Hilbert |
+| --- | --- | --- |
+| rung 1 | 5,030× | **428×** |
+| rung 3 | 571× | **21×** |
+| rung 6 | 11× | **3×** |
+
+What is left is the first half of the residue — a disc packed at one density inside a block rounded
+up to a power of four — and it is the fine rungs' to carry: sixteen members of one disc are a patch
+far smaller than sixteen blocks of margin, and by rung 6 it is gone into the average.
 
 <Callout type="warn" title="This is the idea that was discarded, and the difference is which layer it is applied at">
 *Area proportional to population* is [a rejected row](/docs/design/discarded), and the evidence
@@ -351,17 +367,17 @@ group of one member gets, and the unit every other block is a power of two of.
 A buddy allocator normally reuses the holes its alignment leaves, and that is refused here.
 `crates/fossil-layout/src/layout/community.rs, order_by_hierarchy` numbers the placement groups by a
 depth-first walk of the dendrogram, so **a run of consecutive group ids is a subtree**; a monotone
-frontier turns that into a run of consecutive blocks, hence a run of consecutive Morton codes, hence
+frontier turns that into a run of consecutive blocks, hence a run of consecutive Hilbert codes, hence
 a contiguous interval of `dense_id`. Reusing a hole behind the frontier puts a later group in front
 of an earlier one and breaks exactly that. The price is alignment fragmentation, and it is paid out
 of a plane that is 99.98% empty.
 
 **And the frontier does not pack against the origin, which cost a day to find out.** Packing tight
-leaves the groups in the first part of the Z-curve, and the first half of a Z-curve is the *bottom
-half* of its square. That hands the addressing a 2:1 plane — and
-`crates/fossil-layout/src/layout/morton.rs, morton_codes` quantises the two axes **independently**,
+leaves the groups in the first part of the curve, and the first half of the curve is *half* of its
+square. That hands the addressing a 2:1 plane — and
+`crates/fossil-layout/src/layout/hilbert.rs, hilbert_codes` quantises the two axes **independently**,
 over whatever extent the positions turned out to have, so a rectangular plane is normalised into a
-square grid and a square block stops mapping onto an aligned square of Morton codes. The measured
+square grid and a square block stops mapping onto an aligned square of codes. The measured
 consequence, on a planted fixture of four thousand vertices: an extent of 3,805 × 1,900, and 570 of
 1,603 groups in a single run of `dense_id` — *worse than the uniform pitch*, which got 1,355 by
 being so sparse that each group's members shared one quantised cell.

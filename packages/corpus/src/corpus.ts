@@ -23,7 +23,7 @@
  * The addressing is not this. It returns URLs and leaves the consumer knowing what a tile is,
  * which container carries one, how to ask for footers and how to join CSR with CSC. That is exactly
  * the knowledge the handover asked not to need. Here — with an engine given — there are no tiles,
- * no `dense_id`, no Morton, no `by_source`, no prefixes and no footers in the caller's face:
+ * no `dense_id`, no curve, no `by_source`, no prefixes and no footers in the caller's face:
  *
  * ```ts
  * const corpus = await open(url, { query });
@@ -227,16 +227,18 @@ export interface Corpus {
   tileMatrix(type: string): TileMatrixSet;
   /**
    * **Iceberg's `Table.scan`** — a type, a filter and a projection, bound when it is built, with
-   * `plan()` over every zoom and `read(address)` of one tile. See {@link Scan}.
+   * `plan()` over every zoom and `read(addresses)` of a batch per tile, a run of consecutive tiles in
+   * one statement. See {@link Scan}.
    *
    * @throws {CorpusReadError} for a column no zoom carries, in the filter or the projection.
    */
   scan(params: ScanParams): Scan;
   /**
-   * **The relations incident to one tile**, out of the half aligned on `direction` — the adjacency
-   * at `z = Z`, the rung's quotient below it — and the ones declined, with fossil's `GapReason`.
+   * **The relations incident to each tile**, out of the half aligned on `direction` — the adjacency
+   * at `z = Z`, the rung's quotient below it — and the ones declined, with fossil's `GapReason`: one
+   * answer per address, a run of consecutive tiles read in one statement.
    */
-  edges(params: EdgesParams): Promise<EdgeAnswer>;
+  edges(params: EdgesParams): Promise<readonly EdgeAnswer[]>;
   /** The vertices in a rectangle and the edges among them, entire. */
   rows(params: RowsParams): Promise<RowsAnswer>;
   /**

@@ -2,7 +2,7 @@
 //!
 //! Split out of `layout.rs` unchanged. [`cluster_layout`] is the deterministic
 //! placement — every group an aligned square of the quaternary sized to its own
-//! membership, handed out by bumping a Z-order frontier, members
+//! membership, handed out by bumping a Hilbert-order frontier, members
 //! phyllotaxis-packed inside — and [`place_after`] is what keeps two vertex
 //! types from stacking.
 //!
@@ -10,7 +10,7 @@
 //! gives the word: the algorithm chose it because a picture needed coordinates,
 //! and nothing measured it.
 
-use super::morton::morton_decode;
+use super::hilbert::hilbert_decode;
 
 /// Golden angle (radians) — the phyllotaxis constant `π(3−√5)`. Successive
 /// nodes placed at multiples of this angle pack a disc evenly with no RNG.
@@ -74,7 +74,7 @@ const TYPE_GUTTER: f32 = CELL_UNIT * 4.0;
 ///
 /// The code here used to argue the uniform pitch, and the argument was that a
 /// cluster's cell must be findable from its id alone. Nothing ever asked:
-/// [`morton_decode`] has exactly one caller and it is this function, and a
+/// [`hilbert_decode`] has exactly one caller and it is this function, and a
 /// reader locates a group by reading `x` and `y`, which it opens anyway. What
 /// the argument was really protecting is that the placement is a function of
 /// `cluster_ids` and of nothing else — and that survives untouched, because the
@@ -82,8 +82,8 @@ const TYPE_GUTTER: f32 = CELL_UNIT * 4.0;
 ///
 /// # What the packing buys, and it is not the picture
 ///
-/// `dense_id` is a vertex's **rank** in the Morton order of its position
-/// ([`super::morton::morton_ranks`]), so a plane carrying one vertex per unit of
+/// `dense_id` is a vertex's **rank** in the Hilbert order of its position
+/// ([`super::hilbert::hilbert_ranks`]), so a plane carrying one vertex per unit of
 /// area makes the rank axis an area axis: an interval of `n` ids covers `n`
 /// blocks of plane wherever on the plane it is taken. That is the whole
 /// precondition of the cell pyramid — `/docs/design/cells` calls a cell row a
@@ -99,7 +99,7 @@ const TYPE_GUTTER: f32 = CELL_UNIT * 4.0;
 /// alignment fragmentation instead. `order_by_hierarchy` numbers these groups by
 /// a depth-first walk of the dendrogram, so **a run of consecutive ids is a
 /// subtree**; a frontier that only moves forward turns that into a run of
-/// consecutive blocks, hence of consecutive Morton codes, hence a contiguous
+/// consecutive blocks, hence of consecutive Hilbert codes, hence a contiguous
 /// interval of `dense_id`. Every `cluster_id` is therefore an interval of ids
 /// too, being a union of consecutive groups — which is what stops a reader
 /// colouring by it from colouring scattered packets. Reusing a hole behind the
@@ -119,11 +119,11 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     // **The square the groups are spread over**, and why they are spread rather
     // than packed against the origin.
     //
-    // `morton_codes` quantises each axis over the extent the positions turned
+    // `hilbert_codes` quantises each axis over the extent the positions turned
     // out to have, INDEPENDENTLY — so a placement that fills a half of its root
     // hands the addressing a 2:1 plane, and the quaternary the corpus is
     // addressed on stops being made of squares. Packing the frontier tight does
-    // exactly that: the first half of a Z-curve is the bottom half of its
+    // exactly that: the first half of the curve is one half of its
     // square. Measured on a planted fixture of four thousand vertices, that is
     // an extent of 3,805 × 1,900 and a `dense_id` axis that no longer follows
     // the placement at all.
@@ -136,6 +136,7 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     // quantisation that normalises.
     let demand: u64 = sizes.iter().map(|&m| blocks_for(m)).sum();
     let root = next_power_of_four(demand);
+    let root_order = root.trailing_zeros() / 2;
 
     // The frontier, in finest blocks, walked in group-id order. A group takes
     // the smallest power of four that holds it, aligned to its own size — so its
@@ -162,7 +163,21 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
         let start = next.max(spread).div_ceil(blocks) * blocks;
         next = start + blocks;
 
-        let (col, row) = morton_decode(u32::try_from(start).unwrap_or(u32::MAX));
+        // The frontier walks the root square in the order the codes will sort
+        // it: block `start` of a root of `4^K` blocks is the `start`-th aligned
+        // sub-square of the order-16 curve, read off at its first cell.
+        let fine = 2 * (16 - root_order);
+        let (col, row) = hilbert_decode(u32::try_from(start << fine).unwrap_or(u32::MAX));
+        // The curve enters an aligned block at whichever corner the block's
+        // orientation puts first, so the corner the centre is measured from is
+        // the block's alignment and not its first cell — reading the first cell
+        // put 24,570 ids inside foreign groups, which
+        // `tests/cells.rs, a_cluster_is_one_run_of_dense_id` caught.
+        let side_bits = blocks.trailing_zeros() / 2 + fine / 2;
+        let (col, row) = (
+            (col >> side_bits) << (side_bits - fine / 2),
+            (row >> side_bits) << (side_bits - fine / 2),
+        );
         // Half a side, which is where the phyllotaxis disc is centred: the disc
         // reaches `R·√m` and the half-side is `√blocks · R · (1 + margin)`, so it
         // fits with the margin to spare and does so at every size.
@@ -195,7 +210,7 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
 ///
 /// A power of **four** and not of two, because the block is a node of the
 /// quaternary the whole corpus is addressed on — a square, aligned to its own
-/// side, so that its members are one interval of Morton codes and therefore one
+/// side, so that its members are one interval of Hilbert codes and therefore one
 /// interval of `dense_id`.
 fn blocks_for(members: u32) -> u64 {
     next_power_of_four(u64::from(members))
@@ -347,7 +362,7 @@ mod tests {
     }
 
     /// Every group is one aligned square of the quaternary, and the squares are
-    /// handed out along the Z-curve without going back. That is what makes a run
+    /// handed out along the curve without going back. That is what makes a run
     /// of consecutive ids — which `order_by_hierarchy` arranges to be a subtree —
     /// a run of adjacent blocks rather than a scatter, and it is the half of the
     /// hidden-partition repair that lives in this function.

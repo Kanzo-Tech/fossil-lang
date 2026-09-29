@@ -25,7 +25,7 @@ form, take it.
 
 | file | |
 | --- | --- |
-| `arithmetic.mjs` | the addressing and Morton arithmetic, as a second implementation. No imports. |
+| `arithmetic.mjs` | the addressing and Hilbert arithmetic, as a second implementation. No imports. |
 | `vectors.json` | the published test vectors. The deliverable — this is what gets copied. |
 | `manifest.mjs` | the manifest, read by line scan rather than through the struct that wrote it |
 | `inspect.mjs` | what is on disk, before any guard has an opinion about it |

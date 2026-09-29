@@ -1,6 +1,6 @@
 //! Where the layout pass puts its bytes.
 //!
-//! The pass itself is arithmetic over Arrow — Louvain, a Morton renumbering, a
+//! The pass itself is arithmetic over Arrow — Louvain, a Hilbert renumbering, a
 //! gather, one sort. **None of it is about files.** What was about files was a
 //! handful of `std::fs` helpers at the bottom of [`crate::layout`], and that was
 //! the single reason a crate declaring `[package.metadata.fossil] wasm = true`
