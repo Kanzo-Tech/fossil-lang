@@ -10,7 +10,7 @@
 //! gives the word: the algorithm chose it because a picture needed coordinates,
 //! and nothing measured it.
 
-use super::morton::morton_decode;
+use super::morton::hilbert_decode;
 
 /// Golden angle (radians) — the phyllotaxis constant `π(3−√5)`. Successive
 /// nodes placed at multiples of this angle pack a disc evenly with no RNG.
@@ -136,6 +136,7 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     // quantisation that normalises.
     let demand: u64 = sizes.iter().map(|&m| blocks_for(m)).sum();
     let root = next_power_of_four(demand);
+    let root_order = root.trailing_zeros() / 2;
 
     // The frontier, in finest blocks, walked in group-id order. A group takes
     // the smallest power of four that holds it, aligned to its own size — so its
@@ -162,7 +163,19 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
         let start = next.max(spread).div_ceil(blocks) * blocks;
         next = start + blocks;
 
-        let (col, row) = morton_decode(u32::try_from(start).unwrap_or(u32::MAX));
+        // The frontier walks the root square in the order the codes will sort
+        // it: block `start` of a root of `4^K` blocks is the `start`-th aligned
+        // sub-square of the order-16 curve, read off at its first cell.
+        let fine = 2 * (16 - root_order);
+        let (col, row) = hilbert_decode(u32::try_from(start << fine).unwrap_or(u32::MAX));
+        // Morton enters every aligned block at its lower-left corner and Hilbert
+        // at whichever corner the block's orientation puts first, so the corner
+        // is the block's alignment and not the first cell.
+        let side_bits = blocks.trailing_zeros() / 2 + fine / 2;
+        let (col, row) = (
+            (col >> side_bits) << (side_bits - fine / 2),
+            (row >> side_bits) << (side_bits - fine / 2),
+        );
         // Half a side, which is where the phyllotaxis disc is centred: the disc
         // reaches `R·√m` and the half-side is `√blocks · R · (1 + margin)`, so it
         // fits with the margin to spare and does so at every size.

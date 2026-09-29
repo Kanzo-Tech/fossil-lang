@@ -38,6 +38,8 @@ pub fn morton_ranks(morton: &[u32]) -> (Vec<u32>, Vec<u32>) {
 /// near-sequential codes, so sorting vertices by it groups nearby ones into the
 /// same Parquet row group — a bbox viewport query then prunes via row-group
 /// min/max stats (the larger-than-RAM predicate-pushdown contract).
+// Unread outside the tests while the Hilbert prototype stands in for it.
+#[allow(dead_code)]
 fn morton2(x: u16, y: u16) -> u32 {
     fn spread(n: u16) -> u32 {
         let mut n = u32::from(n);
@@ -115,7 +117,7 @@ fn morton_codes_within(positions: &[(f32, f32)], extent: Extent) -> Vec<u32> {
     positions
         .iter()
         .map(|&(x, y)| {
-            morton2(
+            hilbert2(
                 quantize(x, extent.xlo, extent.xhi),
                 quantize(y, extent.ylo, extent.yhi),
             )
@@ -137,6 +139,61 @@ pub fn morton_codes(positions: &[(f32, f32)]) -> Vec<u32> {
     }
 }
 
+/// The index of a cell on the order-16 Hilbert curve over the `u16` grid — the
+/// PROTOTYPE on `investigate/tile-compactness` that replaces [`morton2`] as the
+/// order `dense_id` is a rank in.
+///
+/// Same grid, same quantisation, same `u32` codomain, and the same quaternary:
+/// every aligned `2^k` square is one interval of `4^k` codes, exactly as it is
+/// under Morton, so a group's buddy block is still one run of ids and a cell is
+/// still `dense_id >> shift`. What differs is what an interval that is NOT an
+/// aligned square looks like. A Morton interval that crosses a quad boundary
+/// jumps diagonally across the parent, so a 4,096-row tile's box can be most of
+/// the extent; a Hilbert interval is always edge-connected, so its box is never
+/// far from its area. `/docs/design/position` has the measurement.
+pub(super) fn hilbert2(x: u16, y: u16) -> u32 {
+    let (mut x, mut y) = (u32::from(x), u32::from(y));
+    let mut d = 0u32;
+    let mut s = 1u32 << 15;
+    while s > 0 {
+        let rx = u32::from(x & s != 0);
+        let ry = u32::from(y & s != 0);
+        d += s * s * ((3 * rx) ^ ry);
+        if ry == 0 {
+            if rx == 1 {
+                x ^= 0xffff;
+                y ^= 0xffff;
+            }
+            std::mem::swap(&mut x, &mut y);
+        }
+        s >>= 1;
+    }
+    d
+}
+
+/// The inverse of [`hilbert2`]: the cell at index `d` of the order-16 curve.
+pub(super) const fn hilbert_decode(index: u32) -> (u32, u32) {
+    let (mut col, mut row) = (0u32, 0u32);
+    let mut rest = index;
+    let mut side = 1u32;
+    while side < (1 << 16) {
+        let rx = 1 & (rest / 2);
+        let ry = 1 & (rest ^ rx);
+        if ry == 0 {
+            if rx == 1 {
+                col = side - 1 - col;
+                row = side - 1 - row;
+            }
+            std::mem::swap(&mut col, &mut row);
+        }
+        col += side * rx;
+        row += side * ry;
+        rest /= 4;
+        side <<= 1;
+    }
+    (col, row)
+}
+
 /// Split a Morton code back into the two coordinates [`morton2`] interleaved.
 ///
 /// Used to walk the cluster grid in Z-order rather than row by row. Row-major
@@ -144,6 +201,8 @@ pub fn morton_codes(positions: &[(f32, f32)]) -> Vec<u32> {
 /// wraps at the edge, so a parent's children end up spread across a row and
 /// broken over two; Z-order keeps a consecutive run inside a compact block, and
 /// consecutive is exactly what [`order_by_hierarchy`] arranges for siblings.
+// Unread outside the tests while the Hilbert prototype stands in for it.
+#[allow(dead_code)]
 pub(super) const fn morton_decode(code: u32) -> (u32, u32) {
     const fn compact(n: u32) -> u32 {
         let mut n = n & 0x5555_5555;
@@ -239,6 +298,32 @@ mod tests {
              row that separates them — 147 over [0, 167] is 57687 in binary32 \
              and 57686 in binary64."
         );
+    }
+
+    /// The two halves of the prototype are inverses, and an aligned square is
+    /// one interval — the property the buddy placement and the cells rest on.
+    #[test]
+    fn hilbert_is_a_quaternary_bijection() {
+        for d in (0..(1u32 << 20)).step_by(7) {
+            let (x, y) = hilbert_decode(d);
+            assert_eq!(hilbert2(x as u16, y as u16), d);
+        }
+        for block in 0..64u32 {
+            let lo = block * 256;
+            let cells: Vec<_> = (lo..lo + 256).map(hilbert_decode).collect();
+            let (x0, y0) = cells
+                .iter()
+                .fold((u32::MAX, u32::MAX), |a, c| (a.0.min(c.0), a.1.min(c.1)));
+            let (x1, y1) = cells
+                .iter()
+                .fold((0, 0), |a, c| (a.0.max(c.0), a.1.max(c.1)));
+            assert_eq!(
+                (x1 - x0, y1 - y0),
+                (15, 15),
+                "block {block} is a 16x16 square"
+            );
+            assert_eq!((x0 % 16, y0 % 16), (0, 0), "block {block} is aligned");
+        }
     }
 
     #[test]
