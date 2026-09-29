@@ -147,7 +147,7 @@ them, `<name>.graph.yml`, `<label>.vertex.yml` and `<source>_<edge>_<destination
 > **fossil follows GraphAr as far as GraphAr specifies, and no further** — because past that point
 > there is nothing left to follow but a C++ implementation.
 
-Is the thing in `docs/specification/format.md`? Then fossil spells it that way and a difference is a
+Is the thing in `specification/format.md`, under GraphAr's `docs/`? Then fossil spells it that way and a difference is a
 defect. Is it only in that repository's `cpp/`? Then it is somebody's code, it binds nobody, and the
 decision is taken here. **This is not a GraphAr-conformant corpus and does not claim to be.**
 
@@ -523,7 +523,7 @@ The name it took was held by `apps/corpus`, which is now `@fossil-lang/corpus-co
 published name won that collision because it is the one that appears in a stranger's import; the
 app's name was a pnpm resolution handle referenced from nowhere else in the tree. **Neither
 directory rename that would have been tidier happened**: `apps/corpus/` keeps its path because
-`apps/docs/components/{guard-index,vector-table}.tsx` read across into it at build time.
+`docs/components/{guard-index,vector-table}.tsx` read across into it at build time.
 
 <Callout type="info">
   The rename touched no arithmetic. What changed the count of readers of

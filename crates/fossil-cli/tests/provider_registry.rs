@@ -25,12 +25,12 @@
 
 use std::path::{Path, PathBuf};
 
-/// `apps/docs/programs/` — the conformance set, on disk.
+/// `docs/programs/` — the conformance set, on disk.
 fn programs_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../apps/docs/programs")
+        .join("../../docs/programs")
         .canonicalize()
-        .expect("apps/docs/programs is on disk")
+        .expect("docs/programs is on disk")
 }
 
 /// Every diagnostic message `fossil check` produces for `path`.

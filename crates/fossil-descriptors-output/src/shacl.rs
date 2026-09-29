@@ -74,7 +74,7 @@
 //! the `ShEx` side because the position would come from the real parser. It is
 //! an upstream ask, not a local one.
 //!
-//! The corpus has one SHACL document (`apps/docs/programs/catalogue`) and that
+//! The corpus has one SHACL document (`docs/programs/catalogue`) and that
 //! program is clean, so nothing today would render such a label even if it
 //! existed. That is why this is written down rather than built.
 //!

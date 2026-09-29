@@ -1,7 +1,7 @@
 //! The editor reports what `fossil check` reports, for the diagnostics that
 //! need a source column's TYPE.
 //!
-//! `fossil check apps/docs/programs/errors/unknown-field/program.fossil` prints
+//! `fossil check docs/programs/errors/unknown-field/program.fossil` prints
 //! ``` `nmae` is not a field of `User` ``` and exits 1. Driven over stdio, the
 //! LSP published **zero** diagnostics for the same bytes — measured 2026-08-23,
 //! and it was not a transport fault: [`the_transport_is_not_what_is_missing`]
@@ -44,11 +44,11 @@ use serde_json::{Value, json};
 /// `data/users.csv`.
 fn program_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../apps/docs/programs/errors")
+        .join("../../docs/programs/errors")
         .join(name)
         .join("program.fossil")
         .canonicalize()
-        .unwrap_or_else(|e| panic!("apps/docs/programs/errors/{name}/program.fossil: {e}"))
+        .unwrap_or_else(|e| panic!("docs/programs/errors/{name}/program.fossil: {e}"))
 }
 
 fn program_uri(path: &std::path::Path) -> String {

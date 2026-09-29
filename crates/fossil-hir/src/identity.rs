@@ -378,7 +378,7 @@ pub fn check_identities(db: &dyn fossil_base::Db, file: SourceFile) -> usize {
 /// `.../user/{…}` against `.../u/{…}` differ in the literal text. Comparing
 /// SKELETONS instead — every hole replaced by a marker, which is what
 /// `fossil-mir`'s deleted `subject_skeletons` did — would call those two equal,
-/// and it is exactly the program `apps/docs/programs/errors/two-identities`
+/// and it is exactly the program `docs/programs/errors/two-identities`
 /// exists to reject.
 fn identity_form(e: &HirExpr) -> String {
     match e {
@@ -495,7 +495,7 @@ B : Person from more
 
     /// The fixture one identity per type exists for, in miniature: two
     /// mappings, one type, two different identities.
-    /// `apps/docs/programs/errors/two-identities` is
+    /// `docs/programs/errors/two-identities` is
     /// the same program in the conformance set, and it was ACCEPTED — the rule
     /// was written down in three places and enforced in none.
     const TWO_IDENTITIES: &str = "\

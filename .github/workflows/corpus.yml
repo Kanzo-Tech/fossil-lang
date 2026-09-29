@@ -3,7 +3,7 @@ name: corpus
 # The corpus guards and the plain-Node half of the conformance pair, on CI.
 #
 # Both existed and neither ran. `pnpm-ci.yml` filters every recursive step to
-# `./packages/*`, `docs.yml` is filtered to `apps/docs/**`, and there is no git hook
+# `./packages/*`, `docs.yml` is filtered to `docs/**`, and there is no git hook
 # in this repo — so `node guards/self-test.mjs` (the fifteen guards fired against a
 # corpus broken in exactly one way, each) and `node conformance/verify.mjs` ran only
 # when somebody typed them. The half of the conformance pair that DID run,

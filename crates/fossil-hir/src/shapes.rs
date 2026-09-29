@@ -117,7 +117,7 @@ pub struct ResolvedShape<'db> {
     ///
     /// One per shape and not one per constraint: a shape is declared in exactly
     /// one document — `shape_binding_for` resolves which, and getting that
-    /// wrong is what `apps/docs/programs/multi-document` exists to catch — so a
+    /// wrong is what `docs/programs/multi-document` exists to catch — so a
     /// copy per predicate would be the same string N times with N chances to
     /// disagree.
     pub document: SmolStr,
@@ -542,7 +542,7 @@ pub fn resolve_target_shape<'db>(
     // io.shex("…")` introduced it, not the first document the file happens to
     // name. A program with two documents resolved its second mapping against the
     // wrong one until `shape_binding_for` existed; the fixture is
-    // `apps/docs/programs/multi-document`. A program that names none has no
+    // `docs/programs/multi-document`. A program that names none has no
     // output contract.
     let dm = crate::def_map::def_map(db, file);
     let Some((constructor, document)) = dm.shape_binding_for(db, shape_iri.as_str()) else {

@@ -144,7 +144,7 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
 
 // ── The reference page ─────────────────────────────────────────────────────
 //
-// `apps/docs/content/docs/book/stdlib.mdx` used to write the catalogue out by
+// `docs/content/docs/book/stdlib.mdx` used to write the catalogue out by
 // hand. The measurement that ended that is in `xtask::reference`'s module doc:
 // 51 rows in the registry, 58 on the page, seven of the page's naming nothing
 // the checker knows. These three tests are what stops it happening twice.
@@ -163,7 +163,7 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
 #[test]
 fn the_reference_page_includes_the_partial_and_writes_no_row_itself() {
     let root = catalogue::repo_root();
-    let page = std::fs::read_to_string(root.join("apps/docs/content/docs/book/stdlib.mdx"))
+    let page = std::fs::read_to_string(root.join("docs/content/docs/book/stdlib.mdx"))
         .expect("the reference page is on disk");
     let partial = std::fs::read_to_string(root.join(reference::PARTIAL))
         .expect("the generated partial is on disk");
@@ -198,7 +198,7 @@ fn the_reference_page_includes_the_partial_and_writes_no_row_itself() {
     for (n, line) in page.lines().enumerate() {
         assert!(
             !(line.starts_with('|') && line.contains("->")),
-            "apps/docs/content/docs/book/stdlib.mdx:{} writes a catalogue row by hand:\n  {line}\n\
+            "docs/content/docs/book/stdlib.mdx:{} writes a catalogue row by hand:\n  {line}\n\
              rows come from `cargo xtask catalogue`; the page carries the prose",
             n + 1
         );

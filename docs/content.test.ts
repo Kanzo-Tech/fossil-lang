@@ -513,7 +513,7 @@ describe("every source citation names an item that exists", () => {
  * above do. There is no floor here either; `design/discarded` carries the rejected one.
  */
 const WORKSPACE_CITATION =
-  /`((?:packages|apps)\/[\w./@-]+\.(?:ts|tsx|mjs|cjs|js|jsx|json|yml|yaml|css|sh|toml|md|mdx|bnf|rs|fossil))(?:,\s*([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*))?`/g;
+  /`((?:packages|apps|docs)\/[\w./@-]+\.(?:ts|tsx|mjs|cjs|js|jsx|json|yml|yaml|css|sh|toml|md|mdx|bnf|rs|fossil))(?:,\s*([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*))?`/g;
 
 /** The extensions a definition can be read out of. Everything else is checked for existence only. */
 const DEFINING = /\.(?:ts|tsx|mjs|cjs|js|jsx)$/;
@@ -648,11 +648,11 @@ function pageFileForRoute(route: string): string | null {
  * matched identically here, and two readers of one citation form is the arrangement this site
  * exists instead of.
  *
- * **What is a citation and what is a path.** `apps/docs/programs/hello` contains `/docs/` and is a
+ * **What is a citation and what is a path.** `docs/programs/hello` contains `/docs/` and is a
  * directory, so a route starts where its path does and a match preceded by a word character, a dot,
  * a dash or a slash is not one. A trailing `…` names a FAMILY of routes rather than a route — the
  * paragraph above names two that are gone on purpose, and they must not be made to resolve. And a
- * last segment carrying a file extension is a file: `apps/docs/content/docs/book/stdlib.mdx` cited
+ * last segment carrying a file extension is a file: `docs/content/docs/book/stdlib.mdx` cited
  * from `xtask`, or `/docs/book/anatomy.mdx`, which is the llms.mdx handler's route and not a page.
  *
  * WHAT IT CANNOT PROVE: that the target says what the citation claims, which is the same residue
@@ -664,10 +664,11 @@ const ROUTE_CITATION = /(?<![\w.\-/…])\/docs(?:\/[A-Za-z0-9._#-]+)*\/?/g;
 
 /**
  * Where a route may be cited. Anything outside this is unchecked, not permitted, and widening the
- * list is the whole of the change if a fourth tree ever cites one.
+ * list is the whole of the change if a fifth tree ever cites one.
  */
 const ROUTE_TREES: ReadonlyArray<readonly [dir: string, exts: readonly string[]]> = [
   ["crates", [".rs", ".toml"]],
+  ["docs", [".ts", ".tsx", ".mjs", ".mdx", ".md", ".json"]],
   ["apps", [".ts", ".tsx", ".mjs", ".mdx", ".md", ".json"]],
   ["packages", [".ts", ".tsx", ".mjs", ".md", ".json"]],
 ];
@@ -742,7 +743,7 @@ describe("every /docs route that is cited lands", () => {
   it("finds routes to check, on both sides of the tree", () => {
     expect(routeCitations.length).toBeGreaterThan(300);
     expect(
-      routeCitations.filter((c) => !c.where.startsWith("apps/docs/")).length,
+      routeCitations.filter((c) => !c.where.startsWith("docs/")).length,
       "no route is cited from outside this app, which is the half this guard was widened for",
     ).toBeGreaterThan(50);
     expect(routeCitations.filter((c) => c.route.includes("#")).length).toBeGreaterThan(20);
@@ -858,7 +859,7 @@ describe("every argument that is named is a page of this site", () => {
  *     comment that lost its citation and kept its meaning from one that lost both.
  *   - **That `grammar.bnf` is right.** It specifies the language; the parser implements it. A
  *     production here and absent from `crates/fossil-syntax` is work outstanding, and that inversion
- *     is deliberate. Nothing mechanical compares the two — the 23 programs of `apps/docs/programs/`
+ *     is deliberate. Nothing mechanical compares the two — the 23 programs of `docs/programs/`
  *     are the only check the file has.
  *
  * **What it does not scan:** nothing, now. This carried two exemptions and outlived both —
@@ -871,7 +872,7 @@ const GRAMMAR = join(repoRoot, "grammar.bnf");
 /** Where a `grammar.bnf` citation may appear. Anything outside this is unchecked, not permitted. */
 const CITED_TREES: ReadonlyArray<readonly [dir: string, ext: string]> = [
   ["crates", ".rs"],
-  ["apps/docs/content", ".mdx"],
+  ["docs/content", ".mdx"],
 ];
 
 /** `grammar.bnf, TypeDef` or `grammar.bnf, § RESERVED KEYWORDS`. Nothing else is a citation. */

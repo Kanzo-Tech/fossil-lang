@@ -1591,7 +1591,7 @@ fn diagnostics_of(src: &str) -> Vec<String> {
 /// `ex:buyer @ex:Person` says where the edge lands. While a reference was
 /// `TyKind::Iri` every reference had ONE type, so `buyer = Order(…)` — an edge
 /// to the wrong shape — type-checked clean, measured against
-/// `apps/docs/programs/shop` on 2026-08-21.
+/// `docs/programs/shop` on 2026-08-21.
 ///
 /// Both halves are asserted, because a rule that refuses everything would pass
 /// the first: the right edge is accepted and the wrong one is refused, naming
@@ -1866,7 +1866,7 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
     // re-qualifies neither — so the refusal demanded the one spelling that could
     // not resolve. The side is a SET of names now
     // (`fossil_mir::JoinSide::relations`), the seam is closed, and
-    // `apps/docs/programs/chained-join` is the program that executes it.
+    // `docs/programs/chained-join` is the program that executes it.
     let chained = diagnostics(&format!(
         "{SOURCES}Both := Left.join(Right, on = Left.k == Right.k)\n\
          Out := Both.join(Third, on = Right.k == Third.k)\n"

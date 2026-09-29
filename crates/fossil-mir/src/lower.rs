@@ -1561,7 +1561,7 @@ Venta : Person from Sales
     /// naming the one qualifier that could not resolve as the alternative:
     /// `Both.join(Region, on = User.region_id == Region.id)` wanted `Both`, and
     /// `Purchase.join(Adults, on = … == User.id)` wanted `Adults`.
-    /// `apps/docs/programs/chained-join` is both of them, executed.
+    /// `docs/programs/chained-join` is both of them, executed.
     #[test]
     fn a_side_carries_every_binding_its_pipeline_left_addressable() {
         let src = "\

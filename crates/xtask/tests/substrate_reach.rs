@@ -65,7 +65,7 @@
 //! - **That the dev edge is harmless.** It is excluded on purpose:
 //!   `examples/compaction_pass.rs` links `fossil-df` and therefore `salsa`, and
 //!   that is the arrangement the repair chose. `-e normal` is the edge
-//!   `deny.toml`, the WASM gate and `apps/docs/content.test.ts` all read, so it
+//!   `deny.toml`, the WASM gate and `docs/content.test.ts` all read, so it
 //!   is the one to assert on.
 //! - **Anything about a feature-gated edge.** `cargo metadata`'s resolve graph
 //!   is taken as given, for the default features and the host target — the same

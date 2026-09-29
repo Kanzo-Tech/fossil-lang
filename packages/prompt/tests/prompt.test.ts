@@ -16,7 +16,7 @@ import { EXAMPLE, FORBIDDEN, FOSSIL_PROMPT, NAMES } from '../src/index.js';
 import { GRAMMAR_DIGEST, SURFACE } from '../src/surface.js';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-const PROGRAMS = join(ROOT, 'apps/docs/programs');
+const PROGRAMS = join(ROOT, 'docs/programs');
 
 /** Every conformance program, recursively — `crates/fossil-cli/tests/programs.rs` walks the same tree. */
 function programs(dir = PROGRAMS): string[] {
@@ -55,7 +55,7 @@ describe('the prompt is held to the language', () => {
     const unwritten = fences
       .flatMap((f) => f.split('\n').map((l) => l.trim()))
       .filter((l) => l !== '' && !written.has(l));
-    expect(unwritten, 'these lines are in the prompt and in no program under apps/docs/programs').toEqual(
+    expect(unwritten, 'these lines are in the prompt and in no program under docs/programs').toEqual(
       [],
     );
   });

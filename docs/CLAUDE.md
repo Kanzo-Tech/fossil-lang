@@ -1,6 +1,6 @@
-# apps/docs — rules local to this app
+# docs/ — rules local to this app
 
-The repository rules are in `../../CLAUDE.md`. These are true only here.
+The repository rules are in `../CLAUDE.md`. These are true only here.
 
 ## One site, and this is all of it
 
@@ -81,10 +81,10 @@ them inside a `NotImplemented` message a user reads. Inside this app it reads mo
 links, too: fifteen `<Card href="/docs/…">` on `design/index.mdx` were unchecked.
 
 **The same spelling reads the other half of the tree**, and there the bare path is checked too: a
-`packages/…` or `apps/…` path must be a file that is on disk, with or without an anchor, and an
+`packages/…`, `apps/…` or `docs/…` path must be a file that is on disk, with or without an anchor, and an
 anchor on a `.ts`/`.tsx`/`.mjs` must be a name that file declares — a re-export is this half's `use`.
 `044cbbf` moved two modules into a package and eight citations of their old paths survived it across
-four pages with CI green, which is what that buys. It stops at those two directories: `crates/` with
+four pages with CI green, which is what that buys. It stops at those three directories: `crates/` with
 no anchor is still unchecked, because `design/prior-art` cites rust-analyzer by its real `crates/…`
 path, and `design/discarded` carries which half landed and what the other one needs.
 
@@ -93,7 +93,7 @@ path, and `design/discarded` carries which half landed and what the other one ne
 `build` runs `test` first, and that is load-bearing. `content.test.ts` fails the build on: a
 direction without a summary, an `arguedIn` that does not resolve or that names its own page, a
 `/docs/…` route cited **anywhere in the repository** that is not a page here, a `#fragment` naming
-no heading in the target, a source citation naming an item its file does not define, a `packages/…` or `apps/…` path that is not on
+no heading in the target, a source citation naming an item its file does not define, a `packages/…`, `apps/…` or `docs/…` path that is not on
 disk, a citation written as `path:12` at all, and a `grammar.bnf` citation that names no production. It also carries the one architectural claim a
 manifest can settle.
 

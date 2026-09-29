@@ -413,7 +413,7 @@ fn files_with_extension(root: &std::path::Path, ext: &str) -> Vec<std::path::Pat
 ///
 /// - **That a fixture is a form the language HAS.** A file that parses clean may
 ///   still be nonsense the checker refuses — `@subject = ?` in bucket 2 is a
-///   parse-recovery fixture on purpose. Only compiling `apps/docs/programs/`
+///   parse-recovery fixture on purpose. Only compiling `docs/programs/`
 ///   proves that, and this crate has no checker to ask.
 /// - **That fossil written inside a Rust or TypeScript string literal is
 ///   live.** This is the real hole and it is deliberate, because a guard that
@@ -440,7 +440,7 @@ fn no_fixture_spells_a_retired_form() {
     // A FLOOR, not an equality. The failure a count exists to catch here is the
     // walk finding nothing because the root resolved wrong — and a floor catches
     // that. An equality would additionally go red every time anyone adds a
-    // conformance program under `apps/docs/programs/`, which is unrelated work
+    // conformance program under `docs/programs/`, which is unrelated work
     // and would train people to bump the number without reading it.
     assert!(
         checked >= 50,
@@ -467,7 +467,7 @@ fn no_fixture_spells_a_retired_form() {
 
 /// The same guard over ` ```fossil ` fenced blocks in Markdown.
 ///
-/// Documentation transcludes `apps/docs/programs/` rather than retyping it (see
+/// Documentation transcludes `docs/programs/` rather than retyping it (see
 /// the repo `CLAUDE.md`), so there is very little of this — but «very little» is
 /// the state a guard preserves, not one it can assume. A page that inlines a
 /// program in the dead spelling is a page teaching it.

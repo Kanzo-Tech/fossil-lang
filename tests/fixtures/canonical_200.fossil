@@ -1,7 +1,7 @@
 // canonical_200.fossil — the LSP performance fixture (the didChange round-trip
 // budget) AND the input of the end-to-end feature test.
 //
-// IT IS NOT A CONFORMANCE PROGRAM. The conformance set is `apps/docs/programs/`
+// IT IS NOT A CONFORMANCE PROGRAM. The conformance set is `docs/programs/`
 // and grammar.bnf names it; this is a BENCH. 8 sources and 15 mappings, and the
 // size is the whole point: `crates/fossil-lsp/tests/didchange_budget.rs` is a
 // hard CI gate at 400 ms, and a budget measured over a twelve-line file asserts

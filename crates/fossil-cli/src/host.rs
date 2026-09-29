@@ -322,7 +322,7 @@ pub fn run(
     // The run's one anchor: the directory of the program being run, and the
     // `@conn` map it expands aliases through. Everything below resolves through
     // this and nothing below consults the process's working directory — which
-    // is what makes `fossil run apps/docs/programs/hello/hello.fossil` mean the
+    // is what makes `fossil run docs/programs/hello/hello.fossil` mean the
     // same thing from the repository root as from beside the program.
     let program_dir = fossil_locator::program_dir(&path.to_string_lossy());
     let anchor = SourceAnchor::new(&program_dir, connections);

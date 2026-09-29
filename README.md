@@ -45,7 +45,7 @@ People : Person from User
     name     = User.name
 ```
 
-That is `apps/docs/programs/hello/hello.fossil` verbatim — one of the programs
+That is `docs/programs/hello/hello.fossil` verbatim — one of the programs
 the documentation is written against. The surface is the one [`grammar.bnf`](grammar.bnf)
 specifies, and the grammar is ahead of the parser on purpose — read a page's `today:`
 register before assuming the compiler has arrived there.
@@ -78,7 +78,7 @@ that files appeared — and is the test that goes red if it stops holding.
 `examples/hello.fossil` is a CLI fixture, not a conformance program: it is the
 one thing that drives the *binary* end to end and asserts the GraphAr dataset on
 disk by content. The language itself is proved by the conformance programs under
-`apps/docs/programs/`, which `crates/fossil-cli/tests/programs.rs` compiles
+`docs/programs/`, which `crates/fossil-cli/tests/programs.rs` compiles
 and the documentation transcludes.
 
 ## Foundations
@@ -99,14 +99,14 @@ There is **one** reference, in three pieces:
 
 - [`grammar.bnf`](grammar.bnf) — the language's syntax, normative. The parser implements it; it does
   not describe the parser. Transcluded whole into `/docs/book/grammar`.
-- [`apps/docs/`](apps/docs/) — all of the prose (Next.js + fumadocs). `/docs/book/getting-started`
+- [`docs/`](docs/) — all of the prose (Next.js + fumadocs). `/docs/book/getting-started`
   teaches the language, `/docs/format` specifies the corpus, and behind a maintainers' divider `/docs/design`
   is the argument for why any of it is shaped this way. A page describing something not yet built
   says so in a `direction:` field rather than in its tone; everything else describes what is there.
 - [`apps/corpus/`](apps/corpus/) — the artifact's contract, executable: the guards that make a
   convention checkable and the conformance corpus that makes two readers agree. Copy `guards/`
   somewhere else and it runs — `node` and a `duckdb` binary, no install, no build.
-- [`apps/docs/programs/`](apps/docs/programs/) — the conformance programs. Every program the
+- [`docs/programs/`](docs/programs/) — the conformance programs. Every program the
   documentation shows is one of these, read off disk at build time and never retyped into prose.
   No count here: `crates/fossil-cli/tests/programs.rs` walks the directory, and the number this
   line used to carry was five behind it.

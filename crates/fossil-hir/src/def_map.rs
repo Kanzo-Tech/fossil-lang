@@ -476,7 +476,7 @@ impl<'db> DefMap<'db> {
     /// it.** This used to be [`Self::output_shape_binding`]: a `find_map` over
     /// the type bindings returning the FIRST document any of them named. With
     /// one document per program the two answers coincide; with two they do not,
-    /// and `apps/docs/programs/multi-document` — `Persona` from `es.shex`,
+    /// and `docs/programs/multi-document` — `Persona` from `es.shex`,
     /// `Human` from `en.shex`, disjoint — resolved its second mapping against
     /// the first document and reported *«`es.shex` declares no shape
     /// `https://council.example/voc#Person`»*, which is true and is not the
@@ -1296,7 +1296,7 @@ Users : Person from User
     /// And a COMMENT is trivia too, which trimming characters cannot see.
     ///
     /// The corpus writes these: `// #region` / `// #endregion` mark the runs
-    /// `apps/docs` transcludes, so the binding a documentation page shows is
+    /// `docs/` transcludes, so the binding a documentation page shows is
     /// exactly the binding with a comment glued to its range. Measured on
     /// `compound-key` with its join condition broken — the report underlined
     /// `// #endregion on` and the blank line after it, as a multi-line block.

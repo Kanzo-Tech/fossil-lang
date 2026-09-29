@@ -12,7 +12,7 @@ it is the interface. **The seam between the two halves of fossil is the corpus o
 API.** `kanzo-ui` reads fossil-written corpora with no `@fossil-lang/*` dependency of any kind, and
 three languages that do not know fossil exists read the same tree; the read surface here,
 `crates/fossil-graph`, reaches the rest of the tree exactly once, which
-`apps/docs/content.test.ts` asserts as a build failure instead of a sentence.
+`docs/content.test.ts` asserts as a build failure instead of a sentence.
 
 <Callout title="Two products, one repository">
 The other half of fossil is a statically-typed language that produces a graph, documented at its own

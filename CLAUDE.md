@@ -17,7 +17,7 @@ Keep it under 200 lines, rules-not-context.
   function with its signature and lowering. Generated from, not compared against — seven files
   come out of `cargo xtask catalogue` and no Rust states a row a second time. Adding a
   function is a line here. `CONTRIBUTING.md` has the seven and the round-trip guard.
-- `apps/docs/` — the whole of the documentation, and there is no second site.
+- `docs/` — the whole of the documentation, and there is no second site.
   `/docs/book/getting-started` teaches the language and `/docs/format` specifies the corpus;
   behind a maintainers' divider,
   `/docs/design` is where an argument lives, with `design/discarded` for every rejected
@@ -27,12 +27,12 @@ Keep it under 200 lines, rules-not-context.
   and `vectors.json` live on the docs side and read across, so renaming either file breaks the
   docs build on purpose. `integration/` is the one directory here that needs `pnpm install`, and
   `pnpm test:integration` is the only script that reaches it.
-- `apps/docs/programs/` — the conformance programs. Documentation transcludes them; nothing
+- `docs/programs/` — the conformance programs. Documentation transcludes them; nothing
   retypes a program into prose. No number here: `crates/fossil-cli/tests/programs.rs` walks
   the directory, and the count in this line was already wrong.
 - `crates/` — the crate list. There is no number to quote; `cargo xtask wasm-check` prints
   the wasm32 subset it derived from the dependency graph.
-- `apps/docs/CLAUDE.md` — the editorial rules for the docs app: which pages declare a
+- `docs/CLAUDE.md` — the editorial rules for the docs app: which pages declare a
   `direction:` and which simply describe what is there, and why evidence is transclusion
   rather than a cited line number.
 
@@ -300,7 +300,7 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
                            own path-filtered workflow instead: `docs.yml`, `corpus.yml`.
   docs/                    Next.js + fumadocs, and ALL of the prose: the book, the corpus
                            format, and the design argument behind a maintainers' divider.
-                           `apps/docs/CLAUDE.md` has the editorial rules
+                           `docs/CLAUDE.md` has the editorial rules
   corpus/                  NOT a site — it was one, and it is now `docs/content/docs/format/`.
                            What is left executes: the guards, the conformance corpus, a reader
                            that shares no code with them, and `integration/` — the four vitest

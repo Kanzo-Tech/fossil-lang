@@ -1209,7 +1209,7 @@ mod disambiguation {
 
     // ── RULE 7 — `as` is CONTEXTUAL ───────────────────────────────────
 
-    /// The self-join, from `apps/docs/programs/self-join/`. The alias binds a
+    /// The self-join, from `docs/programs/self-join/`. The alias binds a
     /// second name for the same source so the two sides of the join can be told
     /// apart.
     #[test]

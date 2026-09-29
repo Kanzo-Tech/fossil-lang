@@ -404,7 +404,7 @@ graph LR
 
 The seam between the two halves is the corpus on disk, and it was never an API: `kanzo-ui` reads
 corpora written by fossil with **no dependency on `@fossil-lang/*`**, and three languages that do not
-know fossil exists read the same tree on 2026-08-04. `apps/docs/content.test.ts` keeps the first
+know fossil exists read the same tree on 2026-08-04. `docs/content.test.ts` keeps the first
 paragraph a build failure rather than a sentence somebody measured once — it reads
 `crates/fossil-graph/Cargo.toml` and fails if that crate's fossil dependencies are ever anything but
 `fossil-sinks` alone, including when the manifest goes and the answer becomes none.

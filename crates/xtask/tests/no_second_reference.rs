@@ -11,12 +11,12 @@
 //! silently, on the day the work lands and the document keeps describing it. By then it is load
 //! bearing enough that deleting it is a project.
 //!
-//! So the rule is a test rather than a habit: documentation lives in `apps/docs`, and the root
+//! So the rule is a test rather than a habit: documentation lives in `docs/`, and the root
 //! carries only what a reader meets before the site — the front door, the contributor's guide, the
 //! agent instructions, the licence.
 //!
 //! WHAT THIS DOES NOT PROVE. It checks a filename, not a genre. A second reference filed as
-//! `apps/docs/content/docs/design/plan.mdx` passes here and is the same mistake — what stops that
+//! `docs/content/docs/design/plan.mdx` passes here and is the same mistake — what stops that
 //! one is `design/discarded`'s admission rule, which is prose. And it says nothing about the four
 //! permitted files themselves: `CONTRIBUTING.md` could grow a design chapter and this would not
 //! notice. It closes the one door that has been walked through twice.
@@ -67,7 +67,7 @@ fn the_root_holds_no_prose_but_its_own_front_door() {
     assert!(
         strays.is_empty(),
         "the repository root has grown prose that is not its front door: {strays:?}\n\
-         Documentation belongs in apps/docs. A plan belongs in the commit that executes it.\n\
+         Documentation belongs in docs. A plan belongs in the commit that executes it.\n\
          This repository has deleted a second reference from the root twice; the second time it \
          had been cited 89 times from the code and the deletion took a day.",
     );

@@ -146,7 +146,7 @@ use lsp_types::{
 /// empty table pretending to be one». That was honest about a host that did
 /// nothing with sources, and it stopped being harmless the moment the checker
 /// started reporting on their columns. Measured 2026-08-23 over the real stdio
-/// transport: `fossil check apps/docs/programs/errors/unknown-field/program.fossil`
+/// transport: `fossil check docs/programs/errors/unknown-field/program.fossil`
 /// reports ``nmae` is not a field of `User`` and exits 1, and the editor
 /// published **zero** diagnostics for the same bytes. Every diagnostic whose
 /// evidence is a source's schema was absent from the editor and present in the

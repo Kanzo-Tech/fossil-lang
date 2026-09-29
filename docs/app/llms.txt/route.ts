@@ -160,10 +160,10 @@ export function GET() {
     "## Where the things the pages describe live",
     "",
     "- `crates/` — the Rust workspace: the compiler stage by stage, the runtime, the CLI (`fossil-cli`) and the language server (`fossil-lsp`). A page that claims something is true today cites a file in here.",
-    "- `apps/docs/programs/` — every program this site shows, one directory per program with its data beside it. These are the files `<Program>` transcludes; they are not extracted from the prose.",
+    "- `docs/programs/` — every program this site shows, one directory per program with its data beside it. These are the files `<Program>` transcludes; they are not extracted from the prose.",
     "- `grammar.bnf` — the language, normative, and transcluded whole into `/docs/book/grammar`. The parser implements it; it does not describe the parser.",
     "- `/docs/design/` — the arguments, and the only place they live. `direction.arguedIn` names one of these pages; `/docs/design/discarded` carries every rejected alternative with the observation that would bring it back.",
-    "- `apps/docs/` — this site.",
+    "- `docs/` — this site.",
     "",
   ];
 
