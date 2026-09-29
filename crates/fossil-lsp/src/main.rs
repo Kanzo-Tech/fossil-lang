@@ -18,7 +18,7 @@
 #[cfg(target_arch = "wasm32")]
 compile_error!(
     "fossil-lsp is native-only (lsp-server uses crossbeam-channel + stdio); \
-     the playground exposes LSP features via fossil-wasm directly, not through this binary"
+     the browser reaches LSP features through fossil-wasm directly, not through this binary"
 );
 
 use std::error::Error;

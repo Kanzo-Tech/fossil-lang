@@ -1,5 +1,5 @@
 /**
- * Vitest coverage for FossilPlayground.registerInferredDescriptor — the API a
+ * Vitest coverage for FossilWorkspace.registerInferredDescriptor — the API a
  * host uses to push a `DESCRIBE`-derived input schema into the compiler, which
  * does no IO of its own. Exercises the wasm-bindgen build output directly — these tests
  * are integration-flavoured (real WASM load) but isolated to the
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import {
   initFossilWasm,
-  FossilPlayground,
+  FossilWorkspace,
   type InferredDescriptorJson,
 } from '../src/index.js';
 
@@ -29,9 +29,9 @@ beforeAll(async () => {
   await initFossilWasm(bytes);
 });
 
-describe('FossilPlayground.registerInferredDescriptor', () => {
+describe('FossilWorkspace.registerInferredDescriptor', () => {
   it('registers a valid descriptor without throwing', () => {
-    const pg = new FossilPlayground();
+    const ws = new FossilWorkspace();
     try {
       const desc: InferredDescriptorJson = {
         uri: 'users.csv',
@@ -41,14 +41,14 @@ describe('FossilPlayground.registerInferredDescriptor', () => {
         ],
         freshness_token: '',
       };
-      expect(() => pg.registerInferredDescriptor(desc)).not.toThrow();
+      expect(() => ws.registerInferredDescriptor(desc)).not.toThrow();
     } finally {
-      pg.free();
+      ws.free();
     }
   });
 
   it('re-registering the same uri does not throw', () => {
-    const pg = new FossilPlayground();
+    const ws = new FossilWorkspace();
     try {
       const first: InferredDescriptorJson = {
         uri: 'users.csv',
@@ -63,33 +63,33 @@ describe('FossilPlayground.registerInferredDescriptor', () => {
         ],
         freshness_token: 'h2',
       };
-      pg.registerInferredDescriptor(first);
-      expect(() => pg.registerInferredDescriptor(second)).not.toThrow();
+      ws.registerInferredDescriptor(first);
+      expect(() => ws.registerInferredDescriptor(second)).not.toThrow();
     } finally {
-      pg.free();
+      ws.free();
     }
   });
 
   it('throws on missing required fields', () => {
-    const pg = new FossilPlayground();
+    const ws = new FossilWorkspace();
     try {
       // Bypass TS to exercise runtime Rust-side validation.
       const malformed = { uri: 'users.csv' } as unknown as InferredDescriptorJson;
-      expect(() => pg.registerInferredDescriptor(malformed)).toThrow();
+      expect(() => ws.registerInferredDescriptor(malformed)).toThrow();
     } finally {
-      pg.free();
+      ws.free();
     }
   });
 
   it('registers multiple distinct uris independently', () => {
-    const pg = new FossilPlayground();
+    const ws = new FossilWorkspace();
     try {
-      pg.registerInferredDescriptor({
+      ws.registerInferredDescriptor({
         uri: 'users.csv',
         columns: [{ name: 'id', primitive: 'integer' }],
         freshness_token: '',
       });
-      pg.registerInferredDescriptor({
+      ws.registerInferredDescriptor({
         uri: 'products.csv',
         columns: [{ name: 'sku', primitive: 'string' }],
         freshness_token: '',
@@ -100,21 +100,21 @@ describe('FossilPlayground.registerInferredDescriptor', () => {
       // throwing.
       expect(true).toBe(true);
     } finally {
-      pg.free();
+      ws.free();
     }
   });
 
   it('accepts empty columns array', () => {
-    const pg = new FossilPlayground();
+    const ws = new FossilWorkspace();
     try {
       const desc: InferredDescriptorJson = {
         uri: 'empty.csv',
         columns: [],
         freshness_token: '',
       };
-      expect(() => pg.registerInferredDescriptor(desc)).not.toThrow();
+      expect(() => ws.registerInferredDescriptor(desc)).not.toThrow();
     } finally {
-      pg.free();
+      ws.free();
     }
   });
 });

@@ -9,7 +9,7 @@ JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Prov
 - `tokenize(text)` — calls the Rust lexer, returns `TokenRow[]`. The Rust lexer
   is the only lexer: no host reimplements one and drifts from the grammar.
 - `semanticLegend()` — returns the LSP semantic-tokens legend.
-- `FossilPlayground` — the Workspace API class for LSP + compile. `fossil-lsp`
+- `FossilWorkspace` — the Workspace API class for LSP + compile. `fossil-lsp`
   itself is native-only (stdio over crossbeam), so the browser gets this
   equivalent dispatch surface over the same `fossil-ide` functions.
 
@@ -33,7 +33,7 @@ and every one that answers about the program takes the text and pushes it
 first, comparing against what it last pushed so the common case costs a string
 comparison. `check` and `sources` also run `resolveDocuments`, which reads
 nothing when nothing is missing. That is the whole protocol an editor host used
-to write by hand; `workspace` is the `FossilPlayground` underneath, for a
+to write by hand; `workspace` is the `FossilWorkspace` underneath, for a
 question this surface does not ask, and `close()` frees it.
 
 ## Documents and sources: fossil resolves, the host reads
@@ -50,10 +50,10 @@ A host that already holds a document's text calls `registerDocument` itself.
 ```typescript
 import { resolveDocuments } from '@fossil-lang/storage';
 
-const pg = new FossilPlayground();
-const h = pg.openFile('prog.fossil', text); // edited buffers only
-const { unread } = await resolveDocuments(pg.workspace(h), host); // sets the connections too
-const rows = pg.check();
+const ws = new FossilWorkspace();
+const h = ws.openFile('prog.fossil', text); // edited buffers only
+const { unread } = await resolveDocuments(ws.workspace(h), host); // sets the connections too
+const rows = ws.check();
 ```
 
 - `missingDocuments(h)` — `{ key, locator, connection? }` rows. The key is what
@@ -97,8 +97,8 @@ the URL then answers with `index.html`. Keep the three packages out of it —
 export default { optimizeDeps: { exclude: ['@fossil-lang/wasm', '@fossil-lang/executor', '@fossil-lang/corpus'] } };
 ```
 
-A workspace-linked package is never pre-bundled, which is why the playground needs
-no such line. Next.js needs none in either `next dev` or `next build`, webpack or
+A workspace-linked package is never pre-bundled, which is why a host inside this
+repository would need no such line. Next.js needs none in either `next dev` or `next build`, webpack or
 Turbopack.
 
 `--target bundler` was rejected because it emits `import … from '*.wasm'` (the

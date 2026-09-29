@@ -12,7 +12,7 @@
  * Mirrors `@fossil-lang/corpus`'s `client.ts` split, the known-good shape.
  */
 import {
-  FossilPlayground as RawFossilPlayground,
+  FossilWorkspace as RawFossilWorkspace,
   FileHandle as RawFileHandle,
   tokenize as rawTokenize,
   semantic_legend as rawSemanticLegend,
@@ -58,7 +58,7 @@ export function start_lsp_worker(): void {
 }
 
 /**
- * Opaque file-handle returned by {@link FossilPlayground.openFile}. Pass it
+ * Opaque file-handle returned by {@link FossilWorkspace.openFile}. Pass it
  * back into the matching `updateFile` / `closeFile` / `diagnosticsFor`
  * calls. JS code cannot construct one directly (the wasm-bindgen class has a
  * private constructor) — handles are minted only by `openFile` on the Rust
@@ -143,7 +143,7 @@ export function providers(): ProviderInfo[] {
 
 /**
  * Workspace API class. Thin TS wrapper around the wasm-bindgen
- * `FossilPlayground` that exposes camelCase method names for JS idiom + better
+ * `FossilWorkspace` that exposes camelCase method names for JS idiom + better
  * TS inference (the raw bindings use snake_case from the Rust impl block).
  *
  * One instance per browser tab / Node process — the instance owns the Salsa
@@ -152,15 +152,15 @@ export function providers(): ProviderInfo[] {
  * NOTE: {@link FileHandle} is opaque — JS cannot construct one. Callers receive
  * a handle from `openFile` and pass it back to subsequent operations.
  */
-export class FossilPlayground {
-  private _inner: RawFossilPlayground;
+export class FossilWorkspace {
+  private _inner: RawFossilWorkspace;
 
   constructor() {
-    this._inner = new RawFossilPlayground();
+    this._inner = new RawFossilWorkspace();
   }
 
   /**
-   * Free the underlying WASM-side Salsa store. Call when the playground is no
+   * Free the underlying WASM-side Salsa store. Call when the workspace is no
    * longer needed (e.g. component unmount).
    */
   free(): void {
@@ -226,7 +226,7 @@ export class FossilPlayground {
 
   /**
    * The file at `handle` as a {@link DocumentWorkspace}, for
-   * `resolveDocuments(playground.workspace(handle), host)`.
+   * `resolveDocuments(workspace.workspace(handle), host)`.
    */
   workspace(handle: FileHandle): DocumentWorkspace {
     return {

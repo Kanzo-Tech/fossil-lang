@@ -4,7 +4,7 @@
  * "Given the sources a program reads, produce an `InferredDescriptor` per
  * source" is a single fossil capability. Which sources a program reads is not
  * this package's question: fossil answers it from the AST
- * (`FossilPlayground.sources`), with every `@conn/path` already expanded into
+ * (`FossilWorkspace.sources`), with every `@conn/path` already expanded into
  * a locator and the connection it goes through. This package reads each one
  * through the host's DuckDB under the credential the host vends for that
  * connection (`@fossil-lang/storage`), and owns the DESCRIBE SQL, the
@@ -36,7 +36,7 @@ import {
 /**
  * The Fossil primitive lattice (mirror `@fossil-lang/wasm`'s
  * `InferredPrimitive` — structurally identical so `introspect()` output flows
- * straight into `FossilPlayground.registerInferredDescriptor`). Collapsing the
+ * straight into `FossilWorkspace.registerInferredDescriptor`). Collapsing the
  * two into one source is still open.
  */
 export type InferredPrimitive =

@@ -24,7 +24,7 @@
 //!
 //! # What answers «which open files are programs»
 //!
-//! Nothing new. `FossilPlayground` installs `fossil_descriptors_output::
+//! Nothing new. `FossilWorkspace` installs `fossil_descriptors_output::
 //! PROVIDERS` (`wasm_system.rs`), every row of which declares the extensions it
 //! accepts, and `fossil_base::claimed` asks all of them at once. A URI some row
 //! reads is an INPUT — that is what `io.shex("person.shex")` means — and an
@@ -48,7 +48,7 @@
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use fossil_wasm::FossilPlayground;
+use fossil_wasm::FossilWorkspace;
 
 /// The program of `shape_document.rs`, naming its output document.
 const PROGRAM: &str = "\
@@ -95,8 +95,8 @@ const USERS_DESCRIPTOR: &str = r#"{
   "freshness_token": ""
 }"#;
 
-fn rows_for(pg: &FossilPlayground, uri: &str) -> Vec<String> {
-    pg.check_rows()
+fn rows_for(ws: &FossilWorkspace, uri: &str) -> Vec<String> {
+    ws.check_rows()
         .into_iter()
         .filter(|r| r.uri == uri)
         .map(|r| r.message)
@@ -107,14 +107,14 @@ fn rows_for(pg: &FossilPlayground, uri: &str) -> Vec<String> {
 /// document, and (4): the program is still checked against it.
 #[test]
 fn a_shape_document_in_the_workspace_is_not_parsed_as_fossil() {
-    let mut pg = FossilPlayground::new();
-    pg.register_inferred_descriptor_native(USERS_DESCRIPTOR)
+    let mut ws = FossilWorkspace::new();
+    ws.register_inferred_descriptor_native(USERS_DESCRIPTOR)
         .expect("the descriptor JSON is well-formed");
-    pg.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
-    let document = pg.open_file_native("person.shex".to_string(), DEMANDS_INTEGER.to_string());
+    ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
+    let document = ws.open_file_native("person.shex".to_string(), DEMANDS_INTEGER.to_string());
 
     // (1) The workspace-wide drain. Twenty-one before this line existed.
-    let in_document = rows_for(&pg, "person.shex");
+    let in_document = rows_for(&ws, "person.shex");
     assert!(
         in_document.is_empty(),
         "a `ShExJ` document is not fossil source and its parse errors are not \
@@ -124,7 +124,7 @@ fn a_shape_document_in_the_workspace_is_not_parsed_as_fossil() {
 
     // (2) The per-file drain — the one the LSP Worker turns into
     // `publishDiagnostics` for the buffer the user is looking at.
-    let per_file = pg
+    let per_file = ws
         .diagnostics_for_rows(document)
         .expect("the document handle is open");
     assert!(
@@ -137,7 +137,7 @@ fn a_shape_document_in_the_workspace_is_not_parsed_as_fossil() {
     // (4) And the document is still the OUTPUT CONTRACT: it demands an integer
     // where the program writes a string, and that report is on the program.
     // Silencing the document must not deregister it.
-    let in_program = rows_for(&pg, "prog.fossil");
+    let in_program = rows_for(&ws, "prog.fossil");
     assert!(
         in_program.iter().any(|m| m.contains("expects Integer")),
         "the program is still checked against the document it names; got \
@@ -155,16 +155,16 @@ fn the_catalogue_is_what_decides_and_not_a_shex_special_case() {
     // file's NAME and nothing else.
     const NOT_FOSSIL: &str = "id,name\n1,Ada\n";
 
-    let mut pg = FossilPlayground::new();
-    pg.open_file_native("users.csv".to_string(), NOT_FOSSIL.to_string());
-    pg.open_file_native("users.unknown".to_string(), NOT_FOSSIL.to_string());
+    let mut ws = FossilWorkspace::new();
+    ws.open_file_native("users.csv".to_string(), NOT_FOSSIL.to_string());
+    ws.open_file_native("users.unknown".to_string(), NOT_FOSSIL.to_string());
 
     assert!(
-        rows_for(&pg, "users.csv").is_empty(),
+        rows_for(&ws, "users.csv").is_empty(),
         "`io.csv` reads `.csv`, so a `.csv` buffer is an input, not a program"
     );
     assert!(
-        !rows_for(&pg, "users.unknown").is_empty(),
+        !rows_for(&ws, "users.unknown").is_empty(),
         "no row claims `.unknown`, so it is checked — an unrecognised file \
          falls back to the old behaviour, never to silence"
     );
@@ -174,18 +174,18 @@ fn the_catalogue_is_what_decides_and_not_a_shex_special_case() {
 /// the guard cannot be passing by turning the drain off.
 #[test]
 fn a_program_with_a_mistake_still_reports() {
-    let mut pg = FossilPlayground::new();
-    let broken = pg.open_file_native(
+    let mut ws = FossilWorkspace::new();
+    let broken = ws.open_file_native(
         "broken.fossil".to_string(),
         "User : Nowhere from nothing\n    name = nothing.name\n".to_string(),
     );
 
     assert!(
-        !rows_for(&pg, "broken.fossil").is_empty(),
+        !rows_for(&ws, "broken.fossil").is_empty(),
         "the workspace drain still checks programs"
     );
     assert!(
-        !pg.diagnostics_for_rows(broken)
+        !ws.diagnostics_for_rows(broken)
             .expect("open handle")
             .is_empty(),
         "and so does the per-file drain"

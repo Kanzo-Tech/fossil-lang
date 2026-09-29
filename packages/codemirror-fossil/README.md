@@ -42,7 +42,7 @@ mouse-move and completion on nearly every keystroke, so three of the four run be
 checks. A source taking only a position would let a host query text it had not pushed and
 get a range one keystroke wrong. `openProgram` pushes before every answer and compares
 against what it last sent, so the push costs a string comparison in the common case; a
-host wiring `FossilPlayground` by hand owes the same discipline.
+host wiring `FossilWorkspace` by hand owes the same discipline.
 
 `@kanzo-tech/ui`'s `CodeEditor` takes exactly that as its `extensions` prop and
 holds it in a live-reconfigured `Compartment`. So does a bare `EditorView`.

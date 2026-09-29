@@ -125,10 +125,7 @@ bytes = "1"
 # `fossil-layout` and `fossil-cli` keep it as a dev-dependency, to
 # read written Parquet back or to bring an engine to a test. `deny.toml`'s
 # `duckdb` wrappers list is the enforced version of that sentence.
-#
-# `vscalar` (the scalar-UDF registration API) has no user left: nothing in
-# `crates/` names `VScalar` or `register_scalar_function`.
-duckdb = { version = "1.10502", features = ["bundled", "vscalar"] }
+duckdb = { version = "1.10502", features = ["bundled"] }
 
 # === Reference implementations for stdlib fidelity tests (NATIVE ONLY) ===
 # `fossil-df` dev-depends on these to measure its SQL templates against the Rust

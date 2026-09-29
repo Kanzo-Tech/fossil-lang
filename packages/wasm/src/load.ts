@@ -11,7 +11,7 @@ let _initPromise: Promise<unknown> | null = null;
 /**
  * Boot the fossil-wasm module. MUST be awaited before calling any of
  * {@link tokenize}, {@link semanticLegend}, or instantiating
- * {@link FossilPlayground}. Memoised — subsequent calls return the same promise.
+ * {@link FossilWorkspace}. Memoised — subsequent calls return the same promise.
  *
  * **Called with nothing, the module finds its own `.wasm`.** The glue resolves
  * `new URL('fossil_wasm_bg.wasm', import.meta.url)`, which is the pattern Vite,

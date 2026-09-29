@@ -55,7 +55,7 @@ fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 # column's type — measured over the real stdio transport on 2026-08-23, `fossil
 # check apps/docs/programs/errors/unknown-field/program.fossil` reports ``nmae`
 # is not a field of `User`` and exits 1 while the LSP published zero
-# diagnostics. The browser playground has had those diagnostics all along, over
+# diagnostics. The browser workspace has had those diagnostics all along, over
 # DuckDB-WASM, through `fossil/registerInferredDescriptor`.
 #
 # There is no cheaper way to get them that is also RIGHT. The columns' types

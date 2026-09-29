@@ -25,7 +25,7 @@
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use fossil_wasm::FossilPlayground;
+use fossil_wasm::FossilWorkspace;
 
 /// A program that names its output shape document and writes `name` from a CSV
 /// column.
@@ -100,11 +100,11 @@ const USERS_DESCRIPTOR: &str = r#"{
 }"#;
 
 /// Every diagnostic message the workspace reports, across all open files.
-fn messages(pg: &FossilPlayground) -> Vec<String> {
-    pg.check_rows().into_iter().map(|r| r.message).collect()
+fn messages(ws: &FossilWorkspace) -> Vec<String> {
+    ws.check_rows().into_iter().map(|r| r.message).collect()
 }
 
-/// The messages [`FossilPlayground::check_rows`] attributes to ONE file.
+/// The messages [`FossilWorkspace::check_rows`] attributes to ONE file.
 ///
 /// Step (4) below asks a question about the PROGRAM, so it looks at the
 /// program's rows. It is the narrower question and it stays narrow.
@@ -117,8 +117,8 @@ fn messages(pg: &FossilPlayground) -> Vec<String> {
 /// that. `tests/documents_are_not_programs.rs` is where the fix is measured; a
 /// file the provider catalogue claims is an input, and an input is not drained
 /// as a program.
-fn messages_for(pg: &FossilPlayground, uri: &str) -> Vec<String> {
-    pg.check_rows()
+fn messages_for(ws: &FossilWorkspace, uri: &str) -> Vec<String> {
+    ws.check_rows()
         .into_iter()
         .filter(|r| r.uri == uri)
         .map(|r| r.message)
@@ -131,15 +131,15 @@ fn mentions_integer(messages: &[String]) -> bool {
 
 #[test]
 fn opening_and_editing_the_document_re_checks_the_program_that_names_it() {
-    let mut pg = FossilPlayground::new();
-    pg.register_inferred_descriptor_native(USERS_DESCRIPTOR)
+    let mut ws = FossilWorkspace::new();
+    ws.register_inferred_descriptor_native(USERS_DESCRIPTOR)
         .expect("the descriptor JSON is well-formed");
 
-    let program = pg.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
+    let program = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
 
     // (1) Nobody registered the document. The program is checked against no
     //     output contract.
-    let before = messages(&pg);
+    let before = messages(&ws);
     assert!(
         !mentions_integer(&before),
         "with no document registered there is no contract to violate; got {before:?}"
@@ -148,8 +148,8 @@ fn opening_and_editing_the_document_re_checks_the_program_that_names_it() {
     // (2) Opening the document registers it under its own path — the key the
     //     program's `io.shex(\"person.shex\")` resolves to — and the check that
     //     missed re-runs. Nothing touched the program.
-    let document = pg.open_file_native("person.shex".to_string(), DEMANDS_INTEGER.to_string());
-    let with_document = messages(&pg);
+    let document = ws.open_file_native("person.shex".to_string(), DEMANDS_INTEGER.to_string());
+    let with_document = messages(&ws);
     assert!(
         mentions_integer(&with_document),
         "registering the document must invalidate the check that missed it, and \
@@ -159,30 +159,30 @@ fn opening_and_editing_the_document_re_checks_the_program_that_names_it() {
 
     // (3) The edit the disk could not express: the buffer changes, and the
     //     diagnostic derived from it changes with it.
-    pg.update_file_native(document, DEMANDS_STRING.to_string())
+    ws.update_file_native(document, DEMANDS_STRING.to_string())
         .expect("update_file_native");
-    let after_edit = messages(&pg);
+    let after_edit = messages(&ws);
     assert!(
         !mentions_integer(&after_edit),
         "editing the document must re-check every program that reads it; got \
          {after_edit:?}"
     );
-    let program_after_edit = messages_for(&pg, "prog.fossil");
+    let program_after_edit = messages_for(&ws, "prog.fossil");
 
     // (4) And the converse: editing the PROGRAM does not move the shape it is
     //     checked against. The edit changes the `@subject` template and nothing
     //     the contract touches, so the program's own diagnostics must be
     //     unchanged — see `messages_for` for why this is the program's rows and
     //     not the workspace's.
-    pg.update_file_native(program, PROGRAM.replace("u/{users.id}", "v/{users.id}"))
+    ws.update_file_native(program, PROGRAM.replace("u/{users.id}", "v/{users.id}"))
         .expect("update_file_native");
     assert_eq!(
-        messages_for(&pg, "prog.fossil"),
+        messages_for(&ws, "prog.fossil"),
         program_after_edit,
         "a program edit re-checks the program against the SAME document"
     );
     assert!(
-        !mentions_integer(&messages(&pg)),
+        !mentions_integer(&messages(&ws)),
         "and the document it is checked against is still the edited one"
     );
 }
@@ -192,15 +192,15 @@ fn opening_and_editing_the_document_re_checks_the_program_that_names_it() {
 /// does: the buffer wins over the disk.
 #[test]
 fn a_document_opened_after_the_program_is_still_found_by_it() {
-    let mut pg = FossilPlayground::new();
-    let _program = pg.open_file_native("a/prog.fossil".to_string(), PROGRAM.to_string());
+    let mut ws = FossilWorkspace::new();
+    let _program = ws.open_file_native("a/prog.fossil".to_string(), PROGRAM.to_string());
     // Opened under the path the program's relative reference resolves to.
-    let _document = pg.open_file_native("a/person.shex".to_string(), DEMANDS_INTEGER.to_string());
-    pg.register_inferred_descriptor_native(USERS_DESCRIPTOR)
+    let _document = ws.open_file_native("a/person.shex".to_string(), DEMANDS_INTEGER.to_string());
+    ws.register_inferred_descriptor_native(USERS_DESCRIPTOR)
         .expect("descriptor");
 
     assert!(
-        mentions_integer(&messages(&pg)),
+        mentions_integer(&messages(&ws)),
         "the document is resolved relative to the program that names it"
     );
 }
@@ -229,13 +229,13 @@ ex:Person {
   ex:name xsd:integer
 }
 ";
-    let mut pg = FossilPlayground::new();
-    pg.register_inferred_descriptor_native(USERS_DESCRIPTOR)
+    let mut ws = FossilWorkspace::new();
+    ws.register_inferred_descriptor_native(USERS_DESCRIPTOR)
         .expect("the descriptor JSON is well-formed");
-    pg.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
-    pg.open_file_native("person.shex".to_string(), COMPACT.to_string());
+    ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
+    ws.open_file_native("person.shex".to_string(), COMPACT.to_string());
 
-    let row = pg
+    let row = ws
         .check_rows()
         .into_iter()
         .find(|r| r.message.contains("expects Integer"))

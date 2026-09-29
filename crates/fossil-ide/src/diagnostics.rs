@@ -15,7 +15,7 @@
 //!   squiggles down the length of the user's `ShEx` and the browser did not.
 //! - The worker's `publishDiagnostics` carried `related` where LSP says
 //!   `relatedInformation`, with a flat `uri`/`range` where LSP says a nested
-//!   `location`, because it republished the playground's JS row shape verbatim.
+//!   `location`, because it republished the wasm workspace's JS row shape verbatim.
 //!   A client reading the spec found nothing there.
 //!
 //! `crates/fossil-lsp/tests/transport_parity.rs` is the guard that would have
@@ -27,7 +27,7 @@
 //!
 //! [`diagnostics()`] answers WHICH — the drain, plus the rule about which open
 //! files are programs. [`lsp_diagnostics()`] answers WHAT THEY LOOK LIKE.
-//! `fossil-wasm` needs the first on its own for the playground's `check()`
+//! `fossil-wasm` needs the first on its own for the workspace's `check()`
 //! array, whose row shape is not LSP and is keyed by whatever path the host
 //! opened the buffer under; see [`crate::related`] for why turning one of those
 //! into a URI is not always possible.
@@ -56,7 +56,7 @@ use crate::related::related_locations;
 /// # A file the catalogue reads is not drained as a program
 ///
 /// Opening the `.shex` a program names is the ordinary way to look at your own
-/// output contract, and in the playground it is the ONLY way to hand the
+/// output contract, and in the wasm workspace it is the ONLY way to hand the
 /// compiler one. Without the guard below that ran the fossil parser over the
 /// document and attributed every complaint to it — twenty-one diagnostics
 /// measured over the wire for a `ShExJ` document with nothing wrong with it.
@@ -164,7 +164,7 @@ pub fn lsp_diagnostic(
 /// The keys are the program's own path with the document joined onto it
 /// ([`fossil_hir::documents::registry_key`]), so in an editor they are already
 /// `file://` URIs and this is the identity. A key that is a bare path — what a
-/// test, or a playground host that opened a buffer by name, produces — gets
+/// test, or a browser host that opened a buffer by name, produces — gets
 /// `file://` in front of it; `None` for a key that is neither.
 ///
 /// **This was three functions across the two hosts and they did not agree.**

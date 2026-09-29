@@ -9,14 +9,14 @@
 //! run over it, with every complaint attributed to the document. In VS Code that
 //! is squiggles down the length of the user's `ShEx`.
 //!
-//! The playground measured **twenty-one** rows for the `ShExJ` document below.
+//! The browser workspace measured **twenty-one** rows for the `ShExJ` document below.
 //! This test drives the real binary over stdio, and the number it measured
 //! before the guard existed is in the assertion message where it belongs.
 //!
 //! # What answers «which open files are programs»
 //!
 //! Nothing new. `LspSystem::providers` returns
-//! `fossil_descriptors_output::PROVIDERS` — the same table the playground
+//! `fossil_descriptors_output::PROVIDERS` — the same table the browser workspace
 //! installs — every row of which declares the extensions it accepts, and
 //! `fossil_base::claimed` asks all of them at once. A URI some row reads is an
 //! INPUT, and an input is not a program. The extension is read off the LSP's

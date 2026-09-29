@@ -6,7 +6,7 @@
  * through `duckdb` — and they must agree or the browser and the CLI answer the
  * same program differently. Which sources a program reads is not one of the
  * things they share: the browser takes them from fossil's AST
- * (`FossilPlayground.sources`), so the regex that used to be compared here is
+ * (`FossilWorkspace.sources`), so the regex that used to be compared here is
  * gone from this side, and this file builds its `ProgramSource`s by hand.
  *
  * What still has to agree, and how each is checked:

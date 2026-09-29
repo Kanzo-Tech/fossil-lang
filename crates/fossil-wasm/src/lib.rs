@@ -1,26 +1,26 @@
-//! `fossil-wasm` — WASM host shim exposing [`FossilPlayground`] to JS.
+//! `fossil-wasm` — WASM host shim exposing [`FossilWorkspace`] to JS.
 //!
 //! ## The surface
 //!
-//! The surface is the `ty_wasm`-shaped `Workspace` lifecycle the playground and
+//! The surface is the `ty_wasm`-shaped `Workspace` lifecycle an editor host and
 //! the WASM LSP Worker consume, because an editor edits files and re-checks
 //! them, and a one-shot compile has nowhere to put the file identity that
 //! requires:
 //!
 //! | Method                          | Returns                              | Use site            |
 //! |---------------------------------|--------------------------------------|---------------------|
-//! | [`WasmPlayground::open_file`]   | [`FileHandle`]                       | `textDocument/didOpen`     |
-//! | [`WasmPlayground::update_file`] | `()`                                 | `textDocument/didChange`   |
-//! | [`WasmPlayground::close_file`]  | `()`                                 | `textDocument/didClose`    |
-//! | [`WasmPlayground::set_connections`] | `()`                             | the host's `Host.connections()` |
-//! | [`WasmPlayground::missing_documents`] | `Array<{ key, locator, connection? }>` | `resolveDocuments` |
-//! | [`WasmPlayground::register_document`] | `()`                           | `resolveDocuments` |
-//! | [`WasmPlayground::sources`]     | `Array<ProgramSource>`               | introspection |
-//! | [`WasmPlayground::check`]       | `Array<{ uri, range, severity, message }>` | the playground's panel, workspace-wide |
-//! | [`WasmPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | the same rows scoped to one file |
-//! | [`WasmPlayground::hover`]       | `{ markdown, range } \| null`        | `textDocument/hover`       |
-//! | [`WasmPlayground::completions`] | `Array<{ label, kind, detail }>`     | `textDocument/completion`  |
-//! | [`WasmPlayground::goto_definition`] | `Array<{ uri, range }>`          | `textDocument/definition`  |
+//! | [`WasmWorkspace::open_file`]   | [`FileHandle`]                       | `textDocument/didOpen`     |
+//! | [`WasmWorkspace::update_file`] | `()`                                 | `textDocument/didChange`   |
+//! | [`WasmWorkspace::close_file`]  | `()`                                 | `textDocument/didClose`    |
+//! | [`WasmWorkspace::set_connections`] | `()`                             | the host's `Host.connections()` |
+//! | [`WasmWorkspace::missing_documents`] | `Array<{ key, locator, connection? }>` | `resolveDocuments` |
+//! | [`WasmWorkspace::register_document`] | `()`                           | `resolveDocuments` |
+//! | [`WasmWorkspace::sources`]     | `Array<ProgramSource>`               | introspection |
+//! | [`WasmWorkspace::check`]       | `Array<{ uri, range, severity, message }>` | a diagnostics panel, workspace-wide |
+//! | [`WasmWorkspace::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | the same rows scoped to one file |
+//! | [`WasmWorkspace::hover`]       | `{ markdown, range } \| null`        | `textDocument/hover`       |
+//! | [`WasmWorkspace::completions`] | `Array<{ label, kind, detail }>`     | `textDocument/completion`  |
+//! | [`WasmWorkspace::goto_definition`] | `Array<{ uri, range }>`          | `textDocument/definition`  |
 //!
 //! The last three are the [`ide`] module: the same `fossil-ide` answers the
 //! Worker dispatches, as ordinary method calls, because a tab that already
@@ -84,7 +84,7 @@ use crate::workspace::OpenFiles;
 /// [`System`] (here [`WasmSystem`]) + the file registry. The target-side `ShEx`
 /// type/properties `fossil-ide` surfaces are reachable because the PROGRAM
 /// names its output document and the host REGISTERS it (see
-/// [`FossilPlayground::register_document_native`]) — the playground supplies
+/// [`FossilWorkspace::register_document_native`]) — the host supplies
 /// documents, not a contract.
 #[salsa::db]
 #[derive(Clone)]
@@ -132,15 +132,15 @@ impl WasmDb {
 /// JS-facing handle for the Fossil compiler running inside a WASM module.
 ///
 /// One instance owns one [`WasmDb`] (Salsa store + injected [`WasmSystem`]).
-/// Hosts construct a single playground per browser tab / Node process and
+/// Hosts construct a single workspace per browser tab / Node process and
 /// reuse it across all method calls to amortise the Salsa interning +
 /// memoisation overhead.
 ///
 /// This is the RUST-side workspace and it is not the exported class: the JS
-/// boundary is [`WasmPlayground`], which holds one of these in a `RefCell` and
-/// exports it under the name `FossilPlayground`. That indirection is the fix
-/// for a real defect — the type-level note on [`WasmPlayground`] says which.
-pub struct FossilPlayground {
+/// boundary is [`WasmWorkspace`], which holds one of these in a `RefCell` and
+/// exports it under the name `FossilWorkspace`. That indirection is the fix
+/// for a real defect — the type-level note on [`WasmWorkspace`] says which.
+pub struct FossilWorkspace {
     db: WasmDb,
     /// The system handle is owned by `db` via `Arc<dyn System>`; we retain a
     /// typed `Arc<WasmSystem>` here so descriptor registration reaches its
@@ -156,16 +156,16 @@ pub struct FossilPlayground {
     files: OpenFiles,
 }
 
-impl std::fmt::Debug for FossilPlayground {
+impl std::fmt::Debug for FossilWorkspace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FossilPlayground")
+        f.debug_struct("FossilWorkspace")
             .field("files", &self.files)
             .finish_non_exhaustive()
     }
 }
 
-impl FossilPlayground {
-    /// Construct a new playground.
+impl FossilWorkspace {
+    /// Construct a new workspace.
     ///
     /// Installs `console_error_panic_hook` (idempotent) so any panic inside
     /// compiler-core surfaces as a `console.error` stack trace in the host
@@ -184,11 +184,11 @@ impl FossilPlayground {
     }
 
     // A `classification()` method sat here, returning the `{ name, wasm_class }`
-    // manifest for the playground to gray out the native-only stdlib functions.
+    // manifest for an editor to gray out the native-only stdlib functions.
     // There are none: `crates/fossil-hir/src/stdlib.rs` records the removal.
 }
 
-/// The JS-facing workspace — `FossilPlayground` on the JS side, and a
+/// The JS-facing workspace — `FossilWorkspace` on the JS side, and a
 /// `RefCell` around the Rust one.
 ///
 /// # Why the interior `RefCell`, and it is not a style choice
@@ -216,23 +216,23 @@ impl FossilPlayground {
 /// **the workspace is still usable afterwards**, because a returned `Err` drops
 /// its guard where a panic did not.
 ///
-/// The Rust-side [`FossilPlayground`] keeps its `&mut self` signatures
+/// The Rust-side [`FossilWorkspace`] keeps its `&mut self` signatures
 /// untouched: `lsp_worker` already owns it inside an `Rc<RefCell<…>>`, and the
 /// native tests drive it directly. Only the JS boundary changed.
-#[wasm_bindgen(js_name = FossilPlayground)]
-pub struct WasmPlayground {
-    inner: RefCell<FossilPlayground>,
+#[wasm_bindgen(js_name = FossilWorkspace)]
+pub struct WasmWorkspace {
+    inner: RefCell<FossilWorkspace>,
 }
 
-impl std::fmt::Debug for WasmPlayground {
+impl std::fmt::Debug for WasmWorkspace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WasmPlayground")
+        f.debug_struct("WasmWorkspace")
             .field("inner", &self.inner)
             .finish()
     }
 }
 
-impl Default for WasmPlayground {
+impl Default for WasmWorkspace {
     fn default() -> Self {
         Self::new()
     }
@@ -251,9 +251,9 @@ fn busy_error(method: &str) -> JsError {
     ))
 }
 
-#[wasm_bindgen(js_class = FossilPlayground)]
-impl WasmPlayground {
-    /// Construct a new playground.
+#[wasm_bindgen(js_class = FossilWorkspace)]
+impl WasmWorkspace {
+    /// Construct a new workspace.
     ///
     /// Installs `console_error_panic_hook` (idempotent) so any panic inside
     /// compiler-core surfaces as a `console.error` stack trace in the host
@@ -262,7 +262,7 @@ impl WasmPlayground {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            inner: RefCell::new(FossilPlayground::new()),
+            inner: RefCell::new(FossilWorkspace::new()),
         }
     }
 
@@ -278,13 +278,13 @@ impl WasmPlayground {
     /// # Errors
     ///
     /// Returns a JS error if the workspace is already inside another call —
-    /// see the type-level note on [`WasmPlayground`].
+    /// see the type-level note on [`WasmWorkspace`].
     pub fn open_file(&self, path: String, contents: String) -> Result<FileHandle, JsError> {
-        let mut pg = self
+        let mut ws = self
             .inner
             .try_borrow_mut()
             .map_err(|_| busy_error("open_file"))?;
-        Ok(pg.open_file_native(path, contents))
+        Ok(ws.open_file_native(path, contents))
     }
 
     /// Apply an edit to an open file. Mutates the SAME `SourceFile` via the
@@ -300,14 +300,14 @@ impl WasmPlayground {
     ///
     /// Returns a JS error if `handle` was never opened or was already closed,
     /// or if the workspace is already inside another call — see the type-level
-    /// note on [`WasmPlayground`]. **Neither leaves the workspace unusable**,
+    /// note on [`WasmWorkspace`]. **Neither leaves the workspace unusable**,
     /// which is the whole reason this method takes `&self`.
     pub fn update_file(&self, handle: &FileHandle, contents: String) -> Result<(), JsError> {
-        let mut pg = self
+        let mut ws = self
             .inner
             .try_borrow_mut()
             .map_err(|_| busy_error("update_file"))?;
-        pg.update_file_native(*handle, contents)
+        ws.update_file_native(*handle, contents)
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
@@ -320,17 +320,17 @@ impl WasmPlayground {
     /// Returns a JS error if `handle` was never opened or was already closed,
     /// or if the workspace is busy.
     pub fn close_file(&self, handle: &FileHandle) -> Result<(), JsError> {
-        let mut pg = self
+        let mut ws = self
             .inner
             .try_borrow_mut()
             .map_err(|_| busy_error("close_file"))?;
-        pg.close_file_native(*handle)
+        ws.close_file_native(*handle)
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Every open **program**'s diagnostics as a flat JS array of
     /// `{ uri, range, severity, message }` rows keyed by file URI — the
-    /// playground's panel view. It is NOT what the LSP Worker publishes; see
+    /// diagnostics panel's view. It is NOT what the LSP Worker publishes; see
     /// [`CheckRow`], and `lsp_worker::publish_diagnostics` for the wire.
     ///
     /// A buffer the installed provider catalogue claims — a `.shex` being
@@ -354,8 +354,8 @@ impl WasmPlayground {
         // halves keeps `cargo test -p fossil-wasm` runnable without a JS
         // runtime (the `to_value` call panics on native targets — the
         // wasm-bindgen library's deliberate guard).
-        let pg = self.inner.try_borrow().map_err(|_| busy_error("check"))?;
-        serde_wasm_bindgen::to_value(&pg.check_rows()).map_err(JsError::from)
+        let ws = self.inner.try_borrow().map_err(|_| busy_error("check"))?;
+        serde_wasm_bindgen::to_value(&ws.check_rows()).map_err(JsError::from)
     }
 
     /// Per-file diagnostic drain: `check()` returns the workspace-wide flat
@@ -369,11 +369,11 @@ impl WasmPlayground {
     /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
     /// if serialization fails.
     pub fn diagnostics_for(&self, handle: &FileHandle) -> Result<JsValue, JsError> {
-        let pg = self
+        let ws = self
             .inner
             .try_borrow()
             .map_err(|_| busy_error("diagnostics_for"))?;
-        let rows = pg
+        let rows = ws
             .diagnostics_for_rows(*handle)
             .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
@@ -408,11 +408,11 @@ impl WasmPlayground {
     /// if serialization fails.
     #[wasm_bindgen(js_name = missingDocuments)]
     pub fn missing_documents(&self, handle: &FileHandle) -> Result<JsValue, JsError> {
-        let pg = self
+        let ws = self
             .inner
             .try_borrow()
             .map_err(|_| busy_error("missingDocuments"))?;
-        let rows = pg
+        let rows = ws
             .missing_documents_native(*handle)
             .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
@@ -441,8 +441,8 @@ impl WasmPlayground {
     /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
     /// if serialization fails.
     pub fn sources(&self, handle: &FileHandle) -> Result<JsValue, JsError> {
-        let pg = self.inner.try_borrow().map_err(|_| busy_error("sources"))?;
-        let rows = pg
+        let ws = self.inner.try_borrow().map_err(|_| busy_error("sources"))?;
+        let rows = ws
             .sources_native(*handle)
             .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
@@ -473,15 +473,15 @@ impl WasmPlayground {
     ///
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`. An unknown handle is `null`, not an error —
-    /// see [`FossilPlayground::hover_row`].
+    /// see [`FossilWorkspace::hover_row`].
     pub fn hover(
         &self,
         handle: &FileHandle,
         line: u32,
         character: u32,
     ) -> Result<JsValue, JsError> {
-        let pg = self.inner.try_borrow().map_err(|_| busy_error("hover"))?;
-        serde_wasm_bindgen::to_value(&pg.hover_row(*handle, line, character)).map_err(JsError::from)
+        let ws = self.inner.try_borrow().map_err(|_| busy_error("hover"))?;
+        serde_wasm_bindgen::to_value(&ws.hover_row(*handle, line, character)).map_err(JsError::from)
     }
 
     /// The completion candidates at a position: `{ label, kind, detail }` rows,
@@ -503,11 +503,11 @@ impl WasmPlayground {
         line: u32,
         character: u32,
     ) -> Result<JsValue, JsError> {
-        let pg = self
+        let ws = self
             .inner
             .try_borrow()
             .map_err(|_| busy_error("completions"))?;
-        serde_wasm_bindgen::to_value(&pg.completion_rows(*handle, line, character))
+        serde_wasm_bindgen::to_value(&ws.completion_rows(*handle, line, character))
             .map_err(JsError::from)
     }
 
@@ -529,11 +529,11 @@ impl WasmPlayground {
         line: u32,
         character: u32,
     ) -> Result<JsValue, JsError> {
-        let pg = self
+        let ws = self
             .inner
             .try_borrow()
             .map_err(|_| busy_error("gotoDefinition"))?;
-        serde_wasm_bindgen::to_value(&pg.definition_rows(*handle, line, character))
+        serde_wasm_bindgen::to_value(&ws.definition_rows(*handle, line, character))
             .map_err(JsError::from)
     }
 
@@ -555,11 +555,11 @@ impl WasmPlayground {
     /// - The workspace is busy.
     #[wasm_bindgen(js_name = registerInferredDescriptor)]
     pub fn register_inferred_descriptor(&self, descriptor_json: &str) -> Result<(), JsError> {
-        let pg = self
+        let ws = self
             .inner
             .try_borrow()
             .map_err(|_| busy_error("registerInferredDescriptor"))?;
-        pg.register_inferred_descriptor_native(descriptor_json)
+        ws.register_inferred_descriptor_native(descriptor_json)
             .map_err(|e| JsError::new(&e.to_string()))
     }
 }
@@ -607,7 +607,7 @@ impl std::fmt::Display for WorkspaceError {
 
 impl std::error::Error for WorkspaceError {}
 
-impl FossilPlayground {
+impl FossilWorkspace {
     /// Native-reachable workspace-wide diagnostic drain. Returns the same
     /// row structures `check()` serializes, without going through
     /// `serde_wasm_bindgen`.
@@ -692,12 +692,12 @@ impl FossilPlayground {
         self.files.insert(path, file)
     }
 
-    /// Pure-Rust mirror of [`WasmPlayground::set_connections`].
+    /// Pure-Rust mirror of [`WasmWorkspace::set_connections`].
     pub fn set_connections_native(&mut self, connections: HashMap<String, String>) {
         self.connections = connections;
     }
 
-    /// Pure-Rust mirror of [`WasmPlayground::missing_documents`]; `None` for an
+    /// Pure-Rust mirror of [`WasmWorkspace::missing_documents`]; `None` for an
     /// unknown handle.
     #[must_use]
     pub fn missing_documents_native(&self, handle: FileHandle) -> Option<Vec<MissingDocumentRow>> {
@@ -714,12 +714,12 @@ impl FossilPlayground {
         )
     }
 
-    /// Pure-Rust mirror of [`WasmPlayground::register_document`].
+    /// Pure-Rust mirror of [`WasmWorkspace::register_document`].
     pub fn register_document_native(&mut self, key: &str, text: &str) {
         fossil_base::register_document(&mut self.db, key, text);
     }
 
-    /// Pure-Rust mirror of [`WasmPlayground::sources`]; `None` for an unknown
+    /// Pure-Rust mirror of [`WasmWorkspace::sources`]; `None` for an unknown
     /// handle.
     #[must_use]
     pub fn sources_native(&self, handle: FileHandle) -> Option<Vec<fossil_lineage::ProgramSource>> {
@@ -784,7 +784,7 @@ impl FossilPlayground {
 
     // ----- Inferred-descriptor registration -----
 
-    /// Pure-Rust mirror of [`WasmPlayground::register_inferred_descriptor`] (the
+    /// Pure-Rust mirror of [`WasmWorkspace::register_inferred_descriptor`] (the
     /// `#[wasm_bindgen]` wrapper).
     ///
     /// Cargo-tests call THIS function — the wasm-bindgen wrapper panics on
@@ -826,7 +826,7 @@ impl FossilPlayground {
     }
 }
 
-impl Default for FossilPlayground {
+impl Default for FossilWorkspace {
     fn default() -> Self {
         Self::new()
     }
@@ -842,7 +842,7 @@ impl Default for FossilPlayground {
 // `fossil_descriptors_output::PROVIDERS` — the SAME two calls `fossil-cli`'s
 // `host.rs` makes natively — so the browser and the CLI can never diverge.
 //
-// Free functions (not `FossilPlayground` methods): they are stateless and
+// Free functions (not `FossilWorkspace` methods): they are stateless and
 // program-text-driven (the job runner has the script string, not the editor's
 // open-file workspace), mirroring the existing free `tokenize` export.
 
@@ -898,9 +898,9 @@ pub struct MissingDocumentRow {
     pub connection: Option<String>,
 }
 
-/// One diagnostic row in the [`WasmPlayground::check`] return array.
+/// One diagnostic row in the [`WasmWorkspace::check`] return array.
 ///
-/// The playground's own shape, and **not the LSP wire's** — the LSP Worker
+/// The workspace's own shape, and **not the LSP wire's** — the LSP Worker
 /// publishes `lsp_types::Diagnostic` (`lsp_worker::publish_diagnostics`), which
 /// is the mistake this type's docblock used to make: it said it «mirrors the LSP
 /// `Diagnostic` shape exactly so the LSP Worker can republish each row as-is»,
@@ -1001,12 +1001,9 @@ fn to_check_row(
 /// must not feed it malformed JSON).
 #[doc(hidden)]
 #[must_use]
-pub fn __dispatch_for_test(
-    pg: &mut FossilPlayground,
-    req: serde_json::Value,
-) -> DispatchTestOutput {
+pub fn __dispatch_for_test(ws: &mut FossilWorkspace, req: serde_json::Value) -> DispatchTestOutput {
     let parsed: lsp_worker::LspRequest = serde_json::from_value(req).expect("malformed test req");
-    let out = lsp_worker::dispatch(pg, parsed);
+    let out = lsp_worker::dispatch(ws, parsed);
     DispatchTestOutput {
         response: out.response.map(|r| DispatchTestResponse {
             id: r.id,

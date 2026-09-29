@@ -1,4 +1,4 @@
-//! Fossil resolves, the host reads: the playground reports the documents a
+//! Fossil resolves, the host reads: the workspace reports the documents a
 //! program is missing and the sources it reads, and takes back only text.
 //!
 //! `resolveDocuments` in `@fossil-lang/types` is the loop over these three
@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 
 use fossil_lineage::ProgramSource;
-use fossil_wasm::{FossilPlayground, MissingDocumentRow};
+use fossil_wasm::{FossilWorkspace, MissingDocumentRow};
 
 const PROGRAM: &str = "\
 type { Person } := io.shex(\"@vocab/person.shex\")
@@ -65,21 +65,21 @@ fn connections() -> HashMap<String, String> {
     ])
 }
 
-fn violates_contract(pg: &FossilPlayground) -> bool {
-    pg.check_rows()
+fn violates_contract(ws: &FossilWorkspace) -> bool {
+    ws.check_rows()
         .iter()
         .any(|r| r.message.contains("expects Integer"))
 }
 
 #[test]
 fn registering_what_is_missing_under_its_key_is_what_the_checker_reads() {
-    let mut pg = FossilPlayground::new();
-    pg.register_inferred_descriptor_native(USERS_DESCRIPTOR)
+    let mut ws = FossilWorkspace::new();
+    ws.register_inferred_descriptor_native(USERS_DESCRIPTOR)
         .expect("descriptor");
-    pg.set_connections_native(connections());
-    let program = pg.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
+    ws.set_connections_native(connections());
+    let program = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
 
-    let missing = pg.missing_documents_native(program).expect("open handle");
+    let missing = ws.missing_documents_native(program).expect("open handle");
     assert_eq!(
         missing,
         [MissingDocumentRow {
@@ -88,16 +88,16 @@ fn registering_what_is_missing_under_its_key_is_what_the_checker_reads() {
             connection: Some("vocab".to_string()),
         }]
     );
-    assert!(!violates_contract(&pg), "nothing registered, no contract");
+    assert!(!violates_contract(&ws), "nothing registered, no contract");
 
-    pg.register_document_native(&missing[0].key, DEMANDS_INTEGER);
+    ws.register_document_native(&missing[0].key, DEMANDS_INTEGER);
     assert!(
-        pg.missing_documents_native(program)
+        ws.missing_documents_native(program)
             .expect("open")
             .is_empty()
     );
     assert!(
-        violates_contract(&pg),
+        violates_contract(&ws),
         "the registered document is the program's output contract"
     );
 }
@@ -106,19 +106,19 @@ fn registering_what_is_missing_under_its_key_is_what_the_checker_reads() {
 /// a registered document registered.
 #[test]
 fn a_connection_map_moves_the_locator_and_not_the_key() {
-    let mut pg = FossilPlayground::new();
-    let program = pg.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
-    let unmapped = pg.missing_documents_native(program).expect("open");
+    let mut ws = FossilWorkspace::new();
+    let program = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
+    let unmapped = ws.missing_documents_native(program).expect("open");
     assert_eq!(unmapped[0].locator, "@vocab/person.shex");
 
-    pg.set_connections_native(connections());
-    let mapped = pg.missing_documents_native(program).expect("open");
+    ws.set_connections_native(connections());
+    let mapped = ws.missing_documents_native(program).expect("open");
     assert_eq!(mapped[0].key, unmapped[0].key);
 
-    pg.register_document_native(&mapped[0].key, DEMANDS_INTEGER);
-    pg.set_connections_native(HashMap::new());
+    ws.register_document_native(&mapped[0].key, DEMANDS_INTEGER);
+    ws.set_connections_native(HashMap::new());
     assert!(
-        pg.missing_documents_native(program)
+        ws.missing_documents_native(program)
             .expect("open")
             .is_empty()
     );
@@ -128,16 +128,16 @@ fn a_connection_map_moves_the_locator_and_not_the_key() {
 /// arrives only through `register_document`, or as a buffer being edited.
 #[test]
 fn opening_a_program_registers_no_document_and_an_open_buffer_is_not_missing() {
-    let mut pg = FossilPlayground::new();
-    let program = pg.open_file_native(
+    let mut ws = FossilWorkspace::new();
+    let program = ws.open_file_native(
         "prog.fossil".to_string(),
         PROGRAM.replace("@vocab/person.shex", "person.shex"),
     );
-    assert_eq!(pg.missing_documents_native(program).expect("open").len(), 1);
+    assert_eq!(ws.missing_documents_native(program).expect("open").len(), 1);
 
-    pg.open_file_native("person.shex".to_string(), DEMANDS_INTEGER.to_string());
+    ws.open_file_native("person.shex".to_string(), DEMANDS_INTEGER.to_string());
     assert!(
-        pg.missing_documents_native(program)
+        ws.missing_documents_native(program)
             .expect("open")
             .is_empty()
     );
@@ -145,11 +145,11 @@ fn opening_a_program_registers_no_document_and_an_open_buffer_is_not_missing() {
 
 #[test]
 fn sources_are_keyed_as_written_and_located_through_the_map() {
-    let mut pg = FossilPlayground::new();
-    pg.set_connections_native(connections());
-    let program = pg.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
+    let mut ws = FossilWorkspace::new();
+    ws.set_connections_native(connections());
+    let program = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
     assert_eq!(
-        pg.sources_native(program).expect("open handle"),
+        ws.sources_native(program).expect("open handle"),
         [ProgramSource {
             binding: "users".to_string(),
             key: "@lake/users.csv".to_string(),
@@ -163,9 +163,9 @@ fn sources_are_keyed_as_written_and_located_through_the_map() {
 
 #[test]
 fn an_unknown_handle_has_no_documents_and_no_sources() {
-    let mut pg = FossilPlayground::new();
-    let handle = pg.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
-    pg.close_file_native(handle).expect("open");
-    assert!(pg.missing_documents_native(handle).is_none());
-    assert!(pg.sources_native(handle).is_none());
+    let mut ws = FossilWorkspace::new();
+    let handle = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
+    ws.close_file_native(handle).expect("open");
+    assert!(ws.missing_documents_native(handle).is_none());
+    assert!(ws.sources_native(handle).is_none());
 }

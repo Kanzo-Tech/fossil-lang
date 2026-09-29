@@ -10,7 +10,7 @@
  * - {@link openProgram} — one program open for an editor: the workspace, the push-before-ask
  *   discipline and the document resolution a host would otherwise write, shaped to spread into
  *   `@fossil-lang/codemirror-fossil`'s `fossil()`. What a host with one editor calls.
- * - {@link FossilPlayground} — Workspace API class: open / update / close,
+ * - {@link FossilWorkspace} — Workspace API class: open / update / close,
  *   `check`, the three position queries (`hover`, `completions`,
  *   `gotoDefinition`) an editor draws its IDE surface from, and the documents
  *   and sources a program reads (`missingDocuments`, `registerDocument`,
@@ -39,7 +39,7 @@ export {
   tokenize,
   tokenKinds,
   semanticLegend,
-  FossilPlayground,
+  FossilWorkspace,
   refs,
   providers,
 } from './client.js';
@@ -68,8 +68,8 @@ export interface ProviderInfo {
   kind: 'schema' | 'data' | 'both';
 }
 
-/** Diagnostic row returned by {@link FossilPlayground.check} and
- *  {@link FossilPlayground.diagnosticsFor} — mirrors `fossil-wasm`'s
+/** Diagnostic row returned by {@link FossilWorkspace.check} and
+ *  {@link FossilWorkspace.diagnosticsFor} — mirrors `fossil-wasm`'s
  *  `CheckRow` JSON shape (the LSP `Diagnostic` projected through
  *  `fossil_ide::LineIndex` for UTF-16 ranges).
  */
@@ -88,7 +88,7 @@ export interface LspRange {
   end: { line: number; character: number };
 }
 
-/** What {@link FossilPlayground.hover} found: the rendered Markdown — a
+/** What {@link FossilWorkspace.hover} found: the rendered Markdown — a
  *  ` ```fossil ` fence, the type of what you wrote and where it came from, and
  *  a second block with the type the target shape demands of that predicate when
  *  the shape resolves — and the range it applies to. */
@@ -97,7 +97,7 @@ export interface HoverRow {
   range: LspRange;
 }
 
-/** One candidate from {@link FossilPlayground.completions}.
+/** One candidate from {@link FossilWorkspace.completions}.
  *
  *  `kind` is the LSP `CompletionItemKind` **by name**, lowercased —
  *  `"function"`, `"field"`, `"enum_member"` — and `""` when the item carries
@@ -118,7 +118,7 @@ export interface CompletionRow {
   detail: string;
 }
 
-/** One place {@link FossilPlayground.gotoDefinition} found a definition.
+/** One place {@link FossilWorkspace.gotoDefinition} found a definition.
  *
  *  `uri` is the key the buffer was opened under, VERBATIM — matching
  *  {@link CheckRow.uri}, and not a `file://` URI. Two of the four positions
@@ -130,8 +130,8 @@ export interface DefinitionRow {
   range: LspRange;
 }
 
-// `StdlibClass` and `FossilPlayground.classification()` lived here — one row per
-// stdlib function carrying `"pure_sql"` or `"native_udf_only"`, so a playground
+// `StdlibClass` and `FossilWorkspace.classification()` lived here — one row per
+// stdlib function carrying `"pure_sql"` or `"native_udf_only"`, so an editor
 // could render the native-only functions as disabled. The Rust side deleted the
 // concept (`crates/fossil-wasm/src/lib.rs`, two tombstones, and
 // `crates/fossil-hir/src/stdlib.rs`): every catalogued function is a pure SQL
@@ -177,7 +177,7 @@ export interface InferredColumnJson {
  * read as CSV introspects to a single column named `[`.
  *
  * Consumed by the Rust compiler via
- * {@link FossilPlayground.registerInferredDescriptor}. There is no metadata
+ * {@link FossilWorkspace.registerInferredDescriptor}. There is no metadata
  * sidecar for the user to write and keep in sync: the host introspects the
  * real file and feeds the compiler ahead of `compile()`.
  */

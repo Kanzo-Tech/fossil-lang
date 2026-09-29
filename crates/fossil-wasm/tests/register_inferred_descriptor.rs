@@ -1,4 +1,4 @@
-//! Cargo-test mirror of `FossilPlayground::register_inferred_descriptor`.
+//! Cargo-test mirror of `FossilWorkspace::register_inferred_descriptor`.
 //!
 //! Exercises the pure-Rust path via `register_inferred_descriptor_native`. The
 //! `#[wasm_bindgen]`-attributed `register_inferred_descriptor` wrapper panics on
@@ -10,7 +10,7 @@
 //! Convention mirrors `crates/fossil-wasm/tests/workspace.rs`.
 
 use fossil_graph_schema::Primitive;
-use fossil_wasm::FossilPlayground;
+use fossil_wasm::FossilWorkspace;
 
 fn sample_descriptor_json(uri: &str) -> String {
     format!(
@@ -20,10 +20,10 @@ fn sample_descriptor_json(uri: &str) -> String {
 
 #[test]
 fn register_inferred_descriptor_parses_and_stores() {
-    let pg = FossilPlayground::new();
-    pg.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
+    let ws = FossilWorkspace::new();
+    ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
         .expect("valid JSON ok");
-    let got = pg
+    let got = ws
         .inferred_descriptor_native("users.csv")
         .expect("registered descriptor present");
     assert_eq!(got.uri.as_str(), "users.csv");
@@ -36,13 +36,13 @@ fn register_inferred_descriptor_parses_and_stores() {
 
 #[test]
 fn register_inferred_descriptor_overwrites_on_duplicate_uri() {
-    let pg = FossilPlayground::new();
-    pg.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
+    let ws = FossilWorkspace::new();
+    ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
         .expect("first ok");
     let second = r#"{"uri":"users.csv","columns":[{"name":"id","primitive":"integer"}],"freshness_token":"h2"}"#;
-    pg.register_inferred_descriptor_native(second)
+    ws.register_inferred_descriptor_native(second)
         .expect("second ok");
-    let got = pg
+    let got = ws
         .inferred_descriptor_native("users.csv")
         .expect("present after re-register");
     assert_eq!(got.columns.len(), 1);
@@ -51,37 +51,37 @@ fn register_inferred_descriptor_overwrites_on_duplicate_uri() {
 
 #[test]
 fn register_inferred_descriptor_rejects_malformed_json() {
-    let pg = FossilPlayground::new();
-    let result = pg.register_inferred_descriptor_native("not json at all");
+    let ws = FossilWorkspace::new();
+    let result = ws.register_inferred_descriptor_native("not json at all");
     assert!(result.is_err());
 }
 
 #[test]
 fn register_inferred_descriptor_rejects_missing_required_fields() {
-    let pg = FossilPlayground::new();
-    let result = pg.register_inferred_descriptor_native(r#"{"uri":"users.csv"}"#);
+    let ws = FossilWorkspace::new();
+    let result = ws.register_inferred_descriptor_native(r#"{"uri":"users.csv"}"#);
     assert!(result.is_err(), "missing `columns` field should err");
 }
 
 #[test]
 fn unknown_source_returns_none() {
-    let pg = FossilPlayground::new();
-    pg.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
+    let ws = FossilWorkspace::new();
+    ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
         .expect("ok");
-    assert!(pg.inferred_descriptor_native("nonexistent.csv").is_none());
+    assert!(ws.inferred_descriptor_native("nonexistent.csv").is_none());
 }
 
 #[test]
 fn distinct_uris_register_independently() {
-    let pg = FossilPlayground::new();
-    pg.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
+    let ws = FossilWorkspace::new();
+    ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
         .expect("users ok");
-    pg.register_inferred_descriptor_native(
+    ws.register_inferred_descriptor_native(
         r#"{"uri":"products.csv","columns":[{"name":"sku","primitive":"string"}],"freshness_token":""}"#,
     )
     .expect("products ok");
-    assert!(pg.inferred_descriptor_native("users.csv").is_some());
-    let products = pg
+    assert!(ws.inferred_descriptor_native("users.csv").is_some());
+    let products = ws
         .inferred_descriptor_native("products.csv")
         .expect("present");
     assert_eq!(products.uri.as_str(), "products.csv");

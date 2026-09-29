@@ -223,7 +223,7 @@ crates/
                            consumer — this one. `fossil-lsp` and `fossil-wasm` keep their hosts
                            inside themselves too: three hosts, three crates  [NATIVE-ONLY]
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
-  fossil-wasm/             WASM host shim (FossilPlayground API + the tokenizer the editor reuses)
+  fossil-wasm/             WASM host shim (FossilWorkspace API + the tokenizer the editor reuses)
   fossil-df-wasm/          the fossil-df executor exposed to JS
   fossil-graph-wasm/       wasm-bindgen binding for the fossil-graph verb surface
   xtask/                   repo automation. Three commands: `wasm-check` derives the wasm32
@@ -268,7 +268,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            and not an editor. FIVE of them, not two: highlighting from
                            `tokenize()` + `tokenKinds()`, squiggles from `check()` through
                            `@codemirror/lint`, and hover / completion / goto-definition
-                           over the three position queries `FossilPlayground` grew. The
+                           over the three position queries `FossilWorkspace` grew. The
                            two that stay OUT are semantic tokens (they come back only
                            over the Worker) and code actions (the two quick fixes hang
                            off a structured diagnostic the `CheckRow` wire shape

@@ -29,12 +29,12 @@
 //!   values; the wasm-bindgen serialisation is wasm32-only. What removes that
 //!   risk instead is that no row on this surface has an `Option` field — the
 //!   one shape the two serializers are measured to disagree about.
-//! - **The two HOSTS.** One `FossilPlayground` each, opened with identical
+//! - **The two HOSTS.** One `FossilWorkspace` each, opened with identical
 //!   buffers under identical keys, so the hosts cannot differ.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use fossil_wasm::FossilPlayground;
+use fossil_wasm::FossilWorkspace;
 
 /// Both buffers are opened under `file://` keys because the worker's
 /// `didOpen` deserialises `uri` into an `lsp_types::Uri` and the direct
@@ -53,14 +53,14 @@ fn read(name: &str) -> String {
 }
 
 /// A workspace driven through the JSON-RPC dispatch loop.
-fn worker_side() -> FossilPlayground {
-    let mut pg = FossilPlayground::new();
+fn worker_side() -> FossilWorkspace {
+    let mut ws = FossilWorkspace::new();
     for (uri, text) in [
         (SHEX_URI, read("hello.shex")),
         (PROGRAM_URI, read("hello.fossil")),
     ] {
         let _ = fossil_wasm::__dispatch_for_test(
-            &mut pg,
+            &mut ws,
             serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "textDocument/didOpen",
@@ -70,26 +70,21 @@ fn worker_side() -> FossilPlayground {
             }),
         );
     }
-    pg
+    ws
 }
 
 /// The same workspace, driven through `open_file` — and the handle for the
 /// program, which is what the direct surface keys on.
-fn direct_side() -> (FossilPlayground, fossil_wasm::FileHandle) {
-    let mut pg = FossilPlayground::new();
-    pg.open_file_native(SHEX_URI.to_string(), read("hello.shex"));
-    let handle = pg.open_file_native(PROGRAM_URI.to_string(), read("hello.fossil"));
-    (pg, handle)
+fn direct_side() -> (FossilWorkspace, fossil_wasm::FileHandle) {
+    let mut ws = FossilWorkspace::new();
+    ws.open_file_native(SHEX_URI.to_string(), read("hello.shex"));
+    let handle = ws.open_file_native(PROGRAM_URI.to_string(), read("hello.fossil"));
+    (ws, handle)
 }
 
-fn request(
-    pg: &mut FossilPlayground,
-    method: &str,
-    line: u32,
-    character: u32,
-) -> serde_json::Value {
+fn request(ws: &mut FossilWorkspace, method: &str, line: u32, character: u32) -> serde_json::Value {
     let out = fossil_wasm::__dispatch_for_test(
-        pg,
+        ws,
         serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -269,10 +264,10 @@ fn definition_agrees_over_the_whole_file() {
 /// throwing — the three cases a host hits while a buffer is being torn down.
 #[test]
 fn a_closed_handle_answers_empty_on_all_three() {
-    let (mut pg, handle) = direct_side();
-    pg.close_file_native(handle).expect("the handle was open");
+    let (mut ws, handle) = direct_side();
+    ws.close_file_native(handle).expect("the handle was open");
 
-    assert_eq!(pg.hover_row(handle, 0, 0), None);
-    assert!(pg.completion_rows(handle, 0, 0).is_empty());
-    assert!(pg.definition_rows(handle, 0, 0).is_empty());
+    assert_eq!(ws.hover_row(handle, 0, 0), None);
+    assert!(ws.completion_rows(handle, 0, 0).is_empty());
+    assert!(ws.definition_rows(handle, 0, 0).is_empty());
 }

@@ -1,4 +1,4 @@
-//! Workspace lifecycle — the `ty_wasm`-shaped multi-file API the playground
+//! Workspace lifecycle — the `ty_wasm`-shaped multi-file API an editor host
 //! and the WASM LSP Worker share. Mirrors Astral's `ty_wasm::Workspace`
 //! exactly: a small
 //! `FileHandle` newtype on the JS boundary plus an internal
@@ -20,7 +20,7 @@
 //! are not stable across JS calls (the JS shim cannot hold the `'db` lifetime
 //! a `SourceFile` carries on the Rust side). A plain `u32` is the smallest
 //! JS-friendly handle; the map below translates handle → `SourceFile` on
-//! every operation. Counter overflow is panicked on (a playground tab
+//! every operation. Counter overflow is panicked on (a browser tab
 //! cannot realistically open 4 billion files; if it ever does, the panic
 //! surfaces as a clear `console.error` via `console_error_panic_hook`).
 
@@ -105,7 +105,7 @@ impl OpenFiles {
         Some(f)
     }
 
-    /// URI → handle lookup, behind `FossilPlayground::lookup_handle_by_uri`.
+    /// URI → handle lookup, behind `FossilWorkspace::lookup_handle_by_uri`.
     /// The LSP Worker dispatches `textDocument/...` notifications through it.
     pub(crate) fn lookup_uri(&self, uri: &str) -> Option<FileHandle> {
         self.by_uri.get(uri).copied()

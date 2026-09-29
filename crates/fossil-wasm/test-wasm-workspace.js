@@ -29,7 +29,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 
-const { FossilPlayground } = require('./pkg/fossil_wasm.js');
+const { FossilWorkspace } = require('./pkg/fossil_wasm.js');
 
 function fail(msg) {
     console.error(`FAIL: ${msg}`);
@@ -44,23 +44,23 @@ function readHello() {
 }
 
 function main() {
-    const pg = new FossilPlayground();
+    const ws = new FossilWorkspace();
     const source = readHello();
 
     // ----- open_file -----
-    const h1 = pg.open_file('a.fossil', source);
+    const h1 = ws.open_file('a.fossil', source);
     if (h1 === undefined || h1 === null) fail('open_file returned no FileHandle');
     console.log('open_file(a.fossil) ->', h1);
 
     // ----- update_file -----
-    pg.update_file(h1, source + '\n// edit');  // must not throw
+    ws.update_file(h1, source + '\n// edit');  // must not throw
 
     // ----- check -----
-    const diags1 = pg.check();
+    const diags1 = ws.check();
     assert.ok(Array.isArray(diags1), 'check returns an array');
     console.log(`check() -> ${diags1.length} rows`);
     // Every row carries the CheckRow shape — { uri, range, severity, message }.
-    // That is the playground's panel shape, NOT the LSP wire: the worker
+    // That is a diagnostics panel's shape, NOT the LSP wire: the worker
     // publishes lsp_types::Diagnostic, which has no `uri` field.
     for (const d of diags1) {
         assert.ok(typeof d.uri === 'string', 'row.uri is a string');
@@ -71,9 +71,9 @@ function main() {
     }
 
     // ----- multi-file isolation + diagnostics_for -----
-    const h2 = pg.open_file('b.fossil', source);
-    const perFileA = pg.diagnostics_for(h1);
-    const perFileB = pg.diagnostics_for(h2);
+    const h2 = ws.open_file('b.fossil', source);
+    const perFileA = ws.diagnostics_for(h1);
+    const perFileB = ws.diagnostics_for(h2);
     assert.ok(Array.isArray(perFileA), 'diagnostics_for(h1) returns an array');
     assert.ok(Array.isArray(perFileB), 'diagnostics_for(h2) returns an array');
     // Every row drained for h1 carries h1's URI; same for h2 (per-file scoping).
@@ -81,19 +81,19 @@ function main() {
     for (const d of perFileB) assert.equal(d.uri, 'b.fossil');
 
     // ----- close_file -----
-    pg.close_file(h1);
+    ws.close_file(h1);
     // Closing the same handle again must throw — strict signal mirrors ty_wasm.
     let threwClose = false;
-    try { pg.close_file(h1); } catch (_e) { threwClose = true; }
+    try { ws.close_file(h1); } catch (_e) { threwClose = true; }
     assert.ok(threwClose, 'close_file of closed handle throws');
 
     // update_file on a closed handle must also throw.
     let threwUpdate = false;
-    try { pg.update_file(h1, '// post-close'); } catch (_e) { threwUpdate = true; }
+    try { ws.update_file(h1, '// post-close'); } catch (_e) { threwUpdate = true; }
     assert.ok(threwUpdate, 'update_file of closed handle throws');
 
     // The other file remains usable.
-    const diagsAfterClose = pg.diagnostics_for(h2);
+    const diagsAfterClose = ws.diagnostics_for(h2);
     assert.ok(Array.isArray(diagsAfterClose), 'h2 still drainable after closing h1');
 
     console.log('OK: workspace lifecycle smoke passed');

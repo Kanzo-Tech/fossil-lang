@@ -4,7 +4,7 @@
 //! single resolver, so a symbol declared in file A resolves when referenced
 //! from file B. This implements the **open-files-as-workspace** model: the
 //! file set is whatever the host holds open — the LSP's
-//! `LspState.files` map or the playground's multi-panel set — NOT a filesystem
+//! `LspState.files` map or the wasm workspace's open files — NOT a filesystem
 //! scan of a workspace root (deferred to v2; conflicts with the WASM
 //! `VirtualFS`).
 //!
