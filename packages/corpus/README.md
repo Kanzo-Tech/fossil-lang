@@ -8,26 +8,20 @@ and the five bounded verbs (`read`, `expand`, `path`, `aggregate`, `schema`) on
 one object. No tiles, no `dense_id`, no Morton, no `by_source`, no prefixes, no
 footers.
 
-**Three depths on that one name, and the depth is what the caller brings.** The
-engine-free route was a second function, `resolveCorpus`, and is now the shallow
-end of the same call:
+**It needs an engine, and the engine is the host's.** A job's corpus is opened
+through the page's engine under the credential the host vends; a corpus at a
+URL through a `query` callback:
 
 ```ts
-await open(url,  { query })          // Corpus — the whole door
-await open(url,  { readText })       // CorpusAddressing — manifests only
-await open(base, { manifestFiles })  // CorpusAddressing — no request at all
+await open(job, { engine, host })          // a job's corpus
+await open(url, { query })                 // a corpus at a URL
+await open(url, { query, manifestFiles })  // the same, with the manifests in hand
 ```
 
-`query` is the engine; `readText` is `(url) => text` and buys only the
-manifests; `manifestFiles` is for a caller that already holds them, where `base`
-is what every address is prepended with. Exactly one is required, and giving
-none is a `TypeError` that names the three. `corpus.addressing` is none of the
-three — it is what the first rung already resolved, for a caller who paid for
-it.
-
-The capability was always the real difference between the two functions, and a
-capability is an argument. The call is now always asynchronous; the synchronous
-form `resolveCorpus` had once the module was up had no production consumer.
+Giving neither `engine` nor `query` is a `TypeError`. `corpus.addressing` is the
+arithmetic over the manifests the open already resolved — the URLs, for a
+caller that reads its own tiles. The engine-free rungs that used to answer with
+it directly went with the one viewer that used them.
 
 Everything else that was on the barrel is reachable through the door or not at
 all:
@@ -35,13 +29,8 @@ all:
 - `createGraphClient` — the in-process transport the verbs dispatch through.
   `open` already holds the two things it took.
 - `GRAPH_INFO_PATH` — the index's file name is the door's business. `open`
-  takes a corpus URL and reads whatever is under it. **That was applied to the
-  engine-free route too, and it should not have been**: a caller with no engine
-  cannot read anything for itself, so it was left hand-writing a scan of the
-  index's `vertices:`/`edges:` lists — three copies of it, one in another
-  repository. The file name stays off the surface and the *sequence* is
-  published instead, as `readText`: lend a text reader and the package reads the
-  index, the manifests it names, and nothing else.
+  takes a corpus URL and reads the index and the manifests it names through the
+  engine it was given.
 - `initFossilGraphWasm` — the boot, awaited inside `open`. A consumer
   should not have to know there is a wasm module, let alone sequence two calls
   against it. Nor does it say where the module is: the `.wasm` ships in this
@@ -79,8 +68,7 @@ So the TypeScript reader is gone and the addressing asks the Rust one, through
 
 - **The module has to be up before anything resolves**, exactly as for a verb.
   Composing a URL was arithmetic over bytes the host already held and is now a
-  call into an instantiated module. `open` awaits the boot itself, on
-  every rung.
+  call into an instantiated module. `open` awaits the boot itself.
 - **There is no WASM-free path, and there will not be one.** A second
   implementation is what a WASM-free path is.
 - `tests/address-standalone.test.ts` proved the subpath's closure loaded from a
@@ -94,10 +82,10 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
   ├─ src/generated.ts   verb Params/Result types — codegen'd from schemars JSON Schema
   ├─ src/load.ts        the memoised wasm boot (internal; open awaits it)
   ├─ src/client.ts      the verb transport, dispatched through by the door (not exported)
-  ├─ src/query.ts       QueryFn + ReadTextFn — what a host lends, and how deep each one reaches
+  ├─ src/query.ts       QueryFn — the engine a host lends
   ├─ src/manifest.ts    graph.graph.yml, scanned for the paths to fetch next
   ├─ src/address.ts     addressManifests + levelsOf — the binding, not the reader
-  └─ src/corpus.ts      open(url, { query | readText | manifestFiles }) — THE DOOR
+  └─ src/corpus.ts      open(url, { query } | { engine, host }) — THE DOOR
 ```
 
 ## Usage
@@ -288,19 +276,6 @@ const { vertexUrls, edgeUrls, complete, gaps } = addressing.tilesFor({
 });
 // complete: false
 // gaps: [{ edgeType: 'knows', direction: 'dst', reason: 'not-requested' }]
-```
-
-**And it is not a second function either.** A caller with no engine asks the
-same name for the same object, by lending less:
-
-```ts
-// The package reads the index and the manifests it names. You supply the reader.
-const addressing = await open(base, {
-  readText: async (url) => (await fetch(url)).text(),
-});
-
-// Or, with the manifests already in hand, nothing is read at all.
-const same = await open(base, { manifestFiles });
 ```
 
 `container` on every address says which number a footer hands you is the tile:

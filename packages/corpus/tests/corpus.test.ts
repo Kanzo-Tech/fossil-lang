@@ -112,13 +112,9 @@ const adjTiles = (dir: 'by_source' | 'by_target') =>
     .join(', ')}]`;
 
 describe('open — what is inside', () => {
-  it('needs a capability, and names the three rather than failing at the first query', async () => {
-    // **The claim narrowed when the door absorbed `resolveCorpus`.** It used to be that an engine
-    // was the only thing that opened a corpus; now `readText` and `manifestFiles` open the
-    // engine-free rung, so what is refused is bringing NONE of the three — and the refusal names
-    // them, because which one a caller can supply is the whole of how deep the answer goes.
+  it('needs an engine, and names both ways to lend one rather than failing at the first query', async () => {
     await expect(open(CORPUS, {} as { query: QueryFn })).rejects.toThrow(
-      /needs one of: query .*, readText .*, or manifestFiles/,
+      /needs an engine: engine with host .* or query/,
     );
   });
 
