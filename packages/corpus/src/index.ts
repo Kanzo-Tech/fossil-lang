@@ -63,15 +63,14 @@
  * # What is here and why
  *
  * **`Corpus.levels()` is `levelsOf` in `./address.ts`** — three calls to that module and no fourth
- * fact, which is why it is not a member of the door. It IS re-exported here, and was not: the
- * grounds were that a consumer never names a level file, and two do. See the export.
+ * fact, which is why it is not a member of the door. It is not on the barrel either: the two
+ * readers outside this package that named a level file were verifier scripts in a viewer this
+ * repository no longer has.
  *
- * **The four `PAYLOAD_*` role constants**, because the check found a consumer:
- * `@fossil-lang/draw`'s `encoding.ts` reads all three of `PAYLOAD_ADDRESS`, `PAYLOAD_COORDINATES`
- * and `PAYLOAD_CATEGORICAL`, and `apps/playground/scripts/verify-encoding.mjs` reads the last of
- * them through it. Internalising them puts `cluster_id` back in a hand-written line — which is the
- * six-statements-of-one-fact this table was generated to end. That consumer was in an app when this
- * was written and is a published package now, which makes the reason stronger rather than weaker.
+ * **The four `PAYLOAD_*` role constants**, because a consumer reads them: `@kanzo-tech/graph`
+ * takes `PAYLOAD_ADDRESS`, `PAYLOAD_COORDINATES` and `PAYLOAD_IDENTITY` rather than spelling the
+ * writer's columns again. Internalising them puts `cluster_id` back in a hand-written line — which
+ * is the six-statements-of-one-fact this table was generated to end.
  */
 
 // The door — one name, three depths — and the two errors an `instanceof` is a legitimate part of a
@@ -80,21 +79,12 @@
 // caller can retry one of those against a different corpus and never the other.
 export { CorpusManifestError, CorpusReadError, open } from './corpus.js';
 
-// Which levels of detail a type has, and which of them the writer spent bytes on.
-//
-// It came off `Corpus` in the same change and did not leave the tree — every line of it is
-// addressing. It is back on the barrel because two readers outside this package name a level file:
-// `apps/playground/scripts/measure-frame.mjs` and `measure-pyramid.mjs` report the written levels
-// beside what a frame cost. `Frame.matchedAt` is a member of the door and reports a level; what
-// makes that number readable has to be reachable from the same surface.
-export { levelsOf } from './address.js';
-
 // The writer's column table, by ROLE — `corpus.bnf` through `cargo xtask corpus`, and the same
 // table `crates/fossil-sinks/src/generated.rs` carries on the Rust side.
 //
 // Exported because the alternative is a consumer spelling the names again. `cluster_id` was
 // written down in `corpus.bnf`, in this package's generated file, twice in this package, and three
-// times in `apps/playground` — six statements of one fact, of which the only machine-readable one
+// times in a viewer app — six statements of one fact, of which the only machine-readable one
 // had no consumer. A reader asks for the ROLE it means and gets whatever the writer calls it.
 //
 // **All four and not the three with a consumer today.** They are one generated table with one
@@ -178,7 +168,6 @@ export type {
   Gap,
   GapReason,
   IndexAddress,
-  LevelInfo,
   ProjectionAddress,
   VertexAddress,
 } from './address.js';

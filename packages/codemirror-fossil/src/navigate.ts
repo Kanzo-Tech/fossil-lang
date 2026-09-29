@@ -9,7 +9,7 @@
  * simply move a cursor: it moves the cursor when the target is in this buffer,
  * and hands the target to the host when it is not.
  *
- * A host with one editor pane (the playground) reports where the definition is.
+ * A host with one editor pane reports where the definition is.
  * A host with tabs opens one. Neither decision belongs in a language layer, and
  * guessing wrong would be worse than either — which is why `onNavigate` has no
  * default that opens anything.

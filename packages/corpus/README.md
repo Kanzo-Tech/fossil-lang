@@ -53,8 +53,9 @@ all:
   and later, with nobody deciding. The twelve params/results the members name
   are re-exported by name instead.
 
-`Corpus.levels()` is the free function `levelsOf(addressing, type?)`, because
-every line of it is addressing rather than a member of a door.
+`Corpus.levels()` is `levelsOf(addressing, type?)` inside the package, because
+every line of it is addressing rather than a member of a door; no reader outside
+the repository names a level file, so it is not exported.
 
 `./corpus` was a subpath whose one justification was that its closure reached no
 WASM; the door reaches the verbs now, so it does, and the subpath went with the

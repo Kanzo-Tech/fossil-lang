@@ -232,8 +232,7 @@ export interface EdgeDrops {
  * its rungs, their quotients and the channel its `mode` names — and this
  * interface does not, because transcribing that tree by hand for no consumer is
  * the kind of speculative mirror that drifts, which is what the paragraph above
- * is about. A reader that needs it reads the manifest YAML, which is what
- * `apps/playground` does for `channels:` today. So read an absence here as
+ * is about. A reader that needs it reads the manifest YAML. So read an absence here as
  * «nothing in TypeScript has asked», never as «the wire does not carry it».
  */
 export interface RunReport {

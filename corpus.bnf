@@ -25,7 +25,7 @@
 
      crates/fossil-graph/src/manifest.rs   five names, `cluster_id` included
      packages/corpus/src/corpus.ts         four names, `cluster_id` absent
-     apps/playground/src/encoding.ts       the same set spelled a third way
+     a viewer app's encoding module        the same set spelled a third way
 
    Neither is wrong where it stands, and that is the point: they mean different
    things — *every column the writer emits* against *the columns this struct

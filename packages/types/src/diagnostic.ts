@@ -5,8 +5,7 @@
  *
  *   1 = Error, 2 = Warning, 3 = Information, 4 = Hint.
  *
- * `@fossil-lang/codemirror-fossil` maps these to CodeMirror lint severities;
- * `@fossil-lang/playground` renders them in the diagnostics panel.
+ * `@fossil-lang/codemirror-fossil` maps these to CodeMirror lint severities.
  */
 
 /** Zero-based line + UTF-16 character column (LSP convention). */

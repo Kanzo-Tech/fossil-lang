@@ -359,8 +359,7 @@ export interface FrameParams extends Box {
    * says what fossil's writer emits; a vertex type's `channels:` block says what *this* corpus
    * carries, and where the two disagree the corpus is right. This package cannot see that block —
    * the per-type manifests are parsed by `fossil-graph` in WASM, which does not surface it — so a
-   * caller that has read it names the column here and it wins, which is what
-   * `apps/playground/src/tiles.ts` does with `Encoding.fill`.
+   * caller that has read it names the column here and it wins.
    */
   fill?: string;
   /**

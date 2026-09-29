@@ -243,8 +243,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            standalone test — composing a URL now costs loading the module, which is
                            the price of there being one reader instead of two.
                            It was `@fossil-lang/graph` and it is not a graph: its door is
-                           `open` and the thing that DOES draw one, `@kanzo-tech/graph`,
-                           sits beside it in the playground's `package.json`. The Rust crates
+                           `open` and the thing that DOES draw one is `@kanzo-tech/graph`,
+                           the one view layer, in kanzo-ui. The Rust crates
                            keep their names — `fossil-graph` IS a verb surface over a property
                            graph, and a crate name is not in npm's import space.
                            ONE name at three depths, because the capability the caller brings
@@ -268,7 +268,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            `draw/` reads one and 22 MB of wasm is the wrong price for an interface
   types/                   Host — `connections()` + `credentials(scope, access)` — the one host
                            contract, and StorageCredential (Iceberg REST's, verbatim); the
-                           Engine; FossilTheme; the `channels:` wire shape. Types only
+                           Engine; the `channels:` wire shape. Types only
   storage/                 how every package reaches storage from a vended credential, over
                            `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
                            expires−5min, refcounted per prefix; Azure lent file by file),
@@ -311,22 +311,6 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
                            `--filter "./packages/*"` cannot isolate — `v0.3.0-alpha.4` is what
                            that cost. `pnpm-ci.yml` runs them; it is the job that has both a
                            `duckdb` binary and `packages/corpus/pkg/`
-  playground/              the architectural claim, clickable: check → run → query in one
-                           browser tab, no server. It imports `examples/hello.fossil` rather
-                           than copying it, and produces the same five subjects the walking
-                           skeleton asserts natively. It runs the REAL layout pass — Louvain
-                           and Morton through `fossil-layout` over a `MemoryFs` — so the corpus
-                           the tab writes is byte-identical to the one `fossil run` writes. Its
-                           editor is `@kanzo-tech/ui`'s `CodeEditor` with
-                           `packages/codemirror-fossil` inside it, and its canvas IS
-                           `@kanzo-tech/graph` — this line said it was not, and the tree
-                           won. What the app does NOT take is `@kanzo-tech/mosaic`: that
-                           subpath is an OPTIONAL peer, and taking it pulls
-                           `@uwdata/mosaic-core`, which hard-depends on a SECOND
-                           DuckDB-WASM. `src/tiles.ts` implements `BoundedSource` over the
-                           app's own connection instead; `pnpm --filter
-                           @fossil-lang/playground... build` emitting one `duckdb-*.wasm`
-                           asset is the condition that keeps it true
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The

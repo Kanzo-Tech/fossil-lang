@@ -668,9 +668,9 @@ async fn execute_edge(
     // `unnest_columns` on a `Utf8` is `"trying to unnest on invalid data type"`,
     // a DataFusion internal error at run time with no diagnostic in front of it.
     // That is 8 of LDBC-SNB's 21 relationships — `knows`, `likes`, `hasMember`,
-    // `hasTag`, `hasInterest`, `studyAt`, `workAt` — and it is why
-    // `apps/playground/bench/dblp/dblp.shex` carries a comment calling its own
-    // `;` a defect rather than a modelling choice.
+    // `hasTag`, `hasInterest`, `studyAt`, `workAt` — and a shape that wrote
+    // `;` where it meant `*` to dodge it was recording a defect, not a
+    // modelling choice.
     let dst_is_list = matches!(
         edge_src
             .schema()

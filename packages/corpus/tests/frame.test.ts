@@ -17,9 +17,9 @@ import type { QueryFn, QueryRow } from '../src/query.js';
  * The door a camera goes through: `levels` and `frame` — against the conformance corpus.
  *
  * **This file is about the CONTRACT and not about a picture.** The three properties the request is
- * really after — fidelity, monotone refinement, path independence — are measured against the
- * million-vertex bench corpus by `apps/playground/scripts/verify-properties.mjs`, because they are
- * statistical and a 300-vertex fixture cannot carry a density grid. What is asserted here is what a
+ * really after — fidelity, monotone refinement, path independence — are statistical, and a
+ * 300-vertex fixture cannot carry a density grid; nothing in this repository measures them. What
+ * is asserted here is what a
  * conformance corpus CAN carry and a large one cannot check cheaply:
  *
  * 1. **`frame` is a pure function of its arguments.** The same rectangle at the same level, asked

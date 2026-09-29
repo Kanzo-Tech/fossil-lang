@@ -49,7 +49,7 @@ describe('toDiagnostics', () => {
   });
 
   it('drops rows belonging to another open file', () => {
-    // `check()` is workspace-wide: the playground opens `hello.shex` too, and its
+    // `check()` is workspace-wide: a host opens `hello.shex` too, and its
     // rows must not be painted onto the program's text.
     const rows = [row(), row({ uri: 'hello.shex', message: 'shape is unsatisfiable' })];
     expect(toDiagnostics(state(), rows, URI)).toHaveLength(1);

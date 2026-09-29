@@ -36,9 +36,9 @@
 //! The consequence a caller owes is the other half: these read the text of the
 //! LAST `update_file`, so a position query issued mid-debounce answers about
 //! text one keystroke old and its ranges land one keystroke wrong. The host
-//! pushes the buffer before it asks — `apps/playground/src/check.ts` does it
-//! with a string compare, so the common case (nothing changed since the check)
-//! costs one comparison and takes no exclusive borrow at all. That is what an
+//! pushes the buffer before it asks — `@fossil-lang/codemirror-fossil` passes
+//! the text with every query, and a host that compares it against what it last
+//! sent pays one comparison in the common case and takes no exclusive borrow. That is what an
 //! LSP client's ordering guarantee buys for free and a direct caller has to
 //! arrange.
 //!

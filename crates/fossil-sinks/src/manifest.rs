@@ -786,9 +786,8 @@ pub const QUOTIENT_PREFIX: &str = "quotient/";
 /// longer exists: *on com-DBLP the published rungs contract by 5.69×, 6.02× and
 /// 5.45× against a declared floor of four, because a cut chooses out of the
 /// partitions a dendrogram already holds*. That was the dendrogram-cut writer
-/// `Pyramid` replaced. Measured on com-DBLP with the writer that is here —
-/// `crates/fossil-layout/tests/level_vs_rung.rs` — the rungs contract by
-/// **exactly 4.00× at every step**, 317,080 → 19,818 → 4,955 → … → 1, because
+/// `Pyramid` replaced. Measured on com-DBLP with the writer that is here, the
+/// rungs contract by **exactly 4.00× at every step**, 317,080 → 19,818 → 4,955 → … → 1, because
 /// [`Self::cells_at`] is `ceil(V / 4^k)` and `Pyramid::write` asserts against
 /// it. The field survives the correction: a declared count is still not a
 /// spendable scale, and it is now also the only place the ratio is stated at
@@ -1009,9 +1008,8 @@ pub struct CellRung {
     /// a quotient at the finest rung of com-DBLP is **274,647** edges against the
     /// graph's 1,049,866 — a real saving — while a coarse one is dense enough
     /// that drawing it is a hairball. That figure read 159,413 and is not
-    /// reproducible from this writer; `crates/fossil-layout/tests/level_vs_rung.rs`
-    /// is what measures it, and it also measures where the hairball starts —
-    /// density is 0.14% at the finest rung and **69.9% by the fourth**, reaching
+    /// reproducible from this writer. Where the hairball starts was measured
+    /// on com-DBLP too — density is 0.14% at the finest rung and **69.9% by the fourth**, reaching
     /// the complete graph from the sixth down. A writer answers that rung by rung, and
     /// `None` says it wrote none rather than that there are none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1184,12 +1182,9 @@ impl CellTree {
     /// This read *a reader zoomed all the way out wants four marks rather than
     /// four thousand*, and no reader in this tree can ask for four marks:
     /// `packages/corpus/src/corpus.ts, levelForCanvas` spends `pixels.w *
-    /// pixels.h` marks, and its one production caller —
-    /// `apps/playground/src/tiles.ts` — passes `sqrt(limit) × sqrt(limit)`
-    /// rather than its canvas, so it spends a constant 20,000 whatever the
-    /// window is. The smallest mark budget anything in this tree spends is
-    /// 15,000 (`SCREEN_MARKS`, in `crates/fossil-layout/tests/level_vs_rung.rs`),
-    /// so the coarse end of this list is a region nothing reads.
+    /// pixels.h` marks, and the viewer that calls it passes a mark budget of
+    /// thousands rather than a handful, so the coarse end of this list is a
+    /// region nothing reads.
     ///
     /// What completeness buys instead is that `ceil(vertex_count / 4^k)` names
     /// an artefact that exists for every `k` a reader can compute: no

@@ -29,7 +29,7 @@
  * `open` in `./corpus.ts` is the layer that reads those footers, by taking an engine from the
  * host rather than growing one. It sits **on** this module and does not absorb it.
  *
- * **Nothing here is on the barrel except the shapes and {@link levelsOf}.** `resolveCorpus` was,
+ * **Nothing here is on the barrel except the shapes.** `resolveCorpus` was,
  * and it was a second name for a depth of the door — `openCorpus` as the door was spelled then.
  * Both took a corpus and answered about it, and which one a caller wanted was decided by whether
  * it had an engine to lend. That is now an argument rather than an import — `open(base,
@@ -157,12 +157,8 @@ export interface LevelInfo {
  * with nothing answering that, eight assertions in `tests/frame.test.ts` and
  * `apps/corpus/integration/frame-levels.test.ts` would have had to re-derive these three calls
  * themselves — a second statement of the arithmetic, which is the rule the door was being narrowed
- * for. Moved, not
- * deleted — and re-exported from the barrel after all, because two consumers outside this package
- * do name a level file: `apps/playground/scripts/measure-frame.mjs` and `measure-pyramid.mjs` both
- * report which levels a corpus WROTE beside what a frame cost, and neither is in a position to
- * re-derive `strideOf`/`rowsAt`/`projection` for itself. `Frame.matchedAt` is on the door, so what
- * makes `matchedAt` readable has to be reachable from it.
+ * for. Moved, not deleted, and not on the barrel: no reader outside this repository names a level
+ * file.
  */
 export function levelsOf(addressing: CorpusAddressing, type?: string): readonly LevelInfo[] {
   const address = addressing.vertexType(type);

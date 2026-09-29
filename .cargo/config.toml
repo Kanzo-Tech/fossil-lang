@@ -12,7 +12,7 @@ xtask = "run -q --package xtask --"
 # WASM check: the crate set is DERIVED from the cdylib dependency closure by xtask
 # (no hand-maintained `-p …` list to drift). CI runs the same command.
 wasm-check = "run -q --package xtask -- wasm-check"
-# WASM build for the playground shim
+# WASM build for the editor host shim
 wasm-build = "build --target wasm32-unknown-unknown --release -p fossil-wasm"
 # Lint everything the way CI does
 lint = "clippy --workspace --all-targets -- -D warnings"

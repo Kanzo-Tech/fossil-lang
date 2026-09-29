@@ -202,9 +202,9 @@ impl FossilPlayground {
 /// later call on that object fails the same way for the life of the module.**
 /// One bad call poisons the workspace permanently.
 ///
-/// That is a real defect and it was reachable from correct host code:
-/// `apps/playground` reproduced it by typing sixteen characters faster than its
-/// debounce, and the app carried a `busy` flag and a 120 ms coalesce to stay
+/// That is a real defect and it was reachable from correct host code: an
+/// editor reproduced it by typing sixteen characters faster than its
+/// debounce, and had to carry a `busy` flag and a 120 ms coalesce to stay
 /// out of it. A mitigation a host has to remember is not a fix — and an editor
 /// is precisely the workload that forgets.
 ///
