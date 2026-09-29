@@ -115,6 +115,8 @@ export type {
 } from './corpus.js';
 export type { Answer, Neighbourhood, NeighboursParams, PlacedEdge } from './edges.js';
 export type { Box, Filter, Literal } from './expression.js';
+export type { Batch } from './query.js';
+export type { Scan, ScanParams, ScanTask } from './scan.js';
 export type { Frame, FrameCost, FrameParams } from './frame.js';
 export type { NodeParams, PlacedVertex } from './identity.js';
 export type { OpenOptions, SqlPolicy } from './open.js';

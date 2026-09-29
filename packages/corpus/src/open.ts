@@ -12,6 +12,7 @@ import { initFossilGraphWasm, type InitInput } from './load.js';
 import { join, paths, scan } from './manifest.js';
 import { callbackReads, engineReads, type QueryFn, type QueryRow, type Reads } from './query.js';
 import { rowsOf } from './rows.js';
+import { scanOf } from './scan.js';
 import { CorpusReadError, ident, list, lit, text } from './sql.js';
 import { published, tileManifestOf } from './tile-manifest.js';
 import { zoomsOf, type Zooms } from './tile-matrix.js';
@@ -421,6 +422,7 @@ async function opened(
     relations: verbs.relations,
     extent: manifest.extent,
     tileMatrix: (type) => zooms(type).set,
+    scan: scanOf({ reads, zooms }),
     rows: rectangles.rows,
     frame: frameOf({ query, addressing, fieldsOf, has, manifest, rectangles }),
     node: identity.node,

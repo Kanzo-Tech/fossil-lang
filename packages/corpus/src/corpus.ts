@@ -79,6 +79,7 @@ import type {
 } from './generated.js';
 import type { NodeParams, PlacedVertex } from './identity.js';
 import type { RowsAnswer, RowsParams } from './rows.js';
+import type { Scan, ScanParams } from './scan.js';
 import type { Extent } from './tile-manifest.js';
 import type { TileMatrixSet } from './tile-matrix.js';
 
@@ -224,6 +225,13 @@ export interface Corpus {
    * @throws {CorpusReadError} for a type that publishes no tile manifest.
    */
   tileMatrix(type: string): TileMatrixSet;
+  /**
+   * **Iceberg's `Table.scan`** — a type, a filter and a projection, bound when it is built, with
+   * `plan()` over every zoom and `read(address)` of one tile. See {@link Scan}.
+   *
+   * @throws {CorpusReadError} for a column no zoom carries, in the filter or the projection.
+   */
+  scan(params: ScanParams): Scan;
   /** The vertices in a rectangle and the edges among them, entire. */
   rows(params: RowsParams): Promise<RowsAnswer>;
   /**
