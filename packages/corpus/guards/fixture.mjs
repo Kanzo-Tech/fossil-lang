@@ -30,8 +30,9 @@
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { execute, lit, scalar } from "./duck.mjs";
+import { execute, lit, query, scalar } from "./duck.mjs";
 import { TILE_ROWS, mortonOf } from "./arithmetic.mjs";
+import { footerSql } from "./inspect.mjs";
 
 /**
  * The base a cell tree declares, in vertices per cell.
@@ -98,6 +99,58 @@ function renumber(points) {
  * chord per vertex inside its own cluster. The ring makes the whole graph statable in one line of
  * arithmetic; the chords make the adjacency non-trivial across tiles.
  */
+/**
+ * A bound as the tile manifest prints it: the column's own value, exactly.
+ *
+ * A `FLOAT` footer prints the shortest decimal that reads back as its `f32`, which is not the
+ * `f32` — `0.1` is a smaller number than `0.1f32` — so the value is widened and printed as the
+ * double it is, the way fossil's writer prints it. An integral float keeps its `.0`, so a reader
+ * that types a bare number by its spelling does not take a coordinate for an integer column.
+ */
+function bound(type, text) {
+  if (type === "FLOAT" || type === "DOUBLE") {
+    const value = type === "FLOAT" ? Math.fround(Number(text)) : Number(text);
+    return Number.isInteger(value) && Math.abs(value) < 1e16 ? value.toFixed(1) : String(value);
+  }
+  return String(text);
+}
+
+/**
+ * The tile manifest of a payload, read off the footers that were just written — the only honest
+ * source, and the one fossil's writer reads too. One zoom, `z = 0`, because this fixture writes no
+ * rung. Keys are sorted, as the Rust writer's maps sort them.
+ */
+function tileManifest(zooms) {
+  const tiles = new Map();
+  for (const row of query(footerSql(zooms))) {
+    const key = `${row.z}/${row.tile}`;
+    if (!tiles.has(key)) {
+      tiles.set(key, { z: Number(row.z), tile: Number(row.tile), rows: String(row.rows), nulls: [], lower: [], upper: [] });
+    }
+    const entry = tiles.get(key);
+    entry.nulls.push([row.col, String(row.nulls)]);
+    if (row.lo !== null) entry.lower.push([row.col, bound(row.type, row.lo)]);
+    if (row.hi !== null) entry.upper.push([row.col, bound(row.type, row.hi)]);
+  }
+  const object = (pairs) =>
+    `{${pairs
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => `${JSON.stringify(k)}:${v}`)
+      .join(",")}}`;
+  const byZ = new Map();
+  for (const entry of [...tiles.values()].sort((a, b) => a.z - b.z || a.tile - b.tile)) {
+    if (!byZ.has(entry.z)) byZ.set(entry.z, []);
+    byZ
+      .get(entry.z)
+      .push(
+        `{"tile":${entry.tile},"record_count":${entry.rows},"null_value_counts":${object(entry.nulls)},` +
+          `"lower_bounds":${object(entry.lower)},"upper_bounds":${object(entry.upper)}}`,
+      );
+  }
+  const matrices = [...byZ].map(([z, list]) => `{"z":${z},"tiles":[${list.join(",")}]}`);
+  return `{"matrices":[${matrices.join(",")}]}`;
+}
+
 /**
  * The level entries of a `projections:` list, which both manifests carry because the levels of a
  * relation ARE its source type's.
@@ -489,9 +542,24 @@ export function write(
       "  - knows",
       "  mode_channel: community",
       "  rungs: []",
+      // Where every tile's statistics are, so a reader plans without opening a footer. Written
+      // below, off the footers the COPYs above closed.
+      "tile_manifest: tile-manifest.json",
       "version: gar/v1",
       "",
     ].join("\n"),
+  );
+  writeFileSync(
+    join(vertexPrefix, "tile-manifest.json"),
+    tileManifest(
+      layout === "files"
+        ? Array.from({ length: tiles }, (_, k) => ({
+            z: 0,
+            path: join(vertexPrefix, `chunk${k}.parquet`),
+            tile: k,
+          }))
+        : [{ z: 0, path: join(vertexPrefix, "tiles.parquet"), tile: null }],
+    ),
   );
   writeFileSync(
     join(edgeDir, "Person_knows_Person.edge.yml"),

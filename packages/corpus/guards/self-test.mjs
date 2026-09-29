@@ -577,6 +577,39 @@ const MUTATIONS = [
     layout: "files",
     mutate: (dir) => recut(dir, "by_target", "src_dense"),
   },
+  {
+    guard: "tile-manifest",
+    what: "one tile's upper `x` is published a thousandth above its footer's",
+    layout: "rowgroups",
+    mutate(dir) {
+      const path = join(dir, VERTEX_DIR, "tile-manifest.json");
+      const manifest = JSON.parse(readFileSync(path, "utf8"));
+      manifest.matrices[0].tiles[1].upper_bounds.x += 1e-3;
+      writeFileSync(path, JSON.stringify(manifest));
+    },
+  },
+  {
+    guard: "tile-manifest",
+    what: "the manifest drops the last tile, so a reader plans as if the corpus ended early",
+    layout: "files",
+    mutate(dir) {
+      const path = join(dir, VERTEX_DIR, "tile-manifest.json");
+      const manifest = JSON.parse(readFileSync(path, "utf8"));
+      manifest.matrices[0].tiles.pop();
+      writeFileSync(path, JSON.stringify(manifest));
+    },
+  },
+  {
+    guard: "tile-manifest",
+    what: "the manifest publishes a bound for `subject`, a string no planner may compare",
+    layout: "rowgroups",
+    mutate(dir) {
+      const path = join(dir, VERTEX_DIR, "tile-manifest.json");
+      const manifest = JSON.parse(readFileSync(path, "utf8"));
+      manifest.matrices[0].tiles[0].lower_bounds.subject = 0;
+      writeFileSync(path, JSON.stringify(manifest));
+    },
+  },
 ];
 
 console.log("\nThe declared channels are recounted rather than skipped");
@@ -652,6 +685,21 @@ console.log("\nThe tree's `mode` resolves into the list rather than being guesse
     "one hop from the name is the column and the domain, stated once",
     entry === undefined ? "the name resolves to nothing" : `${entry.column}, ${entry.domain}`,
   );
+}
+
+{
+  // `tile-manifest` passes on a type that names none, which is every corpus written before the
+  // field — so green says nothing until the count says it compared something. The fixture
+  // publishes one; this is the assertion that the guard held every tile of it against a footer.
+  for (const layout of ["rowgroups", "files"]) {
+    const [{ failures, notes }] = runAll(inspect(pristine[layout]), ["tile-manifest"]);
+    const checked = Number(/^(\d+) tile\(s\) checked$/.exec(notes[0] ?? "")?.[1] ?? 0);
+    assert(
+      failures.length === 0 && checked > 0,
+      `the fixture publishes a tile manifest and the guard holds it against the footers (${layout})`,
+      `${checked} tile(s) checked`,
+    );
+  }
 }
 
 console.log("\nEvery guard fires when its convention is broken");

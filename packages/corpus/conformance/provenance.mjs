@@ -69,7 +69,8 @@ function tree(root) {
   }
   all.sort();
   return {
-    manifests: all.filter((p) => p.endsWith(".yml")),
+    // The tile manifest is a manifest: text the recipe writes, compared as text.
+    manifests: all.filter((p) => p.endsWith(".yml") || p.endsWith(".json")),
     payloads: all.filter((p) => p.endsWith(".parquet")),
   };
 }
@@ -95,11 +96,11 @@ try {
   const regenerated = tree(written.dir);
 
   // Non-vacuity first: two empty trees agree about everything, and so do two trees this failed to
-  // read. The committed corpus is 3 manifests and 26 payloads — five vertex tiles, five index,
+  // read. The committed corpus is 4 manifests and 26 payloads — five vertex tiles, five index,
   // five of each adjacency orientation, and the pyramid's three vertex tiles and three edge tiles
   // — and the numbers are here so a walker that stopped descending is a failure rather than a
   // smaller success.
-  if (committed.manifests.length < 3 || committed.payloads.length < 26) {
+  if (committed.manifests.length < 4 || committed.payloads.length < 26) {
     fail(
       `non-vacuity: the committed corpus reads as ${committed.manifests.length} manifest(s) and ` +
         `${committed.payloads.length} payload(s), so the comparison below is over almost nothing`,

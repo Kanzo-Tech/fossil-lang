@@ -17,9 +17,10 @@
  * self-consistent and nothing about the artefact.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { query, scalar } from "./duck.mjs";
-import { fileList, rowGroups } from "./inspect.mjs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { lit, query, scalar } from "./duck.mjs";
+import { fileList, footerSql, payload, rowGroups } from "./inspect.mjs";
 import {
   TILE_ROWS,
   morton2,
@@ -1725,6 +1726,112 @@ export const GUARDS = [
           `${followed} reference(s) resolved`,
         ...notes,
       ]);
+    },
+  },
+  {
+    id: "tile-manifest",
+    title: "The tile manifest says what the footers say",
+    proves:
+      "Where a vertex type names a tile manifest, the file is there and it lists exactly the tiles " +
+      "on disk — the payload at the highest `z` and each rung below it, rung `k` of `R` at " +
+      "`z = R − k` — and for every one of them the row count, every column's null count and every " +
+      "numeric column's lower and upper bound equal the footer's, with no bound published for a " +
+      "string. A reader plans a scan off this file and never opens a footer to do it, so a wrong " +
+      "bound is a tile pruned that held the match, and nothing downstream can notice.\n\n" +
+      "**A float is compared as the `f32` it is.** The footer prints `0.1` and the manifest prints " +
+      "the widened value; both are cast to the column's physical type before they are compared, so " +
+      "the check is exact rather than approximate and a manifest that printed the short decimal " +
+      "would still pass — it names the same `f32`.\n\n" +
+      "A type naming no tile manifest is reported, not failed: every corpus written before the " +
+      "field is one, and its reader falls back to the footers.",
+    cannotProve:
+      "That the footers are true. This holds the manifest to the footers and the footers to " +
+      "nothing: `footer-is-the-index` has the same limit, and only re-reading every page would " +
+      "lift it.\n\n" +
+      "That a rung is where this looks. The manifest scanner reads one level of nesting and the " +
+      "rungs are deeper, so a rung is found at `<cells.prefix>/r{k}/` — the naming fossil's writer " +
+      "uses — and not at whatever `path` the tree declares. A writer that names its rungs " +
+      "otherwise is reported as a manifest listing zooms with no bytes under them.\n\n" +
+      "The statistics of an adjacency or a quotient. The manifest does not publish them yet.",
+    run(corpus) {
+      const failures = [];
+      const notes = [];
+      let checked = 0;
+      for (const type of corpus.types) {
+        if (type.tileManifest === null) {
+          notes.push(`${type.name}: names no tile manifest, so a reader reads the footers`);
+          continue;
+        }
+        if (!existsSync(type.tileManifest)) {
+          failures.push(`${type.name}: names a tile manifest at ${type.tileManifest} and there is none`);
+          continue;
+        }
+        const manifest = lit(type.tileManifest);
+        const top = Number(
+          scalar(
+            `SELECT coalesce(max((m->>'z')::INTEGER), -1)
+               FROM (SELECT unnest(json_extract(json, '$.matrices[*]')) AS m
+                       FROM read_json_objects('${manifest}'))`,
+          ),
+        );
+        if (top < 0) {
+          failures.push(`${type.name}: the tile manifest lists no zoom at all`);
+          continue;
+        }
+        const cellRoot = join(corpus.root, type.prefix, type.cells?.prefix ?? "cell");
+        const onDisk = existsSync(cellRoot)
+          ? readdirSync(cellRoot).filter((name) => /^r\d+$/.test(name)).length
+          : 0;
+        if (onDisk !== top) {
+          failures.push(
+            `${type.name}: the tile manifest's payload is at z = ${top}, which says ${top} rung(s), ` +
+              `and ${onDisk} are on disk`,
+          );
+        }
+        const zooms = type.files.map((f) => ({ z: top, path: f.path, tile: f.tile }));
+        for (let k = 1; k <= top; k += 1) {
+          for (const f of payload(join(cellRoot, `r${k}`))) {
+            zooms.push({ z: top - k, path: f.path, tile: f.tile });
+          }
+        }
+        const mismatches = query(`
+          WITH m AS (SELECT unnest(json_extract(json, '$.matrices[*]')) AS m
+                       FROM read_json_objects('${manifest}')),
+               t AS (SELECT (m->>'z')::INTEGER AS z, unnest(json_extract(m, '$.tiles[*]')) AS t FROM m),
+               published AS (
+                 SELECT z, (t->>'tile')::BIGINT AS tile, (t->>'record_count')::BIGINT AS rows,
+                        k.key AS col, k.value::BIGINT AS nulls,
+                        t->'lower_bounds'->>k.key AS lo, t->'upper_bounds'->>k.key AS hi
+                   FROM t, json_each(t->'null_value_counts') k),
+               footer AS (${footerSql(zooms)})
+          SELECT coalesce(p.z, f.z) AS z, coalesce(p.tile, f.tile) AS tile, coalesce(p.col, f.col) AS col,
+                 p.rows AS p_rows, f.rows AS f_rows, p.nulls AS p_nulls, f.nulls AS f_nulls,
+                 p.lo AS p_lo, f.lo AS f_lo, p.hi AS p_hi, f.hi AS f_hi
+            FROM published p FULL JOIN footer f USING (z, tile, col)
+           WHERE p.rows IS DISTINCT FROM f.rows OR p.nulls IS DISTINCT FROM f.nulls
+              OR CASE WHEN f.type = 'FLOAT'
+                        THEN p.lo::FLOAT IS DISTINCT FROM f.lo::FLOAT OR p.hi::FLOAT IS DISTINCT FROM f.hi::FLOAT
+                      WHEN f.type = 'DOUBLE'
+                        THEN p.lo::DOUBLE IS DISTINCT FROM f.lo::DOUBLE OR p.hi::DOUBLE IS DISTINCT FROM f.hi::DOUBLE
+                      ELSE p.lo::HUGEINT IS DISTINCT FROM f.lo::HUGEINT OR p.hi::HUGEINT IS DISTINCT FROM f.hi::HUGEINT END
+           ORDER BY 1, 2, 3`);
+        for (const row of mismatches.slice(0, 5)) {
+          failures.push(
+            `${type.name}: z ${row.z} tile ${row.tile} \`${row.col}\` — the manifest says ` +
+              `rows ${row.p_rows}, nulls ${row.p_nulls}, [${row.p_lo}, ${row.p_hi}] and the footer ` +
+              `says rows ${row.f_rows}, nulls ${row.f_nulls}, [${row.f_lo}, ${row.f_hi}]`,
+          );
+        }
+        if (mismatches.length > 5) {
+          failures.push(`${type.name}: … and ${mismatches.length - 5} more disagreement(s)`);
+        }
+        const entries = Number(
+          scalar(`SELECT count(DISTINCT (z, tile)) FROM (${footerSql(zooms)})`),
+        );
+        checked += entries;
+        notes.push(`${type.name}: ${entries} tile(s) over ${top + 1} zoom(s) held against their footers`);
+      }
+      return result(failures, [`${checked} tile(s) checked`, ...notes]);
     },
   },
 ];

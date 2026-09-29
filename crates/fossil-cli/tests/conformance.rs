@@ -291,6 +291,74 @@ fn addressed(payload: &str, key: &str, shift: u32) -> String {
     )
 }
 
+/// How many published tile statistics disagree with the footers — `0` when the
+/// tile manifest at `manifest` says exactly what the Parquet under `prefix`
+/// says, tile for tile and column for column.
+///
+/// **Both sides are read by `DuckDB` and neither through fossil's types**:
+/// `read_json_objects` over the manifest, `parquet_metadata` over the payload
+/// and every rung. The zoom of each file is the arithmetic the manifest is
+/// held to — rung `k` of `R` is `z = R − k`, the payload is `z = R` — and a
+/// `FULL JOIN` on `(z, tile, column)` makes a missing entry on either side a
+/// mismatch rather than an absence nothing counts.
+///
+/// A bound is compared in the footer's own physical type, because a `float`
+/// column's footer prints `0.1` where the manifest prints the `f32` exactly; a
+/// string column must carry no bound at all.
+fn tile_manifest_mismatches(conn: &Connection, prefix: &Path, manifest: &Path) -> i64 {
+    let rungs = std::fs::read_dir(prefix.join("cell"))
+        .map(|dir| dir.filter_map(Result::ok).count())
+        .unwrap_or(0);
+    let top = rungs;
+    let mut files = vec![(top, prefix.join("tiles.parquet"))];
+    for k in 1..=rungs {
+        files.push((top - k, prefix.join(format!("cell/r{k}/tiles.parquet"))));
+    }
+    let values = files
+        .iter()
+        .map(|(z, f)| format!("({z}, '{}')", f.display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let list = files
+        .iter()
+        .map(|(_, f)| format!("'{}'", f.display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let manifest = manifest.display();
+    scalar(
+        conn,
+        &format!(
+            "WITH m AS (SELECT unnest(json_extract(json, '$.matrices[*]')) AS m \
+             FROM read_json_objects('{manifest}')), \
+             t AS (SELECT (m->>'z')::INT AS z, unnest(json_extract(m, '$.tiles[*]')) AS t FROM m), \
+             published AS ( \
+             SELECT z, (t->>'tile')::BIGINT AS tile, (t->>'record_count')::BIGINT AS rows, \
+             k.key AS col, k.value::BIGINT AS nulls, \
+             t->'lower_bounds'->>k.key AS lo, t->'upper_bounds'->>k.key AS hi \
+             FROM t, json_each(t->'null_value_counts') k), \
+             footer AS ( \
+             SELECT v.z, p.row_group_id AS tile, p.row_group_num_rows AS rows, \
+             p.path_in_schema AS col, p.type, p.stats_null_count AS nulls, \
+             p.stats_min_value AS lo, p.stats_max_value AS hi \
+             FROM (VALUES {values}) v(z, f) \
+             JOIN parquet_metadata([{list}]) p ON p.file_name = v.f) \
+             SELECT count(*) FROM published p FULL JOIN footer f USING (z, tile, col) \
+             WHERE p.rows IS DISTINCT FROM f.rows OR p.nulls IS DISTINCT FROM f.nulls \
+             OR CASE WHEN f.type IN ('BYTE_ARRAY', 'FIXED_LEN_BYTE_ARRAY', 'BOOLEAN') \
+             THEN p.lo IS NOT NULL OR p.hi IS NOT NULL \
+             WHEN f.lo IS NULL THEN true \
+             WHEN f.type = 'FLOAT' \
+             THEN p.lo::FLOAT IS DISTINCT FROM f.lo::FLOAT \
+             OR p.hi::FLOAT IS DISTINCT FROM f.hi::FLOAT \
+             WHEN f.type = 'DOUBLE' \
+             THEN p.lo::DOUBLE IS DISTINCT FROM f.lo::DOUBLE \
+             OR p.hi::DOUBLE IS DISTINCT FROM f.hi::DOUBLE \
+             ELSE p.lo::HUGEINT IS DISTINCT FROM f.lo::HUGEINT \
+             OR p.hi::HUGEINT IS DISTINCT FROM f.hi::HUGEINT END"
+        ),
+    )
+}
+
 // A numbered sequence of assertions over ONE corpus, read top to bottom, and the
 // order is the contract rather than an accident of writing. Splitting it either
 // threads the same eight bindings through helpers or writes the corpus once per
@@ -895,6 +963,51 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "an edge does not connect the two identities it was written from — the endpoints are \
          dense ids, the pass reassigned them, and this is the half of that operation nothing else \
          here can see"
+    );
+
+    // 14. The tile manifest says what the footers say. The writer reads it off
+    //     the footers it closes, so this is the check that it READ them — every
+    //     tile of the payload and of every rung, every column's null count, and
+    //     every numeric column's bounds, against `parquet_metadata` read back
+    //     off the disk. Then once more against a copy with one bound moved by
+    //     one unit, because a comparison that nothing can fail is not one.
+    let person_yml = dest.join("vertex/Person.vertex.yml");
+    let named = manifest_line(&person_yml, "tile_manifest: ")
+        .expect("the vertex document names its tile manifest");
+    let prefix = dest.join("vertex/Person");
+    let manifest = prefix.join(&named);
+    assert!(
+        prefix.join("cell/r1/tiles.parquet").exists(),
+        "the corpus carries no rung, so the manifest's coarse zooms go unchecked"
+    );
+    let tiles = scalar(
+        &conn,
+        &format!(
+            "SELECT count(*) FROM (SELECT unnest(json_extract(m, '$.tiles[*]'))                FROM (SELECT unnest(json_extract(json, '$.matrices[*]')) AS m                        FROM read_json_objects('{}')))",
+            manifest.display()
+        ),
+    );
+    assert!(
+        tiles > 3,
+        "the tile manifest lists {tiles} tile(s) — the payload alone has three"
+    );
+    assert_eq!(
+        tile_manifest_mismatches(&conn, &prefix, &manifest),
+        0,
+        "the tile manifest disagrees with the footers it was read off"
+    );
+    let text = std::fs::read_to_string(&manifest).expect("read the tile manifest");
+    let moved = text.replacen(
+        "\"upper_bounds\":{\"cluster_id\":",
+        "\"upper_bounds\":{\"cluster_id\":1",
+        1,
+    );
+    assert_ne!(moved, text, "the mutation found nothing to move");
+    let tampered = dir.path().join("tampered.json");
+    std::fs::write(&tampered, moved).expect("write the tampered manifest");
+    assert!(
+        tile_manifest_mismatches(&conn, &prefix, &tampered) > 0,
+        "a bound moved by a digit went unnoticed — the comparison is vacuous"
     );
 
     // What 12 does not prove is that a hop is *cheap*, only that it is correct
