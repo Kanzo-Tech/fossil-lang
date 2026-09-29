@@ -104,7 +104,7 @@ There is **one** reference, in three pieces:
   is the argument for why any of it is shaped this way. A page describing something not yet built
   says so in a `direction:` field rather than in its tone; everything else describes what is there.
   Every push to `main` publishes it to <https://kanzo-tech.github.io/fossil-lang/>.
-- [`apps/corpus/`](apps/corpus/) — the artifact's contract, executable: the guards that make a
+- [`packages/corpus/`](packages/corpus/) — the artifact's contract, executable: the guards that make a
   convention checkable and the conformance corpus that makes two readers agree. Copy `guards/`
   somewhere else and it runs — `node` and a `duckdb` binary, no install, no build.
 - [`docs/programs/`](docs/programs/) — the conformance programs. Every program the

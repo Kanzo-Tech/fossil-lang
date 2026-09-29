@@ -292,7 +292,7 @@ fn local_dest_dir(url: &str) -> Option<PathBuf> {
 ///
 /// Neither given seals `privacy: undeclared` into the manifest, which is a claim
 /// a recipient can read rather than a silence they have to interpret: the corpus
-/// says `undeclared` on its face and `apps/corpus`'s `declared-privacy` repeats
+/// says `undeclared` on its face and `packages/corpus/guards`' `declared-privacy` repeats
 /// it to whoever receives the files.
 ///
 /// `memory_bytes` is the run's declared memory budget, and it is one number held

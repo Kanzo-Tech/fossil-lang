@@ -229,7 +229,7 @@ export function categoricalOf(
  *
  * **A line scanner, like the four others over this format**, and for the same reason: the shape is
  * flat two-space `key: scalar` under `- ` items, and `crates/fossil-sinks` freezes it precisely so
- * that independent parsers agree. `packages/corpus/src/manifest.ts`, `apps/corpus/guards/
+ * that independent parsers agree. `packages/corpus/src/manifest.ts`, `packages/corpus/guards/
  * manifest.mjs` and `apps/playground/src/bound.ts` are the others; this one is here rather than
  * beside that third because it reads `graph.graph.yml`'s `privacy:` block and a channel is per
  * TYPE.

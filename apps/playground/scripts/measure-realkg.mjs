@@ -164,7 +164,7 @@ function duck(sql, json) {
   }
   // Any other `run.error` is a process that never started either, and it leaves `status` and
   // `stderr` null — so `run.stderr.trim()` below would report a TypeError from this file rather
-  // than the reason. `apps/corpus/guards/duck.mjs` has the same two lines for the same reason.
+  // than the reason. `packages/corpus/guards/duck.mjs` has the same two lines for the same reason.
   if (run.error) {
     throw new Error(`duckdb could not be run: ${run.error.message}\n--- sql ---\n${sql}`, {
       cause: run.error,

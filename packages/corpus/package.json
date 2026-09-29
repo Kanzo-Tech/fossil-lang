@@ -33,13 +33,22 @@
     "README.md",
     "LICENSE"
   ],
+  "//contract": "`conformance/`, `guards/` and `integration/` are the corpus contract, and they live beside the reader that fulfils it rather than in a private app of their own: a private app beside a package is a second workspace name for one directory, and the package's own tests already reached into it by path. None of the three is in `files`, so npm never sees them. `guards/` stays plain ESM with no dependencies and no build — node plus the `duckdb` binary — because it is the directory a third party copies. **`test` is still `vitest run` over `tests/` and nothing else**, and that is the constraint this move must not break: `release.yml` runs `pnpm --filter \"./packages/*\" test` before publishing, and a suite that spawns `duckdb` in that step is what took `v0.3.0-alpha.4` down. The contract runs under its own names: `test:contract` is the guards' self-test and the conformance chain (`--without-wasm`, as `corpus.yml` runs it), `conformance` is every leg and FAILS without `pkg/`, and `test:integration` is the four suites that write a corpus with the `duckdb` binary and read it back through `src/`, under their own vitest config.",
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
     "gen:types": "bash scripts/gen-types.sh",
     "build": "pnpm run build:wasm && pnpm run gen:types && tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:contract": "node guards/self-test.mjs && node conformance/containers.mjs && node guards/check.mjs conformance/corpus && node conformance/provenance.mjs && node conformance/verify.mjs --without-wasm",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "check": "node guards/check.mjs",
+    "self-test": "node guards/self-test.mjs",
+    "fixture": "node guards/fixture.mjs",
+    "conformance": "node conformance/verify.mjs",
+    "provenance": "node conformance/provenance.mjs",
+    "containers": "node conformance/containers.mjs"
   },
   "sideEffects": false,
   "dependencies": {

@@ -80,7 +80,7 @@ guard `identity-is-the-subject` and the writer now both mark `subject`. The flag
 *reachable*: `packages/corpus/src/manifest.ts` is a line scanner and `properties` is nested one
 level deeper than anything it addresses, so getting at it means a third shape in `ScannedManifest`
 — a sequence of mappings inside a mapping inside a sequence — which is the nesting that module
-refuses by name, plus the same growth in `apps/corpus/guards/manifest.mjs`, a deliberate copy for a
+refuses by name, plus the same growth in `packages/corpus/guards/manifest.mjs`, a deliberate copy for a
 third party who has neither this repository nor npm. And independently: the reader already refuses
 to take the payload vocabulary off the manifest at all, because a payload projection's `properties`
 enumerates three where `DESCRIBE` sees seven columns. A flag on a list that does not enumerate the
@@ -198,7 +198,7 @@ manifest says something untrue about all nine.
 <Callout title="Nothing in this tree keys on it, and that is the fact the decision turns on">
 `gar/v1` appears **69 times in 34 files**, and **not one of them reads it**. There is no comparison,
 no `match`, no branch, no rejection path, no version gate — in the crates, in
-`apps/corpus/conformance/corpus/graph.graph.yml` and its siblings, in the guards, or in the
+`packages/corpus/conformance/corpus/graph.graph.yml` and its siblings, in the guards, or in the
 TypeScript. `packages/executor/src/index.ts, GraphInfo` carries `version` as an opaque `string` and
 nothing ever looks at it.
 
@@ -465,7 +465,7 @@ to fetch it, a parser, a guard, a code path, a fallback for corpora written befo
 on the cost report whose entire content was which of the two indexes had answered.
 [`design/discarded`](/docs/design/discarded) carries the measurement and what would bring it back.
 
-`apps/corpus/integration/address-cost.test.ts` is what the surviving path costs, in tiles, in `Range`
+`packages/corpus/integration/address-cost.test.ts` is what the surviving path costs, in tiles, in `Range`
 requests and in kilobytes, against a denominator DuckDB supplies: the tiles that actually hold a
 vertex inside the rectangle, so a path answering with fewer has not read less, it has drawn a wrong
 picture.
@@ -519,11 +519,12 @@ rename — every `fossil_graph::plan` in the conformance tables, the `fossil_gra
 stem in `packages/corpus/pkg/`, and the `pkg/` filenames in the published `files` list — to fix an
 ambiguity that does not exist there.
 
-The name it took was held by `apps/corpus`, which is now `@fossil-lang/corpus-contract`. The
-published name won that collision because it is the one that appears in a stranger's import; the
-app's name was a pnpm resolution handle referenced from nowhere else in the tree. **Neither
-directory rename that would have been tidier happened**: `apps/corpus/` keeps its path because
-`docs/components/{guard-index,vector-table}.tsx` read across into it at build time.
+The name it took was held by the private app that executed the corpus contract. The published
+name won that collision because it is the one that appears in a stranger's import; the app's name
+was a pnpm resolution handle referenced from nowhere else in the tree. The app is gone since: its
+`guards/`, `conformance/` and `integration/` are directories of `packages/corpus/`, beside the
+reader that fulfils them and outside its `files`, so there is one name for the corpus and it is the
+published one.
 
 <Callout type="info">
   The rename touched no arithmetic. What changed the count of readers of
@@ -737,7 +738,7 @@ artefact.
 plainly, and fossil follows both:
 
 - **Iceberg publishes the arithmetic and a table of vectors**, and ports are checked against the
-  table rather than against a sentence. `apps/corpus/guards/vectors.json` is that table here, every
+  table rather than against a sentence. `packages/corpus/guards/vectors.json` is that table here, every
   value a border, read by the guard *and* rendered by [addressing](/docs/format/conventions/addressing)
   so the documented table and the executed one cannot drift apart.
 - **Arrow requires two implementations and integration tests _before_ a format change lands**, not
@@ -770,7 +771,7 @@ misdiagnosis: regenerating with the fixture's defaults produces 600 edges agains
 manifest declares, which reads exactly like a fixture that has drifted from its generator. It has
 not. `clusters` decides how many chords the ring carries and the default is 256; at **16** the
 generator reproduces the checked-in corpus **byte for byte**, all twenty-three files.
-`apps/corpus/conformance/provenance.mjs` carries the recipe and proves it, asserting the manifests
+`packages/corpus/conformance/provenance.mjs` carries the recipe and proves it, asserting the manifests
 as text and every payload's rows in order — and *reporting* byte-identity rather than requiring it,
 because a writer may change an encoding without changing a row, and a check that went red on a
 DuckDB point release would teach everyone to regenerate the fixture instead of reading the diff.
@@ -782,14 +783,14 @@ Then the second JavaScript one went: the published TypeScript was a thousand lin
 the Rust because people kept making it agree, nothing compared the two, and it is a binding over
 `fossil_graph::plan` now. So `packages/corpus/tests/conformance.test.ts` is not a second
 implementation diffed against the first — it is **the same reader re-entered at wasm32 width**.
-`apps/corpus/conformance/reader.mjs` carries the independence.
+`packages/corpus/conformance/reader.mjs` carries the independence.
 
 `fossil_graph::plan` is that reader. It goes through no struct of the writer's — `fossil-graph`'s
 other manifest module deserialises into `fossil-sinks`' own types, which proves those types
 round-trip and says nothing about the artefact, so this one reads a generic YAML value and asks the
 document a stranger's questions. It opens no byte, which is also what makes it indifferent to which
 engine anybody would open the files with. `crates/fossil-graph/tests/conformance.rs` runs it
-natively; `apps/corpus/conformance/wasm-reader.mjs` runs the wasm32 build of it, through
+natively; `packages/corpus/conformance/wasm-reader.mjs` runs the wasm32 build of it, through
 `fossil-graph-wasm`, which is a separate claim rather than the same one twice — `usize` is 64 bits in
 one and 32 in the other.
 
@@ -800,11 +801,11 @@ That obligation has been discharged once, and the shape of it is what to copy. T
 [row-group container](/docs/format/conventions/addressing#two-containers-one-address) is a change of
 format; both readers were moved to it and diffed **while the writer still emitted only the old one**,
 which is the only window in which two containers of one corpus exist at the same time to be compared.
-`apps/corpus/conformance/containers.mjs` and `apps/corpus/integration/containers.test.ts` are that diff:
+`packages/corpus/conformance/containers.mjs` and `packages/corpus/integration/containers.test.ts` are that diff:
 the same graph written both ways, every answer required to match. After the writer moves there is
 one container and nothing left to compare against.
 
-What runs lives in `apps/corpus/conformance/` — `verify.mjs` (the table, against each reader in
+What runs lives in `packages/corpus/conformance/` — `verify.mjs` (the table, against each reader in
 turn), `containers.mjs` (the same graph in both containers) and `provenance.mjs` (the corpus from its
 recipe) — plus `crates/fossil-graph/tests/conformance.rs` and
 `packages/corpus/tests/conformance.test.ts`. The conventions they check are documented for reader
@@ -856,5 +857,5 @@ strong character of a string does **not** determine how it should be laid out, s
 without it is one the host renders backwards with nothing in the cell to say so.
 
 The format itself — the conventions, the measurement behind each, and executable guards — is
-documented in `apps/corpus`, for somebody implementing a reader and requiring no knowledge of the
+documented in `/docs/format` and executed by `packages/corpus/guards/`, for somebody implementing a reader and requiring no knowledge of the
 language. **The language is one product and the corpus is another, and the seam is the artifact.**

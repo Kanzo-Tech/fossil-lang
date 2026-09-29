@@ -39,7 +39,7 @@ import type { QueryFn, QueryRow } from '../src/query.js';
  */
 
 const require = createRequire(import.meta.url);
-const CONFORMANCE = fileURLToPath(new URL('../../../apps/corpus/conformance/corpus', import.meta.url));
+const CONFORMANCE = fileURLToPath(new URL('../conformance/corpus', import.meta.url));
 
 /** The manifest's own numbers, so a hard-coded stride shows up as a failure. */
 const VERTEX_COUNT = 300;
@@ -104,7 +104,7 @@ version: gar/v1
 /**
  * The conformance corpus's bytes under four names: two vertex types and two relations, one of
  * which leaves the type it starts at. Nothing is generated — a fourth writer of Parquet in this
- * repository is what `apps/corpus/integration/frame-levels.test.ts` says a test must not become.
+ * repository is what `packages/corpus/integration/frame-levels.test.ts` says a test must not become.
  */
 function relabel(): string {
   const root = mkdtempSync(join(tmpdir(), 'fossil-cross-type-'));

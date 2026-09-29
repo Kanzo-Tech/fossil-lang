@@ -88,8 +88,8 @@ jobs:
         run: pnpm --filter "./packages/*" build
 
       # Filtered to `./packages/*`, like every other recursive step in this repo.
-      # It read `pnpm -r test`, which reaches `apps/corpus` — whose test script
-      # hard-requires the `duckdb` binary this job never installs, so the gate
+      # It read `pnpm -r test`, which reached the corpus contract — then a
+      # private app, whose test script hard-requires the `duckdb` binary this job never installs, so the gate
       # before publishing exited 2 on a missing dependency rather than on a
       # failing package. `apps/` is `private: true` and nothing here publishes
       # it; CLAUDE.md states the filter as the invariant that makes an app
@@ -99,11 +99,13 @@ jobs:
       #
       # **The filter was necessary and was not sufficient**, which is what
       # `v0.3.0-alpha.4` died of: four suites in `packages/corpus/tests/` imported
-      # `../../../apps/corpus/guards/*.mjs`, so this step selected the package and
+      # that app's `guards/*.mjs`, so this step selected the package and
       # the package reached out of the selection anyway — into a fixture writer that
       # spawns `duckdb`. A filter isolates a directory; it cannot isolate an import.
-      # Those four are `apps/corpus/integration/` now and run in `pnpm-ci.yml`, which
-      # installs the binary. Nothing under `packages/*` spawns a process this job does
+      # Those four are `packages/corpus/integration/` now — beside `tests/`, not in
+      # it, and behind `test:integration` rather than `test` — and run in
+      # `pnpm-ci.yml`, which installs the binary. The guards and conformance chain
+      # are `test:contract`, which `corpus.yml` runs. Neither may enter `test`. Nothing under `packages/*` spawns a process this job does
       # not have, and this step needs no duckdb to be green.
       - name: Test (gate before publishing)
         run: pnpm --filter "./packages/*" test

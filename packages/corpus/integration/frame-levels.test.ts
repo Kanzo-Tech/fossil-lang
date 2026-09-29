@@ -8,10 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import '../../../packages/corpus/tests/boot.js';
-import { levelsOf, rowsAt, strideOf } from '../../../packages/corpus/src/address.js';
-import { open, type Corpus } from '../../../packages/corpus/src/corpus.js';
-import type { QueryFn, QueryRow } from '../../../packages/corpus/src/query.js';
+import '../tests/boot.js';
+import { levelsOf, rowsAt, strideOf } from '../src/address.js';
+import { open, type Corpus } from '../src/corpus.js';
+import type { QueryFn, QueryRow } from '../src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
 // conventions ask for, and it must not import a type of ours to be one.
@@ -24,7 +24,7 @@ import { write } from '../guards/fixture.mjs';
  * vertices in 5 tiles and writes no `l{k}/`, deliberately, because giving it one would mean growing
  * the artefact every implementation of this format is checked against.
  *
- * **The corpus here is written by `apps/corpus/guards/fixture.mjs`, and this file writes no
+ * **The corpus here is written by `packages/corpus/guards/fixture.mjs`, and this file writes no
  * Parquet of its own.** It used to: it built a payload and a pyramid out of inline SQL, which made
  * it a FOURTH writer of level bytes beside the layout pass, the fixture and the guards — and it
  * existed only because a floor constant kept the conformance corpus from ever having a pyramid to
@@ -49,9 +49,9 @@ import { write } from '../guards/fixture.mjs';
  * nothing else. Asking for links used to be the control, and it stopped being one the day the
  * fixture began writing the relation's levels too.
  *
- * It needs the `duckdb` binary, which is why it lives in `apps/corpus/integration/` beside the
+ * It needs the `duckdb` binary, which is why it lives in `packages/corpus/integration/` beside the
  * guards that speak to it and not in `packages/corpus/tests/`. The dependency is DECLARED —
- * `pnpm --filter @fossil-lang/corpus-contract test:integration` is the script that has it, and the
+ * `pnpm --filter @fossil-lang/corpus test:integration` is the script that has it, and the
  * package's own `pnpm test` no longer does. It is not probed and this file does not skip:
  * `describe.skipIf` skips the TESTS and runs the describe BODY, so the probe it was guarding
  * never guarded the fixture write, and a suite that vanishes with its dependency reads as

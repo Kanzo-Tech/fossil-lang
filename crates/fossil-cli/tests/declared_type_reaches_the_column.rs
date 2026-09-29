@@ -9,7 +9,7 @@
 //! produced (`crates/fossil-df/src/files.rs`). Nothing in the tree compares the
 //! two — `fossil_sinks::manifest::data_type_name`'s own doc comment says so,
 //! `tests/conformance.rs` checks paths, counts, tiling and the adjacency joins,
-//! and `apps/corpus/guards/guards.mjs` records the same gap in its
+//! and `packages/corpus/guards/guards.mjs` records the same gap in its
 //! `cannotProve`.
 //!
 //! # The mechanism, and it is not about aggregates

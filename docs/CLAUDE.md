@@ -10,7 +10,7 @@ built to catch — **159 dead citations** in versioned prose, and eighteen of tw
 record resolving to a *different* record. The third was `SURFACE-PLAN.md`, 1,443 lines, which
 diagnosed itself on its own line 5 and had been cited 89 times from the code by the time it went;
 `crates/xtask/tests/no_second_reference.rs` now fails if prose reappears at the root. The fourth was
-`apps/corpus`, a whole second Next.js app — nine runtime dependencies identical version for version
+the corpus contract's own site, a whole second Next.js app — nine runtime dependencies identical version for version
 to these — serving twelve pages that are now `content/docs/format/`.
 
 **Do not reintroduce any of them.** If a decision needs somewhere to live, it is a page; if a page
@@ -37,7 +37,7 @@ tests, zero consumers and a retired grammar rule, so it is an entry in `design/d
 
 The corpus format is a specification, and a specification does not have a roadmap in its prose.
 **Never write "today", "currently", "not yet", "will be", "for now" on those pages.** A convention
-holds of a corpus or it does not, and what says which is `apps/corpus/guards/check.mjs`, not an
+holds of a corpus or it does not, and what says which is `packages/corpus/guards/check.mjs`, not an
 adverb. Where something is genuinely undecided, write it as a **design question** naming what would
 settle it — which is not the same as a gap.
 
@@ -56,7 +56,7 @@ and nothing more. And `unmeasured: true`, the honest alternative the schema offe
 
 So prefer `<Program src= region= />`, which reads the file at build time — an absent region stops
 the build, and the code on the page *is* the code on disk. Same for `<GuardIndex />` and
-`<VectorTable of= />`, which render `apps/corpus/guards/{guards.mjs,vectors.json}` rather than
+`<VectorTable of= />`, which render `packages/corpus/guards/{guards.mjs,vectors.json}` rather than
 transcribing them.
 
 **A line number is not a citation.** This paragraph used to end "a bare `file:line` is allowed and is

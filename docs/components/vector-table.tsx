@@ -26,7 +26,7 @@ export function VectorTable({
 }) {
   // Off the repo root, not off `process.cwd()`: the file lives with the checker that executes it,
   // and this page renders it from there rather than keeping a copy on this side of the tree.
-  const path = join(repoRoot, "apps", "corpus", "guards", "vectors.json");
+  const path = join(repoRoot, "packages", "corpus", "guards", "vectors.json");
   const table = JSON.parse(readFileSync(path, "utf8"))[of] as Table;
   const columns = Object.keys(table.vectors[0]).filter((key) => key !== "why");
 

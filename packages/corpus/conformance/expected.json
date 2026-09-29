@@ -1,5 +1,5 @@
 {
-  "about": "The addresses a reader must compose from these manifests, and the ones it must refuse to compose. Every path is dataset-relative; a reader prepends wherever the corpus is served from. This file is the deliverable: two implementations execute it, `verify.mjs` here and `packages/corpus/tests/conformance.test.ts` next door, and neither one wrote it.",
+  "about": "The addresses a reader must compose from these manifests, and the ones it must refuse to compose. Every path is dataset-relative; a reader prepends wherever the corpus is served from. This file is the deliverable: two implementations execute it, `verify.mjs` here and `packages/corpus/tests/conformance.test.ts` beside it, and neither one wrote it.",
   "base_join": {
     "about": "The base is prepended and nothing else happens to it — no normalisation, no trailing slash, no encoding.",
     "case": "corpus",
@@ -596,7 +596,7 @@
         }
       ],
       "index": {
-        "about": "The one assertion that makes an index an OPTIMISATION rather than a second truth: the same corpus read with it and without it hands back the same vertex. Both harnesses run each id twice — once against the manifest as it is, once against a copy of the tree whose `index:` block has been stripped — and compare. Without this the block above proves nothing about the index at all, because both routes return the same answer by construction and neither harness can see which one ran. It is the gap `apps/corpus`'s `index-agrees-with-the-payload` names in its own `cannotProve`, closed from the reader's side instead of the artefact's.",
+        "about": "The one assertion that makes an index an OPTIMISATION rather than a second truth: the same corpus read with it and without it hands back the same vertex. Both harnesses run each id twice — once against the manifest as it is, once against a copy of the tree whose `index:` block has been stripped — and compare. Without this the block above proves nothing about the index at all, because both routes return the same answer by construction and neither harness can see which one ran. It is the gap `packages/corpus/guards`' `index-agrees-with-the-payload` names in its own `cannotProve`, closed from the reader's side instead of the artefact's.",
         "indexed": true,
         "same_either_way": [
           "https://example.org/person/15",

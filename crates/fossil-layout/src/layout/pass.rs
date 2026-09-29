@@ -1384,7 +1384,7 @@ pub fn enrich_layout_with(
 
         // The relation goes out CUT and only cut: publishing the uncut relation
         // beside its own tiles is two containers for one set of rows, which is
-        // what `apps/corpus`'s `declared-tiling` fires on. There is no longer a
+        // what `packages/corpus/guards`' `declared-tiling` fires on. There is no longer a
         // staged copy for anyone to publish by accident — the rows reached this
         // pass as Arrow and the tiles below are the first time they are written.
 
@@ -1414,7 +1414,7 @@ pub fn enrich_layout_with(
         // the tile numbers are not. What locates a tile here is the footer's box
         // on the key column, and the runs below are written in ascending order,
         // so the boxes ascend and do not overlap — which is the property
-        // `apps/corpus`'s `tile-of` asks an adjacency for.
+        // `packages/corpus/guards`' `tile-of` asks an adjacency for.
         //
         // A run is unpacked into two `u32` arrays as it is written, so the only
         // Arrow this loop holds is one tile — tens of thousands of rows against
@@ -1514,7 +1514,7 @@ pub fn enrich_layout_with(
 ///
 /// `None` is a legal corpus rather than a failure: where the identity lives when
 /// the drawing tile does not carry it is an open convention, and a type without
-/// one simply has no index. `apps/corpus`'s `identity-is-the-subject` reports the
+/// one simply has no index. `packages/corpus/guards`' `identity-is-the-subject` reports the
 /// same absence and does not fail on it either.
 fn subject_pairs(
     batches: &[&RecordBatch],

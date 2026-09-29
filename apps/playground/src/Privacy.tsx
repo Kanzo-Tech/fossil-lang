@@ -12,7 +12,7 @@
  * and shows the two columns beside each other.
  *
  * What that demonstrates is a property of the FORMAT rather than a property of this corpus. It
- * is the same check `apps/corpus/guards/check.mjs` runs natively as `declared-privacy`, done by
+ * is the same check `packages/corpus/guards/check.mjs` runs natively as `declared-privacy`, done by
  * the reader instead of the writer.
  *
  * ## And why the green tick is still nearly worthless here, which the panel says out loud

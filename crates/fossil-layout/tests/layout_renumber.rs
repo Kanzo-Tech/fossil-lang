@@ -311,7 +311,7 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
 
     // ONE Parquet in the prefix, and it is the payload. Two containers at once
     // is one too many — a reader that globs finds both — which is the convention
-    // `apps/corpus`'s `declared-tiling` fires on. `index/`, `l1/` and `cell/`
+    // `packages/corpus/guards`' `declared-tiling` fires on. `index/`, `l1/` and `cell/`
     // are not a second one: they are directories. The list is exhaustive so that
     // a fifth entry cannot appear unremarked — and `cell/` is the entry that
     // proved it works, having appeared here the moment the pass grew a pyramid.

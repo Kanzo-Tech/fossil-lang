@@ -98,7 +98,7 @@ pub enum Container {
 /// chokepoint, so the protection is total at write time: the bytes that would
 /// violate the bound are never written. What travels with the artifact is this
 /// declaration plus a property a stranger can re-derive from the files —
-/// `apps/corpus/guards/guards.mjs`'s `declared-privacy` is that stranger.
+/// `packages/corpus/guards/guards.mjs`'s `declared-privacy` is that stranger.
 /// `/docs/format/conventions/privacy` has the argument, and what a *served*
 /// corpus can guarantee on top of it.
 ///
@@ -166,7 +166,7 @@ pub struct KAnonymity {
     /// spaces — `Person.birth_year Person.postcode Person.sex`.
     ///
     /// **The one field a reader cannot derive and the one the whole bound turns
-    /// on.** A flat scalar and not a sequence: `apps/corpus/guards/manifest.mjs`
+    /// on.** A flat scalar and not a sequence: `packages/corpus/guards/manifest.mjs`
     /// and `packages/corpus/src/manifest.ts` are line scanners over a flat
     /// mapping, and they **skip** what they cannot see rather than failing on
     /// it — so a set emitted as a YAML sequence scans as absent.
@@ -911,7 +911,7 @@ pub struct CellTree {
     /// **Nothing here can check it.** A tree cannot see the `channels:` list it
     /// points into, so a name that resolves to no entry is a well-formed
     /// document and a dangling reference is the failure this introduces.
-    /// `apps/corpus/guards`' `mode-names-a-channel` is where the two are held
+    /// `packages/corpus/guards`' `mode-names-a-channel` is where the two are held
     /// together, and `/docs/design/cells` is the argument.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode_channel: Option<String>,
@@ -1996,7 +1996,7 @@ pub fn arrow_type(name: &str) -> Option<DataType> {
 ///
 /// **Nothing enforces that the declared type matches the column the writer
 /// emits**, except for the three names every convention *shifts*:
-/// `apps/corpus/guards/guards.mjs`'s `addressing-is-unsigned` opens the payload
+/// `packages/corpus/guards/guards.mjs`'s `addressing-is-unsigned` opens the payload
 /// and requires `dense_id`, `src_dense` and `dst_dense` to hold an unsigned
 /// integer, because one stored signed shifts arithmetically and reaches a tile
 /// that does not exist. The rest of the property list is open, and
@@ -2116,7 +2116,7 @@ mod tests {
     }
 
     /// How many tiles a declared count implies — the Rust half of the
-    /// `declared_count` section of `apps/corpus/guards/vectors.json`. The
+    /// `declared_count` section of `packages/corpus/guards/vectors.json`. The
     /// borders are a count that exactly fills a tile and one a row over, the
     /// tail tile being what a truncated corpus loses and no other check sees.
     #[test]
@@ -2356,7 +2356,7 @@ version: gar/v1
     /// freezes half the contract.
     ///
     /// Flat mappings, and that is load-bearing rather than tidy: the line
-    /// scanners over this document — `apps/corpus/guards/manifest.mjs` and
+    /// scanners over this document — `packages/corpus/guards/manifest.mjs` and
     /// `packages/corpus/src/manifest.ts` — read one level of
     /// sequence-of-mappings and silently skip anything deeper, so a channel
     /// that nested would be a channel half its readers cannot see.
@@ -2543,7 +2543,7 @@ version: gar/v1
         assert_eq!(original, parsed);
     }
 
-    /// `apps/corpus/guards/manifest.mjs` and `packages/corpus/src/manifest.ts`
+    /// `packages/corpus/guards/manifest.mjs` and `packages/corpus/src/manifest.ts`
     /// are line scanners that **skip silently** what falls outside a flat
     /// mapping, so the emitted `privacy:` block has to stay inside one — said
     /// here, in the crate that emits it, rather than in the two that read it.
@@ -2871,7 +2871,7 @@ version: gar/v1
     /// **The bytes the hand-written line scanners have to read**, pinned here
     /// rather than assumed there.
     ///
-    /// `apps/corpus/guards/manifest.mjs` is a line scanner and not a YAML
+    /// `packages/corpus/guards/manifest.mjs` is a line scanner and not a YAML
     /// parser, deliberately and for the reason its own header states. What it
     /// has to see is one sequence of mappings — `projections:` — each with a
     /// nested `properties:` sequence at the item's OWN indentation, which is the

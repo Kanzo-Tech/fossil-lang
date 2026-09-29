@@ -37,7 +37,7 @@
  *
  * ## The caveat this bench inherits from its corpus
  *
- * `apps/corpus/guards/fixture.mjs`'s `positions()` packs each cluster at radius `12*sqrt(count /
+ * `packages/corpus/guards/fixture.mjs`'s `positions()` packs each cluster at radius `12*sqrt(count /
  * clusters)` on a grid of CONSTANT spacing 100. At a million vertices over 128 clusters that radius
  * is about 1,061 while the grid contributes 1,100 — so every disc overlaps every other one and the
  * corpus is one blur. Table 0 re-derives the ratio live rather than restating it, and
@@ -424,7 +424,7 @@ ${
   overCentres > 1
     ? `A disc **${overCentres.toFixed(2)}× wider than the entire grid its centres sit on** means all ${N(shape.clusters)} overlap: this corpus is one blur, and each disc alone covers ${(overExtent * 100).toFixed(0)}% of the picture.`
     : `The discs are narrower than the span of their centres (${overCentres.toFixed(2)}×), so this corpus has spatially separated communities and the caveat below does not bind.`
-} \`positions()\` in \`apps/corpus/guards/fixture.mjs\` packs a cluster at radius
+} \`positions()\` in \`packages/corpus/guards/fixture.mjs\` packs a cluster at radius
 \`12*sqrt(count/clusters)\` on a grid of CONSTANT spacing 100, so the discs outgrow the grid as the
 corpus grows and the degeneracy is a function of the size. \`measure-locality.mjs\` and
 \`realkg-prepare.mjs\` record the same thing.

@@ -1,6 +1,6 @@
 //! The conformance corpus, executed against the Rust reader.
 //!
-//! `apps/corpus/conformance/expected.json` is a table of ADDRESSES: what a reader
+//! `packages/corpus/conformance/expected.json` is a table of ADDRESSES: what a reader
 //! must compose from a manifest and what it must refuse to compose. **Nothing here
 //! opens a byte.** Three implementations execute that table and none of them wrote
 //! it:
@@ -8,7 +8,7 @@
 //! | reader | executed by | what it is |
 //! | --- | --- | --- |
 //! | [`fossil_graph::plan`] | this file, and `verify.mjs`'s wasm leg | the Rust one, and the one that reaches a browser through `fossil-graph-wasm` |
-//! | `apps/corpus/conformance/reader.mjs` | `apps/corpus/conformance/verify.mjs` | plain Node, written from the conventions and from nothing else |
+//! | `packages/corpus/conformance/reader.mjs` | `packages/corpus/conformance/verify.mjs` | plain Node, written from the conventions and from nothing else |
 //! | `packages/corpus/src/address.ts` | `packages/corpus/tests/conformance.test.ts` | the published module |
 //!
 //! Two of them were here before this one, and the gap the third closes is named
@@ -33,7 +33,7 @@ use serde_json::Value;
 /// Where the shared table and its case roots live. Not a copy: the same bytes
 /// `verify.mjs` and `conformance.test.ts` read.
 fn conformance_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/corpus/conformance")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/corpus/conformance")
 }
 
 /// Every manifest under a case root, keyed the way a host that fetched them would

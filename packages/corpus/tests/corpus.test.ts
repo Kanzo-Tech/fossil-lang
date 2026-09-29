@@ -24,7 +24,7 @@ import type { QueryFn, QueryRow } from '../src/query.js';
  * **Every expectation is a second query, not a constant.** The API's answer is compared against SQL
  * this file writes over the same files, because a constant transcribed from a run of the code under
  * test agrees with it by construction. The four numbers that *are* constants — 300, 5, 64, 596 —
- * come from the manifest and from `apps/corpus/guards/vectors.json`, which neither this file nor
+ * come from the manifest and from `packages/corpus/guards/vectors.json`, which neither this file nor
  * `open` wrote.
  *
  * **What it cannot prove**, and each of these is why:
@@ -43,7 +43,7 @@ import type { QueryFn, QueryRow } from '../src/query.js';
  */
 
 const require = createRequire(import.meta.url);
-const CONFORMANCE = fileURLToPath(new URL('../../../apps/corpus/conformance/', import.meta.url));
+const CONFORMANCE = fileURLToPath(new URL('../conformance/', import.meta.url));
 const CORPUS = join(CONFORMANCE, 'corpus');
 
 /** The manifest's own numbers, read here so a hard-coded stride shows up as a failure. */
@@ -695,7 +695,7 @@ describe('what open refuses, and names', () => {
 });
 
 /**
- * The same table `apps/corpus/conformance/verify.mjs` executes, executed here.
+ * The same table `packages/corpus/conformance/verify.mjs` executes, executed here.
  *
  * Everything above compares an answer to SQL **this file writes**, which catches the API being
  * wrong about the bytes. This asks the other question, and it is the one a self-check cannot: has
@@ -790,7 +790,7 @@ describe('the conformance table, executed against the published API', () => {
   it('hands back the same vertex with the index and without it', async () => {
     // The one assertion that makes the index an OPTIMISATION rather than a second truth. Nothing
     // else here can see which route ran: both return the same answer by construction, which is
-    // exactly the gap `apps/corpus`'s `index-agrees-with-the-payload` names in its own
+    // exactly the gap `packages/corpus/guards`' `index-agrees-with-the-payload` names in its own
     // `cannotProve`, closed from the reader's side.
     const dir = mkdtempSync(join(tmpdir(), 'fossil-noindex-'));
     scratch.push(dir);

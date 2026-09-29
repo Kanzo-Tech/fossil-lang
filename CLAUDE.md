@@ -22,7 +22,7 @@ Keep it under 200 lines, rules-not-context.
   behind a maintainers' divider,
   `/docs/design` is where an argument lives, with `design/discarded` for every rejected
   alternative and what would bring it back, and `design/prior-art` for every source named.
-- `apps/corpus/` — the artifact's contract, executable: `guards/`, `conformance/` and
+- `packages/corpus/` — the artifact's contract, executable: `guards/`, `conformance/` and
   `integration/`. Its prose is `/docs/format`; the two server components that render `guards.mjs`
   and `vectors.json` live on the docs side and read across, so renaming either file breaks the
   docs build on purpose. `integration/` is the one directory here that needs `pnpm install`, and
@@ -242,6 +242,12 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            caller could address a corpus WITHOUT wasm, and it is deleted with its
                            standalone test — composing a URL now costs loading the module, which is
                            the price of there being one reader instead of two.
+                           Beside `src/` sits the contract it fulfils — `guards/`, `conformance/`
+                           and `integration/` — outside `files`, so npm never sees it. It was a
+                           private app, and its suites reaching into this package is what
+                           `v0.3.0-alpha.4` died of. `test` stays `tests/` alone because the
+                           release gate runs it without `duckdb`; the contract is
+                           `test:contract` (`corpus.yml`) and `test:integration` (`pnpm-ci.yml`).
                            It was `@fossil-lang/graph` and it is not a graph: its door is
                            `open` and the thing that DOES draw one, `@kanzo-tech/graph`,
                            sits beside it in the playground's `package.json`. The Rust crates
@@ -297,20 +303,10 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
 
 apps/                      NOT published, and no RECURSIVE CI step reaches them (all are
                            filtered to `./packages/*` by path — see release.yml). Each gets its
-                           own path-filtered workflow instead: `docs.yml`, `corpus.yml`.
+                           own path-filtered workflow instead: `docs.yml`.
   docs/                    Next.js + fumadocs, and ALL of the prose: the book, the corpus
                            format, and the design argument behind a maintainers' divider.
                            `docs/CLAUDE.md` has the editorial rules
-  corpus/                  NOT a site — it was one, and it is now `docs/content/docs/format/`.
-                           What is left executes: the guards, the conformance corpus, a reader
-                           that shares no code with them, and `integration/` — the four vitest
-                           suites that need the `duckdb` BINARY, which is why they are here and
-                           not in `packages/corpus/tests/`. They were there, reaching backwards
-                           over `../../../apps/corpus/guards/`, and a published package that
-                           imports out of a private app is a package the release gate's
-                           `--filter "./packages/*"` cannot isolate — `v0.3.0-alpha.4` is what
-                           that cost. `pnpm-ci.yml` runs them; it is the job that has both a
-                           `duckdb` binary and `packages/corpus/pkg/`
   playground/              the architectural claim, clickable: check → run → query in one
                            browser tab, no server. It imports `examples/hello.fossil` rather
                            than copying it, and produces the same five subjects the walking

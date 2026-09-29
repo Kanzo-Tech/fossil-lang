@@ -28,7 +28,7 @@
  *
  * ## What the fixture is, which bounds every number below
  *
- * `apps/corpus/guards/fixture.mjs` builds this corpus, and it is synthetic in three ways the
+ * `packages/corpus/guards/fixture.mjs` builds this corpus, and it is synthetic in three ways the
  * reader must know before believing any ratio here. The script re-derives all three at runtime and
  * prints them as Table 0, so they cannot silently stop being true:
  *
@@ -116,7 +116,7 @@ function duck(sql, json) {
   }
   // Any other `run.error` is a process that never started either, and it leaves `status` and
   // `stderr` null — so `run.stderr.trim()` below would report a TypeError from this file rather
-  // than the reason. `apps/corpus/guards/duck.mjs` has the same two lines for the same reason.
+  // than the reason. `packages/corpus/guards/duck.mjs` has the same two lines for the same reason.
   if (run.error) {
     throw new Error(`duckdb could not be run: ${run.error.message}\n--- sql ---\n${sql}`, {
       cause: run.error,

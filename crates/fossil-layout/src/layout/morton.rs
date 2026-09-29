@@ -63,7 +63,7 @@ fn morton2(x: u16, y: u16) -> u32 {
 ///
 /// It was a closure inside [`morton_codes`] and therefore untestable, which is
 /// how the writer came to be the one side of this contract nothing executed:
-/// `apps/corpus/guards/vectors.json` publishes the table, `guards/arithmetic.mjs`
+/// `packages/corpus/guards/vectors.json` publishes the table, `guards/arithmetic.mjs`
 /// is checked against it, and until `quantize_agrees_with_the_published_table`
 /// existed the Rust could have been switched to `f64` with every test in the
 /// workspace still green.
@@ -162,9 +162,9 @@ mod tests {
     /// The writer side of the quantisation contract, read off the published
     /// table instead of restated beside it.
     ///
-    /// `apps/corpus/guards/vectors.json` is the deliverable — a second
+    /// `packages/corpus/guards/vectors.json` is the deliverable — a second
     /// implementation is checked against that table and not against a sentence
-    /// — and `apps/corpus/guards/arithmetic.mjs` executes it. **The engine that
+    /// — and `packages/corpus/guards/arithmetic.mjs` executes it. **The engine that
     /// writes the corpus did not.** Nothing in Rust read that file; the two
     /// `morton_codes` tests below assert relative ordering and no-panic, which
     /// hold for either float width. So the reference implementation was pinned
@@ -176,7 +176,7 @@ mod tests {
     /// 147/0/167 row with `57686, want 57687`.
     ///
     /// **What it cannot prove.** That the `DuckDB` half agrees:
-    /// `apps/corpus/guards/guards.mjs` spells the width `::FLOAT` in SQL, and
+    /// `packages/corpus/guards/guards.mjs` spells the width `::FLOAT` in SQL, and
     /// that `FLOAT / FLOAT` stays binary32 rather than promoting is evidenced
     /// by a passing guard, not by a width proof. And it says nothing about the
     /// bounding box the coordinates are quantised against — `morton_codes`
@@ -198,7 +198,7 @@ mod tests {
             .parent()
             .and_then(std::path::Path::parent)
             .expect("CARGO_MANIFEST_DIR has two parents")
-            .join("apps/corpus/guards/vectors.json");
+            .join("packages/corpus/guards/vectors.json");
         let published: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(&table)
                 .unwrap_or_else(|e| panic!("read {}: {e}", table.display())),

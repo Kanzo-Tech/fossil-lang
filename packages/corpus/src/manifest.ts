@@ -13,7 +13,7 @@
  * narrowed to the shape its one remaining input has: a flat mapping of scalars, plus the two
  * sequences of paths this exists to return.
  *
- * **A line scanner and not a YAML parser, deliberately.** `apps/corpus/guards/manifest.mjs` makes
+ * **A line scanner and not a YAML parser, deliberately.** `packages/corpus/guards/manifest.mjs` makes
  * the same call and cannot be imported — it has no `package.json` and exists to be *copied* by a
  * third party who has neither this repository nor npm.
  *

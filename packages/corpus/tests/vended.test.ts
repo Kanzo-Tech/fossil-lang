@@ -23,7 +23,7 @@ import { open } from '../src/corpus.js';
 // scoped secret over httpfs — needs a store, and is exercised against MinIO instead.
 
 const require = createRequire(import.meta.url);
-const CORPUS = fileURLToPath(new URL('../../../apps/corpus/conformance/corpus', import.meta.url));
+const CORPUS = fileURLToPath(new URL('../conformance/corpus', import.meta.url));
 const VERTEX_COUNT = 300;
 const HOST = 'acct.dfs.core.windows.net';
 

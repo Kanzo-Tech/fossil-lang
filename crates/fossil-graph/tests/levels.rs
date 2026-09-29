@@ -1,6 +1,6 @@
 //! The pyramid, addressed — as projections of one sequence, in quarters.
 //!
-//! `apps/corpus/conformance/expected.json` pins what three readers agree on and
+//! `packages/corpus/conformance/expected.json` pins what three readers agree on and
 //! is the harness next door. This file is the one that holds the Rust reader
 //! against the **writer's own algebra**: every scale below either comes out of
 //! `fossil_sinks::manifest::VertexLevels` or is a border the shared table has no

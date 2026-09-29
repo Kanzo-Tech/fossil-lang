@@ -1,13 +1,15 @@
-# apps/corpus — rules local to here
+# packages/corpus — rules local to here
 
 The repository rules are in `../../CLAUDE.md`. These are true only here.
 
 ## What this is, and what it stopped being
 
-The **executable** half of the corpus contract. `guards/` checks that a corpus on disk satisfies the
+The published reader, `src/`, and beside it the **executable** half of the corpus contract it
+fulfils. The contract was a private app of its own, and it is three directories of this package now:
+none of them is in `files`, so npm never sees them. `guards/` checks that a corpus on disk satisfies the
 conventions; `conformance/` checks that three independent readers address it the same way, and that
 the corpus they address reproduces from a recorded recipe; `integration/` writes a corpus with the
-guards' own fixture and reads it back through `packages/corpus/src`, which is where the addressing
+guards' own fixture and reads it back through `src/`, which is where the addressing
 cost, the container comparison, the cost model and the pyramid read are measured.
 
 The prose half was a second Next.js site living beside this directory. It is gone: the pages are
@@ -56,14 +58,12 @@ third party who has neither this repository nor Rust nor pnpm — that is why it
 when every other README in `crates/` was deleted. Adding an npm dependency changes what the contract
 costs to check, which changes who can check it.
 
-The rule is on `guards/`, and on `guards/` alone. Two other places here reach out of this app into
-`packages/corpus/`: `conformance/wasm-reader.mjs` into the gitignored `pkg/`, and every file under
+The rule is on `guards/`, and on `guards/` alone. Two other directories here reach into the
+reader: `conformance/wasm-reader.mjs` into the gitignored `pkg/`, and every file under
 `integration/` into `src/` and `tests/boot.ts`. **Nothing under `guards/` may**, and that is the
-line — an app reaching a package is the direction dependencies run in, and the reverse is what put
-four suites of the published package inside this directory's `duckdb` dependency and broke a
-release.
+line — `guards/` is the part a stranger copies out of this repository.
 
-`pnpm test` writes a conforming corpus in both containers, requires every guard to pass, and then
+`pnpm test:contract` writes a conforming corpus in both containers, requires every guard to pass, and then
 requires every guard to **fire** against a corpus broken in exactly one way. A guard nobody has seen
 fail is a sentence.
 
@@ -86,7 +86,12 @@ What replaces it is rendering rather than transcribing, which is what the two co
 and transclusion — `<Program src= region= />` on the documentation side reads the file at build time
 and an absent region stops the build.
 
-## Never published
+## `test` is the reader's, and the contract has its own names
 
-`private: true`, and the root's recursive scripts are scoped to `./packages/*` by path. The
-`pnpm-workspace.yaml` entry exists for resolution, not for npm.
+`pnpm test` is `vitest run` over `tests/` and nothing else, because `release.yml` runs
+`pnpm --filter "./packages/*" test` before it publishes, and a suite that spawned `duckdb` in that
+step is what took `v0.3.0-alpha.4` down. The contract runs under separate scripts:
+`test:contract` (the guards' self-test and the conformance chain, `--without-wasm`), `conformance`
+(every leg, and it fails without `pkg/`) and `test:integration` (the four `integration/` suites,
+under `vitest.integration.config.ts`). **Do not fold any of them into `test`**, and do not add
+`conformance/`, `guards/` or `integration/` to `files`.

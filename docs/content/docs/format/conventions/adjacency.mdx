@@ -119,7 +119,7 @@ directions, because **following only the out-edges is a wrong answer rather than
 
 ### What a hop costs, measured
 
-Written by `apps/corpus/guards/fixture.mjs` at three sizes (`--layout files`, a ring plus one chord
+Written by `packages/corpus/guards/fixture.mjs` at three sizes (`--layout files`, a ring plus one chord
 per vertex), read with the `duckdb` CLI. Twelve seeds across the id space, compared row for row
 against the scan at every seed; medians, all queries inside **one** process, since a process start is
 10–40 ms here.

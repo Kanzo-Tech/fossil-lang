@@ -7,7 +7,7 @@
  * that says so: the same graph is written both ways and every answer has to come back identical.
  *
  * **This is the diff a format change is allowed to arrive behind**, and its plain-Node twin is
- * `apps/corpus/conformance/containers.mjs`, which asks the same question of a reader that shares no
+ * `packages/corpus/conformance/containers.mjs`, which asks the same question of a reader that shares no
  * line with this one. Two implementations moved and compared BEFORE a writer emits the new
  * container; after it emits one, the only corpus that exists is the new one and there is nothing
  * left to compare against.
@@ -23,9 +23,9 @@
  * a limit of the tool that writes the fixture, not of the format, and it is why the checked-in
  * conformance corpus (`chunk_size` 64) cannot be repacked into the other container.
  *
- * It needs the `duckdb` binary, which is why it lives in `apps/corpus/integration/` beside the
+ * It needs the `duckdb` binary, which is why it lives in `packages/corpus/integration/` beside the
  * guards that speak to it and not in `packages/corpus/tests/`. The dependency is DECLARED —
- * `pnpm --filter @fossil-lang/corpus-contract test:integration` is the script that has it, and the
+ * `pnpm --filter @fossil-lang/corpus test:integration` is the script that has it, and the
  * package's own `pnpm test` no longer does. It is not probed and this file does not skip:
  * `describe.skipIf` skips the TESTS and runs the describe BODY, so the probe it was guarding
  * never guarded the fixture write, and a suite that vanishes with its dependency reads as
@@ -40,9 +40,9 @@ import { dirname, join, resolve } from 'node:path';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import '../../../packages/corpus/tests/boot.js';
-import { open, type Box, type Corpus } from '../../../packages/corpus/src/corpus.js';
-import type { QueryFn, QueryRow } from '../../../packages/corpus/src/query.js';
+import '../tests/boot.js';
+import { open, type Box, type Corpus } from '../src/corpus.js';
+import type { QueryFn, QueryRow } from '../src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
 // conventions ask for, and it must not import a type of ours to be one.

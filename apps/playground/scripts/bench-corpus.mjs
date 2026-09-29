@@ -15,7 +15,7 @@
  *   - **Generate it at build time, serve it from this app's origin.** What this does.
  *
  * The third is the only one that keeps the corpus BYTE-IDENTICAL to what the guards check,
- * because it calls `write()` — the same function, not a copy of it. `apps/corpus/guards/` has
+ * because it calls `write()` — the same function, not a copy of it. `packages/corpus/guards/` has
  * no npm dependencies by design, so importing across the workspace costs nothing but a path.
  *
  * ## What it costs

@@ -163,7 +163,7 @@ the `frontier` its depth bound stopped at.
 whether one is a file (`chunk{k}.parquet`) or a row group inside a single
 `tiles.parquet` is a second question — the one `graph.graph.yml`'s `container`
 answers, because a reader over HTTP has no directory to list and cannot work it
-out. **Both are read.** `apps/corpus/integration/containers.test.ts` writes
+out. **Both are read.** `packages/corpus/integration/containers.test.ts` writes
 the same graph in each and asserts the answers back are identical — extent,
 window, `node`, `neighbours` — and that the row-group container names strictly
 fewer files for the same window (over HTTP, 5.6 requests per window against 22.3
@@ -325,12 +325,12 @@ per-tile `x`/`y` statistics in the Parquet footers; reading a footer needs a
 Parquet reader, the host has one, and the tile numbers come back here. Tile
 cache, debounce, supersede-cancellation and sampling stay in the reader too.
 
-The contract is executable: `apps/corpus/conformance/` holds a corpus, the
+The contract is executable: `packages/corpus/conformance/` holds a corpus, the
 manifest cases a corpus cannot hold, and `expected.json` — every address that
 must compose and every one that must be refused. `tests/conformance.test.ts`
 runs it here, through the wasm32 build that actually ships;
 `crates/fossil-graph/tests/conformance.rs` runs it natively, where `usize` is 64
-bits rather than 32; and `apps/corpus/conformance/verify.mjs` runs it in plain
+bits rather than 32; and `packages/corpus/conformance/verify.mjs` runs it in plain
 Node with no npm at all, which is the position a third-party reader is in and
 the only one of the three that is a separate implementation.
 

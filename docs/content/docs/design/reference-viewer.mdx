@@ -152,7 +152,7 @@ is left of this one.
 
 ## What a frame costs
 
-The frame is the whole extent of the million-vertex corpus `apps/corpus/guards/fixture.mjs` writes,
+The frame is the whole extent of the million-vertex corpus `packages/corpus/guards/fixture.mjs` writes,
 at a budget of 20,000 marks — `BOUNDED_DEFAULTS.limit` in the renderer, which the door answers
 level **3** for over the four levels this corpus writes. Every byte is `total_compressed_size` out
 of the Parquet footer, because DuckDB issues its reads from inside a Worker where no thread here
@@ -290,7 +290,7 @@ item said nothing read them, and it named a `levels:` block and an `EdgeLevels` 
 longer spells. A relation's levels are `projections:` entries beside its adjacency, declared by
 `crates/fossil-sinks/src/manifest.rs, EdgeInfo`, emitted by
 `crates/fossil-layout/src/layout/pass.rs, write_edge_levels`, written into the fixture by
-`apps/corpus/guards/fixture.mjs`, and addressed by `crates/fossil-graph/src/plan.rs, EdgeAddress` —
+`packages/corpus/guards/fixture.mjs`, and addressed by `crates/fossil-graph/src/plan.rs, EdgeAddress` —
 one projection per orientation at `scale: 1` and one per written level, source-aligned, each counted
 against the SOURCE type's `vertex_count` and never against `edge_count`.
 `packages/corpus/src/address.ts` is the binding over that reader rather than a second one, and
@@ -300,7 +300,7 @@ level file — which carries both endpoints' coordinates, so no vertex tile is o
 them — and `Frame.matchedAt` reports *k* rather than `0`. Where any of them is missing it, the read
 is the payload's, all or none, because a frame drawing one relation off level *k* and another off
 the payload would be two reads reported as one number.
-`apps/corpus/integration/frame-levels.test.ts` holds it against a fixture corpus with a pyramid and
+`packages/corpus/integration/frame-levels.test.ts` holds it against a fixture corpus with a pyramid and
 the identical corpus without one.
 
 What is left of this item is not a byte the writer owes; it is what a caller may ask for.

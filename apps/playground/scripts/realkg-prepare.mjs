@@ -2,7 +2,7 @@
  * **Fetch a REAL graph and put it in front of `fossil run`.**
  *
  * Everything fossil's read costs have been measured against so far is
- * `apps/corpus/guards/fixture.mjs`, and that fixture cannot answer the questions
+ * `packages/corpus/guards/fixture.mjs`, and that fixture cannot answer the questions
  * that matter. Re-derived, not asserted — `measure-locality.mjs` prints all three
  * as its Table 0:
  *

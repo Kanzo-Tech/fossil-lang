@@ -4,7 +4,7 @@
  * The ratio this prints was an EXTRAPOLATION for as long as it existed: measured over a
  * 300,000-vertex corpus written by the layout pass and scaled to a million, because nothing could
  * write a level set a JavaScript reader could open. Both halves of that are gone —
- * `apps/corpus/guards/fixture.mjs` writes the pyramid now and `@fossil-lang/corpus` reads it — so
+ * `packages/corpus/guards/fixture.mjs` writes the pyramid now and `@fossil-lang/corpus` reads it — so
  * the number is measurable end to end and this is the thing that measures it.
  *
  * It is an INSTRUMENT and not a test, which is why it asserts nothing about a byte count: a

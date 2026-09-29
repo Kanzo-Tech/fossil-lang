@@ -21,7 +21,7 @@
  * open to answer the same window — and that is printed rather than asserted, because the ratio is a
  * property of the corpus and not of the format.
  *
- * The published module's half of this is `apps/corpus/integration/containers.test.ts`, which asks
+ * The published module's half of this is `packages/corpus/integration/containers.test.ts`, which asks
  * the same question of `open`. Neither shares a line with the other.
  */
 
