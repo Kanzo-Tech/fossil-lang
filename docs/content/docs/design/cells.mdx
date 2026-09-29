@@ -6,7 +6,7 @@ direction:
 ---
 
 There are two ways to read a graph you cannot see all of, and the decision here is to build both and
-**never cross them**.
+**never let them coexist at rest**.
 
 | | what it is | when |
 | --- | --- | --- |
@@ -16,6 +16,16 @@ There are two ways to read a graph you cannot see all of, and the decision here 
 A mode that switches between the two as the camera zooms was built far enough to be rejected, and
 [what was discarded](/docs/design/discarded) carries why. The short form: the zoom level at which
 the reader is most lost is the one where the interaction changes under them.
+
+**They cross in one condition, and only while loading.** A cell tile is drawn until the row tiles
+under it arrive and then it goes, so a reader never rests on a picture holding both. Showing the
+parent is not a mode; it is what is on screen instead of nothing for the length of a read, and it is
+the rule [the backend](/docs/design/backend#four-rulings-the-contract-rests-on) states from the
+reader's side.
+
+**What would reverse it.** A reader measured to be lost at the swap — a click or hover landing on a
+cell that resolves to a row while both are drawn. Then the loading window is long enough to be
+interacted with, and the parent stops answering input before it stops being drawn.
 
 The corpus serves both without knowing about either — cosmos.gl reads the payload,
 a cell reader reads the tree. This page is the second one.

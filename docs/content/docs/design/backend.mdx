@@ -406,8 +406,8 @@ makes a stale read stoppable.
 **The signal has to reach the running query, not the queue.** A DuckDB-WASM connection runs one
 statement at a time, so a view keeps one read in flight rather than deck.gl's six, and an abort that
 only dropped queued work would leave the one read that matters — the running, stale one — to finish.
-So `Engine.query` takes the signal and the host's engine interrupts the statement it is running,
-which is a change to `packages/types/src/engine.ts, Engine` and to every host that implements it.
+So `Engine.query` takes the signal and the host's engine interrupts the statement it is running —
+[the ruling](#four-rulings-the-contract-rests-on) below, beside the Arrow-shaped answer.
 
 **What would reverse it.** Reads short enough that cancelling costs more than finishing. A tile is
 4,096 rows, so this is plausible, and it is one measurement: the wall time of a single-tile read
@@ -469,27 +469,51 @@ The order is fixed by one rule: **nothing is deleted while something still reads
 is none that this repository can find, and keasy consumes this repository by git tag, so step 5 is
 preceded by asking rather than by a grep.
 
+## Four rulings the contract rests on
+
+**A filter on a payload column has no task below `Z`.** A cell's `count`, `mode` and `purity`
+summarise every member, so a view that filters the rows — a crossfilter brush — has no precomputed
+answer at a coarse zoom, and `plan()` gives it none: the view gets rows or nothing. Recomputing the
+rung from the rows at `Z` would read every row under the camera and make a coarse read cost what a
+fine one does, which is the property the tile matrix exists to prevent.
+
+**What would reverse it.** A view that needs the filtered field at a zoom where the rows do not fit —
+a crossfilter brush over a corpus of ten million is the likely first — and a writer willing to
+summarise per filter value, which is a second pyramid per channel rather than a reader-side fallback.
+
+**Rows and cells cross only while loading.** A cell tile is drawn until the row tiles under it
+arrive, and then it goes: the two are never on screen together at rest. That is the one crossing
+[cells](/docs/design/cells) admits, and it is the same condition stated there. The backend's part is
+that both are addressable in one matrix and a parent is a shift of its child; when to swap is the
+view's.
+
+**What would reverse it.** A reader measured to be lost at the swap — a click or hover that lands on
+a cell and resolves to a row, or the reverse, while the two are both drawn — which would mean the
+loading window is long enough to be interacted with, and the parent has to stop answering input
+before it stops being drawn.
+
+**Below `Z`, edges come only from the quotient.** The level files are retired, relation levels
+included, so a coarse zoom draws the rung's quotient where the writer published one and no lines
+where it did not. The argument is [above](#the-sample-goes-below-z-there-are-only-cells); this is
+the ruling.
+
+**What would reverse it.** A coarse view whose lines are measured to be what its reader needs and
+which no quotient can draw — real edges between real vertices at a far zoom — which is the
+self-drawing edge level coming back as a third artefact beside the cells, not as a second pyramid of
+rows.
+
+**`Engine.query` takes an `AbortSignal` and returns Arrow-shaped data.** The signal reaches the
+running statement, and the answer is a table a `Batch` reads, so no reader turns columns into objects
+and back. It lands in `packages/types/src/engine.ts, Engine` in phase 4, and every host that
+implements `Engine` moves with it — keasy among them.
+
+**What would reverse it.** A host engine that can neither interrupt a statement nor answer in
+columns. Then the reader converts at the boundary and drops a stale answer instead, and both costs
+are measured rather than assumed.
+
 ## What this does not settle
-
-**A filter on a payload column below `Z`.** A cell's `count`, `mode` and `purity` summarise every
-member, so a view that filters the rows — a crossfilter brush — has no precomputed answer at a coarse
-zoom. The contract above plans no task below `Z` for such a filter, which leaves the view with rows
-or nothing; the alternative is recomputing the rung from the rows at `Z`, which reads every row under
-the camera and makes a coarse read cost what a fine one does. What would settle it is a view that
-needs the filtered field at a zoom where the rows do not fit — a crossfilter brush over a corpus of
-ten million is the likely first.
-
-**Whether a view may draw cells while rows load.** [Cells](/docs/design/cells) opens on building both
-readers and never crossing them, because the zoom at which a reader is most lost is the one where the
-interaction changes under them. A tile loader that shows a parent while its children arrive crosses
-them at every rows-to-rung boundary. The backend makes both addressable and does not decide; the
-view does, against that page.
-
-**What the engine returns.** `Batch` is the structural part of an Arrow table so this package still
-links no Arrow, and a host's DuckDB-WASM answers one natively — but `Engine.query` answers rows.
-Whether it grows a second method for a table or changes what the one it has returns is decided in
-`@fossil-lang/types`, beside the signal it takes above.
 
 **Where the tile manifest lives.** One file per vertex type, named from its YAML, is Iceberg's
 manifest-list-to-manifest shape. Inline in the YAML is one fewer request and a larger document to
-parse on every open. What would settle it is the open time of both at ten million vertices.
+parse on every open. It is decided in phase 4 by one measurement: the open time of both at ten
+million vertices.
