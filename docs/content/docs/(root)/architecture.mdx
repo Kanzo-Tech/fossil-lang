@@ -83,8 +83,8 @@ brings no engine of its own to either.
 range predicate per row instead of skipping row groups: a range join against the id runs at 237 ms
 and 179 `BETWEEN … OR …` predicates at 189 ms, against 5 ms for not pruning at all. A window written
 as a `WHERE` reads the whole file, so pruning stays the tiles' job and this change did not merge
-anything. [One door](/docs/design/one-door) argues the surface;
-[the reference viewer](/docs/design/reference-viewer) argues what a frame may answer with.
+anything. [One door](/docs/design/one-door) argues the surface, and [the backend](/docs/design/backend) is
+where it is going: a tile matrix, a scan planned from the manifest, and one tile per read.
 
 The reader's **policy** over that contract is deliberately not on the door, and not in this
 repository: what a corpus is drawn WITH and what is already LOADED belong to the viewer,
@@ -120,7 +120,7 @@ only one without a page of its own. The other four have one: a declared budget b
 ([streaming](/docs/design/streaming)), a read is bounded and reports what it read
 ([one door](/docs/design/one-door)), addressing is arithmetic
 ([addressing](/docs/format/conventions/addressing)), and a reader never holds the graph
-([cells](/docs/design/cells), [the reference viewer](/docs/design/reference-viewer)).
+([cells](/docs/design/cells), [the backend](/docs/design/backend)).
 
 It is what decided the pyramid against the holarchy. A holarchy's extents are **measured** — they are
 wherever Louvain's sweeps stopped — so addressing one means fetching a heuristic's boundaries into

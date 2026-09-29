@@ -156,7 +156,7 @@ them in SQL gets that:
 Both attempts are **slower than not pruning at all**, because DuckDB evaluates the ranges per row
 instead of skipping row groups. A `WHERE` clause selects rows from a table; it does not select which
 bytes get read. So the camera asks for bytes and the
-[verbs](/docs/design/corpus#the-verb-surface-six-and-none-of-them-draws) answer
+[verbs](/docs/design/corpus#the-verb-surface-two-and-neither-draws) answer
 questions; when a filter has to change the picture it returns **ids**, and the canvas applies them as
 a mask over the tiles it holds.
 

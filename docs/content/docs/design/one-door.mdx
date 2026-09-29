@@ -15,7 +15,10 @@ const frame = await corpus.frame({ x, y, w, h, pixels: { w: 800, h: 600 } });
 ```
 
 Everything below is why the canvas is what decides the level, why that answer is the same rows with
-or without a pyramid on disk, and why none of it is a new entry point.
+or without a pyramid on disk, and why none of it is a new entry point. It is the door until
+[the backend](/docs/design/backend) replaces it with a scan planned per tile, and what survives the
+replacement is this page's first rule: an answer is a function of its arguments — there, of an
+address.
 
 ## Purity is the specification, not a property it happens to have
 
@@ -125,10 +128,11 @@ It stopped being true when a relation grew a pyramid of its own. A level row of 
 **both endpoints' coordinates** (`crates/fossil-sinks/src/manifest.rs, Projection`), which places
 the far end without opening a vertex tile for it — and that is not a synthetic edge, which is the
 thing the design refuses: the far end is the vertex, where the payload puts it. `Corpus.frame`
-reads it, and [the reference viewer](/docs/design/reference-viewer) says so as the general rule
-this one is a special case of.
+reads it, and the general rule this one is a special case of is that **the pyramid answers when the
+level set carries what the answer needs** — for points that is the vertex level, for lines it is the
+pair.
 
-Measured rather than argued: the playground's `scripts/measure-frame.mjs` (deleted after `2fa5f22`) puts every one of ten
+Measured rather than argued: the playground's `scripts/measure-frame.mjs` (deleted after `2fa5f22`) put every one of ten
 camera rectangles at level 1, 2 or 3 **with links asked for** — 322 to 62,024 of them. Not one at
 level 0.
 

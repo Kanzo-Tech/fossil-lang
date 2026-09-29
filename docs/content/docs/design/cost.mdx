@@ -316,13 +316,14 @@ Three of the four go red when the defect is put back; the fourth does not, becau
 the number of statements. That is worth stating: each assertion covers a different property, and a
 guard nobody has watched fail is a sentence rather than a guard.
 
-**And one bench, which is not a test.** The playground's `scripts/measure-frame.mjs` (deleted after `2fa5f22`) walks ten
-written-down rectangles over a bench corpus and reports the door's ledger per frame — carried
-forward onto `SliceCost` in the playground's `src/tiles.ts` (deleted after `2fa5f22`), which adds what was drawn to what was read.
-Each frame is asked three times and **every cost column but the clock must be identical across the
-repeats or the script exits 1 naming the frame that moved**, because a bench that flaps is not
-evidence. What it cannot see is anything after the upload: no fps, no draw call, no overdraw. It
-hands a decision the floor, and the gap left over belongs to whoever is drawing.
+**And one bench, which was not a test, and is gone.** The playground's `scripts/measure-frame.mjs` (deleted after `2fa5f22`) walked ten
+written-down rectangles over a bench corpus and reported the door's ledger per frame — carried
+forward onto `SliceCost` in the playground's `src/tiles.ts` (deleted after `2fa5f22`), which added what was drawn to what was read.
+Each frame was asked three times and **every cost column but the clock had to be identical across
+the repeats or the script exited 1 naming the frame that moved**, because a bench that flaps is not
+evidence. It left with the viewer it ran through, and nothing in this repository measures a read
+through the door now; under [the backend](/docs/design/backend) the unit it would measure is one
+tile, whose cost is its row count and its byte range out of the manifest.
 
 The write half has its probe already — `FOSSIL_MEM_PROBE=1` and the two examples under
 `fossil-layout` — and what it lacks is the same discipline: W1 is `peak(10N) === peak(N)`, and it is

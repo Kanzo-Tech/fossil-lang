@@ -322,8 +322,8 @@ pub struct VertexInfo {
     ///
     /// Not a [`Self::projections`] entry and that is the load-bearing part: a
     /// projection is a subset of real rows at a `scale`, and a cell is a
-    /// synthetic row that no scale describes. `/docs/design/reference-viewer`
-    /// makes the ruling and `/docs/design/cells` carries it.
+    /// synthetic row that no scale describes. `/docs/design/cells` makes the
+    /// ruling.
     ///
     /// `Option`, and **`None` is a statement about the writer**: a corpus with
     /// no tree reads back as "not declared", never as "none". The same rule
@@ -768,8 +768,7 @@ pub const QUOTIENT_PREFIX: &str = "quotient/";
 /// the same rows in another order; both are the corpus's real vertices. **A
 /// cell is a synthetic row by construction** — a group a partitioning
 /// algorithm returned, which exists nowhere in the source — so it is neither.
-/// `/docs/design/reference-viewer` is where that ruling is made and
-/// `/docs/design/cells` is what it decides here: a cell tree could not be an
+/// `/docs/design/cells` is where that ruling is made: a cell tree could not be an
 /// entry in [`VertexLevels`] without making `scale` mean two different things
 /// in one document, which is the failure the one-contract rule exists to
 /// prevent. Its own block, its own prefix, its own name.

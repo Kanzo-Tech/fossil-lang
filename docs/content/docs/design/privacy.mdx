@@ -13,10 +13,10 @@ read-time privacy control is possible** — not a masked column, not a row filte
 a verb.
 
 The temptation is to answer this by withholding the escape hatch: gate `execute_sql` and the problem
-looks smaller. It is not smaller, it is hidden. [`read`'s `where` is a raw SQL
-fragment](/docs/design/corpus#reads-where-is-sql-and-carries-executesqls-authority) evaluated by
-the same engine, so gating one and not the other is the same surface with a second door — and even
-with both gated, the recipient has the Parquet.
+looks smaller. It is not smaller, it is hidden. [The hatch is one
+token](/docs/design/corpus#executesql-reaches-the-engine-unparsed-and-one-token-opens-it) over an
+engine the recipient can run without fossil at all, so gating it closes a door in a room with no
+walls — the recipient has the Parquet.
 
 The systems that genuinely do this have a chokepoint and still do not put the control on SQL.
 Snowflake applies dynamic data masking and row access policies inside the query planner; BigQuery
