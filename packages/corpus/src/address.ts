@@ -26,14 +26,14 @@
  *   has one, so the host reads its own footers and hands the tile numbers back to
  *   {@link CorpusAddressing.tilesFor}.
  *
- * `open` in `./corpus.ts` is the layer that reads those footers, by taking an engine from the
+ * `open` in `./open.ts` is the layer that reads those footers, by taking an engine from the
  * host rather than growing one. It sits **on** this module and does not absorb it.
  *
  * **Nothing here is on the barrel except the shapes.** `resolveCorpus` was,
  * and it was a second name for a depth of the door — `openCorpus` as the door was spelled then.
  * Both took a corpus and answered about it. Every `open` resolves this module's answer first and
  * hands it on as `corpus.addressing`, so there is one name. {@link addressManifests} is the
- * resolution itself, reached only from `./corpus.ts`.
+ * resolution itself, reached only from `./open.ts`.
  *
  * @see {@link CorpusAddressing}
  */
@@ -773,7 +773,7 @@ function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress 
  * This was `resolveCorpus`, exported beside the door — `openCorpus` as it was spelled then — and
  * the two were one question asked at two depths: the door reads bytes, this names URLs. Every
  * open resolves this first and publishes it as `corpus.addressing`, so the module surface has one
- * name on it. `./corpus.ts` is the only caller.
+ * name on it. `./open.ts` is the only caller.
  *
  * **It is synchronous and stays synchronous**, because the boot is the caller's problem one layer
  * up: `open` awaits the boot before it gets here, exactly as it does for a verb.

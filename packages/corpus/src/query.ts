@@ -33,8 +33,8 @@
  *   completion and cannot honour one. A seam that accepted a signal and ignored it would be worse than one that
  *   does not have it. Supersede-cancellation stays in the reader, where it can drop an answer.
  * - **No parameter binding.** Every value reaches SQL as a literal, so the caller of this callback
- *   owns quoting — `corpus.ts` routes every URL, IRI and column name through one escaper each, and
- *   every id through `BigInt`'s own decimal rendering. Binding would be a second method and a
+ *   owns quoting — the reader routes every URL, IRI and column name through one escaper each in
+ *   `sql.ts`, and every id through `BigInt`'s own decimal rendering. Binding would be a second method and a
  *   second dialect question; one string is what a host already accepts.
  * - **No streaming.** The rows are materialised as an array, so a window over a dense region is in
  *   JS memory all at once. A cursor or an Arrow table would fix that and would put a shape from

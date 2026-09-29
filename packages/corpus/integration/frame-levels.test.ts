@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import '../tests/boot.js';
 import { levelsOf, rowsAt, strideOf } from '../src/address.js';
-import { open, type Corpus } from '../src/corpus.js';
+import { open, type Corpus } from '../src/index.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the

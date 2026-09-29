@@ -1,5 +1,5 @@
 import type { CorpusAddressing } from '../src/address.js';
-import { open } from '../src/corpus.js';
+import { open } from '../src/index.js';
 
 /**
  * The addressing of a corpus opened over manifests already in hand — `open(base, { query,

@@ -13,7 +13,7 @@
  *
  * The seam it measures through is the one the package already has. `open` asks a host for a
  * single `query` callback, so everything a reader does passes through one function and counting is
- * a decorator around it: no instrumentation inside `packages/corpus/src/corpus.ts`, and nothing
+ * a decorator around it: no instrumentation inside `packages/corpus/src`, and nothing
  * here can drift from what a real host would see.
  *
  * **Two corpora, written by the checker's own fixture** — `packages/corpus/guards/fixture.mjs`, which
@@ -40,7 +40,7 @@ import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/b
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import '../tests/boot.js';
-import { open, type Corpus } from '../src/corpus.js';
+import { open, type Corpus } from '../src/index.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the

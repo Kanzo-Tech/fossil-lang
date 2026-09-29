@@ -41,7 +41,7 @@ import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/b
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import '../tests/boot.js';
-import { open, type Box, type Corpus } from '../src/corpus.js';
+import { open, type Box, type Corpus } from '../src/index.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
