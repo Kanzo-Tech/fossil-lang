@@ -155,8 +155,11 @@ crates/
   fossil-shex/             ShExDescriptor over `shex_ast` — backward target-shape checking
   fossil-descriptors-{input,output}/   trait + impls (ShEx, inferred)
   fossil-storage/          a vended `StorageCredential` (Iceberg REST's) → a scoped DuckDB secret,
-                           an Azure SAS lend, or a SigV4-signed request. Sans-IO, wasm-clean,
-                           and the one renderer of a `CREATE SECRET`, native hosts' included
+                           an Azure SAS lend, or (feature `object-store`) an `object_store` store
+                           routed by longest prefix and renewed at expires−5min — the one IO path
+                           of DataFusion and of every byte fossil reads or writes. `js`: a JS
+                           `Host` as its `Host`. The one renderer of a `CREATE SECRET`, native
+                           hosts' included
   fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
   fossil-sinks/            the canonical GraphAr manifest model, plus `generated.rs` — the
@@ -269,7 +272,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   storage/                 how every package reaches storage from a vended credential, over
                            `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
                            expires−5min, refcounted per prefix; Azure lent file by file),
-                           `read`/`write` (SigV4-signed requests), and `resolveDocuments`.
+                           `read`/`write` (`object_store` stores), and `resolveDocuments`.
                            No host ever signs a URL for fossil
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
                            and not an editor. FIVE of them, not two: highlighting from

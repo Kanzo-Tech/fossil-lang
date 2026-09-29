@@ -3,11 +3,11 @@
 
 use std::collections::HashMap;
 
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::resolved::{CloudSecret, ResolvedPath};
-use crate::sigv4;
 
 /// A storage credential scoped to one prefix — Iceberg REST's
 /// `StorageCredential`, verbatim on the wire.
@@ -36,7 +36,7 @@ impl std::fmt::Debug for StorageCredential {
 }
 
 /// What a credential was vended for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Access {
     Read,
@@ -44,7 +44,7 @@ pub enum Access {
 }
 
 impl Access {
-    const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Read => "read",
             Self::Write => "write",
@@ -70,13 +70,10 @@ pub enum StorageError {
     },
     #[error("{locator} lies outside {prefix}, the prefix the credential was vended for")]
     Outside { locator: String, prefix: String },
-}
-
-/// A request a plain HTTP client can send as is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SignedRequest {
-    pub url: String,
-    pub headers: Vec<(String, String)>,
+    #[error("the host vended nothing usable for {scope}: {reason}")]
+    Vend { scope: String, reason: String },
+    #[error("{locator}: {reason}")]
+    Io { locator: String, reason: String },
 }
 
 /// A parsed [`StorageCredential`].
@@ -86,16 +83,8 @@ pub struct Grant {
     expires_at_ms: Option<u64>,
 }
 
-enum Store {
-    S3 {
-        bucket: String,
-        key_id: SecretString,
-        secret: SecretString,
-        token: Option<SecretString>,
-        region: String,
-        endpoint: Option<Endpoint>,
-        path_style: bool,
-    },
+pub(crate) enum Store {
+    S3(S3),
     Azure {
         account: String,
         container: String,
@@ -103,13 +92,28 @@ enum Store {
     },
 }
 
-struct Endpoint {
-    authority: String,
-    ssl: bool,
+pub(crate) struct S3 {
+    pub(crate) bucket: String,
+    pub(crate) key_id: SecretString,
+    pub(crate) secret: SecretString,
+    pub(crate) token: Option<SecretString>,
+    pub(crate) region: String,
+    pub(crate) endpoint: Option<Endpoint>,
+    pub(crate) path_style: bool,
 }
 
-/// How long a signed request stays valid: it is sent at once.
-const SIGNED_REQUEST_SECS: u32 = 300;
+pub(crate) struct Endpoint {
+    pub(crate) authority: String,
+    pub(crate) ssl: bool,
+}
+
+/// RFC 3986's unreserved set, and `/`: a blob path is encoded segment by segment.
+const PATH: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~')
+    .remove(b'/');
 
 impl TryFrom<StorageCredential> for Grant {
     type Error = StorageError;
@@ -158,7 +162,7 @@ impl TryFrom<StorageCredential> for Grant {
                     });
                 }
             };
-            let store = Store::S3 {
+            let store = Store::S3(S3 {
                 bucket: bucket.to_string(),
                 key_id: need("s3.access-key-id")?,
                 secret: need("s3.secret-access-key")?,
@@ -166,7 +170,7 @@ impl TryFrom<StorageCredential> for Grant {
                 region: need("client.region")?.expose_secret().to_string(),
                 endpoint,
                 path_style,
-            };
+            });
             let expires_at_ms = millis("s3.session-token-expires-at-ms")?;
             return Ok(Self {
                 prefix,
@@ -249,6 +253,10 @@ impl Grant {
         self.expires_at_ms
     }
 
+    pub(crate) const fn store(&self) -> &Store {
+        &self.store
+    }
+
     /// The secret's name for `access` on this prefix — the same on every renewal,
     /// so `CREATE OR REPLACE` rotates it under a view that stays.
     #[must_use]
@@ -264,7 +272,7 @@ impl Grant {
     /// reaches with a secret; `None` for Azure, which is lent file by file.
     #[must_use]
     pub fn install_sql(&self, access: Access) -> Option<String> {
-        let Store::S3 {
+        let Store::S3(S3 {
             key_id,
             secret,
             token,
@@ -272,7 +280,7 @@ impl Grant {
             endpoint,
             path_style,
             ..
-        } = &self.store
+        }) = &self.store
         else {
             return None;
         };
@@ -302,7 +310,7 @@ impl Grant {
     /// The statement that takes [`Self::install_sql`] back.
     #[must_use]
     pub fn uninstall_sql(&self, access: Access) -> Option<String> {
-        matches!(self.store, Store::S3 { .. })
+        matches!(self.store, Store::S3(_))
             .then(|| format!("DROP SECRET IF EXISTS {}", self.secret_name(access)))
     }
 
@@ -315,7 +323,7 @@ impl Grant {
     pub fn name(&self, locator: &str) -> Result<String, StorageError> {
         let rest = self.within(locator)?;
         Ok(match &self.store {
-            Store::S3 { .. } => locator.to_string(),
+            Store::S3(_) => locator.to_string(),
             Store::Azure {
                 account, container, ..
             } => format!("azure/{account}/{container}/{}", self.path_of(rest)),
@@ -330,68 +338,9 @@ impl Grant {
     pub fn lend(&self, locator: &str) -> Result<Option<String>, StorageError> {
         let rest = self.within(locator)?;
         Ok(match &self.store {
-            Store::S3 { .. } => None,
+            Store::S3(_) => None,
             Store::Azure { .. } => Some(self.azure_url(rest)),
         })
-    }
-
-    /// One request on `locator`, signed with the credential and valid for five
-    /// minutes from `now_ms`.
-    ///
-    /// # Errors
-    /// As [`Self::name`].
-    pub fn sign(
-        &self,
-        method: &str,
-        locator: &str,
-        now_ms: u64,
-    ) -> Result<SignedRequest, StorageError> {
-        let rest = self.within(locator)?;
-        match &self.store {
-            Store::S3 {
-                bucket,
-                key_id,
-                secret,
-                token,
-                region,
-                endpoint,
-                path_style,
-            } => {
-                let key = sigv4::encode(&self.path_of(rest), true);
-                let (scheme, authority) = endpoint.as_ref().map_or_else(
-                    || ("https", format!("s3.{region}.amazonaws.com")),
-                    |e| (if e.ssl { "https" } else { "http" }, e.authority.clone()),
-                );
-                let (host, path) = if *path_style {
-                    (authority, format!("/{bucket}/{key}"))
-                } else {
-                    (format!("{bucket}.{authority}"), format!("/{key}"))
-                };
-                let query = sigv4::presign(&sigv4::Presign {
-                    method,
-                    host: &host,
-                    path: &path,
-                    region,
-                    key_id: key_id.expose_secret(),
-                    secret: secret.expose_secret(),
-                    token: token.as_ref().map(ExposeSecret::expose_secret),
-                    now_ms,
-                    expires_secs: SIGNED_REQUEST_SECS,
-                });
-                Ok(SignedRequest {
-                    url: format!("{scheme}://{host}{path}?{query}"),
-                    headers: Vec::new(),
-                })
-            }
-            Store::Azure { .. } => Ok(SignedRequest {
-                url: self.azure_url(rest),
-                headers: if method == "PUT" {
-                    vec![("x-ms-blob-type".to_string(), "BlockBlob".to_string())]
-                } else {
-                    Vec::new()
-                },
-            }),
-        }
     }
 
     fn within<'l>(&self, locator: &'l str) -> Result<&'l str, StorageError> {
@@ -421,7 +370,7 @@ impl Grant {
         else {
             unreachable!("only an Azure grant lends");
         };
-        let path = sigv4::encode(&self.path_of(rest), true);
+        let path = utf8_percent_encode(&self.path_of(rest), PATH).to_string();
         let sas = sas.expose_secret().trim_start_matches('?');
         format!("https://{account}.blob.core.windows.net/{container}/{path}?{sas}")
     }
@@ -516,40 +465,14 @@ mod tests {
             "{sql}"
         );
         assert!(!sql.contains("SESSION_TOKEN"), "{sql}");
-        let url = grant.sign("GET", "s3://b/p/a b.csv", 0).expect("sign").url;
-        assert!(
-            url.starts_with("https://b.s3.eu-west-1.amazonaws.com/p/a%20b.csv?"),
-            "{url}"
-        );
     }
 
     #[test]
-    fn a_signed_s3_request_is_path_style_against_the_endpoint() {
-        let signed = minio()
-            .sign(
-                "PUT",
-                "s3://keasy-dev/output/job-1/vertex/Person/tiles.parquet",
-                0,
-            )
-            .expect("sign");
-        assert!(
-            signed.url.starts_with(
-                "http://localhost:9000/keasy-dev/output/job-1/vertex/Person/tiles.parquet?X-Amz-Algorithm="
-            ),
-            "{}",
-            signed.url
-        );
-        assert!(signed.url.contains("X-Amz-Security-Token=TOKEN"));
-        assert!(signed.headers.is_empty());
-    }
-
-    #[test]
-    fn nothing_outside_the_prefix_is_named_lent_or_signed() {
+    fn nothing_outside_the_prefix_is_named_or_lent() {
         let outside = "s3://keasy-dev/output/job-1-evil/x";
         for result in [
             minio().name(outside).map(drop),
             minio().lend(outside).map(drop),
-            minio().sign("GET", outside, 0).map(drop),
         ] {
             assert!(
                 matches!(result, Err(StorageError::Outside { .. })),
@@ -572,11 +495,6 @@ mod tests {
         assert_eq!(
             grant.lend(locator).expect("lend").as_deref(),
             Some("https://acct.blob.core.windows.net/lake/raw/a%20b.csv?sv=2025&sr=d&sig=a%2Bb")
-        );
-        let put = grant.sign("PUT", locator, 0).expect("sign");
-        assert_eq!(
-            put.headers,
-            [("x-ms-blob-type".to_string(), "BlockBlob".to_string())]
         );
     }
 

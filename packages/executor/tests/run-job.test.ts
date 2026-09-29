@@ -1,9 +1,9 @@
 /**
  * Orchestration smoke for {@link runJob} — drives the full browser job flow
- * (documents → sources → run → upload → complete) against a host that vends
+ * (documents → sources → run → write → complete) against a host that vends
  * `read` on one connection and `write` on the job, and a stubbed `fetch` that
- * serves the fixtures to signed GETs and records the signed PUTs. No network,
- * no server.
+ * answers as S3 does — HEAD, ranged GET, PUT — and only to signed requests.
+ * No network, no server.
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
@@ -80,22 +80,46 @@ const FIXTURES: Record<string, string> = {
   '/lake/in/orders.csv': '../../../crates/fossil-df/tests/fixtures/orders.csv',
 };
 
-/** GET serves a fixture by path, and only when it is signed; PUT records the URL. */
+/** An S3 that serves the fixtures by path to signed HEADs and GETs (ranged too), and records PUTs. */
 function stubFetch(serve: Record<string, string>) {
   const gets: string[] = [];
   const puts: string[] = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (init?.method === 'PUT') {
-        puts.push(url);
-        return new Response(null, { status: 200 });
+      const request = new Request(input, init);
+      const signed = request.headers.get('authorization')?.startsWith('AWS4-HMAC-SHA256 ') === true;
+      const answer = (response: Response) => Object.defineProperty(response, 'url', { value: request.url });
+      if (!signed) return answer(new Response(null, { status: 403 }));
+      if (request.method === 'PUT') {
+        puts.push(request.url);
+        return answer(new Response(null, { status: 200, headers: { etag: '"e"' } }));
       }
-      gets.push(url);
-      const fixture = serve[new URL(url).pathname];
-      if (fixture === undefined || !url.includes('X-Amz-Signature=')) return new Response(null, { status: 404 });
-      return new Response(await readFile(fileURLToPath(new URL(fixture, import.meta.url))));
+      const fixture = serve[new URL(request.url).pathname];
+      if (fixture === undefined) return answer(new Response(null, { status: 404 }));
+      const whole = new Uint8Array(await readFile(fileURLToPath(new URL(fixture, import.meta.url))));
+      const meta = { 'last-modified': 'Tue, 29 Sep 2026 08:00:00 GMT', etag: '"f"' };
+      if (request.method === 'HEAD') {
+        return answer(new Response(null, { headers: { ...meta, 'content-length': String(whole.length) } }));
+      }
+      gets.push(request.url);
+      const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.get('range') ?? '');
+      if (range === null) {
+        return answer(new Response(whole, { headers: { ...meta, 'content-length': String(whole.length) } }));
+      }
+      const start = Number(range[1]);
+      const end = range[2] === '' ? whole.length - 1 : Math.min(Number(range[2]), whole.length - 1);
+      const part = whole.subarray(start, end + 1);
+      return answer(
+        new Response(part, {
+          status: 206,
+          headers: {
+            ...meta,
+            'content-length': String(part.length),
+            'content-range': `bytes ${start}-${end}/${whole.length}`,
+          },
+        }),
+      );
     }),
   );
   return { gets, puts };
@@ -112,7 +136,7 @@ beforeAll(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('runJob', () => {
-  it('reads through the connection with signed GETs and writes under the job prefix with signed PUTs', async () => {
+  it('reads through the connection and writes under the job prefix, every request signed', async () => {
     const { gets, puts } = stubFetch(FIXTURES);
     const { host, asks } = recordingHost();
     const job = recording(host);
@@ -129,17 +153,13 @@ describe('runJob', () => {
     expect(edge?.edge_count).toBe(4);
 
     for (const path of Object.keys(FIXTURES)) {
-      expect(gets.some((u) => u.startsWith(`http://localhost:9000${path}?X-Amz-`))).toBe(true);
+      expect(gets).toContain(`http://localhost:9000${path}`);
     }
     expect(asks).toContainEqual({ scope: { connection: 'lake' }, access: 'read' });
     expect(asks).toContainEqual({ scope: { job: 'job-1' }, access: 'write' });
 
-    // Every GraphAr file was PUT, signed, at `<prefix><path>` — payload and index alike.
-    const written = puts.map((u) => {
-      const url = new URL(u);
-      expect(url.searchParams.has('X-Amz-Signature')).toBe(true);
-      return `s3:/${url.pathname}`;
-    });
+    // Every GraphAr file was PUT at `<prefix><path>` — payload and index alike.
+    const written = puts.map((u) => `s3:/${new URL(u).pathname}`);
     expect(written.every((w) => w.startsWith(JOB))).toBe(true);
     for (const need of [
       'vertex/Person/tiles.parquet',
@@ -157,7 +177,7 @@ describe('runJob', () => {
     const { host } = recordingHost();
     const job = recording(host);
 
-    await expect(runJob(PROGRAM, job)).rejects.toThrow(/graph\.shex \(HTTP 404\)/);
+    await expect(runJob(PROGRAM, job)).rejects.toThrow(/graph\.shex \(.*not found/i);
     expect(job.completed?.status).toBe('failed');
     expect(job.completed?.error).toMatch(/could not be read/);
     expect(puts).toEqual([]);
@@ -168,7 +188,7 @@ describe('runJob', () => {
     const { host } = recordingHost();
     const job = recording(host, 'job-2');
 
-    await expect(runJob(PROGRAM, job)).rejects.toThrow(/0 write credentials for job job-2/);
+    await expect(runJob(PROGRAM, job)).rejects.toThrow(/no write credential/);
     expect(job.completed?.status).toBe('failed');
     expect(puts).toEqual([]);
   });

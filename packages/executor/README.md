@@ -35,29 +35,28 @@ const report = await runJob(program, {
 
 `runJob` reads the documents the program names (every shape, not just the first)
 with `resolveDocuments` from `@fossil-lang/storage`, fails the job if any stays
-unread, then reads the sources fossil resolved, runs, writes and completes.
-Fossil turns each `@conn/path` into a locator and the connection it goes
-through; every request is signed in Rust with the credential the host vends for
-it — a GET per source under `read` on its connection, a PUT per output file at
-`<prefix><path>` under `write` on `{ job: id }`. The host never signs a URL.
+unread, then runs, writes and completes. Fossil turns each `@conn/path` into a
+locator and the connection it goes through, and every byte goes through an
+`object_store` store built from the credential the host vends for it: DataFusion
+reads each source through `read` on its connection — by range requests, not
+whole — and the output is written at `<prefix><path>` through `write` on
+`{ job: id }`, in parts when a file is large. The host never signs a URL.
 
 Step by step, the same thing is:
 
 ```ts
-import { read, resolveDocuments, write } from '@fossil-lang/storage';
+import { resolveDocuments } from '@fossil-lang/storage';
 
 const exec = new FossilExecutor(program);
 const { unread } = await resolveDocuments(exec, host); // sets connections, registers documents
-const wanted = exec.sources();                         // [{ uri: locator, connection?, format }]
-const results = await read(host, wanted.map((s) => ({ locator: s.uri, connection: s.connection })));
-const sources = wanted.map((s, i) => {
-  const r = results[i]!;
-  if (!r.ok) throw new Error(r.reason);
-  return { uri: s.uri, format: s.format, bytes: r.bytes };
-});
-const { files, report } = await exec.run(sources, '');
-await write(host, { job: jobId }, files);
+const report = await exec.run(host, jobId);            // reads, runs, writes under the job's prefix
 exec.free();
+```
+
+A host with no storage runs over files it holds, and gets them back:
+
+```ts
+const { files, report } = await exec.runInMemory({ 'https://data.example.com/users.csv': bytes }, 'memory://corpus');
 ```
 
 ### Bundler notes

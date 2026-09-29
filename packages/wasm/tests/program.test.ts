@@ -60,7 +60,7 @@ describe('openProgram', () => {
     try {
       expect(asked).toEqual([{ connection: 'vocab' }]);
       expect(fetched).toHaveLength(1);
-      expect(fetched[0]).toMatch(/^http:\/\/minio\.example\/vocab\/shapes\/person\.shex\?X-Amz-/);
+      expect(fetched[0]).toBe('http://minio.example/vocab/shapes/person.shex');
       program.registerDescriptor(DESCRIPTOR);
       const rows = await program.check(PROGRAM);
       // The shape arrived: `name` is checked against its datatype, which only a read shape knows.

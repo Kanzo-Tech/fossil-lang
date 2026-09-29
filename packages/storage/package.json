@@ -1,7 +1,7 @@
 {
   "name": "@fossil-lang/storage",
   "version": "0.0.0-development",
-  "description": "Storage access for every @fossil-lang/* package, from credentials the host vends: a scoped DuckDB secret renewed before it expires, an Azure SAS lend, or a SigV4-signed request — rendered by fossil-storage in WASM.",
+  "description": "Storage access for every @fossil-lang/* package, from credentials the host vends: a scoped DuckDB secret renewed before it expires, an Azure SAS lend, or an object_store request — fossil-storage in WASM.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

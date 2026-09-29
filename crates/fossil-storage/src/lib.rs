@@ -11,15 +11,24 @@
 //! - an Azure prefix has no `DuckDB` extension in the browser, so a reader
 //!   names each file by a scheme-less name ([`Grant::name`]) that the engine
 //!   lends to a SAS URL ([`Grant::lend`]) — no glob, a manifest enumerates;
-//! - a writer, or a reader that wants bytes rather than SQL, signs one request
-//!   ([`Grant::sign`]): `SigV4` for S3, the SAS for Azure.
+//! - `DataFusion`, and anything that wants bytes rather than SQL, reaches it
+//!   through an `object_store` store ([`Storage`], behind the `object-store`
+//!   feature), which signs every request itself and renews the credential
+//!   before it expires.
 //!
-//! Sans-IO: the clock is an argument, so the crate is the same on wasm32 and
-//! native. The store enforces the prefix; nothing here can widen a credential.
+//! Without `object-store` the crate is sans-IO. The store enforces the prefix;
+//! nothing here can widen a credential.
 
 pub mod credential;
+#[cfg(feature = "js")]
+mod js;
 pub mod resolved;
-mod sigv4;
+#[cfg(feature = "object-store")]
+mod store;
 
-pub use credential::{Access, Grant, SignedRequest, StorageCredential, StorageError};
+pub use credential::{Access, Grant, StorageCredential, StorageError};
+#[cfg(feature = "js")]
+pub use js::JsHost;
 pub use resolved::{CloudSecret, ResolvedPath};
+#[cfg(feature = "object-store")]
+pub use store::{Host, Scope, Storage};

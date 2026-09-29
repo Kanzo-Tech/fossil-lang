@@ -11,10 +11,10 @@
  * undefined (reading '__wbindgen_malloc…')`). Mirrors `@fossil-lang/corpus`'s
  * `client.ts` split, which is the known-good shape.
  */
-import type { DocumentWorkspace, MissingDocument } from '@fossil-lang/types';
+import type { DocumentWorkspace, Host, MissingDocument } from '@fossil-lang/types';
 
 import { FossilExecutor as RawFossilExecutor } from '../pkg/fossil_df_wasm.js';
-import type { ExecutorResult, SourceDescriptor, SourceInput } from './index.js';
+import type { ExecutorResult, RunReport, SourceDescriptor } from './index.js';
 
 /**
  * One compiled fossil program, run on DataFusion in the browser. Call
@@ -52,12 +52,20 @@ export class FossilExecutor implements DocumentWorkspace {
   }
 
   /**
-   * Execute against the fetched `sources`, materialising the GraphAr graph.
-   * `dest` labels the run (the job's object-storage prefix). Returns the output
-   * files (Parquet + manifest YAML, as bytes) and the manifest, already parsed.
+   * Run with the storage `host` vends: each source read through its connection's credential —
+   * by range requests, not whole — and the GraphAr graph written under the one prefix `host`
+   * vends `write` on for `job`. Answers the manifest it wrote.
    */
-  run(sources: SourceInput[], dest: string): Promise<ExecutorResult> {
-    return this.#raw.run(sources, dest) as Promise<ExecutorResult>;
+  run(host: Host, job: string): Promise<RunReport> {
+    return this.#raw.run(host, job) as Promise<RunReport>;
+  }
+
+  /**
+   * Run over files held in memory, for a host with no storage: `sources` maps each locator the
+   * program reads to its bytes, and the output stays in memory under `dest`.
+   */
+  runInMemory(sources: Record<string, Uint8Array>, dest: string): Promise<ExecutorResult> {
+    return this.#raw.runInMemory(sources, dest) as Promise<ExecutorResult>;
   }
 
   /** Release the wasm-side handle. */

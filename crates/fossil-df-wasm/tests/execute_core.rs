@@ -1,6 +1,6 @@
-//! Native gate for the browser executor core: a CSV program staged through the
-//! in-memory object-store seam runs end-to-end on `DataFusion` and yields the
-//! `GraphAr` files + a `RunReport`. `packages/executor/tests/execute.test.ts`
+//! Native gate for the browser executor core: a CSV program read through a
+//! [`Storage`] of in-memory stores runs end-to-end on `DataFusion`, writes the
+//! `GraphAr` files under its destination, and answers a `RunReport`. `packages/executor/tests/execute.test.ts`
 //! drives the same core through the `#[wasm_bindgen]` wrapper under Node, which
 //! is where wasm-bindgen-futures is proved.
 
@@ -15,8 +15,84 @@
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use fossil_df_wasm::{Executor, SourceInput, source_row};
+use fossil_df_wasm::Executor;
+use fossil_storage::{Access, Host, Scope, Storage, StorageCredential};
+use futures::TryStreamExt;
+use futures::future::BoxFuture;
+use object_store::memory::InMemory;
+use object_store::path::Path;
+use object_store::{ObjectStore, ObjectStoreExt};
+
+const DEST: &str = "s3://jobs/run-1/";
+
+#[derive(Debug)]
+struct NoHost;
+
+impl Host for NoHost {
+    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, String>> {
+        Box::pin(async { Ok(HashMap::new()) })
+    }
+    fn credentials(
+        &self,
+        _: &Scope,
+        _: Access,
+    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, String>> {
+        Box::pin(async { Err("these tests vend nothing".to_string()) })
+    }
+}
+
+/// A storage holding each `(locator, fixture)` in memory, and the store the
+/// run writes into.
+async fn storage(sources: &[(&str, &str)]) -> (Storage, Arc<InMemory>) {
+    let mut storage = Storage::new(Arc::new(NoHost));
+    let data = Arc::new(InMemory::new());
+    storage
+        .with_store(
+            "https://data.example.com/",
+            Arc::clone(&data) as Arc<dyn ObjectStore>,
+        )
+        .expect("route");
+    for (locator, fixture) in sources {
+        let key = locator
+            .strip_prefix("https://data.example.com/")
+            .expect("in the fixture authority");
+        let bytes =
+            std::fs::read(format!("../fossil-df/tests/fixtures/{fixture}")).expect("fixture");
+        data.put(&Path::from(key), bytes.into())
+            .await
+            .expect("stage");
+    }
+    let out = Arc::new(InMemory::new());
+    storage
+        .with_store(DEST, Arc::clone(&out) as Arc<dyn ObjectStore>)
+        .expect("route");
+    (storage, out)
+}
+
+/// What the run wrote, by path under [`DEST`].
+async fn written(out: &InMemory) -> HashMap<String, Vec<u8>> {
+    let listed: Vec<_> = out.list(None).try_collect().await.expect("list");
+    let mut files = HashMap::new();
+    for meta in listed {
+        let bytes = out
+            .get(&meta.location)
+            .await
+            .expect("get")
+            .bytes()
+            .await
+            .expect("bytes");
+        let path = meta
+            .location
+            .as_ref()
+            .strip_prefix("run-1/")
+            .expect("under DEST")
+            .to_string();
+        files.insert(path, bytes.to_vec());
+    }
+    files
+}
 
 /// The document every program below names.
 const EXECUTOR_SHEX: &str = include_str!("fixtures/executor.shex");
@@ -44,18 +120,13 @@ Person : Person from users
 ";
 
 #[tokio::test]
-async fn csv_program_runs_through_the_in_memory_source_seam() {
-    let bytes = std::fs::read("../fossil-df/tests/fixtures/users.csv").expect("fixture");
-    let sources = vec![SourceInput {
-        uri: "https://data.example.com/users.csv".to_string(),
-        format: source_row("csv").expect("the csv row"),
-        bytes,
-    }];
-
-    let out = executor(PROGRAM, HashMap::new())
-        .execute(sources, "s3://jobs/run-1")
+async fn csv_program_runs_through_the_storage_seam() {
+    let (mut storage, out) = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
+    let report = executor(PROGRAM, HashMap::new())
+        .execute(&mut storage, DEST)
         .await
         .expect("executor runs the CSV program");
+    let files = written(&out).await;
 
     // The TILED tree, which is the one `fossil run` writes: the tiles under the
     // declared prefix, the identity index beside them, and the staged
@@ -63,7 +134,7 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
     // written, read by the pass and removed from the map. Left in, it is a
     // second, stale copy of every vertex and `apps/corpus`'s `exactly-once`
     // fails a corpus for it.
-    let paths: Vec<&str> = out.files.iter().map(|f| f.rel_path.as_str()).collect();
+    let paths: Vec<&str> = files.keys().map(String::as_str).collect();
     assert!(
         paths.contains(&"vertex/Person/tiles.parquet"),
         "expected the tiled Person payload, got {paths:?}"
@@ -79,17 +150,12 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
     assert!(paths.contains(&"graph.graph.yml"));
     assert!(paths.contains(&"vertex/Person.vertex.yml"));
 
-    let person = out
-        .files
-        .iter()
-        .find(|f| f.rel_path == "vertex/Person/tiles.parquet")
-        .unwrap();
-    assert!(!person.bytes.is_empty());
+    assert!(!files["vertex/Person/tiles.parquet"].is_empty());
 
     // 3 users → 3 vertices.
-    assert_eq!(out.report.dest, "s3://jobs/run-1");
-    assert_eq!(out.report.vertices.len(), 1);
-    let v = &out.report.vertices[0];
+    assert_eq!(report.dest, DEST);
+    assert_eq!(report.vertices.len(), 1);
+    let v = &report.vertices[0];
     assert_eq!(v.vertex_type, "Person");
     assert_eq!(v.vertex_count, 3);
 
@@ -137,8 +203,7 @@ fn program_sources_lists_each_distinct_source_with_its_format() {
 }
 
 /// **The browser's report IS the documents the browser shipped** — every
-/// manifest, field for field, checked against the YAML in the same
-/// `ExecOutput`.
+/// manifest, field for field, checked against the YAML the same run wrote.
 ///
 /// It is written as an equality over the whole set and not as an assertion
 /// about two named fields, because the defect it guards is not about a field.
@@ -156,48 +221,40 @@ fn program_sources_lists_each_distinct_source_with_its_format() {
 /// reaches — so the report has something to lose.
 #[tokio::test]
 async fn the_report_is_the_manifest_the_browser_shipped() {
-    let sources = vec![
-        SourceInput {
-            uri: "https://data.example.com/users.csv".to_string(),
-            format: source_row("csv").expect("the csv row"),
-            bytes: std::fs::read("../fossil-df/tests/fixtures/users.csv").expect("fixture"),
-        },
-        SourceInput {
-            uri: "https://data.example.com/orders.csv".to_string(),
-            format: source_row("csv").expect("the csv row"),
-            bytes: std::fs::read("../fossil-df/tests/fixtures/orders.csv").expect("fixture"),
-        },
-    ];
-    let out = executor(TWO_SOURCE_PROGRAM, HashMap::new())
-        .execute(sources, "s3://jobs/run-1")
+    let (mut storage, out) = storage(&[
+        ("https://data.example.com/users.csv", "users.csv"),
+        ("https://data.example.com/orders.csv", "orders.csv"),
+    ])
+    .await;
+    let report = executor(TWO_SOURCE_PROGRAM, HashMap::new())
+        .execute(&mut storage, DEST)
         .await
         .expect("executor runs the two-source program");
+    let files = written(&out).await;
 
     let shipped = |rel: &str| -> String {
-        let file = out
-            .files
-            .iter()
-            .find(|f| f.rel_path == rel)
+        let bytes = files
+            .get(rel)
             .unwrap_or_else(|| panic!("the run emitted `{rel}`"));
-        String::from_utf8(file.bytes.clone()).expect("a manifest is UTF-8")
+        String::from_utf8(bytes.clone()).expect("a manifest is UTF-8")
     };
 
     // The index, then every document it names — positionally, which is the
     // agreement `GraphInfo::vertices`/`edges` already carry.
     assert_eq!(
         shipped("graph.graph.yml"),
-        out.report.graph.to_yaml().expect("the index serialises"),
+        report.graph.to_yaml().expect("the index serialises"),
         "the report's index is not the `graph.graph.yml` the run shipped"
     );
-    assert!(!out.report.vertices.is_empty() && !out.report.edges.is_empty());
-    for (rel, info) in out.report.graph.vertices.iter().zip(&out.report.vertices) {
+    assert!(!report.vertices.is_empty() && !report.edges.is_empty());
+    for (rel, info) in report.graph.vertices.iter().zip(&report.vertices) {
         assert_eq!(
             shipped(rel),
             info.to_yaml().expect("a vertex document serialises"),
             "the report's entry for `{rel}` is not the document the run shipped"
         );
     }
-    for (rel, info) in out.report.graph.edges.iter().zip(&out.report.edges) {
+    for (rel, info) in report.graph.edges.iter().zip(&report.edges) {
         assert_eq!(
             shipped(rel),
             info.to_yaml().expect("an edge document serialises"),
@@ -208,8 +265,7 @@ async fn the_report_is_the_manifest_the_browser_shipped() {
     // And the equality is not vacuous on the field that found this: the pass
     // partitioned `Person`, so its document declares a channel with a measured
     // domain — and therefore so must the report.
-    let person = out
-        .report
+    let person = report
         .vertices
         .iter()
         .find(|v| v.vertex_type == "Person")
@@ -234,10 +290,22 @@ Person : Person from users
     name = users.name
 ";
 
+/// A destination no store covers is refused before anything runs: the output
+/// has nowhere to go, and a run that wrote nothing would still report.
+#[tokio::test]
+async fn a_destination_no_store_covers_is_refused() {
+    let (mut storage, _) = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
+    let refused = executor(PROGRAM, HashMap::new())
+        .execute(&mut storage, "s3://elsewhere/run-2/")
+        .await
+        .expect_err("refused");
+    assert!(refused.contains("no store covers"), "{refused}");
+}
+
 #[tokio::test]
 async fn at_conn_source_alias_resolves_through_the_ref_map() {
     // `@mybucket/users.csv` resolves to `{base}/users.csv` via the ref-map —
-    // both `sources()` (enumeration) and `run()` (staging + read) must agree.
+    // both `sources()` (enumeration) and `execute()` (the read) must agree.
     let exec = executor(
         CONN_PROGRAM,
         HashMap::from([(
@@ -249,33 +317,14 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     let listed = exec.sources().expect("sources");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].0, "https://data.example.com/users.csv");
-    // The wire `format` round-trips: what `sources()` emits is a catalogue row
-    // name and `source_row` reads it back, which is the half of the host
-    // contract nothing else looks at.
     assert_eq!(listed[0].1, "csv");
-    assert_eq!(
-        source_row(&listed[0].1)
-            .expect("the emitted name is a row")
-            .name,
-        "csv"
-    );
 
-    let resolved_uri = &listed[0].0;
-    let sources = vec![SourceInput {
-        uri: resolved_uri.clone(),
-        format: source_row("csv").expect("the csv row"),
-        bytes: std::fs::read("../fossil-df/tests/fixtures/users.csv").expect("fixture"),
-    }];
-
-    let out = exec
-        .execute(sources, "s3://jobs/run-1")
+    let (mut storage, _) = storage(&[(listed[0].0.as_str(), "users.csv")]).await;
+    let report = exec
+        .execute(&mut storage, DEST)
         .await
         .expect("executor runs the @conn-aliased program");
-    let person = out
-        .report
-        .vertices
-        .iter()
-        .find(|v| v.vertex_type == "Person");
+    let person = report.vertices.iter().find(|v| v.vertex_type == "Person");
     assert_eq!(person.map(|v| v.vertex_count), Some(3));
 }
 

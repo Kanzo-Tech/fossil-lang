@@ -1,9 +1,15 @@
-//! `fossil-storage-wasm` — [`fossil_storage::Grant`] exposed to JS, stateless:
-//! every call takes the credential as the host vended it and parses it again,
-//! so nothing secret outlives the call on this side of the boundary.
+//! `fossil-storage-wasm` — [`fossil_storage`] exposed to JS.
+//!
+//! The `DuckDB` half is stateless: every call takes the credential as the host
+//! vended it and parses it again, so nothing secret outlives the call on this
+//! side of the boundary. The bytes half ([`storage_read`], [`storage_write`])
+//! asks the JS `Host` itself, through [`JsHost`], and reaches storage through
+//! `object_store`.
 
-use fossil_storage::{Access, Grant, StorageCredential};
-use js_sys::{Object, Reflect};
+use std::sync::Arc;
+
+use fossil_storage::{Access, Grant, JsHost, Scope, Storage, StorageCredential};
+use js_sys::{Array, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 
 fn grant(credential: JsValue) -> Result<Grant, JsError> {
@@ -73,28 +79,93 @@ pub fn storage_name(credential: JsValue, locator: &str) -> Result<JsValue, JsErr
     object(&[("name", JsValue::from_str(&name)), ("lend", opt(lend))])
 }
 
-/// `{ url, headers }` — one `method` request on `locator`, signed at `now_ms`.
+/// `[{ ok: true, bytes } | { ok: false, reason }]` — each target's bytes, in
+/// order, read with the credentials `host` vends: one `credentials` call per
+/// connection named, not per file. A target with no connection is read only
+/// when it is a public `http(s)` URL. A failure is the target's own answer and
+/// never the batch's.
 ///
 /// # Errors
-/// A JS `Error` when `locator` lies outside the credential's prefix.
-#[wasm_bindgen(js_name = storageSign)]
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // `Date.now()` is a non-negative integer
-pub fn storage_sign(
-    credential: JsValue,
-    method: &str,
-    locator: &str,
-    now_ms: f64,
-) -> Result<JsValue, JsError> {
-    let signed = grant(credential)?
-        .sign(method, locator, now_ms as u64)
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    let headers = Object::new();
-    for (key, value) in &signed.headers {
-        Reflect::set(&headers, &JsValue::from_str(key), &JsValue::from_str(value))
-            .map_err(|_| JsError::new("setting a header on a fresh object"))?;
+/// A JS `Error` when `targets` is not an array of `{ locator, connection? }`.
+#[wasm_bindgen(js_name = storageRead)]
+pub async fn storage_read(host: JsValue, targets: JsValue) -> Result<JsValue, JsError> {
+    #[derive(serde::Deserialize)]
+    struct Target {
+        locator: String,
+        connection: Option<String>,
     }
-    object(&[
-        ("url", JsValue::from_str(&signed.url)),
-        ("headers", headers.into()),
-    ])
+    let targets: Vec<Target> = serde_wasm_bindgen::from_value(targets)?;
+    let mut storage = Storage::new(Arc::new(JsHost::new(host)));
+    let mut refused = Vec::with_capacity(targets.len());
+    for target in &targets {
+        refused.push(match &target.connection {
+            Some(connection) => storage
+                .grant(Scope::Connection(connection.clone()), Access::Read)
+                .await
+                .err()
+                .map(|e| e.to_string()),
+            None => storage
+                .public(&target.locator)
+                .err()
+                .map(|_| "it names no connection and is not a public URL".to_string()),
+        });
+    }
+    let out = Array::new();
+    for (target, refused) in targets.iter().zip(refused) {
+        let result = match refused {
+            Some(reason) => Err(reason),
+            None => storage
+                .get(&target.locator)
+                .await
+                .map_err(|e| e.to_string()),
+        };
+        out.push(&match result {
+            Ok(bytes) => object(&[
+                ("ok", JsValue::TRUE),
+                ("bytes", Uint8Array::from(bytes.as_ref()).into()),
+            ])?,
+            Err(reason) => object(&[
+                ("ok", JsValue::FALSE),
+                ("reason", JsValue::from_str(&reason)),
+            ])?,
+        });
+    }
+    Ok(out.into())
+}
+
+/// Write each `{ path, bytes }` under the one prefix `host` vends `write` on
+/// for `scope`, and answer the prefix. A scope that vends several prefixes has
+/// no single place to write to, and is refused.
+///
+/// # Errors
+/// A JS `Error` when the host vends no single prefix, or a write fails.
+#[wasm_bindgen(js_name = storageWrite)]
+pub async fn storage_write(host: JsValue, scope: JsValue, files: Array) -> Result<String, JsError> {
+    let scope: Scope = serde_wasm_bindgen::from_value(scope)?;
+    let mut storage = Storage::new(Arc::new(JsHost::new(host)));
+    let prefix = match storage.grant(scope.clone(), Access::Write).await {
+        Ok([prefix]) => prefix.clone(),
+        Ok(prefixes) => {
+            return Err(JsError::new(&format!(
+                "the host vended {} write credentials for {scope}; a write needs exactly one prefix",
+                prefixes.len()
+            )));
+        }
+        Err(e) => return Err(JsError::new(&e.to_string())),
+    };
+    for file in files.iter() {
+        let path = Reflect::get(&file, &JsValue::from_str("path"))
+            .ok()
+            .and_then(|p| p.as_string())
+            .ok_or_else(|| JsError::new("a file is `{ path: string, bytes: Uint8Array }`"))?;
+        let bytes = Reflect::get(&file, &JsValue::from_str("bytes"))
+            .ok()
+            .and_then(|b| b.dyn_into::<Uint8Array>().ok())
+            .ok_or_else(|| JsError::new("a file is `{ path: string, bytes: Uint8Array }`"))?;
+        storage
+            .put(&format!("{prefix}{path}"), bytes.to_vec().into())
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+    }
+    Ok(prefix)
 }

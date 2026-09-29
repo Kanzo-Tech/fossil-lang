@@ -55,17 +55,18 @@ fossil-hir = { path = "../fossil-hir" }
 # wasm host owns the SessionContext so it can register source object stores +
 # tune execution (target_partitions = 1 — single-thread, no tokio::spawn).
 datafusion = { version = "54", default-features = false, features = ["parquet"] }
-# In-memory object store: JS fetches each source by signed URL and hands us the
-# bytes; we stage them in an `InMemory` store keyed by the source URI's
-# scheme+authority, so the executor's existing `read_csv`/`read_parquet` path
-# reads them unchanged: the host registers an ObjectStore in the ctx. The
-# HTTP/streaming store is a later host-only swap — same seam.
-object_store = "0.13"
+# Every byte of a run goes through `fossil-storage`'s `Storage` — stores built
+# from the credentials the JS `Host` vends, or `InMemory` for a host with no
+# storage — and `DataFusion` reads sources through the same stores.
+fossil-storage = { path = "../fossil-storage", features = ["js"] }
+object_store = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
 url = "2"
 # chrono is transitive (datafusion / object_store) and pulled with wasmbind OFF,
 # so `Utc::now()` falls through to std `SystemTime::now()` — which PANICS on
-# wasm32 ("time not implemented"). object_store's `InMemory::put` stamps
-# `last_modified = Utc::now()`, so the executor hits it. Adding chrono directly
+# wasm32 ("time not implemented"). object_store stamps `InMemory::put` and signs
+# every S3 request with `Utc::now()`, so the executor hits it. Adding chrono directly
 # with `wasmbind` flips the feature on for the whole graph (js_sys::Date clock,
 # works in browser + node; target-gated to wasm32 → no-op on native).
 chrono = { version = "0.4", features = ["wasmbind"] }
@@ -88,8 +89,12 @@ console_error_panic_hook = { workspace = true }
 # `datafusion-datasource`, and getrandom 0.2 through `const-random` ← `ahash` ←
 # `arrow`. Salsa's own hashbrown hashes with foldhash and draws no randomness.
 getrandom = { workspace = true }
+# `object_store`'s cloud client adds two more lines: 0.2 from `ring`, 0.4 from `rand`.
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
 
 [dev-dependencies]
+futures = { workspace = true }
 # Native test drives the async core on a real runtime (the browser uses JS's
 # event loop instead, so tokio never reaches the wasm build).
 tokio = { workspace = true }

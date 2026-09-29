@@ -961,10 +961,10 @@ pub fn emit_ts_executor(rows: &[Row]) -> String {
 
     let mut out = ts_header(
         "// Every `io.` constructor that reads DATA. This is the wire vocabulary of\n\
-         // `FossilExecutor.sources()` and `SourceInput.format`: the string IS the\n\
-         // catalogue row's name, and `fossil-df-wasm` reads it back with\n\
-         // `source_row`. Unlike the introspect list, `io.rdf` is here — the host\n\
-         // fetches its bytes like any other source; only the staging differs.",
+         // `FossilExecutor.sources()`: the string IS the catalogue row's name.\n\
+         // Unlike the introspect list, `io.rdf` is here — the executor reads its\n\
+         // bytes through the same storage as any other source; only the decoding\n\
+         // differs.",
     );
     out.push_str("/** Every `io.` constructor that reads data, in catalogue order. */\n");
     let names: Vec<String> = data.iter().map(|n| format!("{n:?}")).collect();

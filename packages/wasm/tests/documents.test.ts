@@ -69,7 +69,7 @@ describe('FossilPlayground documents and sources', () => {
       expect(result).toEqual({ registered: 1, unread: [] });
       expect(asked).toEqual([{ connection: 'vocab' }]);
       expect(fetched).toHaveLength(1);
-      expect(fetched[0]).toMatch(/^http:\/\/minio\.example\/vocab\/shapes\/person\.shex\?X-Amz-/);
+      expect(fetched[0]).toBe('http://minio.example/vocab/shapes/person.shex');
       expect(pg.missingDocuments(handle)).toEqual([]);
       expect(pg.check().some((r) => r.message.includes('expects Integer'))).toBe(true);
     } finally {

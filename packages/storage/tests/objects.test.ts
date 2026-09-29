@@ -10,14 +10,26 @@ import { countingHost, s3 } from './fixtures.js';
 const LAKE = 's3://b/lake/';
 
 function fakeFetch(files: Record<string, string>) {
-  const seen: { url: string; init?: RequestInit }[] = [];
+  const seen: { url: string; method: string; headers: Headers }[] = [];
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    seen.push({ url, init });
-    const path = new URL(url).pathname;
-    if (init?.method === 'PUT') return new Response(null, { status: 200 });
+    const request = new Request(input, init);
+    seen.push({ url: request.url, method: request.method, headers: request.headers });
+    const path = new URL(request.url).pathname;
     const body = files[path];
-    return body === undefined ? new Response('no', { status: 404 }) : new Response(body);
+    const response =
+      request.method === 'PUT'
+        ? new Response(null, { status: 200, headers: { etag: '"e"' } })
+        : body === undefined
+          ? new Response('no', { status: 404 })
+          : new Response(body, {
+              headers: {
+                'content-length': String(new TextEncoder().encode(body).length),
+                'last-modified': 'Tue, 29 Sep 2026 08:00:00 GMT',
+                etag: '"e"',
+              },
+            });
+    // A fetched response carries its URL, and a client reads it back.
+    return Object.defineProperty(response, 'url', { value: request.url });
   });
   vi.stubGlobal('fetch', impl);
   return seen;
@@ -26,16 +38,18 @@ function fakeFetch(files: Record<string, string>) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('read', () => {
-  it('signs a GET per file with the credential of its connection, asking once per connection', async () => {
+  it('reads each file with the credential of its connection, asking once per connection', async () => {
     const seen = fakeFetch({ '/b/lake/a.csv': 'a', '/b/lake/b.csv': 'b' });
     const { host, asks } = countingHost(() => [s3(LAKE, 'K')]);
     const out = await read(host, [
       { locator: `${LAKE}a.csv`, connection: 'lake' },
       { locator: `${LAKE}b.csv`, connection: 'lake' },
     ]);
-    expect(out.map((r) => r.ok && new TextDecoder().decode(r.bytes))).toEqual(['a', 'b']);
+    expect(out.map((r) => (r.ok ? new TextDecoder().decode(r.bytes) : r.reason))).toEqual(['a', 'b']);
     expect(asks).toEqual([{ scope: { connection: 'lake' }, access: 'read' }]);
-    expect(seen[0]!.url).toMatch(/^http:\/\/localhost:9000\/b\/lake\/a\.csv\?X-Amz-Algorithm=AWS4-HMAC-SHA256&/);
+    expect(seen[0]!.url).toBe('http://localhost:9000/b/lake/a.csv');
+    expect(seen[0]!.headers.get('authorization')).toMatch(/^AWS4-HMAC-SHA256 Credential=K\//);
+    expect(seen[0]!.headers.get('x-amz-security-token')).toBe('token-K');
   });
 
   it('reads a public URL as it is, and refuses a bare path with no connection', async () => {
@@ -47,20 +61,21 @@ describe('read', () => {
     expect(asks).toEqual([]);
   });
 
-  it('answers a failure per file, never with the signed URL in it', async () => {
-    fakeFetch({});
+  it('answers a failure per file, and asks nothing of the store outside what was vended', async () => {
+    const seen = fakeFetch({});
     const { host } = countingHost(() => [s3(LAKE, 'K')]);
     const [missing, outside] = await read(host, [
       { locator: `${LAKE}gone.csv`, connection: 'lake' },
       { locator: 's3://b/other/x.csv', connection: 'lake' },
     ]);
-    expect(missing).toEqual({ ok: false, reason: 'HTTP 404' });
-    expect(outside).toEqual({ ok: false, reason: 'the host vends nothing covering it for connection lake' });
+    expect(missing).toMatchObject({ ok: false, reason: expect.stringMatching(/not found/i) });
+    expect(outside).toMatchObject({ ok: false, reason: expect.stringMatching(/lies outside/) });
+    expect(seen.map((r) => r.url)).toEqual(['http://localhost:9000/b/lake/gone.csv']);
   });
 });
 
 describe('write', () => {
-  it('PUTs each file under the one prefix the job vends write on', async () => {
+  it('puts each file under the one prefix the job vends write on', async () => {
     const seen = fakeFetch({});
     const job = 's3://b/output/job-1/';
     const { host, asks } = countingHost(() => [s3(job, 'W')]);
@@ -69,8 +84,9 @@ describe('write', () => {
     ]);
     expect(prefix).toBe(job);
     expect(asks).toEqual([{ scope: { job: 'job-1' }, access: 'write' }]);
-    expect(seen[0]!.init?.method).toBe('PUT');
-    expect(seen[0]!.url).toMatch(/^http:\/\/localhost:9000\/b\/output\/job-1\/graph\.graph\.yml\?/);
+    expect(seen[0]!.method).toBe('PUT');
+    expect(seen[0]!.url).toBe('http://localhost:9000/b/output/job-1/graph.graph.yml');
+    expect(seen[0]!.headers.get('authorization')).toMatch(/^AWS4-HMAC-SHA256 Credential=W\//);
   });
 
   it('refuses a scope with no single prefix to write under', async () => {
@@ -106,7 +122,7 @@ describe('resolveDocuments', () => {
     const out = await resolveDocuments(ws, host);
     expect(out.registered).toBe(2);
     expect(out.unread).toEqual([
-      { key: '@lake/c.shex', locator: `${LAKE}c.shex`, connection: 'lake', reason: 'HTTP 404' },
+      { key: '@lake/c.shex', locator: `${LAKE}c.shex`, connection: 'lake', reason: expect.stringMatching(/not found/) },
     ]);
     expect(ws.registered.get('@lake/b.shex')).toBe('B');
   });

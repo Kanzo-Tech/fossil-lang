@@ -32,7 +32,7 @@ import type { Channel } from '@fossil-lang/types';
 import type { DataRow } from './catalogue.generated.js';
 
 /**
- * The fetch strategy for a source — how the host must stage its bytes.
+ * How a source is read — the reader `DataFusion` scans it with, or the provider that decodes it.
  *
  * It is the catalogue ROW's name: what the program wrote after `io.`, what
  * {@link FossilExecutor.sources} emits, and what `fossil-df-wasm` reads back
@@ -51,12 +51,6 @@ export interface SourceDescriptor {
   format: SourceFormat;
   /** The connection the locator lies under, when the program wrote `@name/…`. */
   connection?: string;
-}
-
-/** A source's bytes, fed to {@link FossilExecutor.run}. */
-export interface SourceInput extends SourceDescriptor {
-  /** The fetched bytes (CSV/JSON/Parquet content, or RDF Turtle text). */
-  bytes: Uint8Array;
 }
 
 /** One GraphAr output file: a dataset-relative path + its encoded bytes. */
@@ -250,7 +244,7 @@ export interface RunReport {
   dropped: EdgeDrops[];
 }
 
-/** The result of {@link FossilExecutor.run}. */
+/** The result of {@link FossilExecutor.runInMemory}. */
 export interface ExecutorResult {
   /** The W0b GraphAr tree as bytes, each `path` relative to the job's prefix. */
   files: GraphArFile[];

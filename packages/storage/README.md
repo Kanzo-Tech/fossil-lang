@@ -11,11 +11,13 @@ come here; a host seldom does.
 | door | for | how |
 | --- | --- | --- |
 | `mount(engine, host, scope, access)` | SQL through the page's engine | `CREATE OR REPLACE SECRET … SCOPE '<prefix>'` per S3 prefix, renewed at `expires − 5 min` under the same name, shared by every mount of the prefix and dropped by the last; an Azure file is lent by name to its SAS URL (no Azure extension in DuckDB-WASM, so no glob) |
-| `read(host, targets)` | bytes | a GET signed with SigV4 (or the SAS) per file, one `credentials` call per connection |
-| `write(host, scope, files)` | a job's output | a PUT signed with SigV4 (or the SAS) under the one prefix the scope vends `write` on |
+| `read(host, targets)` | bytes | an `object_store` GET per file, one `credentials` call per connection |
+| `write(host, scope, files)` | a job's output | an `object_store` PUT — in parts when large — under the one prefix the scope vends `write` on |
 | `resolveDocuments(workspace, host)` | the documents a program names | `read`, until nothing new is missing |
 
 The engine must have `httpfs` loaded; `mount` says so when it has not. The translation from a
-credential to a statement, a name or a signature is the Rust crate `fossil-storage`, compiled to
-`pkg/` — the same code a native host renders its secrets with. In Node, call
+credential to a statement, a name or a store is the Rust crate `fossil-storage`, compiled to
+`pkg/` — the same code a native host renders its secrets with, and the same stores
+`@fossil-lang/executor`'s DataFusion reads through. The store must expose `ETag` to CORS for a
+multipart write. In Node, call
 `initStorage(bytes)` first; a bundler finds the `.wasm` on its own.

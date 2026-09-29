@@ -48,12 +48,19 @@ else
   echo "::warning::wasm-opt not found. Install via brew (binaryen) or apt (binaryen). Skipping optimization pass — artefact will be larger." >&2
 fi
 
+# `ring` (object_store's signer) compiles C, so the wasm32 build needs a
+# wasm-capable clang (Apple's lacks the target) — the executor's requirement too.
+if [[ -z "${CC_wasm32_unknown_unknown:-}" && -x /opt/homebrew/opt/llvm/bin/clang ]]; then
+  export CC_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/clang
+  export AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar
+fi
+
 # ---- 1. Build the WASM via cargo ----
 
-echo "[build-wasm] cargo build --release --target wasm32-unknown-unknown -p fossil-storage-wasm"
-cargo build --release --target wasm32-unknown-unknown -p fossil-storage-wasm
+echo "[build-wasm] cargo build --profile wasm-release --target wasm32-unknown-unknown -p fossil-storage-wasm"
+cargo build --profile wasm-release --target wasm32-unknown-unknown -p fossil-storage-wasm
 
-WASM_INPUT="$REPO_ROOT/target/wasm32-unknown-unknown/release/fossil_storage_wasm.wasm"
+WASM_INPUT="$REPO_ROOT/target/wasm32-unknown-unknown/wasm-release/fossil_storage_wasm.wasm"
 if [[ ! -f "$WASM_INPUT" ]]; then
   echo "::error::cargo build did not produce expected artefact: $WASM_INPUT" >&2
   exit 1
@@ -76,11 +83,16 @@ wasm-bindgen "$WASM_INPUT" \
   --target web \
   --out-dir "$PKG_DIR"
 
-# ---- 3. (Optional) wasm-opt -O3 for a smaller artefact ----
+# ---- 3. (Optional) wasm-opt -Oz for a smaller artefact ----
+# The feature set is wasm32-unknown-unknown's default, as the executor's script
+# explains; without it wasm-opt rejects the input.
 
 if [[ $HAS_WASM_OPT -eq 1 ]]; then
-  echo "[build-wasm] wasm-opt -O3"
-  wasm-opt -O3 "$PKG_DIR/fossil_storage_wasm_bg.wasm" -o "$PKG_DIR/fossil_storage_wasm_bg.wasm"
+  echo "[build-wasm] wasm-opt -Oz"
+  wasm-opt -Oz \
+    --enable-bulk-memory --enable-sign-ext --enable-mutable-globals \
+    --enable-nontrapping-float-to-int --enable-reference-types --enable-multivalue \
+    "$PKG_DIR/fossil_storage_wasm_bg.wasm" -o "$PKG_DIR/fossil_storage_wasm_bg.wasm"
 fi
 
 # ---- 4. Report size ----

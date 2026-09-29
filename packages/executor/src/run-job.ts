@@ -1,17 +1,16 @@
 /**
- * A job, end to end in the browser: read the documents and sources the program names, run the
- * mapping on DataFusion-WASM, write the GraphAr output, report the outcome.
+ * A job, end to end in the browser: read the documents the program names, run the mapping on
+ * DataFusion-WASM, write the GraphAr output, report the outcome.
  *
- * Every byte goes through `@fossil-lang/storage` under a credential the host vends — `read` per
- * connection the program names, `write` on the job — and every request is signed in Rust. The
- * writer is fossil and not the engine: DuckDB-WASM's `COPY … TO 's3://'` signs a `content-type`
- * the browser never sends (duckdb-httpfs#351).
+ * Every byte goes through `object_store` stores built from credentials the host vends — `read`
+ * per connection the program names, `write` on the job. `DataFusion` reads a source through its
+ * store by range requests, and the output is written through the job's, in parts when large.
  */
-import { read, resolveDocuments, write } from '@fossil-lang/storage';
+import { resolveDocuments } from '@fossil-lang/storage';
 import type { Host } from '@fossil-lang/types';
 
 import { FossilExecutor } from './client.js';
-import type { ExecutorResult, RunReport, SourceInput } from './index.js';
+import type { RunReport } from './index.js';
 
 /** What {@link runJob} runs as: the job, the host that vends its credentials, and its outcome. */
 export interface Job {
@@ -51,20 +50,7 @@ export async function runJob(program: string, job: Job): Promise<RunReport> {
       throw new Error(`documents the program names could not be read: ${which}`);
     }
 
-    const descriptors = exec.sources();
-    const fetched = await read(
-      job.host,
-      descriptors.map((d) => ({ locator: d.uri, connection: d.connection })),
-    );
-    const sources: SourceInput[] = descriptors.map((d, i) => {
-      const result = fetched[i]!;
-      if (!result.ok) throw new Error(`source ${d.uri} could not be read (${result.reason})`);
-      return { uri: d.uri, format: d.format, bytes: result.bytes };
-    });
-
-    const { files, report }: ExecutorResult = await exec.run(sources, '');
-    await write(job.host, { job: job.id }, files);
-
+    const report = await exec.run(job.host, job.id);
     await job.complete({ status: 'completed', manifest: report });
     return report;
   } catch (e) {

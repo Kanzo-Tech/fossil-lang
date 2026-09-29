@@ -13,7 +13,7 @@ export const CONNECTIONS = { vocab: 's3://vocab/shapes', lake: 's3://lake' };
 
 /**
  * A host that vends a read credential on each connection's prefix, and a `fetch` that answers the
- * signed GET of `person.shex` with `shape` — recording every scope asked and every URL fetched.
+ * GET of `person.shex` with `shape` as S3 does — recording every scope asked and every URL fetched.
  */
 export function recordingHost(shape: string) {
   const asked: Scope[] = [];
@@ -40,12 +40,21 @@ export function recordingHost(shape: string) {
   };
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const { url } = new Request(input, init);
       fetched.push(url);
-      return new URL(url).pathname === '/vocab/shapes/person.shex'
-        ? new Response(shape)
-        : new Response('', { status: 404 });
+      const response =
+        new URL(url).pathname === '/vocab/shapes/person.shex'
+          ? new Response(shape, {
+              headers: {
+                'content-length': String(new TextEncoder().encode(shape).length),
+                'last-modified': 'Tue, 29 Sep 2026 08:00:00 GMT',
+                etag: '"e"',
+              },
+            })
+          : new Response('', { status: 404 });
+      // A fetched response carries its URL, and a client reads it back.
+      return Object.defineProperty(response, 'url', { value: url });
     }),
   );
   return { host, asked, fetched };

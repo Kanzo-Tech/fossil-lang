@@ -7,19 +7,17 @@
 //! and the run executed — against the output descriptor decoded from those
 //! registered documents, which is what the checker read. [`Executor::execute`]
 //! builds a `DataFusion` plan (`lower_to_mir_pg` → `execute_graph`),
-//! materialises the `GraphAr` graph, and returns the output files (Parquet +
-//! manifest YAML, as bytes) plus the [`RunReport`] — the same manifest, as
-//! JSON, so the host does not parse back out of the bytes it is about to
-//! upload. No mapping runtime on the server.
+//! materialises the `GraphAr` graph, writes it under the destination, and
+//! answers the [`RunReport`] — the manifest it wrote, as JSON. No mapping
+//! runtime on the server.
 //!
-//! ## Source seam
-//! The executor reads sources through the [`SessionContext`]'s object stores.
-//! Here the host stages each fetched source's bytes in an
-//! [`object_store::memory::InMemory`] store keyed by the source URI's
-//! scheme+authority, so the executor's existing `read_csv`/`read_parquet` path
-//! reads them unchanged. Swapping `InMemory` for an HTTP/signed-URL store
-//! (true streaming, larger-than-RAM) is a host-only change — same seam. RDF
-//! sources take the provider seam ([`fossil_df::register_rdf`]) instead.
+//! ## Storage seam
+//! Every byte goes through a [`Storage`]: the sources `DataFusion` reads, the
+//! RDF a provider decodes, and the files the run writes. A host with storage
+//! builds it from the credentials its `Host` vends ([`FossilExecutor::run`]),
+//! so `DataFusion` reads a remote source by range requests rather than whole; a
+//! host with none holds the files in memory ([`FossilExecutor::run_in_memory`]).
+//! Both are `object_store` stores, so the run cannot tell them apart.
 //!
 //! ## Native vs wasm split
 //! The pure-Rust [`Executor`] (target-agnostic — `cargo test` drives it on a
@@ -41,76 +39,21 @@ use std::time::SystemTime;
 
 use datafusion::execution::context::SessionContext;
 use datafusion::prelude::SessionConfig;
-use fossil_base::{FossilDb, FsError, Provider, RowReader, SourceFile, System};
+use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
 use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_df::RunReport;
 use fossil_df::SourceFormat;
-use fossil_df::files::GraphArFile;
 use fossil_hir::documents::MissingDocument;
 use fossil_layout::io::MemoryFs;
+use fossil_storage::{Access, JsHost, Scope, Storage};
+use futures::{StreamExt, TryStreamExt};
 use object_store::memory::InMemory;
-use object_store::path::Path as ObjPath;
 use object_store::{ObjectStore, ObjectStoreExt};
 use url::Url;
 use wasm_bindgen::prelude::*;
 
-/// One source the host fetched: its program URI (`io.csv("…")`), the catalogue
-/// ROW it was written with, and the raw bytes.
-///
-/// # `format` is a catalogue row and not an enum of its own
-///
-/// The one question this crate asks of it is *does this go through the object
-/// store or through the provider seam* — [`RowReader::Native`] against
-/// [`RowReader::Materialised`], a property the row already carries. Asking the
-/// row means a second materialised provider works here the day it is a line in
-/// `catalogue.bnf`, instead of being silently staged as bytes for a reader that
-/// cannot read it.
-#[derive(Debug, Clone)]
-pub struct SourceInput {
-    pub uri: String,
-    pub format: &'static Provider,
-    pub bytes: Vec<u8>,
-}
-
-/// The row a wire `format` string names, which must be one that reads DATA.
-///
-/// [`DATA`](fossil_base::providers::DATA) rather than the full table: a host
-/// fetching bytes for `io.shex` would be a program that got past the checker,
-/// and the wire has no business naming a row that decodes types.
-///
-/// Public because a caller building a [`SourceInput`] needs one.
-///
-/// # Errors
-///
-/// When no data row is called `name`.
-pub fn source_row(name: &str) -> Result<&'static Provider, String> {
-    fossil_base::provider(fossil_base::providers::DATA, name)
-        .ok_or_else(|| format!("unknown source format `{name}`"))
-}
-
-/// Does this row's bytes get staged in the object store for a native reader to
-/// scan? The complement is the provider seam — see [`SourceInput`].
-const fn is_object_store(row: &Provider) -> bool {
-    matches!(row.reads_rows, Some(RowReader::Native(_)))
-}
-
-/// Does this row's relation get materialised outside the reader?
-const fn is_materialised(row: &Provider) -> bool {
-    matches!(row.reads_rows, Some(RowReader::Materialised))
-}
-
-/// The executor result: the `GraphAr` output files (the bytes the host
-/// signed-PUTs) and the [`RunReport`] keasy turns into DCAT.
-///
-/// The report duplicates nothing in `files`: the manifest YAMLs are in there as
-/// bytes, and this is the same values already parsed. A host that only wants to
-/// upload can ignore it; one that wants to know what it uploaded would otherwise
-/// have to YAML-parse its own payload.
-#[derive(Debug)]
-pub struct ExecOutput {
-    pub files: Vec<GraphArFile>,
-    pub report: RunReport,
-}
+/// Files written at once.
+const WRITES_IN_FLIGHT: usize = 4;
 
 /// Minimal [`System`] for the executor host. The executor reads sources through
 /// the object-store / provider seams and documents through the registry, never
@@ -193,10 +136,9 @@ impl Executor {
         fossil_base::register_document(&mut self.db, key, text);
     }
 
-    /// The program's sources as `(locator, row-name, connection)`: what is read
-    /// before [`Self::execute`]. The second element is the catalogue
-    /// row's name, which is what the program wrote after `io.` and what the host
-    /// hands back on `SourceInput.format`.
+    /// The program's sources as `(locator, row-name, connection)`: what
+    /// [`Self::execute`] reads. The second element is the catalogue row's name,
+    /// which is what the program wrote after `io.`.
     ///
     /// # Errors
     /// The output shape document is unregistered or does not decode.
@@ -214,36 +156,46 @@ impl Executor {
         fossil_df::output_descriptor(&self.db, self.file)
     }
 
-    /// Run the program on `DataFusion` from host-fetched source bytes: stage each
-    /// source in the [`SessionContext`], execute the graph, and encode the
-    /// `GraphAr` output.
-    ///
-    /// `dest` is the dataset's logical location (e.g. the job's object-storage
-    /// prefix) — it only labels the [`RunReport`], no IO happens against it here.
+    /// Run the program on `DataFusion` over `storage` and write the `GraphAr`
+    /// output under `dest`, a prefix `storage` covers: route each source —
+    /// through its connection's credential, or as a public URL — register the
+    /// stores, execute the graph, lay it out, and write it.
     ///
     /// # Errors
-    /// Output shape, URL parse, object-store staging, `DataFusion` execution, or
-    /// Parquet encode failures — all surfaced as a message string for the JS host.
-    pub async fn execute(
-        &self,
-        sources: Vec<SourceInput>,
-        dest: &str,
-    ) -> Result<ExecOutput, String> {
+    /// A source or the destination no store covers, `DataFusion` execution,
+    /// Parquet encode, or a write — each as a message for the JS host.
+    pub async fn execute(&self, storage: &mut Storage, dest: &str) -> Result<RunReport, String> {
         let (db, file, connections) = (&self.db, self.file, &self.connections);
         let descriptor = self.descriptor()?;
+        if !dest.ends_with('/') || !storage.covers(&format!("{dest}graph.graph.yml")) {
+            return Err(format!("no store covers the destination {dest}"));
+        }
+
+        for source in fossil_df::program_sources(db, file, &descriptor, connections) {
+            if storage.covers(&source.uri) {
+                continue;
+            }
+            match source.connection {
+                Some(connection) => storage
+                    .grant(Scope::Connection(connection), Access::Read)
+                    .await
+                    .map(drop),
+                None => storage.public(&source.uri),
+            }
+            .map_err(|e| format!("source {}: {e}", source.uri))?;
+        }
 
         // Single partition: no RepartitionExec, no detached `tokio::spawn` — the
         // whole plan is drivable by one top-level future, which is what makes
         // DataFusion run under wasm-bindgen-futures (no tokio runtime in the browser).
         let config = SessionConfig::new().with_target_partitions(1);
         let ctx = SessionContext::new_with_config(config);
+        for (authority, store) in storage.stores() {
+            let url = Url::parse(authority).map_err(|e| format!("{authority}: {e}"))?;
+            ctx.register_object_store(&url, store);
+        }
+        register_rdf_sources(&ctx, db, file, &descriptor, storage, connections).await?;
 
-        register_object_store_sources(&ctx, &sources).await?;
-        register_rdf_sources(&ctx, db, file, &descriptor, &sources, connections)?;
-
-        // The executor resolves each `@conn` source alias through `connections`
-        // (same name→URL map the browser used in `sources()`), so the registered
-        // object-store / RDF tables line up with what the plan reads.
         let mut graph = fossil_df::execute_graph(&ctx, db, file, &descriptor, connections)
             .await
             .map_err(|e| format!("execute_graph: {e}"))?;
@@ -276,19 +228,39 @@ impl Executor {
         // `tests/execute_core.rs::the_report_is_the_manifest_the_browser_shipped`
         // holds the report against the emitted YAML so a third field cannot repeat it.
         let report = RunReport::of(dest, &graph);
-        for file in graph.manifest_files().map_err(|e| format!("encode: {e}"))? {
-            fs.insert(file.rel_path, file.bytes);
-        }
-        let files = fs
-            .drain()
-            .into_iter()
-            .map(|(rel_path, bytes)| GraphArFile {
-                rel_path,
-                bytes: bytes.to_vec(),
-            })
-            .collect();
-        Ok(ExecOutput { files, report })
+        let payload = fs.drain();
+        let manifests = graph.manifest_files().map_err(|e| format!("encode: {e}"))?;
+        write_all(storage, dest, payload.into_iter()).await?;
+        write_all(
+            storage,
+            dest,
+            manifests
+                .into_iter()
+                .map(|f| (f.rel_path, bytes::Bytes::from(f.bytes))),
+        )
+        .await?;
+        Ok(report)
     }
+}
+
+/// Write each `(relative path, bytes)` under `dest`, a few at once.
+async fn write_all(
+    storage: &Storage,
+    dest: &str,
+    files: impl Iterator<Item = (String, bytes::Bytes)>,
+) -> Result<(), String> {
+    futures::stream::iter(files)
+        .map(|(rel, bytes)| async move {
+            let locator = format!("{dest}{rel}");
+            storage
+                .put(&locator, bytes)
+                .await
+                .map_err(|e| format!("write: {e}"))
+        })
+        .buffer_unordered(WRITES_IN_FLIGHT)
+        .try_collect::<Vec<()>>()
+        .await
+        .map(drop)
 }
 
 /// Run the real layout pass, in memory, and hand back the filesystem it wrote
@@ -382,9 +354,8 @@ fn enrich_layout_in_memory(
     Ok((fs, report))
 }
 
-/// The host fetch-strategy string for a source format — **the catalogue row's
-/// name**, which is what a program wrote after `io.` and what [`source_row`]
-/// reads back off the wire.
+/// A source format as the wire names it — **the catalogue row's name**, which
+/// is what a program wrote after `io.`.
 ///
 /// The `Provider` arm carries the name rather than the literal `"rdf"` because
 /// more than one row can be materialised: labelling an `io.avro` source `rdf`
@@ -393,9 +364,8 @@ fn enrich_layout_in_memory(
 fn format_kind(f: &SourceFormat) -> &str {
     match f {
         // `{ .. }` because `Csv` carries the `delimiter =` the program wrote.
-        // It is not in the wire string on purpose: this names the FETCH
-        // STRATEGY the host has to stage bytes for, and the delimiter is read
-        // by `fossil_df::read_source` off the MIR the executor already holds.
+        // It is not in the wire string on purpose: the delimiter is read by
+        // `fossil_df::read_source` off the MIR the executor already holds.
         SourceFormat::Csv { .. } => "csv",
         SourceFormat::Json => "json",
         SourceFormat::Parquet => "parquet",
@@ -403,79 +373,35 @@ fn format_kind(f: &SourceFormat) -> &str {
     }
 }
 
-/// Stage every object-store source (`csv`/`json`/`parquet`) in an [`InMemory`]
-/// store keyed by its URI's scheme+authority, then register the stores in `ctx`
-/// so the executor's `read_csv`/`read_json`/`read_parquet` path reaches them.
-async fn register_object_store_sources(
-    ctx: &SessionContext,
-    sources: &[SourceInput],
-) -> Result<(), String> {
-    let mut stores: HashMap<String, Arc<InMemory>> = HashMap::new();
-    for src in sources {
-        if !is_object_store(src.format) {
-            continue;
-        }
-        let url = Url::parse(&src.uri).map_err(|e| format!("source URI `{}`: {e}", src.uri))?;
-        let base = base_url(&url)?;
-        let store = stores
-            .entry(base)
-            .or_insert_with(|| Arc::new(InMemory::new()));
-        let path = ObjPath::from(url.path().trim_start_matches('/'));
-        store
-            .put(&path, src.bytes.clone().into())
-            .await
-            .map_err(|e| format!("stage `{}`: {e}", src.uri))?;
-    }
-    for (base, store) in stores {
-        let url = Url::parse(&base).map_err(|e| e.to_string())?;
-        ctx.register_object_store(&url, store as Arc<dyn ObjectStore>);
-    }
-    Ok(())
-}
-
 /// Decode + register every provider (RDF) source through
-/// [`fossil_df::register_rdf`] — match each program-derived provider binding to
-/// the host-fetched bytes by URI.
+/// [`fossil_df::register_rdf`], its bytes read through `storage`.
 ///
 /// It is the browser counterpart of `fossil_df::register_provider_sources`,
 /// which walks the same `provider_bindings` and calls the same `register_rdf`;
-/// where the bytes come from is the whole difference, and it gives this side one
-/// failure the native side cannot have — a binding the host did not provide.
+/// where the bytes come from is the whole difference.
 ///
 /// **"Exactly the counterpart" is a reading, not a result.** Nothing here
 /// drives an RDF source through both halves and compares — `tests/` is CSV — so
 /// the two can drift and only a program would notice.
-fn register_rdf_sources(
+async fn register_rdf_sources(
     ctx: &SessionContext,
     db: &dyn fossil_base::Db,
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
-    sources: &[SourceInput],
+    storage: &Storage,
     connections: &HashMap<String, String>,
 ) -> Result<(), String> {
     for binding in fossil_df::provider_bindings(db, file, descriptor, connections) {
-        let src = sources
-            .iter()
-            .find(|s| is_materialised(s.format) && s.uri == binding.uri)
-            .ok_or_else(|| format!("RDF source `{}` was not provided", binding.uri))?;
-        let turtle = std::str::from_utf8(&src.bytes)
+        let bytes = storage
+            .get(&binding.uri)
+            .await
+            .map_err(|e| format!("RDF source: {e}"))?;
+        let turtle = std::str::from_utf8(&bytes)
             .map_err(|e| format!("RDF source `{}` is not UTF-8: {e}", binding.uri))?;
         fossil_df::register_rdf(ctx, &binding, turtle)
             .map_err(|e| format!("register RDF `{}`: {e}", binding.uri))?;
     }
     Ok(())
-}
-
-/// The `scheme://authority` key an object store is registered under (datafusion
-/// looks up the store by a URL's scheme + authority; the path selects the object).
-fn base_url(u: &Url) -> Result<String, String> {
-    let authority = u.authority();
-    if authority.is_empty() {
-        return Err(format!(
-            "source URI `{u}` has no host — object-store sources need an absolute URL"
-        ));
-    }
-    Ok(format!("{}://{}", u.scheme(), authority))
 }
 
 // ───────────────────────── wasm-bindgen surface ─────────────────────────────
@@ -580,25 +506,152 @@ impl FossilExecutor {
         Ok(arr.into())
     }
 
-    /// Execute against the host-fetched `sources` (`[{ uri, format, bytes:
-    /// Uint8Array }]`, `uri` and `format` as [`Self::sources`] emitted them) and
-    /// return `{ files: [{ path, bytes: Uint8Array }], report }`.
+    /// Run with the storage `host` vends: read each source through its
+    /// connection's credential, write under the one prefix `host` vends `write`
+    /// on for `job`, and answer the [`RunReport`].
     ///
     /// # Errors
-    /// A JS `Error` carrying the message of any parse / staging / execution /
-    /// encode failure.
+    /// A JS `Error` when the host vends no single prefix to write under, or the
+    /// run fails.
     // The shared borrow is held across the run on purpose: it is what makes a
     // `registerDocument` issued mid-run fail instead of changing the program
     // under it.
-    #[allow(clippy::await_holding_refcell_ref)]
-    pub async fn run(&self, sources: JsValue, dest: String) -> Result<JsValue, JsError> {
-        let sources = parse_sources(&sources).map_err(|e| JsError::new(&e))?;
+    #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
+    pub async fn run(&self, host: JsValue, job: String) -> Result<JsValue, JsError> {
+        let mut storage = Storage::new(Arc::new(JsHost::new(host)));
+        let scope = Scope::Job(job);
+        let dest = match storage.grant(scope.clone(), Access::Write).await {
+            Ok([prefix]) => prefix.clone(),
+            Ok(prefixes) => {
+                return Err(JsError::new(&format!(
+                    "the host vended {} write credentials for {scope}; a run writes under exactly one prefix",
+                    prefixes.len()
+                )));
+            }
+            Err(e) => return Err(JsError::new(&e.to_string())),
+        };
         let exec = self.borrow()?;
-        let out = exec
-            .execute(sources, &dest)
+        let report = exec
+            .execute(&mut storage, &dest)
             .await
             .map_err(|e| JsError::new(&e))?;
-        out_to_js(&out).map_err(|e| JsError::new(&e))
+        Ok(serde_wasm_bindgen::to_value(&report)?)
+    }
+
+    /// Run over files held in memory, for a host with no storage: `sources`
+    /// maps each locator the program reads to its bytes, and the output stays
+    /// in memory under `dest`. Answers `{ files: [{ path, bytes }], report }`.
+    ///
+    /// # Errors
+    /// A JS `Error` when `sources` is not an object of `Uint8Array`s, or the run
+    /// fails.
+    #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
+    #[wasm_bindgen(js_name = runInMemory)]
+    pub async fn run_in_memory(&self, sources: JsValue, dest: String) -> Result<JsValue, JsError> {
+        let dest = format!("{}/", dest.trim_end_matches('/'));
+        let mut storage = Storage::new(Arc::new(NoHost));
+        let mut held: HashMap<String, Arc<InMemory>> = HashMap::new();
+        let mut memory = |storage: &mut Storage, root: &str| -> Result<Arc<InMemory>, JsError> {
+            if let Some(store) = held.get(root) {
+                return Ok(Arc::clone(store));
+            }
+            let store = Arc::new(InMemory::new());
+            storage
+                .with_store(root, Arc::clone(&store) as Arc<dyn ObjectStore>)
+                .map_err(|e| JsError::new(&e.to_string()))?;
+            held.insert(root.to_string(), Arc::clone(&store));
+            Ok(store)
+        };
+        let obj: &js_sys::Object = sources
+            .dyn_ref()
+            .ok_or_else(|| JsError::new("`sources` is `{ [locator]: Uint8Array }`"))?;
+        for entry in js_sys::Object::entries(obj).iter() {
+            let pair: js_sys::Array = entry.into();
+            let locator = pair
+                .get(0)
+                .as_string()
+                .ok_or_else(|| JsError::new("a source locator is a string"))?;
+            let bytes: js_sys::Uint8Array = pair
+                .get(1)
+                .dyn_into()
+                .map_err(|_| JsError::new("a source's bytes are a Uint8Array"))?;
+            let url = Url::parse(&locator).map_err(|e| JsError::new(&format!("{locator}: {e}")))?;
+            let root = format!("{}://{}/", url.scheme(), url.authority());
+            let store = memory(&mut storage, &root)?;
+            store
+                .put(
+                    &object_store::path::Path::from(url.path().trim_start_matches('/')),
+                    bytes.to_vec().into(),
+                )
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?;
+        }
+        let out = Arc::new(InMemory::new());
+        storage
+            .with_store(&dest, Arc::clone(&out) as Arc<dyn ObjectStore>)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        let exec = self.borrow()?;
+        let report = exec
+            .execute(&mut storage, &dest)
+            .await
+            .map_err(|e| JsError::new(&e))?;
+
+        let key = Url::parse(&dest)
+            .map_err(|e| JsError::new(&e.to_string()))?
+            .path()
+            .trim_start_matches('/')
+            .to_string();
+        let files = js_sys::Array::new();
+        let listed: Vec<_> = out
+            .list(None)
+            .try_collect()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        for meta in listed {
+            let bytes = out
+                .get(&meta.location)
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?
+                .bytes()
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?;
+            let location = meta.location.as_ref();
+            let path = location.strip_prefix(&key).unwrap_or(location);
+            let file = js_sys::Object::new();
+            set(&file, "path", &JsValue::from_str(path)).map_err(|e| JsError::new(&e))?;
+            set(&file, "bytes", &js_sys::Uint8Array::from(bytes.as_ref()))
+                .map_err(|e| JsError::new(&e))?;
+            files.push(&file);
+        }
+        let result = js_sys::Object::new();
+        set(&result, "files", &files).map_err(|e| JsError::new(&e))?;
+        set(&result, "report", &serde_wasm_bindgen::to_value(&report)?)
+            .map_err(|e| JsError::new(&e))?;
+        Ok(result.into())
+    }
+}
+
+/// The host of a run with no storage: it has no connections and vends nothing,
+/// so a source that is not in memory is refused by name.
+#[derive(Debug)]
+struct NoHost;
+
+impl fossil_storage::Host for NoHost {
+    fn connections(
+        &self,
+    ) -> futures::future::BoxFuture<'static, Result<HashMap<String, String>, String>> {
+        Box::pin(async { Ok(HashMap::new()) })
+    }
+
+    fn credentials(
+        &self,
+        scope: &Scope,
+        _access: Access,
+    ) -> futures::future::BoxFuture<'static, Result<Vec<fossil_storage::StorageCredential>, String>>
+    {
+        let refused = format!("a run in memory has no storage to vend {scope} from");
+        Box::pin(async move { Err(refused) })
     }
 }
 
@@ -635,52 +688,6 @@ fn parse_connections(connections: &JsValue) -> Result<HashMap<String, String>, S
         map.insert(name, url);
     }
     Ok(map)
-}
-
-/// Parse the JS `sources` array into [`SourceInput`]s, reading each `bytes`
-/// `Uint8Array` directly (no serde round-trip — bulletproof for typed arrays).
-fn parse_sources(sources: &JsValue) -> Result<Vec<SourceInput>, String> {
-    let arr: &js_sys::Array = sources
-        .dyn_ref::<js_sys::Array>()
-        .ok_or("`sources` must be an array")?;
-    let mut out = Vec::with_capacity(arr.length() as usize);
-    for item in arr.iter() {
-        let uri = get_string(&item, "uri")?;
-        let format = source_row(&get_string(&item, "format")?)?;
-        let bytes_val =
-            js_sys::Reflect::get(&item, &JsValue::from_str("bytes")).map_err(|e| js_err(&e))?;
-        let bytes = bytes_val
-            .dyn_ref::<js_sys::Uint8Array>()
-            .ok_or("source `bytes` must be a Uint8Array")?
-            .to_vec();
-        out.push(SourceInput { uri, format, bytes });
-    }
-    Ok(out)
-}
-
-/// Marshal [`ExecOutput`] to `{ files: [{ path, bytes: Uint8Array }], report }`.
-/// Bytes go out as `Uint8Array` (not a number array) so large Parquet payloads
-/// stay zero-copy-ish on the JS side.
-fn out_to_js(out: &ExecOutput) -> Result<JsValue, String> {
-    let files = js_sys::Array::new();
-    for f in &out.files {
-        let obj = js_sys::Object::new();
-        set(&obj, "path", &JsValue::from_str(&f.rel_path))?;
-        set(&obj, "bytes", &js_sys::Uint8Array::from(f.bytes.as_slice()))?;
-        files.push(&obj);
-    }
-    let report = serde_wasm_bindgen::to_value(&out.report).map_err(|e| e.to_string())?;
-    let result = js_sys::Object::new();
-    set(&result, "files", &files)?;
-    set(&result, "report", &report)?;
-    Ok(result.into())
-}
-
-fn get_string(obj: &JsValue, key: &str) -> Result<String, String> {
-    js_sys::Reflect::get(obj, &JsValue::from_str(key))
-        .map_err(|e| js_err(&e))?
-        .as_string()
-        .ok_or_else(|| format!("source field `{key}` must be a string"))
 }
 
 fn set(obj: &js_sys::Object, key: &str, value: &JsValue) -> Result<(), String> {

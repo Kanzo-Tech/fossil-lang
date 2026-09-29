@@ -122,18 +122,18 @@ access)`, and never a URL it signed. The answer is Iceberg REST's `StorageCreden
 is what a host vends to fossil. `scope` is a connection or a job; `access` is `read` or `write`, one
 parameter and not two doors, which is how Unity Catalog and Polaris model it.
 
-What fossil does with one has **one implementation**, `fossil-storage`, sans-IO and compiled to
-wasm32 for `@fossil-lang/storage`:
+What fossil does with one has **one implementation**, `fossil-storage`, compiled to wasm32 for
+`@fossil-lang/storage` and `@fossil-lang/executor`:
 
 | a reader or writer that… | gets |
 | --- | --- |
 | queries through the page's engine (a corpus, introspection) | `CREATE OR REPLACE SECRET … SCOPE '<prefix>'` — what DuckDB's iceberg extension does with vended credentials. The SQL names `s3://…` and never the credential |
-| needs bytes and no engine (documents, a job's sources) | a GET signed with SigV4 in Rust |
-| writes a job's output | a PUT signed with SigV4 in Rust — fossil is the writer, because DuckDB-WASM's `COPY … TO 's3://'` signs a `content-type` the browser never sends |
+| reads through DataFusion (a job's sources), or needs bytes and no engine (documents) | an `object_store` store per credential, routed by the longest prefix covering a path — so DataFusion reads a source by range requests, not whole |
+| writes a job's output | the job's `object_store` store, in parts when a file is large — fossil is the writer, because DuckDB-WASM's `COPY … TO 's3://'` signs a `content-type` the browser never sends |
 
 A mounted prefix is renewed at `expires − 5 min` by asking the host again and re-issuing the same
 statement under the same name, so a view over it never reopens: Iceberg's `VendedCredentialsProvider`
-margin. Renewal is the mechanism and not a retry on error, because DuckDB-WASM reports an expired
+margin. A store renews the same way, through `object_store`'s `CredentialProvider`. Renewal is the mechanism and not a retry on error, because DuckDB-WASM reports an expired
 credential as *no files found* or *404* and a reader cannot tell it from absent data. Two readers of
 one prefix on one engine share the secret, and the last to close drops it.
 

@@ -3,12 +3,14 @@
 import init, {
   storageGrant,
   storageName,
-  storageSign,
+  storageRead,
+  storageWrite,
   type InitInput,
 } from '../pkg/fossil_storage_wasm.js';
 import type { Access, StorageCredential } from '@fossil-lang/types';
 
 export type { InitInput };
+export { storageRead, storageWrite };
 
 let booted: Promise<unknown> | null = null;
 
@@ -36,13 +38,6 @@ export const nameOf = (
   credential: StorageCredential,
   locator: string,
 ): { name: string; lend: string | null } => storageName(credential, locator);
-
-export const signed = (
-  credential: StorageCredential,
-  method: 'GET' | 'PUT',
-  locator: string,
-): { url: string; headers: Record<string, string> } =>
-  storageSign(credential, method, locator, Date.now());
 
 /** The credential whose prefix is the longest one covering `locator`. */
 export function covering(

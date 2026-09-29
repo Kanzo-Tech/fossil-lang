@@ -43,9 +43,15 @@ schemars = { version = "0.8" }
 # producer in fossil-layout tests). Already a transitive dep via duckdb/parquet;
 # WASM-safe (no C/FFI) though only used in a native-only dev dependency here.
 sha2 = "0.10"
-# HMAC over `sha2` for SigV4 request signing in `fossil-storage` — the same
-# RustCrypto `digest` 0.10 generation, pure Rust, wasm32-clean.
-hmac = "0.12"
+# `fossil-storage`'s IO half: a vended credential as a store `DataFusion`
+# reads through and fossil writes through. `aws` + `azure` are the stores a
+# host vends for, `http` the public URLs no credential covers. Its cloud client
+# runs on wasm32 over `fetch` (verified in a browser against MinIO, 2026-09-29).
+object_store = { version = "0.13", default-features = false, features = ["aws", "azure", "http"] }
+async-trait = "0.1"
+futures = "0.3"
+web-time = "1"
+percent-encoding = "2"
 
 # === Input descriptors (declared here for inheritance) ===
 csv = "1.3"

@@ -9,11 +9,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import {
-  initFossilExecutor,
-  FossilExecutor,
-  type SourceInput,
-} from '../src/index.js';
+import { initFossilExecutor, FossilExecutor } from '../src/index.js';
 
 // The header names are BARE and bound positionally by the `type { … }` line
 // against `graph.shex`; every property key is the last segment of a predicate
@@ -96,16 +92,27 @@ describe('FossilExecutor', () => {
     }
   });
 
+  it('refuses to run in memory over a source it does not hold', async () => {
+    const exec = compiled();
+    try {
+      await expect(
+        exec.runInMemory({ 'https://data.example.com/users.csv': await fixture('users.csv') }, 's3://jobs/run-1'),
+      ).rejects.toThrow(/orders\.csv/);
+    } finally {
+      exec.free();
+    }
+  });
+
   it('runs the full vertex+edge path in wasm and emits valid Parquet', async () => {
-    const sources: SourceInput[] = [
-      { uri: 'https://data.example.com/users.csv', format: 'csv', bytes: await fixture('users.csv') },
-      { uri: 'https://data.example.com/orders.csv', format: 'csv', bytes: await fixture('orders.csv') },
-    ];
+    const sources = {
+      'https://data.example.com/users.csv': await fixture('users.csv'),
+      'https://data.example.com/orders.csv': await fixture('orders.csv'),
+    };
 
     const exec = compiled();
     let result;
     try {
-      result = await exec.run(sources, 's3://jobs/run-1');
+      result = await exec.runInMemory(sources, 's3://jobs/run-1');
     } finally {
       exec.free();
     }
@@ -137,7 +144,7 @@ describe('FossilExecutor', () => {
       }
     }
 
-    expect(result.report.dest).toBe('s3://jobs/run-1');
+    expect(result.report.dest).toBe('s3://jobs/run-1/');
     const person = result.report.vertices.find((v) => v.type === 'Person');
     expect(person?.vertex_count).toBe(3);
     expect(person?.prefix).toBe('vertex/Person/');

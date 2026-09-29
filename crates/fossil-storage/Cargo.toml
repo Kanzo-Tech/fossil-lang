@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Storage access from a vended credential — Iceberg REST's StorageCredential turned into a scoped DuckDB secret, an Azure SAS URL, or a SigV4-signed request. Sans-IO and wasm32-clean."
+description = "Storage access from a vended credential — Iceberg REST's StorageCredential turned into a scoped DuckDB secret, an Azure SAS URL, or an object_store store. wasm32-clean."
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -19,8 +19,26 @@ thiserror = { workspace = true }
 # `Debug`-printed, zeroed on drop.
 secrecy = { workspace = true }
 serde = { workspace = true }
-sha2 = { workspace = true }
-hmac = { workspace = true }
+percent-encoding = { workspace = true }
+# The IO half: `DataFusion` reads through `object_store`, so a vended credential
+# becomes a store. Off, the crate is sans-IO for the hosts that only render SQL.
+object_store = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+# `SystemTime::now()` panics on wasm32-unknown-unknown; this is std's on native.
+web-time = { workspace = true, optional = true }
+
+# The JS `Host` as a credential source, for the wasm32 bindings.
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+serde-wasm-bindgen = { workspace = true, optional = true }
+
+[features]
+object-store = ["dep:object_store", "dep:async-trait", "dep:bytes", "dep:futures", "dep:web-time"]
+js = ["object-store", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:serde-wasm-bindgen"]
 
 [dev-dependencies]
 serde_json = { workspace = true }
+tokio = { workspace = true }

@@ -206,5 +206,5 @@ anything was ported. These are what was read, and the one thing each settles.
 | **Unity Catalog OSS** — temporary table and path credentials, `AwsCredentialGenerator` | `access` as one parameter (`READ` / `READ_WRITE`) over one door, and `AssumeRole` with a session policy as the way a credential is scoped to a prefix. |
 | **Apache Polaris** — `AwsCredentialsStorageIntegration`, `AzureCredentialsStorageIntegration` | The same model on a second implementation, and user-delegation SAS as Azure's prefix-scoped credential. |
 | **DuckDB iceberg extension**, `ACCESS_DELEGATION_MODE 'vended_credentials'` | What a reader does with a vended credential: a secret with `SCOPE = prefix`, so the SQL names the object and never the credential. `fossil-storage` does the same for a reader that is not an Iceberg table. |
-| **AWS**, *Authenticating Requests: Using Query Parameters (Signature Version 4)* | The presigned request fossil's writer sends, and the worked example `crates/fossil-storage/src/sigv4.rs` is tested against. |
+| **Apache Arrow `object_store`** | The IO DataFusion reads through, and so the one fossil reads and writes through: a vended credential becomes a store with a renewing `CredentialProvider`, and its cloud client runs on wasm32 over `fetch`. |
 | **duckdb-httpfs #351 / #352** | Why the writer is fossil and not `COPY … TO 's3://'` in DuckDB-WASM. |
