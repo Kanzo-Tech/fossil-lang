@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "next dev --port 3200",
     "build": "pnpm run test && next build",
+    "//build:static": "What GitHub Pages gets: `output: \"export\"` under the project-page prefix, then the pass that puts each page's `.mdx` source back at the URL the rewrite serves it from on a server. The test runs first here too, so the published site is held to the guard the PR build is. Override NEXT_PUBLIC_BASE_PATH to serve it from anywhere else.",
+    "build:static": "pnpm run test && DOCS_STATIC_EXPORT=1 NEXT_PUBLIC_BASE_PATH=\"${NEXT_PUBLIC_BASE_PATH-/fossil-lang}\" next build && node scripts/materialise-mdx.mjs",
     "start": "next start --port 3200",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

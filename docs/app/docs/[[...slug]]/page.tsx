@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "fumadocs-ui/page";
 import { MarkdownCopyButton, ViewOptionsPopover } from "fumadocs-ui/layouts/docs/page";
+import { basePath } from "@/lib/base-path";
 import { source } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
 import { DirectionNote } from "@/components/direction";
@@ -12,7 +13,8 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
   if (!page) notFound();
 
   const MDX = page.data.body;
-  const markdownUrl = `${page.url}.mdx`;
+  // Prefixed by hand: the copy button `fetch`es it and the popover writes it into a bare `<a>`.
+  const markdownUrl = `${basePath}${page.url}.mdx`;
 
   return (
     <DocsPage toc={page.data.toc}>
