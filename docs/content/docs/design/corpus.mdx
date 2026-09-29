@@ -24,7 +24,7 @@ which is the worst distribution of a failure a design can have. The lineage is e
 ### Where a wildcard survives, counted
 
 The rule has one exception left in the tree, and it is bounded rather than argued.
-`packages/corpus/src/corpus.ts, verbs` composes every path a verb reads, and what is left was
+`packages/corpus/src/verbs.ts, verbs` composes every path a verb reads, and what is left was
 measured over the conformance corpus in both containers by `fossil-mcp`'s `src/lib.rs` (deleted after
 `2fa5f22`), which composed the same paths the same way:
 
@@ -778,7 +778,7 @@ does not retire the lesson, because the defect was a reader composing a path the
 given it.
 
 It composed both paths from the manifest before it was deleted, and
-`packages/corpus/src/corpus.ts, verbs` composes them the same way: `container` says whether a tile is a file or a row
+`packages/corpus/src/verbs.ts, verbs` composes them the same way: `container` says whether a tile is a file or a row
 group and `prefix` says where the set is, so under the container fossil writes each relation is one
 named file and there is nothing to expand. Under the other one a vertex type's tiles are enumerated
 from `vertex_count` and `chunk_size`, which is why the count is declared. The single wildcard left is

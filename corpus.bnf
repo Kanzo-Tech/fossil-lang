@@ -110,7 +110,7 @@
 
    `declared` marks a column that also appears in the manifest's `properties:`.
    Exactly one does. That asymmetry is the whole of the manifest-versus-bytes
-   difference `packages/corpus/src/corpus.ts` documents from the other side: on
+   difference `packages/corpus/src/open.ts` documents from the other side: on
    the conformance corpus it is three declared properties against seven columns
    on disk, and this file is where the three-versus-seven is stated once. *)
 

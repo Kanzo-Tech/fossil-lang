@@ -85,7 +85,17 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
   ├─ src/query.ts       QueryFn — the engine a host lends
   ├─ src/manifest.ts    graph.graph.yml, scanned for the paths to fetch next
   ├─ src/address.ts     addressManifests + levelsOf — the binding, not the reader
-  └─ src/corpus.ts      open(url, { query } | { engine, host }) — THE DOOR
+  ├─ src/open.ts        open(url, { query } | { engine, host }) — THE DOOR
+  ├─ src/corpus.ts      the Corpus surface's types
+  ├─ src/tile-manifest.ts   the footers: tile boxes, bytes, runs, extent
+  ├─ src/tile-matrix.ts the level a canvas can show
+  ├─ src/expression.ts  the box predicate
+  ├─ src/scan.ts        tile selection, the sampled read, rows
+  ├─ src/frame.ts       frame
+  ├─ src/edges.ts       the adjacency reads, neighbours
+  ├─ src/identity.ts    node: the index seek and its key ranges
+  ├─ src/verbs.ts       the views the verbs read, schema, relations, executeSql
+  └─ src/sql.ts         literals, identifiers, the 64-bit id guard
 ```
 
 ## Usage
@@ -133,7 +143,7 @@ rectangle read would otherwise re-derive by hand. `read_text`, `read_parquet` an
 every vertex, so an address held outside the corpus names a different vertex
 after the next write. `node` refuses a `BigInt` with a `TypeError` that says so.
 The price is a scan of the `subject` column, because the corpus carries no index
-from a name to an address; `src/corpus.ts` measures it at the call site.
+from a name to an address; `src/identity.ts` measures it at the call site.
 
 **An answer says what it is missing.** `complete` is `true` only when every edge
 incident to the answer's vertices is in it. `gaps` names an orientation that was

@@ -13,7 +13,7 @@
  *
  * The seam it measures through is the one the package already has. `open` asks a host for a
  * single `query` callback, so everything a reader does passes through one function and counting is
- * a decorator around it: no instrumentation inside `packages/corpus/src/corpus.ts`, and nothing
+ * a decorator around it: no instrumentation inside `packages/corpus/src`, and nothing
  * here can drift from what a real host would see.
  *
  * **Two corpora, written by the checker's own fixture** — `packages/corpus/guards/fixture.mjs`, which
