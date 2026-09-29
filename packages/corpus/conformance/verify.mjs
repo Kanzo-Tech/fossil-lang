@@ -93,9 +93,22 @@ let reader = "reader.mjs";
 const fail = (message) => failures.push(`[${reader}] ${message}`);
 const note = (message) => notes.push(`[${reader}] ${message}`);
 
+/**
+ * Two values compared as JSON, with a `BigInt` spelled `64n` rather than refused.
+ *
+ * The spelling keeps the TYPE, and that is the point of it: a reader that hands back `64n` where
+ * the table and the other readers say `64` has changed the width of a field, and this reports it
+ * under that reader's name. `JSON.stringify` alone threw instead — the whole run died on the first
+ * `BigInt` with no reader named — and a replacer that wrote the digits alone would have made the
+ * two widths compare equal, which is the one difference three readers exist to see. Where the
+ * table means a count in decimal, the call site says so with `String()`.
+ */
+const canonical = (value) =>
+  JSON.stringify(value, (_, v) => (typeof v === "bigint" ? `${v}n` : v));
+
 function same(what, got, want) {
-  const a = JSON.stringify(got);
-  const b = JSON.stringify(want);
+  const a = canonical(got);
+  const b = canonical(want);
   if (a !== b) fail(`${what}: ${a} is not ${b}`);
 }
 
