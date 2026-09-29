@@ -3,7 +3,7 @@
 //!
 //! The writer emits `x`/`y`/`cluster_id` as placeholders (`0`); this fills them,
 //! so a reader addressing the corpus gets meaningful positions and the Parquet
-//! can be morton-sorted for predicate pushdown.
+//! can be sorted along a Hilbert curve for predicate pushdown.
 //!
 //! The pure half, over a `dense_id` edge list:
 //!
@@ -30,7 +30,7 @@
 //! - [`community`] — the partition. Louvain, its quotient graph, and the
 //!   reachability it is contrasted against.
 //! - [`place`] — where a vertex goes on the plane, given its community.
-//! - [`morton`] — Z-order codes and the quantisation into one.
+//! - [`hilbert`] — Hilbert codes and the quantisation into one.
 //! - [`pass`] — [`enrich_layout`], which takes the executor's `RecordBatch`es
 //!   and writes Parquet through `arrow-rs` and the one encoder the writer itself
 //!   uses. There is no database here: see `docs/design/one-engine.mdx`.
@@ -55,7 +55,7 @@
 
 pub mod cells;
 pub mod community;
-pub mod morton;
+pub mod hilbert;
 pub mod pass;
 pub mod place;
 mod statistics;

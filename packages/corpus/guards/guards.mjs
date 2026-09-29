@@ -23,8 +23,7 @@ import { lit, query, scalar } from "./duck.mjs";
 import { fileList, partOf, payload, rowGroups, tileSql } from "./inspect.mjs";
 import {
   TILE_ROWS,
-  morton2,
-  mortonOf,
+  hilbert2,
   quantize,
   shiftFor,
   tailRows,
@@ -52,10 +51,10 @@ function vectors() {
 /**
  * The bound on how much of a corpus one tile's bounding box may cover, averaged over the tiles.
  *
- * Not a quality target. A Morton-ordered corpus of 70,000 vertices in 18 tiles measures **0.124**;
+ * Not a quality target. A Hilbert-ordered corpus of 70,000 vertices in 18 tiles measures **0.080**;
  * the same vertices with `dense_id` assigned at random measure **0.99**, which is what theory says
  * — with no spatial order every tile's box is the whole corpus, so the average share is 1 whatever
- * the tile count. Half sits four times above the ordered case and just below the disordered one at
+ * the tile count. Half sits six times above the ordered case and just below the disordered one at
  * the smallest corpus worth checking, and the gap only widens with N.
  *
  * It separates *a spatial order* from *no spatial order*. It does not separate a good one from a
@@ -84,24 +83,38 @@ function violations(count, what) {
   return Number(count) === 0 ? [] : [`${Number(count).toLocaleString("en-US")} × ${what}`];
 }
 
-/** The SQL that recomputes the Morton code of every vertex from the corpus's own positions. */
-function mortonSql(files) {
+/**
+ * The SQL that recomputes the Hilbert code of every vertex from the corpus's own positions.
+ *
+ * `hilbert2` in `arithmetic.mjs`, unrolled: one CTE per bit from the top, each adding the quadrant's
+ * `s·s·((3·rx) ^ ry)` and turning the frame. Written as `CASE` rather than `xor`, because `^` is
+ * exponentiation in DuckDB; and as sixteen CTEs rather than one `SELECT` of lateral aliases, because
+ * the binder inlines an alias into every use and each step reads the last one's coordinates twice —
+ * two to the sixteenth copies of the first step.
+ */
+function hilbertSql(files) {
+  const steps = [];
+  for (let k = 0; k < 16; k += 1) {
+    const bit = 15 - k;
+    const s2 = 4 ** bit;
+    steps.push(`h${k + 1} AS (SELECT dense_id,
+            CASE WHEN ry = 1 THEN x WHEN rx = 1 THEN 65535 - y ELSE y END AS x,
+            CASE WHEN ry = 1 THEN y WHEN rx = 1 THEN 65535 - x ELSE x END AS y,
+            d + ${s2}::BIGINT * CASE WHEN rx = 0 THEN ry ELSE 3 - ry END AS d
+          FROM (SELECT *, (x >> ${bit}) & 1 AS rx, (y >> ${bit}) & 1 AS ry FROM h${k}))`);
+  }
   return `
     WITH src AS (SELECT dense_id, x, y FROM read_parquet(${fileList(files)})),
     ext AS (SELECT min(x) AS mnx, max(x) AS mxx, min(y) AS mny, max(y) AS mxy FROM src),
-    q AS (SELECT dense_id,
+    h0 AS (SELECT dense_id,
             CASE WHEN mxx <= mnx THEN 0::BIGINT ELSE
-              CAST(round(least(greatest((x - mnx) / (mxx - mnx), 0::FLOAT), 1::FLOAT) * 65535::FLOAT) AS BIGINT) END AS a0,
+              CAST(round(least(greatest((x - mnx) / (mxx - mnx), 0::FLOAT), 1::FLOAT) * 65535::FLOAT) AS BIGINT) END AS x,
             CASE WHEN mxy <= mny THEN 0::BIGINT ELSE
-              CAST(round(least(greatest((y - mny) / (mxy - mny), 0::FLOAT), 1::FLOAT) * 65535::FLOAT) AS BIGINT) END AS b0
+              CAST(round(least(greatest((y - mny) / (mxy - mny), 0::FLOAT), 1::FLOAT) * 65535::FLOAT) AS BIGINT) END AS y,
+            0::BIGINT AS d
           FROM src, ext),
-    z AS (SELECT dense_id,
-            (a0 | (a0 << 8)) & 16711935  AS a1, (b0 | (b0 << 8)) & 16711935  AS b1,
-            (a1 | (a1 << 4)) & 252645135 AS a2, (b1 | (b1 << 4)) & 252645135 AS b2,
-            (a2 | (a2 << 2)) & 858993459 AS a3, (b2 | (b2 << 2)) & 858993459 AS b3,
-            (a3 | (a3 << 1)) & 1431655765 AS a4, (b3 | (b3 << 1)) & 1431655765 AS b4,
-            (a4 | (b4 << 1)) AS morton
-          FROM q)`;
+    ${steps.join(",\n    ")},
+    z AS (SELECT dense_id, d AS hilbert FROM h16)`;
 }
 
 /** The bounding box of every tile, whichever container carries them. */
@@ -131,9 +144,9 @@ export function checkVectors(vectors) {
     const got = tileOf(BigInt(v.dense_id));
     if (got !== BigInt(v.tile)) failures.push(`tile_of(${v.dense_id}) = ${got}, not ${v.tile}`);
   }
-  for (const v of vectors.morton2.vectors) {
-    const got = morton2(v.x, v.y);
-    if (got !== v.morton) failures.push(`morton2(${v.x}, ${v.y}) = ${got}, not ${v.morton}`);
+  for (const v of vectors.hilbert2.vectors) {
+    const got = hilbert2(v.x, v.y);
+    if (got !== v.hilbert) failures.push(`hilbert2(${v.x}, ${v.y}) = ${got}, not ${v.hilbert}`);
   }
   for (const v of vectors.quantize.vectors) {
     const got = quantize(v.v, v.lo, v.hi);
@@ -563,7 +576,7 @@ export const GUARDS = [
       "column entirely — row `j` of tile `i` is `i·4096 + j` — is only sound because of this.",
     cannotProve:
       "That the numbering means anything. Gapless ids in an arbitrary order pass here and fail " +
-      "`morton-order`, which is the guard that makes the numbering an address.",
+      "`hilbert-order`, which is the guard that makes the numbering an address.",
     run(corpus) {
       const failures = [];
       for (const type of corpus.types) {
@@ -704,11 +717,11 @@ export const GUARDS = [
     id: "published-vectors",
     title: "The published vectors reproduce",
     proves:
-      "`tile_of`, `tile_url`, `morton2`, the quantisation and the count-to-tiles arithmetic answer " +
+      "`tile_of`, `tile_url`, `hilbert2`, the quantisation and the count-to-tiles arithmetic answer " +
       "what `guards/vectors.json` says they answer, at every border where a re-implementation " +
       "diverges: 2³¹ for a shift taken as signed, 2⁵³ for an id, a count or a tile number that " +
-      "went through a JavaScript `Number`, bit 31 of a Morton code for an interleave that was not " +
-      "coerced back to unsigned, a count that exactly fills a tile for the ceiling that writes an " +
+      "went through a JavaScript `Number`, bit 31 and the 3·2³⁰ step of a Hilbert index kept in a " +
+      "signed accumulator, the reflection a port of the curve drops, a count that exactly fills a tile for the ceiling that writes an " +
       "empty one after it, and one path for every tile of a set for a port that carried the " +
       "file-per-tile composition into the other container. The vectors are the deliverable — they " +
       "are what gets copied.",
@@ -721,17 +734,17 @@ export const GUARDS = [
   },
 
   {
-    id: "morton-order",
-    title: "`dense_id` ascends with the Morton code of the position",
+    id: "hilbert-order",
+    title: "`dense_id` ascends with the Hilbert code of the position",
     proves:
       "The order is the index. Recomputing the code from the corpus's own `x` and `y` — quantised " +
       "over that vertex type's own extent, in binary32, the width the conventions specify — the " +
       "code never decreases as `dense_id` increases. This is what makes a rectangle in space a few " +
-      "hundred contiguous runs of `dense_id` instead of a scan: a rectangle over a Morton order " +
+      "hundred contiguous runs of `dense_id` instead of a scan: a rectangle over a Hilbert order " +
       "breaks into O(√n) segments, and that is the whole mechanism.",
     cannotProve:
-      "That the *layout* is any good — a Morton order over positions that mean nothing is still a " +
-      "Morton order. And it is exact only because the width is specified: a writer that quantised " +
+      "That the *layout* is any good — a Hilbert order over positions that mean nothing is still a " +
+      "Hilbert order. And it is exact only because the width is specified: a writer that quantised " +
       "in binary64 can report inversions here that are ties in its own arithmetic, which is why " +
       "the conventions name the width rather than leaving it to be inferred.",
     run(corpus) {
@@ -739,11 +752,11 @@ export const GUARDS = [
       for (const type of corpus.types) {
         if (type.files.length === 0 || !type.columns.has("x") || !type.columns.has("y")) continue;
         const bad = scalar(
-          `${mortonSql(type.files)}
-           SELECT count(*) FROM (SELECT morton, lag(morton) OVER (ORDER BY dense_id) AS prev FROM z)
-            WHERE prev IS NOT NULL AND morton < prev`,
+          `${hilbertSql(type.files)}
+           SELECT count(*) FROM (SELECT hilbert, lag(hilbert) OVER (ORDER BY dense_id) AS prev FROM z)
+            WHERE prev IS NOT NULL AND hilbert < prev`,
         );
-        failures.push(...violations(bad, `${type.name}: dense_id ascends where the Morton code falls`));
+        failures.push(...violations(bad, `${type.name}: dense_id ascends where the Hilbert code falls`));
       }
       return result(failures);
     },
@@ -754,8 +767,8 @@ export const GUARDS = [
     title: "A tile is compact in space",
     proves:
       "What the order exists to produce, measured on the footer a reader actually has: the average " +
-      "tile's bounding box covers at most half the corpus extent. A Morton-ordered corpus measures " +
-      "far below that (0.124 on the fixture); the same vertices renumbered at random measure 0.99, " +
+      "tile's bounding box covers at most half the corpus extent. A Hilbert-ordered corpus measures " +
+      "far below that (0.080 on the fixture); the same vertices renumbered at random measure 0.99, " +
       "because with no spatial order every tile's box is the whole corpus.",
     cannotProve:
       "The difference between a good spatial order and a slightly worse one. It separates having " +
@@ -1041,7 +1054,7 @@ export const GUARDS = [
       "still match, both orientations still agree, and the graph is wrong.",
     cannotProve:
       "That an endpoint addresses the *right* vertex. A renumbering that permuted two ids leaves " +
-      "every id in range; only `morton-order` and an identity join catch that.",
+      "every id in range; only `hilbert-order` and an identity join catch that.",
     run(corpus) {
       const failures = [];
       for (const edge of corpus.edges) {
@@ -1129,7 +1142,7 @@ export const GUARDS = [
       "`x` and `y` on a vertex payload, `dense_id` and `src_dense` where they are the address. " +
       "Arithmetic gives a reader *which tiles exist*; only the boxes give it *which tiles " +
       "intersect the window*, because the `dense_id` range of a rectangle is not computable " +
-      "without knowing the Morton range, and the boxes are what say it. One request buys the " +
+      "without knowing the Hilbert range, and the boxes are what say it. One request buys the " +
       "footer and the whole index comes with it.",
     cannotProve:
       "That the statistics are true. They are written by the writer and believed by the reader; a " +

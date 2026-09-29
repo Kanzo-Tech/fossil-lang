@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "The layout post-pass — Louvain communities and Morton tiling over Parquet through arrow-rs. Compiles for wasm32"
+description = "The layout post-pass — Louvain communities and Hilbert tiling over Parquet through arrow-rs. Compiles for wasm32"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 

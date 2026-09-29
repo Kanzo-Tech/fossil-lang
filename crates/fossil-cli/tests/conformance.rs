@@ -42,13 +42,12 @@
 //! reader over a corpus `fossil run` produced, and that is a Rust test that would
 //! need a wasm build to exist.
 //!
-//! **It does not freeze the Morton arithmetic.** No test vector for `morton2`
-//! appears below: the quantisation is in motion — it may widen if flattened
-//! ids grow past 32 bits — and a vector for an arithmetic that is
-//! about to change would be precisely wrong rather than honestly absent. The
-//! *tile* arithmetic is settled and is frozen, but in `fossil-sinks`, beside the
-//! shift it describes, and not here: a border vector is a statement about a
-//! function, and this file only makes statements about an artefact.
+//! **It does not freeze the curve.** No test vector for `hilbert2` or the
+//! quantisation appears below: they are `packages/corpus/guards/vectors.json`,
+//! held against the writer by `fossil-layout`'s `hilbert` tests, and the *tile*
+//! arithmetic is frozen in `fossil-sinks`, beside the shift it describes. A
+//! border vector is a statement about a function, and this file only makes
+//! statements about an artefact.
 
 #![cfg(not(target_arch = "wasm32"))]
 

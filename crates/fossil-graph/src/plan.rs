@@ -189,7 +189,7 @@ pub const fn tail_rows(count: u64, chunk_size: u64) -> Option<u64> {
 /// Where a vertex type's identity index lives, and how to address one of its tiles.
 ///
 /// A second copy of the type ordered by identity. It cannot be a column of the
-/// payload: one table has one sort, the payload's is Morton because the spatial
+/// payload: one table has one sort, the payload's is Hilbert because the spatial
 /// order IS the id space, and a lookup by identity needs the other one.
 #[derive(Debug, Clone, Serialize)]
 pub struct IndexAddress {

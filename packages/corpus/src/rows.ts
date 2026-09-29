@@ -358,7 +358,7 @@ export function rowsOf(reads: {
      * be expressed as a predicate*: what was measured there is 179 disjoint `dense_id` ranges,
      * which cost 189 ms against 5 ms for no pruning at all because the engine evaluates them per
      * row. The `WHERE` here selects which rows come back; what selects which bytes are read is the
-     * footer, and the Morton order is what keeps the boxes tight enough for it to matter.
+     * footer, and the Hilbert order is what keeps the boxes tight enough for it to matter.
      *
      * Edges have no such column. An adjacency tile is addressed by the *vertex* tile of the endpoint
      * it is ordered by, so the tiles are computed from the answer — `dense_id >> shift` over the

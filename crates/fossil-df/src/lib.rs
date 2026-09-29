@@ -2129,7 +2129,7 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
     // nothing reads it — which is `RunStatus` again, in one boolean.
     //
     // The address cannot be the identity for the reason `fossil-layout`
-    // exists: the pass ranks every vertex by the Morton code of its new
+    // exists: the pass ranks every vertex by the Hilbert code of its new
     // position and lets that rank be its `dense_id`, so a `dense_id` held
     // anywhere outside the corpus names a different vertex after the next
     // write. `subject` is what survives that, and since `55f573e` it is

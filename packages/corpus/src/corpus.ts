@@ -23,7 +23,7 @@
  * The addressing is not this. It returns URLs and leaves the consumer knowing what a tile is,
  * which container carries one, how to ask for footers and how to join CSR with CSC. That is exactly
  * the knowledge the handover asked not to need. Here — with an engine given — there are no tiles,
- * no `dense_id`, no Morton, no `by_source`, no prefixes and no footers in the caller's face:
+ * no `dense_id`, no curve, no `by_source`, no prefixes and no footers in the caller's face:
  *
  * ```ts
  * const corpus = await open(url, { query });

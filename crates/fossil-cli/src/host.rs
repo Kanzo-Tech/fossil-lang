@@ -402,7 +402,7 @@ pub fn run(
 
     // **The write, in the order a corpus is true in.** The payload first, out of
     // the batches `graph` holds — a community partition, a deterministic
-    // placement, and `dense_id` renumbered into Morton order, emitted as tiles.
+    // placement, and `dense_id` renumbered into Hilbert order, emitted as tiles.
     // Then the manifests, describing what is on disk.
     //
     // That order is the whole of `materialise` no longer taking a destination.
@@ -438,7 +438,7 @@ pub fn run(
 /// Run the W3 layout enrichment: for each vertex type, hand the pass the batches
 /// [`fossil_df::materialise`] returned and the prefixes the manifests will
 /// declare, and let it emit the payload with real `x`/`y`/`cluster_id` and
-/// `dense_id` in Morton order. Local-filesystem paths (`dest_dir` is a local
+/// `dense_id` in Hilbert order. Local-filesystem paths (`dest_dir` is a local
 /// directory).
 ///
 /// # It writes the payload, it no longer rewrites one

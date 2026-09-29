@@ -23,7 +23,7 @@
 //! bound. A string's footer bound is truncated to 64 bytes by the encoder, is
 //! ordered by UTF-8 bytes where a JavaScript planner compares UTF-16 code units,
 //! and over `subject` — the one string every type has — prunes nothing, because
-//! tiles are in Morton order and identities are not. What would reverse it is a
+//! tiles are in Hilbert order and identities are not. What would reverse it is a
 //! string filter measured to prune a tile.
 //!
 //! **The box is not a field.** A tile's box is the bounds of its coordinate

@@ -20,7 +20,7 @@
 //!    their tiles on the endpoint ranges that just moved.
 //!
 //! Every one of those is something `fossil_layout::layout::enrich_layout`
-//! already does, on every run, for the Morton renumbering — which is why the
+//! already does, on every run, for the Hilbert renumbering — which is why the
 //! number this prints is worth having next to that pass's own. Run both.
 //!
 //! # What it measures
@@ -271,7 +271,7 @@ fn main() {
             // A compaction map is monotone, so the re-sort below is provably a
             // no-op and this is the cost of the pass a compaction would
             // actually be. It is not the default because the pass it would be
-            // folded into does sort — Morton is not monotone — and a default
+            // folded into does sort — the curve is not monotone — and a default
             // that measures the cheaper thing is how a number gets quoted for
             // the wrong pass.
             "--no-resort" => resort = false,
@@ -434,7 +434,7 @@ fn main() {
     // **The sort is the conservative half of this number.** A compaction map is
     // monotone, so a file sorted on `src_dense` before it is sorted on
     // `src_dense` after it, and the `lexsort_to_indices` below is provably a
-    // no-op. It is here because the pass it would live inside does it — Morton
+    // no-op. It is here because the pass it would live inside does it — the curve
     // is not monotone — and because leaving it out would measure the compaction
     // as cheaper than the thing it would actually be folded into.
     let edge_root = corpus.join("edge");

@@ -162,7 +162,7 @@ export function window(root, count, { x, y, w, h, type, directions = ["src", "ds
  * One vertex by identity, which is the subject IRI.
  *
  * A scan of the `subject` column over every tile of the type, and it cannot be anything else here:
- * the rows are in Morton order and subjects are not, so no footer statistic prunes and the corpus
+ * the rows are in Hilbert order and subjects are not, so no footer statistic prunes and the corpus
  * publishes no index from one to the other. That cost is the answer's, not this file's.
  */
 export function node(root, count, id, type) {
@@ -170,7 +170,7 @@ export function node(root, count, id, type) {
   const vertex = corpus.vertexType(type);
   const rows =
     vertex.index === null
-      ? // The scan. Every tile of the type, because the rows are in Morton order
+      ? // The scan. Every tile of the type, because the rows are in Hilbert order
         // and subjects are not, so no footer prunes.
         query(
           `SELECT * FROM read_parquet(${list(allTiles(root, vertex, count))}) ` +

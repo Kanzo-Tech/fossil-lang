@@ -148,32 +148,24 @@
       }
     ]
   },
-  "morton2": {
-    "formula": "morton = spread(x) | (spread(y) << 1)",
+  "hilbert2": {
+    "formula": "Wikipedia's xy2d at n = 2^16: for s from 2^15 down to 1, rx = (x & s) > 0, ry = (y & s) > 0, d += s·s·((3·rx) ^ ry), and when ry = 0 reflect both coordinates across the grid if rx = 1 and then swap them",
     "input": "two unsigned 16-bit quantised coordinates",
-    "output": "unsigned 32-bit code; the shift result must be coerced back to unsigned",
+    "output": "unsigned 32-bit index on the order-16 curve; the accumulator must stay unsigned, and a single step adds up to 3·2^30",
     "vectors": [
-      { "x": 0, "y": 0, "morton": 0, "why": "the origin" },
-      { "x": 1, "y": 0, "morton": 1, "why": "x occupies the even bits" },
-      { "x": 0, "y": 1, "morton": 2, "why": "y occupies the odd bits" },
-      { "x": 1, "y": 1, "morton": 3, "why": "the first cell of the second row" },
-      { "x": 34, "y": 17, "morton": 1542, "why": "an interior value with no symmetry to hide behind" },
-      { "x": 4096, "y": 4096, "morton": 50331648, "why": "a power of two on both axes" },
-      {
-        "x": 32768,
-        "y": 0,
-        "morton": 1073741824,
-        "why": "bit 30 — the last one a signed 32-bit accumulator survives"
-      },
-      {
-        "x": 0,
-        "y": 32768,
-        "morton": 2147483648,
-        "why": "bit 31, which is negative in a signed 32-bit reading and is where a port that omits the unsigned coercion sorts the top half of the plane first"
-      },
-      { "x": 65535, "y": 0, "morton": 1431655765, "why": "every even bit set" },
-      { "x": 0, "y": 65535, "morton": 2863311530, "why": "every odd bit set" },
-      { "x": 65535, "y": 65535, "morton": 4294967295, "why": "the last code" }
+      { "x": 0, "y": 0, "hilbert": 0, "why": "the origin, where the curve starts" },
+      { "x": 1, "y": 0, "hilbert": 1, "why": "the first step is along x. At an odd order the curve starts along y, so a port that runs it at any order but 16 answers 3 here" },
+      { "x": 1, "y": 1, "hilbert": 2, "why": "the first 2×2 block is a U and not a Z: this cell comes before (0, 1), where Morton puts it last" },
+      { "x": 0, "y": 1, "hilbert": 3, "why": "the last cell of the first U" },
+      { "x": 34, "y": 17, "hilbert": 3501, "why": "an interior value with no symmetry to hide behind. A port that swaps without reflecting answers 3855" },
+      { "x": 4096, "y": 4096, "hilbert": 33554432, "why": "a power of two on both axes" },
+      { "x": 32768, "y": 32768, "hilbert": 2147483648, "why": "2^31 — bit 31, negative in a signed 32-bit reading, where a port that keeps the index in a signed integer sorts the second half of the curve first" },
+      { "x": 65535, "y": 32767, "hilbert": 3221225472, "why": "3·2^30, the first cell of the last quadrant: the one step that adds three quarters of the codomain at once, and overflows a signed accumulator" },
+      { "x": 32768, "y": 0, "hilbert": 3937053354, "why": "the last quadrant's reflection. A port that swaps without reflecting answers 3221225472 here and 3937053354 at the row above — the two cells trade places" },
+      { "x": 0, "y": 65535, "hilbert": 1431655765, "why": "the top-left corner" },
+      { "x": 65535, "y": 65535, "hilbert": 2863311530, "why": "the top-right corner" },
+      { "x": 12345, "y": 54321, "hilbert": 1555040834, "why": "a second interior value, on the other side of the diagonal" },
+      { "x": 65535, "y": 0, "hilbert": 4294967295, "why": "the last code: the curve ends at the bottom-right corner" }
     ]
   },
   "quantize": {
@@ -185,7 +177,7 @@
       { "v": 50, "lo": 0, "hi": 100, "q": 32768, "why": "the midpoint rounds up, not down" },
       { "v": 100, "lo": 0, "hi": 100, "q": 65535, "why": "the high edge" },
       { "v": 5, "lo": 5, "hi": 5, "q": 0, "why": "a degenerate axis maps to 0 rather than dividing by zero" },
-      { "v": 147, "lo": 0, "hi": 167, "q": 57687, "why": "the width, and the only kind of border the four rows above cannot express: every one of them is exact in both float widths, so a table without this row passes against an implementation that quantises in binary64. Here binary32 rounds up to 57687 and binary64 rounds down to 57686 — one unit, which is a different Morton code, a different rank, a different `dense_id` and a different tile" }
+      { "v": 147, "lo": 0, "hi": 167, "q": 57687, "why": "the width, and the only kind of border the four rows above cannot express: every one of them is exact in both float widths, so a table without this row passes against an implementation that quantises in binary64. Here binary32 rounds up to 57687 and binary64 rounds down to 57686 — one unit, which is a different Hilbert code, a different rank, a different `dense_id` and a different tile" }
     ]
   }
 }

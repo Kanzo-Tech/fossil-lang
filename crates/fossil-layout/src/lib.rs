@@ -2,7 +2,7 @@
 //! `fossil-runtime` and it is not a runtime.
 //!
 //! [`layout`] holds no database connection: it takes Arrow in and writes Parquet
-//! through `arrow-rs`/`parquet-rs`, and Louvain and Morton were always Rust.
+//! through `arrow-rs`/`parquet-rs`, and Louvain and the curve were always Rust.
 //! `DuckDB` is a **dev**-dependency, brought by the tests to read back what the
 //! library wrote — `docs/design/one-engine.mdx` has the argument. It links no
 //! engine at all now: `DataFusion` reached this crate transitively, through the

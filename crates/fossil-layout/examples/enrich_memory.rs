@@ -3,7 +3,7 @@
 //!
 //! `layout_memory` next door measures `community_hierarchy` — the partition,
 //! which is integers. This measures the other half: reading a wide vertex file
-//! and permuting it into Morton order. The 2026-08-22 run of the real thing put
+//! and permuting it into Hilbert order. The 2026-08-22 run of the real thing put
 //! `read vertices` at **+0.95 G** and `gather + replace` at **+0.51 G** of the
 //! layout's +2.00 G, against `remap adjacencies`'s +0.17 G, so the vertex half
 //! is where the pass's memory is and there was no way to isolate it short of
@@ -290,7 +290,7 @@ fn adjacency_batches(edges: &[(u32, u32)], ordered_by: Endpoint) -> Vec<RecordBa
         .collect()
 }
 
-/// A graph with communities in it, so the Morton renumbering is a real
+/// A graph with communities in it, so the Hilbert renumbering is a real
 /// permutation. Same planted partition and same LCG as `layout_memory`, for the
 /// reason given there: Louvain on a uniform random graph merges nothing.
 // Every `as u32` is a modulus by a `u32`-derived bound, so it is in range by

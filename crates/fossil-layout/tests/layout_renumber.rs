@@ -1,4 +1,4 @@
-//! Integration: renumbering `dense_id` into Morton order must not change the
+//! Integration: renumbering `dense_id` into Hilbert order must not change the
 //! graph, and must leave every file the manifest describes actually describing it.
 //!
 //! These four assertions exist because each corresponding failure is **silent**.

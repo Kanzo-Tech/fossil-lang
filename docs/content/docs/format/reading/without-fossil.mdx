@@ -133,7 +133,7 @@ that these two files replace did not return in 45 seconds
 ## Finding one by its identity
 
 An IRI in hand and its address wanted is the one question the payload's order cannot answer: the
-rows are in Morton order and subjects are not, so every tile's `min`/`max` for `subject` overlaps
+rows are in Hilbert order and subjects are not, so every tile's `min`/`max` for `subject` overlaps
 every other's, the footer prunes nothing, and the read is the identity column of the whole type.
 **A vertex manifest may declare a second copy of itself that does answer it** — an `index:` block
 with a `prefix`, an `ordered_by` and its own `chunk_size` — and a reader that never looks for the
@@ -156,7 +156,7 @@ nothing.
 ## The same read through the package
 
 `@fossil-lang/corpus` composes all of it, and none of the arithmetic reaches the caller: no tiles, no
-`dense_id`, no Morton codes, no `by_source`, no prefixes, no footers.
+`dense_id`, no curve codes, no `by_source`, no prefixes, no footers.
 
 ```ts
 import { open } from '@fossil-lang/corpus';

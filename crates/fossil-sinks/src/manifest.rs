@@ -2,7 +2,7 @@
 //!
 //! # A corpus is a sequence, a cut, and some projections of that sequence
 //!
-//! **An order** — Morton over the positions, and `dense_id` *is* the rank in it.
+//! **An order** — Hilbert over the positions, and `dense_id` *is* the rank in it.
 //! **A cut** — fixed runs of `chunk_size`, and that, and only that, is a tile:
 //! arithmetic rather than an artefact. And **projections of that sequence**,
 //! each of them a [`Projection`]: a `scale` and the columns it carries. This
@@ -11,7 +11,7 @@
 //! the projection at `scale: 1`, not a special case, and that is the claim.**
 //!
 //! **Two artefacts are NOT projections**, and each of them says why in its own
-//! doc: [`VertexIndex`] is a second ORDER over the same rows, so the Morton cut
+//! doc: [`VertexIndex`] is a second ORDER over the same rows, so the spatial cut
 //! does not address it, and [`CellTree`] is a tree of SYNTHETIC rows, so no
 //! `scale` describes what one of them stands for. Everything else — payload,
 //! vertex levels, adjacency, edge levels — is the one sequence read at some
@@ -563,13 +563,13 @@ impl Channel {
 /// Where a vertex type's identity index lives, and what it is ordered by.
 ///
 /// **This is the one artefact of a corpus that is not a [`Projection`]: it is a
-/// second ORDER over the same rows, so the Morton cut does not address it.**
+/// second ORDER over the same rows, so the spatial cut does not address it.**
 /// Everything else — payload, levels, adjacency, edge levels — is the same
 /// sequence read at some `scale`, and tile `k` of it is a `dense_id` range.
 /// Tile `k` here is the `k`th slice of the SORTED order, which is why it
 /// carries a [`Self::chunk_size`] of its own and no `scale`.
 ///
-/// The payload is in Morton order, because the spatial order IS the id space
+/// The payload is in Hilbert order, because the spatial order IS the id space
 /// and that is what makes a window a range. A lookup by identity needs the
 /// other order and a table has one sort, so this is a **second table**, tiled
 /// like the first: the index tiles' footers carry disjoint `subject` ranges, so
@@ -602,7 +602,7 @@ pub struct VertexIndex {
 /// [`Self::projections`], so the manifest cannot name a level nobody wrote.
 ///
 /// **Level `k` is the vertices whose `dense_id` is a multiple of `4^k`.** Over
-/// a Morton-ordered `dense_id` that is one vertex per quadtree cell of depth
+/// a Hilbert-ordered `dense_id` that is one vertex per quadtree cell of depth
 /// `k`, and level `k+1` is a strict subset of level `k` — the nesting is by
 /// construction rather than by a writer's care, which is why zooming in only
 /// ever ADDS. A level is not an aggregation: nothing here is a synthetic
@@ -1434,7 +1434,7 @@ pub struct GraphInfo {
 
 /// **One projection of a corpus's sequence: a scale, a path, and the columns.**
 ///
-/// A corpus is an order (Morton over the positions, and `dense_id` is the rank
+/// A corpus is an order (Hilbert over the positions, and `dense_id` is the rank
 /// in it), a cut (fixed runs of `chunk_size`), and some projections of that
 /// sequence. This is one of them, and the four artefacts of a corpus that used
 /// to be four vocabularies are four of these:
