@@ -117,7 +117,7 @@ function relabel(): string {
     writeFileSync(
       join(root, 'vertex', `${type}.vertex.yml`),
       `type: ${type}\nvertex_count: ${VERTEX_COUNT}\nchunk_size: ${CHUNK_SIZE}\n` +
-        `prefix: vertex/${type}/\n${VERTEX_PROJECTIONS}`,
+        `prefix: vertex/${type}/\ntile_manifest: tile-manifest.json\n${VERTEX_PROJECTIONS}`,
     );
   }
 
@@ -234,4 +234,27 @@ it('draws nothing at all for a type whose only relation leaves it', async () => 
   expect(drawn.undrawn).toEqual([
     { edgeType: 'authored', direction: 'src', reason: 'other-space' },
   ]);
+});
+
+it('edges from a tile read the relations cut on its type, and decline the one that leaves it', async () => {
+  const author = { type: 'Author', z: 0, tile: 1 };
+  const out = await relabelled.edges({ from: author, direction: 'src' });
+  expect(out.batches.map((b) => [b.edgeType, b.srcType, b.dstType])).toEqual([['knows', 'Author', 'Author']]);
+  expect(out.declined).toEqual([{ edgeType: 'authored', direction: 'src', reason: 'other-space' }]);
+
+  // Named, the relation that leaves the type is read: its far ends are `Paper` ids, and the batch
+  // says so rather than letting them pass for `Author`s.
+  const named = await relabelled.edges({ from: author, direction: 'src', relation: 'authored' });
+  expect(named.batches.map((b) => [b.edgeType, b.srcType, b.dstType])).toEqual([['authored', 'Author', 'Paper']]);
+  expect(named.batches[0]!.src.length).toBe(out.batches[0]!.src.length);
+  expect(named.declined).toEqual([]);
+
+  // A `Paper` is the target of `authored` and the source of nothing.
+  const paper = { type: 'Paper', z: 0, tile: 1 };
+  expect(await relabelled.edges({ from: paper, direction: 'src' })).toEqual({ batches: [], declined: [] });
+  expect((await relabelled.edges({ from: paper, direction: 'dst' })).declined).toEqual([
+    { edgeType: 'authored', direction: 'dst', reason: 'other-space' },
+  ]);
+  const into = await relabelled.edges({ from: paper, direction: 'dst', relation: 'authored' });
+  expect(into.batches[0]!.dst.every((d) => d >= 64n && d < 128n)).toBe(true);
 });
