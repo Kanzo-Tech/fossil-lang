@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
 import { levelsOf, rowsAt, strideOf } from '../src/address.js';
-import { open, type Corpus, type Frame } from '../src/corpus.js';
+import { open, type Corpus, type Frame } from '../src/index.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 /**

@@ -15,7 +15,7 @@ import type { Engine, Host } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { open } from '../src/corpus.js';
+import { open } from '../src/index.js';
 
 // A job's corpus against a real DuckDB-WASM, vended as Azure: the one store the engine is lent
 // file by file, so every file the corpus reads crosses `lend`. The SAS URL a lease gets is mapped

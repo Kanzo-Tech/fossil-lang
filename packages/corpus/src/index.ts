@@ -62,7 +62,9 @@
 // surface for. `CorpusManifestError` is the manifest failing to address itself before a byte of
 // payload is read; `CorpusReadError` is the bytes disagreeing with what the manifest promised. A
 // caller can retry one of those against a different corpus and never the other.
-export { CorpusManifestError, CorpusReadError, open } from './corpus.js';
+export { CorpusManifestError } from './address.js';
+export { open } from './open.js';
+export { CorpusReadError } from './sql.js';
 
 // The writer's column table, by ROLE — `corpus.bnf` through `cargo xtask corpus`, and the same
 // table `crates/fossil-sinks/src/generated.rs` carries on the Rust side.
@@ -103,30 +105,22 @@ export type { QueryFn, QueryRow } from './query.js';
 // ours under that name would have forced an import alias in the one external file that binds this
 // door. **Do not "restore" the prefix.**
 export type {
-  Answer,
-  Box,
   Corpus,
   CorpusEdgeType,
   CorpusField,
   CorpusRelation,
   CorpusTypes,
   CorpusVertexType,
-  Extent,
-  Frame,
-  FrameCost,
-  FrameParams,
-  Neighbourhood,
-  NeighboursParams,
-  NodeParams,
-  OpenOptions,
-  Pixels,
-  PlacedEdge,
-  PlacedVertex,
-  RowsAnswer,
-  RowsParams,
   SqlCorpus,
-  SqlPolicy,
 } from './corpus.js';
+export type { Answer, Neighbourhood, NeighboursParams, PlacedEdge } from './edges.js';
+export type { Box } from './expression.js';
+export type { Frame, FrameCost, FrameParams } from './frame.js';
+export type { NodeParams, PlacedVertex } from './identity.js';
+export type { OpenOptions, SqlPolicy } from './open.js';
+export type { RowsAnswer, RowsParams } from './scan.js';
+export type { Extent } from './tile-manifest.js';
+export type { Pixels } from './tile-matrix.js';
 
 // What `Corpus.addressing` is. Named here because the member is: a public member whose type cannot be
 // written down is worse than no member.

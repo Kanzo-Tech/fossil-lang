@@ -9,7 +9,7 @@ import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/b
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { CorpusManifestError, CorpusReadError, open, type Corpus } from '../src/corpus.js';
+import { CorpusManifestError, CorpusReadError, open, type Corpus } from '../src/index.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 /**
