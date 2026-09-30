@@ -120,3 +120,28 @@ between them.
 **What would reverse it.** A second consumer that needs the addresses without the bytes — a host
 that signs URLs for an engine it does not own, say. Then the addressing earns a member again, and it
 is a member of this door rather than a door of its own.
+
+## One door, and one layer behind it
+
+One door is half of the rule. The other half is what stands behind it: **each thing the door does
+is done once, by one layer.** A layer that parses what the layer below already parsed, or forwards a
+call it could have made itself, is a second implementation with a longer path, and it is deleted.
+The door stays minimal and hides everything underneath: a consumer states what it wants, and how it
+is fetched — whole, by range, or by tile — is the door's business and never the consumer's.
+
+**Reading a corpus breaks this today, measured 2026-09-30 on `main` `ac1801d4`.** One read crosses
+four layers that each know the manifest: the TS door scans it line by line
+(`packages/corpus/src/manifest.ts`), the WASM crate resolves it again (`fossil-graph/src/plan.rs`,
+`plan::resolve`, which `open(job)` runs twice), the Rust verb path loads it once more on every call
+(`fossil-graph-wasm/src/lib.rs`, `dispatch_graph` → `Manifest::load`), and the verb it serves ends
+as SQL that DuckDB could have been sent directly — `executeSql` loads the manifest and never reads it
+(`fossil-graph/src/executor.rs`). keasy's discover view parses the manifest six times before it
+draws anything. Writing has the same shape: the CLI and the browser were two hosts that wrote
+different corpora, and no test compared them.
+
+The same pattern is expected elsewhere, so the rule obliges an audit rather than a fix to this one
+case: for every capability, count the layers that implement it, and keep one.
+
+**What would reverse it.** A layer that is the only place a capability can run — the WASM build is
+the only way the browser can *write* — earns its place for that capability and no other. Reading is
+not such a case: it is a small manifest and SQL, which the door can do without Rust.
