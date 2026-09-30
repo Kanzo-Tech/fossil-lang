@@ -84,11 +84,7 @@ pub enum WriteError {
 ///
 /// [`WriteError`] on the first failure. Nothing is written after it, and
 /// `fossil.json` never is.
-pub async fn write(
-    graph: &Graph,
-    storage: &Storage,
-    dest: &str,
-) -> Result<Written, WriteError> {
+pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Written, WriteError> {
     let mut probe = Probe::new("write");
     let nodes = &graph.schema.nodes;
     let empty: Vec<RecordBatch> = Vec::new();
