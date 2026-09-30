@@ -50,6 +50,12 @@
 //! build for `wasm32` before this shim could exist at all, which is why the
 //! `compile_error!` tripwires live on the native-only crates rather than here.
 
+// `result_large_err`: the pure-Rust half refuses with
+// `fossil_graph_schema::Failure` (144 bytes, over clippy's 128) on the path that
+// ends the call, where the copy costs nothing measurable — `fossil-df`'s crate
+// root says the same.
+#![allow(clippy::result_large_err)]
+
 pub mod ide;
 pub mod tokenize;
 mod wasm_system;
@@ -68,6 +74,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, System};
+use fossil_graph_schema::js::{bug, invalid_argument};
+use fossil_graph_schema::{Failure, Problem};
 use fossil_ide::LineIndex;
 use lsp_types::{DiagnosticSeverity, Range};
 use wasm_bindgen::prelude::*;
@@ -235,17 +243,32 @@ impl Default for WasmWorkspace {
     }
 }
 
-/// The message a refused re-entrant call carries.
+/// A refused re-entrant call, `api/busy`.
 ///
-/// It names the method and says what to do, because the host that hits this is
-/// an editor and the fix is always the same shape: coalesce the edit stream.
-fn busy_error(method: &str) -> JsError {
-    JsError::new(&format!(
-        "fossil workspace is busy: `{method}` was called while another call on \
-         the same workspace was still running. Coalesce edits (an LSP client \
-         debounces `didChange` rather than sending one per keystroke) and retry \
-         — the workspace is still usable."
-    ))
+/// Its help says what to do, because the host that hits this is an editor and
+/// the fix is always the same shape: coalesce the edit stream.
+fn busy(method: &str) -> Failure {
+    Failure::new(Problem::Busy {
+        call: method.to_string(),
+    })
+    .with_help(
+        "coalesce edits (an LSP client debounces `didChange` rather than sending one per \
+         keystroke) and retry — the workspace is still usable",
+    )
+}
+
+/// A value this crate built, as plain JS data. A serialiser refusing one is
+/// fossil's fault, `internal/bug`.
+pub(crate) fn to_value<T: serde::Serialize + ?Sized>(
+    what: &str,
+    value: &T,
+) -> Result<JsValue, JsValue> {
+    serde_wasm_bindgen::to_value(value).map_err(|e| bug(format!("serialising {what}"), e).into())
+}
+
+/// The failure an unknown or closed handle is.
+const fn unknown_handle() -> Failure {
+    Failure::new(Problem::UnknownHandle {})
 }
 
 #[wasm_bindgen(js_class = FossilWorkspace)]
@@ -276,11 +299,8 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if the workspace is already inside another call —
     /// see the type-level note on [`WasmWorkspace`].
-    pub fn open_file(&self, path: String, contents: String) -> Result<FileHandle, JsError> {
-        let mut ws = self
-            .inner
-            .try_borrow_mut()
-            .map_err(|_| busy_error("open_file"))?;
+    pub fn open_file(&self, path: String, contents: String) -> Result<FileHandle, JsValue> {
+        let mut ws = self.inner.try_borrow_mut().map_err(|_| busy("open_file"))?;
         Ok(ws.open_file_native(path, contents))
     }
 
@@ -299,13 +319,12 @@ impl WasmWorkspace {
     /// or if the workspace is already inside another call — see the type-level
     /// note on [`WasmWorkspace`]. **Neither leaves the workspace unusable**,
     /// which is the whole reason this method takes `&self`.
-    pub fn update_file(&self, handle: &FileHandle, contents: String) -> Result<(), JsError> {
+    pub fn update_file(&self, handle: &FileHandle, contents: String) -> Result<(), JsValue> {
         let mut ws = self
             .inner
             .try_borrow_mut()
-            .map_err(|_| busy_error("update_file"))?;
-        ws.update_file_native(*handle, contents)
-            .map_err(|e| JsError::new(&e.to_string()))
+            .map_err(|_| busy("update_file"))?;
+        Ok(ws.update_file_native(*handle, contents)?)
     }
 
     /// Close a file in the workspace. Idempotent in spirit but strict in
@@ -316,13 +335,12 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if `handle` was never opened or was already closed,
     /// or if the workspace is busy.
-    pub fn close_file(&self, handle: &FileHandle) -> Result<(), JsError> {
+    pub fn close_file(&self, handle: &FileHandle) -> Result<(), JsValue> {
         let mut ws = self
             .inner
             .try_borrow_mut()
-            .map_err(|_| busy_error("close_file"))?;
-        ws.close_file_native(*handle)
-            .map_err(|e| JsError::new(&e.to_string()))
+            .map_err(|_| busy("close_file"))?;
+        Ok(ws.close_file_native(*handle)?)
     }
 
     /// Every open **program**'s diagnostics as a flat JS array of
@@ -345,14 +363,14 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`.
-    pub fn check(&self) -> Result<JsValue, JsError> {
+    pub fn check(&self) -> Result<JsValue, JsValue> {
         // Native-side tests reach the pure-Rust core via `check_rows()`;
         // the wasm-bindgen wrapper just serializes. Separating the two
         // halves keeps `cargo test -p fossil-wasm` runnable without a JS
         // runtime (the `to_value` call panics on native targets — the
         // wasm-bindgen library's deliberate guard).
-        let ws = self.inner.try_borrow().map_err(|_| busy_error("check"))?;
-        serde_wasm_bindgen::to_value(&ws.check_rows()).map_err(JsError::from)
+        let ws = self.inner.try_borrow().map_err(|_| busy("check"))?;
+        to_value("the check rows", &ws.check_rows())
     }
 
     /// Per-file diagnostic drain: `check()` returns the workspace-wide flat
@@ -364,15 +382,15 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
     /// if serialization fails.
-    pub fn diagnostics_for(&self, handle: &FileHandle) -> Result<JsValue, JsError> {
+    pub fn diagnostics_for(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
         let ws = self
             .inner
             .try_borrow()
-            .map_err(|_| busy_error("diagnostics_for"))?;
+            .map_err(|_| busy("diagnostics_for"))?;
         let rows = ws
             .diagnostics_for_rows(*handle)
-            .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
-        serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
+            .ok_or_else(unknown_handle)?;
+        to_value("the diagnostic rows", &rows)
     }
 
     // ----- Documents and sources: fossil resolves, the host reads -----
@@ -385,12 +403,18 @@ impl WasmWorkspace {
     /// Returns a JS error if `connections` is not a string-to-string record, or
     /// if the workspace is busy.
     #[wasm_bindgen(js_name = setConnections)]
-    pub fn set_connections(&self, connections: JsValue) -> Result<(), JsError> {
-        let connections: HashMap<String, String> =
-            serde_wasm_bindgen::from_value(connections).map_err(JsError::from)?;
+    pub fn set_connections(&self, connections: JsValue) -> Result<(), JsValue> {
+        let connections: HashMap<String, String> = serde_wasm_bindgen::from_value(connections)
+            .map_err(|e| {
+                invalid_argument(
+                    "connections",
+                    "an object of { name: baseUrl }",
+                    Some(e.into()),
+                )
+            })?;
         self.inner
             .try_borrow_mut()
-            .map_err(|_| busy_error("setConnections"))?
+            .map_err(|_| busy("setConnections"))?
             .set_connections_native(connections);
         Ok(())
     }
@@ -403,15 +427,15 @@ impl WasmWorkspace {
     /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
     /// if serialization fails.
     #[wasm_bindgen(js_name = missingDocuments)]
-    pub fn missing_documents(&self, handle: &FileHandle) -> Result<JsValue, JsError> {
+    pub fn missing_documents(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
         let ws = self
             .inner
             .try_borrow()
-            .map_err(|_| busy_error("missingDocuments"))?;
+            .map_err(|_| busy("missingDocuments"))?;
         let rows = ws
             .missing_documents_native(*handle)
-            .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
-        serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
+            .ok_or_else(unknown_handle)?;
+        to_value("the missing documents", &rows)
     }
 
     /// Register a fetched document's `text` under the `key` `missingDocuments`
@@ -421,10 +445,10 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if the workspace is busy.
     #[wasm_bindgen(js_name = registerDocument)]
-    pub fn register_document(&self, key: &str, text: &str) -> Result<(), JsError> {
+    pub fn register_document(&self, key: &str, text: &str) -> Result<(), JsValue> {
         self.inner
             .try_borrow_mut()
-            .map_err(|_| busy_error("registerDocument"))?
+            .map_err(|_| busy("registerDocument"))?
             .register_document_native(key, text);
         Ok(())
     }
@@ -436,12 +460,10 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
     /// if serialization fails.
-    pub fn sources(&self, handle: &FileHandle) -> Result<JsValue, JsError> {
-        let ws = self.inner.try_borrow().map_err(|_| busy_error("sources"))?;
-        let rows = ws
-            .sources_native(*handle)
-            .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
-        serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
+    pub fn sources(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
+        let ws = self.inner.try_borrow().map_err(|_| busy("sources"))?;
+        let rows = ws.sources_native(*handle).ok_or_else(unknown_handle)?;
+        to_value("the sources", &rows)
     }
 
     // ----- The main-thread IDE surface (see the `ide` module) -----
@@ -475,9 +497,9 @@ impl WasmWorkspace {
         handle: &FileHandle,
         line: u32,
         character: u32,
-    ) -> Result<JsValue, JsError> {
-        let ws = self.inner.try_borrow().map_err(|_| busy_error("hover"))?;
-        serde_wasm_bindgen::to_value(&ws.hover_row(*handle, line, character)).map_err(JsError::from)
+    ) -> Result<JsValue, JsValue> {
+        let ws = self.inner.try_borrow().map_err(|_| busy("hover"))?;
+        to_value("the hover", &ws.hover_row(*handle, line, character))
     }
 
     /// The completion candidates at a position: `{ label, kind, detail }` rows,
@@ -498,13 +520,12 @@ impl WasmWorkspace {
         handle: &FileHandle,
         line: u32,
         character: u32,
-    ) -> Result<JsValue, JsError> {
-        let ws = self
-            .inner
-            .try_borrow()
-            .map_err(|_| busy_error("completions"))?;
-        serde_wasm_bindgen::to_value(&ws.completion_rows(*handle, line, character))
-            .map_err(JsError::from)
+    ) -> Result<JsValue, JsValue> {
+        let ws = self.inner.try_borrow().map_err(|_| busy("completions"))?;
+        to_value(
+            "the completions",
+            &ws.completion_rows(*handle, line, character),
+        )
     }
 
     /// Where the name under the cursor is defined: `{ uri, range }` rows, empty
@@ -524,13 +545,15 @@ impl WasmWorkspace {
         handle: &FileHandle,
         line: u32,
         character: u32,
-    ) -> Result<JsValue, JsError> {
+    ) -> Result<JsValue, JsValue> {
         let ws = self
             .inner
             .try_borrow()
-            .map_err(|_| busy_error("gotoDefinition"))?;
-        serde_wasm_bindgen::to_value(&ws.definition_rows(*handle, line, character))
-            .map_err(JsError::from)
+            .map_err(|_| busy("gotoDefinition"))?;
+        to_value(
+            "the definitions",
+            &ws.definition_rows(*handle, line, character),
+        )
     }
 
     // ----- Register a host-introspected descriptor -----
@@ -550,58 +573,28 @@ impl WasmWorkspace {
     ///   underlying `serde_json` message.
     /// - The workspace is busy.
     #[wasm_bindgen(js_name = registerInferredDescriptor)]
-    pub fn register_inferred_descriptor(&self, descriptor_json: &str) -> Result<(), JsError> {
+    pub fn register_inferred_descriptor(&self, descriptor_json: &str) -> Result<(), JsValue> {
         let ws = self
             .inner
             .try_borrow()
-            .map_err(|_| busy_error("registerInferredDescriptor"))?;
-        ws.register_inferred_descriptor_native(descriptor_json)
-            .map_err(|e| JsError::new(&e.to_string()))
+            .map_err(|_| busy("registerInferredDescriptor"))?;
+        Ok(ws.register_inferred_descriptor_native(descriptor_json)?)
     }
 }
 
 // ----- Pure-Rust core (test-reachable; no wasm-bindgen serialization) -----
 //
 // The `#[wasm_bindgen]` methods above (`check`, `diagnostics_for`)
-// call `serde_wasm_bindgen::to_value` and construct
-// `JsError`s, both of which call wasm-bindgen extern intrinsics that panic
+// call `serde_wasm_bindgen::to_value` and build a `FossilError` through
+// `fossil_graph_schema::js`, both of which call wasm-bindgen extern intrinsics that panic
 // on native targets ("cannot call wasm-bindgen imported functions on
 // non-wasm targets" — wasm-bindgen 0.2). Splitting the
 // pure-Rust half out into a separate non-#[wasm_bindgen] impl block lets
 // `cargo test -p fossil-wasm --test workspace` exercise the full lifecycle
 // natively (the wasm-bindgen attribute layer is a transparent pass-through
 // over these helpers — a passing native test guarantees the wire-side
-// methods compile + dispatch correctly).
-
-/// Pure-Rust error returned by the `*_native` / `*_rows` / `*_result`
-/// helpers.
-///
-/// The `#[wasm_bindgen]` wrappers translate this to `JsError` (the
-/// JS-facing error type) so native tests never construct a `JsError`
-/// directly — wasm-bindgen's intrinsic-construction routines panic on
-/// non-wasm32 targets.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkspaceError {
-    /// The handle was never opened, or was already closed.
-    UnknownHandle,
-    /// The `register_inferred_descriptor` JSON payload did not deserialise
-    /// into an [`fossil_descriptors_input::InferredDescriptor`]. Carries the
-    /// underlying `serde_json` error message.
-    MalformedDescriptor(String),
-}
-
-impl std::fmt::Display for WorkspaceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownHandle => f.write_str("unknown file handle"),
-            Self::MalformedDescriptor(msg) => {
-                write!(f, "malformed InferredDescriptor JSON: {msg}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for WorkspaceError {}
+// methods compile + dispatch correctly). What the pure half refuses with is a
+// `Failure`, which is plain Rust; the wrappers turn it into the thrown value.
 
 impl FossilWorkspace {
     /// Native-reachable workspace-wide diagnostic drain. Returns the same
@@ -621,8 +614,8 @@ impl FossilWorkspace {
     }
 
     /// Native-reachable per-file diagnostic drain. Returns `None` when
-    /// `handle` is unknown / closed (the wasm-bindgen wrapper translates
-    /// `None` to a `JsError`).
+    /// `handle` is unknown / closed (the wasm-bindgen wrapper throws
+    /// `None` as `api/unknown-handle`).
     #[must_use]
     pub fn diagnostics_for_rows(&self, handle: FileHandle) -> Option<Vec<CheckRow>> {
         let file = self.files.get(handle)?;
@@ -640,18 +633,15 @@ impl FossilWorkspace {
     ///
     /// # Errors
     ///
-    /// Returns `Err(WorkspaceError::UnknownHandle)` if `handle` was never
+    /// Returns `api/unknown-handle` if `handle` was never
     /// opened or was already closed.
     pub fn update_file_native(
         &mut self,
         handle: FileHandle,
         contents: String,
-    ) -> Result<(), WorkspaceError> {
+    ) -> Result<(), Failure> {
         use salsa::Setter as _;
-        let file = self
-            .files
-            .get(handle)
-            .ok_or(WorkspaceError::UnknownHandle)?;
+        let file = self.files.get(handle).ok_or_else(unknown_handle)?;
         file.set_text(&mut self.db).to(contents);
         Ok(())
     }
@@ -666,12 +656,10 @@ impl FossilWorkspace {
     ///
     /// # Errors
     ///
-    /// Returns `Err(WorkspaceError::UnknownHandle)` if `handle` was never
+    /// Returns `api/unknown-handle` if `handle` was never
     /// opened or was already closed.
-    pub fn close_file_native(&mut self, handle: FileHandle) -> Result<(), WorkspaceError> {
-        self.files
-            .remove(handle)
-            .ok_or(WorkspaceError::UnknownHandle)?;
+    pub fn close_file_native(&mut self, handle: FileHandle) -> Result<(), Failure> {
+        self.files.remove(handle).ok_or_else(unknown_handle)?;
         Ok(())
     }
 
@@ -768,15 +756,20 @@ impl FossilWorkspace {
     ///
     /// # Errors
     ///
-    /// Returns [`WorkspaceError::MalformedDescriptor`] if the JSON fails to
-    /// deserialise. The descriptor table is not modified on error.
+    /// Returns `api/invalid-argument`, the `serde_json` error as its cause, if
+    /// the JSON fails to deserialise. The descriptor table is not modified on error.
     pub fn register_inferred_descriptor_native(
         &self,
         descriptor_json: &str,
-    ) -> Result<(), WorkspaceError> {
+    ) -> Result<(), Failure> {
         let descriptor: fossil_descriptors_input::InferredDescriptor =
-            serde_json::from_str(descriptor_json)
-                .map_err(|e| WorkspaceError::MalformedDescriptor(e.to_string()))?;
+            serde_json::from_str(descriptor_json).map_err(|e| {
+                Failure::new(Problem::InvalidArgument {
+                    argument: "descriptorJson".to_string(),
+                    expected: "an InferredDescriptor as JSON".to_string(),
+                })
+                .caused_by(e)
+            })?;
         if let Some(cache) = self.system.descriptors() {
             cache.insert(descriptor);
         }
@@ -822,11 +815,11 @@ impl Default for FossilWorkspace {
 /// # Errors
 /// Returns a JS error only if the result fails to serialize to `JsValue`.
 #[wasm_bindgen]
-pub fn providers() -> Result<JsValue, JsError> {
-    serde_wasm_bindgen::to_value(&fossil_lineage::providers(
-        fossil_descriptors_output::PROVIDERS,
-    ))
-    .map_err(JsError::from)
+pub fn providers() -> Result<JsValue, JsValue> {
+    to_value(
+        "the providers",
+        &fossil_lineage::providers(fossil_descriptors_output::PROVIDERS),
+    )
 }
 
 /// Parse `program` and return its external references — every data URI +
@@ -838,13 +831,13 @@ pub fn providers() -> Result<JsValue, JsError> {
 /// # Errors
 /// Returns a JS error only if the result fails to serialize to `JsValue`.
 #[wasm_bindgen]
-pub fn refs(program: &str) -> Result<JsValue, JsError> {
-    serde_wasm_bindgen::to_value(&refs_native(program)).map_err(JsError::from)
+pub fn refs(program: &str) -> Result<JsValue, JsValue> {
+    to_value("the references", &refs_native(program))
 }
 
 /// Native-reachable core of [`refs`] — builds a transient single-file db and
 /// runs the shared [`fossil_lineage::source_refs`]. Cargo-tests call THIS: the
-/// `#[wasm_bindgen]` wrapper's `serde_wasm_bindgen` / `JsError` calls panic on
+/// `#[wasm_bindgen]` wrapper's `serde_wasm_bindgen` call panics on
 /// native targets (same split as `check` ↔ `check_rows`). The db is throwaway
 /// (refs is parse-only and called once per job launch, not per keystroke), so
 /// it never touches the editor's persistent workspace.

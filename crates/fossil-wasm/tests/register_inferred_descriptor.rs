@@ -52,8 +52,14 @@ fn register_inferred_descriptor_overwrites_on_duplicate_uri() {
 #[test]
 fn register_inferred_descriptor_rejects_malformed_json() {
     let ws = FossilWorkspace::new();
-    let result = ws.register_inferred_descriptor_native("not json at all");
-    assert!(result.is_err());
+    let failure = ws
+        .register_inferred_descriptor_native("not json at all")
+        .expect_err("malformed JSON should err");
+    assert_eq!(failure.problem.code(), "api/invalid-argument");
+    assert!(
+        std::error::Error::source(&failure).is_some(),
+        "the serde error is the cause"
+    );
 }
 
 #[test]

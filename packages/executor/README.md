@@ -44,6 +44,11 @@ reads each source through `read` on its connection — by range requests, not
 whole — and the output is written at `<prefix><path>` through `write` on
 `{ job: id }`, in parts when a file is large. The host never signs a URL.
 
+A job that fails completes with `{ status: 'failed', problem }` — the failure as
+plain data, which a host stores as it is and turns back into the error with
+`FossilError.from(problem)` from `@fossil-lang/types` — and `runJob` throws that
+`FossilError`. Branch on its `code`, never on its message.
+
 Step by step, the same thing is:
 
 ```ts
@@ -58,9 +63,10 @@ exec.free();
 `report` is `{ dest, dropped }`: where the corpus went and, per edge table, how many
 input rows named a vertex that does not exist. What was written is `<dest>fossil.json`.
 
-A run executes under a 2 GiB memory budget. One that needs more rejects with an
-`Error` named `OverBudget` — which operator asked, for how much, and what was
-already held — while the graph is still executing, so nothing has been written.
+A run executes under a 2 GiB memory budget. One that needs more rejects with a
+`FossilError` — `isFossilError(e, 'run/over-budget')`, and `e.data` says which
+operator asked, for how much, and what was already held — while the graph is
+still executing, so nothing has been written.
 `/docs/design/three-hosts` has the budget and its measured ceiling.
 
 A host with no storage runs over files it holds, and gets them back:

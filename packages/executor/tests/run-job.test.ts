@@ -176,9 +176,14 @@ describe('runJob', () => {
     const { host } = recordingHost();
     const job = recording(host);
 
-    await expect(runJob(PROGRAM, job)).rejects.toThrow(/graph\.shex \(.*not found/i);
+    await expect(runJob(PROGRAM, job)).rejects.toThrow(
+      expect.objectContaining({ name: 'FossilError', code: 'document/unread', data: { documents: [expect.stringContaining('graph.shex')] } }),
+    );
     expect(job.completed?.status).toBe('failed');
-    expect(job.completed?.error).toMatch(/could not be read/);
+    expect(job.completed?.problem).toMatchObject({
+      code: 'document/unread',
+      cause: { code: 'storage/unreachable', data: { locator: expect.stringContaining('graph.shex') } },
+    });
     expect(puts).toEqual([]);
   });
 
@@ -187,7 +192,9 @@ describe('runJob', () => {
     const { host } = recordingHost();
     const job = recording(host, 'job-2');
 
-    await expect(runJob(PROGRAM, job)).rejects.toThrow(/no write credential/);
+    await expect(runJob(PROGRAM, job)).rejects.toThrow(
+      expect.objectContaining({ name: 'FossilError', code: 'storage/no-credential', data: { scope: 'job job-2', access: 'write' } }),
+    );
     expect(job.completed?.status).toBe('failed');
     expect(puts).toEqual([]);
   });

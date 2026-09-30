@@ -33,7 +33,13 @@ describe('mount', () => {
     const { engine } = recordingEngine();
     const { host } = countingHost(() => [s3(JOB, 'A')]);
     const m = await mount(engine, host, { job: 'job-1' }, 'read');
-    expect(() => m.name('s3://keasy-dev/output/job-1-evil/x')).toThrow(/lies outside/);
+    expect(() => m.name('s3://keasy-dev/output/job-1-evil/x')).toThrow(
+      expect.objectContaining({
+        name: 'FossilError',
+        code: 'storage/outside-prefix',
+        data: expect.objectContaining({ locator: 's3://keasy-dev/output/job-1-evil/x' }),
+      }),
+    );
   });
 
   it('picks the longest prefix that covers a locator', async () => {
@@ -140,14 +146,19 @@ describe('mount', () => {
   it('says so when the engine has no httpfs', async () => {
     const { engine } = recordingEngine(false);
     const { host } = countingHost(() => [s3(JOB, 'A')]);
-    await expect(mount(engine, host, { job: 'job-1' }, 'read')).rejects.toThrow(/no httpfs loaded/);
+    await expect(mount(engine, host, { job: 'job-1' }, 'read')).rejects.toMatchObject({
+      name: 'FossilError',
+      code: 'storage/no-httpfs',
+    });
   });
 
   it('says so when the host vends nothing', async () => {
     const { engine } = recordingEngine();
     const { host } = countingHost(() => []);
-    await expect(mount(engine, host, { connection: 'lake' }, 'read')).rejects.toThrow(
-      /vended no read credential for connection lake/,
-    );
+    await expect(mount(engine, host, { connection: 'lake' }, 'read')).rejects.toMatchObject({
+      name: 'FossilError',
+      code: 'storage/no-credential',
+      data: { scope: 'connection lake', access: 'read' },
+    });
   });
 });

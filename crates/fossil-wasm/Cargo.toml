@@ -45,6 +45,9 @@ fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # calls it.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 smol_str = { workspace = true }
+# `Failure` is what every call here refuses with, and `js` the one function
+# that throws it as a `FossilError` — shared by the three wasm crates.
+fossil-graph-schema = { path = "../fossil-graph-schema", features = ["js"] }
 # `fossil_lineage::source_refs` is what the test-reachable `refs_native` core
 # calls to report a program's source bindings. WASM-clean: its own deps are
 # fossil-hir + salsa + smol_str, all already inside the WASM gate, and it pulls
@@ -88,6 +91,4 @@ getrandom = { workspace = true }
 uuid      = { workspace = true }
 
 [dev-dependencies]
-# The lattice the descriptor JSON carries.
-fossil-graph-schema = { path = "../fossil-graph-schema" }
 wasm-bindgen-test.workspace = true

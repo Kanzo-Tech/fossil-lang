@@ -30,10 +30,10 @@ own errors excluded:
 **53 of 71 are a string and nothing else.** The 18 that are not are barely better: the two corpus
 classes say *which package* refused, not *what* — `CorpusReadError` covers an unknown table, an
 unknown column, a bad limit, an inverted box and a NaN, and the only way to tell them apart is the
-message. The one real discriminant is `run_error` in
-`crates/fossil-df-wasm/src/lib.rs, run_error`, which names an over-budget run `OverBudget` — and
-`runJob` (`packages/executor/src/run-job.ts, runJob`) then reduces it to `error: string` in its
-`CompletePayload`, so a host never sees the name. The `Refusal` behind it
+message. The one real discriminant was `run_error` in
+`crates/fossil-df-wasm/src/lib.rs` at `8d6114a3`, which named an over-budget run `OverBudget` — and
+`runJob` (`packages/executor/src/run-job.ts, runJob`) then reduced it to `error: string` in its
+`CompletePayload`, so a host never saw the name. The `Refusal` behind it
 (`crates/fossil-df/src/memory.rs, Refusal`) carries the consumer, the bytes requested, the bytes held
 and the budget as four fields; all four reach JavaScript inside a sentence.
 

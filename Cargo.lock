@@ -2078,6 +2078,7 @@ name = "fossil-storage-wasm"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "fossil-graph-schema",
  "fossil-storage",
  "getrandom 0.2.17",
  "getrandom 0.4.2",

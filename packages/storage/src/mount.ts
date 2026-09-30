@@ -1,4 +1,4 @@
-import type { Access, Engine, Host, Scope, StorageCredential } from '@fossil-lang/types';
+import { FossilError, type Access, type Engine, type Host, type Scope, type StorageCredential } from '@fossil-lang/types';
 
 import { covering, initStorage, nameOf, plan } from './wasm.js';
 
@@ -42,7 +42,8 @@ const httpfs = new WeakSet<Engine>();
  * file by file, because DuckDB-WASM has no Azure extension: no glob there, and the readers never
  * glob — a manifest enumerates.
  *
- * @throws when the host vends nothing for the scope, or the engine has no `httpfs`.
+ * @throws {FossilError} `storage/host-refused` when the host rejects the request, `storage/no-credential`
+ *   when it vends nothing for the scope, `storage/no-httpfs` when the engine has no `httpfs`.
  */
 export async function mount(
   engine: Engine,
@@ -51,10 +52,8 @@ export async function mount(
   access: Access,
 ): Promise<Mount> {
   await initStorage();
-  const credentials = await host.credentials(scope, access);
-  if (credentials.length === 0) {
-    throw new Error(`the host vended no ${access} credential for ${describe(scope)}`);
-  }
+  const credentials = await vended(host, scope, access);
+  if (credentials.length === 0) throw noCredential(scope, access);
   const table = held.get(engine) ?? new Map<string, Held>();
   held.set(engine, table);
   const keys: string[] = [];
@@ -81,10 +80,13 @@ export async function mount(
   const entryFor = (locator: string): Held => {
     const credential = covering(current(), locator);
     if (credential === undefined) {
-      throw new Error(
-        `${locator} lies outside what the host vended for ${describe(scope)} (${current()
-          .map((c) => c.prefix)
-          .join(', ')})`,
+      const prefix = current()
+        .map((c) => c.prefix)
+        .join(', ');
+      throw FossilError.of(
+        'storage/outside-prefix',
+        { locator, prefix },
+        `${locator} lies outside what the host vended for ${describe(scope)} (${prefix})`,
       );
     }
     return table.get(`${access}\u0000${credential.prefix}`)!;
@@ -152,10 +154,8 @@ async function renew(engine: Engine, host: Host, entry: Held): Promise<void> {
   if (entry.holders === 0) return;
   const { prefix } = entry.credential;
   try {
-    const fresh = (await host.credentials(entry.scope, entry.access)).find((c) => c.prefix === prefix);
-    if (fresh === undefined) {
-      throw new Error(`the host no longer vends ${entry.access} on ${prefix} for ${describe(entry.scope)}`);
-    }
+    const fresh = (await vended(host, entry.scope, entry.access)).find((c) => c.prefix === prefix);
+    if (fresh === undefined) throw noCredential(entry.scope, entry.access);
     if (entry.holders === 0) return;
     entry.credential = fresh;
     await install(engine, entry);
@@ -177,12 +177,32 @@ async function requireHttpfs(engine: Engine): Promise<void> {
     "SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'httpfs'",
   );
   if (answer.numRows === 0 || answer.getChild('loaded')?.get(0) !== true) {
-    throw new Error(
-      'the engine has no httpfs loaded: fossil reads s3:// through a scoped secret, and the ' +
-        "host's engine loads httpfs before handing it over",
+    throw FossilError.of(
+      'storage/no-httpfs',
+      {},
+      'the engine cannot read remote storage: its httpfs extension is not loaded',
+      { help: "fossil reads s3:// through a scoped secret, and the host's engine loads httpfs before handing it over" },
     );
   }
   httpfs.add(engine);
+}
+
+async function vended(host: Host, scope: Scope, access: Access): Promise<StorageCredential[]> {
+  try {
+    return await host.credentials(scope, access);
+  } catch (cause) {
+    const said = describe(scope);
+    throw FossilError.of('storage/host-refused', { scope: said }, `the host refused ${said}`, { cause });
+  }
+}
+
+function noCredential(scope: Scope, access: Access): FossilError<'storage/no-credential'> {
+  const said = describe(scope);
+  return FossilError.of(
+    'storage/no-credential',
+    { scope: said, access },
+    `the host vended no ${access} credential for ${said}`,
+  );
 }
 
 export function describe(scope: Scope): string {

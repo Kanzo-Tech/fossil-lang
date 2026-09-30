@@ -1,3 +1,5 @@
+import type { Problem } from './error.js';
+
 /**
  * A storage credential scoped to one prefix — Iceberg REST's `StorageCredential`, verbatim on the
  * wire, so what a catalogue vends to DuckDB, Spark or PyIceberg is what a host vends to fossil.
@@ -59,10 +61,10 @@ export interface ProgramSource {
   option?: string;
 }
 
-/** A document that stayed missing, and why. The checker reports it as a
- *  diagnostic on its own; a run treats it as a failure. */
+/** A document that stayed missing, and why — the problem its read answered. The checker reports
+ *  it as a diagnostic on its own; a run treats it as a failure. */
 export interface UnreadDocument extends MissingDocument {
-  reason: string;
+  problem: Problem;
 }
 
 /** What a compiled workspace answers — the checker's and the executor's. */

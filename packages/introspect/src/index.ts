@@ -25,7 +25,7 @@
  */
 
 import { mount, type Mount } from "@fossil-lang/storage";
-import type { Engine, Host, ProgramSource } from "@fossil-lang/types";
+import { FossilError, type Engine, type Host, type ProgramSource } from "@fossil-lang/types";
 
 import {
   NATIVE_READERS,
@@ -263,7 +263,11 @@ export async function introspect(
             const mounted = await mountOf(source.connection);
             name = (await mounted.files([source.locator]))[0] ?? name;
           } else if (!/^https?:\/\//.test(source.locator)) {
-            throw new Error("it names no connection and is not a public URL");
+            throw FossilError.of(
+              "storage/no-route",
+              { locator: source.locator },
+              `${source.locator} names no connection and is not a public URL`,
+            );
           }
           const described = await io.engine.query(
             describeSql(name, source.format, source.option),

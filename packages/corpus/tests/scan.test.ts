@@ -117,8 +117,14 @@ describe('the SQL a filter becomes', () => {
   });
 
   it('refuses a NaN, a string against a number and a box turned inside out', () => {
-    expect(() => bind({ column: 'x', op: '=', value: Number.NaN }, columns)).toThrow(/NaN/);
-    expect(() => bind({ column: 'dense_id', op: '=', value: '3' }, columns)).toThrow(/holds numbers/);
-    expect(() => bind({ bbox: [2, 0, 1, 1] }, columns)).toThrow(/x0 ≤ x1/);
+    const fossil = (code: string, data: Record<string, unknown>) =>
+      expect.objectContaining({ name: 'FossilError', code, data: expect.objectContaining(data) });
+    expect(() => bind({ column: 'x', op: '=', value: Number.NaN }, columns)).toThrow(
+      fossil('api/invalid-argument', { argument: 'filter' }),
+    );
+    expect(() => bind({ column: 'dense_id', op: '=', value: '3' }, columns)).toThrow(
+      fossil('corpus/filter-type-mismatch', { column: 'dense_id', value: '"3"' }),
+    );
+    expect(() => bind({ bbox: [2, 0, 1, 1] }, columns)).toThrow(fossil('api/invalid-argument', { argument: 'bbox' }));
   });
 });

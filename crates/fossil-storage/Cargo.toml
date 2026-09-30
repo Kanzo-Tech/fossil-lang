@@ -41,7 +41,7 @@ serde-wasm-bindgen = { workspace = true, optional = true }
 
 [features]
 object-store = ["dep:object_store", "dep:async-trait", "dep:bytes", "dep:futures", "dep:web-time"]
-js = ["object-store", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:serde-wasm-bindgen"]
+js = ["object-store", "fossil-graph-schema/js", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:serde-wasm-bindgen"]
 
 [dev-dependencies]
 serde_json = { workspace = true }

@@ -75,7 +75,9 @@ describe('FossilWorkspace.registerInferredDescriptor', () => {
     try {
       // Bypass TS to exercise runtime Rust-side validation.
       const malformed = { uri: 'users.csv' } as unknown as InferredDescriptorJson;
-      expect(() => ws.registerInferredDescriptor(malformed)).toThrow();
+      expect(() => ws.registerInferredDescriptor(malformed)).toThrow(
+        expect.objectContaining({ name: 'FossilError', code: 'api/invalid-argument' }),
+      );
     } finally {
       ws.free();
     }

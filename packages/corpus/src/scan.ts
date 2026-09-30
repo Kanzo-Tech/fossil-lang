@@ -7,11 +7,11 @@
  * read in pieces — tiles, or a table larger than a tab — the pieces are tasks and no caller changes.
  */
 
-import type { Engine } from '@fossil-lang/types';
+import { FossilError, type Engine } from '@fossil-lang/types';
 
-import { bind, sqlOf, type Bound, type Filter } from './filter.js';
+import { bind, sqlOf, unknownColumn, type Bound, type Filter } from './filter.js';
 import type { EdgeTable, VertexTable } from './manifest.js';
-import { CorpusReadError, ident } from './sql.js';
+import { ident, query } from './sql.js';
 
 /** What {@link Corpus.scan} takes. */
 export interface ScanParams {
@@ -50,8 +50,9 @@ export interface Scan {
   /**
    * **One batch per task, in the order given**, each one `SELECT` over the table's view.
    *
-   * @throws {CorpusReadError} for a task of another table. An abort rejects with the signal's
-   *   reason, whether or not the engine stopped the statement.
+   * @throws {FossilError} `api/invalid-argument` for a task of another table, `engine/failed` when the
+   *   engine refuses the statement. An abort rejects with the signal's reason, whether or not the
+   *   engine stopped the statement.
    */
   read(tasks: readonly ScanTask[], options?: { readonly signal?: AbortSignal }): Promise<readonly Batch[]>;
 }
@@ -63,25 +64,28 @@ export function scanOf(engine: Engine, relation: (table: string) => string, tabl
   return (params: ScanParams): Scan => {
     const table = tables.get(params.table);
     if (table === undefined) {
-      throw new CorpusReadError(
-        `${params.table} is not a table of this corpus — its tables are ${[...tables.keys()].join(', ')}`,
+      const names = [...tables.keys()];
+      throw FossilError.of(
+        'corpus/unknown-table',
+        { table: params.table, tables: names },
+        `${params.table} is not a table of this corpus — its tables are ${names.join(', ')}`,
       );
     }
     const declared = new Set(table.properties.map((p) => p.name));
     const { select, limit, filter } = params;
     if (select !== undefined) {
-      if (select.length === 0) throw new CorpusReadError(`select names no column of ${table.name}`);
+      if (select.length === 0) {
+        throw FossilError.of(
+          'corpus/empty-projection',
+          { table: table.name },
+          `select names no column of ${table.name}`,
+        );
+      }
       for (const column of select) {
-        if (!declared.has(column)) {
-          throw new CorpusReadError(
-            `select names ${column}, which ${table.name} does not declare — its columns are ${[...declared].join(', ')}`,
-          );
-        }
+        if (!declared.has(column)) throw unknownColumn(table.name, column, [...declared]);
       }
     }
-    if (limit !== undefined && !(Number.isSafeInteger(limit) && limit >= 0)) {
-      throw new CorpusReadError(`limit ${limit} is not a count of rows`);
-    }
+    if (limit !== undefined && !(Number.isSafeInteger(limit) && limit >= 0)) throw notACount(limit);
     const position = 'position' in table ? table.position : undefined;
     const bound: Bound | undefined =
       filter === undefined ? undefined : bind(filter, { table: table.name, properties: table.properties, position });
@@ -97,18 +101,31 @@ export function scanOf(engine: Engine, relation: (table: string) => string, tabl
       async read(tasks, options = {}) {
         for (const t of tasks) {
           if (t.table !== table.name) {
-            throw new CorpusReadError(`a task of ${t.table} was handed to a scan of ${table.name}`);
+            throw FossilError.of(
+              'api/invalid-argument',
+              { argument: 'tasks', expected: `tasks of ${table.name}` },
+              `a task of ${t.table} was handed to a scan of ${table.name}`,
+            );
           }
         }
         const { signal } = options;
         const out: Batch[] = [];
         for (let i = 0; i < tasks.length; i += 1) {
           signal?.throwIfAborted();
-          out.push(await (signal === undefined ? engine.query(sql) : engine.query(sql, { signal })));
+          out.push(await query(engine, sql, signal));
           signal?.throwIfAborted();
         }
         return out;
       },
     };
   };
+}
+
+/** A limit that is not a count of rows. */
+export function notACount(limit: number): FossilError<'api/invalid-argument'> {
+  return FossilError.of(
+    'api/invalid-argument',
+    { argument: 'limit', expected: 'a count of rows' },
+    `limit ${limit} is not a count of rows`,
+  );
 }

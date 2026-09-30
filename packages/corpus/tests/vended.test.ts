@@ -125,6 +125,8 @@ describe('open(job, { engine, host })', () => {
 
   it('refuses a job the host vends nothing for', async () => {
     const empty: Host = { connections: async () => ({}), credentials: async () => [] };
-    await expect(open('4', { engine, host: empty })).rejects.toThrow(/vended no read credential for job 4/);
+    await expect(open('4', { engine, host: empty })).rejects.toThrow(
+      expect.objectContaining({ name: 'FossilError', code: 'storage/no-credential', data: { scope: 'job 4', access: 'read' } }),
+    );
   });
 });

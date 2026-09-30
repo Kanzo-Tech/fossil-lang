@@ -1,4 +1,4 @@
-import type { DocumentWorkspace, Host, UnreadDocument } from '@fossil-lang/types';
+import { FossilError, type DocumentWorkspace, type Host, type UnreadDocument } from '@fossil-lang/types';
 
 import { read } from './objects.js';
 
@@ -17,7 +17,7 @@ export async function resolveDocuments(
   const attempted = new Set<string>();
   const unread: UnreadDocument[] = [];
   let registered = 0;
-  workspace.setConnections(await host.connections());
+  workspace.setConnections(await connections(host));
   const decoder = new TextDecoder();
 
   for (;;) {
@@ -32,8 +32,16 @@ export async function resolveDocuments(
         workspace.registerDocument(d.key, decoder.decode(result.bytes));
         registered++;
       } else {
-        unread.push({ ...d, reason: result.reason });
+        unread.push({ ...d, problem: result.problem });
       }
     }
+  }
+}
+
+async function connections(host: Host): Promise<Record<string, string>> {
+  try {
+    return await host.connections();
+  } catch (cause) {
+    throw FossilError.of('storage/host-refused', { scope: 'connections' }, 'the host refused connections', { cause });
   }
 }

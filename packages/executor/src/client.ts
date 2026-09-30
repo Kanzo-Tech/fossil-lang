@@ -61,8 +61,9 @@ export class FossilExecutor implements DocumentWorkspace {
    * by range requests, not whole — and the `fossil/1` corpus written under the one prefix `host`
    * vends `write` on for `job`, `fossil.json` last. Answers where it wrote and what it dropped.
    *
-   * Rejects with an `Error` named `OverBudget` when the run needs more memory than the executor's
-   * budget; that is decided while the graph executes, so nothing has been written.
+   * Rejects with a `FossilError`. One that needed more memory than the executor's budget is
+   * `isFossilError(e, 'run/over-budget')`, with the consumer and the bytes in `e.data`; that is
+   * decided while the graph executes, so nothing has been written.
    */
   run(host: Host, job: string): Promise<RunReport> {
     return this.#raw.run(host, job) as Promise<RunReport>;

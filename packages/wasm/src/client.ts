@@ -296,7 +296,8 @@ export class FossilWorkspace {
    * so a host that wants column types must run the `DESCRIBE` and push the
    * result in here.
    *
-   * @throws Error if the descriptor JSON fails to deserialise on the Rust side.
+   * @throws {FossilError} `api/invalid-argument` if the descriptor fails to deserialise on the Rust
+   *   side, the `serde_json` error as its cause.
    */
   registerInferredDescriptor(descriptor: InferredDescriptorJson): void {
     // The wasm-bindgen wrapper accepts a JSON string; serialise here so callers

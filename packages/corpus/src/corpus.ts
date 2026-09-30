@@ -25,8 +25,9 @@ export interface Corpus {
   /**
    * **Read one table**, vertices or edges: a filter, a projection and a limit, bound now.
    *
-   * @throws {CorpusReadError} for a table the manifest does not declare, a column its table does
-   *   not declare, or a box over a table with no position — before any statement runs.
+   * @throws {FossilError} before any statement runs: `corpus/unknown-table` for a table the manifest
+   *   does not declare, `corpus/unknown-column` for a column its table does not declare,
+   *   `corpus/no-position` for a box over a table with no position — see `bind` for the rest.
    */
   scan(params: ScanParams): Scan;
   /**

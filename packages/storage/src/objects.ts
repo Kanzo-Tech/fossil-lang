@@ -1,4 +1,4 @@
-import type { Host } from '@fossil-lang/types';
+import type { Host, Problem } from '@fossil-lang/types';
 
 import { initStorage, storageRead } from './wasm.js';
 
@@ -8,7 +8,8 @@ export interface Target {
   connection?: string;
 }
 
-export type ReadResult = { ok: true; bytes: Uint8Array } | { ok: false; reason: string };
+/** A target's bytes, or the problem that kept them — plain data; `FossilError.from(problem)` throws it. */
+export type ReadResult = { ok: true; bytes: Uint8Array } | { ok: false; problem: Problem };
 
 /**
  * Read each target's bytes, in order, with the credentials the host vends.

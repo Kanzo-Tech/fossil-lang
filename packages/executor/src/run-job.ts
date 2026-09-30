@@ -7,7 +7,7 @@
  * store by range requests, and the output is written through the job's, in parts when large.
  */
 import { resolveDocuments } from '@fossil-lang/storage';
-import type { Host } from '@fossil-lang/types';
+import { FossilError, isFossilError, type Host, type Problem } from '@fossil-lang/types';
 
 import { FossilExecutor } from './client.js';
 import type { RunReport } from './index.js';
@@ -29,13 +29,15 @@ export interface CompletePayload {
    * name its consumers read; the manifest itself is `<dest>fossil.json`.
    */
   manifest?: RunReport;
-  error?: string;
+  /** Why it failed, as plain data — `FossilError.from(problem)` rebuilds the error. */
+  problem?: Problem;
 }
 
 /**
  * Run a fossil mapping in the browser, end-to-end. Returns the `RunReport` on success; on any
  * failure — a document or source that could not be read included — reports a `failed` completion
- * (best-effort) and rethrows.
+ * with its problem (best-effort) and throws the `FossilError`. A failure fossil did not raise — a
+ * panic — is `internal/bug`, the original kept as its cause.
  *
  * `initFossilExecutor` must have resolved first.
  */
@@ -46,17 +48,26 @@ export async function runJob(program: string, job: Job): Promise<RunReport> {
 
     const { unread } = await resolveDocuments(exec, job.host);
     if (unread.length > 0) {
-      const which = unread.map((d) => `${d.key} (${d.reason})`).join(', ');
-      throw new Error(`documents the program names could not be read: ${which}`);
+      const documents = unread.map((d) => d.key);
+      throw FossilError.of(
+        'document/unread',
+        { documents },
+        `${documents.length} document(s) could not be read: ${documents.join(', ')}`,
+        { cause: unread[0]!.problem },
+      );
     }
 
     const report = await exec.run(job.host, job.id);
     await job.complete({ status: 'completed', manifest: report });
     return report;
   } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    await job.complete({ status: 'failed', error }).catch(() => {});
-    throw e;
+    const failure = isFossilError(e)
+      ? e
+      : FossilError.of('internal/bug', { what: 'the run failed outside fossil' }, 'internal error: the run failed outside fossil', {
+          cause: e,
+        });
+    await job.complete({ status: 'failed', problem: failure.problem }).catch(() => {});
+    throw failure;
   } finally {
     exec?.free();
   }

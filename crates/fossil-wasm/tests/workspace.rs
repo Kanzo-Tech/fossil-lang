@@ -9,11 +9,12 @@
 //! exercises the lifecycle through the pure-Rust `*_native` / `*_rows` /
 //! `*_result` helpers — the `#[wasm_bindgen]` wrappers (`open_file`,
 //! `update_file`, `close_file`, `check`, `diagnostics_for`)
-//! merely translate to/from `JsError` + `JsValue` via wasm-bindgen, which
+//! merely translate to `JsValue` — a thrown `FossilError` included — via wasm-bindgen, which
 //! panics on native targets ("cannot call wasm-bindgen
 //! imported functions on non-wasm targets" — wasm-bindgen 0.2).
 
-use fossil_wasm::{FossilWorkspace, WorkspaceError};
+use fossil_graph_schema::Problem;
+use fossil_wasm::FossilWorkspace;
 
 /// Read `examples/hello.fossil` from the repo root. The cargo-test cwd is the
 /// crate directory (`crates/fossil-wasm/`), so the fixture is two levels up.
@@ -59,16 +60,17 @@ fn workspace_lifecycle_smoke() {
     // Closing the same handle again must error — strict signal, mirrors
     // ty_wasm's contract.
     assert_eq!(
-        ws.close_file_native(h),
-        Err(WorkspaceError::UnknownHandle),
-        "close-of-closed must error with UnknownHandle"
+        ws.close_file_native(h).map_err(|f| f.problem),
+        Err(Problem::UnknownHandle {}),
+        "close-of-closed must error with api/unknown-handle"
     );
 
     // update_file_native on a closed handle must also error.
     assert_eq!(
-        ws.update_file_native(h, "// post-close".to_string()),
-        Err(WorkspaceError::UnknownHandle),
-        "update of closed handle must error with UnknownHandle"
+        ws.update_file_native(h, "// post-close".to_string())
+            .map_err(|f| f.problem),
+        Err(Problem::UnknownHandle {}),
+        "update of closed handle must error with api/unknown-handle"
     );
 }
 
@@ -119,7 +121,7 @@ fn workspace_multi_file_isolation() {
     );
 
     // diagnostics_for_rows on a closed handle returns None (the wasm
-    // wrapper converts that to JsError).
+    // wrapper throws that as `api/unknown-handle`).
     assert!(
         ws.diagnostics_for_rows(h1).is_none(),
         "diagnostics_for_rows of closed handle is None"

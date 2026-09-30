@@ -18,6 +18,9 @@ workspace = true
 
 [dependencies]
 fossil-storage = { path = "../fossil-storage", features = ["js"] }
+# Every value this crate throws or answers as a failure is built by
+# `fossil_graph_schema::js` — the one boundary function the wasm crates share.
+fossil-graph-schema = { path = "../fossil-graph-schema", features = ["js"] }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 serde-wasm-bindgen = { workspace = true }

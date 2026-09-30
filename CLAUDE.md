@@ -164,7 +164,7 @@ crates/
   fossil-df/               DataFusion backend for the property-graph MIR, the one corpus
                            writer (`write`: layout, then a Parquet per table, `fossil.json`
                            last), and `Executor` — the whole run a host drives, under the
-                           2 GiB pool in `memory.rs` that refuses as `OverBudget`
+                           2 GiB pool in `memory.rs` that refuses as `run/over-budget`
   fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each source's columns,
                            and the payload that authenticates one. `fossil-lsp` calls it
                            before the compile. It links `DuckDB` on a normal edge, and
@@ -185,7 +185,9 @@ crates/
   fossil-mem-probe/        `FOSSIL_MEM_PROBE` — peak RSS + elapsed seconds per phase of a
                            write. Depends on NOTHING; both halves of the write path
                            (fossil-df, fossil-layout) report through it
-  fossil-graph-schema/     the canonical graph-schema — the shared substrate contract
+  fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
+                           error catalogue: `Problem`, `Failure`, and (feature `js`) the one
+                           function every wasm crate throws a failure through
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
   fossil-wasm/             WASM host shim (FossilWorkspace API + the tokenizer the editor reuses)
@@ -193,11 +195,13 @@ crates/
                            corpus, in the browser and in Node. There is no native CLI: it
                            was deleted on 2026-09-30 (`/docs/design/discarded` says what
                            brings it back)
-  xtask/                   repo automation. Three commands: `wasm-check` derives the wasm32
-                           subset from the cdylib closure, and `catalogue [--check]` and
-                           `corpus [--check]` regenerate every projection of the data file
-                           each is named after. One generator loop behind both, so the
-                           `--check` semantics cannot drift between them
+  xtask/                   repo automation. Four commands: `wasm-check` derives the wasm32
+                           subset from the cdylib closure, and `catalogue [--check]`,
+                           `corpus [--check]` and `problem [--check]` regenerate every
+                           projection of their source — `catalogue.bnf`, `corpus.bnf`, and
+                           `fossil-graph-schema/problem.schema.json` into `problem.gen.ts`.
+                           One generator loop behind all three, so the `--check` semantics
+                           cannot drift between them
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
@@ -218,7 +222,10 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            answers `{ dest, dropped }`; what it wrote is `<dest>fossil.json`
   types/                   Host — `connections()` + `credentials(scope, access)` — the one host
                            contract, and StorageCredential (Iceberg REST's, verbatim); the
-                           Engine. Types only
+                           Engine. And its one runtime export: `FossilError` + `isFossilError`,
+                           over `problem.gen.ts` (the codes, their data and titles, generated) —
+                           the error every package throws, the same object the wasm crates
+                           build in Rust
   storage/                 how every package reaches storage from a vended credential, over
                            `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
                            expires−5min, refcounted per prefix; Azure lent file by file),

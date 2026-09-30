@@ -8,6 +8,7 @@
 
 use crate::credential::{Access, StorageCredential};
 use fossil_graph_schema::Foreign;
+use fossil_graph_schema::js::foreign;
 use std::collections::HashMap;
 
 use crate::store::{Host, Scope};
@@ -106,16 +107,13 @@ fn method(host: &JsValue, name: &str) -> Result<Function, Foreign> {
 // leaves it.
 #[allow(clippy::future_not_send)]
 async fn settle(returned: Result<JsValue, JsValue>, name: &str) -> Result<JsValue, Foreign> {
-    let promise: Promise = returned
-        .map_err(|e| describe(&e))?
-        .dyn_into()
-        .map_err(|_| {
-            Foreign::named(
-                "TypeError",
-                format!("`{name}` returned something other than a promise"),
-            )
-        })?;
-    JsFuture::from(promise).await.map_err(|e| describe(&e))
+    let promise: Promise = returned.map_err(|e| foreign(&e))?.dyn_into().map_err(|_| {
+        Foreign::named(
+            "TypeError",
+            format!("`{name}` returned something other than a promise"),
+        )
+    })?;
+    JsFuture::from(promise).await.map_err(|e| foreign(&e))
 }
 
 #[allow(clippy::future_not_send)]
@@ -136,15 +134,6 @@ async fn credentials(
     let returned = method(host, "credentials")?.call2(host, &scope, &access);
     let vended = settle(returned, "credentials").await?;
     serde_wasm_bindgen::from_value(vended).map_err(|e| shape(&e))
-}
-
-/// A host's rejection as it threw it: its own `name` and `message`. A
-/// `JsValue` is not `Send`, so the object itself cannot ride the cause.
-fn describe(error: &JsValue) -> Foreign {
-    error.dyn_ref::<js_sys::Error>().map_or_else(
-        || Foreign::named("Error", format!("{error:?}")),
-        |e| Foreign::named(String::from(e.name()), String::from(e.message())),
-    )
 }
 
 /// A value the host handed back that is not the shape `Host` declares.

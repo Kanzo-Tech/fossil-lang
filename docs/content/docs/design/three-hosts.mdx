@@ -46,8 +46,8 @@ would be built on.
 Inside the address space the executor declares a **budget**: a 2 GiB pool every `DataFusion`
 operator reserves against, and no disk. An operator told no has nowhere to spill, so the run stops
 while the graph is still executing — before the first byte of the corpus is written — and the host
-gets an `Error` named `OverBudget` that says which operator asked, for how much, and what was already
-held. `crates/fossil-df/src/memory.rs` is the pool and its reasons.
+gets a `FossilError` whose code is `run/over-budget` and whose `data` says which operator asked, for
+how much, and what was already held. `crates/fossil-df/src/memory.rs` is the pool and its reasons.
 
 The budget is half the address space because the pool only sees what operators *reserve*: the source
 bytes, the collected graph, the layout pass and the encoded Parquet are outside it. Measured on
@@ -59,7 +59,7 @@ bytes, the collected graph, the layout pass and the encoded Parquet are outside 
 | 200,000 · 600,000 | written | 624 MiB | 6.2 s |
 | 500,000 · 1,500,000 | written | 1,466 MiB | 22.1 s |
 | 900,000 · 2,700,000 | written | 2,704 MiB | 48.8 s |
-| 1,000,000 · 3,000,000 | `OverBudget` | 2,763 MiB | 39.8 s |
+| 1,000,000 · 3,000,000 | `run/over-budget` | 2,763 MiB | 39.8 s |
 
 A real corpus sits well inside it: Vermont — twelve types, 144,784 vertices and 426,781 edges — writes
 in 4.8 s at 684 MiB. What spends the budget first is the dedup of a vertex type (its

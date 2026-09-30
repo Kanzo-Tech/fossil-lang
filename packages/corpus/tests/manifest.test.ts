@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
-import { CorpusManifestError, FOSSIL_FORMAT, parseManifest } from '../src/manifest.js';
+import { FOSSIL_FORMAT, parseManifest } from '../src/manifest.js';
 
 /**
  * `fossil.json`: what the reader refuses, and the one shape the writer and the reader agree on.
@@ -161,12 +161,13 @@ describe('parseManifest', () => {
   });
 
   it.each([
-    ['another format', JSON.stringify({ format: 'fossil/2' }), /fossil\/2/],
-    ['no format', JSON.stringify({ vertex_tables: [] }), /undefined/],
-    ['the old index', 'name: graph\nversion: gar/v1\n', /not JSON/],
-    ['null', 'null', /undefined/],
-  ])('refuses %s', (_, text, message) => {
-    expect(() => parseManifest(text, 'fossil.json')).toThrow(CorpusManifestError);
-    expect(() => parseManifest(text, 'fossil.json')).toThrow(message);
+    ['another format', JSON.stringify({ format: 'fossil/2' }), 'corpus/unsupported-format', { format: 'fossil/2' }],
+    ['no format', JSON.stringify({ vertex_tables: [] }), 'corpus/unsupported-format', { format: 'undefined' }],
+    ['the old index', 'name: graph\nversion: gar/v1\n', 'corpus/not-json', {}],
+    ['null', 'null', 'corpus/unsupported-format', { format: 'undefined' }],
+  ])('refuses %s', (_, text, code, data) => {
+    expect(() => parseManifest(text, 'fossil.json')).toThrow(
+      expect.objectContaining({ name: 'FossilError', code, data: { path: 'fossil.json', ...data } }),
+    );
   });
 });

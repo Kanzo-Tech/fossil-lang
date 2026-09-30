@@ -20,6 +20,7 @@
  */
 import { linter, type Diagnostic } from '@codemirror/lint';
 import type { EditorState, Extension } from '@codemirror/state';
+import { isFossilError } from '@fossil-lang/types';
 
 import { rangeOf, type Position } from './positions.js';
 
@@ -127,14 +128,16 @@ export function fossilLinter(source: CheckSource, options: LinterOptions): Exten
       } catch (cause) {
         // A refused check is a diagnostic in its own right, and a silent one is
         // how "the editor stopped underlining things" becomes a mystery. The
-        // wasm surface's own busy error says what to do; show it.
+        // wasm surface's own busy error says what to do in its `help`; show it.
         return [
           {
             from: 0,
             to: Math.min(1, view.state.doc.length),
             severity: 'error' as const,
             source: 'fossil',
-            message: `fossil check failed: ${String(cause)}`,
+            message: isFossilError(cause)
+              ? `fossil check failed: ${cause.message}${cause.help === undefined ? '' : `\nhelp: ${cause.help}`}`
+              : `fossil check failed: ${String(cause)}`,
           },
         ];
       }

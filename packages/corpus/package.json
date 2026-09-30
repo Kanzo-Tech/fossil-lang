@@ -16,7 +16,7 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "//exports": "ONE entry. `.` is the door: `open`, `FOSSIL_FORMAT` and the two errors, plus the manifest's and the scan's types. There is no WASM behind it any more — the reader was `fossil-graph` compiled to wasm32 and it is `JSON.parse` plus the SQL a scan composes — so importing it costs nothing a bundler has to emit.",
+  "//exports": "ONE entry. `.` is the door: `open` and `FOSSIL_FORMAT`, plus the manifest's and the scan's types. There is no WASM behind it any more — the reader was `fossil-graph` compiled to wasm32 and it is `JSON.parse` plus the SQL a scan composes — so importing it costs nothing a bundler has to emit.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

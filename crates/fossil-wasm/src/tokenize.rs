@@ -6,7 +6,7 @@
 //!   without a `JS` runtime (`wasm-bindgen` intrinsics panic on native — see
 //!   the lib.rs header for the `*_native` precedent).
 //! - [`tokenize`] — `#[wasm_bindgen]` `JS`-facing wrapper. Serialises
-//!   `Vec<TokenRow>` to `JsValue` via `serde_wasm_bindgen`. Throws `JsError` on
+//!   `Vec<TokenRow>` to `JsValue` via `serde_wasm_bindgen`. Throws `internal/bug` on
 //!   serialisation failure (extremely rare — the rows are plain numbers).
 //! - [`semantic_legend`] — re-exports `fossil-ide`'s semantic-token legend
 //!   over the `wasm-bindgen` boundary, so a host can map LSP `semanticTokens`
@@ -96,9 +96,9 @@ pub fn tokenize_native(text: &str) -> Vec<TokenRow> {
 /// signature for forward compatibility if `TokenRow` ever grows non-trivial
 /// fields).
 #[wasm_bindgen]
-pub fn tokenize(text: &str) -> Result<JsValue, JsError> {
+pub fn tokenize(text: &str) -> Result<JsValue, JsValue> {
     let rows = tokenize_native(text);
-    serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
+    crate::to_value("the tokens", &rows)
 }
 
 /// `JS`-facing re-export of the semantic-token legend.
@@ -115,9 +115,9 @@ pub fn tokenize(text: &str) -> Result<JsValue, JsError> {
 /// Returns a JS error only if `serde_wasm_bindgen` fails (impossible in
 /// practice for the legend shape).
 #[wasm_bindgen]
-pub fn semantic_legend() -> Result<JsValue, JsError> {
+pub fn semantic_legend() -> Result<JsValue, JsValue> {
     let legend = fossil_ide::semantic_legend();
-    serde_wasm_bindgen::to_value(&legend).map_err(JsError::from)
+    crate::to_value("the legend", &legend)
 }
 
 /// Every `fossil_syntax::lexer::Token` variant, in discriminant order.
@@ -243,6 +243,6 @@ pub fn token_kinds_native() -> Vec<&'static str> {
 /// Returns a JS error only if `serde_wasm_bindgen` fails to serialise a
 /// `Vec<&str>` (impossible in practice).
 #[wasm_bindgen(js_name = tokenKinds)]
-pub fn token_kinds() -> Result<JsValue, JsError> {
-    serde_wasm_bindgen::to_value(&token_kinds_native()).map_err(JsError::from)
+pub fn token_kinds() -> Result<JsValue, JsValue> {
+    crate::to_value("the token kinds", &token_kinds_native())
 }

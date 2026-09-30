@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { CorpusManifestError, CorpusReadError, FOSSIL_FORMAT, open, type Manifest } from '../src/index.js';
+import { FOSSIL_FORMAT, open, type Manifest } from '../src/index.js';
 import { duckdb } from './engine.js';
 
 /**
@@ -41,6 +41,10 @@ function manifestOnly(name: string, text: string): string {
   return dir;
 }
 
+/** A `FossilError` of `code`, carrying at least `data`. */
+const fossil = (code: string, data?: Record<string, unknown>) =>
+  expect.objectContaining({ name: 'FossilError', code, ...(data === undefined ? {} : { data: expect.objectContaining(data) }) });
+
 describe('open', () => {
   it('reads fossil.json once and registers a view per table under the corpus', async () => {
     const corpus = await open(CORPUS, { engine });
@@ -66,14 +70,15 @@ describe('open', () => {
 
   it('refuses a format it does not read before reading a byte of Parquet', async () => {
     const dir = manifestOnly('fossil2', JSON.stringify({ ...MANIFEST, format: 'fossil/2' }));
-    await expect(open(dir, { engine })).rejects.toThrow(CorpusManifestError);
-    await expect(open(dir, { engine })).rejects.toThrow(/fossil\/2.*fossil\/1/);
+    await expect(open(dir, { engine })).rejects.toThrow(fossil('corpus/unsupported-format', { format: 'fossil/2' }));
     expect(await catalogs()).not.toContain(dir);
   });
 
   it('refuses a manifest that is not JSON, and one that is not there', async () => {
-    await expect(open(manifestOnly('garbage', 'format: fossil/1'), { engine })).rejects.toThrow(CorpusManifestError);
-    await expect(open(join(scratch, 'nothing-here'), { engine })).rejects.toThrow(CorpusManifestError);
+    await expect(open(manifestOnly('garbage', 'format: fossil/1'), { engine })).rejects.toThrow(fossil('corpus/not-json'));
+    await expect(open(join(scratch, 'nothing-here'), { engine })).rejects.toThrow(
+      fossil('corpus/unreadable', { path: join(scratch, 'nothing-here', 'fossil.json') }),
+    );
   });
 
   it('ignores a key it does not know', async () => {
@@ -85,12 +90,12 @@ describe('open', () => {
 
   it('refuses a manifest that names one table twice', async () => {
     const dir = manifestOnly('twice', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'Person' }] }));
-    await expect(open(dir, { engine })).rejects.toThrow(/Person twice/);
+    await expect(open(dir, { engine })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'Person' }));
     expect(await catalogs()).not.toContain(dir);
   });
 
   it('needs an engine', async () => {
-    await expect(open(CORPUS, {} as never)).rejects.toThrow(TypeError);
+    await expect(open(CORPUS, {} as never)).rejects.toThrow(fossil('api/invalid-argument', { argument: 'engine' }));
   });
 
   it('shares a catalog between two opens, and the last to close detaches it', async () => {
@@ -148,31 +153,35 @@ describe('sql', () => {
 describe('scan, refused before any statement', () => {
   it('names the tables when the table is not one', async () => {
     const corpus = await open(CORPUS, { engine });
-    expect(() => corpus.scan({ table: 'Nobody' })).toThrow(CorpusReadError);
-    expect(() => corpus.scan({ table: 'Nobody' })).toThrow(/Person/);
+    expect(() => corpus.scan({ table: 'Nobody' })).toThrow(
+      fossil('corpus/unknown-table', { table: 'Nobody', tables: expect.arrayContaining(['Person']) }),
+    );
     await corpus.close();
   });
 
   it('refuses a column the table does not declare, an empty projection and a negative limit', async () => {
     const corpus = await open(CORPUS, { engine });
-    expect(() => corpus.scan({ table: 'Person', select: ['nope'] })).toThrow(/nope/);
-    expect(() => corpus.scan({ table: 'Person', select: [] })).toThrow(CorpusReadError);
-    expect(() => corpus.scan({ table: 'Person', limit: -1 })).toThrow(CorpusReadError);
-    expect(() => corpus.scan({ table: 'Person', filter: { column: 'nope', op: '=', value: 1 } })).toThrow(/nope/);
+    const unknown = fossil('corpus/unknown-column', { table: 'Person', column: 'nope' });
+    expect(() => corpus.scan({ table: 'Person', select: ['nope'] })).toThrow(unknown);
+    expect(() => corpus.scan({ table: 'Person', select: [] })).toThrow(fossil('corpus/empty-projection', { table: 'Person' }));
+    expect(() => corpus.scan({ table: 'Person', limit: -1 })).toThrow(fossil('api/invalid-argument', { argument: 'limit' }));
+    expect(() => corpus.scan({ table: 'Person', filter: { column: 'nope', op: '=', value: 1 } })).toThrow(unknown);
     await corpus.close();
   });
 
   it('refuses a box over a table with no position', async () => {
     const corpus = await open(CORPUS, { engine });
     const undrawn = MANIFEST.vertex_tables.find((t) => t.position === undefined)!;
-    expect(() => corpus.scan({ table: undrawn.name, filter: { bbox: [0, 0, 1, 1] } })).toThrow(/no position/);
+    expect(() => corpus.scan({ table: undrawn.name, filter: { bbox: [0, 0, 1, 1] } })).toThrow(
+      fossil('corpus/no-position', { table: undrawn.name }),
+    );
     await corpus.close();
   });
 
   it('refuses a task of another table', async () => {
     const corpus = await open(CORPUS, { engine });
     const other = corpus.scan({ table: 'Tag' }).plan();
-    await expect(corpus.scan({ table: 'Person' }).read(other)).rejects.toThrow(CorpusReadError);
+    await expect(corpus.scan({ table: 'Person' }).read(other)).rejects.toThrow(fossil('api/invalid-argument', { argument: 'tasks' }));
     await corpus.close();
   });
 });

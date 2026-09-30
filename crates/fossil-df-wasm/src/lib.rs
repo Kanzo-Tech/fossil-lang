@@ -9,12 +9,17 @@
 // The executor is single-threaded by construction (the browser has no threads),
 // so its futures need not be `Send` — and DataFusion's execution futures aren't.
 #![allow(clippy::future_not_send)]
+// `result_large_err`: the helpers here refuse with `fossil_graph_schema::Failure`
+// (144 bytes, over clippy's 128) on the path that ends the call, where the copy
+// costs nothing measurable — `fossil-df`'s crate root says the same.
+#![allow(clippy::result_large_err)]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use fossil_df::Executor;
+use fossil_graph_schema::js::{bug, invalid_argument};
 use fossil_graph_schema::{Failure, Foreign, Problem};
 use fossil_storage::{Access, JsHost, Scope, Storage};
 use futures::TryStreamExt;
@@ -30,7 +35,10 @@ use wasm_bindgen::prelude::*;
 /// `WasmWorkspace` gives: a `&mut self` export borrows wasm-bindgen's cell
 /// exclusively, a failed borrow panics, and on `wasm32` that poisons the object
 /// for good. Every export takes `&self`; a register while a run is in flight
-/// returns a catchable `Error` instead.
+/// throws a catchable `FossilError`, `api/busy`, instead.
+///
+/// Everything thrown here is a `FossilError` built by
+/// `fossil_graph_schema::js::to_js` — a [`Failure`] with a code.
 #[wasm_bindgen(js_name = FossilExecutor)]
 #[derive(Debug)]
 pub struct FossilExecutor {
@@ -65,11 +73,11 @@ impl FossilExecutor {
     /// `@fossil-lang/storage`'s `resolveDocuments` sets it from the host.
     ///
     /// # Errors
-    /// A JS `Error` if `connections` is not an object of strings, or a run is
-    /// in flight.
+    /// `api/invalid-argument` if `connections` is not an object of strings,
+    /// `api/busy` if a run is in flight.
     #[wasm_bindgen(js_name = setConnections)]
-    pub fn set_connections(&self, connections: &JsValue) -> Result<(), JsError> {
-        let connections = parse_connections(connections).map_err(|e| JsError::new(&e))?;
+    pub fn set_connections(&self, connections: &JsValue) -> Result<(), JsValue> {
+        let connections = parse_connections(connections)?;
         self.borrow_mut("setConnections")?
             .set_connections(connections);
         Ok(())
@@ -80,18 +88,16 @@ impl FossilExecutor {
     /// reads them.
     ///
     /// # Errors
-    /// A JS `Error` if a register is in flight.
+    /// `api/busy` if a register is in flight.
     #[wasm_bindgen(js_name = missingDocuments)]
-    pub fn missing_documents(&self) -> Result<JsValue, JsError> {
+    pub fn missing_documents(&self) -> Result<JsValue, JsValue> {
         let arr = js_sys::Array::new();
-        for missing in self.borrow()?.missing_documents() {
+        for missing in self.borrow("missingDocuments")?.missing_documents() {
             let obj = js_sys::Object::new();
-            set(&obj, "key", &JsValue::from_str(&missing.key)).map_err(|e| JsError::new(&e))?;
-            set(&obj, "locator", &JsValue::from_str(&missing.locator))
-                .map_err(|e| JsError::new(&e))?;
+            set(&obj, "key", &JsValue::from_str(&missing.key))?;
+            set(&obj, "locator", &JsValue::from_str(&missing.locator))?;
             if let Some(connection) = &missing.connection {
-                set(&obj, "connection", &JsValue::from_str(connection))
-                    .map_err(|e| JsError::new(&e))?;
+                set(&obj, "connection", &JsValue::from_str(connection))?;
             }
             arr.push(&obj);
         }
@@ -101,10 +107,10 @@ impl FossilExecutor {
     /// Register a fetched document under the `key` `missingDocuments` gave it.
     ///
     /// # Errors
-    /// A JS `Error` if a run is in flight.
+    /// `api/busy` if a run is in flight.
     #[wasm_bindgen(js_name = registerDocument)]
     #[allow(clippy::needless_pass_by_value)]
-    pub fn register_document(&self, key: String, text: String) -> Result<(), JsError> {
+    pub fn register_document(&self, key: String, text: String) -> Result<(), JsValue> {
         self.borrow_mut("registerDocument")?
             .register_document(&key, &text);
         Ok(())
@@ -115,21 +121,17 @@ impl FossilExecutor {
     /// `connection` the one a credential is vended for.
     ///
     /// # Errors
-    /// A JS `Error` if the output shape document is unregistered or does not
-    /// decode.
-    pub fn sources(&self) -> Result<JsValue, JsError> {
-        let srcs = self
-            .borrow()?
-            .sources()
-            .map_err(|e| JsError::new(&detail(&e)))?;
+    /// The executor's failure if the output shape document is unregistered or
+    /// does not decode; `api/busy` if a register is in flight.
+    pub fn sources(&self) -> Result<JsValue, JsValue> {
+        let srcs = self.borrow("sources")?.sources()?;
         let arr = js_sys::Array::new();
         for (uri, format, connection) in srcs {
             let obj = js_sys::Object::new();
-            set(&obj, "uri", &JsValue::from_str(&uri)).map_err(|e| JsError::new(&e))?;
-            set(&obj, "format", &JsValue::from_str(&format)).map_err(|e| JsError::new(&e))?;
+            set(&obj, "uri", &JsValue::from_str(&uri))?;
+            set(&obj, "format", &JsValue::from_str(&format))?;
             if let Some(connection) = &connection {
-                set(&obj, "connection", &JsValue::from_str(connection))
-                    .map_err(|e| JsError::new(&e))?;
+                set(&obj, "connection", &JsValue::from_str(connection))?;
             }
             arr.push(&obj);
         }
@@ -141,8 +143,9 @@ impl FossilExecutor {
     /// on for `job`, and answer the [`fossil_df::RunReport`].
     ///
     /// # Errors
-    /// A JS `Error` when the host vends no single prefix to write under, or the
-    /// run fails — named `OverBudget` when it needed more memory than the
+    /// `storage/ambiguous-prefix` when the host vends more than one prefix to
+    /// write under, the storage failure when it vends none, or the run's own
+    /// failure — `run/over-budget` when it needed more memory than the
     /// executor's budget, which is raised before anything is written.
     // The shared borrow is held across the run on purpose: it is what makes a
     // `registerDocument` issued mid-run fail instead of changing the program
@@ -154,20 +157,18 @@ impl FossilExecutor {
         let dest = match storage.grant(scope.clone(), Access::Write).await {
             Ok([prefix]) => prefix.clone(),
             Ok(prefixes) => {
-                return Err(JsError::new(&format!(
-                    "the host vended {} write credentials for {scope}; a run writes under exactly one prefix",
-                    prefixes.len()
-                ))
+                return Err(Failure::new(Problem::AmbiguousPrefix {
+                    scope: scope.to_string(),
+                    count: prefixes.len() as u64,
+                })
+                .with_help("a run writes under exactly one prefix")
                 .into());
             }
-            Err(e) => return Err(JsError::new(&e.to_string()).into()),
+            Err(e) => return Err(Failure::from(e).into()),
         };
-        let exec = self.borrow()?;
-        let report = exec
-            .execute(&mut storage, &dest)
-            .await
-            .map_err(|e| run_error(&e))?;
-        Ok(serde_wasm_bindgen::to_value(&report)?)
+        let exec = self.borrow("run")?;
+        let report = exec.execute(&mut storage, &dest).await?;
+        Ok(report_value(&report)?)
     }
 
     /// Run over files held in memory, for a host with no storage: `sources`
@@ -175,39 +176,34 @@ impl FossilExecutor {
     /// in memory under `dest`. Answers `{ files: [{ path, bytes }], report }`.
     ///
     /// # Errors
-    /// A JS `Error` when `sources` is not an object of `Uint8Array`s, or the run
-    /// fails — named `OverBudget` as [`Self::run`]'s is.
+    /// `api/invalid-argument` when `sources` is not an object of `Uint8Array`s
+    /// keyed by URL, or the run's own failure, as [`Self::run`]'s is.
     #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
     #[wasm_bindgen(js_name = runInMemory)]
     pub async fn run_in_memory(&self, sources: JsValue, dest: String) -> Result<JsValue, JsValue> {
         let dest = format!("{}/", dest.trim_end_matches('/'));
         let mut storage = Storage::new(Arc::new(NoHost));
         let mut held: HashMap<String, Arc<InMemory>> = HashMap::new();
-        let mut memory = |storage: &mut Storage, root: &str| -> Result<Arc<InMemory>, JsError> {
+        let mut memory = |storage: &mut Storage, root: &str| -> Result<Arc<InMemory>, Failure> {
             if let Some(store) = held.get(root) {
                 return Ok(Arc::clone(store));
             }
             let store = Arc::new(InMemory::new());
-            storage
-                .with_store(root, Arc::clone(&store) as Arc<dyn ObjectStore>)
-                .map_err(|e| JsError::new(&e.to_string()))?;
+            storage.with_store(root, Arc::clone(&store) as Arc<dyn ObjectStore>)?;
             held.insert(root.to_string(), Arc::clone(&store));
             Ok(store)
         };
-        let obj: &js_sys::Object = sources
-            .dyn_ref()
-            .ok_or_else(|| JsError::new("`sources` is `{ [locator]: Uint8Array }`"))?;
+        let shape = |error: Option<JsValue>| {
+            invalid_argument("sources", "an object of { [url]: Uint8Array }", error)
+        };
+        let obj: &js_sys::Object = sources.dyn_ref().ok_or_else(|| shape(None))?;
         for entry in js_sys::Object::entries(obj).iter() {
             let pair: js_sys::Array = entry.into();
-            let locator = pair
-                .get(0)
-                .as_string()
-                .ok_or_else(|| JsError::new("a source locator is a string"))?;
-            let bytes: js_sys::Uint8Array = pair
-                .get(1)
-                .dyn_into()
-                .map_err(|_| JsError::new("a source's bytes are a Uint8Array"))?;
-            let url = Url::parse(&locator).map_err(|e| JsError::new(&format!("{locator}: {e}")))?;
+            let locator = pair.get(0).as_string().ok_or_else(|| shape(None))?;
+            let bytes: js_sys::Uint8Array = pair.get(1).dyn_into().map_err(|_| shape(None))?;
+            let url = Url::parse(&locator).map_err(|e| {
+                invalid_argument("sources", "an object keyed by URL", None).caused_by(e)
+            })?;
             let root = format!("{}://{}/", url.scheme(), url.authority());
             let store = memory(&mut storage, &root)?;
             store
@@ -216,21 +212,18 @@ impl FossilExecutor {
                     bytes.to_vec().into(),
                 )
                 .await
-                .map_err(|e| JsError::new(&e.to_string()))?;
+                .map_err(|e| unreachable(&locator, e))?;
         }
         let out = Arc::new(InMemory::new());
         storage
             .with_store(&dest, Arc::clone(&out) as Arc<dyn ObjectStore>)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+            .map_err(Failure::from)?;
 
-        let exec = self.borrow()?;
-        let report = exec
-            .execute(&mut storage, &dest)
-            .await
-            .map_err(|e| run_error(&e))?;
+        let exec = self.borrow("runInMemory")?;
+        let report = exec.execute(&mut storage, &dest).await?;
 
         let key = Url::parse(&dest)
-            .map_err(|e| JsError::new(&e.to_string()))?
+            .map_err(|e| invalid_argument("dest", "a URL", None).caused_by(e))?
             .path()
             .trim_start_matches('/')
             .to_string();
@@ -239,60 +232,41 @@ impl FossilExecutor {
             .list(None)
             .try_collect()
             .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
+            .map_err(|e| unreachable(&dest, e))?;
         for meta in listed {
             let bytes = out
                 .get(&meta.location)
                 .await
-                .map_err(|e| JsError::new(&e.to_string()))?
+                .map_err(|e| unreachable(&dest, e))?
                 .bytes()
                 .await
-                .map_err(|e| JsError::new(&e.to_string()))?;
+                .map_err(|e| unreachable(&dest, e))?;
             let location = meta.location.as_ref();
             let path = location.strip_prefix(&key).unwrap_or(location);
             let file = js_sys::Object::new();
-            set(&file, "path", &JsValue::from_str(path)).map_err(|e| JsError::new(&e))?;
-            set(&file, "bytes", &js_sys::Uint8Array::from(bytes.as_ref()))
-                .map_err(|e| JsError::new(&e))?;
+            set(&file, "path", &JsValue::from_str(path))?;
+            set(&file, "bytes", &js_sys::Uint8Array::from(bytes.as_ref()))?;
             files.push(&file);
         }
         let result = js_sys::Object::new();
-        set(&result, "files", &files).map_err(|e| JsError::new(&e))?;
-        set(&result, "report", &serde_wasm_bindgen::to_value(&report)?)
-            .map_err(|e| JsError::new(&e))?;
+        set(&result, "files", &files)?;
+        set(&result, "report", &report_value(&report)?)?;
         Ok(result.into())
     }
 }
 
-/// A failed run as a JS `Error`. One that needed more memory than the budget
-/// is named `OverBudget`, so a host can tell it from a program's own failure
-/// without reading the message.
-fn run_error(e: &Failure) -> JsValue {
-    let error = js_sys::Error::new(&detail(e));
-    if matches!(e.problem, Problem::OverBudget { .. }) {
-        error.set_name("OverBudget");
-    }
-    error.into()
+/// An in-memory store that answered with an error, as the storage failure a
+/// real store's would be.
+fn unreachable(locator: &str, error: object_store::Error) -> Failure {
+    Failure::new(Problem::Unreachable {
+        locator: locator.to_string(),
+    })
+    .caused_by(error)
 }
 
-/// A failure's message followed by its causes', as one line — the text a
-/// run's `Error` carried before failures had codes, so a host reading it sees
-/// the engine's or the store's own words as it did. The boundary that carries
-/// the code and the cause as values replaces this.
-fn detail(e: &Failure) -> String {
-    let mut text = e.to_string();
-    let mut last = text.clone();
-    let mut next = std::error::Error::source(e);
-    while let Some(cause) = next {
-        let said = cause.to_string();
-        if said != last {
-            text.push_str(": ");
-            text.push_str(&said);
-            last = said;
-        }
-        next = cause.source();
-    }
-    text
+/// The report of a run fossil just made, as plain data.
+fn report_value(report: &fossil_df::RunReport) -> Result<JsValue, Failure> {
+    serde_wasm_bindgen::to_value(report).map_err(|e| bug("serialising the run report", e))
 }
 
 /// The host of a run with no storage: it has no connections and vends nothing,
@@ -322,46 +296,37 @@ impl fossil_storage::Host for NoHost {
 }
 
 impl FossilExecutor {
-    fn borrow(&self) -> Result<std::cell::Ref<'_, Executor>, JsError> {
-        self.inner
-            .try_borrow()
-            .map_err(|_| JsError::new("the executor is being changed"))
+    fn borrow(&self, call: &str) -> Result<std::cell::Ref<'_, Executor>, Failure> {
+        self.inner.try_borrow().map_err(|_| busy(call))
     }
 
-    fn borrow_mut(&self, call: &str) -> Result<std::cell::RefMut<'_, Executor>, JsError> {
-        self.inner
-            .try_borrow_mut()
-            .map_err(|_| JsError::new(&format!("{call} during a run")))
+    fn borrow_mut(&self, call: &str) -> Result<std::cell::RefMut<'_, Executor>, Failure> {
+        self.inner.try_borrow_mut().map_err(|_| busy(call))
     }
 }
 
+fn busy(call: &str) -> Failure {
+    Failure::new(Problem::Busy {
+        call: call.to_string(),
+    })
+}
+
 /// Parse the JS `connections` object `{ name: baseUrl }`.
-fn parse_connections(connections: &JsValue) -> Result<HashMap<String, String>, String> {
-    let obj: &js_sys::Object = connections
-        .dyn_ref::<js_sys::Object>()
-        .ok_or("`connections` must be an object of { name: baseUrl }")?;
+fn parse_connections(connections: &JsValue) -> Result<HashMap<String, String>, Failure> {
+    let shape = || invalid_argument("connections", "an object of { name: baseUrl }", None);
+    let obj: &js_sys::Object = connections.dyn_ref::<js_sys::Object>().ok_or_else(shape)?;
     let mut map = HashMap::new();
     for entry in js_sys::Object::entries(obj).iter() {
         let pair: js_sys::Array = entry.into();
-        let name = pair
-            .get(0)
-            .as_string()
-            .ok_or("`connections` keys must be strings")?;
-        let url = pair
-            .get(1)
-            .as_string()
-            .ok_or("`connections` values must be strings")?;
+        let name = pair.get(0).as_string().ok_or_else(shape)?;
+        let url = pair.get(1).as_string().ok_or_else(shape)?;
         map.insert(name, url);
     }
     Ok(map)
 }
 
-fn set(obj: &js_sys::Object, key: &str, value: &JsValue) -> Result<(), String> {
+fn set(obj: &js_sys::Object, key: &str, value: &JsValue) -> Result<(), Failure> {
     js_sys::Reflect::set(obj, &JsValue::from_str(key), value)
         .map(|_| ())
-        .map_err(|e| js_err(&e))
-}
-
-fn js_err(e: &JsValue) -> String {
-    e.as_string().unwrap_or_else(|| "JS error".to_string())
+        .map_err(|e| bug(format!("setting `{key}` on a fresh object"), e))
 }

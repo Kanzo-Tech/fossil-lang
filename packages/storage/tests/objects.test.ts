@@ -43,7 +43,7 @@ describe('read', () => {
       { locator: `${LAKE}a.csv`, connection: 'lake' },
       { locator: `${LAKE}b.csv`, connection: 'lake' },
     ]);
-    expect(out.map((r) => (r.ok ? new TextDecoder().decode(r.bytes) : r.reason))).toEqual(['a', 'b']);
+    expect(out.map((r) => (r.ok ? new TextDecoder().decode(r.bytes) : r.problem.code))).toEqual(['a', 'b']);
     expect(asks).toEqual([{ scope: { connection: 'lake' }, access: 'read' }]);
     expect(seen[0]!.url).toBe('http://localhost:9000/b/lake/a.csv');
     expect(seen[0]!.headers.get('authorization')).toMatch(/^AWS4-HMAC-SHA256 Credential=K\//);
@@ -55,7 +55,7 @@ describe('read', () => {
     const { host, asks } = countingHost(() => []);
     const [pub, bare] = await read(host, [{ locator: 'https://x.test/shapes/p.shex' }, { locator: 'p.shex' }]);
     expect(pub).toEqual({ ok: true, bytes: new TextEncoder().encode('shape') });
-    expect(bare).toEqual({ ok: false, reason: 'it names no connection and is not a public URL' });
+    expect(bare).toMatchObject({ ok: false, problem: { code: 'storage/no-route', data: { locator: 'p.shex' } } });
     expect(asks).toEqual([]);
   });
 
@@ -66,8 +66,14 @@ describe('read', () => {
       { locator: `${LAKE}gone.csv`, connection: 'lake' },
       { locator: 's3://b/other/x.csv', connection: 'lake' },
     ]);
-    expect(missing).toMatchObject({ ok: false, reason: expect.stringMatching(/not found/i) });
-    expect(outside).toMatchObject({ ok: false, reason: expect.stringMatching(/lies outside/) });
+    expect(missing).toMatchObject({
+      ok: false,
+      problem: { code: 'storage/unreachable', data: { locator: `${LAKE}gone.csv` }, cause: { name: expect.any(String) } },
+    });
+    expect(outside).toMatchObject({
+      ok: false,
+      problem: { code: 'storage/outside-prefix', data: { locator: 's3://b/other/x.csv' } },
+    });
     expect(seen.map((r) => r.url)).toEqual(['http://localhost:9000/b/lake/gone.csv']);
   });
 });
@@ -99,7 +105,12 @@ describe('resolveDocuments', () => {
     const out = await resolveDocuments(ws, host);
     expect(out.registered).toBe(2);
     expect(out.unread).toEqual([
-      { key: '@lake/c.shex', locator: `${LAKE}c.shex`, connection: 'lake', reason: expect.stringMatching(/not found/) },
+      {
+        key: '@lake/c.shex',
+        locator: `${LAKE}c.shex`,
+        connection: 'lake',
+        problem: expect.objectContaining({ code: 'storage/unreachable', data: { locator: `${LAKE}c.shex` } }),
+      },
     ]);
     expect(ws.registered.get('@lake/b.shex')).toBe('B');
   });

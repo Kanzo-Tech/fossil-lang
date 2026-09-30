@@ -19,8 +19,7 @@
  */
 
 export { open } from './open.js';
-export { CorpusManifestError, FOSSIL_FORMAT } from './manifest.js';
-export { CorpusReadError } from './sql.js';
+export { FOSSIL_FORMAT } from './manifest.js';
 
 export type { Corpus, SqlCorpus, SqlResult } from './corpus.js';
 export type { Filter, Literal } from './filter.js';

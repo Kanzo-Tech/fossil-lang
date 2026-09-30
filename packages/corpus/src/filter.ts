@@ -7,8 +7,10 @@
  * exclude it are not read.
  */
 
+import { FossilError } from '@fossil-lang/types';
+
 import type { Position, Property } from './manifest.js';
-import { CorpusReadError, ident, lit } from './sql.js';
+import { ident, lit } from './sql.js';
 
 /** A value a filter compares a column against. */
 export type Literal = number | bigint | string | boolean;
@@ -78,18 +80,17 @@ export interface Columns {
 /**
  * **Bind a filter to a table** — Iceberg's `bind(schema)`, with `rewrite_not` folded in.
  *
- * @throws {CorpusReadError} for a column the table does not declare, a NaN or non-finite number, a
- *   literal the column cannot hold, or a box over a table with no position — before any statement.
+ * @throws {FossilError} before any statement: `corpus/unknown-column` for a column the table does not
+ *   declare, `corpus/filter-type-mismatch` for a literal the column cannot hold, `corpus/no-position`
+ *   for a box over a table with no position, `api/invalid-argument` for a NaN or non-finite number
+ *   or a box that is not one.
  */
 export function bind(filter: Filter, columns: Columns): Bound {
   const kinds = new Map(columns.properties.map((p) => [p.name, kindOf(p.type)]));
   const leaf = (column: string, op: Op, values: readonly Literal[], negated: boolean): Bound => {
     const kind = kinds.get(column);
     if (kind === undefined) {
-      throw new CorpusReadError(
-        `the filter names ${column}, which ${columns.table} does not declare — its columns are ` +
-          `${[...kinds.keys()].join(', ')}`,
-      );
+      throw unknownColumn(columns.table, column, [...kinds.keys()]);
     }
     for (const value of values) literalFor(column, kind, value);
     return { leaf: { column, kind, op: negated ? NEGATED[op] : op, values } };
@@ -104,11 +105,19 @@ export function bind(filter: Filter, columns: Columns): Bound {
     if ('bbox' in node) {
       const { position } = columns;
       if (position === undefined) {
-        throw new CorpusReadError(`${columns.table} declares no position, so it has no box to filter by`);
+        throw FossilError.of(
+          'corpus/no-position',
+          { table: columns.table },
+          `${columns.table} declares no position, so it has no box to filter by`,
+        );
       }
       const [x0, y0, x1, y1] = node.bbox;
       if (![x0, y0, x1, y1].every(Number.isFinite) || x0 > x1 || y0 > y1) {
-        throw new CorpusReadError(`bbox ${JSON.stringify(node.bbox)} is not [x0, y0, x1, y1] with x0 ≤ x1 and y0 ≤ y1`);
+        throw FossilError.of(
+          'api/invalid-argument',
+          { argument: 'bbox', expected: '[x0, y0, x1, y1] with x0 ≤ x1 and y0 ≤ y1' },
+          `bbox ${JSON.stringify(node.bbox)} is not [x0, y0, x1, y1] with x0 ≤ x1 and y0 ≤ y1`,
+        );
       }
       const sides = [
         leaf(position.x, '>=', [x0], negated),
@@ -126,13 +135,19 @@ export function bind(filter: Filter, columns: Columns): Bound {
 
 function literalFor(column: string, kind: Kind, value: Literal): void {
   if (typeof value === 'number' && !Number.isFinite(value)) {
-    throw new CorpusReadError(
+    throw FossilError.of(
+      'api/invalid-argument',
+      { argument: 'filter', expected: `a finite literal for ${column}` },
       `${String(value)} is not a literal (${column}): a NaN matches no comparison, and an infinity ` +
         'is not a value a column holds',
     );
   }
   if (kind !== 'other' && typeof value !== 'number' && typeof value !== 'bigint') {
-    throw new CorpusReadError(`${column} holds numbers, and the filter compares it with ${JSON.stringify(value)}`);
+    throw FossilError.of(
+      'corpus/filter-type-mismatch',
+      { column, holds: 'numbers', value: JSON.stringify(value) },
+      `${column} holds numbers, and the filter compares it with ${JSON.stringify(value)}`,
+    );
   }
 }
 
@@ -171,4 +186,17 @@ export function sqlOf(bound: Bound): string {
     default:
       return `${name} ${op} ${literal(values[0]!)}`;
   }
+}
+
+/** A column `table` does not declare, named where a projection or a filter asked for it. */
+export function unknownColumn(
+  table: string,
+  column: string,
+  columns: string[],
+): FossilError<'corpus/unknown-column'> {
+  return FossilError.of(
+    'corpus/unknown-column',
+    { table, column, columns },
+    `${table} does not declare ${column} — its columns are ${columns.join(', ')}`,
+  );
 }

@@ -71,7 +71,9 @@ describe('FossilExecutor', () => {
     try {
       exec.setConnections({ vocab: 'https://shapes.example.com' });
       expect(exec.missingDocuments()).toEqual([{ key: 'graph.shex', locator: 'graph.shex' }]);
-      expect(() => exec.sources()).toThrow(/not registered/);
+      expect(() => exec.sources()).toThrow(
+        expect.objectContaining({ name: 'FossilError', code: 'document/not-registered', data: { document: 'graph.shex' } }),
+      );
       exec.registerDocument('graph.shex', SHEX);
       expect(exec.missingDocuments()).toEqual([]);
     } finally {
@@ -98,7 +100,13 @@ describe('FossilExecutor', () => {
     try {
       await expect(
         exec.runInMemory({ 'https://data.example.com/users.csv': await fixture('users.csv') }, 's3://jobs/run-1'),
-      ).rejects.toThrow(/orders\.csv/);
+      ).rejects.toThrow(
+        expect.objectContaining({
+          name: 'FossilError',
+          code: 'engine/failed',
+          cause: expect.objectContaining({ name: 'DataFusionError' }),
+        }),
+      );
     } finally {
       exec.free();
     }

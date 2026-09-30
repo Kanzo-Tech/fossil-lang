@@ -7,20 +7,11 @@
  * optional fields without a reader changing.
  */
 
+import { FossilError } from '@fossil-lang/types';
+
 /** The format this reader reads. Anything else is refused at `open`. */
 export const FOSSIL_FORMAT = 'fossil/1';
 
-/**
- * Raised when `fossil.json` cannot be read, is not JSON, or declares a format other than
- * {@link FOSSIL_FORMAT} — before a byte of Parquet is read. Distinct from `CorpusReadError`, which
- * is a read the manifest allowed failing: a caller can retry one of these against another corpus.
- */
-export class CorpusManifestError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CorpusManifestError';
-  }
-}
 
 /** One column of a table, as the manifest declares it. */
 export interface Property {
@@ -85,18 +76,21 @@ export interface Manifest {
 /**
  * Parse `fossil.json`. `where` names it in an error.
  *
- * @throws {CorpusManifestError} for text that is not JSON, or a `format` other than `fossil/1`.
+ * @throws {FossilError} `corpus/not-json` for text that is not JSON, `corpus/unsupported-format` for a
+ *   `format` other than `fossil/1`.
  */
 export function parseManifest(text: string, where: string): Manifest {
   let json: unknown;
   try {
     json = JSON.parse(text);
   } catch (cause) {
-    throw new CorpusManifestError(`${where} is not JSON: ${(cause as Error).message}`);
+    throw FossilError.of('corpus/not-json', { path: where }, `${where} is not JSON`, { cause });
   }
   const format = (json as { format?: unknown } | null)?.format;
   if (format !== FOSSIL_FORMAT) {
-    throw new CorpusManifestError(
+    throw FossilError.of(
+      'corpus/unsupported-format',
+      { path: where, format: typeof format === 'string' ? format : String(JSON.stringify(format)) },
       `${where} declares format ${JSON.stringify(format)}; this reader reads ${FOSSIL_FORMAT} and nothing else`,
     );
   }
