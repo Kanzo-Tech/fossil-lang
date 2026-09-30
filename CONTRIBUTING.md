@@ -71,7 +71,7 @@ cargo xtask wasm-check
 ```
 
 Without any LLVM at all, check the compiler closure directly — it is the smaller
-claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-graph-wasm`.
+claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm`.
 
 ## Generated files
 

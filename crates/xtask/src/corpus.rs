@@ -20,9 +20,8 @@
 //! A [`Role`] says what a column IS. Every reader that used to carry a
 //! hand-written list now names the roles it means, which is what makes the two
 //! surviving sets legibly different rather than accidentally different:
-//! `fossil-graph` hides *everything the writer emits* from a field listing, and
-//! `packages/corpus` excludes only *the columns it already surfaces as named
-//! members*. Those are different questions and they were two literals.
+//! a field listing hides *everything the writer emits*, and a viewer excludes
+//! only *the columns it already surfaces as named members*. Those are different questions and they were two literals.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;

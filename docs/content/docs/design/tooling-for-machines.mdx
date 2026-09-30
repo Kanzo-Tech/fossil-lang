@@ -42,7 +42,7 @@ ask a question, and every answer it gets is only as correct as its model of that
 
 So what fossil types is the part an agent would otherwise reconstruct. `schema` answers what types,
 fields and relations exist, with field statistics on request, and its params and result are JSON
-Schemas published off `crates/fossil-graph/src/operations/mod.rs, Verb` — a malformed request is
+Schemas published off `e5b2113f:crates/fossil-graph/src/operations/mod.rs, Verb` — a malformed request is
 rejected at the boundary rather than producing a plausible wrong answer. `execute_sql` is the one
 verb that is not typed, and it is behind a permission rather than beside the others.
 

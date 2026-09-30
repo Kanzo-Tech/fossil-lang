@@ -60,7 +60,7 @@ address is the payload's shift plus two bits per rung. And `dense_id` is not a n
 of its own position**, which is what `crates/fossil-layout/src/layout/hilbert.rs, hilbert_ranks`
 computes and what
 [the order that makes an interval mean something](/docs/format/conventions/addressing#the-order-that-makes-an-interval-mean-something)
-specifies. `crates/fossil-graph/src/plan.rs, tile_of` states the consequence in its own doc:
+specifies. `e5b2113f:crates/fossil-graph/src/plan.rs, tile_of` states the consequence in its own doc:
 
 > tile `i` **is** the range `[i·4096, (i+1)·4096)`, its parent is a further shift, and the lowest
 > common ancestor of two vertices is the common prefix of their ids.
@@ -131,7 +131,7 @@ community does not exist in the source, hashing the member set changes the momen
 a counter is not stable across reorderings, and every reference dangles.
 
 That argument still holds, and under *the partition is arbitrary* it no longer has to be made.
-**Nothing but the camera reads the tree.** `crates/fossil-graph/src/operations/mod.rs, Verb` has two
+**Nothing but the camera reads the tree.** `e5b2113f:crates/fossil-graph/src/operations/mod.rs, Verb` has two
 variants, `schema` and `execute_sql`, and neither descends a rung: a verb answers in relations, and a
 verb that returned a cell would be answering a question about the plane in a language about the
 graph. That is the split the door already draws between its addressed half and its queried half —

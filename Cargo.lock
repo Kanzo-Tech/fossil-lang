@@ -1991,37 +1991,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "fossil-graph"
-version = "0.1.0"
-dependencies = [
- "fossil-sinks",
- "insta",
- "schemars",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "fossil-graph-schema"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "fossil-graph-wasm"
-version = "0.1.0"
-dependencies = [
- "fossil-graph",
- "js-sys",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
 ]
 
 [[package]]

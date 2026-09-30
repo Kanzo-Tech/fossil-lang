@@ -155,7 +155,7 @@ coordinate system; the contract had all three total, and a type without geometry
 `packages/corpus/src/index.ts` already exported, with one addition: each vertex type carries its
 manifest's `channels:` block. The page said the reader parsed it and did not surface it; nothing on
 the reader's side parsed it at all, so `fossil_graph::plan` reads it now
-(`crates/fossil-graph/src/plan/declared.rs, channels_of`) with the cell tree and the coordinate
+(`e5b2113f:crates/fossil-graph/src/plan/declared.rs, channels_of`) with the cell tree and the coordinate
 system beside it. `Channel`, `Direction`, `Gap` and `GapReason` are the ones
 `e5b2113f:packages/corpus/src/address.ts` exports — `src` reads the source-aligned half of a relation and `dst`
 the target-aligned one — and they are the only names of the addressing on the barrel.
@@ -497,7 +497,7 @@ and each member's types went with the member. `frame` and `rows` ran composition
 and were held in two modules of their own, so that retiring them deleted two files rather than
 carving two. `query.ts` is where the engine's two faces meet — rows for the members that walk
 objects, a `Batch` for the ones a view draws. `address.ts` stays the one bridge to
-`crates/fossil-graph/src/plan.rs, ReadPlan`, and it was the one module over the bound, at 950 lines,
+`e5b2113f:crates/fossil-graph/src/plan.rs, ReadPlan`, and it was the one module over the bound, at 950 lines,
 until it shed everything a level was, the window and the drawing `rows` and `frame` asked of it, and
 every field no reader reads: 453 lines. `index.ts` stays the barrel.
 
