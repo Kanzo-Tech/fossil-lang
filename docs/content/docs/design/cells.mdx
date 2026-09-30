@@ -957,7 +957,7 @@ that is allowed. Nothing is released and no corpus written by anyone else exists
 buys is a property of a set with nothing in it.
 
 What holds the two halves together instead is the guard, and it was made to hold *before* the
-rename rather than after. `packages/corpus/guards/inspect.mjs, cellsOf` is the one function in the tree
+rename rather than after. `e5b2113f:packages/corpus/guards/inspect.mjs, cellsOf` is the one function in the tree
 that reads the key; `mode-names-a-channel` in `packages/corpus/guards/guards.mjs` counts the trees it
 examined, and `packages/corpus/guards/self-test.mjs` asserts that count is non-zero against a fixture
 that writes one. A writer that renames the key and a reader that does not now produces *zero trees

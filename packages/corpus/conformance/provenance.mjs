@@ -1,32 +1,28 @@
 /**
  * Where `conformance/corpus/` came from, executed.
  *
- * The corpus every address in `expected.json` resolves against is checked in — twenty Parquet
- * files, three manifests and a tile manifest. Nothing said how it was made, and the cost of that showed up as a
- * diagnosis: regenerating with `guards/fixture.mjs`'s defaults gives **600** edges against the
- * **596** the manifest declares, which reads exactly like a fixture that has drifted from its
- * generator. It has not. `clusters` decides how many chords the ring carries and the default is
- * 256; at 16 the generator reproduces this corpus **byte for byte**, every file, both manifests
- * included. The four edges are the parameter, not a drift.
+ * The corpus the reader's tests open is checked in — a `fossil.json` and six Parquet files. It is
+ * generated, and the parameters that generated it are `RECIPE` below. Regenerating with
+ * `guards/fixture.mjs`'s defaults gives a corpus two hundred times larger; the recipe is what makes
+ * it this one, and this file is what keeps the recipe true.
  *
  *   node conformance/provenance.mjs
  *
  * # What is asserted, and what is only reported
  *
- * **Asserted:** the manifests are identical text, the file set is identical, and every payload
- * holds the same rows in the same order. That is the corpus, and it is stable across DuckDB
- * versions.
+ * **Asserted:** the manifest is identical text, the file set is identical, and every table holds
+ * the same rows in the same order. That is the corpus, and it is stable across DuckDB versions.
  *
  * **Reported:** byte-identity of the Parquet files. It holds on the pinned CLI and it is not a
  * requirement, because a writer is free to change an encoding without changing a row — and a check
  * that went red on a DuckDB point release would teach everyone to regenerate the fixture rather
- * than read the diff, which is how the recorded parameters would get lost a second time.
+ * than read the diff.
  *
  * # Why this is not `git diff`
  *
  * Regenerating in place and looking at the diff is the same check with the corpus already
- * overwritten, which is the state nobody wants to be in when the answer is "the parameters were
- * right and the default is not". This writes to a temporary directory and leaves the corpus alone.
+ * overwritten. This writes to a temporary directory and leaves the corpus alone. To regenerate it
+ * on purpose: `node guards/fixture.mjs conformance/corpus --vertices 300 --clusters 16`.
  */
 
 import { execFileSync } from "node:child_process";
@@ -41,14 +37,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const CORPUS = join(HERE, "corpus");
 
 /**
- * The command that wrote `conformance/corpus/`, as parameters rather than as prose.
- *
- * `clusters: 16` is the one that is not a default and the one the whole file is about. `count: 300`
- * is five tiles of 64 with the last deliberately partial (44 rows), because a corpus whose count
- * divides its tile size never exercises a tail; `chunkSize: 64` is small enough to read by hand and
- * a power of two, which is what the conventions require and 4,096 is only the measured default of.
+ * The command that wrote `conformance/corpus/`, as parameters rather than as prose. 300 people is
+ * small enough to read by hand; the orders and tags are the fixture's defaults for that count.
  */
-export const RECIPE = { count: 300, clusters: 16, layout: "files", chunkSize: 64 };
+export const RECIPE = { count: 300, clusters: 16 };
 
 const failures = [];
 const notes = [];
@@ -63,8 +55,7 @@ function tree(root) {
   }
   all.sort();
   return {
-    // The tile manifest is a manifest: text the recipe writes, compared as text.
-    manifests: all.filter((p) => p.endsWith(".yml") || p.endsWith(".json")),
+    manifests: all.filter((p) => p.endsWith(".json")),
     payloads: all.filter((p) => p.endsWith(".parquet")),
   };
 }
@@ -81,19 +72,14 @@ function rows(path) {
 const scratch = mkdtempSync(join(tmpdir(), "fossil-provenance-"));
 try {
   const written = write(join(scratch, "corpus"), RECIPE);
-  notes.push(
-    `regenerated: ${written.count} vertices · ${written.edges} edges · ${written.tiles} tiles · ` +
-      `${written.layout}, chunk_size ${written.chunkSize}`,
-  );
+  notes.push(`regenerated: ${written.vertices} vertices · ${written.edges} edges · ${written.tables} tables`);
 
   const committed = tree(CORPUS);
   const regenerated = tree(written.dir);
 
   // Non-vacuity first: two empty trees agree about everything, and so do two trees this failed to
-  // read. The committed corpus is 4 manifests and 20 payloads — five vertex tiles, five index and
-  // five of each adjacency orientation — and the numbers are here so a walker that stopped
-  // descending is a failure rather than a smaller success.
-  if (committed.manifests.length < 4 || committed.payloads.length < 20) {
+  // read. The committed corpus is one manifest and six tables.
+  if (committed.manifests.length < 1 || committed.payloads.length < 6) {
     fail(
       `non-vacuity: the committed corpus reads as ${committed.manifests.length} manifest(s) and ` +
         `${committed.payloads.length} payload(s), so the comparison below is over almost nothing`,
@@ -107,7 +93,7 @@ try {
     );
   }
 
-  // The manifests, as text. This is where 596 lives, and it is the whole of the "drift".
+  // The manifest, as text.
   for (const path of committed.manifests) {
     if (!regenerated.manifests.includes(path)) continue;
     const a = readFileSync(join(CORPUS, path), "utf8");
@@ -120,8 +106,8 @@ try {
     }
   }
 
-  // The payloads, as rows in order. Order is part of the format — `by_source` is CSR and
-  // `by_target` is CSC — so a set comparison would pass over a sort that stopped sorting.
+  // The payloads, as rows in order. Order is part of the format — every table is written in the
+  // order of its key — so a set comparison would pass over a sort that stopped sorting.
   let identicalBytes = 0;
   for (const path of committed.payloads) {
     if (!regenerated.payloads.includes(path)) continue;
@@ -147,11 +133,7 @@ for (const line of notes) console.log(`  ${line}`);
 if (failures.length > 0) {
   console.error(`\n${failures.length} disagreement(s) with the recorded recipe:\n`);
   for (const failure of failures) console.error(`  ✗ ${failure}`);
-  console.error(
-    `\nThe recipe is RECIPE in this file: ${JSON.stringify(RECIPE)}. Regenerating with ` +
-      `guards/fixture.mjs's DEFAULTS gives 600 edges rather than 596, which is the parameter and ` +
-      `not a drift — see the note at the top before concluding the fixture is stale.\n`,
-  );
+  console.error(`\nThe recipe is RECIPE in this file: ${JSON.stringify(RECIPE)}.\n`);
   process.exit(1);
 }
 console.log(`\nconformance/corpus reproduces from ${JSON.stringify(RECIPE)}`);

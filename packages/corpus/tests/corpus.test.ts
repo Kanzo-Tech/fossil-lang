@@ -1,490 +1,178 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import './boot.js';
-import {
-  CorpusManifestError,
-  CorpusReadError,
-  open,
-  type Corpus,
-  type Direction,
-  type OpenOptions,
-  type TileAddress,
-} from '../src/index.js';
-import type { QueryFn } from '../src/query.js';
+import { CorpusManifestError, CorpusReadError, FOSSIL_FORMAT, open, type Manifest } from '../src/index.js';
 import { duckdb } from './engine.js';
 
 /**
- * The reference API, run against the conformance corpus with a real engine.
+ * The door, run against the checked-in conformance corpus with a real DuckDB-WASM.
  *
- * `tests/conformance.test.ts` executes `expected.json`, which is a table of **addresses**: what a
- * reader must compose and what it must refuse to compose. Nothing in it opens a byte. This file is
- * the other half — the corpus is 300 vertices in five tiles of 64 with a tail of 44, and 596 edges
- * stored twice, so every answer below has a size that a wrong shift, a hard-coded 4,096 or a
- * doubled orientation changes.
- *
- * **Every expectation is a second query, not a constant.** The API's answer is compared against SQL
- * this file writes over the same files, because a constant transcribed from a run of the code under
- * test agrees with it by construction. The four numbers that *are* constants — 300, 5, 64, 596 —
- * come from the manifest and from `packages/corpus/guards/vectors.json`, which neither this file nor
- * `open` wrote.
- *
- * **What it cannot prove**, and each of these is why:
- *
- * - **That the identity survives a re-layout**, which is the entire argument for keying on the
- *   subject IRI. Proving it needs two corpora over the same graph with different placements, and
- *   the fixture is one tree. What is proved instead is the half that is observable here: the API
- *   refuses a `dense_id` as an identity, and every id it hands back is a subject.
- * - **That the tile manifest is true.** It is written by the writer and believed by the reader. The
- *   cross-check below re-reads the rows, so it catches a box that disagrees with the pages *of this
- *   corpus*; it cannot catch a writer that lies consistently — `guards/`' `tile-manifest` holds it
- *   against the footers.
- * - **That the other container is read**, because it is not. The refusal is asserted; the row-group
- *   container has no test here because it has no implementation, and no manifest field to select it.
- * - **Anything above 2⁵³.** The `BigInt` boundary is exercised at conformance-corpus scale, where a
- *   `Number` would also work. `tests/address.test.ts` and `vectors.json` hold the borders.
+ * **Every expectation is a second query, not a constant**: a count is held against the manifest and
+ * against SQL this file writes over the same files, because a number transcribed from a run of the
+ * code under test agrees with it by construction.
  */
 
-const CONFORMANCE = fileURLToPath(new URL('../conformance/', import.meta.url));
-const CORPUS = join(CONFORMANCE, 'corpus');
+const CORPUS = fileURLToPath(new URL('../conformance/corpus', import.meta.url));
+const MANIFEST = JSON.parse(readFileSync(join(CORPUS, 'fossil.json'), 'utf8')) as Manifest;
+const TABLES = [...MANIFEST.vertex_tables, ...MANIFEST.edge_tables];
 
-/** The manifest's own numbers, read here so a hard-coded stride shows up as a failure. */
-const VERTEX_COUNT = 300n;
-const CHUNK_SIZE = 64n;
-const TILES = 5n;
-const EDGE_COUNT = 596n;
-
-let query: QueryFn;
 let engine: Engine;
-let corpus: Corpus;
-const scratch: string[] = [];
-
-afterAll(() => {
-  for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
-});
+let query: (sql: string) => Promise<Record<string, unknown>[]>;
+const scratch = mkdtempSync(join(tmpdir(), 'fossil-corpus-test-'));
 
 beforeAll(async () => {
-  // DuckDB-WASM under NODE_RUNTIME pre-allocates its spill files the moment a query touches the
-  // filesystem, and it puts them in `./.tmp` relative to the process — which is the package
-  // directory. Left alone this run writes 29 GB into `packages/corpus/.tmp` and does not remove it.
-  const spill = mkdtempSync(join(tmpdir(), 'fossil-corpus-spill-'));
-  scratch.push(spill);
-  ({ engine, query } = await duckdb(spill));
-  corpus = await open(CORPUS, { engine, sql: 'allowed' });
+  ({ engine, query } = await duckdb(join(scratch, 'spill')));
 }, 60_000);
+afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-/** The engine, with every statement it is asked recorded — how a test counts what a member reads. */
-function recording(statements: string[]): Engine {
-  return {
-    ...engine,
-    query(sql, options) {
-      statements.push(sql);
-      return engine.query(sql, options);
-    },
-  };
+const catalogs = async (): Promise<string[]> =>
+  (await query('SELECT database_name AS d FROM duckdb_databases()')).map((r) => String(r.d));
+
+/** A corpus directory holding `text` as its `fossil.json` and no Parquet at all. */
+function manifestOnly(name: string, text: string): string {
+  const dir = join(scratch, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'fossil.json'), text);
+  return dir;
 }
 
-/** The payload's zoom — the finest, and the last matrix. */
-const payloadZ = (): number => corpus.tileMatrix('Person').tileMatrices.length - 1;
-
-/**
- * **The relations incident to a set of vertices**, composed out of `edges` the way a caller composes
- * it: read each orientation's half from the tiles holding them, keep the rows whose aligned end is
- * one of them, and count each edge once. `edges` answers every edge of a tile; which of them a
- * caller wants is the caller's.
- */
-async function incident(
-  ids: ReadonlySet<bigint>,
-  directions: readonly Direction[],
-  emitted: Set<string> = new Set(),
-): Promise<Array<{ src: bigint; dst: bigint }>> {
-  const z = payloadZ();
-  const tileRows = BigInt(corpus.tileMatrix('Person').tileMatrices[z]!.tileRows);
-  const from = [...new Set([...ids].map((id) => Number(id / tileRows)))]
-    .sort((a, b) => a - b)
-    .map((tile): TileAddress => ({ type: 'Person', z, tile }));
-  const found: Array<{ src: bigint; dst: bigint }> = [];
-  for (const direction of directions) {
-    for (const answer of await corpus.edges({ from, direction })) {
-      expect(answer.declined).toEqual([]);
-      for (const batch of answer.batches) {
-        batch.src.forEach((src, i) => {
-          const dst = batch.dst[i]!;
-          if (!ids.has(direction === 'src' ? src : dst)) return;
-          const key = `${src} ${dst}`;
-          if (emitted.has(key)) return;
-          emitted.add(key);
-          found.push({ src, dst });
-        });
-      }
-    }
-  }
-  return found;
-}
-
-/** One scalar out of a query this file wrote, so an expectation is never the code under test. */
-async function scalar(sql: string): Promise<unknown> {
-  const rows = await query(sql);
-  return Object.values(rows[0]!)[0];
-}
-
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
-const vertexTiles = () =>
-  `[${[0, 1, 2, 3, 4].map((k) => lit(`${CORPUS}/vertex/Person/chunk${k}.parquet`)).join(', ')}]`;
-const adjTiles = (dir: 'by_source' | 'by_target') =>
-  `[${[0, 1, 2, 3, 4]
-    .map((k) => lit(`${CORPUS}/edge/Person_knows_Person/${dir}/chunk${k}.parquet`))
-    .join(', ')}]`;
-
-describe('open — what is inside', () => {
-  it('needs an engine, and names both ways to lend one rather than failing at the first query', async () => {
-    await expect(open(CORPUS, {} as OpenOptions & { engine: Engine })).rejects.toThrow(
-      /needs an engine: engine with host .* or engine alone/,
+describe('open', () => {
+  it('reads fossil.json once and registers a view per table under the corpus', async () => {
+    const corpus = await open(CORPUS, { engine });
+    expect(corpus.url).toBe(CORPUS);
+    expect(corpus.manifest).toEqual(MANIFEST);
+    expect(corpus.manifest.format).toBe(FOSSIL_FORMAT);
+    const views = await query(
+      `SELECT table_name AS t FROM information_schema.tables WHERE table_catalog = '${CORPUS}' ORDER BY t`,
     );
+    expect(views.map((r) => r.t)).toEqual(TABLES.map((t) => t.name).sort());
+    await corpus.close();
   });
 
-  it('reads the vertex type off the manifest and its columns off the bytes', () => {
-    expect(corpus.types.vertices).toHaveLength(1);
-    const person = corpus.types.vertices[0]!;
-    expect(person.type).toBe('Person');
-    expect(person.count).toBe(VERTEX_COUNT);
-    expect(person.identity).toBe('subject');
-    expect(person.geometry).toBe(true);
-    // Seven on disk against THREE in the payload projection — the manifest's promise is not the
-    // artefact, which is why the vocabulary is a DESCRIBE and not a read of the manifest. The
-    // gap is what matters and not its width: it was five against one before the fixture grew
-    // `birth_year` and `postcode`.
-    expect(person.fields.map((f) => f.name)).toEqual([
-      'dense_id',
-      'subject',
-      'birth_year',
-      'postcode',
-      'x',
-      'y',
-      'cluster_id',
-    ]);
-    expect(person.fields.map((f) => f.type)).toEqual([
-      'UINTEGER',
-      'VARCHAR',
-      'INTEGER',
-      'VARCHAR',
-      'FLOAT',
-      'FLOAT',
-      'UINTEGER',
-    ]);
+  it.each(TABLES.map((t) => [t.name, t] as const))('%s holds its record_count', async (_, table) => {
+    const corpus = await open(CORPUS, { engine });
+    const scan = corpus.scan({ table: table.name });
+    const [batch] = await scan.read(scan.plan());
+    expect(batch!.numRows).toBe(table.record_count);
+    const [direct] = await query(`SELECT count(*)::INTEGER AS n FROM read_parquet('${join(CORPUS, table.path)}')`);
+    expect(batch!.numRows).toBe(direct!.n);
+    await corpus.close();
   });
 
-  it('carries three properties that the manifest declares, against seven columns on disk', () => {
-    const declared = readFileSync(join(CORPUS, 'vertex/Person.vertex.yml'), 'utf8');
-    expect(declared.match(/^ {2}- name: /gm)).toHaveLength(3);
-    expect(corpus.types.vertices[0]!.fields.length).toBe(7);
-  });
-
-  it('reads the edge type, both orientations, one count for the pair', () => {
-    expect(corpus.types.edges).toEqual([
-      {
-        edgeType: 'knows',
-        srcType: 'Person',
-        dstType: 'Person',
-        count: EDGE_COUNT,
-        directions: ['src', 'dst'],
-      },
-    ]);
-  });
-
-  it('takes the stride from the manifest — 64, not the default 4,096', () => {
-    const payload = corpus.tileMatrix('Person').tileMatrices.at(-1)!;
-    expect(payload.tileRows).toBe(Number(CHUNK_SIZE));
-    expect(payload.tiles).toHaveLength(Number(TILES));
-    // The tail tile: 300 = 4·64 + 44, the row `vectors.json` publishes for this corpus.
-    expect(payload.tiles.at(-1)!.rows).toBe(Number(VERTEX_COUNT % CHUNK_SIZE));
-  });
-});
-
-describe('the tile matrix — the box a caller has no other way to know', () => {
-  it('agrees with the rows it claims to summarise', async () => {
-    const box = corpus.tileMatrix('Person').extent;
-    const truth = (
-      await query(
-        `SELECT min(x) AS minX, max(x) AS maxX, min(y) AS minY, max(y) AS maxY
-           FROM read_parquet(${vertexTiles()})`,
-      )
-    )[0]!;
-    expect(box).not.toBeNull();
-    expect(box!.x).toBeCloseTo(Number(truth['minX']), 4);
-    expect(box!.x + box!.w).toBeCloseTo(Number(truth['maxX']), 4);
-    expect(box!.y).toBeCloseTo(Number(truth['minY']), 4);
-    expect(box!.y + box!.h).toBeCloseTo(Number(truth['maxY']), 4);
-  });
-});
-
-describe('the verbs, through the same door', () => {
-  /**
-   * The six verbs answer over a corpus that was opened by URL — which is the whole of the merge.
-   *
-   * They were `createGraphClient`, a second entry point taking the same two arguments and with no
-   * rule for choosing. It is the transport now. What it needed and `open` did not is the
-   * bridge asserted below: the verbs' SQL names tables, this corpus is Parquet files, and the door
-   * registers the temp views that join the two.
-   *
-   * **These do not assert what the corpus API asserts elsewhere, on purpose.** A verb reads the
-   * MANIFEST's vocabulary and this corpus declares three properties against seven columns on
-   * disk, so `read` answers with `subject` alone and `schema` reports no fields at all. That divergence is
-   * the reason `open` describes the bytes instead, and pinning it here is what stops the two
-   * halves being confused for one.
-   */
-  it('answers a verb over a corpus opened by URL', async () => {
-    const { vertices, edges, fields } = await corpus.schema();
-    expect(vertices).toHaveLength(1);
-    expect(vertices[0]!.name).toBe('Person');
-    // The count is `count(*)` over the registered view, not the manifest's declaration — so this
-    // is the bytes agreeing with `vertex_count`, which is the disagreement the corpus guards
-    // exist to catch.
-    expect(vertices[0]!.count).toBe(Number(VERTEX_COUNT));
-    expect(edges).toHaveLength(1);
-    expect(edges[0]!.table_name).toBe('Person_knows_Person');
-    expect(edges[0]!.count).toBe(Number(EDGE_COUNT));
-    // Seven columns on disk, three declared, and `subject` is a writer column: no field survives.
-    expect(fields).toHaveLength(0);
-  }, 30_000);
-
-  it('answers every type\'s field stats, with their kind, in one call', async () => {
-    const { vertices } = await corpus.schema({ stats: true });
-    const person = vertices.find((v) => v.name === 'Person')!;
-    expect(person.stats.map((f) => f.name)).toEqual(person.fields);
-    expect(person.stats.map((f) => [f.name, f.kind])).toEqual([
-      ['birth_year', 'numeric'],
-      ['postcode', 'categorical'],
-    ]);
-    // Without the flag the summaries carry none — the cheap call stays cheap.
-    expect((await corpus.schema()).vertices.every((v) => v.stats.length === 0)).toBe(true);
-  }, 30_000);
-
-  it('lists the relations a host records, named by the corpus and never composed', async () => {
-    const relations = await corpus.relations();
-    const { vertices, edges } = await corpus.schema();
-    expect(relations.map((r) => r.name)).toEqual([
-      ...vertices.map((v) => v.name),
-      ...edges.map((e) => e.table_name),
-    ]);
-    const person = relations.find((r) => r.kind === 'vertex')!;
-    expect(person.rows).toBe(Number(VERTEX_COUNT));
-    expect(person.files).toEqual(
-      [0, 1, 2, 3, 4].map((k) => `${CORPUS}/vertex/Person/chunk${k}.parquet`),
-    );
-    expect(person.kind === 'vertex' && person.columns).toEqual(corpus.types.vertices[0]!.fields);
-    const knows = relations.find((r) => r.kind === 'edge')!;
-    expect(knows.rows).toBe(Number(EDGE_COUNT));
-    expect(knows.files).toEqual(
-      [0, 1, 2, 3, 4].map((k) => `${CORPUS}/edge/Person_knows_Person/by_source/chunk${k}.parquet`),
-    );
-  }, 30_000);
-
-  it('withholds the hatch by default, and admits it when the host says so', async () => {
-    // A withheld corpus does not carry a member that refuses: it does not carry the member.
-    const closed = await open(CORPUS, { engine });
-    expect('executeSql' in closed).toBe(false);
-
-    // And the corpus this file opened with the permission has it.
-    expect('executeSql' in corpus).toBe(true);
-    const permitted = corpus as typeof corpus & {
-      executeSql(params: { sql: string }): Promise<{ rows: unknown[] }>;
-    };
-    expect((await permitted.executeSql({ sql: 'SELECT 1 AS n' })).rows).toHaveLength(1);
-  }, 30_000);
-
-  it('keeps its relations in a catalog of its own, beside a host table of the same name', async () => {
-    // `Person` is not an unlikely name for a table the host already has, nor for a second corpus
-    // in the same engine. The verbs' views live in a database named after the corpus, so the
-    // host's table is neither replaced nor shadowed, and the relation is reached by the name
-    // `relations()` answers with.
-    await query(`CREATE OR REPLACE TABLE memory.main."Person" AS SELECT 99 AS host_owned`);
-    const own = await open(CORPUS, { engine });
-    expect((await own.schema()).vertices[0]!.count).toBe(Number(VERTEX_COUNT));
-    expect(await query(`SELECT host_owned FROM "Person"`)).toEqual([{ host_owned: 99 }]);
-    const person = (await own.relations()).find((r) => r.name === 'Person')!;
-    const [seen] = await query(`SELECT count(*) AS n FROM ${person.sql}`);
-    expect(Number(seen!['n'])).toBe(Number(VERTEX_COUNT));
-    await own.close();
-    await query(`DROP TABLE memory.main."Person"`);
-  }, 30_000);
-
-  it('registers no view for a caller that only draws', async () => {
-    // The verbs are the only half that needs the views, so they are registered on the first verb
-    // call. A tile read and an edge read must not reach for them — asserted as the absence of a
-    // `CREATE ... VIEW`.
-    const statements: string[] = [];
-    const drawing = await open(CORPUS, { engine: recording(statements) });
-    statements.length = 0;
-    const tile: TileAddress = { type: 'Person', z: payloadZ(), tile: 0 };
-    await drawing.scan({ type: 'Person' }).read([tile]);
-    await drawing.edges({ from: [tile], direction: 'src' });
-    expect(statements.length).toBeGreaterThan(0);
-    expect(statements.some((sql) => sql.includes('VIEW'))).toBe(false);
-  }, 30_000);
-});
-
-describe('what open refuses, and names', () => {
-  /** A corpus tree whose manifests can be edited without touching the fixture. */
-  function fork(edit: (yaml: string) => string, tiles: boolean): string {
-    const dir = mkdtempSync(join(tmpdir(), 'fossil-corpus-'));
-    scratch.push(dir);
-    cpSync(CORPUS, dir, { recursive: true });
-    const vertexYml = join(dir, 'vertex/Person.vertex.yml');
-    writeFileSync(vertexYml, edit(readFileSync(vertexYml, 'utf8')));
-    if (!tiles) {
-      // The other container: one file holding the type, which is what a Parquet writer produces by
-      // default and what the measured winner would be. The data is right there and unreadable.
-      cpSync(join(dir, 'vertex/Person/chunk0.parquet'), join(dir, 'vertex/Person.parquet'));
-      rmSync(join(dir, 'vertex/Person'), { recursive: true, force: true });
-      mkdirSync(join(dir, 'vertex/Person'));
-    }
-    return dir;
-  }
-
-  it('refuses a manifest that declares no vertex_count, because tiles are addressed and never listed', async () => {
-    const dir = fork((yaml) => yaml.replace(/^vertex_count: .*\n/m, ''), true);
+  it('refuses a format it does not read before reading a byte of Parquet', async () => {
+    const dir = manifestOnly('fossil2', JSON.stringify({ ...MANIFEST, format: 'fossil/2' }));
     await expect(open(dir, { engine })).rejects.toThrow(CorpusManifestError);
-    await expect(open(dir, { engine })).rejects.toThrow(/no vertex_count/);
+    await expect(open(dir, { engine })).rejects.toThrow(/fossil\/2.*fossil\/1/);
+    expect(await catalogs()).not.toContain(dir);
   });
 
-  it('refuses the row-group container by naming the tile it did not find, and does not glob', async () => {
-    const dir = fork((yaml) => yaml, false);
-    await expect(open(dir, { engine })).rejects.toThrow(CorpusReadError);
-    await expect(open(dir, { engine })).rejects.toThrow(/chunk0\.parquet/);
-    // The point of naming it: a file with the type's rows in it is sitting beside the address, and
-    // a reader that globbed would open it, count every row twice against the manifest, and pass.
-    await expect(open(dir, { engine })).rejects.toThrow(/container/);
+  it('refuses a manifest that is not JSON, and one that is not there', async () => {
+    await expect(open(manifestOnly('garbage', 'format: fossil/1'), { engine })).rejects.toThrow(CorpusManifestError);
+    await expect(open(join(scratch, 'nothing-here'), { engine })).rejects.toThrow(CorpusManifestError);
+  });
+
+  it('ignores a key it does not know', async () => {
+    const dir = manifestOnly('extra', JSON.stringify({ ...MANIFEST, vertex_tables: [], edge_tables: [], extent: [0, 0, 1, 1] }));
+    const corpus = await open(dir, { engine });
+    expect(corpus.manifest.vertex_tables).toEqual([]);
+    await corpus.close();
+  });
+
+  it('refuses a manifest that names one table twice', async () => {
+    const dir = manifestOnly('twice', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'Person' }] }));
+    await expect(open(dir, { engine })).rejects.toThrow(/Person twice/);
+    expect(await catalogs()).not.toContain(dir);
+  });
+
+  it('needs an engine', async () => {
+    await expect(open(CORPUS, {} as never)).rejects.toThrow(TypeError);
+  });
+
+  it('shares a catalog between two opens, and the last to close detaches it', async () => {
+    const first = await open(CORPUS, { engine });
+    const again = await open(CORPUS, { engine });
+    await first.close();
+    await first.close();
+    const scan = again.scan({ table: 'Person', select: ['dense_id'] });
+    expect((await scan.read(scan.plan()))[0]!.numRows).toBe(MANIFEST.vertex_tables[0]!.record_count);
+    expect(await catalogs()).toContain(CORPUS);
+    await again.close();
+    expect(await catalogs()).not.toContain(CORPUS);
   });
 });
 
-/**
- * The same table `packages/corpus/conformance/verify.mjs` executes, executed here.
- *
- * Everything above compares an answer to SQL **this file writes**, which catches the API being
- * wrong about the bytes. This asks the other question — and asks it of `scan`, `edges` and `node`
- * composed the way a view composes them, since the members the table was first written against
- * (`rows`, `neighbours`) are gone and their answers are now the caller's loop over these — and it is the one a self-check cannot: has
- * this reader drifted from the other one? `expected.json`'s `answers` block is a table neither
- * implementation wrote — its numbers come from a full scan of every tile with no addressing at all
- * — and `conformance/answers.mjs` executes it in plain Node over the `duckdb` binary, sharing no
- * line of answer logic with `open`.
- *
- * It is the distinction the addressing half already draws and states in `verify.mjs`'s header: a
- * table catches **drift between two readers**, and pointing a reader at bytes a writer just made
- * catches **two readers agreeing while both disagree with the writer**. Neither replaces the other,
- * and neither replaces the inline cross-checks above.
- *
- * The block has already earned it once, on the other implementation: an adjacency tile filtered by
- * `src_dense OR dst_dense` instead of by the column its orientation is aligned on read 153 edges
- * for a drawing read where the scan says 152.
- */
-describe('the conformance table, executed against the published API', () => {
-  const table = JSON.parse(readFileSync(join(CONFORMANCE, 'expected.json'), 'utf8')) as {
-    answers: {
-      vertex_count: number;
-      types: { vertices: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
-      window: Array<{
-        box: { x: number; y: number; w: number; h: number };
-        directions: Direction[];
-        vertices: number;
-        tiles: number[];
-        edges: number;
-      }>;
-      neighbours: Array<{
-        ids: string[];
-        depth: number;
-        vertices: number;
-        edges: number;
-        frontier: number;
-      }>;
-    };
-  };
-
-  it('is a table with something in it', () => {
-    // A renamed key or a moved file would otherwise make every case below vacuous, which is the
-    // classic way a shared contract stops being shared.
-    expect(table.answers.window.length).toBeGreaterThan(0);
-    expect(table.answers.neighbours.length).toBeGreaterThan(0);
+describe('sql', () => {
+  it('is not on a corpus the host did not open it on', async () => {
+    const corpus = await open(CORPUS, { engine });
+    expect('sql' in corpus).toBe(false);
+    await corpus.close();
   });
 
-  it('what is inside is what the table says is inside', () => {
-    const declared = table.answers.types.vertices[0] as {
-      type: string;
-      fields: string[];
-      identity: string;
-      geometry: boolean;
-    };
-    const got = corpus.types.vertices.find((v) => v.type === declared.type);
-    expect(got).toBeDefined();
-    expect(got!.count).toBe(BigInt(table.answers.vertex_count));
-    expect(got!.fields.map((f) => f.name)).toEqual(declared.fields);
-    expect(got!.identity).toBe(declared.identity);
-    expect(got!.geometry).toBe(declared.geometry);
+  it('answers columns and rows over the views, capped at limit', async () => {
+    const corpus = await open(CORPUS, { engine, sql: 'allowed' });
+    const people = MANIFEST.vertex_tables[0]!;
+    const summary = await corpus.sql(`SUMMARIZE "${CORPUS}"."${people.name}";`);
+    expect(summary.columns).toContain('column_name');
+    expect(summary.rows.map((r) => r[summary.columns.indexOf('column_name')])).toEqual(
+      people.properties.map((p) => p.name),
+    );
+    expect(summary.truncated).toBe(false);
+
+    const capped = await corpus.sql(`SELECT dense_id FROM "${CORPUS}"."${people.name}" ORDER BY dense_id LIMIT 50`, {
+      limit: 10,
+    });
+    expect(capped.rows).toHaveLength(10);
+    expect(capped.truncated).toBe(true);
+    const first = await query(`SELECT dense_id FROM read_parquet('${join(CORPUS, people.path)}') ORDER BY dense_id LIMIT 10`);
+    expect(capped.rows.map((r) => Number(r[0]))).toEqual(first.map((r) => Number(r.dense_id)));
+
+    const exact = await corpus.sql('SELECT 1 AS one', { limit: 1 });
+    expect(exact).toEqual({ columns: ['one'], rows: [[1]], truncated: false });
+    await corpus.close();
   });
 
-  it.each(table.answers.window)(
-    'window $box.x,$box.y over $directions, as a scan and its edges',
-    async ({ box, directions, vertices, tiles, edges }) => {
-      // The box is half-open, `x <= v.x < x + w`, as the table's full scan reads it.
-      const scan = corpus.scan({
-        type: 'Person',
-        filter: {
-          and: [
-            { column: 'x', op: '>=', value: box.x },
-            { column: 'x', op: '<', value: box.x + box.w },
-            { column: 'y', op: '>=', value: box.y },
-            { column: 'y', op: '<', value: box.y + box.h },
-          ],
-        },
-        select: ['dense_id'],
-      });
-      const tasks = scan.plan().filter((t) => t.z === payloadZ());
-      expect(tasks.map((t) => t.tile)).toEqual(tiles);
-      const ids = new Set(
-        (await scan.read(tasks)).flatMap((b) =>
-          Array.from(b.getChild('dense_id')!.toArray(), (v) => BigInt(v as number)),
-        ),
-      );
-      expect(ids.size).toBe(vertices);
-      expect((await incident(ids, directions)).length).toBe(edges);
-    },
-  );
+  it("rejects an aborted statement with the signal's reason", async () => {
+    const corpus = await open(CORPUS, { engine, sql: 'allowed' });
+    const controller = new AbortController();
+    controller.abort(new DOMException('stale', 'AbortError'));
+    await expect(corpus.sql('SELECT 1', { signal: controller.signal })).rejects.toThrow(/stale/);
+    await corpus.close();
+  });
+});
 
-  it.each(table.answers.neighbours)(
-    'a walk of depth $depth, as a scan and a loop over edges',
-    async ({ ids, depth, vertices, edges, frontier }) => {
-      // A walk of more than one hop is the caller's loop: resolve the seeds by identity with a
-      // scan, then per hop read both halves from the frontier's tiles and keep what is incident to
-      // the frontier.
-      const seeding = corpus.scan({
-        type: 'Person',
-        filter: { column: 'subject', op: 'in', values: ids },
-        select: ['dense_id'],
-      });
-      const seen = new Set(
-        (await seeding.read(seeding.plan().filter((t) => t.z === payloadZ()))).flatMap((b) =>
-          Array.from(b.getChild('dense_id')!.toArray(), (v) => BigInt(v as number)),
-        ),
-      );
-      expect(seen.size).toBe(ids.length);
-      const emitted = new Set<string>();
-      let reached = [...seen];
-      for (let hop = 0; hop < depth && reached.length > 0; hop += 1) {
-        const found = await incident(new Set(reached), ['src', 'dst'], emitted);
-        reached = [...new Set(found.flatMap((e) => [e.src, e.dst]))].filter((id) => !seen.has(id));
-        for (const id of reached) seen.add(id);
-      }
-      expect(seen.size).toBe(vertices);
-      expect(emitted.size).toBe(edges);
-      expect(reached.length).toBe(frontier);
-    },
-  );
+describe('scan, refused before any statement', () => {
+  it('names the tables when the table is not one', async () => {
+    const corpus = await open(CORPUS, { engine });
+    expect(() => corpus.scan({ table: 'Nobody' })).toThrow(CorpusReadError);
+    expect(() => corpus.scan({ table: 'Nobody' })).toThrow(/Person/);
+    await corpus.close();
+  });
+
+  it('refuses a column the table does not declare, an empty projection and a negative limit', async () => {
+    const corpus = await open(CORPUS, { engine });
+    expect(() => corpus.scan({ table: 'Person', select: ['nope'] })).toThrow(/nope/);
+    expect(() => corpus.scan({ table: 'Person', select: [] })).toThrow(CorpusReadError);
+    expect(() => corpus.scan({ table: 'Person', limit: -1 })).toThrow(CorpusReadError);
+    expect(() => corpus.scan({ table: 'Person', filter: { column: 'nope', op: '=', value: 1 } })).toThrow(/nope/);
+    await corpus.close();
+  });
+
+  it('refuses a box over a table with no position', async () => {
+    const corpus = await open(CORPUS, { engine });
+    const undrawn = MANIFEST.vertex_tables.find((t) => t.position === undefined)!;
+    expect(() => corpus.scan({ table: undrawn.name, filter: { bbox: [0, 0, 1, 1] } })).toThrow(/no position/);
+    await corpus.close();
+  });
+
+  it('refuses a task of another table', async () => {
+    const corpus = await open(CORPUS, { engine });
+    const other = corpus.scan({ table: 'Tag' }).plan();
+    await expect(corpus.scan({ table: 'Person' }).read(other)).rejects.toThrow(CorpusReadError);
+    await corpus.close();
+  });
 });

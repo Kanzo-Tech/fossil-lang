@@ -1,0 +1,195 @@
+{
+  "format": "fossil/1",
+  "vertex_tables": [
+    {
+      "name": "Person",
+      "iri": "https://example.org/Person",
+      "path": "vertex/Person.parquet",
+      "key": "dense_id",
+      "identity": "subject",
+      "record_count": 300,
+      "properties": [
+        {
+          "name": "dense_id",
+          "type": "uint32"
+        },
+        {
+          "name": "subject",
+          "type": "string"
+        },
+        {
+          "name": "x",
+          "type": "float"
+        },
+        {
+          "name": "y",
+          "type": "float"
+        },
+        {
+          "name": "cluster_id",
+          "type": "uint32"
+        },
+        {
+          "name": "birth_year",
+          "type": "int32",
+          "iri": "https://example.org/birthYear",
+          "nullable": true
+        },
+        {
+          "name": "postcode",
+          "type": "string",
+          "iri": "https://example.org/postcode"
+        }
+      ],
+      "position": {
+        "by": "layout",
+        "x": "x",
+        "y": "y"
+      }
+    },
+    {
+      "name": "Order",
+      "iri": "https://example.org/Order",
+      "path": "vertex/Order.parquet",
+      "key": "dense_id",
+      "identity": "subject",
+      "record_count": 75,
+      "properties": [
+        {
+          "name": "dense_id",
+          "type": "uint32"
+        },
+        {
+          "name": "subject",
+          "type": "string"
+        },
+        {
+          "name": "x",
+          "type": "float"
+        },
+        {
+          "name": "y",
+          "type": "float"
+        },
+        {
+          "name": "cluster_id",
+          "type": "uint32"
+        },
+        {
+          "name": "amount",
+          "type": "double",
+          "iri": "https://example.org/amount"
+        }
+      ],
+      "position": {
+        "by": "layout",
+        "x": "x",
+        "y": "y"
+      }
+    },
+    {
+      "name": "Tag",
+      "iri": "https://example.org/Tag",
+      "path": "vertex/Tag.parquet",
+      "key": "dense_id",
+      "identity": "subject",
+      "record_count": 16,
+      "properties": [
+        {
+          "name": "dense_id",
+          "type": "uint32"
+        },
+        {
+          "name": "subject",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "iri": "https://example.org/name"
+        }
+      ]
+    }
+  ],
+  "edge_tables": [
+    {
+      "name": "Person_knows_Person",
+      "label": "knows",
+      "iri": "https://example.org/knows",
+      "path": "edge/Person_knows_Person.parquet",
+      "source": {
+        "key": "src",
+        "references": "Person"
+      },
+      "destination": {
+        "key": "dst",
+        "references": "Person"
+      },
+      "record_count": 567,
+      "properties": [
+        {
+          "name": "src",
+          "type": "uint32"
+        },
+        {
+          "name": "dst",
+          "type": "uint32"
+        },
+        {
+          "name": "since",
+          "type": "int32"
+        }
+      ]
+    },
+    {
+      "name": "Order_placedBy_Person",
+      "label": "placedBy",
+      "iri": "https://example.org/placedBy",
+      "path": "edge/Order_placedBy_Person.parquet",
+      "source": {
+        "key": "src",
+        "references": "Order"
+      },
+      "destination": {
+        "key": "dst",
+        "references": "Person"
+      },
+      "record_count": 75,
+      "properties": [
+        {
+          "name": "src",
+          "type": "uint32"
+        },
+        {
+          "name": "dst",
+          "type": "uint32"
+        }
+      ]
+    },
+    {
+      "name": "Person_tagged_Tag",
+      "label": "tagged",
+      "iri": "https://example.org/tagged",
+      "path": "edge/Person_tagged_Tag.parquet",
+      "source": {
+        "key": "src",
+        "references": "Person"
+      },
+      "destination": {
+        "key": "dst",
+        "references": "Tag"
+      },
+      "record_count": 100,
+      "properties": [
+        {
+          "name": "src",
+          "type": "uint32"
+        },
+        {
+          "name": "dst",
+          "type": "uint32"
+        }
+      ]
+    }
+  ]
+}

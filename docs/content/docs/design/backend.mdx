@@ -157,7 +157,7 @@ manifest's `channels:` block. The page said the reader parsed it and did not sur
 the reader's side parsed it at all, so `fossil_graph::plan` reads it now
 (`crates/fossil-graph/src/plan/declared.rs, channels_of`) with the cell tree and the coordinate
 system beside it. `Channel`, `Direction`, `Gap` and `GapReason` are the ones
-`packages/corpus/src/address.ts` exports — `src` reads the source-aligned half of a relation and `dst`
+`e5b2113f:packages/corpus/src/address.ts` exports — `src` reads the source-aligned half of a relation and `dst`
 the target-aligned one — and they are the only names of the addressing on the barrel.
 
 What each member answers, in one line each:
@@ -433,7 +433,7 @@ The reader used to read every tile's footer while the corpus opened, and did it 
 level that arrived as a promise would be a request between the camera moving and an address being
 computable. The rule survives and the cost does not. **The writer already has every number the footer
 sweep recovered**, so it writes them once, beside the bytes, and `open` reads one file per type
-instead of one footer per tile — `packages/corpus/src/tile-manifest.ts, published` — and no footer at
+instead of one footer per tile — `e5b2113f:packages/corpus/src/tile-manifest.ts, published` — and no footer at
 all since the sweep's last readers, `rows` and `frame`, went.
 
 It is a manifest in Iceberg's sense, and it is published: one JSON file per vertex type, named by the

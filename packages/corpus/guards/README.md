@@ -25,15 +25,14 @@ form, take it.
 
 | file | |
 | --- | --- |
-| `arithmetic.mjs` | the addressing and Hilbert arithmetic, as a second implementation. No imports. |
-| `vectors.json` | the published test vectors. The deliverable — this is what gets copied. |
-| `manifest.mjs` | the manifest, read by line scan rather than through the struct that wrote it |
+| `manifest.mjs` | `fossil.json`, read with `JSON.parse` and nothing else |
 | `inspect.mjs` | what is on disk, before any guard has an opinion about it |
 | `guards.mjs` | the conventions, each with what it proves and what it cannot. No count here: `check.mjs` prints one and this line had already been wrong |
 | `check.mjs` | the CLI |
 | `duck.mjs` | the only thing between the guards and the corpus: `duckdb` over stdin |
-| `fixture.mjs` | writes a conforming corpus in JavaScript, from the conventions alone |
+| `fixture.mjs` | writes a conforming corpus in JavaScript and SQL, from the conventions alone |
 | `self-test.mjs` | non-vacuity, plus one mutation per guard |
+| `vectors.json` | the Hilbert and addressing borders of the tiled format, which no guard here reads any more; it goes when the last reader of it does |
 
 ## Why a checker rather than a library
 

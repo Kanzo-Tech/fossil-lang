@@ -4,7 +4,6 @@ import { dirname, resolve } from 'node:path';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB, type DuckDBBindings } from '@duckdb/duckdb-wasm/blocking';
 import type { Engine, Table } from '@fossil-lang/types';
 
-import type { QueryFn, QueryRow } from '../src/query.js';
 
 const require = createRequire(import.meta.url);
 // The Arrow DuckDB-WASM decodes with, reached through it rather than declared beside it: a second
@@ -25,7 +24,8 @@ const arrow = createRequire(require.resolve('@duckdb/duckdb-wasm'))('apache-arro
 export async function duckdb(spill?: string): Promise<{
   readonly db: DuckDBBindings;
   readonly engine: Engine;
-  readonly query: QueryFn;
+  /** Rows as plain objects, for a test that asks the engine something directly. */
+  readonly query: (sql: string) => Promise<Record<string, unknown>[]>;
 }> {
   const dist = dirname(require.resolve('@duckdb/duckdb-wasm'));
   const db = await createDuckDB(
@@ -73,7 +73,7 @@ export async function duckdb(spill?: string): Promise<{
     lend: async () => {},
     drop: async () => {},
   };
-  const query: QueryFn = async (sql) =>
-    conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
+  const query = async (sql: string): Promise<Record<string, unknown>[]> =>
+    conn.query(sql).toArray().map((row: { toJSON(): Record<string, unknown> }) => row.toJSON());
   return { db, engine, query };
 }

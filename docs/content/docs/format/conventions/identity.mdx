@@ -129,7 +129,7 @@ Guard: `index-agrees-with-the-payload`, whose mutation is not a deleted row — 
 one too — but a single row pointed at the **wrong address**: a scan finds nothing, and a wrong index
 returns a vertex that is real and is not the one asked for. What no guard can prove is that a reader
 *uses* the index, since both routes return the same row by construction. That is closed from the
-reader's side — `packages/corpus/conformance/expected.json` runs each id twice, against the manifest as
+reader's side — `e5b2113f:packages/corpus/conformance/expected.json` runs each id twice, against the manifest as
 it is and against a copy of the tree with the `index:` block stripped, and requires the same vertex
 both ways.
 
@@ -172,6 +172,6 @@ different things across the layers that have to agree.
 | Rust, on `u64` | logical shift, which is what the addressing specifies |
 | JavaScript, on a `Number` | **truncates to 32 bits, then shifts** |
 
-`packages/corpus/guards/arithmetic.mjs` therefore refuses a `Number` outright, and the
+`e5b2113f:packages/corpus/guards/arithmetic.mjs` therefore refuses a `Number` outright, and the
 [published vectors](/docs/format/conventions/addressing#the-published-vectors) include 2³¹ and 2⁵³ for no
 other reason than that those are the two places a port that got this wrong gives a different answer.

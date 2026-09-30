@@ -24,7 +24,7 @@ which is the worst distribution of a failure a design can have. The lineage is e
 ### Where a wildcard survives, counted
 
 The rule has one exception left in the tree, and it is bounded rather than argued.
-`packages/corpus/src/verbs.ts, verbs` composes every path a verb reads, and what is left was
+`e5b2113f:packages/corpus/src/verbs.ts, verbs` composes every path a verb reads, and what is left was
 measured over the conformance corpus in both containers by `fossil-mcp`'s `src/lib.rs` (deleted after
 `2fa5f22`), which composed the same paths the same way:
 
@@ -199,7 +199,7 @@ manifest says something untrue about all nine.
 <Callout title="Nothing in this tree keys on it, and that is the fact the decision turns on">
 `gar/v1` appears **69 times in 34 files**, and **not one of them reads it**. There is no comparison,
 no `match`, no branch, no rejection path, no version gate — in the crates, in
-`packages/corpus/conformance/corpus/graph.graph.yml` and its siblings, in the guards, or in the
+`e5b2113f:packages/corpus/conformance/corpus/graph.graph.yml` and its siblings, in the guards, or in the
 TypeScript. `packages/executor/src/index.ts, GraphInfo` carries `version` as an opaque `string` and
 nothing ever looks at it.
 
@@ -401,7 +401,7 @@ to fetch it, a parser, a guard, a code path, a fallback for corpora written befo
 on the cost report whose entire content was which of the two indexes had answered.
 [`design/discarded`](/docs/design/discarded) carries the measurement and what would bring it back.
 
-`packages/corpus/integration/address-cost.test.ts` is what the surviving path costs, in tiles, in `Range`
+`e5b2113f:packages/corpus/integration/address-cost.test.ts` is what the surviving path costs, in tiles, in `Range`
 requests and in kilobytes, against a denominator DuckDB supplies: the tiles that actually hold a
 vertex inside the rectangle, so a path answering with fewer has not read less, it has drawn a wrong
 picture.
@@ -663,16 +663,16 @@ used to be JavaScript**, and a mistake they share is invisible to a diff of the 
 as signed, a count that went through a `Number`, exactly the borders `vectors.json` publishes.
 Then the second JavaScript one went: the published TypeScript was a thousand lines that agreed with
 the Rust because people kept making it agree, nothing compared the two, and it is a binding over
-`fossil_graph::plan` now. So `packages/corpus/tests/conformance.test.ts` is not a second
+`fossil_graph::plan` now. So `e5b2113f:packages/corpus/tests/conformance.test.ts` is not a second
 implementation diffed against the first — it is **the same reader re-entered at wasm32 width**.
-`packages/corpus/conformance/reader.mjs` carries the independence.
+`e5b2113f:packages/corpus/conformance/reader.mjs` carries the independence.
 
 `fossil_graph::plan` is that reader. It goes through no struct of the writer's — `fossil-graph`'s
 other manifest module deserialises into `fossil-sinks`' own types, which proves those types
 round-trip and says nothing about the artefact, so this one reads a generic YAML value and asks the
 document a stranger's questions. It opens no byte, which is also what makes it indifferent to which
 engine anybody would open the files with. `crates/fossil-graph/tests/conformance.rs` runs it
-natively; `packages/corpus/conformance/wasm-reader.mjs` runs the wasm32 build of it, through
+natively; `e5b2113f:packages/corpus/conformance/wasm-reader.mjs` runs the wasm32 build of it, through
 `fossil-graph-wasm`, which is a separate claim rather than the same one twice — `usize` is 64 bits in
 one and 32 in the other.
 
@@ -683,14 +683,14 @@ That obligation has been discharged once, and the shape of it is what to copy. T
 [row-group container](/docs/format/conventions/addressing#two-containers-one-address) is a change of
 format; both readers were moved to it and diffed **while the writer still emitted only the old one**,
 which is the only window in which two containers of one corpus exist at the same time to be compared.
-`packages/corpus/conformance/containers.mjs` and `packages/corpus/integration/containers.test.ts` are that diff:
+`e5b2113f:packages/corpus/conformance/containers.mjs` and `e5b2113f:packages/corpus/integration/containers.test.ts` are that diff:
 the same graph written both ways, every answer required to match. After the writer moves there is
 one container and nothing left to compare against.
 
 What runs lives in `packages/corpus/conformance/` — `verify.mjs` (the table, against each reader in
 turn), `containers.mjs` (the same graph in both containers) and `provenance.mjs` (the corpus from its
 recipe) — plus `crates/fossil-graph/tests/conformance.rs` and
-`packages/corpus/tests/conformance.test.ts`. The conventions they check are documented for reader
+`e5b2113f:packages/corpus/tests/conformance.test.ts`. The conventions they check are documented for reader
 implementors on the corpus site rather than here.
 
 The wasm leg is the one part of that directory needing more than `node` and a `duckdb` binary, and it
@@ -713,7 +713,7 @@ does not retire the lesson, because the defect was a reader composing a path the
 given it.
 
 It composed both paths from the manifest before it was deleted, and
-`packages/corpus/src/verbs.ts, verbs` composes them the same way: `container` says whether a tile is a file or a row
+`e5b2113f:packages/corpus/src/verbs.ts, verbs` composes them the same way: `container` says whether a tile is a file or a row
 group and `prefix` says where the set is, so under the container fossil writes each relation is one
 named file and there is nothing to expand. Under the other one a vertex type's tiles are enumerated
 from `vertex_count` and `chunk_size`, which is why the count is declared. The single wildcard left is

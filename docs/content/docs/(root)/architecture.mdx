@@ -58,35 +58,23 @@ Louvain will find. [Streaming](/docs/design/streaming) argues the budget the wri
 
 ## What the reader is
 
-**One door, one name, and it always takes an engine** — `packages/corpus/src/open.ts, open`.
-`resolveCorpus` and `openCorpus` are both gone into it, and the addressing either of them answered
-with is internal to it:
+**One door, one name, and it always takes an engine** — `packages/corpus/src/open.ts, open`, and
+it is TypeScript with no crate behind it:
 
 ```ts
 await open(job, { engine, host })  // a job's corpus, under the credential the host vends
 await open(url, { engine })        // a corpus at a URL
 ```
 
-`sql: 'allowed'` widens either to `SqlCorpus`.
-
-**What comes back has two halves, and the line between them is which bytes get chosen.**
-`tileMatrix`, `scan` and `edges` compute which tiles to read and read those. The verbs —
-`crates/fossil-graph/src/operations/mod.rs, Operation`, compiled to wasm32 — name a table and let the
-engine decide. The two halves meet at exactly one point, the host's `Engine`, and the reader brings
-no engine of its own to either.
-
-**What would merge them is pruning by predicate, and it was measured to lose.** DuckDB evaluates a
-range predicate per row instead of skipping row groups: a range join against the id runs at 237 ms
-and 179 `BETWEEN … OR …` predicates at 189 ms, against 5 ms for not pruning at all. A window written
-as a `WHERE` reads the whole file, so pruning stays the tiles' job and this change did not merge
-anything. [One door](/docs/design/one-door) argues the surface, and [the backend](/docs/design/backend) its
-shape: a tile matrix, a scan planned from the manifest, and a batch per tile.
+`sql: 'allowed'` widens either to `SqlCorpus`. What comes back is `fossil.json` parsed once, a view
+per table on the host's `Engine`, and `scan` — a table, a filter, a projection — over those views.
+Pruning is the engine's: every table is written in the order of its key, and DuckDB skips the row
+groups whose footer statistics exclude a predicate. [One door](/docs/design/one-door) argues the
+surface.
 
 The reader's **policy** over that contract is deliberately not on the door, and not in this
 repository: what a corpus is drawn WITH and what is already LOADED belong to the viewer,
-`@kanzo-tech/graph`. A channel is read off a manifest, but an encoding is a reader's ranking of what
-to do with one and a residency budget is a number measured against one renderer on one corpus.
-Neither is a property of the artefact.
+`@kanzo-tech/graph`.
 
 ## What is declared and what is derived
 

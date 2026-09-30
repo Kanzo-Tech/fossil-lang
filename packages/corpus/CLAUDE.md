@@ -2,96 +2,53 @@
 
 The repository rules are in `../../CLAUDE.md`. These are true only here.
 
-## What this is, and what it stopped being
+## What this is
 
 The published reader, `src/`, and beside it the **executable** half of the corpus contract it
-fulfils. The contract was a private app of its own, and it is three directories of this package now:
-none of them is in `files`, so npm never sees them. `guards/` checks that a corpus on disk satisfies the
-conventions; `conformance/` checks that three independent readers address it the same way, and that
-the corpus they address reproduces from a recorded recipe; `integration/` writes a corpus with the
-guards' own fixture and reads it back through `src/`, which is where the addressing
-cost, the container comparison, the cost model and the pyramid read are measured.
+fulfils: `guards/` checks that a corpus on disk satisfies the conventions, `conformance/` holds a
+checked-in corpus with the recipe that reproduces it, and `integration/` writes corpora with the
+guards' own fixture and reads them back through `src/`. None of the three is in `files`, so npm
+never sees them. The prose half is `docs/content/docs/format/`.
 
-The prose half was a second Next.js site living beside this directory. It is gone: the pages are
-`docs/content/docs/format/`, and what it cost was nine runtime dependencies identical version
-for version to the ones next door, a second bundler, a second search index and a second build, for
-twelve pages. Its two server components moved with it —
-`docs/components/{guard-index,vector-table}.tsx` — and they still read the files here.
+`src/` is TypeScript and nothing else: `fossil.json` through `JSON.parse`, a view per table, and the
+SQL a scan composes. It was a binding over `fossil-graph` compiled to wasm32, and that reader — four
+parsers of one manifest and an addressing layer — went with the tiles. **Do not put a second reader
+of the manifest back**, in Rust or here: the writer's `fossil_sinks::manifest` types are the one
+definition, and `tests/manifest.test.ts` carries the hook where the schema generated from them is
+checked.
 
-**That reach matters.** `guard-index.tsx` imports `guards/guards.mjs` and `vector-table.tsx` reads
-`guards/vectors.json`, both at build time. Renaming or moving either one breaks the documentation
-build, which is the intended coupling: a page cannot drift from a table it does not contain.
-
-## Three readers, and the third one is not free
-
-`conformance/expected.json` is a table of addresses that none of its executors wrote. Three read it:
-`conformance/reader.mjs` (plain Node, from the conventions), `packages/corpus/src/address.ts` (the
-published module, run from `packages/corpus/tests/conformance.test.ts`), and `fossil_graph::plan`
-— natively in `crates/fossil-graph/tests/conformance.rs`, and as wasm32 through
-`conformance/wasm-reader.mjs`.
-
-It was two, and **both were JavaScript**: a mistake they shared — a shift taken as signed, a count
-that went through a `Number` — was invisible to a diff of the two, which is the shape of blindness
-`GraphAr`'s fourth implementation landed through.
-
-The wasm leg is the one thing in THIS pair that needs more than `node` and a `duckdb` binary —
-`integration/` next door needs more than both, which is why it is a separate directory with a
-separate script — and it is therefore **refused explicitly rather than skipped**. `verify.mjs --without-wasm` is the opt-out and
-`corpus.yml` is where it is passed; without it a missing `packages/corpus/pkg/` is a failure. Do not
-change that default: a leg that vanishes with its dependency is how this stops being evidence
-without anybody noticing.
-
-## The checked-in corpus has a recipe, and the recipe is executed
-
-`conformance/corpus/` is generated, and the parameters that generated it are `RECIPE` in
-`conformance/provenance.mjs`. Regenerating with `guards/fixture.mjs`'s **defaults** gives 600 edges
-against the 596 the manifest declares — which reads exactly like a stale fixture and is not one.
-`clusters` decides how many chords the ring carries, the default is 256, and at 16 the generator
-reproduces this corpus byte for byte. **Do not regenerate it with the defaults to "fix" the
-mismatch.** That was diagnosed once from nothing but the numbers; the file exists so it is not
-diagnosed again.
+`guards/guards.mjs` is imported by `docs/components/guard-index.tsx` at build time, so renaming or
+moving it breaks the documentation build — the intended coupling: a page cannot drift from a table
+it does not contain.
 
 ## `guards/` has no dependencies, and that is a constraint not an accident
 
 Plain ESM, `node` plus the `duckdb` binary, no build. The directory is meant to be **copied** by a
-third party who has neither this repository nor Rust nor pnpm — that is why it keeps its own README
-when every other README in `crates/` was deleted. Adding an npm dependency changes what the contract
-costs to check, which changes who can check it.
+third party who has neither this repository nor Rust nor pnpm. Adding an npm dependency changes what
+the contract costs to check, which changes who can check it. Nothing under `guards/` may import
+`src/`; `integration/` may import both.
 
-The rule is on `guards/`, and on `guards/` alone. Two other directories here reach into the
-reader: `conformance/wasm-reader.mjs` into the gitignored `pkg/`, and every file under
-`integration/` into `src/` and `tests/boot.ts`. **Nothing under `guards/` may**, and that is the
-line — `guards/` is the part a stranger copies out of this repository.
-
-`pnpm test:contract` writes a conforming corpus in both containers, requires every guard to pass, and then
-requires every guard to **fire** against a corpus broken in exactly one way. A guard nobody has seen
+`pnpm test:contract` writes a conforming corpus, requires every guard to pass on it, and then
+requires every guard to **fire** against a copy broken in exactly one way. A guard nobody has seen
 fail is a sentence.
 
 ## Every guard declares what it cannot prove
 
-`proves` and `cannotProve` are both required, the self-test asserts both are non-empty, and the page
-renders them with equal weight. This is the price of documenting a format instead of shipping a type
-for it, and it was accepted knowingly. Do not ship a guard without the second field, and do not
-soften one: a guard that overstates its reach is worse than a missing one.
+`proves` and `cannotProve` are both required, the self-test asserts both are non-empty, and the
+format index renders them with equal weight. Do not ship a guard without the second field, and do
+not soften one: a guard that overstates its reach is worse than a missing one.
 
-## No guard over the prose
+## The checked-in corpus has a recipe, and the recipe is executed
 
-The obvious one — assert every `file:line` a page cites is on disk — existed next door and has now
-been deleted twice over. It proves a cited line *exists*, never that it *says* what the page claims:
-159 dead references accumulated under the first version with CI green, and the second version was
-passing over eight citations that had drifted to a different line, one of them blank. Do not rebuild
-it here or there.
-
-What replaces it is rendering rather than transcribing, which is what the two components above do,
-and transclusion — `<Program src= region= />` on the documentation side reads the file at build time
-and an absent region stops the build.
+`conformance/corpus/` is generated: `RECIPE` in `conformance/provenance.mjs` is the command, and
+`provenance.mjs` regenerates into a temporary directory and requires the same manifest text and the
+same rows in the same order. Regenerate it only with that command; never edit it by hand.
 
 ## `test` is the reader's, and the contract has its own names
 
 `pnpm test` is `vitest run` over `tests/` and nothing else, because `release.yml` runs
-`pnpm --filter "./packages/*" test` before it publishes, and a suite that spawned `duckdb` in that
-step is what took `v0.3.0-alpha.4` down. The contract runs under separate scripts:
-`test:contract` (the guards' self-test and the conformance chain, `--without-wasm`), `conformance`
-(every leg, and it fails without `pkg/`) and `test:integration` (the four `integration/` suites,
-under `vitest.integration.config.ts`). **Do not fold any of them into `test`**, and do not add
-`conformance/`, `guards/` or `integration/` to `files`.
+`pnpm --filter "./packages/*" test` before it publishes, on a runner with no `duckdb` binary, and a
+suite that spawned it in that step is what took `v0.3.0-alpha.4` down. `tests/` reads the checked-in
+corpus through DuckDB-WASM, which is a dev dependency and not a binary. The contract runs under
+`test:contract` (guards and provenance) and `test:integration` (`integration/`, under
+`vitest.integration.config.ts`). **Do not fold either into `test`.**

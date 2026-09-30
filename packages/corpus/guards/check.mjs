@@ -72,8 +72,8 @@ const results = runAll(corpus, only ?? null);
 console.log(`corpus  ${root}`);
 console.log(`duckdb  ${duck.split("\n")[0]}`);
 console.log(
-  `shape   ${corpus.types.length} vertex type(s), ${corpus.edges.length} edge type(s), ` +
-    `${corpus.types.map((t) => t.layout).join("/") || "—"}\n`,
+  `shape   ${corpus.vertices.length} vertex table(s), ${corpus.edges.length} edge table(s), ` +
+    `format ${JSON.stringify(corpus.manifest.json?.format ?? null)}\n`,
 );
 
 let failed = 0;
