@@ -532,8 +532,8 @@ surface with a second door. `read` is gone and the token still does the other ha
 
 Two things it does not claim. It does not stop a binding *granting* access — withholding SQL is a
 policy and a library cannot hold a policy for its consumers. And `RawSql` is not a sanitiser: it
-parses, validates and escapes nothing, because [there is no chokepoint to sanitise
-towards](/docs/design/privacy).
+parses, validates and escapes nothing, because there is no chokepoint to sanitise towards: a
+corpus is files and a recipient holds them.
 
 <Callout title="It cost nothing on the wire">
 The published JSON Schemas were byte-identical across the change apart from prose — `where` and `sql`

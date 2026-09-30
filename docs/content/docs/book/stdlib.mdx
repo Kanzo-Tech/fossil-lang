@@ -111,10 +111,9 @@ five could run. `validate.regex` is the instructive one: it lowered to a bare ma
 renders happily as a `Bool`, under a row declaring `String` — so a mapping that validated a code
 wrote `true` into it and nothing failed. Renderable and wrong is worse than absent.
 
-`anon` was two rows, and it is a change of design rather than of engine. Anonymisation is a policy
-you declare once for a corpus and the writer applies, so the language names no anonymisation
-operator. `anon.hash(x, salt = "…")` put the salt in the program text at every call site and made
-"is this column anonymised?" a question you answered by reading every mapping.
+`anon` was two rows, and fossil has no anonymisation at all: it was
+[removed](/docs/design/discarded) whole, and when it returns it returns as one design every write
+host enforces, not as a call a mapping may forget.
 
 ## `io`
 

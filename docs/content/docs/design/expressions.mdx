@@ -103,7 +103,7 @@ spells one.
   both function packages, and it renders now. Ten rows were deleted from the language instead:
   `core.require` and the five `validate.*` needed a way to raise from an expression, which this
   engine does not have; `parse.json` needed a JSON extraction it does not ship; `parse.csv_row` was
-  simply not wanted; and `anon.*` went because anonymisation is a declared policy the writer
-  applies, not an operator a program names. What is left is `math.sum`, `avg`, `min` and `max`,
+  simply not wanted; and `anon.*` went because fossil has no anonymisation at all
+  ([discarded](/docs/design/discarded)). What is left is `math.sum`, `avg`, `min` and `max`,
   which are not scalar calls at all but [a pipeline with a group-by](/docs/design/algebra) — they
   remain how a `group_by`'s aggregations are spelled.
