@@ -3,10 +3,10 @@
 The query layer for whatever draws the graph. **Fossil ships no viewer.**
 
 **One door, and it is one function.** `open(url, { engine })` returns
-discovery, the read path a view is built on (`tileMatrix`, `scan`, `edges`,
-`node`), and the verbs (`schema`, `relations`, and `executeSql` when the host
+discovery, the read path a view is built on (`tileMatrix`, `scan`, `edges`),
+and the verbs (`schema`, `relations`, and `executeSql` when the host
 asks) on one object. `/docs/design/backend` is the argument, and the members
-that path replaced — `extent`, `frame`, `rows`, `neighbours` — are gone.
+that path replaced — `extent`, `frame`, `rows`, `neighbours`, `node` — are gone.
 
 **It needs an engine, and the engine is the host's.** `@fossil-lang/types`'
 `Engine`: `query(sql, { signal })` answering in Arrow-shaped columns — an
@@ -89,7 +89,6 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
   ├─ src/expression.ts  Iceberg's Filter: bind, inclusive + strict evaluators, residual SQL
   ├─ src/scan.ts        Table.scan: plan() over every zoom, read() a batch per tile
   ├─ src/edges.ts       edges(): CSR/CSC at Z, the quotient below
-  ├─ src/identity.ts    node: the index seek and its key ranges
   ├─ src/verbs.ts       the views the verbs read, schema, relations, executeSql
   └─ src/sql.ts         literals, identifiers, the 64-bit id guard
 ```
@@ -144,12 +143,9 @@ const answers = await corpus.edges({ from: visible, direction: 'src', signal });
   declined there), skipping a tile the manifest says has none. A relation to
   another type is declined as `other-space` unless `relation` names it.
 
-- **`node(id)`** — one vertex by identity, with its `dense_id` and position, so
-  a pinned or searched vertex is placed without a scan; its tile is `denseId`
-  over `tileRows`.
-
-A walk of more than one hop is the caller's loop over `node` and `edges`, and a
-rectangle is a filter on `x` and `y`: both are composed in
+A vertex by identity is a `scan` filtered on `subject`. A walk of more than one
+hop is the caller's loop over that and `edges`, and a rectangle is a filter on
+`x` and `y`: both are composed in
 `tests/corpus.test.ts` against the numbers `conformance/expected.json`'s full
 scan published.
 
@@ -158,12 +154,9 @@ scan published.
 engine dependencies: it decodes no Parquet and links no engine. `read_text`,
 `read_parquet` and `parquet_metadata` are the whole of what it is asked for.
 
-**`id` is the subject IRI, never the `dense_id`.** Redoing the layout renumbers
-every vertex, so an address held outside the corpus names a different vertex
-after the next write. `node` refuses a `BigInt` with a `TypeError` that says so.
-Where the type declares an `index:` the lookup is a seek; where it does not, it is
-a scan of the `subject` column, and `types.vertices[i].indexed` says which;
-`src/identity.ts` measures both at the call site.
+**A bookmark is the subject IRI, never the `dense_id`.** Redoing the layout
+renumbers every vertex, so an address held outside the corpus names a different
+vertex after the next write.
 
 **An answer says what it is missing.** `edges` answers with the relations it read
 and the ones it `declined`, with fossil's `GapReason`: `not-declared` for an
@@ -176,7 +169,7 @@ whether one is a file (`chunk{k}.parquet`) or a row group inside a single
 answers, because a reader over HTTP has no directory to list and cannot work it
 out. **Both are read.** `packages/corpus/integration/containers.test.ts` writes
 the same graph in each and asserts the answers back are identical — the tile
-matrix, a window's tiles and their edges, `node` — and that the row-group
+matrix, a window's tiles and their edges — and that the row-group
 container names strictly fewer files for the same window (over HTTP, 5.6
 requests per window against 22.3 at five million vertices). Neither is globbed,
 because a glob picks up the staged single-file copy beside the tiles and counts

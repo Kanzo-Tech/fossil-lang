@@ -158,12 +158,12 @@ mod tests {
 
     #[test]
     fn a_module_path_is_not_the_crate_it_is_spelled_after() {
-        // The substrate rule cites `fossil_df::files::batches_to_parquet` as the
-        // baseline its dev edge exists for. Underscores are not hyphens, and the
-        // rule's subject must not silently acquire a second crate this way.
+        // A rule may cite a Rust path such as `fossil_df::files::manifest_files`.
+        // Underscores are not hyphens, and the rule's subject must not silently
+        // acquire a second crate this way.
         assert!(
             crates_named(
-                "the bench measures against `fossil_df::files::batches_to_parquet`.",
+                "the writer is `fossil_df::files::manifest_files`.",
                 &members(),
             )
             .is_empty(),

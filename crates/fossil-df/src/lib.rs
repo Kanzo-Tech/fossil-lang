@@ -87,8 +87,8 @@ use fossil_locator::SourceAnchor;
 use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
-    Container, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
-    VertexIndex, VertexInfo, data_type_name,
+    Container, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPH_INFO_PATH, GraphInfo,
+    Projection, Property, VertexIndex, VertexInfo, data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -2013,7 +2013,7 @@ impl GraphArData {
     pub fn manifests(&self) -> Result<Vec<ManifestFile>, files::EncodeError> {
         let (graph, vertices, edges) = self.manifest();
         let mut out = vec![ManifestFile {
-            rel_path: "graph.graph.yml".to_string(),
+            rel_path: GRAPH_INFO_PATH.to_string(),
             text: graph.to_yaml()?,
         }];
         for (rel_path, info) in graph.vertices.iter().zip(&vertices) {

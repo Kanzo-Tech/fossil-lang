@@ -167,7 +167,6 @@ const set = corpus.tileMatrix('Person')                  // every zoom, every ti
 const scan = corpus.scan({ type: 'Person', filter })     // bound once, planned over every zoom
 await scan.read(scan.plan())                             // a batch per tile
 await corpus.edges({ from: tiles, direction: 'src' })    // the relations incident to those tiles
-await corpus.node('http://example.org/p/17')             // one vertex by identity
 ```
 
 The one capability a host brings is an `Engine`: SQL in, Arrow-shaped columns out, and an
@@ -188,11 +187,7 @@ It refuses two things: a corpus declaring no `vertex_count`, and an `index:` wit
 off `graph.graph.yml`'s `container`, and a corpus that declares one and carries the other is what
 `declared-tiling` refuses.
 
-And it declares two costs. **A tile's box is believed, not verified** — it comes from the tile
+And it declares a cost. **A tile's box is believed, not verified** — it comes from the tile
 manifest, a box wider than its rows costs a read, a box narrower than its rows **loses vertices**,
 and only re-reading every page tells them apart; `tile-manifest` holds the manifest against the
-footers. **`node(id)` scans a corpus that publishes no index**: at
-five million vertices one lookup reads about 40 MB. Both answers are correct and only one is fast,
-so which one a caller gets is a property of the **type**, readable once as
-`corpus.types.vertices.find((t) => t.type === 'Person')?.indexed` and not a difference discovered by
-timing it.
+footers.

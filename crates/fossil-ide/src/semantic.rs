@@ -4,8 +4,7 @@
 //!
 //! Fossil ships no `TextMate` grammar, so an LSP client colours a program from
 //! these or not at all. The `CodeMirror` layer (`@fossil-lang/codemirror-fossil`)
-//! highlights from `tokenize()` instead; semantic tokens reach a browser only
-//! over the LSP Worker.
+//! highlights from `tokenize()` instead, so semantic tokens reach no browser.
 //!
 //! # Shape (LSP spec)
 //!

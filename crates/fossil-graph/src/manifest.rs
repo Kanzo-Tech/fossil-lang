@@ -13,13 +13,9 @@
 
 use std::collections::HashMap;
 
-use fossil_sinks::manifest::{EdgeInfo, GraphInfo, VertexInfo};
+use fossil_sinks::manifest::{EdgeInfo, GRAPH_INFO_PATH, GraphInfo, VertexInfo};
 
 use crate::{GraphError, Result};
-
-/// Dataset-relative location of the `GraphAr` aggregate index, as emitted by
-/// `fossil_sinks::writer::plan_manifests`.
-pub const GRAPH_INFO_PATH: &str = "graph.graph.yml";
 
 /// Writer-emitted (non-user) vertex columns. Schema verbs hide these from
 /// field listings so callers don't chart on `dense_id` or `x`/`y`.

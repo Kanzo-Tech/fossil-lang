@@ -2,8 +2,8 @@
 //!
 //! The `DuckDB` half is stateless: every call takes the credential as the host
 //! vended it and parses it again, so nothing secret outlives the call on this
-//! side of the boundary. The bytes half ([`storage_read`], [`storage_write`])
-//! asks the JS `Host` itself, through [`JsHost`], and reaches storage through
+//! side of the boundary. The bytes half ([`storage_read`]) asks the JS `Host`
+//! itself, through [`JsHost`], and reaches storage through
 //! `object_store`.
 
 use std::sync::Arc;
@@ -131,41 +131,4 @@ pub async fn storage_read(host: JsValue, targets: JsValue) -> Result<JsValue, Js
         });
     }
     Ok(out.into())
-}
-
-/// Write each `{ path, bytes }` under the one prefix `host` vends `write` on
-/// for `scope`, and answer the prefix. A scope that vends several prefixes has
-/// no single place to write to, and is refused.
-///
-/// # Errors
-/// A JS `Error` when the host vends no single prefix, or a write fails.
-#[wasm_bindgen(js_name = storageWrite)]
-pub async fn storage_write(host: JsValue, scope: JsValue, files: Array) -> Result<String, JsError> {
-    let scope: Scope = serde_wasm_bindgen::from_value(scope)?;
-    let mut storage = Storage::new(Arc::new(JsHost::new(host)));
-    let prefix = match storage.grant(scope.clone(), Access::Write).await {
-        Ok([prefix]) => prefix.clone(),
-        Ok(prefixes) => {
-            return Err(JsError::new(&format!(
-                "the host vended {} write credentials for {scope}; a write needs exactly one prefix",
-                prefixes.len()
-            )));
-        }
-        Err(e) => return Err(JsError::new(&e.to_string())),
-    };
-    for file in files.iter() {
-        let path = Reflect::get(&file, &JsValue::from_str("path"))
-            .ok()
-            .and_then(|p| p.as_string())
-            .ok_or_else(|| JsError::new("a file is `{ path: string, bytes: Uint8Array }`"))?;
-        let bytes = Reflect::get(&file, &JsValue::from_str("bytes"))
-            .ok()
-            .and_then(|b| b.dyn_into::<Uint8Array>().ok())
-            .ok_or_else(|| JsError::new("a file is `{ path: string, bytes: Uint8Array }`"))?;
-        storage
-            .put(&format!("{prefix}{path}"), bytes.to_vec().into())
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-    }
-    Ok(prefix)
 }

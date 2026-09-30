@@ -90,12 +90,6 @@ datafusion = { version = "54", default-features = false, features = [
   "parquet",
   "nested_expressions",
 ] }
-# The single Arrow→Parquet encoder, shared native+wasm (universal-substrate
-# decision: one parquet-rs encoder, no parquet-wasm JS). `default-features =
-# false` + `arrow` keeps it pure-Rust (no compression C deps) → wasm-clean; the
-# in-memory `Vec<u8>` writer in `files.rs` is target-agnostic. Only the *fs*
-# write (`sink.rs`) is native-gated.
-parquet = { version = "58", default-features = false, features = ["arrow"] }
 
 # `src/report.rs` — what a run tells its caller. The (de)serialization the CLI
 # writes to stdout and a host reads back; also what `serde-wasm-bindgen` hands
@@ -129,6 +123,9 @@ unicode-normalization = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# `examples/tile_layout.rs` encodes its two candidate layouts directly; the
+# library writes no Parquet of its own — the layout pass does.
+parquet = { version = "58", default-features = false, features = ["arrow"] }
 # `NativeSystem` and the line-format decoder moved out of `fossil-base`'s
 # production surface into its `test_support` module, which is behind this
 # feature — they had no consumer that was not a test.

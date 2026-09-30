@@ -125,8 +125,8 @@ Under the tile contract it is bought by the partition instead, and it is arithme
 measurement: **a cell is `dense_id >> shift` and the partition is quaternary**, so the parent of
 `(z, t)` is `(z − 1, t >> (shift(z−1) − shift(z)))`, a cell's rows at the zoom below are exactly its
 members, and every member is placed where the payload places it. Zooming in replaces a cell with the
-rows it summarised and never with something else. `crates/fossil-layout/tests/aggregation.rs`
-holds the membership against the payload by symmetric difference.
+rows it summarised and never with something else. `crates/fossil-layout/tests/cells.rs`
+holds the membership against the payload.
 
 **What would reverse it.** A partition that is not a shift of `dense_id` — a base that is not a power
 of four, or cells cut on something other than the order. Then a cell's members are a lookup and not a

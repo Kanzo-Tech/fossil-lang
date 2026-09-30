@@ -12,7 +12,6 @@ come here; a host seldom does.
 | --- | --- | --- |
 | `mount(engine, host, scope, access)` | SQL through the page's engine | `CREATE OR REPLACE SECRET … SCOPE '<prefix>'` per S3 prefix, renewed at `expires − 5 min` under the same name, shared by every mount of the prefix and dropped by the last; an Azure file is lent by name to its SAS URL (no Azure extension in DuckDB-WASM, so no glob) |
 | `read(host, targets)` | bytes | an `object_store` GET per file, one `credentials` call per connection |
-| `write(host, scope, files)` | a job's output | an `object_store` PUT — in parts when large — under the one prefix the scope vends `write` on |
 | `resolveDocuments(workspace, host)` | the documents a program names | `read`, until nothing new is missing |
 
 The engine must have `httpfs` loaded; `mount` says so when it has not. The translation from a

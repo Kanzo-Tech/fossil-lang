@@ -23,7 +23,7 @@ emits were 545 string literals with no declaration any of them derived from.
 
 **Every one of the four is addressed by a shift, and nothing is listed.** `dense_id` is a vertex's
 rank in the Hilbert order of its own position; a tile is
-`crates/fossil-sinks/src/manifest.rs, tile_of`, and a cell of rung `k` is `dense_id >> shift` with
+`crates/fossil-graph/src/plan.rs, tile_of`, and a cell of rung `k` is `dense_id >> shift` with
 parent `r >> 2`, two bits a rung by `crates/fossil-sinks/src/manifest.rs, CellTree` —
 `crates/fossil-layout/src/layout/cells.rs, Pyramid` writes it. There is no directory
 listing over HTTP and the format asks for none.
@@ -70,7 +70,7 @@ await open(url, { engine })        // a corpus at a URL
 `sql: 'allowed'` widens either to `SqlCorpus`.
 
 **What comes back has two halves, and the line between them is which bytes get chosen.**
-`tileMatrix`, `scan`, `edges` and `node` compute which tiles to read and read those. The verbs —
+`tileMatrix`, `scan` and `edges` compute which tiles to read and read those. The verbs —
 `crates/fossil-graph/src/operations/mod.rs, Operation`, compiled to wasm32 — name a table and let the
 engine decide. The two halves meet at exactly one point, the host's `Engine`, and the reader brings
 no engine of its own to either.

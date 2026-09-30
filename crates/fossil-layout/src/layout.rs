@@ -10,11 +10,6 @@
 //! - [`community_hierarchy`] — modularity communities, and the whole hierarchy
 //!   of them, which is what [`enrich_layout`] partitions by. This is the pyramid
 //!   the level-of-detail plan is built from.
-//! - [`weakly_connected_components`] — reachability (union-find). It is a real
-//!   graph property and stays, but it is **no longer what the layout uses**: on
-//!   a connected graph it answers "one component", and measured on the million
-//!   corpus that put 994,786 of a million vertices in a single cluster. It now
-//!   earns its place as the contrast the hierarchy is tested against.
 //! - [`cluster_layout`] — a deterministic community-grouped placement: clusters
 //!   on a grid, nodes phyllotaxis-packed within their cell. Same-cluster nodes
 //!   land near each other. `ForceAtlas2` refinement is a later slice; this gives
@@ -27,19 +22,15 @@
 //! is the one this comment already described — the pure half against the half
 //! that touches Parquet — made a module boundary rather than a paragraph:
 //!
-//! - [`community`] — the partition. Louvain, its quotient graph, and the
-//!   reachability it is contrasted against.
+//! - [`community`] — the partition. Louvain and its quotient graph.
 //! - [`place`] — where a vertex goes on the plane, given its community.
 //! - [`hilbert`] — Hilbert codes and the quantisation into one.
 //! - [`pass`] — [`enrich_layout`], which takes the executor's `RecordBatch`es
 //!   and writes Parquet through `arrow-rs` and the one encoder the writer itself
 //!   uses. There is no database here: see `docs/design/one-engine.mdx`.
 //!
-//! **The public API is unchanged**: every name below was `layout::<name>` before
-//! the split and still is. The file was 3,540 lines holding four subjects, and
-//! the thing that forced the cut is that the dendrogram has no API — a caller
-//! that wants to cut it at chosen sizes, which is what `/docs/design/cells`
-//! asks for, had nowhere to reach.
+//! Every name below was `layout::<name>` before the split and still is. The file
+//! was 3,540 lines holding four subjects.
 
 // This is deliberate numeric code: dense ids / cluster counts cast to/from `f32`
 // coordinates and `f64` grid maths, and tight index loops over `dense_id` arrays.
@@ -60,7 +51,7 @@ pub mod pass;
 pub mod place;
 mod statistics;
 
-pub use community::{community_hierarchy, weakly_connected_components};
+pub use community::community_hierarchy;
 pub use pass::{
     AdjacencyTarget, Endpoint, LayoutError, LayoutReport, VertexLayoutTarget, enrich_layout,
     enrich_layout_with, enrich_layout_within, estimated_peak_bytes,

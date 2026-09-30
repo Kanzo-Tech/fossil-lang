@@ -133,10 +133,10 @@ use arrow::compute::{
     take_record_batch,
 };
 use arrow::datatypes::DataType;
-use fossil_df::files::batches_to_parquet;
 use fossil_mem_probe::Probe;
-use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use parquet::arrow::{ArrowWriter, ProjectionMask};
+use parquet::file::properties::WriterProperties;
 
 /// Rows per batch out of the Parquet reader. `layout.rs`'s `SCAN_BATCH_ROWS`.
 const SCAN_BATCH_ROWS: usize = 8_192;
@@ -212,10 +212,15 @@ fn replace_columns(batch: &RecordBatch, replacements: &[(&str, ArrayRef)]) -> Re
     RecordBatch::try_new(schema, columns).expect("the replacement matches the schema")
 }
 
+/// One Parquet file, row groups cut at the 4,096-row tile.
 fn write_parquet(at: &Path, batch: &RecordBatch) {
-    if let Some(bytes) = batches_to_parquet(std::slice::from_ref(batch)).expect("encode one tile") {
-        std::fs::write(at, bytes).unwrap_or_else(|e| panic!("write {}: {e}", at.display()));
-    }
+    let props = WriterProperties::builder()
+        .set_max_row_group_row_count(Some(4_096))
+        .build();
+    let file = std::fs::File::create(at).unwrap_or_else(|e| panic!("create {}: {e}", at.display()));
+    let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).expect("writer");
+    writer.write(batch).expect("encode one tile");
+    writer.close().expect("close one tile");
 }
 
 /// Which batch a global row index falls in, and where inside it. `layout.rs`'s

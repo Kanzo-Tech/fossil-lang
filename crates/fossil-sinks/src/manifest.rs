@@ -59,6 +59,10 @@ use serde::{Deserialize, Serialize};
 /// whatever this file later says, so they are frozen literals by definition.
 pub const GRAPHAR_VERSION: &str = "gar/v1";
 
+/// Dataset-relative location of the aggregate index — the one path a reader is
+/// told, and the one the writer puts last.
+pub const GRAPH_INFO_PATH: &str = "graph.graph.yml";
+
 /// The payload file of a row-group container: one per set, its row groups the
 /// tiles. `@fossil-lang/corpus` spells the same constant.
 pub const TILES_FILE: &str = "tiles.parquet";
@@ -122,7 +126,7 @@ pub struct VertexInfo {
     pub vertex_count: u64,
     /// Rows per tile (configurable; default [`DEFAULT_CHUNK_SIZE`]). Tile `k` is
     /// the `dense_id` range `[k·chunk_size, (k+1)·chunk_size)` and a power of
-    /// two, so a reader addresses it with [`tile_of`] rather than a division.
+    /// two, so a reader addresses it with a shift rather than a division.
     pub chunk_size: u64,
     /// Output path prefix for this vertex's tiles, e.g. `"vertex/person/"`.
     pub prefix: String,
@@ -747,8 +751,8 @@ pub struct CellRung {
 /// a corpus writes its vertices and its relations as separate artefacts rather
 /// than as one wide table, and the reason a cell row carries an internal weight
 /// instead of a self-loop: **an edge whose two ends share a parent is not an
-/// edge of that parent**, it is absorbed. On the planted fixture
-/// `crates/fossil-layout/tests/aggregation.rs` evaluates, 1,088 of 1,095 edges are
+/// edge of that parent**, it is absorbed. On a planted fixture of 256 vertices
+/// in 32 cliques (`/docs/design/cells` has it), 1,088 of 1,095 edges are
 /// absorbed and the aggregate quotient has seven — so a writer that relabels the
 /// children's edge set and keeps it is not wrong in an edge case, it is wrong
 /// about the overwhelming majority.
@@ -1253,23 +1257,11 @@ pub struct Property {
 /// unsigned 64-bit `dense_id`, the shift is logical, and the result is an
 /// unsigned 64-bit tile number. `>>` is arithmetic on a signed type in Rust,
 /// and in JavaScript it truncates to 32 bits before shifting. The border
-/// vectors a re-implementation is checked against are in this module's tests,
-/// and they run past the `uint32` the column declares so that widening it later
-/// moves no reader. Which ceiling binds is on
+/// vectors a re-implementation is checked against are the `tile_of` section of
+/// `packages/corpus/guards/vectors.json`, and they run past the `uint32` the
+/// column declares so that widening it later moves no reader. Which ceiling binds is on
 /// `/docs/format/conventions/identity`.
 pub const TILE_SHIFT: u32 = 12;
-
-/// The tile a `dense_id` lives in — the whole of the addressing scheme.
-///
-/// There is no tile tree and nothing to discover: tile `i` **is** the range
-/// `[i·4096, (i+1)·4096)`, its parent is a further shift, and the lowest common
-/// ancestor of two vertices is the common prefix of their ids. A reader computes
-/// every URL it wants before it emits the first request, which is the whole
-/// content of *the camera is addressed, not queried*.
-#[must_use]
-pub const fn tile_of(dense_id: u64) -> u64 {
-    dense_id >> TILE_SHIFT
-}
 
 /// Rows per tile when a mapping does not override it — `1 << TILE_SHIFT`.
 ///
@@ -1279,8 +1271,8 @@ pub const fn tile_of(dense_id: u64) -> u64 {
 /// `/docs/format/conventions/addressing`. Two things worth knowing before
 /// touching this: the byte curve is flat from 1,024 to 8,192, so a change
 /// inside that band is noise with a `git blame` on it; and the value must stay
-/// a power of two, because a tile's address is [`tile_of`], a shift, and a
-/// shift is not a division.
+/// a power of two, because a tile's address is a shift by [`TILE_SHIFT`], and
+/// a shift is not a division.
 pub const DEFAULT_CHUNK_SIZE: u64 = 1 << TILE_SHIFT;
 
 impl VertexInfo {
@@ -1734,31 +1726,6 @@ mod tests {
                 cardinality: Some(Cardinality::Single),
             })
             .collect()
-    }
-
-    /// The border vectors of [`tile_of`], which are the deliverable: a second
-    /// implementation is checked against this table and not against a sentence.
-    /// The values past `2^32 − 1` exceed the `uint32` a `dense_id` column holds
-    /// today, and are here because they are where a port that took the shift as
-    /// signed, or ran it through a JavaScript `number`, answers differently.
-    #[test]
-    fn tile_of_border_vectors() {
-        for (dense_id, tile) in [
-            (0u64, 0u64),
-            (4_095, 0),
-            (4_096, 1),
-            (8_191, 1),
-            (2_147_483_647, 524_287),                   // 2^31 − 1
-            (2_147_483_648, 524_288),                   // 2^31
-            (4_294_967_295, 1_048_575),                 // 2^32 − 1, the last id a `uint32` holds
-            (9_007_199_254_740_992, 2_199_023_255_552), // 2^53
-        ] {
-            assert_eq!(tile_of(dense_id), tile, "tile_of({dense_id})");
-        }
-        // The shift and the row count are one statement, not two that agree.
-        assert_eq!(DEFAULT_CHUNK_SIZE, 4_096);
-        assert_eq!(tile_of(DEFAULT_CHUNK_SIZE - 1), 0);
-        assert_eq!(tile_of(DEFAULT_CHUNK_SIZE), 1);
     }
 
     /// How many tiles a declared count implies — the Rust half of the
@@ -2320,8 +2287,7 @@ version: gar/v1
         ]
     }
 
-    /// The com-DBLP tree as `crates/fossil-layout/src/layout/community.rs, Cut`
-    /// measured it: three rungs of Louvain's five, 55,712 / 9,248 / 1,696
+    /// The com-DBLP tree as a cut of Louvain's dendrogram measured it: three rungs of Louvain's five, 55,712 / 9,248 / 1,696
     /// groups over 317,080 authors.
     fn dblp_tree() -> CellTree {
         CellTree::new(
@@ -2378,15 +2344,15 @@ version: gar/v1
     }
 
     /// **A rung declares a count because a contraction is not a scale**, and the
-    /// tree under test is a `Cut`'s rather than the writer's on purpose: its
+    /// tree under test is a dendrogram cut's rather than the writer's on purpose: its
     /// rungs contract by 5.69×, 6.02× and 5.45×, nowhere near four, and no
     /// arithmetic a reader could do with a declared `4` would address anything.
     ///
     /// The writer this crate ships emits a quaternary tree that contracts by
     /// exactly four, so a fixture built from it could not tell a declared count
     /// from a declared exponent — which is the whole property here. A tree the
-    /// writer does not produce is the only one that can falsify it, and
-    /// `crates/fossil-layout/src/layout/community.rs, Cut` produces this one.
+    /// writer does not produce is the only one that can falsify it, and a cut of
+    /// Louvain's dendrogram on com-DBLP produced this one.
     #[test]
     fn a_rung_declares_a_count_and_clears_the_floor_without_meeting_it() {
         let tree = dblp_tree();

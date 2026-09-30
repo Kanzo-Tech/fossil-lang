@@ -48,8 +48,6 @@ export interface GraphClient {
    */
   schema(params?: SchemaParams): Promise<SchemaResult>;
   executeSql(params: ExecuteSqlParams): Promise<ExecuteSqlResult>;
-  /** Escape hatch: dispatch a raw `{ verb, params }` operation. */
-  dispatch(op: Operation): Promise<unknown>;
 }
 
 /**
@@ -72,6 +70,5 @@ export function createGraphClient(opts: CreateGraphClientOpts): GraphClient {
   return {
     schema: (params = {}) => call({ verb: 'schema', params }),
     executeSql: (params) => call({ verb: 'execute_sql', params }),
-    dispatch,
   };
 }

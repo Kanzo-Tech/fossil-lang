@@ -1,25 +1,20 @@
-//! Hover, completion and goto-definition on the **main thread** — the third
-//! wire over the same `fossil-ide` answers.
+//! Hover, completion and goto-definition on the **main thread** — the
+//! browser's one wire over the `fossil-ide` answers the native LSP serves.
 //!
-//! # Why a third wire, when `lsp_worker` already dispatches all three
+//! # Why method calls and not an LSP transport
 //!
-//! [`crate::lsp_worker`] is a `postMessage` transport, and a transport needs
-//! somebody on the other end of it: a Worker that owns its own
-//! [`crate::FossilWorkspace`], a JSON-RPC client, an id table, and a second
-//! copy of every buffer to keep the two workspaces in step. That is an LSP
-//! client, it is a real piece of work, and a browser tab that already calls
-//! `check()` synchronously does not need one to answer *what is the type under
-//! this cursor*.
+//! A `postMessage` LSP transport needs somebody on the other end of it: a
+//! Worker that owns its own [`crate::FossilWorkspace`], a JSON-RPC client, an
+//! id table, and a second copy of every buffer to keep the two workspaces in
+//! step. That is an LSP client, it is a real piece of work, and a browser tab
+//! that already calls `check()` synchronously does not need one to answer
+//! *what is the type under this cursor*. There was such a Worker here, with no
+//! consumer, and it is deleted.
 //!
 //! So these are ordinary method calls, and the surface stays the shape the rest
 //! of this crate has: `(handle, line, character)` in, a serialisable row out.
-//! The Worker keeps every one of its routes; nothing here replaces it.
 //! What is shared is what `/docs/design/three-hosts` says is shared — the
-//! ANSWER, as a `fossil-ide` free function — and
-//! `crates/fossil-wasm/tests/main_thread_parity.rs` is the test that crosses
-//! the new wire rather than the function, because that page's other rule is
-//! that two hosts sharing a function still disagree if they serialise it
-//! differently.
+//! ANSWER, as a `fossil-ide` free function.
 //!
 //! # These three take a SHARED borrow, and that is the whole re-entrancy story
 //!

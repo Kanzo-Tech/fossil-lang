@@ -79,9 +79,7 @@ pub fn local_name(iri: &str) -> &str {
 /// target shape's names and nothing else. Three sides call the bare function on
 /// a predicate IRI and are right to:
 ///
-/// - `fossil_hir::infer`'s source-row builder and
-///   `fossil_descriptors_input::shex` (through
-///   `ResolvedConstraint::predicate_local_name`) name INPUT row fields, which no
+/// - `fossil_hir::infer`'s source-row builder names INPUT row fields, which no
 ///   `@rename` is addressed to;
 /// - `fossil_hir::shapes::suggested_alias` proposes what to rename a colliding
 ///   predicate TO, and it needs the un-renamed segment to build the suggestion.

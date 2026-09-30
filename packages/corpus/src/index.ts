@@ -13,7 +13,6 @@
  * corpus.tileMatrix('Person')                       // every zoom, every tile, its rows and box
  * await corpus.scan({ type: 'Person' }).read(tiles) // a batch per tile
  * await corpus.edges({ from: tiles, direction: 'src' })
- * await corpus.node(iri)
  * ```
  *
  * # One door, one name, and the depth is an argument
@@ -110,7 +109,6 @@ export type { EdgeAnswer, EdgeBatch, EdgesParams } from './edges.js';
 export type { Box, Filter, Literal } from './expression.js';
 export type { Batch } from './query.js';
 export type { Scan, ScanParams, ScanTask } from './scan.js';
-export type { NodeParams, PlacedVertex } from './identity.js';
 export type { OpenOptions, SqlPolicy } from './open.js';
 export type { TileAddress, TileInfo, TileMatrix, TileMatrixSet } from './tile-matrix.js';
 

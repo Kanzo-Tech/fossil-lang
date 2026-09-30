@@ -4,13 +4,12 @@ import init, {
   storageGrant,
   storageName,
   storageRead,
-  storageWrite,
   type InitInput,
 } from '../pkg/fossil_storage_wasm.js';
 import type { Access, StorageCredential } from '@fossil-lang/types';
 
 export type { InitInput };
-export { storageRead, storageWrite };
+export { storageRead };
 
 let booted: Promise<unknown> | null = null;
 

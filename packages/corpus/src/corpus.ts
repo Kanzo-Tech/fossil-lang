@@ -13,11 +13,10 @@
  * const scan = corpus.scan({ type: 'Person', filter, select })
  * await scan.read(scan.plan().filter(visible))   // a batch per tile, a run in one statement
  * await corpus.edges({ from, direction: 'src' }) // the relations incident to those tiles
- * await corpus.node(iri)
  * ```
  *
- * **The object has two halves and the line between them is not a spelling.** `tileMatrix`, `scan`,
- * `edges` and `node` compute which tiles to read and read those; `schema`, `relations` and
+ * **The object has two halves and the line between them is not a spelling.** `tileMatrix`, `scan`
+ * and `edges` compute which tiles to read and read those; `schema`, `relations` and
  * `executeSql` name a relation and let the engine decide. `fossil-graph`'s own crate doc states the
  * same rule from the other side: *pruning is which bytes are read, and that is the tiles' job, not
  * a verb's*.
@@ -34,7 +33,6 @@ import type {
   SchemaParams,
   SchemaResult,
 } from './generated.js';
-import type { NodeParams, PlacedVertex } from './identity.js';
 import type { Scan, ScanParams } from './scan.js';
 import type { TileMatrixSet } from './tile-matrix.js';
 
@@ -55,19 +53,6 @@ export interface CorpusVertexType {
   readonly identity: string | null;
   /** Whether the payload carries `x` and `y`, without which a tile has no box. */
   readonly geometry: boolean;
-  /**
-   * Whether a lookup by identity on this type is a **seek** or a **scan**.
-   *
-   * `true` when the corpus publishes an identity index: {@link Corpus.node} reads one index tile
-   * and then the payload tile the address names. `false` when it does not: the same call reads the identity column of
-   * every tile of the type, which at five million vertices is about 40 MB.
-   *
-   * It is a property of the TYPE and not of a call, because that is the shape of the fact: a
-   * consumer needs to know once whether its bookmarks are cheap, not to be told again on every
-   * click. Both answers are correct; only one of them is fast, and a caller with no way to tell
-   * them apart discovers the difference by measuring.
-   */
-  readonly indexed: boolean;
   /**
    * What a view can draw the type with — the manifest's `channels:`, as declared. A cell tree's
    * `mode` is the mode of the one its `modeChannel` names, and a categorical's `domain` is the
@@ -175,8 +160,6 @@ export interface Corpus {
    * answer per address, a run of consecutive tiles read in one statement.
    */
   edges(params: EdgesParams): Promise<readonly EdgeAnswer[]>;
-  /** One vertex by identity, or `null`. */
-  node(id: string, params?: NodeParams): Promise<PlacedVertex | null>;
   // ── The verbs ─────────────────────────────────────────────────────────────────────────────
   //
   // Methods whose SQL is written in Rust — `fossil-graph` — and dispatched here through
@@ -185,7 +168,7 @@ export interface Corpus {
   //
   // **They read a relation, where everything above reads tiles**, and that is the line between
   // the two halves of this object rather than a spelling difference. A verb's SQL names a table
-  // and lets the engine decide which bytes to open; `scan`, `edges` and `node` compute which tiles
+  // and lets the engine decide which bytes to open; `scan` and `edges` compute which tiles
   // to read and read those. `crates/fossil-graph/src/lib.rs` states the same rule
   // from the other side — *pruning is which bytes are read, and that is the tiles' job, not a
   // verb's*.

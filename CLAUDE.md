@@ -75,9 +75,9 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 - **The batch pass does not link the compiler substrate.** `fossil-layout` must reach `salsa`
   over no normal edge. It reached it over four branches until `39d0fb8`: one `use` of a 37-line
   Parquet encoder the executor never called put a compiler front-end and a query engine inside
-  the closure of a pass that resolves no name and holds no database. The DEV edge stays — an
-  example measures the tiling against the baseline encoder in `fossil_df::files`, and an example
-  links dev-dependencies. **This bullet is the policy and the only copy of it:**
+  the closure of a pass that resolves no name and holds no database. The dev edge that outlived
+  it went too, when the one example that used it wrote its own baseline encoder: the executor may
+  now depend on the pass without a cycle. **This bullet is the policy and the only copy of it:**
   `crates/xtask/tests/substrate_reach.rs` reads the crate name out of THIS line, derives the
   linker set from `cargo metadata`, and prints the whole table when it goes red — so neither
   half is ever written down twice. It does NOT keep the substrate out of the wasm payload and
@@ -180,8 +180,8 @@ crates/
                            browser's `sources()` returns — so it links the compiler front-end,
                            as every host does
   fossil-layout/           the layout post-pass — Louvain + Hilbert over Parquet through
-                           arrow-rs. It links no engine: `DuckDB` and `fossil-df` are both
-                           dev-dependencies, the second since `TileWriter` became
+                           arrow-rs. It links no engine: `DuckDB` is a dev-dependency, and
+                           `fossil-df` is no dependency at all since `TileWriter` became
                            `fossil-tile-writer` and stopped dragging `DataFusion` and
                            `salsa` in behind it. `crates/xtask/tests/engine_reach.rs`
                            derives the real linkers and is what made that edge visible. It
@@ -254,7 +254,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   storage/                 how every package reaches storage from a vended credential, over
                            `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
                            expires−5min, refcounted per prefix; Azure lent file by file),
-                           `read`/`write` (`object_store` stores), and `resolveDocuments`.
+                           `read` (an `object_store` GET), and `resolveDocuments`.
                            No host ever signs a URL for fossil
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
                            and not an editor. FIVE of them, not two: highlighting from

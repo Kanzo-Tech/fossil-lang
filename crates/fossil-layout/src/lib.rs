@@ -29,9 +29,10 @@
 //! a compiler substrate out of a batch pass, which is not what "one shared
 //! function" was weighed against.
 //!
-//! `fossil-df` survives as a **dev**-dependency: `examples/compaction_pass.rs`
-//! measures the tiling against `batches_to_parquet`, the baseline encoder, and a
-//! bench's dependency is not the library's.
+//! The dev edge that outlived it is gone too: `examples/compaction_pass.rs`
+//! took `fossil-df` for a ten-line baseline encoder and writes its own now, so
+//! this crate reaches `fossil-df` over no edge at all, and `fossil-df` is free
+//! to depend on the pass.
 
 pub mod io;
 pub mod layout;

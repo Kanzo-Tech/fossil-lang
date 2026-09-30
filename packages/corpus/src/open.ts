@@ -6,7 +6,6 @@
 import { addressManifests, CorpusManifestError, GRAPH_INFO_PATH } from './address.js';
 import type { Corpus, CorpusField, CorpusTypes, SqlCorpus } from './corpus.js';
 import { edgesOf } from './edges.js';
-import { IDENTITY, identityOf } from './identity.js';
 import { initFossilGraphWasm, type InitInput } from './load.js';
 import { join, paths, scan } from './manifest.js';
 import { engineReads, type QueryRow, type Reads } from './query.js';
@@ -15,8 +14,12 @@ import { CorpusReadError, ident, list, lit, text } from './sql.js';
 import { published } from './tile-manifest.js';
 import { zoomsOf, type Zooms } from './tile-matrix.js';
 import { verbsOf } from './verbs.js';
+import { PAYLOAD_IDENTITY } from './vocabulary.generated.js';
 import { mount } from '@fossil-lang/storage';
 import type { Engine, Host } from '@fossil-lang/types';
+
+/** The column a vertex's identity is read from — the writer's, by role. */
+const IDENTITY = PAYLOAD_IDENTITY[0]!;
 
 /**
  * Whether this corpus puts a caller's SQL in front of the engine.
@@ -334,7 +337,6 @@ async function opened(
       fields: fieldsOf(type.type),
       identity: has(type.type, IDENTITY) ? IDENTITY : null,
       geometry: has(type.type, 'x') && has(type.type, 'y'),
-      indexed: type.index !== null,
       channels: type.channels,
     })),
     edges: addressing.edges.map((edge) => ({
@@ -373,7 +375,6 @@ async function opened(
     return found;
   };
 
-  const identity = identityOf({ query, addressing, payloadFiles, has });
   const verbs = verbsOf({ query, addressing, manifestFiles, catalog, payloadFiles, fieldsOf });
 
   const corpus: Corpus = {
@@ -397,7 +398,6 @@ async function opened(
     tileMatrix: (type) => zooms(type).set,
     scan: scanOf({ reads, zooms }),
     edges: edgesOf({ reads, addressing, zooms }).edges,
-    node: identity.node,
   };
 
   // The hatch is ADDED rather than gated, which is the whole of `SqlPolicy` in one line: a

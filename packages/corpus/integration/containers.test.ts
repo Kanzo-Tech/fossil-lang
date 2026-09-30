@@ -61,8 +61,6 @@ const IN_BOX: Filter = {
   ],
 };
 
-const IDS = [0, 1, COUNT / 2, COUNT - 1].map((i) => `https://example.org/person/${i}`);
-
 interface Opened {
   readonly dir: string;
   readonly corpus: Corpus;
@@ -165,16 +163,6 @@ describe('one corpus, two containers', () => {
     },
     180_000,
   );
-
-  it('resolves the same vertex by identity, through the index in both', async () => {
-    for (const id of [...IDS, 'https://example.org/person/nobody']) {
-      expect(await opened.rowgroups.corpus.node(id)).toEqual(await opened.files.corpus.node(id));
-    }
-    // The seek and not the scan, in both — otherwise this compares two scans and says nothing
-    // about the index tiles, which are a payload set of their own and move containers with the rest.
-    expect(opened.files.corpus.types.vertices[0]!.indexed).toBe(true);
-    expect(opened.rowgroups.corpus.types.vertices[0]!.indexed).toBe(true);
-  }, 180_000);
 
   it('names strictly fewer files for the same window', async () => {
     const cost: Record<string, number> = {};

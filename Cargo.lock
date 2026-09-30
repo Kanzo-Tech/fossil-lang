@@ -1913,7 +1913,6 @@ name = "fossil-descriptors-input"
 version = "0.1.0"
 dependencies = [
  "fossil-graph-schema",
- "fossil-shex",
  "indexmap",
  "serde",
  "serde_json",
@@ -2088,7 +2087,6 @@ dependencies = [
  "arrow",
  "bytes",
  "duckdb",
- "fossil-df",
  "fossil-hir",
  "fossil-mem-probe",
  "fossil-sinks",
@@ -2129,7 +2127,6 @@ dependencies = [
  "fossil-introspect",
  "fossil-lineage",
  "fossil-mir",
- "fossil-wasm",
  "lsp-server",
  "lsp-types",
  "salsa",
@@ -2264,7 +2261,6 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-test",
- "web-sys",
 ]
 
 [[package]]

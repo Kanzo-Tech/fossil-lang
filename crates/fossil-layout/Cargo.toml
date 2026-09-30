@@ -62,13 +62,6 @@ fossil-mem-probe = { path = "../fossil-mem-probe" }
 # `--all-targets`, so no `tests/` target is built for wasm32 at all.
 [dev-dependencies]
 serde_json = { workspace = true }
-# DEV, and that demotion is what took `salsa` and `DataFusion` out of this
-# crate's normal closure: the only thing left here that needs the engine side is
-# `examples/compaction_pass.rs`, which measures the tiling against
-# `batches_to_parquet` — the baseline encoder the phase inversion left behind.
-# An example links dev-dependencies, so the bench keeps its baseline and the
-# library links no engine.
-fossil-df = { path = "../fossil-df" }
 # DEV, and the demotion is the whole point: the library links no DuckDB, and the
 # tests bring one to read back what the library wrote — `one-engine.mdx` calls
 # that «a test convenience, not a dependency of the language». Non-test builds

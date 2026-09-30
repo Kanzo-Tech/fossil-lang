@@ -78,7 +78,7 @@ export function toDiagnostics(
 }
 
 /** What {@link fossilLinter} calls to get rows. Synchronous or not — the wasm
- *  surface is synchronous, but a host driving an LSP Worker over `postMessage`
+ *  surface is synchronous, but a host driving a Worker over `postMessage`
  *  is not, and both should be able to use this. */
 export type CheckSource = (
   text: string,
