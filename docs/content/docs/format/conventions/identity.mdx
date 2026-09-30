@@ -29,7 +29,8 @@ Guard: `dense-ids` — and every guard named here is specified in full, with wha
 
 `dense_id` is not arbitrary. Over the vertices that carry a position — the union of every table whose
 manifest entry declares one — it is the **rank of each vertex in the Hilbert order of its position**:
-the two coordinates quantised with `floor` onto a 2¹⁶ × 2¹⁶ grid over their joint extent, the
+the two coordinates quantised onto a 2¹⁶ × 2¹⁶ grid over their joint extent — in binary64, scaled by
+`65535 / (hi − lo)` and truncated — the
 order-16 Hilbert code of that cell, and the vertex's rank among all such codes. It is the order
 DuckDB's `ST_Hilbert(x, y, extent)` gives, so `ORDER BY ST_Hilbert(…)` over the placed vertices
 reproduces the numbering.
