@@ -21,7 +21,7 @@
 //! # Why dependency-free
 //!
 //! The schema is spoken by every side at once — the producer (`fossil-df`), each
-//! materializer, the consumer (`fossil-graph`), and the wire/manifest. So this
+//! materializer, and the wire/manifest. So this
 //! crate depends on nothing but `serde`: anyone can deserialize and interpret a
 //! graph without pulling the `ShEx` descriptor or Arrow. *Decoding* a `ShEx`
 //! document (which does need that machinery) lives next to the descriptor, not

@@ -60,7 +60,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   No exceptions, no `continue-on-error`. Do not write the gated crate set down anywhere: xtask
   derives it from the cdylib dependency closure and prints it, precisely because the two
   hand-maintained `-p …` lists that preceded it had already drifted apart (9 crates vs 6).
-- **Forbidden crates** (banned in `deny.toml`): `serde_yml` (RUSTSEC-2025-0068; use `serde_yaml_ng`),
+- **Forbidden crates** (banned in `deny.toml`): `serde_yml` (RUSTSEC-2025-0068; `serde_yaml_ng` if YAML ever returns),
   `tower-lsp` (unmaintained ~3 years; use `lsp-server`, as all three reference implementations do),
   `wasm-pack` (archived; use `wasm-bindgen-cli` + Vite),
   `sqlx` (not WASM-compatible).
@@ -116,7 +116,6 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
-| serde_yaml_ng | 0.10 | NOT serde_yml (RUSTSEC) |
 | lsp-server | 0.7 | NOT tower-lsp (unmaintained) |
 | arrow + parquet | 58 | the corpus writer, `fossil_df::write` (through `datafusion`'s re-export) |
 | shex_ast + rudof_iri | 0.3 | ShEx target shapes; explicit features only — `default-features` drags in what wasm32 cannot build |
@@ -207,7 +206,10 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            `open · manifest · scan · sql · close`. It links no engine and loads
                            no WASM. Beside `src/` sits the contract it fulfils — `guards/`,
                            `conformance/` and `integration/` — outside `files`, so npm never
-                           sees it. `test` stays `tests/` alone because the release gate runs it
+                           sees it. `tests/manifest.test.ts` holds `src/manifest.ts` against
+                           `fossil-sinks/fossil.schema.json`; `integration/round-trip.test.ts`
+                           runs a program through the executor and reads the corpus back over
+                           HTTP. `test` stays `tests/` alone because the release gate runs it
                            without `duckdb`; the contract is `test:contract` (`corpus.yml`) and
                            `test:integration` (`pnpm-ci.yml`). It was `@fossil-lang/graph` and it
                            is not a graph: the thing that draws one is `@kanzo-tech/graph`, the

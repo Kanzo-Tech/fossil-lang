@@ -2,7 +2,7 @@
 # and the point the whole design is most sensitive to: change this and every
 # side changes. A property graph is a SCHEMA over typed relations (SQL/PGQ: keys +
 # references); this crate is that schema, format-neutral. Dependency-free except
-# serde so EVERY side (producer fossil-df, materializers, consumer fossil-graph,
+# serde so EVERY side (producer fossil-df, materializers, the manifest writer,
 # the wire) can speak it without pulling the ShEx/Arrow machinery — that
 # decoupling is what keeps the substrate modifiable.
 [package]
