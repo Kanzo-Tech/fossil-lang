@@ -89,11 +89,22 @@ impl std::fmt::Debug for Executor {
 
 impl Executor {
     /// Compile `program`, with no connections until [`Self::set_connections`].
+    ///
+    /// The program has no location, so a relative source or document it names
+    /// resolves against nothing; [`Self::at`] gives it one.
     #[must_use]
     pub fn new(program: &str) -> Self {
+        Self::at(program, "program.fossil")
+    }
+
+    /// Compile `program` as the file at `path` — a URL, usually — so a
+    /// relative `io.csv("data/users.csv")` or `io.shex("shape.shex")` resolves
+    /// beside it, as it would for any reader of that file.
+    #[must_use]
+    pub fn at(program: &str, path: &str) -> Self {
         let system: Arc<dyn System> = Arc::new(ExecutorSystem);
         let db = FossilDb::new(system);
-        let file = SourceFile::new(&db, program.to_string(), "program.fossil".to_string());
+        let file = SourceFile::new(&db, program.to_string(), path.to_string());
         Self {
             db,
             file,

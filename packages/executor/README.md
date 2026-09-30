@@ -5,8 +5,10 @@ lazy-loaded counterpart to the LSP-only [`@fossil-lang/wasm`](../wasm).
 
 Wraps the `fossil-df-wasm` wasm-bindgen build (`--target web`). The browser reads
 every document and source the program names under the credentials the host vends,
-runs the mapping on DataFusion-WASM, and writes the GraphAr output (Parquet +
-manifests) under the job's prefix. No mapping runtime on the server.
+runs the mapping on DataFusion-WASM, and writes the `fossil/1` corpus — one
+Parquet per vertex type and per relation, and `fossil.json` last — under the job's
+prefix. No mapping runtime on the server, and no other writer: this is the one
+host that writes a corpus, in the browser and in Node.
 
 ## Usage
 
@@ -52,6 +54,9 @@ const { unread } = await resolveDocuments(exec, host); // sets connections, regi
 const report = await exec.run(host, jobId);            // reads, runs, writes under the job's prefix
 exec.free();
 ```
+
+`report` is `{ dest, dropped }`: where the corpus went and, per edge table, how many
+input rows named a vertex that does not exist. What was written is `<dest>fossil.json`.
 
 A host with no storage runs over files it holds, and gets them back:
 
