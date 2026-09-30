@@ -27,7 +27,7 @@ use salsa::Accumulator;
 /// Construct via [`raise`], [`delay_span_bug`] or [`bug`] — each pushes a
 /// [`Diagnostic`] to the accumulator before returning, so any
 /// `ErrorGuaranteed` value implies "at least one diagnostic was emitted".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct ErrorGuaranteed(std::marker::PhantomData<()>);
 
 impl ErrorGuaranteed {
@@ -37,27 +37,6 @@ impl ErrorGuaranteed {
     #[must_use]
     const fn new() -> Self {
         Self(std::marker::PhantomData)
-    }
-}
-
-// SAFETY: a third-party-trait integration boundary, which is the ONLY thing the
-// workspace's `unsafe_code = "deny"` (not `"forbid"`) exists to let through, and
-// only with a justification naming what the unsafe is for. ErrorGuaranteed
-// is Copy + Eq + Hash with no nested invariants (PhantomData<()> is zero-sized),
-// so the trivial-replace pattern is sound. No safe alternative exists because
-// salsa::Update requires `unsafe impl` even for trivially-safe bodies.
-#[allow(unsafe_code)]
-unsafe impl salsa::Update for ErrorGuaranteed {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        // SAFETY: caller (Salsa) guarantees `old_pointer` is a valid, aligned
-        // pointer to an initialised `ErrorGuaranteed` owned by Salsa storage.
-        let old = unsafe { &mut *old_pointer };
-        if *old == new_value {
-            false
-        } else {
-            *old = new_value;
-            true
-        }
     }
 }
 

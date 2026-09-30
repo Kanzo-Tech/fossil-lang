@@ -52,29 +52,6 @@ impl<N> std::hash::Hash for FileAstId<N> {
     }
 }
 
-// SAFETY: third-party-trait integration boundary — the workspace denies
-// `unsafe_code` rather than forbidding it, so a boundary like this one opts in
-// with an explicit `allow` and this justification. `FileAstId`
-// is `Copy + Eq`, so the trivial-replace pattern is sound: the new value
-// either equals the old (no change) or replaces it bit-for-bit (self-
-// contained, no nested invariants). The `PhantomData` carries no runtime
-// state. No safe alternative exists because `salsa::Update` requires
-// `unsafe impl` even for trivially-safe bodies.
-#[allow(unsafe_code)]
-unsafe impl<N: 'static> salsa::Update for FileAstId<N> {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        // SAFETY: caller guarantees `old_pointer` is a valid, aligned pointer
-        // to an initialised `FileAstId<N>` owned by Salsa storage.
-        let old = unsafe { &mut *old_pointer };
-        if *old == new_value {
-            false
-        } else {
-            *old = new_value;
-            true
-        }
-    }
-}
-
 impl<N> FileAstId<N> {
     /// Raw `u32` index — exposed for diagnostics and tests; not for normal
     /// query plumbing (use the typed `FileAstId<N>` instead).
@@ -128,7 +105,7 @@ pub struct AstIdMap<'db> {
 /// `local_index` is the position among the top-level CST children (NOT the
 /// per-kind dense index — that's `MappingLoc::index` / `SourceLoc::index`
 /// over in [`crate::def_map`]).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct AstIdEntry {
     pub kind: SyntaxKind,
     /// Position of this item among siblings in DFS top-level scan order.
@@ -137,7 +114,7 @@ pub struct AstIdEntry {
 
 /// Build the per-file `AstIdMap` by walking top-level CST children once. Body
 /// content is NOT inspected — that's the invalidation-barrier guarantee.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn ast_id_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> AstIdMap<'db> {
     let cst = fossil_syntax::parse(db, file);

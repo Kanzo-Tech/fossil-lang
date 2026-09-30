@@ -20,7 +20,7 @@
 //!   [`provenance::expr_types`] projects [`check::typecheck_mapping`]'s
 //!   per-expression types; [`provenance::ty_origin`]
 //!   is the user-facing lookup returning `Option<ExprTypeEntry>` — a struct
-//!   and not a tuple, because tuples don't auto-impl `salsa::Update`.
+//!   and not a tuple, so a reader names `ty` and `provenance`.
 //! - [`spans`] side table: per-mapping real-span lookup
 //!   (`(MappingLoc, ExprId) -> Span`) populated from `rowan::TextRange`s at
 //!   query time. The

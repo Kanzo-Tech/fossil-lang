@@ -28,5 +28,6 @@ pub struct MirGraph<'db> {
     ///
     /// Consumers MUST check this before executing; `fossil_df::execute_graph` is
     /// the enforcement point.
+    #[returns(copy)]
     pub error: Option<fossil_base::ErrorGuaranteed>,
 }

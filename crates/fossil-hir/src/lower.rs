@@ -78,7 +78,7 @@ impl<'db> HirFile<'db> {
 /// Per-mapping HEADER data. The previous `properties` field
 /// is REMOVED — body content lives in [`crate::body::HirBody`], reached via
 /// [`crate::body::body`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct HirMapping {
     /// Mapping name, e.g. `"User"`.
     pub name: SmolStr,
@@ -95,7 +95,7 @@ pub struct HirMapping {
 /// [`HirSourceOp`] in written order. The head must be a name and not another
 /// call, because a pipeline whose head is `io.csv("u.csv")` would give the same
 /// relation two spellings — and `from <name>` resolves bindings, not expressions.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct HirSourcePipe {
     pub name: SmolStr,
     pub base: SmolStr,
@@ -115,7 +115,7 @@ pub struct HirSourcePipe {
 
 /// The relation verbs that have a lowering. `lowered_verbs` derives the list
 /// from this enum's constructors; the catalogue declares more.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum HirSourceOp {
     /// `where(User.age >= 18)` — keeps the rows the predicate holds for. The row
     /// type is unchanged, which is why it is the cheap one.
@@ -178,7 +178,7 @@ pub enum HirSourceOp {
 /// aggregate it is is the CATALOGUE's answer —
 /// [`crate::stdlib::RegistryEntry::agg_fn`] — and a copy of that answer here
 /// would be the second table this crate exists to not have.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct HirAggregation {
     /// The column the result answers to — the program's name, not a row's.
     pub out: SmolStr,
@@ -195,7 +195,7 @@ pub struct HirAggregation {
 /// and the four places that read this pair read them by those names. A tuple
 /// would spell the same pair `.0` and `.1` at every one of them, and the pair
 /// is exactly the kind whose order nobody can recover from the site.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct SelectedColumn {
     /// The binding whose row the column belongs to — `Employee` in
     /// `Active.select(Employee.id)`.
@@ -204,13 +204,13 @@ pub struct SelectedColumn {
     pub column: SmolStr,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct HirProperty {
     pub key: PropertyKey,
     pub value: HirExpr,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum PropertyKey {
     /// `@subject = <expr>` — the mapping's identity.
     ///
@@ -258,7 +258,7 @@ pub enum PropertyKey {
 /// an operand is `Float`, except for [`Self::Div`], which is always `Float`),
 /// and `fossil_df::render` decides what the engine computes. Neither can be
 /// read off this enum, which is a tag and nothing else.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum BinOp {
     Eq,
     Ne,
@@ -282,7 +282,7 @@ pub enum BinOp {
 }
 
 /// A `-` or a `not` — the two operators of L7 (grammar.bnf, `UnaryExpr`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum UnOp {
     /// `-Row.drift` — arithmetic negation. Numeric operand, numeric result.
     Neg,
@@ -304,7 +304,7 @@ pub enum UnOp {
 /// literals that are bitwise equal are the same literal; `-0.0` and `0.0` are
 /// not, and that distinction is load-bearing — see [`UnOp::Neg`] and the
 /// measurement in `negation`'s docs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct FloatBits(u64);
 
 impl FloatBits {
@@ -322,7 +322,7 @@ impl FloatBits {
 }
 
 /// One piece of an [`HirExpr::Interpolation`]: literal text, or a hole.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum InterpolationPart {
     /// A literal run, with `{{` already resolved to `{`.
     Text(SmolStr),
@@ -330,7 +330,7 @@ pub enum InterpolationPart {
     Hole(HirExpr),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum HirExpr {
     /// An interpolated string — its literal runs and its holes, in order.
     ///
@@ -487,7 +487,7 @@ pub enum HirExpr {
     },
 }
 
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirFile<'db> {
     let cst = fossil_syntax::parse(db, file);

@@ -123,7 +123,7 @@ fn installed_barrier_release() -> Arc<Barrier> {
 /// driver, then hits the cooperative cancellation checkpoint, and ONLY THEN
 /// performs observable post-checkpoint work. If the revision was cancelled,
 /// the checkpoint unwinds and the post-checkpoint work never runs.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 fn sentinel_slow_query(db: &dyn Db, file: SourceFile) -> usize {
     // Touch the input so the query genuinely depends on `file`'s revision —
     // this is what a real analysis query (parse/typecheck) would read.

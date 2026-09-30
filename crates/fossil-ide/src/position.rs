@@ -40,7 +40,7 @@ pub struct LineOffsets<'db> {
 }
 
 /// Compute byte-offset-per-line table for `file`.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 pub fn line_offsets<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> LineOffsets<'db> {
     let text = file.text(db);

@@ -20,13 +20,12 @@
 //!
 //! # Why `Option<ExprTypeEntry<'db>>` and not `Option<(Ty, Provenance)>`
 //!
-//! Salsa 0.26 requires every type appearing as a `#[salsa::tracked]` function's
-//! return implement [`salsa::Update`]. Tuples like `(Ty<'db>, Provenance)` do
-//! NOT automatically satisfy this bound. Reusing the existing
-//! [`ExprTypeEntry`] struct (which derives [`salsa::Update`]) cleanly
-//! satisfies the bound — and downstream consumers (the hover handler in
-//! `fossil-ide` + [`crate::check::compatible`]) destructure
-//! `ExprTypeEntry { ty, provenance, .. }` cleanly.
+//! A tuple would satisfy Salsa — `(Ty<'db>, Provenance)` is a
+//! [`salsa::SalsaValue`] since 0.28, which it was not as a `salsa::Update`
+//! under 0.26, and that bound is why this was a struct. What keeps it one is
+//! the readers: the hover handler in `fossil-ide` and
+//! [`crate::check::compatible`] destructure `ExprTypeEntry { ty, provenance, .. }`
+//! by name.
 //!
 //! # Provenance is `'db`-free
 //!
@@ -50,7 +49,7 @@ use crate::ty::Ty;
 
 /// Where a synthesised [`Ty`] came from. Carries a source [`Span`] (where the
 /// type was synthesised) + a categorical [`ProvenanceKind`] (semantic reason).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct Provenance {
     /// Source span the type was synthesised from, resolved through
     /// [`crate::spans::spans`].
@@ -64,7 +63,7 @@ pub struct Provenance {
 ///
 /// One variant per channel a type can reach an expression through — a
 /// descriptor on either side, a literal, an operator, or a closure.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum ProvenanceKind {
     /// Type came from an input source descriptor — a source-row column.
     InputDescriptor {
@@ -122,7 +121,7 @@ pub struct ExprTypes<'db> {
 ///
 /// Returned from [`ty_origin`] as `Option<ExprTypeEntry<'db>>` (see module
 /// docs — Salsa Update bound on tuples is the why).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct ExprTypeEntry<'db> {
     pub expr_id: ExprId,
     pub ty: Ty<'db>,
@@ -143,7 +142,7 @@ pub struct ExprTypeEntry<'db> {
 /// synthesises `String`, an `Interpolation` a `String` unless something above it
 /// expects a reference. A `FieldRef` resolves only where the mapping's source
 /// has a row; without one it synthesises no entry at all.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn expr_types<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> ExprTypes<'db> {
     match crate::check::typecheck_mapping(db, mapping) {
@@ -154,11 +153,10 @@ pub fn expr_types<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -
 
 /// Lookup helper: `(MappingLoc, ExprId) -> Option<ExprTypeEntry>`.
 ///
-/// Returns `Option<ExprTypeEntry<'db>>` (NOT a tuple) to satisfy Salsa 0.26's
-/// `salsa::Update` bound on tracked-function return types. See the module-
-/// level "Why `Option<ExprTypeEntry<'db>>`" section. Downstream consumers
+/// Returns `Option<ExprTypeEntry<'db>>` (NOT a tuple) — see the module-level
+/// "Why `Option<ExprTypeEntry<'db>>`" section. Downstream consumers
 /// destructure `entry.ty` and `entry.provenance` directly.
-#[salsa::tracked]
+#[salsa::tracked(returns(clone))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn ty_origin<'db>(
     db: &'db dyn fossil_base::Db,

@@ -47,6 +47,7 @@ use fossil_graph_schema::OutputShapes;
 #[salsa::interned(debug)]
 pub struct TypeDocument<'db> {
     /// The registered document.
+    #[returns(copy)]
     pub document: SourceFile,
     /// The provider name the program wrote after `io.` — `"shex"`, `"shacl"`.
     #[returns(ref)]
@@ -80,7 +81,7 @@ pub struct TypeDocument<'db> {
 /// malformed `.shex` ever produces — the checker could report "no shapes" but
 /// never "this shape file is broken, here is why", which is precisely the
 /// diagnostic a user needs.
-#[salsa::tracked]
+#[salsa::tracked(returns(clone))]
 pub fn decode_shape_document<'db>(
     db: &'db dyn Db,
     request: TypeDocument<'db>,

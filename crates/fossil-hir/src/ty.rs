@@ -15,8 +15,8 @@ use fossil_base::ErrorGuaranteed;
 // The primitive lattice is NOT the type system's to own: the schema contract, the
 // descriptors and the checker all speak it, so it lives in the leaf they share
 // (`fossil-graph-schema`) and is imported here like any other type. Salsa is fine
-// with a foreign type: the `Update` derive falls back to `PartialEq` comparison
-// for anything that is not `salsa::Update` itself.
+// with a foreign type: a `'static` one needs no `salsa::SalsaValue` impl, and
+// Salsa compares it with `PartialEq`.
 use fossil_graph_schema::Primitive;
 use smol_str::SmolStr;
 
@@ -36,7 +36,7 @@ pub struct Ty<'db> {
 }
 
 /// Every type kind the compiler can build.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum TyKind<'db> {
     /// Primitive types — the lattice [`fossil_graph_schema::Primitive`]
     /// declares, and the only one in the tree.
@@ -147,7 +147,7 @@ impl<'db> Ty<'db> {
 /// with no descriptor at all. So membership (does this relation have a row
 /// called `Contact`?) and typing (what is `Contact.email`?) are two different
 /// questions, and only the first has an answer for every program.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct Rows<'db> {
     rows: Vec<NamedRow<'db>>,
 }
@@ -155,10 +155,10 @@ pub struct Rows<'db> {
 /// One row of a relation, under the binding name that introduced it.
 ///
 /// A named struct and not a `(SmolStr, Option<Ty>)`, for the reason
-/// [`crate::provenance::ExprTypeEntry`] already records: tuples do not
-/// auto-implement `salsa::Update`, and this has to, because it rides inside a
-/// [`TyKind`].
-#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+/// [`crate::provenance::ExprTypeEntry`] already records: a reader names the
+/// fields. It carries `'db` and rides inside a [`TyKind`], so it derives
+/// `salsa::SalsaValue`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct NamedRow<'db> {
     /// The binding a body addresses these columns by — `User` and not the
     /// `Adults` that filtered it. A `union` is the exception and it is the only
@@ -282,7 +282,7 @@ pub(crate) fn record_fields<'db>(
 }
 
 /// One named field of a [`Record`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct RecordField<'db> {
     pub name: SmolStr,
     pub ty: Ty<'db>,

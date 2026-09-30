@@ -14,7 +14,7 @@ description = "Fossil — a typed compiler for RDF graph construction"
 
 [workspace.dependencies]
 # === Compiler core ===
-salsa = { version = "0.26", features = ["accumulator"] }
+salsa = { version = "0.28.5", features = ["accumulator"] }
 rowan = "0.16"
 logos = "0.16"
 text-size = "1"
@@ -193,7 +193,7 @@ tempfile = "3"
 log = "0.4"
 
 [workspace.lints.rust]
-unsafe_code = "deny"   # per-item #[allow] permitted with justification at third-party-trait integration boundaries (e.g., Salsa Update for rowan types)
+unsafe_code = "deny"   # per-item #[allow] permitted with justification at third-party-trait integration boundaries (none today; FFI would be one)
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 elided_lifetimes_in_paths = "warn"

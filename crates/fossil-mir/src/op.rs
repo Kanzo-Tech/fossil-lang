@@ -22,9 +22,9 @@
 //!
 //! - **Enum dispatch ONLY** (CLAUDE.md hard rule). `Op` / `Expr` use enum
 //!   variants, never `Box<dyn Trait>`. Recursion *inside* an `Expr` variant via
-//!   `Box<Expr>` is data, not a trait object — `salsa::Update` lifts through
-//!   `Box<T>` transparently when `T: Update`, so no interned-newtype escape
-//!   hatch is needed.
+//!   `Box<Expr>` is data, not a trait object — `salsa::SalsaValue` lifts
+//!   through `Box<T>` transparently when `T: SalsaValue`, so no
+//!   interned-newtype escape hatch is needed.
 //! - `Op<'db>` / `Expr<'db>` carry `'db` because they reference [`Ty<'db>`]
 //!   (interned handles). They are NOT themselves interned — they live inside
 //!   the tracked [`crate::graph::MirGraph`] — so carrying `Ty` in `Hash`/`Eq`
@@ -42,7 +42,7 @@ use smol_str::SmolStr;
 /// One node of the MIR DAG. The complete typed operator algebra: the nine
 /// relational operators, the two typed-emission refinements plus [`Op::Sink`],
 /// and [`Op::Empty`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum Op<'db> {
     /// `SourceOp(uri, format, row_type)` — origin of all row data.
     ///
@@ -203,7 +203,7 @@ pub enum Op<'db> {
 /// before the lowering ever saw it, so there was nothing to carry; open question
 /// 4 of `grammar.bnf, § OPEN` was decided on 2026-08-14 (`select` may follow a
 /// `join` and names a QUALIFIED column) and the binding now reaches here.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct ProjectedColumn {
     /// The relation the column belongs to — `Employee` in
     /// `Active.select(Employee.id)`.
@@ -258,7 +258,7 @@ pub struct ProjectedColumn {
 /// a name: `Purchase.join(Adults, …)` reads a pipeline called `Adults` whose
 /// columns are addressed as `User.…`, and re-qualifying it under `Adults` would
 /// rename exactly the columns the body refers to.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct JoinSide {
     /// Index into the op list of the operator producing this side's relation.
     pub input: usize,
@@ -288,7 +288,7 @@ impl JoinSide {
 }
 
 /// Relational join flavour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum JoinKind {
     Inner,
     LeftOuter,
@@ -304,7 +304,7 @@ pub enum JoinKind {
 /// `ty` is the AGGREGATE's type and not the column's — that is the whole of why
 /// this verb is checker work: `math.sum` takes a `Float` and gives a `Float`,
 /// so summing an `Integer` column produces a `Float` one.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct AggSpec<'db> {
     pub out_field: SmolStr,
     pub agg_fn: AggFn,
@@ -320,7 +320,7 @@ pub struct AggSpec<'db> {
 /// spelling from it (the core stays format-agnostic). `rdf_uri` is the predicate
 /// IRI the manifest/DCAT layer reads; `single_valued` (shape cardinality) drives
 /// duplicate collapse.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct VProp<'db> {
     pub name: SmolStr,
     pub value: Expr<'db>,
@@ -339,7 +339,7 @@ pub struct VProp<'db> {
 /// the core stays format-agnostic — the plan scans a relation an external
 /// provider materialises, and the decode lives outside the core. Carrying the
 /// provider name makes this non-`Copy`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum SourceFormat {
     /// `io.csv(...)`, and the `delimiter = "…"` the program wrote for it.
     ///
@@ -369,7 +369,7 @@ pub enum SourceFormat {
 
 /// Sink references. `GraphAr` is the only one built; `Turtle`, `JsonLd` and
 /// `NQuads` are the serialisations this enum is shaped to take next.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum SinkRef {
     GraphAr,
 }
@@ -378,7 +378,7 @@ pub enum SinkRef {
 ///
 /// The `ty: Ty<'db>` carriage on `Call` / `BinOp` is intentional — it makes
 /// the "erase types ≡ untyped property" check testable.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum Expr<'db> {
     /// Literal string (e.g. `"https://example.org/user/"`).
     LitString(SmolStr),
@@ -391,8 +391,8 @@ pub enum Expr<'db> {
     /// Column reference (e.g. `users.id`).
     ColRef { source: SmolStr, column: SmolStr },
     /// String concatenation: `lhs || rhs`. Recursive via `Box` so the variant
-    /// has a finite size; `salsa::Update` lifts through `Box<T>` when
-    /// `T: Update`.
+    /// has a finite size; `salsa::SalsaValue` lifts through `Box<T>` when
+    /// `T: SalsaValue`.
     Concat(Box<Expr<'db>>, Box<Expr<'db>>),
     /// `x IS NULL` / `x IS NOT NULL` — what `x == null` and `x != null` lower
     /// to, and the reason there is no null VALUE in this algebra.

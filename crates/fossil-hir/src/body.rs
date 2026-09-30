@@ -56,7 +56,7 @@ use rowan::GreenNode;
 /// Stable per-mapping expression id. Indexed into the body's expression
 /// arena, and the second half of the key `(MappingLoc, ExprId)` the
 /// provenance and span side tables are both keyed by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct ExprId(pub u32);
 
 /// Per-mapping body content.
@@ -112,6 +112,7 @@ pub struct HirBody<'db> {
     /// Count of distinct expression nodes lowered for this mapping. The
     /// provenance side table is keyed by `(MappingLoc, ExprId)` for the ids
     /// in `0..expr_count`.
+    #[returns(copy)]
     pub expr_count: u32,
     /// Where each REFERENCE inside a property's right-hand side was written —
     /// `ref_spans[i]` belongs to `properties[i]`, same index as
@@ -156,7 +157,7 @@ pub struct HirBody<'db> {
 /// `nmae`, because the mistake is the column and `User` is what makes the
 /// message able to name a row. Mapping-relative, like everything read off
 /// [`mapping_cst_node`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct RefSpan {
     /// `User` in `User.nmae`. `None` for a bare name, which reaches the
     /// checker as a column of the one row in scope.
@@ -181,9 +182,9 @@ pub struct RefSpan {
 /// per-mapping bodies depend on a Salsa-tracked value that's STRUCTURALLY
 /// EQUAL for sibling mappings (rowan reuses subtree `Arc`s across edits to
 /// unaffected siblings; the structural-equality check on `GreenNode`
-/// returns `true` even if the Arcs aren't pointer-equal). Salsa's
-/// `maybe_update` returns `false` for unchanged values, so downstream
-/// queries validate via `DidValidateMemoizedValue` instead of re-executing.
+/// returns `true` even if the Arcs aren't pointer-equal). Salsa finds the
+/// new value `PartialEq`-equal to the old, so downstream queries validate
+/// via `DidValidateMemoizedValue` instead of re-executing.
 ///
 /// This is the rust-analyzer per-item Salsa fan-out pattern. The invariant
 /// is enforced by the invalidation regression test at
@@ -193,28 +194,6 @@ pub struct MappingCstNode {
     /// The per-mapping green node, or `None` if the mapping index didn't
     /// resolve to a MAPPING-kind CST child.
     green: Option<GreenNode>,
-}
-
-// SAFETY: third-party-trait integration boundary. Salsa's
-// `Update` trait is `unsafe` by design — implementations must guarantee
-// `maybe_update` correctly determines whether the new value differs. We
-// delegate to `PartialEq` on `Option<GreenNode>`, which rowan implements
-// as structural tree equality on the inner node. No safe alternative
-// because Salsa requires `unsafe impl` even for trivially-safe bodies.
-#[allow(unsafe_code)]
-unsafe impl salsa::Update for MappingCstNode {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        // SAFETY: caller guarantees `old_pointer` is a valid, aligned
-        // pointer to an initialised `MappingCstNode` owned by Salsa storage
-        // (Salsa contract).
-        let old = unsafe { &mut *old_pointer };
-        if *old == new_value {
-            false
-        } else {
-            *old = new_value;
-            true
-        }
-    }
 }
 
 impl MappingCstNode {
@@ -238,7 +217,7 @@ impl MappingCstNode {
 /// dense position among MAPPING-kind children, never an all-children index.
 /// If the two sides ever disagree this query silently hands back another
 /// mapping's subtree, with no panic anywhere downstream.
-#[salsa::tracked]
+#[salsa::tracked(returns(clone))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn mapping_cst_node<'db>(
     db: &'db dyn fossil_base::Db,
@@ -272,7 +251,7 @@ pub fn mapping_cst_node<'db>(
 /// `body(M_k)` because [`mapping_cst_node`] is the invalidation barrier
 /// (rowan's subtree Arc reuse → structural equality → Salsa
 /// `DidValidateMemoizedValue` instead of re-execution).
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirBody<'db> {
     let mapping_cst = mapping_cst_node(db, mapping);

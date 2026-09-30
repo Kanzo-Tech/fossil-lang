@@ -1103,7 +1103,7 @@ mod tests {
     /// what stops the fix from being "accept anything".
     #[test]
     fn a_derived_relation_carries_the_binding_it_derives_from_and_not_its_own_name() {
-        #[salsa::tracked]
+        #[salsa::tracked(returns(clone))]
         fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
             let scope = resolve_binding_scope(db, file, "Reachable", 0).expect("a legal pipeline");
             format!(
@@ -1138,7 +1138,7 @@ mod tests {
     /// not have» refusal.
     #[test]
     fn a_binding_the_relation_does_not_draw_on_is_not_in_scope() {
-        #[salsa::tracked]
+        #[salsa::tracked(returns(clone))]
         fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
             let scope = resolve_binding_scope(db, file, "Reachable", 0).expect("a legal pipeline");
             format!("{} | Other={}", render(db, &scope), scope.has("Other"))
@@ -1167,7 +1167,7 @@ mod tests {
     /// ambiguity at all.
     #[test]
     fn a_self_join_puts_both_sides_in_scope_under_two_names() {
-        #[salsa::tracked]
+        #[salsa::tracked(returns(clone))]
         fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
             let scope = resolve_binding_scope(db, file, "Pairs", 0).expect("a legal pipeline");
             render(db, &scope)
@@ -1191,7 +1191,7 @@ mod tests {
     /// the assertion cannot pass by accident.
     #[test]
     fn a_qualified_reference_resolves_against_its_own_side_of_a_join() {
-        #[salsa::tracked]
+        #[salsa::tracked(returns(clone))]
         fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
             let scope = resolve_binding_scope(db, file, "Both", 0).expect("a legal join");
             let ty = |binding: &str| {

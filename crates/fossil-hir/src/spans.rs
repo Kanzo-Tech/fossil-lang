@@ -8,7 +8,7 @@
 //!
 //! Same architectural rationale as the provenance side table
 //! (`crate::provenance`): adding `span` to every `HirExpr` variant would
-//! change its `PartialEq`/`Hash`, which Salsa uses for `salsa::Update`. Two
+//! change its `PartialEq`/`Hash`, which Salsa compares to decide a change. Two
 //! source-identical expressions at different source positions would no
 //! longer dedupe in interning, defeating the "structural equality at the
 //! HIR layer → pointer equality after Salsa interning" contract.
@@ -177,7 +177,7 @@ impl<'db> Spans<'db> {
 /// Reading `body` rather than `mapping_cst_node` also removes a walk: the
 /// per-mapping invalidation barrier is unchanged,
 /// because `body` reads the same barrier and this query now reads only `body`.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn spans<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Spans<'db> {
     let body = crate::body::body(db, mapping);

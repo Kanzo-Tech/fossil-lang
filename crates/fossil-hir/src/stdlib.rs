@@ -689,7 +689,7 @@ pub enum LoweringKind {
 /// `seq.count` takes a whole relation and hands back an `Integer`, which is a
 /// verb and not an aggregation, and a variant nothing can build is what
 /// `Op::Distinct`'s `by` was.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum AggFn {
     Sum,
     Min,
