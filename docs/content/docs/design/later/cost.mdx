@@ -262,7 +262,7 @@ a window will read before it reads it. What a read costs over the wire is measur
 `bytes` out of `parquet_metadata` is footer arithmetic and never bytes weighed on a wire, because the
 engine reads inside its own process, a Worker in the browser.
 
-**R1 is asserted through the seam, by `ac1801d4:packages/corpus/integration/cost.test.ts`.** The one
+**R1 is asserted through the seam, by `e5b2113f:packages/corpus/integration/cost.test.ts`.** The one
 capability this package asks a host for is an `Engine`, so everything a reader does passes through
 `Engine.query` and the test counts the statements that reach *its own* engine — a wrapper in the
 test file, not a mechanism this package publishes. Two corpora an order of magnitude apart and one

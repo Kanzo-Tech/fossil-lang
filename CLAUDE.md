@@ -115,7 +115,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | sqlparser | 0.59 | SQL AST construction |
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
-| wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating the graph wasm on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
+| wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
 | serde_yaml_ng | 0.10 | NOT serde_yml (RUSTSEC) |
 | lsp-server | 0.7 | NOT tower-lsp (unmaintained) |
 | arrow + parquet | 58 | the corpus writer, `fossil_df::write` (through `datafusion`'s re-export) |
@@ -187,8 +187,6 @@ crates/
                            write. Depends on NOTHING; both halves of the write path
                            (fossil-df, fossil-layout) report through it
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract
-  fossil-graph/            the typed verb surface over a GraphAr corpus. It EMITS SQL in
-                           DuckDB's dialect and links no engine to run it (WASM-clean)
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
   fossil-wasm/             WASM host shim (FossilWorkspace API + the tokenizer the editor reuses)
@@ -196,7 +194,6 @@ crates/
                            corpus, in the browser and in Node. There is no native CLI: it
                            was deleted on 2026-09-30 (`/docs/design/discarded` says what
                            brings it back)
-  fossil-graph-wasm/       wasm-bindgen binding for the fossil-graph verb surface
   xtask/                   repo automation. Three commands: `wasm-check` derives the wasm32
                            subset from the cdylib closure, and `catalogue [--check]` and
                            `corpus [--check]` regenerate every projection of the data file
@@ -205,30 +202,16 @@ crates/
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
-  corpus/                  ONE door over one manifest, and every part of it needs the gitignored
-                           `pkg/`. The addressing is no longer a second implementation: it is
-                           `fossil_graph::plan` compiled to wasm32, and the package is a
-                           binding over it. The subpath `@fossil-lang/corpus/address` existed so a
-                           caller could address a corpus WITHOUT wasm, and it is deleted with its
-                           standalone test — composing a URL now costs loading the module, which is
-                           the price of there being one reader instead of two.
-                           Beside `src/` sits the contract it fulfils — `guards/`, `conformance/`
-                           and `integration/` — outside `files`, so npm never sees it. It was a
-                           private app, and its suites reaching into this package is what
-                           `v0.3.0-alpha.4` died of. `test` stays `tests/` alone because the
-                           release gate runs it without `duckdb`; the contract is
-                           `test:contract` (`corpus.yml`) and `test:integration` (`pnpm-ci.yml`).
-                           It was `@fossil-lang/graph` and it is not a graph: its door is
-                           `open` and the thing that DOES draw one is `@kanzo-tech/graph`,
-                           the one view layer, in kanzo-ui. The Rust crates
-                           keep their names — `fossil-graph` IS a verb surface over a property
-                           graph, and a crate name is not in npm's import space.
-                           ONE door, and it always takes an engine: `{ engine, host }` for a
-                           job's corpus, `{ query }` for one at a URL. `resolveCorpus` is gone
-                           rather than renamed; `corpus.addressing` is what the open already
-                           resolved. The boot is internal: the `.wasm` is a bundler asset (`new
-                           URL(…, import.meta.url)` in the glue), and `wasm` on the options is for
-                           a host with no bundler
+  corpus/                  the reader, and it is TypeScript and nothing else: `fossil.json`
+                           through `JSON.parse`, one view per table on the host's DuckDB, and
+                           `open · manifest · scan · sql · close`. It links no engine and loads
+                           no WASM. Beside `src/` sits the contract it fulfils — `guards/`,
+                           `conformance/` and `integration/` — outside `files`, so npm never
+                           sees it. `test` stays `tests/` alone because the release gate runs it
+                           without `duckdb`; the contract is `test:contract` (`corpus.yml`) and
+                           `test:integration` (`pnpm-ci.yml`). It was `@fossil-lang/graph` and it
+                           is not a graph: the thing that draws one is `@kanzo-tech/graph`, the
+                           one view layer, in kanzo-ui
   executor/                the datafusion-wasm executor — the one writer of a corpus. A run
                            answers `{ dest, dropped }`; what it wrote is `<dest>fossil.json`
   types/                   Host — `connections()` + `credentials(scope, access)` — the one host

@@ -24,7 +24,7 @@ jobs:
           node-version: 20
           cache: pnpm
 
-      # `pnpm -r build` builds @fossil-lang/wasm + graph + executor, whose
+      # `pnpm -r build` builds @fossil-lang/wasm + storage + executor, whose
       # `build:wasm` needs the Rust toolchain + wasm-bindgen-cli (same setup
       # release.yml uses).
       - uses: dtolnay/rust-toolchain@stable
@@ -56,8 +56,8 @@ jobs:
 
       # wasm-opt via the `wasm-opt` crate (binaryen 116). NOT apt binaryen: ubuntu
       # ships 108, whose wasm-opt corrupts wasm-bindgen's externref table (binaryen
-      # #4711) → "Table.grow(): failed to grow table" instantiating the graph wasm
-      # on Node 20. 116 fixes it. Same cargo-install pattern as wasm-bindgen-cli.
+      # #4711) → "Table.grow(): failed to grow table" instantiating a wasm-bindgen
+      # module on Node 20. 116 fixes it. Same cargo-install pattern as wasm-bindgen-cli.
       - name: Install wasm-opt (binaryen 116 via the wasm-opt crate)
         run: cargo install wasm-opt --locked --version 0.116.1
 
@@ -108,52 +108,21 @@ jobs:
       - name: Test all packages
         run: pnpm --filter "./packages/*" test
 
-      # The four suites that write a corpus with the `duckdb` binary and read it back
-      # through `packages/corpus/src` — the addressing-cost table, the container
-      # comparison, the cost model and the pyramid read. They are the strongest evidence
-      # this repository produces about what an address costs, and until now they ran in no
-      # job at all: the one that installed duckdb never invoked vitest, and the one that
-      # invoked vitest skipped them.
+      # The suites that write a corpus with the `duckdb` binary and read it back through
+      # `packages/corpus/src` on DuckDB-WASM: every table at its record_count, and a box that
+      # reads fewer row groups than the file has.
       #
       # It is a step HERE and not a job in `corpus.yml`, which is the other file that
       # installs this binary, because `corpus.yml` states its install list as the point of
       # the guards rather than an accident of them — `node` and `duckdb`, no `pnpm install`,
-      # no `node_modules`, no Rust. These suites need all three: vitest, the workspace's
-      # `@duckdb/duckdb-wasm`, and `packages/corpus/pkg/`, which a Rust toolchain and
-      # `wasm-bindgen-cli` produce. This job already has every one of them, and `Build all
-      # packages` above is what wrote the `pkg/`.
+      # no `node_modules`. These suites need vitest and the workspace's
+      # `@duckdb/duckdb-wasm`, and this job already has both.
       #
       # Named, not recursive: `test:integration` is a script of `@fossil-lang/corpus` and
       # not part of its `test`, which `release.yml` runs before publishing on a runner with
-      # no duckdb. This step names one script the way the conformance step below names one
-      # file.
+      # no duckdb.
       - name: Corpus integration (the suites that need a real duckdb)
         run: pnpm --filter "@fossil-lang/corpus" test:integration
 
       - name: Type-check all packages
         run: pnpm --filter "./packages/*" exec tsc --noEmit
-
-      # The conformance table, against every reader that exists at once.
-      #
-      # `packages/corpus/conformance/expected.json` is executed by three implementations and
-      # written by none of them: plain Node (`conformance/reader.mjs`), the published
-      # TypeScript (`open`, run by the `Test all packages` step above), and
-      # `fossil_graph::plan` compiled to wasm32 — which needs `packages/corpus/pkg/`,
-      # and this is the only job that has it, because `Build all packages` two steps up
-      # is what wrote it.
-      #
-      # It is a step here rather than in `corpus.yml` for the reason that file states: its
-      # install list is `node` and a `duckdb` binary, deliberately, and the wasm leg needs
-      # a Rust toolchain. There it runs with `--without-wasm`; here it runs with all of
-      # them, and no flag, so the leg cannot go missing without this step going red.
-      #
-      # `--addressing-only` because the `answers` half of that file opens Parquet through the
-      # `duckdb` binary, which this job has no reason to install; `corpus.yml` is where that
-      # half runs, and duplicating its pinned CLI install here would be one version in two
-      # files. It is an explicit refusal rather than a skip — without the flag the run fails.
-      # The wasm reader opens no byte, so it has nothing to contribute to that half anyway.
-      #
-      # It is one file invoked by path, not a package script: `test` must stay free of
-      # anything `release.yml`'s gate cannot run.
-      - name: Conformance, every reader at once
-        run: node packages/corpus/conformance/verify.mjs --addressing-only

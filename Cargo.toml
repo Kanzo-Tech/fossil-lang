@@ -32,12 +32,11 @@ smol_str = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
-# `schemars` derives JSON Schema from Rust types. Adopted in `fossil-graph`
-# to publish a per-verb param/result schema once and have every
-# transport binding (@fossil-lang/corpus, through fossil-graph-wasm) consume the
-# SAME schema — no hand-written contract duplicated across bindings. Pin 0.8
-# because 0.9 is in alpha and the keasy-side TS codegen depends on the 0.8
-# JSON Schema draft-07 dialect for openapi-typescript interop.
+# `schemars` derives JSON Schema from Rust types, so a wire shape a TypeScript
+# package reads is generated from the struct that writes it rather than
+# restated by hand. Pin 0.8 because 0.9 is in alpha and the keasy-side TS
+# codegen depends on the 0.8 JSON Schema draft-07 dialect for
+# openapi-typescript interop.
 schemars = { version = "0.8" }
 # Pure-Rust SHA-256 for the cross-engine parity digest (native_baseline.json
 # producer in fossil-layout tests). Already a transitive dep via duckdb/parquet;

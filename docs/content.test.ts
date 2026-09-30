@@ -20,9 +20,9 @@ import { repoRoot } from "@/lib/repo";
  *      it is one person's preference written in the voice of a plan — and an argument kept anywhere
  *      but here is a second reference, which is the thing this site exists to be instead of.
  *
- * A third assertion joined them and is of a different kind: it does not check a citation, it *is*
- * the evidence one page cites — see `fossilDependenciesOf` below. A page may cite this file only for
- * a claim this file actually measures.
+ * The group diagram below is a third of a different kind: it does not check a citation, it *is*
+ * the evidence one page cites. A page may cite this file only for a claim this file actually
+ * measures.
  *
  * WHAT WAS HERE AND IS NOT, because the deletion is the load-bearing part.
  *
@@ -120,21 +120,6 @@ describe("a declared direction is complete", () => {
   });
 });
 
-/**
- * The one claim on this site that a manifest can settle, and `architecture.mdx` is what cites it.
- *
- * That page says `fossil-graph` reaches the rest of the tree exactly once, and everything else it
- * says about two cores hangs off that number. Left as prose it is a sentence somebody measured in
- * August 2026; here it is a build failure the moment it stops holding — in either direction, which
- * is the point. A second dependency appearing means the graph core has started to grow roots into
- * the language; the last one *disappearing* means the graph core has been cut loose entirely and
- * the page's `today:` block now understates what is true. Both deserve a red test, because both need the page rewritten.
- *
- * `[dev-dependencies]` are deliberately out of scope: a test may depend on whatever it likes, and
- * `fossil-graph`'s do not include a fossil crate today anyway.
- */
-const GRAPH_MANIFEST = "crates/fossil-graph/Cargo.toml";
-
 interface Manifest {
   /** The `[package] name`, because `xtask`'s is not its directory's name plus a prefix. */
   name: string;
@@ -169,22 +154,6 @@ function readManifest(path: string): Manifest {
 
   return { name, deps: deps.sort() };
 }
-
-function fossilDependenciesOf(manifest: string): string[] {
-  return readManifest(manifest).deps;
-}
-
-describe("the graph core reaches the rest of the tree exactly once", () => {
-  it("is a manifest that is still on disk", () => {
-    expect(existsSync(join(repoRoot, GRAPH_MANIFEST)), `${GRAPH_MANIFEST} is not on disk`).toBe(
-      true,
-    );
-  });
-
-  it("fossil-graph depends on fossil-sinks and on nothing else of ours", () => {
-    expect(fossilDependenciesOf(join(repoRoot, GRAPH_MANIFEST))).toEqual(["fossil-sinks"]);
-  });
-});
 
 /**
  * The group diagram on `architecture.mdx` is the whole of the grouping — there is no second file

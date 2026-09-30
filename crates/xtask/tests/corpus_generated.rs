@@ -64,7 +64,7 @@ fn the_parse_actually_read_the_file() {
 
 /// **The two sets that diverged, held apart on purpose.**
 ///
-/// `fossil-graph` hides every column the writer emits from a field listing; a
+/// A field listing hides every column the writer emits; a
 /// viewer reads the address, the identity and the two coordinates by name.
 /// Five against four, and the difference is `cluster_id`. Asserted
 /// here so that a column added to `corpus.bnf` without a role makes a decision

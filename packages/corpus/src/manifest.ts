@@ -1,36 +1,20 @@
 /**
- * The aggregate index, scanned for the one thing a host has to know before it can fetch anything.
+ * `fossil.json` — the one file a reader opens before any Parquet, parsed once.
  *
- * A corpus cannot be discovered by listing a directory — over HTTP there is no listing — so it has
- * one entry point, `graph.graph.yml`, and everything else is reached from there. `open`
- * fetches that file, and this is what tells it which per-type manifests to fetch next. That is the
- * whole job: **the manifests themselves are read by `fossil-graph`**, through
- * `fossil-graph-wasm`'s `Corpus`, and this module reads none of them.
- *
- * **It used to read all of them**, because the addressing was a second implementation of the
- * addressing and needed every field the Rust reader needs — a chunk size, an `index:` block, a
- * level list. That reader is gone, so the accessors it wanted are gone with it and the scanner is
- * narrowed to the shape its one remaining input has: a flat mapping of scalars, plus the two
- * sequences of paths this exists to return.
- *
- * **A line scanner and not a YAML parser, deliberately.** `packages/corpus/guards/manifest.mjs` makes
- * the same call and cannot be imported — it has no `package.json` and exists to be *copied* by a
- * third party who has neither this repository nor npm.
- *
- * **What it refuses rather than guesses:** anchors and aliases, flow style (`[a, b]`), and
- * multi-line scalars (`|`, `>`). A manifest using them throws with the line named, which is the
- * honest outcome — a scanner that silently reads half a document composes half the URLs and reports
- * none of it. A nested mapping is *skipped* rather than refused: it is legal, no
- * address is composed from it, and refusing it would fail on a corpus this reads fine.
+ * The shape mirrors the writer's (`fossil_sinks::manifest`, which serialises it), and the only
+ * field this side validates is `format`: a reader refuses a format it does not know before it reads
+ * a byte of Parquet, and ignores a key it does not know, which is what lets `fossil/1` grow
+ * optional fields without a reader changing.
  */
 
-/** Dataset-relative location of the aggregate index. The one path a reader is told. */
-export const GRAPH_INFO_PATH = 'graph.graph.yml';
+/** The format this reader reads. Anything else is refused at `open`. */
+export const FOSSIL_FORMAT = 'fossil/1';
 
-/** One scanned manifest file: scalars, and sequences of scalars. */
-export type ScannedManifest = Record<string, string | string[]>;
-
-/** Raised by everything in this module, and by the reader behind the addressing. */
+/**
+ * Raised when `fossil.json` cannot be read, is not JSON, or declares a format other than
+ * {@link FOSSIL_FORMAT} — before a byte of Parquet is read. Distinct from `CorpusReadError`, which
+ * is a read the manifest allowed failing: a caller can retry one of these against another corpus.
+ */
 export class CorpusManifestError extends Error {
   constructor(message: string) {
     super(message);
@@ -38,76 +22,83 @@ export class CorpusManifestError extends Error {
   }
 }
 
-/** Strip the quoting serde emits around a string that needs it. */
-function unquote(value: string): string {
-  const v = value.trim();
-  if (v.length >= 2 && ((v[0] === "'" && v.at(-1) === "'") || (v[0] === '"' && v.at(-1) === '"'))) {
-    return v.slice(1, -1).replace(/''/g, "'");
+/** One column of a table, as the manifest declares it. */
+export interface Property {
+  readonly name: string;
+  /** The manifest's type word: `uint32`, `string`, `float`, `int32`, … — the writer's vocabulary. */
+  readonly type: string;
+  readonly iri?: string;
+  readonly nullable?: boolean;
+}
+
+/**
+ * Which two columns a vertex table is drawn at: the layout's `x`/`y`, or two of the program's own
+ * (`lon`/`lat`). A table without one is not drawn.
+ */
+export interface Position {
+  readonly by: 'layout' | 'program';
+  readonly x: string;
+  readonly y: string;
+}
+
+/** A vertex table — one per vertex type, and a view of that name once the corpus is open. */
+export interface VertexTable {
+  readonly name: string;
+  readonly iri?: string;
+  /** Relative to the corpus root. */
+  readonly path: string;
+  /** `dense_id`: global over the graph, gapless, and the drawn vertices first. */
+  readonly key: string;
+  /** `subject`: what survives a rewrite, where `key` does not. */
+  readonly identity: string;
+  readonly record_count: number;
+  readonly properties: readonly Property[];
+  readonly position?: Position;
+}
+
+/** One end of an edge table: the column holding it, and the vertex table whose key it is. */
+export interface Endpoint {
+  readonly key: string;
+  readonly references: string;
+}
+
+/** An edge table — one per relation `(source type, label, destination type)`. */
+export interface EdgeTable {
+  /** Unique; the `label` repeats across relations. */
+  readonly name: string;
+  readonly label: string;
+  readonly iri?: string;
+  readonly path: string;
+  readonly source: Endpoint;
+  readonly destination: Endpoint;
+  readonly record_count: number;
+  readonly properties: readonly Property[];
+}
+
+/** `fossil.json`. */
+export interface Manifest {
+  readonly format: typeof FOSSIL_FORMAT;
+  readonly vertex_tables: readonly VertexTable[];
+  readonly edge_tables: readonly EdgeTable[];
+}
+
+/**
+ * Parse `fossil.json`. `where` names it in an error.
+ *
+ * @throws {CorpusManifestError} for text that is not JSON, or a `format` other than `fossil/1`.
+ */
+export function parseManifest(text: string, where: string): Manifest {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (cause) {
+    throw new CorpusManifestError(`${where} is not JSON: ${(cause as Error).message}`);
   }
-  return v;
-}
-
-const REFUSED: Array<[RegExp, string]> = [
-  [/^\s*[-\w]+:\s*[|>][-+\d]*\s*$/, 'a multi-line scalar'],
-  // `[]` and `{}` are how an empty collection is written and carry nothing to misread; a *populated*
-  // flow collection is a second grammar for a sequence and this scanner has one.
-  [/^\s*[-\w]+:\s*[[{]\s*[^\s\]}]/, 'flow style'],
-  [/^\s*[-\w]*:?\s*[&*]\w/, 'an anchor or alias'],
-];
-
-/** Scan one manifest file. `path` is used only to name the file in an error. */
-export function scan(path: string, text: string): ScannedManifest {
-  const out: ScannedManifest = {};
-  let sequence: string[] | null = null;
-
-  for (const [index, raw] of text.split('\n').entries()) {
-    const line = raw.replace(/\s+$/, '');
-    if (line === '' || line.trimStart().startsWith('#')) continue;
-    for (const [pattern, what] of REFUSED) {
-      if (pattern.test(line)) {
-        throw new CorpusManifestError(
-          `${path}:${index + 1} uses ${what}, which this scanner refuses to guess at`,
-        );
-      }
-    }
-    // Anything indented belongs to a nested collection, and no path is read out of one.
-    if (/^ {2,}/.test(line)) continue;
-
-    const element = /^- (.*)$/.exec(line);
-    if (element && sequence) {
-      sequence.push(unquote(element[1]!));
-      continue;
-    }
-
-    const entry = /^(\w+):\s*(.*)$/.exec(line);
-    if (!entry) {
-      throw new CorpusManifestError(`${path}:${index + 1} is not a key, an item or a continuation`);
-    }
-    if (entry[2] === '') {
-      // A key with an empty value opens a sequence — which is also what a key with a nested mapping
-      // under it leaves behind, and an empty one of those names no paths either way.
-      sequence = [];
-      out[entry[1]!] = sequence;
-    } else {
-      sequence = null;
-      out[entry[1]!] = unquote(entry[2]!);
-    }
+  const format = (json as { format?: unknown } | null)?.format;
+  if (format !== FOSSIL_FORMAT) {
+    throw new CorpusManifestError(
+      `${where} declares format ${JSON.stringify(format)}; this reader reads ${FOSSIL_FORMAT} and nothing else`,
+    );
   }
-
-  return out;
-}
-
-/** A sequence of paths — `vertices` and `edges` on the index, and nothing else. */
-export function paths(manifest: ScannedManifest, key: string): string[] {
-  const value = manifest[key];
-  return Array.isArray(value) ? value.map(String) : [];
-}
-
-/** Join dataset-relative segments the way the manifest writes them: forward slashes, always. */
-export function join(...parts: Array<string | undefined>): string {
-  return parts
-    .filter((part): part is string => part !== undefined && part !== '')
-    .map((part, index) => (index === 0 ? part.replace(/\/+$/, '') : part.replace(/^\/+|\/+$/g, '')))
-    .filter((part) => part !== '')
-    .join('/');
+  return json as Manifest;
 }

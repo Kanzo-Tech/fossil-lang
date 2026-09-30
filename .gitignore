@@ -44,7 +44,6 @@ node_modules/
 **/.turbo/
 # wasm-bindgen output is committed-elsewhere or built-on-demand, never tracked
 packages/wasm/pkg/
-packages/corpus/pkg/
 packages/executor/pkg/
 packages/storage/pkg/
 # Changesets are tracked on main; the `changeset version` step consumes them at

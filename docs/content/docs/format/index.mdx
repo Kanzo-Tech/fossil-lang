@@ -143,8 +143,9 @@ node packages/corpus/guards/check.mjs /path/to/corpus
 
 `node` and the `duckdb` binary. No fossil crate, no npm package, no install, no build step — copy
 the `guards/` directory somewhere else and it runs, which is the position the third party this
-format exists for is in. `--explain` prints what each one proves, and `packages/corpus/guards/README.md`
-has how each is proved to fire.
+format exists for is in. `--explain` prints what each one proves, `packages/corpus/guards/README.md` has
+how each is proved to fire, and `packages/corpus/conformance/` holds a corpus that satisfies every
+one of them, with the recipe that reproduces it.
 
 The list is rendered from `packages/corpus/guards/guards.mjs` at build time, so it cannot name a guard
 that does not exist, omit one that does, or paraphrase what one proves. **There is deliberately no

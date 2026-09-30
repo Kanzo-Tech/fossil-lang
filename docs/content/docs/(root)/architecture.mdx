@@ -51,10 +51,19 @@ measured.
 
 ## What the reader is
 
-**One door, and it always takes an engine** — `@fossil-lang/corpus`: `open`, `manifest`, `scan`,
-`sql`, `close`. `open` reads `fossil.json` once and makes a view per table; `scan` is one `SELECT`
-over one table, and DuckDB prunes row groups by their footers. `sql: 'allowed'` widens it to a
-`SqlCorpus`. [One door](/docs/design/one-door) argues the surface.
+**One door, one name, and it always takes an engine** — `packages/corpus/src/open.ts, open`, and
+it is TypeScript with no crate behind it:
+
+```ts
+await open(job, { engine, host })  // a job's corpus, under the credential the host vends
+await open(url, { engine })        // a corpus at a URL
+```
+
+`sql: 'allowed'` widens either to `SqlCorpus`. What comes back is `fossil.json` parsed once, a view
+per table on the host's `Engine`, and `scan` — a table, a filter, a projection — over those views.
+Pruning is the engine's: every table is written in the order of its key, and DuckDB skips the row
+groups whose footer statistics exclude a predicate. [One door](/docs/design/one-door) argues the
+surface.
 
 The reader's **policy** over that contract is deliberately not on the door, and not in this
 repository: what a corpus is drawn WITH and what is already LOADED belong to the viewer,
@@ -100,7 +109,7 @@ graph LR
   L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 3 crates<br/>df · df-wasm · introspect"]
-  C["<b>corpus</b> · 6 crates<br/>graph · graph-wasm · layout<br/>sinks · storage · storage-wasm"]
+  C["<b>corpus</b> · 4 crates<br/>layout · sinks<br/>storage · storage-wasm"]
   X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
   E -->|18| L
@@ -282,37 +291,17 @@ in question is the one at the head of this page, and a list that could not hold 
 would be a list that forbids acting on it.
 </Callout>
 
-## The second core has one dependency left
+## The reader has no crate
 
-**`fossil-graph` has exactly one fossil dependency, `fossil-sinks`, and uses it on one production
-line** — `crates/fossil-graph/src/manifest.rs`; everything else is a `#[cfg(test)]` module. It
-does not know the language (grepping its `src` for
-`fossil_hir|fossil_syntax|fossil_mir|fossil_base|fossil_descriptors|fossil_lineage` returns zero) and
-it does not touch the disk. It declares two ports instead: `ManifestSource::fetch` and
-`DuckExecutor::query_json`, **the only two real extension points in the entire workspace.**
-
-That last dependency is the manifest, and conforming to an existing graph interchange specification
-is already a [discarded alternative](/docs/design/discarded) — so the read surface's one remaining
-dependency is on the one thing the design has ruled out. Filing `fossil-sinks` under the corpus put
-that edge inside a group; it did not make it disappear.
-
-```mermaid
-graph LR
-  subgraph today
-    A["fossil-graph<br/>the read surface"] -->|the manifest model| B["fossil-sinks"]
-  end
-  subgraph "when the manifest goes"
-    C["fossil-graph<br/>no fossil dependency at all"]
-    D["fossil-sinks"]
-  end
-```
+The read surface was a second core — `fossil-graph`, a verb surface compiled to wasm32 — and it is
+gone with the tiles: `fossil.json` is JSON and every table is one Parquet file, so a reader is
+`JSON.parse` and `read_parquet`, and `packages/corpus` is exactly that. Nothing on the read side
+links a fossil crate.
 
 The seam between the two halves is the corpus on disk, and it was never an API: `kanzo-ui` reads
-corpora written by fossil with **no dependency on `@fossil-lang/*`**, and three languages that do not
-know fossil exists read the same tree on 2026-08-04. `docs/content.test.ts` keeps the first
-paragraph a build failure rather than a sentence somebody measured once — it reads
-`crates/fossil-graph/Cargo.toml` and fails if that crate's fossil dependencies are ever anything but
-`fossil-sinks` alone, including when the manifest goes and the answer becomes none.
+corpora written by fossil through that package, and
+[reading one without fossil](/docs/format/reading/without-fossil) is the whole recipe for a reader
+that does not.
 
 ## What is on this page and what is not
 

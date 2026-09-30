@@ -1,9 +1,9 @@
 ---
 title: Reading one without fossil
-description: fossil.json and a Parquet reader are the whole recipe — one request for the manifest, one relation per table, and a join on dense_id. The same read through @fossil-lang/corpus for a caller who would rather not write it.
+description: fossil.json and read_parquet are the whole recipe — one JSON file names every table, and every table is one Parquet file.
 ---
 
-Reading a corpus needs `fossil.json` and a Parquet reader — no fossil crate, no `@fossil-lang/*`
+Reading a corpus needs a JSON parser and a Parquet reader — no fossil crate, no `@fossil-lang/*`
 package, no wasm module, no service. The SQL below is DuckDB because that is the shortest way to
 write it down; nothing in it is DuckDB-specific except the syntax.
 
@@ -14,28 +14,82 @@ sequenceDiagram
   participant R as reader
   participant O as origin
   R->>O: GET fossil.json
-  O-->>R: every table, its path, its columns, its count
-  Note over R: <b>no request</b><br/>refuse a format that is not fossil/1<br/>one relation per table, by path
-  R->>O: GET the Parquet it reads
-  O-->>R: the columns asked for, row groups pruned off the footer
+  O-->>R: every table: its path, its columns, its row count, its position
+  Note over R: <b>no request</b><br/>refuse any format but fossil/1<br/>every file of the corpus is now named
+  R->>O: GET the footers, then the byte ranges a read needs
+  O-->>R: the row groups whose statistics meet the predicate
 ```
 
-**One request settles where everything is**, and it is a small JSON document rather than a query.
-Every other name comes out of it.
+**One round trip settles where everything is**, and it is not a query. A reader over HTTP cannot
+list a directory, so nothing is discovered by listing: `fossil.json` is the one name known in
+advance, and it names every file.
 
-## The manifest is the catalogue
+## The manifest
+
+```jsonc
+{
+  "format": "fossil/1",
+  "vertex_tables": [{
+    "name": "Person", "path": "vertex/Person.parquet",
+    "key": "dense_id", "identity": "subject", "record_count": 1000000,
+    "properties": [{ "name": "dense_id", "type": "uint32" }, { "name": "subject", "type": "string" }, …],
+    "position": { "by": "layout", "x": "x", "y": "y" }
+  }],
+  "edge_tables": [{
+    "name": "Order_placedBy_Person", "label": "placedBy", "path": "edge/Order_placedBy_Person.parquet",
+    "source": { "key": "src", "references": "Order" },
+    "destination": { "key": "dst", "references": "Person" },
+    "record_count": 2000000,
+    "properties": [{ "name": "src", "type": "uint32" }, { "name": "dst", "type": "uint32" }]
+  }]
+}
+```
+
+A reader refuses a `format` other than `fossil/1` before it reads a byte of Parquet, and ignores a
+key it does not know: a field added within `fossil/1` is optional, and changing what a fixed column
+means is `fossil/2`. `packages/corpus/guards/manifest.mjs` is the whole of a reader of it, and it is
+`JSON.parse`.
+
+What each table carries:
+
+- **A vertex table** holds one vertex type. `key` is `dense_id` — one gapless `0..V−1` over the
+  whole graph, not per type, with every vertex that has a `position` numbered before every vertex
+  that has none. `identity` is `subject`, the one column that survives a rewrite: `dense_id` is an
+  address and changes when the layout is redone, so anything held outside the corpus keys on the
+  subject. A table with a `position` is drawn at those two columns; a table without one is not
+  drawn.
+- **An edge table** holds one relation. `src` and `dst` are `dense_id`s of the tables its
+  `source.references` and `destination.references` name — the same global ids, so an edge between
+  two drawn types indexes the same buffer as the vertices do.
+- **Every table is written in the order of its key** — vertices by `dense_id`, edges by
+  `(src, dst)` — in row groups of 122,880 rows. That order is what lets a reader skip row groups
+  from the footer statistics alone.
+
+## The reads
+
+A view per table, and every question after that is SQL:
 
 ```sql
--- one relation per table the manifest names; `path` is relative to the corpus root
-CREATE VIEW Person                AS SELECT * FROM read_parquet('https://cdn.example.org/kg/vertex/Person.parquet');
-CREATE VIEW "Order"               AS SELECT * FROM read_parquet('https://cdn.example.org/kg/vertex/Order.parquet');
-CREATE VIEW Order_placedBy_Person AS SELECT * FROM read_parquet('https://cdn.example.org/kg/edge/Order_placedBy_Person.parquet');
+CREATE VIEW "Person" AS SELECT * FROM read_parquet('vertex/Person.parquet');
+CREATE VIEW "Person_knows_Person" AS SELECT * FROM read_parquet('edge/Person_knows_Person.parquet');
+
+-- everything drawn in a window: the footer's x/y statistics skip the row groups outside it
+SELECT dense_id, x, y FROM "Person" WHERE x BETWEEN 0 AND 100 AND y BETWEEN 0 AND 100;
+
+-- the edges out of a range of ids: sorted by src, so the same skip applies
+SELECT src, dst FROM "Person_knows_Person" WHERE src BETWEEN 40960 AND 45055;
+
+-- one vertex by its identity
+SELECT * FROM "Person" WHERE subject = 'https://example.org/person/7';
 ```
 
-Read `format` first and refuse anything but `fossil/1`: a reader that opens a corpus of another major
-version reads columns whose meaning it does not know. The `properties` list is the schema, in column
-order, so no footer has to be opened to learn it; `record_count` is the row count, which a reader
-that read a table whole can check against what it got.
+A predicate on the column a table is sorted by is the one the footers answer well; a predicate on
+anything else — `dst`, or `subject` — reads every row group. Which edges point *into* a vertex is
+that second kind: there is one copy of each relation, ordered by its source.
+
+Read whole, the drawn columns are small: over a million vertices, `dense_id, x, y, cluster_id` came
+back as **16 MB of Arrow in 77–152 ms**, and two million edges' `src, dst` as **16 MB in 51–127 ms**,
+in DuckDB-WASM on one thread from a local file.
 
 ## A relation, joined to its ends
 
@@ -57,43 +111,21 @@ which reads it: there is no second copy sorted by destination
 ([Adjacency](/docs/format/conventions/adjacency)). Follow both — "the papers by this author" is an
 in-edge.
 
-## What to draw
-
-A vertex table whose manifest entry carries `position` is drawn, at the two columns it names; one
-without is not. Because each table is sorted by `dense_id` and `dense_id` is the Hilbert rank of the
-position, a box on the plane is a filter the footer statistics on `x` and `y` prune well:
-
-```sql
-SELECT dense_id, x, y, cluster_id
-  FROM Person
- WHERE x BETWEEN 0.25 AND 0.30 AND y BETWEEN 0.60 AND 0.65;
-```
-
-Read whole, the drawn columns are small: over a million vertices, `dense_id, x, y, cluster_id` came
-back as **16 MB of Arrow in 77–152 ms**, and two million edges' `src, dst` as **16 MB in 51–127 ms**,
-in DuckDB-WASM on one thread from a local file.
-
-## Finding one by its identity
-
-An IRI in hand is a filter on the table's `identity` column — `WHERE subject = ?`. `dense_id` is an
-address and changes when the layout is redone, so anything held outside the corpus keys on `subject`
-([Identity](/docs/format/conventions/identity#the-identity-is-the-subject-iri)).
-
 ## The same read through the package
 
-`@fossil-lang/corpus` does the manifest and the relations for a caller, and nothing more:
+`@fossil-lang/corpus` is that recipe and nothing more: it parses `fossil.json`, creates the views
+on the host's engine, and composes the `SELECT` a scan asks for.
 
 ```ts
 import { open } from '@fossil-lang/corpus';
-const corpus = await open('https://cdn.example.org/kg', { engine });
-corpus.manifest                                              // fossil.json, parsed once
-const scan = corpus.scan({ table: 'Person', select: ['dense_id', 'x', 'y'] });
-const batches = await scan.read(scan.plan());
-await corpus.close();
+const corpus = await open('https://cdn.example.org/kg/2026-08', { engine });
+
+corpus.manifest.vertex_tables                                      // what is inside
+const scan = corpus.scan({ table: 'Person', select: ['dense_id', 'x', 'y'], filter: { bbox: [0, 0, 100, 100] } });
+await scan.read(scan.plan())                                       // Arrow columns
 ```
 
 The one capability a host brings is an `Engine`: SQL in, Arrow-shaped columns out, and an
-`AbortSignal` that interrupts the running statement. `open` fetches `fossil.json`, refuses another
-`format`, and registers one view per table; `scan` reads one table with an optional filter and
-projection; `sql` answers a raw statement only when the host opened the corpus with
-`sql: 'allowed'`. The package bundles no Parquet decoder — the engine already reads the footer.
+`AbortSignal` that interrupts the running statement. The package decodes no Parquet and links no
+engine: bundling a decoder would make it a driver, and the engine already prunes row groups off the
+footer statistics.

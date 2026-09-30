@@ -1,28 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 
 import { initStorage } from '@fossil-lang/storage';
 
-import { initFossilGraphWasm } from '../src/load.js';
-
-await initStorage(
-  await readFile(createRequire(import.meta.url).resolve('@fossil-lang/storage/pkg/fossil_storage_wasm_bg.wasm')),
-);
-
 /**
- * The WASM module, instantiated before the file that imported this is collected.
- *
- * **Every test that opens or addresses a corpus needs it now.** Addressing used to be synchronous
- * arithmetic in TypeScript over a parsed manifest, so a test could build one and compose URLs with
- * nothing loaded; it asks `fossil-graph` through `fossil-graph-wasm` instead, and that module has
- * to be up first. This is a module and not a `beforeAll` because two of the callers resolve a
- * corpus at collection time, to generate a test per subject of the corpus or per row of a
- * published table.
+ * `@fossil-lang/storage`'s WASM, for the one test that opens a job's corpus through a host.
  *
  * `--target web` init() defaults to `fetch(url)`, and Node's fetch rejects `file://` — so read the
- * bytes and pass a BufferSource, the same way `@fossil-lang/wasm`'s tests do.
+ * bytes and pass a BufferSource.
  */
-await initFossilGraphWasm(
-  await readFile(fileURLToPath(new URL('../pkg/fossil_graph_wasm_bg.wasm', import.meta.url))),
+await initStorage(
+  await readFile(createRequire(import.meta.url).resolve('@fossil-lang/storage/pkg/fossil_storage_wasm_bg.wasm')),
 );

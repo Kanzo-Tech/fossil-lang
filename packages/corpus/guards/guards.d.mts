@@ -24,8 +24,6 @@ export interface Guard {
 
 export declare const GUARDS: Guard[];
 
-export declare function checkVectors(vectors: unknown): { failures: string[]; notes: string[] };
-
 export declare function runAll(
   corpus: unknown,
   only?: string[] | null,
