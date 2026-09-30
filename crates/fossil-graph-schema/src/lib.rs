@@ -49,6 +49,8 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "js")]
+pub mod js;
 pub mod problem;
 pub mod shapes;
 pub mod span;

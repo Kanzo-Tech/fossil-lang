@@ -1,0 +1,90 @@
+import { describe, expect, it } from 'vitest';
+
+import { CODES, FossilError, TITLES, helpUrl, isFossilError, type Problem } from '../src/index.js';
+
+const overBudget: Problem<'run/over-budget'> = {
+  code: 'run/over-budget',
+  data: { consumer: 'ExternalSorter', requested: 1 << 20, reserved: 3 << 20, budget: 2 ** 31 },
+  title: TITLES['run/over-budget'],
+  detail: 'the run needs more memory than the budget',
+  severity: 'error',
+  cause: { code: 'engine/failed', data: {}, title: TITLES['engine/failed'], detail: 'the engine failed', severity: 'error', cause: { name: 'ResourcesExhausted', detail: 'no more' } },
+};
+
+describe('FossilError.from', () => {
+  it('builds a real Error whose message is the detail and whose code and data are the problem’s', () => {
+    const e = FossilError.from(overBudget);
+    expect(e).toBeInstanceOf(Error);
+    expect(e.name).toBe('FossilError');
+    expect(e.message).toBe(overBudget.detail);
+    expect(e.code).toBe('run/over-budget');
+    expect(e.data.budget).toBe(2 ** 31);
+    expect(e.problem).toBe(overBudget);
+  });
+
+  it('nests a problem cause as a FossilError and a foreign one as an Error of its own name', () => {
+    const e = FossilError.from(overBudget);
+    expect(isFossilError(e.cause, 'engine/failed')).toBe(true);
+    const inner = (e.cause as FossilError).cause as Error;
+    expect(isFossilError(inner)).toBe(false);
+    expect(inner.name).toBe('ResourcesExhausted');
+    expect(inner.message).toBe('no more');
+  });
+
+  it('survives a structured clone: the problem is plain data', () => {
+    const e = FossilError.from(structuredClone(FossilError.from(overBudget).problem));
+    expect(e.code).toBe('run/over-budget');
+  });
+});
+
+describe('FossilError.of', () => {
+  it('fills the title from the catalogue and keeps a foreign cause whole', () => {
+    const engine = new TypeError('Parser Error');
+    const e = FossilError.of('engine/failed', {}, 'the query engine failed', { cause: engine, help: 'retry' });
+    expect(e.title).toBe(TITLES['engine/failed']);
+    expect(e.help).toBe('retry');
+    expect(e.cause).toBe(engine);
+    expect(e.problem.cause).toEqual({ name: 'TypeError', detail: 'Parser Error' });
+  });
+
+  it('puts a FossilError cause on the wire as its problem', () => {
+    const inner = FossilError.of('corpus/unreadable', { path: 'x/fossil.json' }, 'x/fossil.json could not be read');
+    const outer = FossilError.of('document/unread', { documents: ['a'] }, '1 document(s) could not be read: a', { cause: inner });
+    expect(outer.cause).toBe(inner);
+    expect(outer.problem.cause).toBe(inner.problem);
+  });
+});
+
+describe('isFossilError', () => {
+  it('is structural: an Error named FossilError with a catalogued code passes, whatever built it', () => {
+    const fromWasm = Object.assign(new Error('x'), { name: 'FossilError', code: 'api/busy', data: { call: 'run' } });
+    expect(isFossilError(fromWasm)).toBe(true);
+    expect(isFossilError(fromWasm, 'api/busy')).toBe(true);
+    expect(isFossilError(fromWasm, 'run/over-budget')).toBe(false);
+  });
+
+  it('refuses a code outside the catalogue, another name, and non-objects', () => {
+    expect(isFossilError(Object.assign(new Error('x'), { name: 'FossilError', code: 'nope/nope' }))).toBe(false);
+    expect(isFossilError(Object.assign(new Error('x'), { name: 'OverBudget', code: 'run/over-budget' }))).toBe(false);
+    expect(isFossilError('run/over-budget')).toBe(false);
+    expect(isFossilError(null)).toBe(false);
+  });
+
+  it('narrows data to the code’s fields', () => {
+    const e: unknown = FossilError.from(overBudget);
+    if (!isFossilError(e, 'run/over-budget')) throw new Error('expected an over-budget error');
+    const { consumer, requested, reserved, budget } = e.data;
+    expect([consumer, requested, reserved, budget]).toEqual(['ExternalSorter', 1 << 20, 3 << 20, 2 ** 31]);
+  });
+});
+
+describe('the catalogue', () => {
+  it('has a title for every code', () => {
+    for (const code of CODES) expect(TITLES[code]).toBeTruthy();
+  });
+
+  it('links a code to its page', () => {
+    expect(helpUrl('run/over-budget')).toBe('https://kanzo-tech.github.io/fossil-lang/docs/errors/run/over-budget');
+    expect(helpUrl('api/busy', 'http://localhost:3000/')).toBe('http://localhost:3000/docs/errors/api/busy');
+  });
+});

@@ -1897,11 +1897,13 @@ dependencies = [
 name = "fossil-graph-schema"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "miette",
  "schemars",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "wasm-bindgen",
 ]
 
 [[package]]

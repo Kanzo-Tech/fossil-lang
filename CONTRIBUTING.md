@@ -140,6 +140,14 @@ wrote; `crates/xtask/tests/corpus_generated.rs` is its `--check` as a test, and
 also holds the one cross-clause rule (`aligns` belongs to an endpoint) and the two
 sets the roles keep apart.
 
+Add or change a code in `crates/fossil-graph-schema/src/problem.rs`, re-bless its
+schema (`FOSSIL_BLESS=1 cargo test -p fossil-graph-schema --test problem_schema`), run
+`cargo xtask problem`, and commit both: the third generator reads that derived file and
+writes `packages/types/src/problem.gen.ts` — `Code`, `CODES`, `ProblemData`, `TITLES`.
+`cargo xtask problem --check` fails without writing, and
+`crates/xtask/tests/problem_generated.rs` is the same check as a test, so it has no CI
+step for the reason `catalogue --check` has none.
+
 Add or change a row in `catalogue.bnf`, run `cargo xtask catalogue`, commit what
 it wrote. `cargo xtask catalogue --check` fails without writing, and there is no
 CI step for it on purpose: `crates/xtask/tests/catalogue_generated.rs` is the

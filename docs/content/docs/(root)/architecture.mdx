@@ -117,13 +117,14 @@ graph LR
 
   E -->|18| L
   E -->|1| M
-  M -->|10| L
+  M -->|11| L
   M -->|5| C
   M -->|1| X
+  C -->|1| L
   C -->|1| X
 ```
 
-**36 cross-group edges**, and no pair runs both ways. Every number above
+**38 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -147,9 +148,11 @@ the writer encodes them. The arrow that remains runs one way:
 | engine → corpus | `fossil-df-wasm → fossil-sinks`, `fossil-df-wasm → fossil-storage` | the host names the files it writes and writes them through the job's store |
 | engine → corpus | `fossil-introspect → fossil-storage` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
 
-`fossil-sinks` and `fossil-storage` are filed by subject and not by history, and both are leaves:
-`fossil-sinks` takes `serde`, `schemars` and `arrow-schema` and no fossil crate, so nothing on the
-corpus side reaches back into the language. [One engine](/docs/design/one-engine) is where the rest
+`fossil-sinks` and `fossil-storage` are filed by subject and not by history. `fossil-sinks` is a
+leaf: it takes `serde`, `schemars` and `arrow-schema` and no fossil crate. The corpus side reaches
+into the language at one crate only — `corpus → language` is `fossil-storage` taking
+`fossil-graph-schema` for the error catalogue, the leaf where shared vocabulary goes
+([one error](/docs/design/errors)) — and at nothing that parses or resolves. [One engine](/docs/design/one-engine) is where the rest
 of the filing gets settled.
 
 Two things have left `fossil-base` and neither shows on this diagram in the same way. The `@conn`

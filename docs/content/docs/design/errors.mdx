@@ -39,7 +39,7 @@ and the budget as four fields; all four reach JavaScript inside a sentence.
 
 What else is lost on the way, each one a place where structure existed and was flattened:
 
-- `RunError` (`crates/fossil-df/src/executor.rs, RunError`) is `OverBudget(Refusal)` or
+- `RunError` (in `crates/fossil-df/src/executor.rs` at `8d6114a3`) is `OverBudget(Refusal)` or
   `Failed(String)`, with a `From<String>`. Sixteen distinct failures — a destination no store covers,
   a source that would not route, a DataFusion error, every variant of `WriteError` and `LayoutError` —
   enter `Failed` through `format!` or `.to_string()`.

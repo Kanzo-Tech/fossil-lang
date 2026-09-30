@@ -12,5 +12,6 @@
 pub mod catalogue;
 pub mod corpus;
 pub mod depgraph;
+pub mod problem;
 pub mod reference;
 pub mod rulebook;

@@ -13,11 +13,15 @@
 //!   corpus       The same, one data file along: the writer's column table from
 //!                `corpus.bnf`, projected into Rust and TypeScript. Two data
 //!                files, two commands, one generator loop.
+//!   problem      The same again, from a derived file rather than a written one:
+//!                `@fossil-lang/types`' `problem.gen.ts` from
+//!                `crates/fossil-graph-schema/problem.schema.json`, the error
+//!                catalogue's schema. Three sources, one generator loop.
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::process::{Command, exit};
 
-use xtask::{catalogue, corpus};
+use xtask::{catalogue, corpus, problem};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -35,11 +39,19 @@ fn main() {
             corpus::generated(),
             args.next().as_deref() == Some("--check"),
         ),
+        Some("problem") => generate(
+            "crates/fossil-graph-schema/problem.schema.json",
+            "problem",
+            problem::generated(),
+            args.next().as_deref() == Some("--check"),
+        ),
         other => {
             if let Some(c) = other {
                 eprintln!("xtask: unknown command {c:?}");
             }
-            eprintln!("usage: cargo xtask <wasm-check | catalogue [--check] | corpus [--check]>");
+            eprintln!(
+                "usage: cargo xtask <wasm-check | catalogue [--check] | corpus [--check] | problem [--check]>"
+            );
             exit(2);
         }
     }
@@ -48,7 +60,7 @@ fn main() {
 /// Write — or, under `--check`, prove current — every file generated from one
 /// data file.
 ///
-/// One loop for both data files rather than one per command: what a generator
+/// One loop for every data file rather than one per command: what a generator
 /// command does is identical and only the source and the fix-it line differ, so
 /// a second copy of this would be a second place for the `--check` semantics to
 /// drift. The check mode names the file and the command that fixes it, because
