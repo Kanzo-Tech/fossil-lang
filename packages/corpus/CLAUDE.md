@@ -6,16 +6,18 @@ The repository rules are in `../../CLAUDE.md`. These are true only here.
 
 The published reader, `src/`, and beside it the **executable** half of the corpus contract it
 fulfils: `guards/` checks that a corpus on disk satisfies the conventions, `conformance/` holds a
-checked-in corpus with the recipe that reproduces it, and `integration/` writes corpora with the
-guards' own fixture and reads them back through `src/`. None of the three is in `files`, so npm
+checked-in corpus with the recipe that reproduces it, and `integration/` writes corpora — with the
+guards' own fixture, and with the real writer (`@fossil-lang/executor`, in `round-trip.test.ts`,
+served over HTTP) — and reads them back through `src/`. None of the three is in `files`, so npm
 never sees them. The prose half is `docs/content/docs/format/`.
 
 `src/` is TypeScript and nothing else: `fossil.json` through `JSON.parse`, a view per table, and the
 SQL a scan composes. It was a binding over `fossil-graph` compiled to wasm32, and that reader — four
 parsers of one manifest and an addressing layer — went with the tiles. **Do not put a second reader
 of the manifest back**, in Rust or here: the writer's `fossil_sinks::manifest` types are the one
-definition, and `tests/manifest.test.ts` carries the hook where the schema generated from them is
-checked.
+definition. `tests/manifest.test.ts` holds `src/manifest.ts` against the schema generated from them
+(`crates/fossil-sinks/fossil.schema.json`), interface by interface, and validates every fixture
+against it: change a field there and this package's `test` goes red until the TypeScript follows.
 
 `guards/guards.mjs` is imported by `docs/components/guard-index.tsx` at build time, so renaming or
 moving it breaks the documentation build — the intended coupling: a page cannot drift from a table

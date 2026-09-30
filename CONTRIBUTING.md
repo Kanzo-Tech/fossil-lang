@@ -131,7 +131,9 @@ becomes, parameter by parameter.
 structs of `fossil.json` rather than from a data file: change a field in
 `crates/fossil-sinks/src/manifest.rs`, run `FOSSIL_BLESS=1 cargo test -p
 fossil-sinks --test schema`, and commit the schema beside it. The test fails on a
-stale one, and it is what a reader outside Rust checks `fossil.json` against.
+stale one, and it is what a reader outside Rust checks `fossil.json` against —
+`packages/corpus/tests/manifest.test.ts` holds `@fossil-lang/corpus`'s hand-written
+types against it, so the TypeScript follows in the same commit.
 
 Add or change a column in `corpus.bnf`, run `cargo xtask corpus`, commit what it
 wrote; `crates/xtask/tests/corpus_generated.rs` is its `--check` as a test, and

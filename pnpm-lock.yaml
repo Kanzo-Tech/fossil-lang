@@ -134,6 +134,9 @@ importers:
       '@duckdb/duckdb-wasm':
         specifier: 1.32.0
         version: 1.32.0
+      '@fossil-lang/executor':
+        specifier: workspace:*
+        version: link:../executor
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
