@@ -58,6 +58,11 @@ exec.free();
 `report` is `{ dest, dropped }`: where the corpus went and, per edge table, how many
 input rows named a vertex that does not exist. What was written is `<dest>fossil.json`.
 
+A run executes under a 2 GiB memory budget. One that needs more rejects with an
+`Error` named `OverBudget` — which operator asked, for how much, and what was
+already held — while the graph is still executing, so nothing has been written.
+`/docs/design/three-hosts` has the budget and its measured ceiling.
+
 A host with no storage runs over files it holds, and gets them back:
 
 ```ts

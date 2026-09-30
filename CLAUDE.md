@@ -163,7 +163,8 @@ crates/
                            nothing: `arrow-schema` for the types, `serde_json` to emit
   fossil-df/               DataFusion backend for the property-graph MIR, the one corpus
                            writer (`write`: layout, then a Parquet per table, `fossil.json`
-                           last), and `Executor` — the whole run a host drives
+                           last), and `Executor` — the whole run a host drives, under the
+                           2 GiB pool in `memory.rs` that refuses as `OverBudget`
   fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each source's columns,
                            and the payload that authenticates one. `fossil-lsp` calls it
                            before the compile. It links `DuckDB` on a normal edge, and

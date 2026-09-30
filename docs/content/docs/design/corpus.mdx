@@ -1,6 +1,6 @@
 ---
 title: The corpus
-description: "A graph in Parquet files under a `fossil.json` written last, with no service in the path: one table per vertex type, one per relation, and one id space across the whole graph; what went with GraphAr's names, why a reader keys on the subject, and what a corpus can carry."
+description: "A graph in Parquet files under a `fossil.json` written last, with no service in the path: one table per vertex type, one per relation, and one id space across the whole graph; why the vocabulary is SQL/PGQ's, why a reader keys on the subject, and what a corpus can carry."
 ---
 
 A fossil program produces a **corpus**: a graph written as columnar files with a manifest that names
@@ -40,11 +40,11 @@ Every vertex of every type has a `dense_id`, and the ids run `0..V−1` across t
 per type. An edge table is `src` and `dst` over those ids, so an edge is a pair of integers whichever
 types it joins, and a viewer's buffer index **is** the id.
 
-The id is the rank of a vertex in the Hilbert order of its position, over the union of every drawn
-type. `crates/fossil-layout/src/layout/hilbert.rs, hilbert_codes` quantises with `floor`, which makes
-the order the one DuckDB's `ST_Hilbert` computes, and
-`crates/fossil-layout/src/layout/hilbert.rs, hilbert_ranks` turns codes into ranks. Vertices of a type
-with no position take the last ids, ordered by type and then by subject. Every table is written
+The id is the rank of a vertex in the Hilbert order of its position, over the union of every vertex
+type. `crates/fossil-layout/src/layout/hilbert.rs, hilbert_codes` quantises in binary64 and truncates,
+exactly as DuckDB's `ST_Hilbert` does, so the order is the one `ST_Hilbert` computes, and
+`crates/fossil-layout/src/layout/hilbert.rs, hilbert_ranks` turns codes into ranks. The writer lays
+out every type, so every id is placed. Every table is written
 sorted by its key, so reading a vertex table in id order is reading it in curve order, and a filter
 on a box prunes row groups on the footers' own statistics. [Position](/docs/design/position) is where
 the coordinates come from.
@@ -85,25 +85,25 @@ published, which is what made a cut like `fossil/1` cheap exactly once. Within `
 only ever added, optional and ignorable; changing what a fixed column or a byte means is `fossil/2`.
 </Callout>
 
-## Nothing is borrowed from GraphAr any more
+## The vocabulary is SQL/PGQ's, declared and not executed
 
-The manifest was three YAML files named and keyed the way GraphAr names them, opening with
-`version: gar/v1`, and this page carried nine measured divergences from GraphAr's specification and
-the observation that GraphAr's own reader throws on the first property of every corpus fossil wrote —
-`dense_id` is `uint32`, and its parser has no unsigned type. The borrowed names bought no reader and
-promised a conformance the files did not have.
+`fossil.json` names its tables the way SQL/PGQ names the element tables of a property graph —
+vertex tables and edge tables, a `key`, a `source` and a `destination` that each `references` a
+vertex table, a `label` per relation — because that is the vocabulary of the engine a reader
+actually opens a corpus with. Everything a `CREATE PROPERTY GRAPH` over the views needs is in the
+manifest. Its version string is `fossil/1`, one constant,
+`crates/fossil-sinks/src/manifest.rs, FOSSIL_FORMAT`, and a reader rejects any other before it reads a
+byte of Parquet.
 
-`fossil.json` replaces all three. Its vocabulary is SQL/PGQ's — vertex tables and edge tables, a
-`key`, a `source` and a `destination` that each `references` a vertex table, a `label` per relation —
-because that is the vocabulary of the engine a reader actually opens it with. Its version string is
-`fossil/1`, one constant, `crates/fossil-sinks/src/manifest.rs, FOSSIL_FORMAT`, and a reader rejects
-any other before it reads a byte of Parquet. The YAML manifest, the divergence table and the `gar/v1`
-count are kept on
-[the tiled corpus](/docs/design/later/corpus-tiles#what-is-borrowed-from-graphar-and-where-borrowing-stops).
+**Declared is all it is.** Nothing in fossil issues a graph query: the door is `scan` and `sql`, and
+DuckPGQ — the extension that would run `GRAPH_TABLE` over those views — does not load in
+DuckDB-WASM 1.5.x, the engine a browser reader has. A traversal today is SQL over `src` and `dst`,
+written by whoever needs it.
 
-**What would reverse it.** A second reader, not ours, that already speaks GraphAr and would open a
-fossil corpus if the names matched. [What was discarded](/docs/design/discarded) carries the
-conformance row with the same condition.
+**What would reverse it.** A host engine that runs SQL/PGQ where the reader runs. Then `open` issues
+the `CREATE PROPERTY GRAPH` the manifest already describes, and nothing in the format moves. Borrowing
+another format's names instead is [a discarded alternative](/docs/design/discarded#the-corpus), with
+what would bring it back.
 
 ## The width of an address, and what actually runs out first
 
@@ -115,8 +115,10 @@ that ceiling is close.
 it was measured: on a 14-core machine with 48 GiB it peaked at **2.09 GiB at two million vertices and
 8.82 GiB at ten**, and the whole write at ten million took **404.4 s**. Linear over that range, 2³²
 vertices is on the order of **3.7 TiB resident and two days of wall clock** — the pass exhausts a
-machine roughly **430× before the column exhausts its range**, and the wasm host, with 4 GiB of linear
-memory, long before that. The width is not what stops a corpus.
+machine roughly **430× before the column exhausts its range** — and the wasm writer, the one there is,
+[refuses long before that](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no):
+its budget is 2 GiB, and a `shop` corpus of a million people and three million orders is over it. The
+width is not what stops a corpus.
 
 It is also 32-bit *by construction* rather than by choice of spelling.
 `crates/fossil-layout/src/layout/community.rs, community_hierarchy` and
@@ -218,17 +220,11 @@ there can only be satisfied by agreeing with the bytes**, never by agreeing with
 implementation of the same arithmetic — the gap through which GraphAr's fourth implementation landed
 green and wrong.
 
-The three-reader round trip that preceded it — a JavaScript reader, a Rust planner at two widths, and
-the published vectors — is on
-[the tiled corpus](/docs/design/later/corpus-tiles#conformance-is-a-round-trip-and-what-it-rests-on-is-not-a-headcount).
-It existed because the arithmetic a reader reproduced was the contract, and a `fossil/1` reader
-reproduces none.
-
 ## What a corpus can carry, and where the format lives
 
-RDF terms, quads and named graphs — a graph is not restricted to triples and the container is not
-restricted to one graph. But **a cell in a columnar file carries a value, not a term with its
-trimmings**: a literal's language tag, and in RDF 1.2 its base direction, are gone at the pivot into
+Vertex and edge tables of values, and one graph: there are no quads and nowhere to put a graph
+name, which is why `grammar.bnf` has no `in g`. And **a cell in a columnar file carries a value, not
+a term with its trimmings**: a literal's language tag, and in RDF 1.2 its base direction, are gone at the pivot into
 columns unless the layout carries them explicitly. Base direction exists precisely because the first
 strong character of a string does **not** determine how it should be laid out, so a value returned
 without it is one the host renders backwards with nothing in the cell to say so.

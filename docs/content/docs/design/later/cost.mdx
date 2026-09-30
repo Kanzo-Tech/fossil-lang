@@ -97,13 +97,15 @@ incident edges and could say so.
 
 ## W1, W2 · The peak follows the corpus, and the budget does not reach it
 
-`--memory-gib` is a `FairSpillPool` around `execute_graph`, and for a long time it was nothing after
-it: `enrich_layout` took the run's `memory_bytes` and discarded it, so three stages sat outside the
-pool and a declared 4 GiB run peaked at 8.39 GiB. The number reaches the layout pass now, and is
-honoured there by **refusing** rather than spilling — `estimated_peak_bytes` over three numbers the
-batches carry, checked before the first tile is gathered. That closes the *declaration* for that stage — and the flag
-bounds each stage rather than their sum, which is decided rather than outstanding and argued on
-[streaming](/docs/design/later/streaming). It does not close the shape below, and the two should not be
+On the native host `--memory-gib` was a `FairSpillPool` around `execute_graph`, and for a long time
+it was nothing after it: `enrich_layout` took the run's `memory_bytes` and discarded it, so three
+stages sat outside the pool and a declared 4 GiB run peaked at 8.39 GiB. The number then reached the
+layout pass, honoured there by **refusing** rather than spilling — `estimated_peak_bytes` over three
+numbers the batches carry, checked before the first tile was gathered — and the flag bounded each
+stage rather than their sum, argued on [streaming](/docs/design/later/streaming). The wasm writer
+that is left has neither flag nor spill: a fixed 2 GiB pool over its operators, the layout pass
+outside it, and a refusal by name
+([three hosts](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no)). It does not close the shape below, and the two should not be
 confused. **The peak still grows with N, and a
 refusal is what happens when it grows past what was declared.**
 

@@ -34,10 +34,9 @@ being embedded in a host application is its whole problem statement.
 [The architecture](/docs/architecture) is the shape this argument produces.
 
 <Callout type="warn" title="The middle box runs in wasm32, so no ceiling is deferred">
-The command was a native binary, `fossil-cli`, and it was the only place a spill could have lived. It
-was deleted on 2026-09-30: no consumer used it, and it wrote a different corpus from the browser's
-([discarded](/docs/design/discarded)). A command is now Node over the same wasm build a tab runs, so
-every write is bounded by wasm32's address space. What brings the native layer back is a consumer
+There is no native binary that writes. A command is Node over the same wasm build a tab runs, so
+every write is bounded by wasm32's address space, and the one place a spill could live is a native
+host that does not exist ([discarded](/docs/design/discarded#the-tooling) says why). What brings the native layer back is a consumer
 that must write natively — a corpus larger than RAM, spilled — and the argument above is what it
 would be built on.
 </Callout>
@@ -109,7 +108,7 @@ answered by what the host passes in.
 If the embedding host is a browser, a capability only a native binary can perform is a capability the
 product cannot reach. So the direction is that **every capability has one implementation, in a crate
 that compiles to `wasm32`, and each host is a transport over it** — the language server, the wasm
-shim and the machine-facing server are projections, and none of them is the API.
+shim and the executor are projections, and none of them is the API.
 `cargo xtask wasm-check` derives that set from the cdylib crates plus any crate declaring
 `[package.metadata.fossil] wasm = true`, and the compile→run pipeline is inside it. Its size is
 deliberately not written here; this page carried a count once and it was stale by the next reading.
@@ -123,12 +122,14 @@ on its own side of the wire.
 > implementation guarantees one *answer*, not one *wire* — so a capability offered to two hosts owes
 > a test that crosses each host's wire rather than each host's function.
 
-The browser turned out to need **two** wires rather than one, and the rule held for the second
-exactly as written. `postMessage` is a transport with a client on the other end of it, which a page
-that already calls the checker in-process has no reason to build in order to ask what type is under a
-cursor — so hover, completion and definition are also plain method calls on the wasm workspace. One
-implementation still, two projections of it, and a guard that sweeps every cursor of a program
-comparing what the two wires say rather than comparing either against a written-down answer.
+The browser's wire is not the protocol. A page that already calls the checker in-process has no
+reason to stand up an LSP client to ask what type is under a cursor, so check, hover, completion and
+definition are plain method calls on the wasm workspace, and the language server over stdio is the
+other wire. One implementation, two projections of it — and the rule above is what each of them owes.
+
+**What would reverse it.** A browser consumer that needs what only the protocol carries — code
+actions, semantic tokens — at which point it earns a projection of its own, and a test that crosses
+both wires with it.
 
 The same measurement settles what a row may carry across that wire, and it is the companion rule:
 

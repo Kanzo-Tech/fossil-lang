@@ -20,10 +20,12 @@ Every vertex table in `fossil.json` has a `position` or has none —
 | `{ "by": "program", "x": "lon", "y": "lat" }` | the program, which declared two of its own columns | whatever the program named |
 | absent | nobody | the table is **not drawn** |
 
-**No absent table is drawn, and none is placed at a default.** A reader that invented a position for
-it would draw the invention, which is the one thing this page exists to prevent. Its vertices still
-have ids — the last ones, ordered by type and then by subject — and it is still read, filtered and
-joined like any other table.
+**fossil's writer emits `layout` on every vertex table**, so it writes neither of the other two rows;
+they are the format's, for a writer that has coordinates of its own or none. **No absent table is
+drawn, and none is placed at a default.** A reader that invented a position for it would draw the
+invention, which is the one thing this page exists to prevent. Its vertices still have ids — the last
+ones, ordered by type and then by subject — and it is still read, filtered and joined like any other
+table.
 
 **What would reverse it.** A reader that has to draw every type and has no position for some. Then
 that reader places them, in the view, and the corpus still says it did not.
@@ -34,10 +36,10 @@ The default is **one** layout over the union of every vertex type, with every re
 ones between types included. Louvain over that graph gives a hierarchy of communities;
 `cluster_id` is its cut; `crates/fossil-layout/src/layout/place.rs, cluster_layout` places the
 communities and packs each one's members; and the position's Hilbert rank over the whole plane is the
-`dense_id` — `crates/fossil-layout/src/layout/hilbert.rs, hilbert_codes` quantised with `floor`, so
-that the order is exactly the one DuckDB spatial's `ST_Hilbert` computes over the same extent. That
-agreement is measured, not assumed: flooring agreed with `ST_Hilbert` on **2,000 of 2,000** points,
-and the rounding it replaced on **504**. A reader can therefore recompute the order in SQL, and none
+`dense_id` — `crates/fossil-layout/src/layout/hilbert.rs, hilbert_codes` quantised in binary64 and
+truncated, so that the order is exactly the one DuckDB spatial's `ST_Hilbert` computes over the same
+extent. That agreement is measured, not assumed: truncating in binary64 agreed with `ST_Hilbert` on
+**2,000 of 2,000** points, and the binary32 rounding it replaced on **504**. A reader can therefore recompute the order in SQL, and none
 has to: every table is written in it.
 
 There are no per-type planes. The writer used to lay each type out on its own and set the planes side
@@ -55,8 +57,8 @@ weighs in the community pass; it does not bring back a plane per type.
 
 ## `program` is a design question
 
-The manifest has the shape — `{"by": "program", "x": …, "y": …}` — and the writer emits only
-`layout`. What is undecided is how a program says it: a clause in the language, checked like any other
+The manifest has the shape — `crates/fossil-sinks/src/manifest.rs, Position` declares
+`{"by": "program", "x": …, "y": …}` — and the writer emits only `layout`. What is undecided is how a program says it: a clause in the language, checked like any other
 (the columns exist, and are numeric, on at least one type), or a parameter the host passes to the
 write. With a program position there is no community pass and no `cluster_id`; the ids are the
 `ST_Hilbert` rank of the declared columns over the types that have them, and every other type is

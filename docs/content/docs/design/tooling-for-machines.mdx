@@ -49,10 +49,10 @@ answer.
 
 ### One binding, and no protocol server
 
-The verbs used to be served over the **Model Context Protocol** as well, by `fossil-mcp`, and it was
-deleted with no consumer. What an agent reaches now is the one binding — `@fossil-lang/corpus`, in
-process, over the host's engine — and a host that wants to hand it to an agent over a protocol wraps
-that binding rather than growing a second one beside it.
+What an agent reaches is the one binding — `@fossil-lang/corpus`, in process, over the host's
+engine — and a host that wants to hand it to an agent over a protocol wraps that binding rather than
+growing a second one beside it. A protocol server of fossil's own is
+[discarded](/docs/design/discarded#the-tooling), with what would bring it back.
 
 <Callout title="The escape hatch is a thing a host opens">
 `sql` costs a function of whatever was typed, where `scan` costs a function of the answer, so it is
@@ -86,7 +86,7 @@ credentialed browser experience without a server is claiming something the surve
 ## The documentation as an artifact
 
 The third surface is this documentation, and it is part of the product rather than a compliance item
-— *tooling for machines* is one of the seven declared reasons the project exists, so an agent-readable
+— *tooling for machines* is one of the five declared reasons the project exists, so an agent-readable
 index of it is in scope by construction.
 
 Two properties make it worth reading rather than merely present.

@@ -26,25 +26,23 @@ prose.
 | --- | --- | --- | --- |
 | `fossil-introspect` | **directly** | no | the `DESCRIBE`, and the credentials that reach a cloud source |
 | `fossil-lsp` | via `fossil-introspect` | no | a host: it checks a program against the columns it reads |
-| `fossil-layout` | dev-dependency only | **yes** | the post-pass, over Parquet through `arrow-rs` |
+| `fossil-layout` | dev-dependency only | **yes** | the layout pass, over the executor's Arrow rows through `arrow-rs` |
 
 Removing the database from `fossil-layout` was necessary and not sufficient: `fossil-resolver` (now `fossil-storage`) was an
 unused edge carrying its own wasm32 refusal for an unrelated reason, and `cargo check` never reports
-an unused dependency. The crate still links `datafusion` transitively through `fossil-df`, which is
-not the same claim — what it takes from there is one Arrow → Parquet encoder.
+an unused dependency. It links no `datafusion` either: its normal dependencies are `arrow`,
+`thiserror` and `fossil-mem-probe`, and `fossil-df` depends on it rather than the reverse.
 
-**There is no native write host.** `fossil-cli` was one — it introspected, compiled, ran and wrote a
-corpus to a local directory — and it was deleted on 2026-09-30, because nothing used it and it wrote
-a different corpus from the browser's ([discarded](/docs/design/discarded)). The one host that writes
-is `fossil-df-wasm`, in a browser tab or in Node, so the compiler and the write path are both the
-wasm32 build and neither links a database. **DuckDB is still the engine that `DESCRIBE`s**: natively
+**There is no native write host** ([discarded](/docs/design/discarded#the-tooling) says why and what
+brings one back). The one host that writes is `fossil-df-wasm`, in a browser tab or in Node, so the
+compiler and the write path are both the wasm32 build and neither links a database. **DuckDB is still the engine that `DESCRIBE`s**: natively
 in the language server, and as DuckDB-WASM in a browser editor.
 
 ## What the layout pass paid for it
 
-`--memory` used to cap the DuckDB connection and DuckDB's sort spilled; nothing in the Arrow pass
-spills. Measured 2026-08-22, one million nodes and ten million edges through the native host that
-existed then:
+DuckDB's sort spilled; nothing in the Arrow pass spills, and it runs outside the executor's budget —
+[three hosts](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no) has the pool and
+what it does not see. Measured 2026-08-22, natively, one million nodes and ten million edges:
 
 | | |
 | --- | --- |
@@ -54,8 +52,8 @@ existed then:
 
 A vertex row carries a subject IRI and every property; an adjacency row carries two integers. The
 valve is fitted — `interleave_record_batch` gathers across batches, so the pass no longer holds the
-vertex file three times over — and the vertex half went from +0.32 G to +0.06 G at a million rows at
-no measurable time cost. What is left is the file held **once**, as Arrow.
+vertex rows three times over — and the vertex half went from +0.32 G to +0.06 G at a million rows at
+no measurable time cost. What is left is the rows held **once**, as Arrow.
 
 ## How DataFusion reaches storage
 
@@ -72,10 +70,10 @@ cannot tell.
 [Unifying the two execution engines](/docs/design/discarded) is a discarded alternative, and it is a
 different decision from this one rather than the same one taken twice.
 
-That row is about the corpus **read** path, where `fossil-graph` builds verb SQL and a host executes
-it — `@fossil-lang/corpus` through a host-provided DuckDB-WASM callback. Rewriting it as DataFusion plan construction costs roughly nine hundred lines, adds
-several megabytes to the read path, and loses the range-request file system that makes reading a
-corpus over plain HTTP work at all. Still rejected.
+That row is about the corpus **read** path, where `@fossil-lang/corpus` composes SQL in TypeScript
+and the host's DuckDB-WASM runs it. Putting DataFusion there adds a wasm build of several megabytes to
+a path that loads none, and loses the range-request file system that makes reading a corpus over
+plain HTTP work at all. Still rejected.
 
 This page is the **write** path, and it asks the compiler to stop *containing* an engine rather than
 asking any consumer to stop using one. The host brings the engine to the read side, which is what the

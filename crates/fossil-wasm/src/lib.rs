@@ -803,10 +803,9 @@ impl Default for FossilWorkspace {
 
 // ----- Parse-only lineage + providers (one crate, two hosts) -----
 //
-// `refs` and `providers` mirror the native `fossil refs` / `fossil providers`
-// CLI commands for the BROWSER host: keasy's client-compute job runner reads a
-// program's typed lineage (which `@conn`s + `schema =` it references) and the
-// supported source providers WITHOUT subprocessing the `fossil` binary. Both
+// `refs` and `providers` serve the BROWSER host: keasy's client-compute job
+// runner reads a program's typed lineage (which `@conn`s + `schema =` it
+// references) and the supported source providers with no native binary. Both
 // delegate to `fossil_lineage` (WASM-clean) over
 // `fossil_descriptors_output::PROVIDERS` — the same calls
 // `fossil-df/tests/provider_registry.rs` makes natively.
