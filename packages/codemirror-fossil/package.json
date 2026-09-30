@@ -53,8 +53,8 @@
     "@codemirror/state": "^6.4.0",
     "@codemirror/view": "^6.34.0",
     "@fossil-lang/wasm": "workspace:*",
-    "happy-dom": "^15.0.0",
+    "happy-dom": "^20.8.9",
     "typescript": "^5.6.0",
-    "vitest": "^2.0.0"
+    "vitest": "^4.1.11"
   }
 }

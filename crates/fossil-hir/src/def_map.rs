@@ -44,13 +44,17 @@ use smol_str::SmolStr;
 
 #[salsa::interned(debug)]
 pub struct MappingLoc<'db> {
+    #[returns(copy)]
     pub file: SourceFile,
+    #[returns(copy)]
     pub index: usize,
 }
 
 #[salsa::interned(debug)]
 pub struct SourceLoc<'db> {
+    #[returns(copy)]
     pub file: SourceFile,
+    #[returns(copy)]
     pub index: usize,
 }
 
@@ -60,7 +64,7 @@ pub struct SourceLoc<'db> {
 /// existed blamed the member's NAME for all of them — so an unreadable file
 /// reported "matches no shape in the schema". They are separated here because
 /// the reader cannot act on a message that names the wrong thing.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum ShapeBindError {
     /// The constructor carries no `schema = …`, so there is no document.
     NoSchema,
@@ -103,7 +107,7 @@ pub struct SourceCall {
 }
 
 /// One entry in the source-binding table (`users := io.csv(...)`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct SourceEntry<'db> {
     pub name: SmolStr,
     pub loc: SourceLoc<'db>,
@@ -192,7 +196,7 @@ pub struct SourceEntry<'db> {
 /// says what kind of name it is (grammar.bnf, DEFINE). Types had their own `=`
 /// for a while and lost it: `=` assigns a value, and a type binding assigns
 /// nothing.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct TypeEntry {
     /// The local label. Free — it does not have to name anything in the
     /// document, because binding is by position — the Nth name takes the Nth
@@ -502,7 +506,7 @@ impl<'db> DefMap<'db> {
     }
 }
 
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'db> {
     let cst = fossil_syntax::parse(db, file);

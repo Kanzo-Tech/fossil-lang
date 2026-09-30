@@ -147,7 +147,7 @@ mod tests {
         path: String,
     }
 
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn text_at<'db>(db: &'db dyn Db, path: ResolvedPath<'db>) -> Option<String> {
         file_at(db, path.path(db)).map(|f| f.text(db).clone())
     }

@@ -39,7 +39,7 @@ pub struct ItemTree<'db> {
 
 /// One signature entry. Each variant carries header data and (for mappings)
 /// structural counts — NEVER body expression content.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum ItemHeader {
     SourceDef(SourceDefHeader),
     Mapping(MappingHeader),
@@ -49,13 +49,13 @@ pub enum ItemHeader {
 // The vocabulary declaration is gone — a program writes full IRIs inside
 // interpolated strings and short names everywhere else — and so is its node.
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct SourceDefHeader {
     pub ast_id: FileAstId<SourceDefNode>,
     pub name: SmolStr,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct MappingHeader {
     pub ast_id: FileAstId<MappingNode>,
     /// `User` in `User : Person from users`.
@@ -76,7 +76,7 @@ pub struct MappingHeader {
 
 /// Build the per-file `ItemTree` by walking top-level CST children once and
 /// extracting each one's signature-only summary.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn item_tree<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> ItemTree<'db> {
     let cst = fossil_syntax::parse(db, file);

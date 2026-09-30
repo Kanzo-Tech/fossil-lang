@@ -281,14 +281,14 @@ fn split(url: &str) -> Result<(String, String), StorageError> {
 fn build(grant: &Grant, renewal: Renewal) -> Result<Arc<dyn ObjectStore>, StorageError> {
     let built = match grant.store() {
         Store::S3(S3 {
-            bucket,
             region,
             endpoint,
             path_style,
             ..
         }) => {
+            // The bucket is the prefix's authority, and `with_url` reads it from there.
             let mut builder = AmazonS3Builder::new()
-                .with_bucket_name(bucket)
+                .with_url(grant.prefix())
                 .with_region(region)
                 .with_virtual_hosted_style_request(!path_style)
                 .with_credentials(Arc::new(Vended::<AwsCredential>::new(grant, renewal)));

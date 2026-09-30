@@ -78,7 +78,9 @@ use crate::ty::{Rows, Ty, TyKind};
 /// — `expr_types` reads it, not the reverse.
 #[salsa::tracked(debug)]
 pub struct TypeckOutput<'db> {
+    #[returns(copy)]
     pub expr_types: ExprTypes<'db>,
+    #[returns(copy)]
     pub source_row: Option<Ty<'db>>,
     /// The target shape's predicates by the short name a body writes —
     /// `("name", "http://xmlns.com/foaf/0.1/name")` — in declaration order.
@@ -99,7 +101,7 @@ pub struct TypeckOutput<'db> {
 /// runs the plain-Rust bidirectional checker, and returns a [`TypeckOutput`].
 /// Returns `Err(ErrorGuaranteed)` if the body has any type error (every error
 /// also pushes ≥1 [`Diagnostic`] to the accumulator).
-#[salsa::tracked]
+#[salsa::tracked(returns(clone))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn typecheck_mapping<'db>(
     db: &'db dyn fossil_base::Db,

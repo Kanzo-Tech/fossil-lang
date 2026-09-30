@@ -92,30 +92,6 @@ impl CstRoot {
     }
 }
 
-// SAFETY: third-party-trait integration boundary — the workspace denies
-// `unsafe_code` rather than forbidding it, so a boundary like this one opts in
-// with an explicit `allow` and this justification.
-// Salsa's `Update` trait is `unsafe` by design — implementations must
-// guarantee that `maybe_update` correctly determines whether the new value
-// differs from the old (used to invalidate downstream queries). We delegate
-// to `PartialEq` on `GreenNode`, which rowan implements as structural tree
-// equality. No safe alternative exists because Salsa requires `unsafe impl`
-// even for trivially-safe bodies.
-#[allow(unsafe_code)]
-unsafe impl salsa::Update for CstRoot {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        // SAFETY: caller guarantees `old_pointer` is a valid, aligned pointer
-        // to an initialised `CstRoot` owned by Salsa storage (Salsa contract).
-        let old = unsafe { &mut *old_pointer };
-        if *old == new_value {
-            false
-        } else {
-            *old = new_value;
-            true
-        }
-    }
-}
-
 /// Salsa-tracked CST handle. Construct via [`parse`].
 ///
 /// Carries a `'db` lifetime tying it to the [`fossil_base::Db`] it was parsed
@@ -131,7 +107,7 @@ pub struct Cst<'db> {
 ///
 /// This signature is locked. New diagnostics flow via the
 /// [`fossil_base::Diagnostic`] accumulator, never by widening the return type.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 pub fn parse(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Cst<'_> {
     let text = file.text(db);
     let tokens = lex_with_indents(text);

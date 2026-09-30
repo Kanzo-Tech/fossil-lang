@@ -73,7 +73,7 @@ use crate::op::{Expr, Op, SinkRef, SourceFormat, VProp};
 /// refinement are a SEPARATE pass, [`apply_output_shape`], because they need a
 /// [`GraphSchema`] this query has no way to read: MIR is a property graph in
 /// the middle and never learns which schema language is on either side of it.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db mirrors `MirGraph<'db>`
 pub fn lower_to_mir_pg<'db>(
     db: &'db dyn fossil_base::Db,

@@ -65,7 +65,7 @@ use crate::def_map::def_map;
 use crate::lower::{HirExpr, InterpolationPart, PropertyKey, lower_to_hir};
 
 /// One type's identity template.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct SubjectTemplate {
     /// The shape IRI the template builds identities for.
     pub shape_iri: SmolStr,
@@ -210,7 +210,7 @@ impl<'db> SubjectTemplates<'db> {
 }
 
 /// The [`SubjectTemplates`] of one file.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn subject_templates<'db>(
     db: &'db dyn fossil_base::Db,
@@ -279,7 +279,7 @@ pub fn subject_templates<'db>(
 /// It accumulates. See the module docs: a diagnostic pushed from a query that
 /// `typecheck_mapping` reads comes back out once per mapping. Hosts drain it
 /// once per FILE, beside `def_map` and `lower_to_hir`.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn check_identities(db: &dyn fossil_base::Db, file: SourceFile) -> usize {
     use salsa::Accumulator as _;

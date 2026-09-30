@@ -119,7 +119,7 @@ mod tests {
     /// `#[salsa::tracked]` functions do. This helper is the minimum surface
     /// that proves end-to-end wiring; `fossil-hir`'s invalidation regression
     /// test builds the full count atop the same constructor.
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn _read_text(db: &dyn Db, file: SourceFile) -> String {
         file.text(db).to_string()
     }

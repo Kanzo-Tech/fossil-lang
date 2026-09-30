@@ -93,7 +93,6 @@ pub(crate) enum Store {
 }
 
 pub(crate) struct S3 {
-    pub(crate) bucket: String,
     pub(crate) key_id: SecretString,
     pub(crate) secret: SecretString,
     pub(crate) token: Option<SecretString>,
@@ -146,9 +145,8 @@ impl TryFrom<StorageCredential> for Grant {
         };
 
         if let Some(rest) = prefix.strip_prefix("s3://") {
-            let (bucket, _) = rest
-                .split_once('/')
-                .filter(|(b, _)| !b.is_empty())
+            rest.split_once('/')
+                .filter(|(bucket, _)| !bucket.is_empty())
                 .ok_or_else(|| StorageError::Store(prefix.clone()))?;
             let endpoint = take("s3.endpoint").map(|e| endpoint(&e)).transpose()?;
             let path_style = match take("s3.path-style-access").as_deref() {
@@ -163,7 +161,6 @@ impl TryFrom<StorageCredential> for Grant {
                 }
             };
             let store = Store::S3(S3 {
-                bucket: bucket.to_string(),
                 key_id: need("s3.access-key-id")?,
                 secret: need("s3.secret-access-key")?,
                 token: config.get("s3.session-token").cloned(),
@@ -253,6 +250,7 @@ impl Grant {
         self.expires_at_ms
     }
 
+    #[cfg(feature = "object-store")]
     pub(crate) const fn store(&self) -> &Store {
         &self.store
     }

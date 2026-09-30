@@ -23,6 +23,13 @@ env:
 # wasm32-unknown-unknown -v` runs: the cfg is on the rustc line without the
 # variable and gone with it.
 #
+# `actions-rust-lang/setup-rust-toolchain` exports `RUSTFLAGS=-D warnings` into
+# every later step unless its `rustflags` input says otherwise, so each job that
+# compiles sets `rustflags: ""`. Without it the wasm job ran with the cfg gone,
+# and `cargo test -p fossil-lsp` denied a warning that only its own feature set
+# produces — which is how the didChange budget step went red on a compile error
+# while measuring 5–7ms against its 400ms.
+#
 # Warnings are still denied. `clippy` denies them on its own command line below,
 # which is the lint gate; a warning that only `cargo check` sees and clippy does
 # not is not a thing this workspace has.
@@ -48,6 +55,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: "1.90"
+          rustflags: ""
           components: clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -63,6 +71,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: "1.90"
+          rustflags: ""
       - run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
@@ -75,6 +84,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: "1.90"
+          rustflags: ""
           # `xtask::catalogue::rustfmt` shells out to rustfmt so the generated
           # catalogue is written the way `cargo fmt --check` demands, and a test
           # asserts it. Naming the toolchain here bypasses the components
@@ -106,6 +116,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: "1.90"
+          rustflags: ""
           target: wasm32-unknown-unknown
       # `fossil-df` is in the gate's closure by two edges — `fossil-df-wasm`'s
       # cdylib, and `fossil-layout`'s `wasm = true` — and it pulls datafusion,

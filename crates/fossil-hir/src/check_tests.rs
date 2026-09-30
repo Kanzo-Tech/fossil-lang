@@ -181,7 +181,7 @@ fn fieldref_without_schema_synthesises_no_type_phase_2_compat() {
 
 #[test]
 fn fieldref_propagates_string_from_inferred_descriptor() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
         let row = users_row(db);
@@ -200,7 +200,7 @@ fn fieldref_propagates_string_from_inferred_descriptor() {
 
 #[test]
 fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<()> {
         let m = *def_map(db, file).mappings(db).first()?;
         let row = users_row(db);
@@ -273,7 +273,7 @@ User : Person from users
     @subject = \"https://example.org/u/{users.id}\"
     name = users.naem
 ";
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<()> {
         let m = *def_map(db, file).mappings(db).first()?;
         let row = users_row(db);
@@ -407,7 +407,7 @@ fn a_column_ref_naming_a_foreign_row_is_rejected() {
     // **`Orders` is a binding this file declares**, and that is the point: the
     // refusal is not about a name nobody bound, it is about a row this RELATION
     // does not carry. That is the case the scope must keep rejecting.
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
@@ -452,7 +452,7 @@ fn a_column_ref_naming_a_row_the_relation_derives_from_is_accepted() {
     // exactly as `fieldref_without_schema_synthesises_no_type_phase_2_compat`
     // describes. What is asserted is that qualifying it raises no error of its
     // own.
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return true;
@@ -481,7 +481,7 @@ fn a_column_ref_naming_the_relations_own_name_is_rejected() {
     // The other half of the same rule, and the half that stops the fix from
     // being «accept anything»: `Adults` is the RELATION, not a row, so
     // `Adults.name` is refused with the same words a stranger's name gets.
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
@@ -508,7 +508,7 @@ fn a_column_ref_naming_the_relations_own_name_is_rejected() {
 
 #[test]
 fn compatible_integer_widens_to_float() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
@@ -534,7 +534,7 @@ fn compatible_integer_widens_to_float() {
 
 #[test]
 fn compatible_string_to_integer_fails() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
@@ -591,7 +591,7 @@ Contact : Person from users
     name = users.name
 ";
     /// `value_ty: None`, `occurs` = exactly one. A `String` satisfies it.
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn accepts(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
@@ -664,7 +664,7 @@ Orders : Order from Purchase
     @subject = \"https://shop.example/order/{Purchase.id}\"
     total = Purchase.reference
 ";
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn refuse(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
@@ -754,7 +754,7 @@ Orders : Order from Purchase
     @subject = \"https://shop.example/order/{Purchase.id}\"
     total = Purchase.reference
 ";
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn refuse(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
@@ -854,7 +854,7 @@ Orders : Order from Purchase
     @subject = \"https://shop.example/order/{Purchase.id}\"
     total = Purchase.reference
 ";
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn refuse(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
@@ -918,7 +918,7 @@ Orders : Order from Purchase
 /// `Date` is both.
 #[test]
 fn a_wrong_type_with_no_repair_says_nothing() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn refuse(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
@@ -1096,7 +1096,7 @@ fn disjunction_rejection() -> Rejection {
 
 #[test]
 fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<()> {
         let m = *def_map(db, file).mappings(db).first()?;
         let shape = ResolvedShape {
@@ -1226,7 +1226,7 @@ fn typecheck_mapping_returns_error_guaranteed_on_any_diagnostic() {
     // A mapping whose source has a row but references a missing column would
     // error. We use a direct Checker to force the error path and
     // assert the ErrorGuaranteed-implies-diagnostic contract.
-    #[salsa::tracked]
+    #[salsa::tracked(returns(copy))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
@@ -1304,7 +1304,7 @@ fn row_record<'db>(db: &'db dyn fossil_base::Db, fields: &[(&str, Primitive)]) -
 /// With a source row present, the checker has both types and refuses it.
 #[test]
 fn comparing_a_string_column_with_an_integer_is_an_error() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
         let row = users_row(db);
@@ -1335,7 +1335,7 @@ fn comparing_a_string_column_with_an_integer_is_an_error() {
 /// The same shape, well typed: an integer column against an integer literal.
 #[test]
 fn comparing_an_integer_column_with_an_integer_is_bool() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
         let row = users_row(db);
@@ -1357,7 +1357,7 @@ fn comparing_an_integer_column_with_an_integer_is_bool() {
 /// result type is the signature's — not the argument's.
 #[test]
 fn a_call_takes_its_return_type_and_checks_its_argument() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<(String, String)> {
         let m = *def_map(db, file).mappings(db).first()?;
         let row = users_row(db);
@@ -1407,7 +1407,7 @@ fn a_call_takes_its_return_type_and_checks_its_argument() {
 /// type depends on the row is a column no shape can check.
 #[test]
 fn a_conditional_with_mismatched_branches_is_an_error() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
         let row = users_row(db);
@@ -1443,7 +1443,7 @@ fn a_conditional_with_mismatched_branches_is_an_error() {
 /// A non-Bool condition is refused before the branches are even considered.
 #[test]
 fn a_conditional_whose_condition_is_not_bool_is_an_error() {
-    #[salsa::tracked]
+    #[salsa::tracked(returns(clone))]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
         let row = users_row(db);
@@ -1675,7 +1675,7 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
         // `resolve_binding_scope` is a plain-Rust helper called from inside a
         // tracked frame, so the accumulator needs one — the same shim the row
         // algebra's own tests use.
-        #[salsa::tracked]
+        #[salsa::tracked(returns(copy))]
         fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
             crate::infer::resolve_binding_scope(db, file, "Valid", 0).is_ok()
         }
@@ -1759,7 +1759,7 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
             );
         }
         let file = SourceFile::new(&db, program.to_string(), "join.fossil".to_string());
-        #[salsa::tracked]
+        #[salsa::tracked(returns(copy))]
         fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
             crate::infer::resolve_binding_scope(db, file, "Out", 0).is_ok()
         }
@@ -1932,7 +1932,7 @@ fn null_compares_with_anything_and_assigns_to_nothing() {
         );
         let src = format!("Row := io.csv(\"r.csv\")\nValid := Row.where({condition})\n");
         let file = SourceFile::new(&db, src, "null.fossil".to_string());
-        #[salsa::tracked]
+        #[salsa::tracked(returns(copy))]
         fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
             crate::infer::resolve_binding_scope(db, file, "Valid", 0).is_ok()
         }

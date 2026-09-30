@@ -85,7 +85,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   not shrink when this edge moved.
 - **No `Box<dyn Trait>` inside Salsa queries.** Salsa interns concrete types; trait objects break
   memoization. Use `&dyn` parameters or enum dispatch.
-- **`unsafe_code = "deny"`** at workspace level, not `"forbid"`. Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (Salsa Update for rowan types; future FFI), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
+- **`unsafe_code = "deny"`** at workspace level, not `"forbid"`. Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (future FFI — the four Salsa `Update` impls for rowan types went with salsa 0.28, whose `SalsaValue` needs none for a `'static` type, and the workspace holds no `unsafe` today), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
 - **Where a decision goes:** any decision between alternatives that took >15 minutes gets written
   down within 24h, **in the reference** — the page that states the rule, with the rejected
   alternative and what would bring it back in `design/discarded`, the sources named in
@@ -112,7 +112,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | Component | Version | Notes |
 |-----------|---------|-------|
 | Rust toolchain | 1.90 | per `rust-toolchain.toml`; bumped from 1.85 to unblock wasm-bindgen-cli 0.2.120 install |
-| salsa | 0.26 + `accumulator` feature | incremental query framework |
+| salsa | 0.28.5 + `accumulator` feature | incremental query framework; ≥0.28.5 for RUSTSEC-2026-0308. 0.28 returns by reference by default, so every tracked item that predates it names `returns(clone)` or `returns(copy)`, the 0.26 default |
 | rowan | 0.16 | lossless CST |
 | logos | 0.16 | lexer |
 | miette | 7.6 | diagnostics |

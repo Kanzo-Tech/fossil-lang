@@ -113,7 +113,13 @@ pub async fn dispatch<E: DuckExecutor>(
     catalog: Option<&str>,
     exec: &E,
 ) -> Result<Value> {
-    Context { manifest, exec, catalog }.dispatch(op).await
+    Context {
+        manifest,
+        exec,
+        catalog,
+    }
+    .dispatch(op)
+    .await
 }
 
 impl<E: DuckExecutor> Context<'_, E> {
@@ -661,7 +667,10 @@ mod tests {
             serde_json::from_value(run(&Operation::Schema(params), &m, &exec).unwrap()).unwrap();
         let person = r.vertices.iter().find(|v| v.name == "Person").unwrap();
         let names: Vec<_> = person.stats.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(names, person.fields.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(
+            names,
+            person.fields.iter().map(String::as_str).collect::<Vec<_>>()
+        );
         assert_eq!(person.stats[0].kind, FieldKind::Numeric);
         // The per-type answer is on the summaries; the narrowed slot stays empty.
         assert!(r.fields.is_empty());
@@ -676,7 +685,11 @@ mod tests {
             assert_eq!(FieldKind::of(temporal), FieldKind::Temporal, "{temporal}");
         }
         for categorical in ["string", "bool", "list<string>", ""] {
-            assert_eq!(FieldKind::of(categorical), FieldKind::Categorical, "{categorical}");
+            assert_eq!(
+                FieldKind::of(categorical),
+                FieldKind::Categorical,
+                "{categorical}"
+            );
         }
         assert!(FieldKind::Temporal.is_binnable());
         assert!(!FieldKind::Categorical.is_binnable());

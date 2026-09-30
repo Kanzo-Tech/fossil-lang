@@ -53,8 +53,16 @@ const BORDERS: &[(u16, u16, &str)] = &[
     ),
     (0, 65535, "the top-left corner"),
     (65535, 65535, "the top-right corner"),
-    (12345, 54321, "a second interior value, on the other side of the diagonal"),
-    (65535, 0, "the last code: the curve ends at the bottom-right corner"),
+    (
+        12345,
+        54321,
+        "a second interior value, on the other side of the diagonal",
+    ),
+    (
+        65535,
+        0,
+        "the last code: the curve ends at the bottom-right corner",
+    ),
 ];
 
 fn main() {
@@ -88,7 +96,11 @@ fn main() {
     let end = start + closing_brace(&text[start..]) + 1;
     let out = format!("{}{block}{}", &text[..start], &text[end..]);
     std::fs::write(&path, out).expect("write vectors.json");
-    println!("wrote {} hilbert2 vectors to {}", BORDERS.len(), path.display());
+    println!(
+        "wrote {} hilbert2 vectors to {}",
+        BORDERS.len(),
+        path.display()
+    );
 }
 
 /// The offset of the brace that closes the object the text opens with. No

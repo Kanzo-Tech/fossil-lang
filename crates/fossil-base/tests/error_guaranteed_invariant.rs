@@ -32,7 +32,7 @@ fn db_with_file() -> (FossilDb, SourceFile) {
 /// context. Accumulator state collects per-query; this is the only context
 /// in which `Diagnostic::accumulated(db, query_input)` returns the pushed
 /// diagnostic.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 fn tracked_emit_delay(db: &dyn Db, file: SourceFile, msg_offset: u32) -> u32 {
     let _ = file.text(db); // touch the input so the query has a real dependency
     let _ = delay_span_bug(db, Span::new(msg_offset, msg_offset + 1), "test error");
@@ -42,7 +42,7 @@ fn tracked_emit_delay(db: &dyn Db, file: SourceFile, msg_offset: u32) -> u32 {
 /// A tracked-query shim that calls [`bug`] (which delegates to
 /// [`delay_span_bug`] but prefixes the message). Used to verify the
 /// "internal compiler error: " prefix path also reaches the accumulator.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 fn tracked_emit_bug(db: &dyn Db, file: SourceFile) -> u32 {
     let _ = file.text(db);
     let _ = bug(db, Span::new(0, 1), "unreachable code reached");
@@ -84,7 +84,7 @@ fn bug_prefixes_internal_compiler_error_in_accumulated_diagnostic() {
 /// which is exactly the upstream behaviour we want (it forces the
 /// invariant "`ErrorGuaranteed` is only constructed via a tracked
 /// diagnostic-emitting path").
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 fn tracked_returns_eg(db: &dyn Db, file: SourceFile) -> u32 {
     let _ = file.text(db);
     let eg: fossil_base::ErrorGuaranteed = delay_span_bug(db, Span::new(0, 1), "x");
