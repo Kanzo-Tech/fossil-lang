@@ -51,11 +51,6 @@ futures = "0.3"
 web-time = "1"
 percent-encoding = "2"
 
-# === Input descriptors (declared here for inheritance) ===
-csv = "1.3"
-jsonschema = { version = "0.42", default-features = false }
-roxmltree = "0.20"
-
 # === Output descriptor (the rudof WASM spike resolved this 2026-05-15) ===
 # Major-pinned; allow patch drift. shex_validation intentionally NOT included — the checker walks
 # the ShEx AST only, and never runs ShEx validation.
@@ -88,17 +83,16 @@ strsim = "0.11"
 
 # === Sinks ===
 # `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc,
-# either of which would break the wasm32 gate). The `arrow` umbrella + `parquet` stay
+# either of which would break the wasm32 gate). The `arrow` umbrella stays
 # for native byte-level test deps.
-# Pinned to 58 — the latest published arrow/parquet line (59 is not on crates.io as of
+# Pinned to 58 — the latest published arrow line (59 is not on crates.io as of
 # 2026-05; the prior `= "59"` placeholders were aspirational and never resolved). 58.3.0
 # is what Cargo.lock already resolves transitively via duckdb's parquet.
 arrow-schema = "58"
 arrow = "58"
-parquet = "58"
 # `bytes` is what `object_store` puts and gets — the currency of every file
 # `fossil-df` writes and `fossil-storage` moves. Not a new crate in the tree:
-# `object_store` and `parquet` already depend on it, so this line names a
+# `object_store` and `datafusion`'s `parquet` already depend on it, so this line names a
 # version rather than adding a dependency. Pure Rust, so it costs the wasm32
 # gate nothing.
 bytes = "1"
@@ -122,20 +116,16 @@ lsp-server = "0.7"
 lsp-types = "0.97"
 crossbeam-channel = "0.5"
 
-# === CLI — NATIVE ONLY ===
-clap = { version = "4", features = ["derive"] }
-
 # === WASM ===
 wasm-bindgen = "=0.2.120"
 wasm-bindgen-futures = "0.4"
 serde-wasm-bindgen = "0.6"
 js-sys = "0.3"
-console_log = "1"
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 uuid = { version = "1", features = ["js"] }
 
-# === Logging (CLI + LSP — NATIVE ONLY) ===
+# === Logging (LSP — NATIVE ONLY) ===
 # default-features=false to avoid pulling mio, which breaks the WASM gate.
 # Only the env-filter and fmt features are needed.
 tracing = "0.1"
@@ -151,22 +141,18 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["e
 secrecy = { version = "0.10", features = ["serde"] }
 
 # Async runtime for the native hosts; each crate says where it keeps it.
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 # === Dev / testing ===
 insta = { version = "1", features = ["yaml"] }
 expect-test = "1"
 wasm-bindgen-test = "0.3"
 # Native temp dirs for integration tests that write Parquet to disk and read it
-# back via duckdb — `fossil-engine`, `fossil-df` and `fossil-introspect`, which
+# back via duckdb — `fossil-df`, `fossil-introspect` and `fossil-lsp`, which
 # are its three dev-dependents. (It named `fossil-layout` here and that crate
 # dropped it along with the `tests/graphar_decomp.rs` it served.) Native-only
 # (uses a real filesystem); no `tests/` target is built for wasm32.
 tempfile = "3"
-# The spill test (fossil-df tests/spill.rs) reads DataFusion's own log records:
-# an operator that spills says so through `log`, and nothing else survives the
-# run to be asserted on. Dev-dep only — fossil emits `tracing`, not `log`.
-log = "0.4"
 
 [workspace.lints.rust]
 unsafe_code = "deny"   # per-item #[allow] permitted with justification at third-party-trait integration boundaries (none today; FFI would be one)
