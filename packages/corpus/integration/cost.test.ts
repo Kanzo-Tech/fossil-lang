@@ -1,8 +1,8 @@
 /**
  * What a window costs, as a shape rather than a number.
  *
- * `window` was handed every tile URL in the corpus and pruned with a `WHERE` for as long as it
- * existed. It answered correctly every time, and the eighty-eight tests beside it never saw
+ * `window` — the first reader of a rectangle, before `scan` — was handed every tile URL in the corpus
+ * and pruned with a `WHERE` for as long as it existed. It answered correctly every time, and the eighty-eight tests beside it never saw
  * it: **a window returning the right answer looks exactly like a window returning it cheaply.** It
  * was found from outside the repository by timing one rectangle against two corpus sizes.
  *
@@ -11,9 +11,9 @@
  * here compares against a recorded figure. Every expectation is either "smaller than the corpus" or
  * "the same at ten times the size".
  *
- * The seam it measures through is the one the package already has. `open` asks a host for a
- * single `query` callback, so everything a reader does passes through one function and counting is
- * a decorator around it: no instrumentation inside `packages/corpus/src`, and nothing
+ * The seam it measures through is the one the package already has. `open` asks a host for one
+ * `Engine`, so everything a reader does passes through `Engine.query` and counting is a decorator
+ * around it: no instrumentation inside `packages/corpus/src`, and nothing
  * here can drift from what a real host would see.
  *
  * **Two corpora, written by the checker's own fixture** — `packages/corpus/guards/fixture.mjs`, which
@@ -32,41 +32,26 @@
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 
-import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
+import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import '../tests/boot.js';
-import { open, type Corpus } from '../src/index.js';
-import type { QueryFn, QueryRow } from '../src/query.js';
+import { open, type Corpus, type TileAddress } from '../src/index.js';
+import { duckdb } from '../tests/engine.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
 // conventions ask for, and it must not import a type of ours to be one.
 import { write } from '../guards/fixture.mjs';
-
-const require = createRequire(import.meta.url);
 
 /** Rows per tile, small enough that ten times the corpus is ten times the tiles and still cheap. */
 const CHUNK = 1024;
 const SMALL = 20_000;
 const BIG = 200_000;
 
-/**
- * One window's bill.
- *
- * `queries` is how many statements reached the host. `files` is the `.parquet` paths named in each
- * of them, in order — a window's first statement is the vertices and the rest are the orientations,
- * so the first entry is the one this file is about.
- */
-interface Bill {
-  readonly queries: number;
-  readonly files: readonly number[];
-}
-
-let corpora: { name: string; corpus: Corpus; tiles: number; bill: () => Bill; reset: () => void }[] = [];
+let corpora: { name: string; corpus: Corpus; tiles: number; seen: () => string[]; reset: () => void }[] = [];
 const scratch: string[] = [];
 
 afterAll(() => {
@@ -74,28 +59,9 @@ afterAll(() => {
 });
 
 beforeAll(async () => {
-
-  const dist = dirname(require.resolve('@duckdb/duckdb-wasm'));
-  const db = await createDuckDB(
-    {
-      mvp: {
-        mainModule: resolve(dist, './duckdb-mvp.wasm'),
-        mainWorker: resolve(dist, './duckdb-node-mvp.worker.cjs'),
-      },
-      eh: {
-        mainModule: resolve(dist, './duckdb-eh.wasm'),
-        mainWorker: resolve(dist, './duckdb-node-eh.worker.cjs'),
-      },
-    },
-    new ConsoleLogger(),
-    NODE_RUNTIME,
-  );
-  await db.instantiate();
-  const conn = db.connect();
-  conn.query(`SET parquet_metadata_cache = true`);
   const spill = mkdtempSync(join(tmpdir(), 'fossil-cost-spill-'));
   scratch.push(spill);
-  conn.query(`SET temp_directory = '${spill}'`);
+  const { engine } = await duckdb(spill);
 
   const root = mkdtempSync(join(tmpdir(), 'fossil-cost-'));
   scratch.push(root);
@@ -109,16 +75,19 @@ beforeAll(async () => {
     write(dir, { count, clusters: 256, layout: 'files', chunkSize: CHUNK });
 
     let seen: string[] = [];
-    const query: QueryFn = async (sql: string): Promise<QueryRow[]> => {
-      seen.push(sql);
-      return conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
+    const counted: Engine = {
+      ...engine,
+      query(sql, options) {
+        seen.push(sql);
+        return engine.query(sql, options);
+      },
     };
-    const corpus = await open(dir, { query });
+    const corpus = await open(dir, { engine: counted });
     corpora.push({
       name,
       corpus,
       tiles: Math.ceil(count / CHUNK),
-      bill: () => ({ queries: seen.length, files: seen.map((s) => (s.match(/\.parquet/g) ?? []).length) }),
+      seen: () => seen,
       reset: () => {
         seen = [];
       },
@@ -126,66 +95,90 @@ beforeAll(async () => {
   }
 }, 120_000);
 
+const filesIn = (sql: string): number => (sql.match(/\.parquet/g) ?? []).length;
+
 /**
- * The same rectangle at both sizes — a quarter of the extent from the corner the extent reports.
+ * The same rectangle at both sizes — a quarter of the extent from the corner the extent reports —
+ * read the way a view reads it: the scan's tasks at `Z`, then both halves of their edges.
  * Fixed ground, ten times the density, which is the control that makes the counts comparable.
  */
 async function windowed(entry: (typeof corpora)[number]) {
   const type = entry.corpus.types.vertices[0]!.type;
-  const extent = (await entry.corpus.extent(type))!;
-  const box = {
-    x: extent.minX,
-    y: extent.minY,
-    w: (extent.maxX - extent.minX) * 0.25,
-    h: (extent.maxY - extent.minY) * 0.25,
+  const set = entry.corpus.tileMatrix(type);
+  const { x, y, w, h } = set.extent!;
+  const scan = entry.corpus.scan({
     type,
-  };
-  await entry.corpus.rows(box); // the first read of a corpus also pays for the footer sweep
+    filter: {
+      and: [
+        { column: 'x', op: '>=', value: x },
+        { column: 'x', op: '<', value: x + w * 0.25 },
+        { column: 'y', op: '>=', value: y },
+        { column: 'y', op: '<', value: y + h * 0.25 },
+      ],
+    },
+    select: ['dense_id'],
+  });
+  const z = set.tileMatrices.length - 1;
+  const tasks: TileAddress[] = scan.plan().filter((t) => t.z === z);
   entry.reset();
-  const answer = await entry.corpus.rows(box);
-  return { answer, bill: entry.bill() };
+  const batches = await scan.read(tasks);
+  const vertices = [...entry.seen()];
+  entry.reset();
+  await entry.corpus.edges({ from: tasks, direction: 'src' });
+  await entry.corpus.edges({ from: tasks, direction: 'dst' });
+  const edges = [...entry.seen()];
+  const runs = tasks.filter((t, k) => k === 0 || t.tile !== tasks[k - 1]!.tile + 1).length;
+  return {
+    tasks,
+    runs,
+    landed: batches.filter((b) => b.numRows > 0).length,
+    rows: batches.reduce((n, b) => n + b.numRows, 0),
+    vertexFiles: vertices.reduce((n, sql) => n + filesIn(sql), 0),
+    vertices,
+    edges,
+  };
 }
 
 describe('what a window costs', () => {
   it('never names every tile in the corpus', async () => {
     for (const entry of corpora) {
-      const { answer, bill } = await windowed(entry);
+      const read = await windowed(entry);
       // The defect exactly: the vertex statement used to carry all of them, at every corpus size.
-      expect(bill.files[0], `${entry.name}: vertex statement`).toBeLessThan(entry.tiles);
-      expect(answer.vertices.length).toBeGreaterThan(0);
+      expect(read.vertexFiles, `${entry.name}: vertex statements`).toBeLessThan(entry.tiles);
+      expect(read.rows).toBeGreaterThan(0);
     }
   }, 120_000);
 
-  it('opens the tiles its own answer landed in, and about one more', async () => {
+  it('opens the tiles its plan named, and about one more than its answer landed in', async () => {
     for (const entry of corpora) {
-      const { answer, bill } = await windowed(entry);
-      // A tile whose box meets the rectangle and whose rows do not is opened and returns nothing.
+      const read = await windowed(entry);
+      // A tile whose box meets the rectangle and whose rows do not is planned and returns nothing.
       // That overshoot is geometry — how the boxes overlap the corner — and not a term in N, which
       // is why it is a constant here and the slope is asserted below.
-      expect(bill.files[0], `${entry.name}: vertex statement`).toBeGreaterThanOrEqual(answer.tiles.length);
-      expect(bill.files[0], `${entry.name}: vertex statement`).toBeLessThanOrEqual(answer.tiles.length + 2);
+      expect(read.vertexFiles, `${entry.name}: vertex statements`).toBe(read.tasks.length);
+      expect(read.tasks.length, `${entry.name}: planned`).toBeLessThanOrEqual(read.landed + 2);
     }
   }, 120_000);
 
   it('opens a smaller share of a bigger corpus', async () => {
     const shares: number[] = [];
     for (const entry of corpora) {
-      const { bill } = await windowed(entry);
-      shares.push(bill.files[0]! / entry.tiles);
+      const read = await windowed(entry);
+      shares.push(read.vertexFiles / entry.tiles);
     }
     // Ten times the corpus for the same rectangle: the share has to fall. It was 1.0 at both sizes
     // when the statement listed everything, which is the only way this can be flat.
     expect(shares[1]!).toBeLessThan(shares[0]!);
   }, 120_000);
 
-  it('is one statement for the vertices and one per orientation', async () => {
+  it('is one statement per run of tiles, for the vertices and for each orientation', async () => {
     for (const entry of corpora) {
-      const { bill } = await windowed(entry);
-      expect(bill.queries, `${entry.name}`).toBe(3);
-      // And the orientations were always addressed — this is the half that was already right, kept
-      // here so a change that broke it could not hide behind the vertex statement being fixed.
-      expect(bill.files[1]).toBeLessThan(entry.tiles);
-      expect(bill.files[2]).toBeLessThan(entry.tiles);
+      const read = await windowed(entry);
+      expect(read.vertices, `${entry.name}: vertices`).toHaveLength(read.runs);
+      expect(read.edges.length, `${entry.name}: edges`).toBeLessThanOrEqual(2 * read.runs);
+      // And the orientations were always addressed — kept here so a change that broke it could not
+      // hide behind the vertex statement being right.
+      for (const sql of read.edges) expect(filesIn(sql)).toBeLessThan(entry.tiles);
     }
   }, 120_000);
 });

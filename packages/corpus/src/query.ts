@@ -1,36 +1,13 @@
 /**
- * The capability this package asks a host for — **run SQL and hand back rows.**
+ * How the reader reaches the host's engine — **run SQL and hand back columns.**
  *
- * {@link QueryFn} is the engine and it is the only thing the door needs.
+ * The host brings `@fossil-lang/types`' `Engine` and nothing else: `Engine.query` takes an
+ * `AbortSignal` and answers in Arrow-shaped columns, so a stale statement is stopped rather than
+ * dropped and no answer is turned into objects and back. This package links no engine and decodes
+ * no Parquet; DuckDB-WASM in the browser is what `tests/engine.ts` drives.
  *
- * It lived in `client.ts` as the verb surface's `QueryFn`, reachable only through a barrel that
- * static-imports the wasm-bindgen output. {@link open} needs the same thing and must not need
- * the WASM, so the type moved here — one spelling, two callers, and `client.ts` re-exports it so
- * nothing downstream changed name.
- *
- * **Why a callback and not a decoder.** Three of the four members of the corpus API have to decode
- * Parquet, and this package has zero runtime dependencies. Bundling a decoder would make it a
- * driver; injecting one makes it a seam. The host already has the engine — DuckDB-WASM in the
- * browser (`tests/e2e.test.ts` boots it). And an engine buys more than
- * decoding: DuckDB prunes Parquet row groups off the footer statistics by itself, which is the one
- * piece of the read path that would otherwise have to be written twice.
- *
- * **One method, and that is deliberate.** A capability with five methods is a driver. Everything
- * the corpus API needs — the manifest YAMLs (`read_text`), the per-tile boxes (`parquet_metadata`)
- * and the payload (`read_parquet`, over a list of paths in one call) — is SQL over the same
- * filesystem layer, so a host that can reach the tiles can already reach the rest. That is measured
- * rather than assumed: `@duckdb/duckdb-wasm@1.32.0` bundles DuckDB v1.4.3 and answers all three
- * against local paths under `NODE_RUNTIME`, which is what `tests/corpus.test.ts` runs on, and the
- * `duckdb` binary the corpus guards use answers them too. **In particular there is no separate
- * `fetch` capability**, because there is nothing a separate one could reach that the engine cannot:
- * it has to see the tiles or it cannot answer a window.
- *
- * **What it does not carry, and what replaced it.** It has no cancellation, no columns and no
- * parameter binding. The first two are {@link Engine}'s now — `Engine.query` takes an
- * `AbortSignal` and answers in Arrow-shaped columns — and a corpus opened with an engine reads
- * through that; a `query` callback is kept for the members `/docs/design/backend` retires in step
- * 5, and a read through it drops a stale answer rather than stopping it. Binding is still absent,
- * and deliberately: every value reaches SQL as a literal through the one escaper each in `sql.ts`.
+ * **Binding is absent, deliberately**: every value reaches SQL as a literal through the one escaper
+ * each in `sql.ts`.
  */
 
 import type { Engine, Table } from '@fossil-lang/types';
@@ -39,31 +16,14 @@ import type { Engine, Table } from '@fossil-lang/types';
 export type QueryRow = Record<string, unknown>;
 
 /**
- * The host's query callback. Runs SQL and resolves the rows as plain objects.
- *
- * In keasy this wraps the Mosaic coordinator, e.g.:
- *
- * ```ts
- * const query: QueryFn = async (sql) => {
- *   const table = await coordinator.query(sql, { type: 'arrow' });
- *   return table.toArray().map((r) => r.toJSON());
- * };
- * ```
- *
- * (Mosaic returns an Arrow table; the binding's WASM core expects row objects, so the host adapts
- * once here — keeping this package free of an Arrow/Mosaic dependency.)
- *
- * **What a value in a row may be is not narrowed, and that is not laziness.** A host decides the width
- * it hands back: DuckDB-WASM gives a `UINTEGER` as a `Number` and a `UBIGINT` as a `BigInt`, and a
- * host that goes through JSON turns both into numbers. So a `dense_id` arrives as a `number`, a
- * `bigint` or a string depending on the host and the column's declared
- * width, and the corpus API coerces it at the boundary rather than trusting any of them.
+ * Rows as plain objects — what the verbs' WASM core and the members that walk objects take. Internal:
+ * a host hands in an {@link Engine}, and this is that engine's answer turned into rows.
  */
 export type QueryFn = (sql: string) => Promise<QueryRow[]>;
 
 /**
  * **A read's answer, in columns** — what `scan.read` hands back. apache-arrow's `Table` is one, so
- * an engine's answer passes through untouched; a `query` callback's rows are turned into one.
+ * an engine's answer passes through untouched.
  */
 export interface Batch {
   readonly numRows: number;
@@ -71,8 +31,8 @@ export interface Batch {
 }
 
 /**
- * **How every module reads**, whichever the host gave: rows for the members that walk objects,
- * batches for the ones a view draws.
+ * **How every module reads**: rows for the members that walk objects, batches for the ones a view
+ * draws.
  */
 export interface Reads {
   readonly rows: QueryFn;
@@ -115,19 +75,6 @@ export function engineReads(engine: Engine): Reads {
       const table = await (signal === undefined ? engine.query(sql) : engine.query(sql, { signal }));
       signal?.throwIfAborted();
       return table;
-    },
-  };
-}
-
-/** Reads through a `query` callback, which cannot stop a statement and so drops a stale answer. */
-export function callbackReads(query: QueryFn): Reads {
-  return {
-    rows: query,
-    async batch(sql, columns, signal) {
-      signal?.throwIfAborted();
-      const rows = await query(sql);
-      signal?.throwIfAborted();
-      return batchOf(rows, columns);
     },
   };
 }

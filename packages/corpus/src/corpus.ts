@@ -1,76 +1,33 @@
 /**
- * A corpus, opened from a URL — **the door**, with the addressing underneath and invisible.
+ * A corpus, opened — **the door**, with the addressing underneath and invisible.
  *
- * There were three entry points over one manifest and no rule for choosing between them, and this
- * is the one door now: `createGraphClient` is the transport it dispatches through, `addressManifests`
- * is the addressing it resolves with, and NEITHER is on the module surface — a consumer of
- * `@fossil-lang/corpus` reaches both through this function or not at all. `./index.ts` carries what
- * each internalisation cost. `/docs/design/one-door` has what the removal settled, and why the
- * camera grew this object rather than opening a fourth beside it.
- *
- * **`resolveCorpus` was the last of the three, and it is `corpus.addressing` now.** The addressing
- * is what every open resolves first, and a caller who wants the URLs reads them off the corpus it
- * opened — there is no engine-free door beside it. See {@link open} and {@link OpenOptions}.
- *
- * **The object has two halves and the line between them is not a spelling.** `extent`, `rows`,
- * `node` and `neighbours` compute which FILES to open and open those; `schema`, `relations` and
- * `executeSql` name a relation and let the engine decide. The camera is
- * addressed, not queried — an LOD is a different relation and not a filter — and `fossil-graph`'s
- * own crate doc states the same rule from the other side: *pruning is which bytes are read, and
- * that is the tiles' job, not a verb's*. See {@link Corpus.neighbours} for the one place the two
- * halves answer questions that look identical and are not.
- *
- * The addressing is not this. It returns URLs and leaves the consumer knowing what a tile is,
- * which container carries one, how to ask for footers and how to join CSR with CSC. That is exactly
- * the knowledge the handover asked not to need. Here — with an engine given — there are no tiles,
- * no `dense_id`, no curve, no `by_source`, no prefixes and no footers in the caller's face:
+ * One door over one manifest: `createGraphClient` is the transport it dispatches through and the
+ * addressing is what it resolves with, and NEITHER is on the module surface. `/docs/design/one-door`
+ * has what that settled, and `/docs/design/backend` the shape the door has: Apache Iceberg's read
+ * path over OGC tile matrices.
  *
  * ```ts
- * const corpus = await open(url, { query });
- * corpus.types                                  // what is inside
- * await corpus.rows({ x, y, w, h })             // vertices + edges, and whether that is all of them
+ * const corpus = await open(url, { engine });
+ * corpus.types                                   // what is inside
+ * const set = corpus.tileMatrix('Person')        // every zoom, every tile, its rows and its box
+ * const scan = corpus.scan({ type: 'Person', filter, select })
+ * await scan.read(scan.plan().filter(visible))   // a batch per tile, a run in one statement
+ * await corpus.edges({ from, direction: 'src' }) // the relations incident to those tiles
  * await corpus.node(iri)
- * await corpus.neighbours([iri], { depth: 2 })
- * await corpus.schema({ vertex_type: 'Person' })
  * ```
  *
- * **The one thing a host brings is an engine.** See `./query.ts` for why the capability is a single
- * `query` callback and not a bundled Parquet decoder: this package still has zero runtime
- * dependencies, and the engine is the one the host already has.
+ * **The object has two halves and the line between them is not a spelling.** `tileMatrix`, `scan`,
+ * `edges` and `node` compute which tiles to read and read those; `schema`, `relations` and
+ * `executeSql` name a relation and let the engine decide. `fossil-graph`'s own crate doc states the
+ * same rule from the other side: *pruning is which bytes are read, and that is the tiles' job, not
+ * a verb's*.
  *
- * That sentence used to end «and DuckDB's own footer pruning is the half of a windowed read nobody
- * has to write», which is true of DuckDB and false as a reason to prefer it. Measured on a
- * million-vertex corpus over HTTP: on the windowed read both DuckDB v1.5.3 and DataFusion 54 open
- * exactly **5 of 245** row groups, and DataFusion reads **2.6× fewer bytes** doing it, because
- * DuckDB's httpfs floors every footer read at 16 KiB. The pruning is not a differentiator. What
- * this package actually buys by taking a callback is that it links no engine at all.
- *
- * **Five things a consumer used to supply out of its own head.** Four are absorbed and the fifth is
- * declared, and each is argued where it bites rather than here:
- *
- * - **How many tiles** — from the manifest. `vertex_count` and `chunk_size` are both required
- *   fields, so `ceil(count / chunk_size)` settles it in one `read_text`. Before that there was no
- *   way: HTTP gives no directory, and the written alternative was to probe with `HEAD` until a 404.
- *   A corpus that declares no count is the one this refuses to open.
- * - **The payload vocabulary** — from the bytes, with one `DESCRIBE` per vertex type, and
- *   deliberately not from the payload projection's declared `properties`. See {@link open}
- *   for the count that decided it.
- * - **The `x`/`y` boxes** — from the Parquet footers, as {@link Corpus.extent}, which is a fifth
- *   member on a surface that names four because without it a caller holding only a URL has no
- *   coordinates to put in a rectangle.
- * - **Corpus identity** — the subject IRI, and this was the one with no owner. See
- *   {@link Corpus.node}: what it costs, what the tree contradicts itself about, and what would
- *   change it.
- * - **Which container** — from the manifest's `container`, because a reader over HTTP has no
- *   directory to list. Both are read; neither is globbed. See {@link open}.
- *
- * And one shape of corpus it refuses rather than guesses at: **an edge label incident twice to one
- * vertex type**, which the addressing's `tilesFor` cannot name unambiguously. See {@link Corpus.rows}.
+ * **The one thing a host brings is an engine** — `@fossil-lang/types`' `Engine`, which takes a
+ * signal and answers in columns. This package links none, and decodes no Parquet.
  */
 
-import type { Channel, CorpusAddressing, Direction } from './address.js';
-import type { EdgeAnswer, EdgesParams, Neighbourhood, NeighboursParams } from './edges.js';
-import type { Frame, FrameParams } from './frame.js';
+import type { Channel, Direction } from './address.js';
+import type { EdgeAnswer, EdgesParams } from './edges.js';
 import type {
   ExecuteSqlParams,
   ExecuteSqlResult,
@@ -78,9 +35,7 @@ import type {
   SchemaResult,
 } from './generated.js';
 import type { NodeParams, PlacedVertex } from './identity.js';
-import type { RowsAnswer, RowsParams } from './rows.js';
 import type { Scan, ScanParams } from './scan.js';
-import type { Extent } from './tile-manifest.js';
 import type { TileMatrixSet } from './tile-matrix.js';
 
 /** One column of a vertex payload, as the bytes declare it. */
@@ -98,14 +53,13 @@ export interface CorpusVertexType {
   readonly fields: readonly CorpusField[];
   /** The column an identity is read from, or `null` when the payload carries none. */
   readonly identity: string | null;
-  /** Whether the payload carries `x` and `y`, without which no box can be answered. */
+  /** Whether the payload carries `x` and `y`, without which a tile has no box. */
   readonly geometry: boolean;
   /**
    * Whether a lookup by identity on this type is a **seek** or a **scan**.
    *
-   * `true` when the corpus publishes an identity index: {@link Corpus.node} and
-   * {@link Corpus.neighbours}'s seed resolution read one index tile and then the payload tiles
-   * those addresses name. `false` when it does not: the same call reads the identity column of
+   * `true` when the corpus publishes an identity index: {@link Corpus.node} reads one index tile
+   * and then the payload tile the address names. `false` when it does not: the same call reads the identity column of
    * every tile of the type, which at five million vertices is about 40 MB.
    *
    * It is a property of the TYPE and not of a call, because that is the shape of the fact: a
@@ -197,24 +151,6 @@ export interface Corpus {
    */
   readonly types: CorpusTypes;
   /**
-   * The addressing underneath, for a caller that has outgrown this surface — a drawing path that
-   * wants tile URLs to fetch itself, for instance. Nothing here needs it.
-   */
-  readonly addressing: CorpusAddressing;
-  /**
-   * The bounding box of one vertex type's positions, or `null` when it has no geometry.
-   *
-   * **It comes from the Parquet footers**, which is one request per tile and then nothing: the same
-   * row-group statistics that let the engine skip tiles a window misses. It is therefore *believed*
-   * rather than verified — a box wider than its rows costs a read, a box narrower than its rows
-   * loses vertices, and only re-reading every page tells them apart. Cached after the first call.
-   *
-   * It is a fifth member on a specification that names four, and it is here because without it
-   * {@link Corpus.rows} cannot be called: a caller with a URL and nothing else has no coordinates
-   * to put in the box.
-   */
-  extent(type?: string): Promise<Extent | null>;
-  /**
    * **One vertex type's tile matrices** — OGC's `TileMatrixSet`: its extent, and one matrix per
    * `z`, coarsest first, the payload last, each listing every tile with its rows and its box.
    *
@@ -239,38 +175,8 @@ export interface Corpus {
    * answer per address, a run of consecutive tiles read in one statement.
    */
   edges(params: EdgesParams): Promise<readonly EdgeAnswer[]>;
-  /** The vertices in a rectangle and the edges among them, entire. */
-  rows(params: RowsParams): Promise<RowsAnswer>;
-  /**
-   * A rectangle at a resolution, ready to draw — **the door a camera goes through.**
-   *
-   * **This and {@link Corpus.rows} both take a rectangle and they are not the same question.**
-   * `rows` answers *what is here*: every row, every column, complete for incidence, no bound. This
-   * answers *what do I draw at this resolution*: a decimation, positions and one categorical,
-   * bounded by the level rather than by a cap. What keeps them one contract rather than two is
-   * that **a frame at level 0 selects the same vertices `rows` does over the same rectangle**,
-   * which `tests/frame.test.ts` asserts against the fixture.
-   *
-   * **Two names rather than one call whose return type moved with a flag**, which is what these
-   * two were. The level comes from {@link FrameParams.pixels} — the pyramid is complete, from
-   * level 1 to the level that fits one tile, so the derived level is always answerable and the
-   * second call that used to name it is gone. {@link FrameParams.level} still says one outright.
-   */
-  frame(params: FrameParams): Promise<Frame>;
   /** One vertex by identity, or `null`. */
   node(id: string, params?: NodeParams): Promise<PlacedVertex | null>;
-  /**
-   * Everything within `depth` hops of a set of identities.
-   *
-   * It turns the frontier into tile numbers by shifting the addresses it already holds, opens those
-   * adjacency tiles and no others, and does it once per hop — where a recursive CTE over the whole
-   * edge relation did not return in 45 seconds at a million vertices. It answers with placements,
-   * and admits {@link Answer.complete}, {@link Answer.gaps} and {@link Neighbourhood.frontier}: the
-   * orientations not read and the boundary the depth bound cut, because an answer whose outermost
-   * ring is missing its own edges looks whole in a count.
-   */
-  neighbours(ids: Iterable<string>, params?: NeighboursParams): Promise<Neighbourhood>;
-
   // ── The verbs ─────────────────────────────────────────────────────────────────────────────
   //
   // Methods whose SQL is written in Rust — `fossil-graph` — and dispatched here through
@@ -279,8 +185,8 @@ export interface Corpus {
   //
   // **They read a relation, where everything above reads tiles**, and that is the line between
   // the two halves of this object rather than a spelling difference. A verb's SQL names a table
-  // and lets the engine decide which bytes to open; `rows`, `extent` and `neighbours` compute
-  // which files to open and open those. `crates/fossil-graph/src/lib.rs` states the same rule
+  // and lets the engine decide which bytes to open; `scan`, `edges` and `node` compute which tiles
+  // to read and read those. `crates/fossil-graph/src/lib.rs` states the same rule
   // from the other side — *pruning is which bytes are read, and that is the tiles' job, not a
   // verb's*.
   //

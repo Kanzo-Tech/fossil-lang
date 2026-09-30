@@ -1,10 +1,10 @@
 /**
  * The zoom arithmetic — OGC 17-083r4's tile matrices over one vertex type: the payload at `z = Z`
  * and each rung of the cell pyramid below it, coarsest first, every tile listed with its rows and
- * its box. And, until step 5 retires `frame`, the level a canvas can show.
+ * its box.
  */
 
-import { CorpusManifestError, strideBits, type VertexAddress } from './address.js';
+import { CorpusManifestError, type Channel, type VertexAddress } from './address.js';
 import type { CorpusField } from './corpus.js';
 import type { Box, ColumnKind } from './expression.js';
 import { CorpusReadError } from './sql.js';
@@ -23,6 +23,12 @@ export interface TileMatrixSet {
   readonly extent: Box | null;
   /** The declared coordinate system `x` and `y` are in, by name, or `null` where none is. */
   readonly coordinates: string | null;
+  /**
+   * The channel a cell's `mode` and `purity` summarise — the cell tree's `mode_channel`, resolved
+   * against the type's `channels:` — or `null` where the type has no cells or the tree names none.
+   * A view colouring by its `column` colours a cell by `mode`.
+   */
+  readonly mode: Channel | null;
   /** Coarsest first: `tileMatrices[z].z === z`, and the last is the payload. */
   readonly tileMatrices: readonly TileMatrix[];
 }
@@ -190,6 +196,7 @@ export function zoomsOf(
     type: address.type,
     extent: union(zooms[top]!.matrix.tiles.map((t) => t.bbox)),
     coordinates: address.coordinates,
+    mode: address.channels.find((c) => c.name === address.cells?.modeChannel) ?? null,
     tileMatrices: zooms.map((z) => z.matrix),
   };
   return {
@@ -208,46 +215,3 @@ export function zoomsOf(
     },
   };
 }
-
-/**
- * The canvas a frame is drawn into. **A number a caller already has** — this was a budget in
- * marks, which is a number nothing outside this package produces and every host invented
- * differently out of the same two facts: how big the canvas is and how big a mark is.
- */
-export interface Pixels {
-  readonly w: number;
-  readonly h: number;
-}
-
-/**
- * **Which level a canvas of this size can show** — `frame`'s derivation, retired with it in step 5.
- *
- * `w · h` marks, because a pixel is the finest thing a canvas tells apart. What the rectangle
- * holds is estimated as the TILES it touches times `chunk_size`, capped by the type's own count
- * (`/docs/design/camera` measures why tiles and not area); a type with no geometry falls back to
- * its whole tile count, which the ceiling turns into the level the whole type needs. The
- * logarithm is in the pyramid's base through {@link strideBits}, because a level drops
- * `strideOf(k)` and not `2^k`.
- */
-export const levelForCanvas = (
-  type: VertexAddress,
-  touched: number | null,
-  pixels: Pixels | undefined,
-): number => {
-  if (pixels === undefined) {
-    throw new CorpusReadError(
-      'a frame needs a resolution: pass `pixels` for the canvas it is drawn into, or `level` to name one',
-    );
-  }
-  const marks = pixels.w * pixels.h;
-  if (!(marks > 0)) {
-    throw new CorpusReadError(
-      `a canvas is positive in both directions; got ${String(pixels.w)}×${String(pixels.h)}`,
-    );
-  }
-  const tiles = touched ?? Number(type.tiles ?? 0n);
-  const ceiling = type.count === null ? Number.POSITIVE_INFINITY : Number(type.count);
-  const estimate = Math.min(tiles * type.chunkSize || 0, ceiling);
-  if (!(estimate > marks)) return 0;
-  return Math.ceil(Math.log2(estimate / marks) / strideBits(1));
-};

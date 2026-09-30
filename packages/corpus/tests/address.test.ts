@@ -131,7 +131,7 @@ describe('tileOf', () => {
       container: 'files',
     })).vertexType();
     for (const { dense_id, tile } of vectors.tile_of.vectors) {
-      expect(person.tileOf(BigInt(dense_id)), dense_id).toBe(BigInt(tile));
+      expect(person.tilesOf([BigInt(dense_id)])[0], dense_id).toBe(BigInt(tile));
     }
   });
 
@@ -142,8 +142,8 @@ describe('tileOf', () => {
       vertexCount: '1',
       container: 'files',
     })).vertexType();
-    expect(() => person.tileOf(4096 as unknown as bigint)).toThrow(TypeError);
-    expect(() => person.tileOf(-1n)).toThrow(RangeError);
+    expect(() => person.tilesOf([4096 as unknown as bigint])[0]).toThrow(TypeError);
+    expect(() => person.tilesOf([-1n])[0]).toThrow(RangeError);
   });
 
   it('takes the corpus’s own shift, and not a default', async () => {
@@ -151,10 +151,10 @@ describe('tileOf', () => {
     // shift is a manifest field and not a constant this package carries.
     const wide = corpusOf({ prefix: 'v', chunkSize: 4096, vertexCount: '1', container: 'files' });
     const narrow = corpusOf({ prefix: 'v', chunkSize: 64, vertexCount: '1', container: 'files' });
-    expect(wide.vertexType().tileOf(64n)).toBe(0n);
-    expect(narrow.vertexType().tileOf(64n)).toBe(1n);
-    expect(wide.vertexType().shift).toBe(12);
-    expect(narrow.vertexType().shift).toBe(6);
+    expect(wide.vertexType().tilesOf([64n])[0]).toBe(0n);
+    expect(narrow.vertexType().tilesOf([64n])[0]).toBe(1n);
+    expect(wide.vertexType().chunkSize).toBe(4096);
+    expect(narrow.vertexType().chunkSize).toBe(64);
   });
 });
 
@@ -249,7 +249,7 @@ describe('the declared count', () => {
   });
 });
 
-describe('corpus.addressing — the arithmetic over the manifests', () => {
+describe('the addressing — the arithmetic over the manifests', () => {
   it('addresses vertex tiles under the declared prefix', async () => {
     const corpus = await addressingOf('/bench/1000000', manifestFiles);
     const person = corpus.vertexType();
@@ -264,7 +264,7 @@ describe('corpus.addressing — the arithmetic over the manifests', () => {
     );
     expect(person.type).toBe('Person');
     expect(person.chunkSize).toBe(declared);
-    expect(2 ** person.shift).toBe(declared);
+    expect(person.chunkSize).toBe(declared);
     // The fixture declares `container: rowgroups`, which is what fossil writes: every tile of the
     // set names one file and the footer's box on `dense_id` says which row groups are the tile.
     // The ordinal-in-the-name half of the claim is `packages/corpus/integration/containers.test.ts`'s
@@ -272,8 +272,8 @@ describe('corpus.addressing — the arithmetic over the manifests', () => {
     expect(person.tileUrl(0)).toBe('/bench/1000000/vertex/Person/tiles.parquet');
     // The boundary is what the shift is FOR, so it is asserted at the boundary
     // wherever the fixture puts it.
-    expect(person.tileOf(BigInt(declared) - 1n)).toBe(0n);
-    expect(person.tileOf(BigInt(declared))).toBe(1n);
+    expect(person.tilesOf([BigInt(declared) - 1n])[0]).toBe(0n);
+    expect(person.tilesOf([BigInt(declared)])[0]).toBe(1n);
   });
 
   it('enumerates every addressable file once, payload first, for a host to grant whole', async () => {
@@ -282,11 +282,10 @@ describe('corpus.addressing — the arithmetic over the manifests', () => {
     expect(new Set(files).size).toBe(files.length);
     const want: string[] = [];
     for (const type of addressing.types) {
-      for (const p of type.projections) want.push(...type.projectionFiles(p.scale));
-      want.push(...(type.index?.files() ?? []));
+      want.push(...type.files(), ...(type.index?.files() ?? []));
     }
     for (const edge of addressing.edges) {
-      for (const p of edge.projections) want.push(...edge.projectionFiles(p.scale, p.direction!));
+      for (const d of edge.directions) want.push(...edge.adjacencyFiles(d));
     }
     expect(files).toEqual([...new Set(want)]);
     expect(files).toContain(addressing.types[0]!.tileUrl(0));
@@ -308,21 +307,6 @@ describe('corpus.addressing — the arithmetic over the manifests', () => {
     expect(knows.directions).toEqual([]);
     expect(knows.adjacency('src')).toBeNull();
     expect(knows.adjacency('dst')).toBeNull();
-  });
-
-  it('reports an unaddressable orientation as a gap rather than drawing nothing', async () => {
-    const corpus = await addressingOf('', manifestFiles);
-    const addressed = corpus.tilesFor({ tiles: [0, 1], directions: ['src', 'dst'] });
-
-    // One file for the two tiles, distinct: under `rowgroups` a list naming it once per tile is
-    // one scan per tile.
-    expect([...addressed.vertexUrls]).toEqual(['vertex/Person/tiles.parquet']);
-    expect([...addressed.edgeUrls]).toEqual([]);
-    expect(addressed.complete).toBe(false);
-    expect(addressed.gaps).toEqual([
-      { edgeType: 'knows', direction: 'src', reason: 'not-declared' },
-      { edgeType: 'knows', direction: 'dst', reason: 'not-declared' },
-    ]);
   });
 
   it('names the file when a manifest it was promised is not there', async () => {
@@ -355,7 +339,7 @@ describe('corpus.addressing — the arithmetic over the manifests', () => {
     // this format deleted. The addressing is resolved once, at open, and every URL after that is
     // arithmetic over it.
     const corpus = await addressingOf('', manifestFiles);
-    expect(corpus.tilesFor({ tiles: [7] }).vertexUrls).toEqual(['vertex/Person/tiles.parquet']);
+    expect(corpus.vertexType().tileUrl(7)).toBe('vertex/Person/tiles.parquet');
   });
 
   it('refuses a vertex type the manifest does not declare, and names the ones it does', async () => {
@@ -368,114 +352,30 @@ describe('corpus.addressing — the arithmetic over the manifests', () => {
 });
 
 /**
- * The `projections:` list — **the one vocabulary, where there were four.**
- *
- * `property_groups`, a vertex's `levels`, `adj_lists` and an edge's own `levels` were one rule
- * written four times, and each entry here is `{ path, scale, … }` instead. `path` and `scale` are
- * OME-NGFF's own spellings, and the shape below is not invented here: `fossil-sinks` emits it.
- *
- * **What is being defended is a silent failure and not a parse error.** A corpus WITH a pyramid
- * that resolves to a corpus without one throws nothing, diagnoses nothing, and opens a million rows
- * to draw fifteen thousand — the same failure `index:` had. Which is why the assertions below are on
- * the numbers surviving rather than on a URL.
+ * The `projections:` list, as the reader refuses it. The payload is the entry at `scale: 1`, and a
+ * scale is a product the reader shifts by — so one that is no power of two is refused, and a list
+ * with no `scale: 1` has no payload to address.
  */
-describe('projections — the written pyramid', () => {
-  /**
-   * A million vertices at 4,096 to a tile is the COMPLETE plan `VertexLevels::planned` writes:
-   * levels 1 to 4, which reach the document as the scales 4, 16, 64 and 256 — every level down to
-   * the one that fits a single tile, because in quarters the whole pyramid costs a third of the
-   * type and there is nothing left for a window or a floor to bound. **The exponent stays on the
-   * writer's side and what crosses is the product**, which is why no `4 ** k` appears here.
-   */
-  const level = (k: number, scale: number): string =>
-    `- path: l${k}/\n  scale: ${scale}\n  file_type: parquet\n`;
-  const withLevels = (extra = `${level(1, 4)}${level(2, 16)}${level(3, 64)}${level(4, 256)}`) => {
+describe('projections — what the reader refuses', () => {
+  const withProjection = (entry: string) => {
     const yaml = manifestFiles['vertex/Person.vertex.yml']!;
-    // Appended to the type's own `projections:` list, whose first entry is the payload — the
-    // projection at `scale: 1`, in the same list rather than beside it.
-    const mutated = yaml
-      .replace(/^vertex_count: \d+$/m, 'vertex_count: 1000000')
-      .replace(/^version: gar\/v1$/m, `${extra}version: gar/v1`);
-    // `files`, because what is asserted below is the filename STEM — unified to `chunk{k}` for
-    // every projection, the adjacency included, leaving `tile{k}` to the identity index alone.
-    // Under the fixture's own `rowgroups` a set is one file and there is no stem to be wrong about.
-    const index = manifestFiles['graph.graph.yml']!.replace(
-      /^container: rowgroups$/m,
-      'container: files',
-    );
-    // The mutations have to have happened, for the reason the chunk_size test states at length.
-    expect(mutated).toContain('vertex_count: 1000000');
+    const mutated = yaml.replace(/^version: gar\/v1$/m, `${entry}version: gar/v1`);
     expect(mutated).not.toBe(yaml);
-    expect(index).toContain('container: files');
-    return { ...manifestFiles, 'graph.graph.yml': index, 'vertex/Person.vertex.yml': mutated };
+    return { ...manifestFiles, 'vertex/Person.vertex.yml': mutated };
   };
 
-  it('sees the scales, which are the whole of what it cannot derive', async () => {
-    const [person] = (await addressingOf('', withLevels())).types;
-    // The payload is IN the list and not beside it — that is the claim the vocabulary rests on.
-    expect(person!.projections.map((p) => p.scale)).toEqual([1, 4, 16, 64, 256]);
-    // No second `chunk_size`: the cut does not change with the scale.
-    expect(person!.projections.map((p) => p.chunkSize)).toEqual([4096, 4096, 4096, 4096, 4096]);
-    expect(person!.projection(64)).not.toBeNull();
-    expect(person!.projection(1024)).toBeNull();
-  });
-
-  it('addresses a projection tile by the same shift, with log2(scale) more bits falling off', async () => {
-    const person = (await addressingOf('', withLevels())).types[0]!;
-    // Scale 64 keeps one id in 64, so a tile of 4,096 of its rows spans 262,144 payload ids: the
-    // payload's own shift of 12 plus the 6 bits the scale carries.
-    const coarse = person.projection(64)!;
-    expect(coarse.shift).toBe(18);
-    expect(coarse.tileOf(0n)).toBe(0n);
-    expect(coarse.tileOf(262_143n)).toBe(0n);
-    expect(coarse.tileOf(262_144n)).toBe(1n);
-    expect(coarse.tileUrl(1)).toBe('vertex/Person/l3/chunk1.parquet');
-    // `ceil(1,000,000 / 64)` rows, which is four tiles of 4,096 — the pyramid's cost in tiles,
-    // and the number the manifest's own `planned` was written against.
-    expect(coarse.rows).toBe(15_625n);
-    expect(coarse.tiles).toBe(4n);
-    expect(person.projectionFiles(64)).toEqual([
-      'vertex/Person/l3/chunk0.parquet',
-      'vertex/Person/l3/chunk1.parquet',
-      'vertex/Person/l3/chunk2.parquet',
-      'vertex/Person/l3/chunk3.parquet',
-    ]);
-    // The coarsest the plan reaches fits one tile, which is where it stops: coarser buys nothing,
-    // because one tile is already one range request and the whole level is the minimum read.
-    expect(person.projection(256)!.rows).toBe(3_907n);
-    expect(person.projection(256)!.tiles).toBe(1n);
-  });
-
-  it('refuses to address a scale nobody wrote, and says what answers it instead', async () => {
-    const person = (await addressingOf('', withLevels())).types[0]!;
-    expect(() => person.projectionFiles(1024)).toThrow('at scales 1, 4, 16, 64, 256 and not 1024');
-    expect(() => person.projectionFiles(1024)).toThrow('the predicate over the payload');
-  });
-
   it('refuses a scale no shift addresses, because a projection is never a division', async () => {
-    const files = withLevels('- path: l1/\n  scale: 3\n  file_type: parquet\n');
+    const files = withProjection('- path: coarse/\n  scale: 3\n  file_type: parquet\n');
     await expect(addressingOf('', files)).rejects.toThrow(CorpusManifestError);
-    await expect(addressingOf('', files)).rejects.toThrow(
-      'scale 3, which no shift addresses',
-    );
+    await expect(addressingOf('', files)).rejects.toThrow('scale 3, which no shift addresses');
   });
 
   it('refuses a type with no payload, which the count and the cut describe and nothing addresses', async () => {
-    // A `projections:` list that names no `scale: 1` is not a corpus without a pyramid; it is one
-    // whose rows have no URL at all, and the two must not resolve to the same thing.
     const yaml = manifestFiles['vertex/Person.vertex.yml']!;
-    const mutated = yaml.replace(/^- path: ''\n  scale: 1\n/m, `${'- path: l1/'}\n  scale: 4\n`);
+    const mutated = yaml.replace(/^- path: ''\n  scale: 1\n/m, `- path: coarse/\n  scale: 4\n`);
     expect(mutated).not.toBe(yaml);
     const files = { ...manifestFiles, 'vertex/Person.vertex.yml': mutated };
-    await expect(addressingOf('', files)).rejects.toThrow(
-      'no projection at scale 1',
-    );
+    await expect(addressingOf('', files)).rejects.toThrow('no projection at scale 1');
     await expect(addressingOf('', files)).rejects.toThrow('no payload to address');
-  });
-
-  it('reports the payload alone when the manifest declares no pyramid, which is a corpus and not a gap', async () => {
-    const [person] = (await addressingOf('', manifestFiles)).types;
-    expect(person!.projections.map((p) => p.scale)).toEqual([1]);
-    expect(person!.projection(4)).toBeNull();
   });
 });

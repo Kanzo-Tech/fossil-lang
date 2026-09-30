@@ -2020,7 +2020,6 @@ name = "fossil-graph-wasm"
 version = "0.1.0"
 dependencies = [
  "fossil-graph",
- "fossil-sinks",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",

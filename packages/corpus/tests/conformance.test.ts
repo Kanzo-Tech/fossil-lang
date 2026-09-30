@@ -11,13 +11,14 @@ import { addressManifests, type Direction, type CorpusAddressing } from '../src/
  * The conformance corpus, executed against the published module.
  *
  * `packages/corpus/conformance/expected.json` is a table of addresses — what a reader must compose from
- * a manifest and what it must refuse to compose. This file runs it through the wasm32 build that
- * actually ships, which is a different claim from `crates/fossil-graph/tests/conformance.rs`
+ * a manifest and what it must refuse to compose. This file runs the part the published reader asks
+ * — a payload tile, an adjacency tile, the refusals — through the wasm32 build that actually ships, which is a different claim from `crates/fossil-graph/tests/conformance.rs`
  * running the same reader natively: `usize` is 64 bits there and 32 here, and 2^53 is where a port
  * that went through a double stops being exact. `packages/corpus/conformance/verify.mjs` is the leg
  * that is a separate implementation, in plain Node with no npm at all, because the format's claim
  * is that a reader who has never heard of this package can open the same corpus. None of the three
- * wrote the table.
+ * wrote the table. The `projections` and `windows` rows are the format's, and the published reader
+ * asks neither: `conformance/reader.mjs` and `crates/fossil-graph/tests/conformance.rs` execute them.
  *
  * The `corpus` case has bytes: 300 vertices in five tiles of 64, both orientations tiled, passing
  * all fifteen guards. Every address it lists is checked to name a file that is on disk, which is
@@ -59,33 +60,8 @@ interface Case {
     path: string;
   }>;
   refused?: Array<{ edge_type: string; direction: Direction }>;
-  windows?: Array<{
-    type?: string;
-    tiles: number[];
-    directions: Direction[];
-    vertex_urls: string[];
-    edge_urls: string[];
-    complete: boolean;
-    gaps: Array<{ edge_type: string; direction: Direction; reason: string }>;
-  }>;
   throws?: Array<{ vertex_type: string; message: string }>;
   resolve_throws?: string;
-  /**
-   * The projections a subject declares, and NO OTHER — keyed by `type` for a vertex, by
-   * `edge_type` plus `direction` for one orientation of a relation. One shape for both, because
-   * there is one vocabulary.
-   */
-  projections?: Array<{
-    type?: string;
-    edge_type?: string;
-    direction?: Direction;
-    scales: number[];
-    sizes?: Array<{ scale: number; rows: string; tiles: string }>;
-    tile_of?: Array<{ scale: number; dense_id: string; tile: string }>;
-    addresses?: Array<{ scale: number; tile: number; path: string }>;
-    files?: Array<{ scale: number; paths: string[] }>;
-    refused?: Array<{ scale: number; message: string }>;
-  }>;
 }
 
 const table = JSON.parse(readFileSync(join(CONFORMANCE, 'expected.json'), 'utf8')) as {
@@ -105,20 +81,6 @@ function manifestFiles(root: string): Record<string, string> {
 }
 
 describe('the conformance corpus', () => {
-  it('declares a pyramid somewhere, so the projection assertions are not an empty loop', () => {
-    // Its own non-vacuity check, and it earned one: the `levels` case was deleted from
-    // `expected.json` by a `git checkout` of a file that was not yet in the index, and every level
-    // assertion in all three harnesses ran over an empty list and stayed green — the cases with no
-    // pyramid carry every other count.
-    const addresses = table.cases.flatMap((c) =>
-      (c.projections ?? []).flatMap((p) => p.addresses ?? []),
-    );
-    expect(addresses.length).toBeGreaterThanOrEqual(4);
-    // And a scale above 1 somewhere: a table of payloads passes against a reader that never
-    // learned a coarser projection exists.
-    expect(addresses.some((a) => a.scale > 1)).toBe(true);
-  });
-
   it('has cases', () => {
     expect(table.cases.length).toBeGreaterThan(0);
   });
@@ -183,7 +145,7 @@ describe('the conformance corpus', () => {
       if ((expected.tile_of ?? []).length > 0) {
         it('shifts a dense_id into the tile the table names', () => {
           for (const v of expected.tile_of!) {
-            expect(corpus.vertexType(v.type).tileOf(BigInt(v.dense_id))).toBe(BigInt(v.tile));
+            expect(corpus.vertexType(v.type).tilesOf([BigInt(v.dense_id)])[0]).toBe(BigInt(v.tile));
           }
         });
       }
@@ -216,123 +178,6 @@ describe('the conformance corpus', () => {
             expect(edge.adjacency(refused.direction)).toBeNull();
             expect(edge.directions).not.toContain(refused.direction);
           }
-        });
-      }
-
-      /**
-       * Every subject of the corpus, in the ONE vocabulary — a vertex type and one orientation of
-       * a relation answering the same four questions, because a level, an adjacency and a payload
-       * are all a `path` and a `scale` now.
-       */
-      const subjects = [
-        ...corpus.types.map((t) => ({
-          name: t.type,
-          direction: null as Direction | null,
-          projections: t.projections,
-          projection: (scale: number) => t.projection(scale),
-          files: (scale: number) => t.projectionFiles(scale),
-        })),
-        ...corpus.edges.flatMap((e) =>
-          (['src', 'dst'] as const).map((d) => ({
-            name: e.edgeType,
-            direction: d as Direction | null,
-            projections: e.projections.filter((p) => p.direction === d),
-            projection: (scale: number) => e.projection(scale, d),
-            files: (scale: number) => e.projectionFiles(scale, d),
-          })),
-        ),
-      ];
-      const declared = (subject: (typeof subjects)[number]) =>
-        (expected.projections ?? []).find((p) =>
-          subject.direction === null
-            ? p.type === subject.name
-            : p.edge_type === subject.name && p.direction === subject.direction,
-        );
-
-      it('reports the projections the manifest declares, and no scale it invented', () => {
-        // A reader that invented a scale would compose `l6/chunk0.parquet` against a corpus that
-        // never wrote one — a 404 for a level the predicate over the payload answers. The default
-        // the table does not spell out is a payload, or an orientation the corpus does not publish
-        // at all; anything coarser is a scale the reader made up.
-        for (const subject of subjects) {
-          const want = declared(subject);
-          expect(
-            subject.projections.map((p) => p.scale),
-            subject.direction === null ? subject.name : `${subject.name}/${subject.direction}`,
-          ).toEqual(want?.scales ?? subject.projections.map(() => 1));
-        }
-      });
-
-      for (const subject of subjects) {
-        const want = declared(subject);
-        if (want === undefined) continue;
-        const label =
-          subject.direction === null ? subject.name : `${subject.name}/${subject.direction}`;
-
-        describe(`the projections of ${label}`, () => {
-          if ((want.sizes ?? []).length > 0) {
-            it('holds what the scale selects, counted', () => {
-              for (const size of want.sizes!) {
-                const found = subject.projection(size.scale)!;
-                expect(found.rows, `scale ${size.scale}`).toBe(BigInt(size.rows));
-                expect(found.tiles, `scale ${size.scale}`).toBe(BigInt(size.tiles));
-                // No second `chunk_size` anywhere: the cut does not change with the scale.
-                expect(found.chunkSize).toBe(subject.projection(1)!.chunkSize);
-              }
-            });
-          }
-
-          if ((want.tile_of ?? []).length > 0) {
-            it('shifts a dense_id by the payload shift plus log2(scale)', () => {
-              for (const v of want.tile_of!) {
-                expect(subject.projection(v.scale)!.tileOf(BigInt(v.dense_id))).toBe(
-                  BigInt(v.tile),
-                );
-              }
-            });
-          }
-
-          if ((want.addresses ?? []).length > 0) {
-            it('composes the addresses in the table', () => {
-              for (const address of want.addresses!) {
-                const url = subject.projection(address.scale)!.tileUrl(address.tile);
-                expect(url).toBe(address.path);
-                if (expected.on_disk) expect(existsSync(join(root, url))).toBe(true);
-              }
-            });
-          }
-
-          for (const set of want.files ?? []) {
-            it(`enumerates scale ${set.scale}`, () => {
-              expect([...subject.files(set.scale)]).toEqual(set.paths);
-            });
-          }
-
-          for (const refused of want.refused ?? []) {
-            it(`refuses to address scale ${refused.scale}, which nobody wrote`, () => {
-              expect(() => subject.files(refused.scale)).toThrow(refused.message);
-            });
-          }
-        });
-      }
-
-      for (const [index, expectation] of (expected.windows ?? []).entries()) {
-        it(`window ${index}: ${expectation.directions.join('+')} over ${expectation.tiles.length} tile(s)`, () => {
-          const got = corpus.tilesFor({
-            type: expectation.type,
-            tiles: expectation.tiles,
-            directions: expectation.directions,
-          });
-          expect([...got.vertexUrls]).toEqual(expectation.vertex_urls);
-          expect([...got.edgeUrls]).toEqual(expectation.edge_urls);
-          expect(got.complete).toBe(expectation.complete);
-          expect(
-            got.gaps.map((g) => ({
-              edge_type: g.edgeType,
-              direction: g.direction,
-              reason: g.reason,
-            })),
-          ).toEqual(expectation.gaps);
         });
       }
 

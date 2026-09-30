@@ -1,44 +1,34 @@
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 import './boot.js';
-import { open, type Corpus, type Frame } from '../src/index.js';
-import type { QueryFn, QueryRow } from '../src/query.js';
+import { open, type Corpus, type EdgeAnswer } from '../src/index.js';
+import { duckdb } from './engine.js';
 
 /**
- * **A frame is one vertex type's `dense_id` space, and a cross-type relation is not in it.**
+ * **A tile is one vertex type's `dense_id` space, and a cross-type relation is not in it.**
  *
  * `Author authored Paper` is tiled by `Author`'s `dense_id` in `by_source` — which is a correct
- * ADDRESS, and it is why `fossil_graph::plan::ReadPlan::window` hands that file to a window over
- * `Author`. What the rows inside it carry is a `dst_dense` in `Paper`'s numbering, and the two
- * numberings are both `BIGINT` and both start at zero. So a frame that joins `dst_dense` against
- * the drawn type's `dense_id` — or that asks whether it is one of the visible ids — matches, every
- * time, and draws a line between two vertices that are not related to each other at all. No error,
- * no warning, and the line is indistinguishable from a real one.
+ * ADDRESS. What the rows inside it carry is a `dst_dense` in `Paper`'s numbering, and the two
+ * numberings are both `BIGINT` and both start at zero. So a view that joins `dst_dense` against
+ * the drawn type's `dense_id` matches, every time, and draws a line between two vertices that are
+ * not related to each other at all. No error, no warning, and the line is indistinguishable from a
+ * real one — which is why `edges` declines that relation unless the call names it.
  *
  * **The fixture is the conformance corpus, relabelled.** Two copies of `Person` become `Author` and
  * `Paper`, and two copies of `Person knows Person` become `Author knows Author` and
  * `Author authored Paper`. That is not a contrivance of the collision: `dense_id` is dense from
  * zero within EVERY vertex type, so two types of similar size collide on almost every id they have.
- * What it buys is the control — the same bytes, framed twice — so the invariant can be stated
+ * What it buys is the control — the same bytes, read twice — so the invariant can be stated
  * without counting anything:
  *
- * > adding a relation that leaves the drawn type changes nothing about the picture.
- *
- * Both shapes of the read are asserted, because they compose their edge URLs differently and
- * therefore fail differently: level 0 joins the adjacency's two id columns against the drawn tiles,
- * and a level read takes the coordinates off the edge row and asks only whether each end is a
- * visible `dense_id`.
+ * > adding a relation that leaves the drawn type changes nothing about the edges a tile answers.
  */
 
-const require = createRequire(import.meta.url);
 const CONFORMANCE = fileURLToPath(new URL('../conformance/corpus', import.meta.url));
 
 /** The manifest's own numbers, so a hard-coded stride shows up as a failure. */
@@ -47,11 +37,10 @@ const CHUNK_SIZE = 64;
 const EDGE_COUNT = 596;
 
 const scratch: string[] = [];
-let query: QueryFn;
 let person: Corpus;
 let relabelled: Corpus;
 
-/** The projection block every copy of `Person`'s payload carries, pyramid included. */
+/** The projection block every copy of `Person`'s payload carries. */
 const VERTEX_PROJECTIONS = `projections:
 - path: ''
   scale: 1
@@ -60,14 +49,6 @@ const VERTEX_PROJECTIONS = `projections:
   - name: subject
     data_type: string
     is_primary: true
-- path: l1/
-  scale: 4
-  file_type: parquet
-  properties: []
-- path: l2/
-  scale: 16
-  file_type: parquet
-  properties: []
 version: gar/v1
 `;
 
@@ -86,25 +67,13 @@ projections:
   ordered: true
   file_type: parquet
   properties: []
-- path: l1/
-  scale: 4
-  aligned_by: src
-  ordered: true
-  file_type: parquet
-  properties: []
-- path: l2/
-  scale: 16
-  aligned_by: src
-  ordered: true
-  file_type: parquet
-  properties: []
 version: gar/v1
 `;
 
 /**
  * The conformance corpus's bytes under four names: two vertex types and two relations, one of
- * which leaves the type it starts at. Nothing is generated — a fourth writer of Parquet in this
- * repository is what `packages/corpus/integration/frame-levels.test.ts` says a test must not become.
+ * which leaves the type it starts at. Nothing is generated: a test is not a fourth writer of Parquet
+ * in this repository.
  */
 function relabel(): string {
   const root = mkdtempSync(join(tmpdir(), 'fossil-cross-type-'));
@@ -153,88 +122,48 @@ afterAll(() => {
 });
 
 beforeAll(async () => {
-  const dist = dirname(require.resolve('@duckdb/duckdb-wasm'));
-  const db = await createDuckDB(
-    {
-      mvp: {
-        mainModule: resolve(dist, './duckdb-mvp.wasm'),
-        mainWorker: resolve(dist, './duckdb-node-mvp.worker.cjs'),
-      },
-      eh: {
-        mainModule: resolve(dist, './duckdb-eh.wasm'),
-        mainWorker: resolve(dist, './duckdb-node-eh.worker.cjs'),
-      },
-    },
-    new ConsoleLogger(),
-    NODE_RUNTIME,
-  );
-  await db.instantiate();
-  const conn = db.connect();
-  conn.query(`SET parquet_metadata_cache = true`);
   const spill = mkdtempSync(join(tmpdir(), 'fossil-cross-type-spill-'));
   scratch.push(spill);
-  conn.query(`SET temp_directory = '${spill}'`);
-  query = async (sql: string): Promise<QueryRow[]> =>
-    conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
-  person = await open(CONFORMANCE, { query });
-  relabelled = await open(relabel(), { query });
+  const { engine } = await duckdb(spill);
+  person = await open(CONFORMANCE, { engine });
+  relabelled = await open(relabel(), { engine });
 }, 120_000);
 
-/** The whole extent, nudged past the far edge so the box holds every vertex. */
-const whole = async (corpus: Corpus, type: string) => {
-  const extent = (await corpus.extent(type))!;
-  return {
-    x: extent.minX,
-    y: extent.minY,
-    w: extent.maxX - extent.minX + 1,
-    h: extent.maxY - extent.minY + 1,
-  };
+/** Every tile of one type's payload, read in one orientation. */
+const everyTile = (corpus: Corpus, type: string, direction: 'src' | 'dst'): Promise<readonly EdgeAnswer[]> => {
+  const matrices = corpus.tileMatrix(type).tileMatrices;
+  const z = matrices.length - 1;
+  const from = matrices[z]!.tiles.map((t) => ({ type, z, tile: t.tile }));
+  return corpus.edges({ from, direction });
 };
 
-const linksOf = (frame: Frame): number[] => [...frame.links];
+const linesOf = (answers: readonly EdgeAnswer[]): string[] =>
+  answers.flatMap((a) =>
+    a.batches.flatMap((b) => Array.from(b.src, (src, i) => `${b.edgeType} ${src} ${b.dst[i]}`)),
+  );
 
-it.each([0, 1])(
-  'a relation that leaves the drawn type changes no line of level %i',
-  async (level) => {
-    const control = await person.frame({
-      type: 'Person',
-      level,
-      pixels: 1024,
-      ...(await whole(person, 'Person')),
-    });
-    const drawn = await relabelled.frame({
-      type: 'Author',
-      level,
-      pixels: 1024,
-      ...(await whole(relabelled, 'Author')),
-    });
+it('a relation that leaves the drawn type changes no edge a tile answers', async () => {
+  const control = await everyTile(person, 'Person', 'src');
+  const drawn = await everyTile(relabelled, 'Author', 'src');
 
-    expect(control.links.length).toBeGreaterThan(0);
-    expect(drawn.marks).toBe(control.marks);
-    expect(linksOf(drawn)).toEqual(linksOf(control));
+  expect(linesOf(control).length).toBe(EDGE_COUNT);
+  expect(linesOf(drawn)).toEqual(linesOf(control));
 
-    // And it is left out LOUDLY: a picture that quietly drops a relation is a picture of a graph
-    // that does not exist.
-    expect(control.undrawn).toEqual([]);
-    expect(drawn.undrawn).toEqual([
-      { edgeType: 'authored', direction: 'src', reason: 'other-space' },
-    ]);
-  },
-  120_000,
-);
+  // And it is left out LOUDLY: an answer that quietly drops a relation is an answer about a graph
+  // that does not exist.
+  expect(control.every((a) => a.declined.length === 0)).toBe(true);
+  for (const answer of drawn) {
+    expect(answer.declined).toEqual([{ edgeType: 'authored', direction: 'src', reason: 'other-space' }]);
+  }
+}, 120_000);
 
-it('draws nothing at all for a type whose only relation leaves it', async () => {
-  const drawn = await relabelled.frame({
-    type: 'Paper',
-    level: 0,
-    pixels: 1024,
-    ...(await whole(relabelled, 'Paper')),
-  });
-  expect(drawn.links.length).toBe(0);
-  expect(drawn.marks).toBe(VERTEX_COUNT);
-  expect(drawn.undrawn).toEqual([
-    { edgeType: 'authored', direction: 'src', reason: 'other-space' },
-  ]);
+it('answers no edge at all for a type whose only relation leaves it', async () => {
+  const drawn = await everyTile(relabelled, 'Paper', 'dst');
+  expect(drawn).toHaveLength(Math.ceil(VERTEX_COUNT / CHUNK_SIZE));
+  expect(linesOf(drawn)).toEqual([]);
+  for (const answer of drawn) {
+    expect(answer.declined).toEqual([{ edgeType: 'authored', direction: 'dst', reason: 'other-space' }]);
+  }
 });
 
 it('edges from a tile read the relations cut on its type, and decline the one that leaves it', async () => {

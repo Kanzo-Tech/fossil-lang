@@ -118,11 +118,9 @@ export const vertexOf = (type: string, row: QueryRow): PlacedVertex => {
 /**
  * Where each INDEX tile's keys begin and end, read from its own footer **once per type.**
  *
- * The same move {@link tileBoxes} makes for `x`/`y`, for the one column an index is sorted by,
- * and for the same reason: the arithmetic says which tiles exist and only the footers say which
- * ones a value can be in. The difference is which side does the pruning. A window leaves it to
- * the engine because a box over `x`/`y` is a conjunctive range and DuckDB prunes one; a lookup
- * cannot, because the predicate is a DISJUNCTION and DuckDB prunes none of those over a VARCHAR
+ * The arithmetic says which index tiles exist and only their footers say which ones a key can be
+ * in. A scan leaves the pruning to the engine because its range is conjunctive and DuckDB prunes
+ * one; a lookup cannot, because the predicate is a DISJUNCTION and DuckDB prunes none of those over a VARCHAR
  * column — measured on v1.5.3 over a million-vertex corpus, `key = 'x'` prunes to one tile and
  * reads 3.98 MB while `key IN ('x','y')`, or the same spelled with `OR`, prunes to none and reads
  * all 245 index tiles, 44.1 MB. So the pruning is done here, from the same statistics the engine
@@ -134,8 +132,7 @@ export const vertexOf = (type: string, row: QueryRow): PlacedVertex => {
  * one-file index, where pruning has nothing to remove.
  *
  * A tile whose footer carries no statistics for the key column keeps `lo`/`hi` at `null` and is
- * always read — the conservative answer, and the same call {@link tileBoxes} makes for a tile
- * with no box.
+ * always read — the conservative answer.
  */
 interface KeyRange {
   readonly url: string;
@@ -145,7 +142,6 @@ interface KeyRange {
 }
 
 export interface Identity {
-  findByIdentity(ids: readonly string[], only?: string): Promise<PlacedVertex[]>;
   node(id: string, params?: NodeParams): Promise<PlacedVertex | null>;
 }
 
@@ -167,7 +163,7 @@ export function identityOf(reads: {
       if (index.container === 'rowgroups') return null;
       const urls = distinct([...index.files()]);
       if (urls.length < 2) return null;
-      // `coalesce(stats_min_value, stats_min)` for the reason `tileBoxes` gives: Parquet's original
+      // `coalesce(stats_min_value, stats_min)` because Parquet's original
       // statistics fields are defined as a signed comparison and a writer that gets that right
       // leaves them empty, so a reader that knows only the deprecated pair concludes the footer
       // carries no bound at all. Read either.
@@ -304,8 +300,6 @@ export function identityOf(reads: {
   };
 
   return {
-    findByIdentity,
-
     /**
      * One vertex by identity.
      *

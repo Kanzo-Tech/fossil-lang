@@ -150,45 +150,6 @@ pub async fn dispatch_graph(
 use fossil_graph::plan::{
     Direction, EdgeAddress, ProjectionAddress, ReadPlan, VertexAddress, resolve,
 };
-use fossil_sinks::manifest::VertexLevels;
-
-/// How many `dense_id`s one row of level `k` stands for — `4^k`.
-///
-/// The pyramid's base, and JS reads it here rather than respelling it: the
-/// decimation level *k* means the vertices whose `dense_id` is a multiple of
-/// this, so a `2^k` on the far side of the boundary is a different corpus.
-#[must_use]
-// `wasm_bindgen` cannot generate glue for a `const fn`, so this cannot be one.
-#[allow(clippy::missing_const_for_fn)]
-#[wasm_bindgen(js_name = strideOf)]
-pub fn stride_of(level: u32) -> u64 {
-    VertexLevels::stride(level)
-}
-
-/// How many bits of `dense_id` level `k` drops — `2k`, and the number a reader
-/// ADDS to its payload tile shift to address a level tile.
-#[must_use]
-// `wasm_bindgen` cannot generate glue for a `const fn`, so this cannot be one.
-#[allow(clippy::missing_const_for_fn)]
-#[wasm_bindgen(js_name = strideBits)]
-pub fn stride_bits(level: u32) -> u32 {
-    VertexLevels::stride_bits(level)
-}
-
-/// How many rows level `k` of a type of `count` rows holds — `ceil(count / 4^k)`.
-///
-/// A level is a predicate, so this answers for every `k` and not only for the
-/// ones a writer spent bytes on. [`ProjectionAddress::rows`] is the same number
-/// for a level the manifest declares — it is a field there, computed once at
-/// resolve time, and not a question asked again per call.
-#[must_use]
-// `wasm_bindgen` cannot generate glue for a `const fn`, so this cannot be one.
-#[allow(clippy::missing_const_for_fn)]
-#[wasm_bindgen(js_name = rowsAt)]
-pub fn rows_at(count: u64, level: u32) -> u64 {
-    VertexLevels::rows_at(count, level)
-}
-
 /// A corpus resolved into a [`ReadPlan`] — synchronous, and it opens no byte.
 ///
 /// A host holds one of these for as long as it holds the manifest.
@@ -276,7 +237,7 @@ impl Corpus {
     }
 
     /// The whole resolution as plain JS data: the container, every vertex type
-    /// with its prefix, tile size, shift, count, index and declared levels, and
+    /// with its prefix, tile size, shift, count, index, projections and cell tree, and
     /// every edge type with the orientations it publishes.
     ///
     /// **This is most of the surface**, and deliberately: what a resolved corpus
@@ -468,9 +429,9 @@ impl Corpus {
     /// # Errors
     ///
     /// A `JsError` when the type is not in the manifest, declares no
-    /// `vertex_count`, or wrote no projection at `scale` — the last one naming
-    /// the scales it did write, because a URL under an `l{k}/` nobody wrote is
-    /// the one failure a reader cannot tell from an empty level.
+    /// `vertex_count`, or declares no projection at `scale` — the last one naming
+    /// the scales it does declare, because a URL under a path nobody wrote is a
+    /// 404 a reader cannot tell from an empty set.
     #[wasm_bindgen(js_name = projectionFiles)]
     pub fn projection_files(
         &self,

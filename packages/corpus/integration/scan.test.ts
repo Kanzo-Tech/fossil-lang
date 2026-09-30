@@ -1,9 +1,10 @@
 /**
  * `scan` and `edges` against a corpus fossil's own writer wrote — the payload, both adjacencies and
  * the whole cell pyramid with its quotients, through the real layout pass — and held to the two
- * obligations `/docs/design/backend` gives the conformance suite for step 3:
+ * obligations `/docs/design/backend` gives the conformance suite:
  *
- * 1. **`scan` at `Z` selects what `rows` selects over the same box.**
+ * 1. **`scan` at `Z` selects what the payload holds inside the box**, the payload read by SQL with
+ *    no tile and no statistic.
  * 2. **A rung read through `scan` keeps the aggregation obligations of `/docs/design/cells`**:
  *    membership and count against the level below, the centroid, and mass conservation — every
  *    edge is in the rung's quotient or in a cell's internal weight — with the quotient read
@@ -137,8 +138,9 @@ describe('the tile matrix set is the cell pyramid', () => {
   });
 });
 
-describe('scan at Z against rows — the rowgroups container fossil writes', () => {
-  it('selects the same vertices over the same box', async () => {
+describe('scan at Z against the payload — the rowgroups container fossil writes', () => {
+  it('selects the vertices the payload holds inside the box', async () => {
+    const payload = (await corpus.relations()).find((r) => r.name === 'Person')!.files;
     const extent = set.extent!;
     const boxes: Box[] = [
       { x: extent.x, y: extent.y, w: extent.w / 4, h: extent.h / 4 },
@@ -161,7 +163,13 @@ describe('scan at Z against rows — the rowgroups container fossil writes', () 
       const tasks = scan.plan().filter((t) => t.z === top);
       expect(tasks.length).toBeLessThan(set.tileMatrices[top]!.tiles.length + 1);
       const read = (await scan.read(tasks)).flatMap((b) => wide(b, 'dense_id'));
-      const rows = (await corpus.rows({ x, y, w, h, directions: ['src'] })).vertices.map((v) => v.denseId);
+      // The oracle is SQL over the payload files the manifest lists, with no tile and no statistic.
+      const rows = (
+        await query(
+          `SELECT dense_id FROM read_parquet([${payload.map((f) => `'${f}'`).join(', ')}])
+            WHERE x >= ${x} AND x < ${x + w} AND y >= ${y} AND y < ${y + h}`,
+        )
+      ).map((r) => BigInt(r['dense_id'] as number | bigint));
       const order = (a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0);
       expect(read.sort(order)).toEqual(rows.sort(order));
       expect(read.length).toBeGreaterThan(0);

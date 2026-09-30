@@ -118,7 +118,7 @@ export function verbsOf(reads: {
             name: e.table_name,
             sql: relationOf(e.table_name),
             rows: e.count,
-            files: address.projectionFiles(1, 'src'),
+            files: address.adjacencyFiles('src'),
             edgeType: e.name,
             srcType: e.source_type,
             dstType: e.target_type,

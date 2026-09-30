@@ -1,18 +1,18 @@
 /**
  * @fossil-lang/corpus — open a corpus from a URL and read it.
  *
- * The query layer for whatever draws the graph — fossil ships no viewer. Verb→SQL runs in WASM
- * (`fossil-graph-wasm`, single-source with the Rust verb structs), and SQL execution is delegated to a
- * host-provided DuckDB-WASM `query` callback (e.g. keasy's Mosaic coordinator). This is what makes
- * a viewer larger-than-RAM: the host's DuckDB streams Parquet over httpfs; the binding never
- * materialises rows in JS.
+ * The backend for whatever draws the graph — fossil ships no viewer; `@kanzo-tech/graph` is the
+ * one there is. Addressing and verb→SQL run in WASM (`fossil-graph-wasm`, single-source with the
+ * Rust), and SQL runs on the host's `Engine` — DuckDB-WASM in a browser — which streams Parquet
+ * over httpfs, so the reader never materialises a corpus in JS.
  *
  * ```ts
  * import { open } from '@fossil-lang/corpus';
  *
- * const corpus = await open(url, { query });
- * corpus.types                                  // what is inside
- * await corpus.frame({ ...box, pixels })        // a rectangle at a resolution, ready to draw
+ * const corpus = await open(url, { engine });
+ * corpus.tileMatrix('Person')                       // every zoom, every tile, its rows and box
+ * await corpus.scan({ type: 'Person' }).read(tiles) // a batch per tile
+ * await corpus.edges({ from: tiles, direction: 'src' })
  * await corpus.node(iri)
  * ```
  *
@@ -26,10 +26,11 @@
  *
  * ```ts
  * await open(job, { engine, host })  // a job's corpus
- * await open(url, { query })         // a corpus at a URL
+ * await open(url, { engine })        // a corpus at a URL
  * ```
  *
- * `corpus.addressing` is what the open already resolved, for a caller who wants the URLs.
+ * The addressing the open resolved is internal: a consumer that needs a URL has outgrown a surface
+ * whose claim is that a corpus is a URL, and the engine is the one capability a host supplies.
  *
  * Also off the barrel, each for its own reason:
  *
@@ -46,11 +47,6 @@
  *   shapes) stay reachable structurally, e.g. `SchemaResult['vertices'][number]`.
  *
  * # What is here and why
- *
- * **`Corpus.levels()` is `levelsOf` in `./address.ts`** — three calls to that module and no fourth
- * fact, which is why it is not a member of the door. It is not on the barrel either: the two
- * readers outside this package that named a level file were verifier scripts in a viewer this
- * repository no longer has.
  *
  * **The four `PAYLOAD_*` role constants**, because a consumer reads them: `@kanzo-tech/graph`
  * takes `PAYLOAD_ADDRESS`, `PAYLOAD_COORDINATES` and `PAYLOAD_IDENTITY` rather than spelling the
@@ -85,15 +81,12 @@ export {
   PAYLOAD_IDENTITY,
 } from './vocabulary.generated.js';
 
-// The capability a host supplies — the engine every member of the door reads through.
-export type { QueryFn, QueryRow } from './query.js';
-
 // The door's own types. `SqlCorpus` is what `sql: 'allowed'` widens the answer to — see
 // `SqlPolicy` for what the option decides.
 //
 // **`OpenOptions` is the one exported type with no `Corpus` in its name, and that is decided
 // rather than overlooked.** The prefix on every other name here is doing real work — `Corpus`,
-// `CorpusTypes`, `CorpusField`, `CorpusAddressing` all name the ARTEFACT or a part of it, and a
+// `CorpusTypes`, `CorpusField` all name the ARTEFACT or a part of it, and a
 // consumer holds them. This one names the CALL: it appears in exactly one position, the second
 // argument of `open`, never in a return type and never in a field, and an options bag whose name
 // does not track its function is how `ResolveCorpusOptions` outlived `resolveCorpus` in another
@@ -113,53 +106,18 @@ export type {
   CorpusVertexType,
   SqlCorpus,
 } from './corpus.js';
-export type {
-  Answer,
-  EdgeAnswer,
-  EdgeBatch,
-  EdgesParams,
-  Neighbourhood,
-  NeighboursParams,
-  PlacedEdge,
-} from './edges.js';
+export type { EdgeAnswer, EdgeBatch, EdgesParams } from './edges.js';
 export type { Box, Filter, Literal } from './expression.js';
 export type { Batch } from './query.js';
 export type { Scan, ScanParams, ScanTask } from './scan.js';
-export type { Frame, FrameCost, FrameParams } from './frame.js';
 export type { NodeParams, PlacedVertex } from './identity.js';
 export type { OpenOptions, SqlPolicy } from './open.js';
-export type { RowsAnswer, RowsParams } from './rows.js';
-export type { Extent } from './tile-manifest.js';
-export type { Pixels, TileAddress, TileInfo, TileMatrix, TileMatrixSet } from './tile-matrix.js';
+export type { TileAddress, TileInfo, TileMatrix, TileMatrixSet } from './tile-matrix.js';
 
-// What `Corpus.addressing` is. Named here because the member is: a public member whose type cannot be
-// written down is worse than no member.
-//
-// **`Container` is on this list and was not, which was the same omission one layer down.**
-// `CorpusAddressing.container`, `VertexAddress.container`, `IndexAddress.container` and
-// `ProjectionAddress.container` are all public members of that type, and a consumer could read the
-// discriminant and not name it. It carries the rule a footer reader needs — under `rowgroups` the
-// row group IS the tile, under `files` the file is — which lived in `/docs/format` prose and now
-// lives on the type, where the reader that needs it already is.
-//
-// `ResolveCorpusOptions` is NOT replaced by another name: `OpenOptions` is what it became.
-export type {
-  AddressedTiles,
-  CellsAddress,
-  Channel,
-  Container,
-  CorpusAddressing,
-  Direction,
-  Drawing,
-  EdgeAddress,
-  EdgeTiles,
-  Gap,
-  GapReason,
-  IndexAddress,
-  ProjectionAddress,
-  RungAddress,
-  VertexAddress,
-} from './address.js';
+// The addressing's own words that the door's answers name: an edge answer declines with a `Gap`,
+// a relation publishes `Direction`s, and a type and its tile matrix set carry `Channel`s. The rest
+// of it is internal.
+export type { Channel, Direction, Gap, GapReason } from './address.js';
 
 // The four the verbs name in their own signatures, plus the five a reader of `Corpus.schema`
 // names — from the schemars codegen, single source of truth with the Rust verb structs. This list

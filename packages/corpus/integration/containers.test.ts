@@ -14,8 +14,7 @@
  *
  * **What it cannot prove.** That the row-group container is cheaper, which is the entire reason for
  * it — the measured win is HTTP requests per window and a local file makes none. What it asserts
- * instead is the countable half: the same window names strictly fewer files. `cost.test.ts` is
- * where the shape of that count against N lives.
+ * instead is the countable half: the same window names strictly fewer files.
  *
  * **Why `chunk_size` is 4,096 here and 1,024 next door.** DuckDB emits row groups in multiples of
  * its 2,048-row vector, so a `ROW_GROUP_SIZE` under that is silently clamped and the tiles land
@@ -32,23 +31,20 @@
  * covered while asserting nothing.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 
-import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
+import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import '../tests/boot.js';
-import { open, type Box, type Corpus } from '../src/index.js';
-import type { QueryFn, QueryRow } from '../src/query.js';
+import { open, type Batch, type Box, type Corpus, type Direction, type Filter, type TileAddress } from '../src/index.js';
+import { duckdb } from '../tests/engine.js';
 
 // @ts-expect-error — the fixture is JavaScript on purpose: it is the second implementation the
 // conventions ask for, and it must not import a type of ours to be one.
 import { write } from '../guards/fixture.mjs';
-
-const require = createRequire(import.meta.url);
 
 const CHUNK = 4096;
 const COUNT = 20_000;
@@ -56,10 +52,19 @@ const CLUSTERS = 64;
 /** A third of the fixture's grid of `ceil(sqrt(clusters))` discs at a spacing of 100. */
 const SIDE = Math.ceil(Math.sqrt(CLUSTERS)) * 100;
 const BOX: Box = { x: 0, y: 0, w: SIDE / 3, h: SIDE / 3 };
+const IN_BOX: Filter = {
+  and: [
+    { column: 'x', op: '>=', value: BOX.x },
+    { column: 'x', op: '<', value: BOX.x + BOX.w },
+    { column: 'y', op: '>=', value: BOX.y },
+    { column: 'y', op: '<', value: BOX.y + BOX.h },
+  ],
+};
 
 const IDS = [0, 1, COUNT / 2, COUNT - 1].map((i) => `https://example.org/person/${i}`);
 
 interface Opened {
+  readonly dir: string;
   readonly corpus: Corpus;
   /** The `.parquet` paths named by every statement since the last reset. */
   bill(): number;
@@ -74,27 +79,9 @@ afterAll(() => {
 });
 
 beforeAll(async () => {
-  const dist = dirname(require.resolve('@duckdb/duckdb-wasm'));
-  const db = await createDuckDB(
-    {
-      mvp: {
-        mainModule: resolve(dist, './duckdb-mvp.wasm'),
-        mainWorker: resolve(dist, './duckdb-node-mvp.worker.cjs'),
-      },
-      eh: {
-        mainModule: resolve(dist, './duckdb-eh.wasm'),
-        mainWorker: resolve(dist, './duckdb-node-eh.worker.cjs'),
-      },
-    },
-    new ConsoleLogger(),
-    NODE_RUNTIME,
-  );
-  await db.instantiate();
-  const conn = db.connect();
-  conn.query(`SET parquet_metadata_cache = true`);
   const spill = mkdtempSync(join(tmpdir(), 'fossil-containers-spill-'));
   scratch.push(spill);
-  conn.query(`SET temp_directory = '${spill}'`);
+  const { engine } = await duckdb(spill);
 
   const root = mkdtempSync(join(tmpdir(), 'fossil-containers-'));
   scratch.push(root);
@@ -103,12 +90,16 @@ beforeAll(async () => {
     const dir = join(root, layout);
     write(dir, { count: COUNT, clusters: CLUSTERS, layout, chunkSize: CHUNK });
     let files = 0;
-    const query: QueryFn = async (sql: string): Promise<QueryRow[]> => {
-      files += (sql.match(/\.parquet/g) ?? []).length;
-      return conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
+    const counted: Engine = {
+      ...engine,
+      query(sql, options) {
+        files += (sql.match(/\.parquet/g) ?? []).length;
+        return engine.query(sql, options);
+      },
     };
     opened[layout] = {
-      corpus: await open(dir, { query }),
+      dir,
+      corpus: await open(dir, { engine: counted }),
       bill: () => files,
       reset: () => {
         files = 0;
@@ -117,49 +108,60 @@ beforeAll(async () => {
   }
 }, 180_000);
 
-/** Both answers, in a form `toEqual` can compare: no `dense_id` order left to the engine. */
-const ordered = <T extends { denseId?: bigint; src?: bigint; dst?: bigint }>(rows: readonly T[]) =>
-  [...rows].sort((a, b) =>
-    String([a.denseId, a.src, a.dst]) < String([b.denseId, b.src, b.dst]) ? -1 : 1,
-  );
+const values = (batch: Batch, name: string): string[] =>
+  Array.from(batch.getChild(name)!.toArray(), (v) => String(v));
+
+/** The box's vertices and every edge of the tiles holding them, in a form `toEqual` can compare. */
+async function window(corpus: Corpus, directions: readonly Direction[]) {
+  const scan = corpus.scan({ type: 'Person', filter: IN_BOX, select: ['dense_id', 'x', 'y'] });
+  const payloadZ = corpus.tileMatrix('Person').tileMatrices.length - 1;
+  const tasks: TileAddress[] = scan.plan().filter((t) => t.z === payloadZ);
+  const vertices = (await scan.read(tasks)).flatMap((b) => {
+    const [ids, xs, ys] = ['dense_id', 'x', 'y'].map((c) => values(b, c));
+    return ids!.map((id, i) => `${id} ${xs![i]} ${ys![i]}`);
+  });
+  const edges: string[] = [];
+  for (const direction of directions) {
+    for (const answer of await corpus.edges({ from: tasks, direction })) {
+      for (const batch of answer.batches) {
+        batch.src.forEach((src, i) => edges.push(`${direction} ${src} ${batch.dst[i]}`));
+      }
+    }
+  }
+  return { tiles: tasks.map((t) => t.tile), vertices: vertices.sort(), edges: edges.sort() };
+}
 
 describe('one corpus, two containers', () => {
-  it('declares the container it was written in, and they are not the same one', () => {
-    expect(opened.files.corpus.addressing.container).toBe('files');
-    expect(opened.rowgroups.corpus.addressing.container).toBe('rowgroups');
+  it('was written in the container it declares, and they are not the same one', () => {
     // The comparison below is worthless if both trees are the same container, and that failure is
     // silent: two identical corpora agree about everything.
-    expect(opened.files.corpus.addressing.vertexType().tileUrl(3)).toMatch(/chunk3\.parquet$/);
-    expect(opened.rowgroups.corpus.addressing.vertexType().tileUrl(3)).toMatch(/tiles\.parquet$/);
+    expect(existsSync(join(opened.files.dir, 'vertex/Person/chunk3.parquet'))).toBe(true);
+    expect(existsSync(join(opened.files.dir, 'vertex/Person/tiles.parquet'))).toBe(false);
+    expect(existsSync(join(opened.rowgroups.dir, 'vertex/Person/tiles.parquet'))).toBe(true);
+    expect(existsSync(join(opened.rowgroups.dir, 'vertex/Person/chunk3.parquet'))).toBe(false);
   });
 
   it('says the same thing is inside', () => {
     expect(opened.rowgroups.corpus.types).toEqual(opened.files.corpus.types);
   });
 
-  it('reports the same extent, which comes out of the footers either way', async () => {
-    const files = await opened.files.corpus.extent();
-    const rowgroups = await opened.rowgroups.corpus.extent();
-    expect(rowgroups).toEqual(files);
-    expect(files!.maxX).toBeGreaterThan(files!.minX);
+  it('publishes the same tile matrix, boxes and extent included', () => {
+    const files = opened.files.corpus.tileMatrix('Person');
+    expect(opened.rowgroups.corpus.tileMatrix('Person')).toEqual(files);
+    expect(files.extent!.w).toBeGreaterThan(0);
   });
 
   it.each([['src'], ['src', 'dst']] as const)(
     'answers the same window for %s',
     async (...directions) => {
-      const files = await opened.files.corpus.rows({ ...BOX, directions });
-      const rowgroups = await opened.rowgroups.corpus.rows({ ...BOX, directions });
+      const files = await window(opened.files.corpus, directions);
+      const rowgroups = await window(opened.rowgroups.corpus, directions);
       // Non-vacuity, and it is not a formality: two windows that selected nothing are identical,
       // and a box wrong by a factor of a hundred is how this file comes to pass on air.
       expect(files.vertices.length).toBeGreaterThan(0);
       expect(files.vertices.length).toBeLessThan(COUNT);
       expect(files.edges.length).toBeGreaterThan(0);
-
-      expect(rowgroups.tiles).toEqual(files.tiles);
-      expect(rowgroups.complete).toBe(files.complete);
-      expect(rowgroups.gaps).toEqual(files.gaps);
-      expect(ordered(rowgroups.vertices)).toEqual(ordered(files.vertices));
-      expect(ordered(rowgroups.edges)).toEqual(ordered(files.edges));
+      expect(rowgroups).toEqual(files);
     },
     180_000,
   );
@@ -174,22 +176,11 @@ describe('one corpus, two containers', () => {
     expect(opened.rowgroups.corpus.types.vertices[0]!.indexed).toBe(true);
   }, 180_000);
 
-  it.each([1, 2])('walks the same neighbourhood at depth %i', async (depth) => {
-    const files = await opened.files.corpus.neighbours(IDS.slice(0, 2), { depth });
-    const rowgroups = await opened.rowgroups.corpus.neighbours(IDS.slice(0, 2), { depth });
-    expect(files.edges.length).toBeGreaterThan(0);
-    expect(ordered(rowgroups.vertices)).toEqual(ordered(files.vertices));
-    expect(ordered(rowgroups.edges)).toEqual(ordered(files.edges));
-    expect(rowgroups.frontier).toEqual(files.frontier);
-    expect(rowgroups.complete).toBe(files.complete);
-  }, 180_000);
-
   it('names strictly fewer files for the same window', async () => {
     const cost: Record<string, number> = {};
     for (const layout of ['files', 'rowgroups'] as const) {
-      await opened[layout].corpus.rows(BOX); // the first read also pays for the footer sweep
       opened[layout].reset();
-      await opened[layout].corpus.rows(BOX);
+      await window(opened[layout].corpus, ['src', 'dst']);
       cost[layout] = opened[layout].bill();
     }
     // The measured claim, in the only currency a local file has. Over HTTP the same shape is 22.3

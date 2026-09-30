@@ -80,7 +80,7 @@ describe('scan', () => {
     expect(batches.flatMap((b) => column(b, 'dense_id'))).toEqual(Array.from({ length: 300 }, (_, i) => BigInt(i)));
   });
 
-  it('at Z, selects what rows selects over the same box — the conformance obligation', async () => {
+  it('at Z, selects what the payload holds inside the box — the conformance obligation', async () => {
     const extent = corpus.tileMatrix('Person').extent!;
     const boxes: Box[] = [
       { x: 0, y: 0, w: 100, h: 100 },
@@ -91,8 +91,13 @@ describe('scan', () => {
     for (const box of boxes) {
       const scan = corpus.scan({ type: 'Person', filter: inBox(box), select: ['dense_id'] });
       const read = (await scan.read(scan.plan())).flatMap((b) => column(b, 'dense_id'));
-      const rows = (await corpus.rows({ ...box, directions: ['src'] })).vertices.map((v) => v.denseId).sort((a, b) => (a < b ? -1 : 1));
-      expect(read).toEqual(rows);
+      // The oracle is SQL over every payload file, with no addressing and no statistics: the
+      // half-open box `x <= v.x < x + w`, as a full scan reads it.
+      const truth = await ids(
+        `SELECT dense_id FROM read_parquet(${VERTICES})
+          WHERE x >= ${box.x} AND x < ${box.x + box.w} AND y >= ${box.y} AND y < ${box.y + box.h}`,
+      );
+      expect(read).toEqual(truth);
     }
   });
 

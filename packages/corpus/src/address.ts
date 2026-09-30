@@ -2,51 +2,19 @@
  * The address of a corpus, resolved from its manifest — **by the reader, which is in Rust.**
  *
  * A tile is a fixed range of `dense_id` and its address is a shift, so a reader computes every URL
- * it wants before it emits the first request. That arithmetic used to be written twice: once in
- * `crates/fossil-graph/src/plan.rs`, which the writer's side also reads; and once here, in a
- * thousand lines of TypeScript that
- * agreed with it because people kept making it agree. Nothing compared the two. This module is what
- * is left of the second one: the shapes the answers arrive in, and the calls that ask.
+ * it wants before it emits the first request. That arithmetic is `crates/fossil-graph/src/plan.rs`,
+ * compiled to wasm32; this module is the shapes its answers arrive in and the calls that ask. There
+ * was a second implementation here, in TypeScript, and nothing compared the two.
  *
- * **It costs a WASM module, and that is the price rather than an oversight.** Composing a URL was
- * synchronous arithmetic over a parsed manifest and is now a call into `fossil-graph-wasm`, so the
- * module has to be up before an address resolves — the same precondition every verb already had.
- * That precondition is not a call a caller sequences: `open` awaits the same memoised boot, and
- * the module finds its own `.wasm` as a bundler asset. The subpath
- * `@fossil-lang/corpus/address` existed exactly so a third party could address a corpus *without*
- * the module at all, and it is deleted: a WASM-free path is a second implementation, and a second
- * implementation is what this change removed.
- *
- * **What it does not do**, and each absence is the seam this package is on the far side of:
- *
- * - **No bytes.** Nothing here fetches, decodes or reads Parquet. `tileUrl` hands back a string.
- * - **No cache, no debounce, no sampling.** Those are the reader's, and they stay there.
- * - **No rectangles.** Which tiles a box touches comes from the per-tile `x`/`y` statistics in the
- *   Parquet footers — `footer-is-the-index` — and reading a footer needs a Parquet reader. The host
- *   has one, so the host reads its own footers and hands the tile numbers back to
- *   {@link CorpusAddressing.tilesFor}.
- *
- * `open` in `./open.ts` is the layer that reads those footers, by taking an engine from the
- * host rather than growing one. It sits **on** this module and does not absorb it.
- *
- * **Nothing here is on the barrel except the shapes.** `resolveCorpus` was,
- * and it was a second name for a depth of the door — `openCorpus` as the door was spelled then.
- * Both took a corpus and answered about it. Every `open` resolves this module's answer first and
- * hands it on as `corpus.addressing`, so there is one name. {@link addressManifests} is the
- * resolution itself, reached only from `./open.ts`.
- *
- * @see {@link CorpusAddressing}
+ * **Internal.** `open` resolves it first and reads through the host's engine; nothing here is on
+ * the barrel but `Direction`, `Gap`, `GapReason` and `Channel`, which the door's own answers name.
+ * It fetches nothing and caches nothing: `tileUrl` hands back a string.
  */
 
 // '../pkg/fossil_graph_wasm.js' is the wasm-bindgen `--target web` output, gitignored and always
 // present at build time — the same import `./load.js` makes, and the reason this module needs the
 // module booted before any of it runs.
-import {
-  Corpus as CorpusReader,
-  rowsAt as rowsAtLevel,
-  strideBits as bitsPerLevel,
-  strideOf as idsPerLevelRow,
-} from '../pkg/fossil_graph_wasm.js';
+import { Corpus as CorpusReader } from '../pkg/fossil_graph_wasm.js';
 
 import { CorpusManifestError } from './manifest.js';
 
@@ -62,120 +30,15 @@ export { CorpusManifestError, GRAPH_INFO_PATH } from './manifest.js';
 export type Direction = 'src' | 'dst';
 
 /**
- * Which container carries the tiles — `graph.graph.yml`'s own `container`.
+ * Which container carries the tiles — `graph.graph.yml`'s own `container`, read off the manifest
+ * because working it out means listing a directory, and there is no listing over HTTP.
  *
- * `files` is one Parquet per tile with the address in the name; `rowgroups` is one Parquet per
- * payload set whose row groups are the tiles. Both are addressed by the same arithmetic and they
- * cost differently: 22.3 requests per window against 5.6, and 1.15 MB of footer against 496 kB, at
- * five million vertices. A file boundary is the only thing that stops contiguous tiles from being
- * fetched in one range.
- *
- * It is a manifest field and not something a reader works out, because working it out means listing
- * a directory and there is no listing over HTTP.
- *
- * **What it decides for a reader that opens footers**, which is the rule `/docs/format` states in
- * prose and which travelled nowhere near the addressing that publishes the discriminant:
- *
- * - Under **`rowgroups`**, a payload set is one file and the **row group IS the tile** — row group
- *   `k` of `tiles.parquet` is tile `k`, so the footer's row-group ordinal is the tile number and
- *   nothing else has to be matched. The one exception is an adjacency, where a tile whose vertices
- *   have no edges contributes no row group to be numbered; there the footer's box on
- *   {@link ProjectionAddress.column} is what locates it. {@link ProjectionAddress.tileUrl} says the
- *   same from the other side.
- * - Under **`files`**, the **file is the tile**: `chunk{k}.parquet` holds tile `k` entire, and a
- *   footer read inside it names row groups the addressing has no opinion about.
- *
- * So `container` is not decoration on an address — it says which of the two numbers a footer hands
- * back is the one {@link CorpusAddressing.tilesFor} takes.
+ * Under **`files`** the file is the tile: `chunk{k}.parquet` holds tile `k` entire. Under
+ * **`rowgroups`** a set is one `tiles.parquet` whose row group `k` is tile `k` — except on an
+ * adjacency, where a tile whose vertices have no edges contributes no row group, and the range on
+ * {@link ProjectionAddress.column} is what locates one.
  */
 export type Container = 'files' | 'rowgroups';
-
-/**
- * How many bits of `dense_id` level `k` drops — `2k`, and the number a reader ADDS to its payload
- * tile shift to address a level tile.
- *
- * The pyramid's base is spelled once, in `VertexLevels::stride_bits`, and reached from here rather
- * than respelled: a `2^k` on this side of the boundary would be a different corpus.
- */
-export const strideBits = (level: number): number => bitsPerLevel(level);
-
-/**
- * How many `dense_id`s one row of level `k` stands for — `4^k`.
- *
- * The decimation level *k* means **the vertices whose `dense_id` is a multiple of this**. Over a
- * Hilbert-ordered `dense_id` that is one vertex per quadtree cell of depth *k*, so a level is a level
- * of the same curve the tile address is read off — not a sample, not a budget, not a cap.
- */
-export const strideOf = (level: number): bigint => idsPerLevelRow(level);
-
-/**
- * How many rows level `k` of a type of `count` rows holds — `ceil(count / strideOf(k))`.
- *
- * A level is a predicate, so this answers for every `k` and not only for the ones a writer spent
- * bytes on — which is what lets a missing {@link VertexAddress.projection} be a cost and not a
- * refusal.
- */
-export const rowsAt = (count: bigint, level: number): bigint => rowsAtLevel(count, level);
-
-/**
- * One level of the pyramid — Zarr's `multiscales` entry, spelled for this corpus.
- *
- * **It is three calls to this module and no fourth fact**: {@link strideOf} is the stride,
- * {@link rowsAt} is the count, and {@link VertexAddress.projection} is whether a file answers it.
- * That is why it lives here rather than on the door — see {@link levelsOf}.
- */
-export interface LevelInfo {
-  /** *k*. Level 0 is every vertex. */
-  readonly level: number;
-  /** `strideOf(k)` — one `dense_id` in this many survives. */
-  readonly stride: number;
-  /** How many vertices the whole type has at this level: `ceil(count / stride)`. */
-  readonly count: number;
-  /**
-   * Whether a written `vertex/<Type>/l{k}/` answers this level, or the full tiles are strided.
-   *
-   * **The two select the same rows** — `dense_id % strideOf(k) == 0` is the definition and a level
-   * file is a cache of it. What a written level changes is the byte count; see `Frame.matchedAt`
-   * and `/docs/design/one-door` for why that is a cost and not a second contract.
-   */
-  readonly written: boolean;
-}
-
-/**
- * Which levels of detail a vertex type has — every level from all of it down to one vertex.
- *
- * Every level is listed because every one is answerable: level *k* is the predicate
- * `dense_id % strideOf(k) == 0`, which needs no bytes on disk. {@link LevelInfo.written} is the
- * only thing a pyramid on disk changes, and it changes a cost rather than an answer.
- *
- * **This was `Corpus.levels()`, a member of the door, and a door is the wrong place for it.**
- * Every line of it is addressing — `strideOf`, `rowsAt`, `projection` — so on the door it was the
- * coarse mechanism restated one layer up, where a reader could reasonably have expected it to mean
- * something the addressing does not already say. The rejected alternative was deleting it outright:
- * `Frame.matchedAt` reports a level and is only interpretable against which levels are WRITTEN, so
- * with nothing answering that, eight assertions in `tests/frame.test.ts` and
- * `packages/corpus/integration/frame-levels.test.ts` would have had to re-derive these three calls
- * themselves — a second statement of the arithmetic, which is the rule the door was being narrowed
- * for. Moved, not deleted, and not on the barrel: no reader outside this repository names a level
- * file.
- */
-export function levelsOf(addressing: CorpusAddressing, type?: string): readonly LevelInfo[] {
-  const address = addressing.vertexType(type);
-  const count = address.count ?? 0n;
-  const out: LevelInfo[] = [];
-  for (let level = 0; ; level += 1) {
-    const stride = strideOf(level);
-    out.push({
-      level,
-      stride: Number(stride),
-      count: Number(rowsAt(count, level)),
-      // Whether a written `l{k}/` answers this level — a projection COARSER than the payload,
-      // which is why level 0 is `false` where its projection is the payload and always there.
-      written: level > 0 && address.projection(stride) !== null,
-    });
-    if (stride >= count) return out;
-  }
-}
 
 /** One vertex type's address: where its tiles are and which `dense_id` range each holds. */
 export interface VertexAddress {
@@ -191,61 +54,23 @@ export interface VertexAddress {
   readonly count: bigint | null;
   /** `ceil(count / chunkSize)`, or `null` when the manifest declares no count. */
   readonly tiles: bigint | null;
-  /** Which container carries this type's tiles. */
-  readonly container: Container;
-  /** The tile holding `denseId`. */
-  tileOf(denseId: bigint): bigint;
   /**
-   * The tiles holding a batch of `dense_id`s, in order.
-   *
-   * **The batch is the shape that crosses**, and {@link VertexAddress.tileOf} is one call to it: a
-   * reader asks this of a frontier, of a pin set, of the addresses an index handed back, and a call
-   * per id would pay the boundary once per vertex.
+   * The tiles holding a batch of `dense_id`s, in order — a batch, because a call per id would pay
+   * the boundary once per vertex.
    */
   tilesOf(denseIds: Iterable<bigint>): bigint[];
-  /**
-   * The file tile `k` is in: `<prefix>chunk{k}.parquet` under `files`, `<prefix>tiles.parquet`
-   * under `rowgroups`, where every tile of the type names the same file and the footer's box on
-   * `dense_id` is what says which row groups are the tile.
-   */
+  /** The file tile `k` is in: `<prefix>chunk{k}.parquet` or `<prefix>tiles.parquet`. */
   tileUrl(tile: number | bigint): string;
   /**
-   * Every payload FILE of this type, in order and distinct — one per tile under `files`, one in
-   * total under `rowgroups`. Throws when the manifest declares no count, because then there is no
-   * set to enumerate: that is the difference between addressing a tile somebody asked for and
-   * knowing how many there are.
+   * Every payload FILE of this type, in order and distinct. Throws when the manifest declares no
+   * count, because then there is no set to enumerate.
    */
   files(): readonly string[];
   /**
-   * The identity index, when the manifest declares one, and `null` otherwise.
-   *
-   * `null` is a legal corpus and not an incomplete one — a lookup by identity answers without it,
-   * by scanning — so a reader that finds none reports the cost rather than refusing. That is the
-   * opposite of {@link VertexAddress.count}, whose absence makes a question unanswerable.
+   * The identity index, or `null` — a legal corpus, where a lookup by identity scans instead: a
+   * cost, where an absent {@link VertexAddress.count} is a refusal.
    */
   readonly index: IndexAddress | null;
-  /**
-   * **Every projection of this type**, in manifest order: the payload at `scale: 1` and one per
-   * written level. See {@link ProjectionAddress}.
-   *
-   * A type declaring only its payload is a legal corpus and the most legal of them: a level is a
-   * predicate, so every scale is answerable with or without a file for it, and what a written one
-   * changes is which bytes answer it.
-   */
-  readonly projections: readonly ProjectionAddress[];
-  /**
-   * One projection by its scale, or `null` when the manifest wrote none at that scale — which is
-   * a cost and not a refusal.
-   */
-  projection(scale: number | bigint): ProjectionAddress | null;
-  /**
-   * Every file of the projection at `scale`, in order and distinct.
-   *
-   * Throws on {@link VertexAddress.files}' argument when the count is absent, and on a scale
-   * nobody wrote — the second one naming the scales that were, because a URL under an unwritten
-   * `l{k}/` is the one failure a reader cannot tell from an empty level.
-   */
-  projectionFiles(scale: number | bigint): readonly string[];
   /** The zooms below the payload — the cell tree, when the document declares one. */
   readonly cells: CellsAddress | null;
   /** The file rung `k`'s tile `t` is in, or `null` where the type declares no such rung. */
@@ -273,7 +98,6 @@ export interface Channel {
 
 /** A vertex type's cell tree — `fossil_graph::plan::CellsAddress` as it crosses. */
 export interface CellsAddress {
-  readonly verticesPerCell: number;
   /** The relations a quotient and an internal weight sum, by label. */
   readonly relations: readonly string[];
   /** Which channel a rung's `mode` is the mode of, by name. */
@@ -282,111 +106,52 @@ export interface CellsAddress {
   readonly rungs: readonly RungAddress[];
 }
 
-/** One rung: `k`, how many bits of `dense_id` a cell drops, and its quotient. */
+/** One rung: `k`, how many bits of `dense_id` a cell drops, and whether it has a quotient. */
 export interface RungAddress {
   readonly rung: number;
-  readonly prefix: string;
   /** `B + 2(k − 1)` — a cell id is `dense_id >> shift`. */
   readonly shift: number;
   readonly cellCount: bigint;
-  readonly tiles: bigint;
   /** The quotient's own edge count, or `null` where the rung publishes none. */
-  readonly quotient: { readonly prefix: string; readonly edgeCount: bigint } | null;
+  readonly quotient: { readonly edgeCount: bigint } | null;
 }
 
 /**
- * Where a vertex type's identity index lives.
- *
- * **The one artefact of a corpus that is not a {@link ProjectionAddress}**: it is a second ORDER
- * over the same rows, so the spatial cut does not address it — which is why it carries a
- * {@link IndexAddress.chunkSize} of its own, no scale, and keeps the `tile{k}` filename stem every
- * projection gave up. It cannot be a column of the payload: one table has one sort, the payload's
- * is Hilbert because the spatial order IS the id space, and a lookup by identity needs the other.
- *
- * Its tiles are sorted by {@link IndexAddress.orderedBy} with disjoint ranges, which is what lets a
- * reader binary-search the footers to one tile — the thing the payload's own footers cannot do for
- * `subject`, because Hilbert order and lexicographic order have nothing to do with each other and
- * every tile's range overlaps every other's.
+ * Where a vertex type's identity index lives — a second ORDER over the same rows, sorted by
+ * {@link IndexAddress.orderedBy} with disjoint ranges, so a reader prunes its footers to the tiles a
+ * key can be in: the thing the payload's footers cannot do for `subject`, whose Hilbert order has
+ * nothing to do with its lexicographic one.
  */
 export interface IndexAddress {
-  /** Where the index tiles are, resolved against the corpus base, with a trailing separator. */
-  readonly prefix: string;
   /** The column the tiles are sorted by, and the one a lookup is keyed on. */
   readonly orderedBy: string;
-  /** Rows per index tile. Unrelated to the payload's: tile `k` here is the `k`th slice of the
-   *  SORTED order, not a `dense_id` range. */
-  readonly chunkSize: number;
-  /** `ceil(count / chunkSize)`, or `null` when the manifest declares no `vertex_count`. */
-  readonly tiles: bigint | null;
   /** Which container carries the index tiles. The corpus's, never a second answer. */
   readonly container: Container;
-  /** Every index file, in order and distinct. Throws when the count is absent, like {@link VertexAddress.files}. */
+  /** Every index file, in order and distinct. Throws when the count is absent. */
   files(): readonly string[];
 }
 
 /**
- * **One projection of a corpus's sequence, resolved into an address.**
- *
- * Every artefact of a corpus except {@link IndexAddress} is one of these: the payload at
- * `scale: 1`, a vertex level at a coarser scale, an orientation of an adjacency at `scale: 1` with
- * a {@link direction}, a level of a relation at a coarser scale with one. **The payload is not a
- * special case** — it is the projection whose scale is one, and this type does not know which of
- * its instances is which. It is `fossil_graph::plan::ProjectionAddress` as it crosses, and the
- * argument for the shape is there and in `fossil_sinks::manifest`, not restated here.
- *
- * A projection nobody wrote is still ANSWERABLE: a level is the predicate `dense_id % scale == 0`
- * over the payload, and a written `l{k}/` is a cache of it. So a corpus declaring one projection
- * draws the identical picture as one declaring five, and only reads more.
+ * **One orientation of a relation's adjacency, resolved into an address** —
+ * `fossil_graph::plan::ProjectionAddress` at `scale: 1`, as it crosses.
  */
 export interface ProjectionAddress {
   /** Where its tiles are, resolved against the corpus base and with a trailing separator. */
   readonly prefix: string;
+  /** Which endpoint column addresses these tiles. */
+  readonly direction: Direction;
+  /** The column tile `k` is a range of. */
+  readonly column: 'src_dense' | 'dst_dense';
   /**
-   * **How many rows of the underlying sequence one row here stands for** — `1` for the payload and
-   * the adjacency, and the product a level's exponent left its one home as.
-   */
-  readonly scale: number;
-  /**
-   * Which endpoint column addresses these tiles, on an edge projection. `null` on a vertex one,
-   * whose address is its own `dense_id`.
-   */
-  readonly direction: Direction | null;
-  /** The column tile `k` filters on — `src_dense`/`dst_dense` on an edge projection, `dense_id` on a vertex one. */
-  readonly column: 'dense_id' | 'src_dense' | 'dst_dense';
-  /**
-   * Rows per tile: the cut, which does not change with the scale. On an edge projection this is the
-   * ALIGNED endpoint type's — a different space from the other endpoint's on a cross-type edge.
+   * Rows per tile — the ALIGNED endpoint type's, a different space from the other endpoint's on a
+   * cross-type edge. Never `edge_count / chunkSize`: an edge tile is addressed by a vertex tile.
    */
   readonly chunkSize: number;
-  /** `log2(chunkSize) + log2(scale)` — the shift that names a tile, and never a division. */
+  /** `log2(chunkSize)` — the shift that names a tile, and never a division. */
   readonly shift: number;
-  /**
-   * How many rows of the sequence this projection addresses: the type's own `vertex_count` divided
-   * by the scale, or the aligned endpoint type's on an edge. `null` when no count is declared.
-   *
-   * **Not the edge's row count**, on an edge projection. An edge tile is addressed by a *vertex*
-   * tile, so `edge_count / chunkSize` is the wrong division and it is wrong quietly: on the
-   * conformance corpus it gives ten where there are five, and every URL past the fifth composes
-   * cleanly and 404s.
-   */
-  readonly rows: bigint | null;
-  /** `ceil(rows / chunkSize)`, or `null` when no count is declared. */
-  readonly tiles: bigint | null;
   /** Which container carries these tiles. The corpus's, never a second answer. */
   readonly container: Container;
-  /** The tile of this projection holding `denseId` — its own {@link shift}, never a division. */
-  tileOf(denseId: bigint): bigint;
-  /**
-   * The file tile `j` is in: `<prefix>chunk{j}.parquet` under `files`, `<prefix>tiles.parquet`
-   * under `rowgroups` — the same two spellings whatever the scale, because a level is not a
-   * different kind of thing from a payload. {@link IndexAddress} is the artefact that spells its
-   * files `tile{k}` instead, and it is the one that is not a projection.
-   *
-   * Under `rowgroups` on an adjacency the row-group ordinal is *not* the tile: an adjacency tile is
-   * however many edges its vertices happen to have, and a tile whose vertices have none contributes
-   * no row group to be numbered. What locates it is the footer's box on {@link column} over the
-   * tile's `dense_id` range.
-   */
+  /** The file tile `j` is in: `<prefix>chunk{j}.parquet` or `<prefix>tiles.parquet`. */
   tileUrl(tile: number | bigint): string;
 }
 
@@ -395,194 +160,66 @@ export interface EdgeAddress {
   readonly edgeType: string;
   readonly srcType: string;
   readonly dstType: string;
-  /**
-   * The manifest's `edge_count`, or `null` when it declares none. **One number for both
-   * orientations** — they are one relation stored twice — so it is not the tile count of either.
-   */
+  /** The manifest's `edge_count` — one number for both orientations — or `null`. */
   readonly count: bigint | null;
   /** Where the type lives, resolved against the corpus base and with a trailing separator. */
   readonly prefix: string;
   /**
-   * The orientations that resolve to an address — never a direction the manifest does not publish.
-   *
-   * A projection the manifest omits, or declares without a `path`, is not here. A corpus that tiles
-   * only CSR has `['src']`, and asking it for `dst` returns `null` rather than a string that 404s.
+   * The orientations that resolve to an address — never one the manifest does not publish. A
+   * corpus that tiles only CSR has `['src']`, and asking it for `dst` is `null`, not a 404.
    */
   readonly directions: readonly Direction[];
-  /**
-   * **Every projection of this relation**: one per orientation at `scale: 1` — the adjacency — and
-   * one per written level, source-aligned and carrying both endpoints' coordinates.
-   *
-   * The same list a vertex type has, told apart by {@link ProjectionAddress.direction}. A relation
-   * declaring only its adjacencies is a corpus and not a gap: a reader draws the same edges out of
-   * the adjacency and the payload, and only reads more.
-   *
-   * **What a level of a relation carries that no other projection does is the endpoints'
-   * coordinates** — `src_x`, `src_y`, `dst_x`, `dst_y` beside the two ids, which makes it
-   * self-drawing. A VERTEX level can position 0.79% of the edges the same view draws, so a pyramid
-   * without this one answers a view with links by opening the payload.
-   */
-  readonly projections: readonly ProjectionAddress[];
-  /** The declared orientation's adjacency — its projection at `scale: 1` — or `null`. */
+  /** The declared orientation's adjacency, or `null`. */
   adjacency(direction: Direction): ProjectionAddress | null;
-  /**
-   * One projection by scale and orientation, or `null` when the corpus publishes neither.
-   *
-   * A level is always source-aligned: a level of a relation is *which vertices are in it*, and the
-   * source type's own pyramid is what says which.
-   */
-  projection(scale: number | bigint, direction: Direction): ProjectionAddress | null;
-  /**
-   * Every file of the projection at `scale` in `direction`, in order and distinct.
-   *
-   * Throws on a scale nobody wrote by naming the ones that were: the adjacency and the payload are
-   * what answer it.
-   */
-  projectionFiles(scale: number | bigint, direction: Direction): readonly string[];
+  /** Every file of the orientation's adjacency, in order and distinct. */
+  adjacencyFiles(direction: Direction): readonly string[];
 }
 
-/** Why an orientation is missing from an answer. The three reasons are honest; they are not the same. */
+/** Why an orientation is missing from an answer. The two reasons are honest; they are not the same. */
 export type GapReason =
-  /** The caller did not ask for this direction. */
-  | 'not-requested'
   /** The manifest does not publish an address for it, so no URL exists to ask for. */
   | 'not-declared'
   /**
    * The relation's other end is a different vertex type, so its far ends are numbered in another
-   * `dense_id` space. Only a {@link Drawing} reports it: a window over the incident set wants that
-   * relation, and gets it.
+   * `dense_id` space. `edges` declines it unless the call names the relation.
    */
   | 'other-space';
 
-/** One orientation of one edge type that a window did not read, and why. */
+/** One orientation of one edge type that an answer did not read, and why. */
 export interface Gap {
   readonly edgeType: string;
   readonly direction: Direction;
   readonly reason: GapReason;
 }
 
-/** The files one edge type contributes to a window, distinct, in the orientation that addresses it. */
-export interface EdgeTiles {
-  readonly edgeType: string;
-  readonly direction: Direction;
-  readonly urls: readonly string[];
-}
-
 /**
- * The tiles a set of vertex tiles addresses, **and what that set is complete for.**
- *
- * A partial answer has to be distinguishable from a complete one. CSR alone is complete for
- * *drawing* — every drawable edge has its source on screen, therefore in a tile the window already
- * fetched — and incomplete for *incidence*: an edge whose destination is drawn and whose source the
- * window never selected is unreachable through `by_source`, and there are measurably many. So
- * `complete` is about incidence and `gaps` says which orientations are missing from it, separating
- * the caller not asking from the corpus not publishing.
- */
-export interface AddressedTiles {
-  /** The vertex type the tile numbers are in the `dense_id` space of. */
-  readonly type: string;
-  readonly tiles: readonly number[];
-  /**
-   * The files those tiles are in, distinct and in order.
-   *
-   * Distinct is a no-op under `files` and the whole answer under `rowgroups`, where every tile of a
-   * type is the same file: a list that named it once per tile would be one scan per tile.
-   */
-  readonly vertexUrls: readonly string[];
-  readonly edges: readonly EdgeTiles[];
-  /** Every URL in {@link edges}, flattened and distinct, in declaration order. */
-  readonly edgeUrls: readonly string[];
-  /** `true` when every edge incident to a vertex in these tiles is in one of these files. */
-  readonly complete: boolean;
-  readonly gaps: readonly Gap[];
-}
-
-/**
- * **Which relations a picture of one vertex type may draw**, and which of the ones incident to it
- * it may not, with the reason.
- *
- * A picture is one type's `dense_id` space: every mark is a row of that type's payload, every far
- * end is placed in the same numbering, and an edge row's two endpoint columns are compared against
- * it. A relation that LEAVES the type has its far ends numbered in another type's space, both
- * spaces are dense from zero, and `BIGINT` compares against `BIGINT` without complaining — so the
- * comparison matches and draws a line between two vertices with nothing between them.
- *
- * **It is not {@link AddressedTiles} narrowed, and that is the point.** `tilesFor` with `['src']`
- * is the out-edge read, and the out-edges of an `Author` include the ones landing on a `Paper`:
- * right for incidence, unusable for a picture. Two questions, two calls.
- */
-export interface Drawing {
-  /** The vertex type every mark, every far end and both ends of every line are numbered in. */
-  readonly type: string;
-  /** The relations a picture of this type may draw, in declaration order. */
-  readonly relations: readonly EdgeAddress[];
-  /**
-   * The relations incident to this type that the picture leaves out, and why. Source-aligned,
-   * because the drawing read is.
-   */
-  readonly undrawn: readonly Gap[];
-}
-
-/**
- * A corpus resolved to addresses.
- *
- * **It was `ResolvedCorpus`, one import away from `Corpus`, and neither name said what differed.**
- * Both are a corpus; one is the door — asynchronous, engine-backed, answering with rows — and this
- * one is the addressing underneath it, which answers with URLs and never reads a byte. So it is
- * named for the layer rather than for the noun the two share, and {@link Corpus.addressing} is
- * where a caller that has outgrown the door reaches it.
+ * A corpus resolved to addresses — the layer under the door, which answers with URLs and never
+ * reads a byte. Internal: the door reads through the host's engine, and a consumer that wanted a
+ * URL has outgrown a surface whose claim is that a corpus is a URL.
  */
 export interface CorpusAddressing {
-  readonly base: string;
   /** Which container the corpus declares. One answer for every payload set in it. */
   readonly container: Container;
   readonly types: readonly VertexAddress[];
   readonly edges: readonly EdgeAddress[];
   /**
-   * **Every file the corpus can address**, distinct and in declaration order: each vertex type's
-   * projections and identity index, then each relation's projections in both orientations.
-   *
-   * The list a host that grants access file by file — signing URLs, registering them with an
-   * engine — hands over whole, so it composes no path of its own. A projection whose count is not
-   * declared cannot be enumerated and is left out rather than guessed at; its own `files()` is the
-   * question that refuses it by name. `fossil_graph::plan::ReadPlan::files` is the implementation.
+   * **Every file the corpus can address**, distinct and in declaration order — the list a host
+   * that lends access file by file hands over whole. `fossil_graph::plan::ReadPlan::files`.
    */
   files(): readonly string[];
   /** One vertex type by name, or the first the index names when no name is given. */
   vertexType(name?: string): VertexAddress;
   /** The edge types incident to `type` — as source, as destination, or both on a self-edge. */
   incident(type: string): readonly EdgeAddress[];
-  /** Which relations a picture of `type` may draw, and why it leaves each of the others out. */
-  drawing(type?: string): Drawing;
-  /**
-   * The URLs a set of vertex tiles addresses.
-   *
-   * `directions` defaults to `['src']`, the out-edge read: it fetches the out-edges of every vertex
-   * in the set and returns `complete: false` with a `not-requested` gap, because a set of drawn
-   * vertices has in-edges it did not ask for. Pass `['src', 'dst']` for the incident set. Neither
-   * is the set a picture may DRAW — see {@link CorpusAddressing.drawing}.
-   *
-   * **It was `window`, and that name belonged to the other layer.** `Corpus.rows` takes a
-   * rectangle in the corpus's own coordinates and answers with vertices and edges; this takes tile
-   * numbers and answers with URLs. One noun for a camera and a URL builder is how a caller ends up
-   * passing a box to the one that wants tiles. This layer returns addresses, so it is named for
-   * what it addresses.
-   */
-  tilesFor(params: {
-    type?: string;
-    tiles: Iterable<number | bigint>;
-    directions?: readonly Direction[];
-  }): AddressedTiles;
 }
 
 // ── what the reader hands back ────────────────────────────────────────────────
 //
 // `Corpus.snapshot()` serialises `fossil_graph::plan::ReadPlan`, so these are that struct's own
-// field names, in `serde`'s spelling. They are the ONLY place this package writes them down: every
-// camelCase name above is produced from one of these below, once, at resolve.
+// field names, in `serde`'s spelling — the ones this package reads, and the only place it writes
+// them down.
 
 interface PlanSnapshot {
-  readonly base: string;
   readonly container: Container;
   readonly types: readonly VertexSnapshot[];
   readonly edges: readonly EdgeSnapshot[];
@@ -595,20 +232,15 @@ interface VertexSnapshot {
   readonly shift: number;
   readonly count: bigint | null;
   readonly tiles: bigint | null;
-  readonly container: Container;
-  readonly index: IndexSnapshot | null;
-  readonly projections: readonly ProjectionSnapshot[];
+  readonly index: { readonly ordered_by: string; readonly container: Container } | null;
   readonly cells: {
-    readonly vertices_per_cell: bigint;
     readonly relations: readonly string[];
     readonly mode_channel: string | null;
     readonly rungs: ReadonlyArray<{
       readonly rung: number;
-      readonly prefix: string;
       readonly shift: number;
       readonly cell_count: bigint;
-      readonly tiles: bigint;
-      readonly quotient: { readonly prefix: string; readonly edge_count: bigint } | null;
+      readonly quotient: { readonly edge_count: bigint } | null;
     }>;
   } | null;
   readonly tile_manifest: string | null;
@@ -622,24 +254,14 @@ interface VertexSnapshot {
   }>;
 }
 
-interface IndexSnapshot {
-  readonly prefix: string;
-  readonly ordered_by: string;
-  readonly chunk_size: bigint;
-  readonly tiles: bigint | null;
-  readonly container: Container;
-}
-
 interface ProjectionSnapshot {
   readonly prefix: string;
   readonly scale: bigint;
   /** Absent on a vertex projection — `serde` skips a `None` rather than writing a null. */
   readonly direction?: Direction;
-  readonly column: 'dense_id' | 'src_dense' | 'dst_dense';
+  readonly column: string;
   readonly chunk_size: bigint;
   readonly shift: number;
-  readonly rows: bigint | null;
-  readonly tiles: bigint | null;
   readonly container: Container;
 }
 
@@ -651,33 +273,6 @@ interface EdgeSnapshot {
   readonly prefix: string;
   readonly directions: readonly Direction[];
   readonly projections: readonly ProjectionSnapshot[];
-}
-
-interface GapSnapshot {
-  readonly edge_type: string;
-  readonly direction: Direction;
-  readonly reason: GapReason;
-}
-
-interface DrawingSnapshot {
-  readonly type: string;
-  /** Indices into the plan's `edges`: a label would not attribute two relations that share one. */
-  readonly relations: readonly number[];
-  readonly undrawn: readonly GapSnapshot[];
-}
-
-interface WindowSnapshot {
-  readonly type: string;
-  readonly tiles: readonly number[];
-  readonly vertex_urls: readonly string[];
-  readonly edges: ReadonlyArray<{
-    readonly edge_type: string;
-    readonly direction: Direction;
-    readonly urls: readonly string[];
-  }>;
-  readonly edge_urls: readonly string[];
-  readonly complete: boolean;
-  readonly gaps: readonly GapSnapshot[];
 }
 
 /**
@@ -721,50 +316,31 @@ function widths(denseIds: Iterable<bigint>): BigUint64Array {
 }
 
 /**
- * One projection of the snapshot, as the address a reader composes URLs from.
- *
- * `tileOf` and `tileUrl` cross back to the reader keyed on the projection's own scale rather than
- * arriving with the snapshot, because they are functions of an argument the manifest does not
- * contain. Both are non-null by construction: the only scales this is ever built for are the ones
- * the snapshot declares.
+ * One orientation's adjacency out of the snapshot. `tileUrl` crosses back to the reader, because it
+ * is a function of an argument the manifest does not contain.
  */
-function projectionAddress(
+function adjacencyAddress(
+  reader: CorpusReader,
+  edgeType: string,
   declared: ProjectionSnapshot,
-  tileOf: (scale: bigint, denseId: bigint) => bigint | undefined,
-  tileUrl: (scale: bigint, tile: bigint) => string | undefined,
 ): ProjectionAddress {
-  const scale = declared.scale;
+  // Non-null by construction: `plan` writes no edge projection without an `aligned_by`, which is
+  // what makes one addressable at all.
+  const direction = declared.direction!;
   return {
     prefix: declared.prefix,
-    scale: Number(scale),
-    direction: declared.direction ?? null,
-    column: declared.column,
+    direction,
+    column: declared.column as 'src_dense' | 'dst_dense',
     chunkSize: Number(declared.chunk_size),
     shift: declared.shift,
-    rows: declared.rows,
-    tiles: declared.tiles,
     container: declared.container,
-    // `widths` is OUTSIDE `asked`: a caller handing this a `Number` has made a type error and not
-    // written an unaddressable manifest, and the two must not come back as the same class.
-    tileOf: (denseId) => {
-      const [id] = widths([denseId]);
-      return asked(() => tileOf(scale, id!)!);
-    },
-    tileUrl: (tile) => asked(() => tileUrl(scale, BigInt(tile))!),
+    tileUrl: (tile) => asked(() => reader.edgeProjectionTileUrl(edgeType, direction, 1n, BigInt(tile))!),
   };
 }
 
 function vertexAddress(reader: CorpusReader, declared: VertexSnapshot): VertexAddress {
   const type = declared.type;
   const index = declared.index;
-  const projections = declared.projections.map((p) =>
-    projectionAddress(
-      p,
-      (scale, denseId) => reader.projectionTileOf(type, scale, denseId),
-      (scale, tile) => reader.projectionTileUrl(type, scale, tile),
-    ),
-  );
-  const byScale = new Map(projections.map((p) => [BigInt(p.scale), p]));
   return {
     type,
     prefix: declared.prefix,
@@ -772,26 +348,16 @@ function vertexAddress(reader: CorpusReader, declared: VertexSnapshot): VertexAd
     shift: declared.shift,
     count: declared.count,
     tiles: declared.tiles,
-    container: declared.container,
     index:
       index === null
         ? null
         : {
-            prefix: index.prefix,
             orderedBy: index.ordered_by,
-            chunkSize: Number(index.chunk_size),
-            tiles: index.tiles,
             container: index.container,
             files: () => asked(() => reader.indexFiles(type)),
           },
-    projections,
-    projection: (scale) => byScale.get(BigInt(scale)) ?? null,
-    projectionFiles: (scale) => asked(() => reader.projectionFiles(type, BigInt(scale))),
-    // `widths` is OUTSIDE `asked`, for the reason {@link projectionAddress} states.
-    tileOf: (denseId) => {
-      const batch = widths([denseId]);
-      return asked(() => reader.tilesOf(type, batch)[0]!);
-    },
+    // `widths` is OUTSIDE `asked`: a caller handing this a `Number` has made a type error and not
+    // written an unaddressable manifest, and the two must not come back as the same class.
     tilesOf: (denseIds) => {
       const batch = widths(denseIds);
       return asked(() => [...reader.tilesOf(type, batch)]);
@@ -802,19 +368,13 @@ function vertexAddress(reader: CorpusReader, declared: VertexSnapshot): VertexAd
       declared.cells === null
         ? null
         : {
-            verticesPerCell: Number(declared.cells.vertices_per_cell),
             relations: declared.cells.relations,
             modeChannel: declared.cells.mode_channel,
             rungs: declared.cells.rungs.map((r) => ({
               rung: r.rung,
-              prefix: r.prefix,
               shift: r.shift,
               cellCount: r.cell_count,
-              tiles: r.tiles,
-              quotient:
-                r.quotient === null
-                  ? null
-                  : { prefix: r.quotient.prefix, edgeCount: r.quotient.edge_count },
+              quotient: r.quotient === null ? null : { edgeCount: r.quotient.edge_count },
             })),
           },
     rungTileUrl: (rung, tile) => asked(() => reader.rungTileUrl(type, rung, BigInt(tile))) ?? null,
@@ -834,20 +394,9 @@ function vertexAddress(reader: CorpusReader, declared: VertexSnapshot): VertexAd
 
 function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress {
   const edgeType = declared.edge_type;
-  const projections = declared.projections.map((p) => {
-    // Non-null by construction: `plan` writes no edge projection without an `aligned_by`, which is
-    // what makes one addressable at all.
-    const at = p.direction!;
-    return projectionAddress(
-      p,
-      (scale, denseId) => reader.edgeProjectionTileOf(edgeType, at, scale, denseId),
-      (scale, tile) => reader.edgeProjectionTileUrl(edgeType, at, scale, tile),
-    );
-  });
-  const key = (scale: number | bigint, direction: Direction): string => `${direction}@${scale}`;
-  const byScale = new Map(projections.map((p) => [key(p.scale, p.direction!), p]));
-  const projection = (scale: number | bigint, direction: Direction): ProjectionAddress | null =>
-    byScale.get(key(scale, direction)) ?? null;
+  const adjacencies = declared.projections
+    .filter((p) => p.scale === 1n)
+    .map((p) => adjacencyAddress(reader, edgeType, p));
   return {
     edgeType,
     srcType: declared.src_type,
@@ -855,13 +404,9 @@ function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress 
     count: declared.count,
     prefix: declared.prefix,
     directions: declared.directions,
-    projections,
-    // The adjacency is the projection at `scale: 1` — which is why its files are `chunk{k}` like
-    // every other projection rather than a stem of their own.
-    adjacency: (direction) => projection(1, direction),
-    projection,
-    projectionFiles: (scale, direction) =>
-      asked(() => reader.edgeProjectionFiles(edgeType, direction, BigInt(scale))),
+    adjacency: (direction) => adjacencies.find((a) => a.direction === direction) ?? null,
+    adjacencyFiles: (direction) =>
+      asked(() => reader.edgeProjectionFiles(edgeType, direction, 1n)),
   };
 }
 
@@ -869,10 +414,8 @@ function edgeAddress(reader: CorpusReader, declared: EdgeSnapshot): EdgeAddress 
  * Resolve a corpus's manifest set into the addresses a reader composes URLs from — **the shallow
  * half of `open`, and not a door of its own.**
  *
- * This was `resolveCorpus`, exported beside the door — `openCorpus` as it was spelled then — and
- * the two were one question asked at two depths: the door reads bytes, this names URLs. Every
- * open resolves this first and publishes it as `corpus.addressing`, so the module surface has one
- * name on it. `./open.ts` is the only caller.
+ * This was `resolveCorpus`, exported beside the door, and then `corpus.addressing`; it is neither
+ * now. `./open.ts` is the only caller.
  *
  * **It is synchronous and stays synchronous**, because the boot is the caller's problem one layer
  * up: `open` awaits the boot before it gets here, exactly as it does for a verb.
@@ -900,51 +443,11 @@ export function addressManifests(
     byName.get(asked(() => reader.vertexTypeName(name)))!;
 
   return {
-    base: plan.base,
     container: plan.container,
     types,
     edges,
     files: () => reader.files(),
     vertexType,
     incident: (type) => edges.filter((e) => e.srcType === type || e.dstType === type),
-    drawing: (type) => {
-      const drawing = asked(() => reader.drawing(type) as DrawingSnapshot);
-      return {
-        type: drawing.type,
-        relations: drawing.relations.map((index) => edges[index]!),
-        undrawn: drawing.undrawn.map((g) => ({
-          edgeType: g.edge_type,
-          direction: g.direction,
-          reason: g.reason,
-        })),
-      };
-    },
-    tilesFor: ({ type, tiles, directions = ['src'] }) => {
-      const window = asked(
-        () =>
-          reader.window(
-            type,
-            BigUint64Array.from([...tiles].map(BigInt)),
-            [...directions],
-          ) as WindowSnapshot,
-      );
-      return {
-        type: window.type,
-        tiles: window.tiles,
-        vertexUrls: window.vertex_urls,
-        edges: window.edges.map((e) => ({
-          edgeType: e.edge_type,
-          direction: e.direction,
-          urls: e.urls,
-        })),
-        edgeUrls: window.edge_urls,
-        complete: window.complete,
-        gaps: window.gaps.map((g) => ({
-          edgeType: g.edge_type,
-          direction: g.direction,
-          reason: g.reason,
-        })),
-      };
-    },
   };
 }

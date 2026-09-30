@@ -2,9 +2,9 @@
  * What a rectangle costs through the footers, over the same windows.
  *
  * **The footers ARE the index** — `footer-is-the-index` — and this is the measurement of the one
- * path that survives that convention: every tile whose Parquet-footer `x`/`y` box intersects the
- * rectangle, which is what `intersecting` in `packages/corpus/src/rows.ts` does with the boxes
- * `open` reads once. Both halves of the question are here: it must MISS nothing, and what it over-reads
+ * path that survives that convention: every tile whose `x`/`y` box intersects the rectangle, which
+ * is what `scan.plan` does with the boxes the writer publishes once in the tile manifest (the same
+ * boxes, held against the footers by the `tile-manifest` guard). Both halves of the question are here: it must MISS nothing, and what it over-reads
  * for that is reported in tiles, in `Range` requests and in kilobytes.
  *
  * The denominator is not a model. DuckDB is asked for the tiles that actually hold a vertex inside
@@ -18,7 +18,7 @@
  *
  * `cost.test.ts` asserts the same path as a SHAPE — never every tile, about one more than the
  * answer needed, a smaller share of a bigger corpus — through `open` and the host's own
- * `query`. This one reports the numbers, at the DuckDB-CLI level, over a corpus this repository's
+ * `Engine`. This one reports the numbers, at the DuckDB-CLI level, over a corpus this repository's
  * own reader never touches.
  *
  * ## The corpus
