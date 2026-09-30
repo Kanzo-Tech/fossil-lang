@@ -105,7 +105,7 @@ use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 /// carriers hold no metadata of their own — it all lives in
 /// [`schema`](Self::schema).
 #[derive(Debug)]
-pub struct GraphArData {
+pub struct Graph {
     pub schema: GraphSchema,
     pub vertices: Vec<VertexTable>,
     pub edges: Vec<EdgeTable>,
@@ -154,7 +154,7 @@ pub async fn execute_graph<'db>(
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
-) -> datafusion::error::Result<GraphArData> {
+) -> datafusion::error::Result<Graph> {
     // The run's anchor, derived from the PROGRAM and not from the caller: a
     // source URI is a path the program wrote, so the directory it resolves
     // against is the program's own. The executor used to hand DataFusion the
@@ -210,7 +210,7 @@ pub async fn execute_graph<'db>(
         nodes,
         edges: edge_types,
     };
-    Ok(GraphArData {
+    Ok(Graph {
         schema,
         vertices,
         edges,

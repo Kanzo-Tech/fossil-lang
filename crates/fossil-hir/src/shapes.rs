@@ -480,24 +480,6 @@ fn malformed_cause(shapes: &OutputShapes) -> Option<SmolStr> {
     })
 }
 
-/// Map a Fossil [`Primitive`] to its manifest data-type spelling — the same
-/// vocabulary `fossil_sinks::manifest::data_type_name` emits. A materializer
-/// spelling, so it lives with the compiler and not on the lattice; the xsd
-/// direction is [`Primitive::to_xsd_iri`], which does.
-#[must_use]
-pub const fn primitive_to_graphar(p: Primitive) -> &'static str {
-    match p {
-        Primitive::Integer => "int64",
-        Primitive::Float => "double",
-        Primitive::Bool => "bool",
-        Primitive::Date => "date",
-        Primitive::DateTime => "timestamp",
-        Primitive::Time => "time",
-        // String / AnyUri / GYear have no narrower manifest spelling.
-        Primitive::String | Primitive::AnyUri | Primitive::GYear => "string",
-    }
-}
-
 /// Peel `Seq` wrappers to the inner [`Primitive`], if any — the datatype
 /// carried on a vertex property column.
 ///
@@ -604,17 +586,6 @@ mod tests {
     use super::*;
 
     use fossil_base::test_support::{PERSON_DOCUMENT, db_with_document, new_db};
-
-    /// Every manifest spelling is reachable, and the `String`-shaped corner of
-    /// the lattice collapses on purpose. The xsd direction is not tested here —
-    /// it is one function in `fossil-graph-schema`, tested there.
-    #[test]
-    fn graphar_spelling_covers_the_lattice() {
-        assert_eq!(primitive_to_graphar(Primitive::Integer), "int64");
-        assert_eq!(primitive_to_graphar(Primitive::DateTime), "timestamp");
-        assert_eq!(primitive_to_graphar(Primitive::AnyUri), "string");
-        assert_eq!(primitive_to_graphar(Primitive::GYear), "string");
-    }
 
     // --- the value type a constraint expects (defect 1) --------------------
 

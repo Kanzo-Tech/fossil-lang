@@ -1,6 +1,6 @@
 //! E2E del backend `DataFusion` (paso 3, vertex phase): `hello.fossil` →
 //! [`fossil_df::execute_vertex`] → ejecuta el plan sobre un CSV real y comprueba
-//! la forma `GraphAr` W0b materializada (`dense_id` + subject + props + x/y/cluster).
+//! la forma de tabla de vértice materializada (`dense_id` + subject + props + x/y/cluster).
 //! Valida MIR-PG → `LogicalPlan` → `read_csv` → `Projection`/sort → `collect()`
 //! → `dense_id` denso determinista.
 //!
@@ -34,7 +34,7 @@ User : Person from users
 const HELLO_SHEX: &str = include_str!("fixtures/person-name.shex");
 
 #[tokio::test]
-async fn execute_vertex_materialises_graphar_shape() {
+async fn execute_vertex_materialises_the_vertex_table_shape() {
     let (db, file) = support::db_with_shapes(HELLO, "hello.fossil", &[("hello.shex", HELLO_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)

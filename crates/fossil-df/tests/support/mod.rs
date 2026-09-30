@@ -124,7 +124,7 @@ pub(crate) const MEMORY_DEST: &str = "mem://out/corpus/";
 /// [`fossil_df::write`] into an in-memory store, and every file it wrote, by
 /// path under [`MEMORY_DEST`].
 pub(crate) async fn write_in_memory(
-    graph: &fossil_df::GraphArData,
+    graph: &fossil_df::Graph,
 ) -> (
     fossil_df::Written,
     std::collections::BTreeMap<String, Vec<u8>>,

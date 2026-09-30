@@ -4,8 +4,8 @@
 //! signature, and its lowering (a scalar SQL expression template, or an
 //! operator of the algebra).
 //! This module says what each becomes HERE, which is a materializer's business
-//! and not the language's — the same split `primitive_to_graphar` keeps for the
-//! datatype lattice.
+//! and not the language's — as a column's type spelling is
+//! `fossil_sinks::manifest::data_type_name`'s and not the lattice's.
 //!
 //! # Two vocabularies, one catalog
 //!

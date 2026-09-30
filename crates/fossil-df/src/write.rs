@@ -1,4 +1,4 @@
-//! The corpus, written: [`write`] lays the whole graph out and writes one
+//! The corpus, written: [`write`](crate::write::write) lays the whole graph out and writes one
 //! Parquet per vertex type and per relation, then `fossil.json`.
 //!
 //! **`fossil.json` goes last, and that is the commit.** Every table is in the
@@ -34,10 +34,10 @@ use fossil_sinks::manifest::{
 };
 use fossil_storage::Storage;
 
-use crate::GraphArData;
+use crate::Graph;
 use crate::report::EdgeDrops;
 
-/// What [`write`] answers: the manifest it wrote, and what the edge join
+/// What [`write`](fn@write) answers: the manifest it wrote, and what the edge join
 /// discarded — the one fact the corpus cannot hold about itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Written {
@@ -47,7 +47,7 @@ pub struct Written {
     pub dropped: Vec<EdgeDrops>,
 }
 
-/// Failure modes of [`write`].
+/// Failure modes of [`write`](fn@write).
 #[derive(Debug, thiserror::Error)]
 pub enum WriteError {
     /// The layout pass refused the graph.
@@ -84,11 +84,7 @@ pub enum WriteError {
 ///
 /// [`WriteError`] on the first failure. Nothing is written after it, and
 /// `fossil.json` never is.
-pub async fn write(
-    graph: &GraphArData,
-    storage: &Storage,
-    dest: &str,
-) -> Result<Written, WriteError> {
+pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Written, WriteError> {
     let mut probe = Probe::new("write");
     let nodes = &graph.schema.nodes;
     let empty: Vec<RecordBatch> = Vec::new();

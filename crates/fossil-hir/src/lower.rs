@@ -1312,10 +1312,9 @@ fn bind_stage_args<'a>(
 impl BoundArgs<'_> {
     /// The value at declared position `i`, lowered.
     ///
-    /// The three readers below are the whole of what
-    /// [`SigTy::names_rather_than_evaluates`] buys: a `Column` is read as a name
-    /// and a `Predicate` as an expression, and which one applies is the row's to
-    /// say rather than the arm's.
+    /// The three readers below are chosen by the row's [`SigTy`]: a `Column` is
+    /// read as a name and a `Predicate` as an expression, and which one applies
+    /// is the row's to say rather than the arm's.
     fn value(&self, db: &dyn fossil_base::Db, i: usize, types: &[SmolStr]) -> Option<HirExpr> {
         let (_, nodes) = self.slots.get(i)?;
         lower_expr_inner(db, nodes.first()?, types)

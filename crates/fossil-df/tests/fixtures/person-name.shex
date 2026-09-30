@@ -7,7 +7,7 @@
 #
 # `xsd:string` is the one narrowing that is safe here: absent an input schema on
 # the source, `users.name` synthesises no type at all, so the constraint is never
-# actually exercised — but the GraphAr column IS a string, and a document that
+# actually exercised — but the corpus column IS a string, and a document that
 # said otherwise would be lying about the corpus.
 PREFIX ex: <https://example.org/>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>

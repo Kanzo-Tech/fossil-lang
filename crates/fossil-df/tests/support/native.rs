@@ -78,7 +78,7 @@ pub(crate) fn open_db(path: &Path) -> (FossilDb, SourceFile) {
     let _ = fossil_introspect::introspect_program(
         Arc::clone(&system),
         path,
-        &fossil_introspect::RunCreds::default(),
+        &std::collections::HashMap::new(),
     );
     let mut db = FossilDb::new(system);
     let file = SourceFile::new(&db, text, path.to_string_lossy().into_owned());

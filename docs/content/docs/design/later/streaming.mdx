@@ -27,14 +27,14 @@ graph LR
   subgraph POOL["<b>--memory-gib</b> · a FairSpillPool, and this is its whole extent"]
     X["<b>execute_graph</b><br/>DataFusion reserves,<br/>spills, releases"]
   end
-  X --> G["<b>GraphArData</b><br/><i>seam 1 · still collects</i><br/>1.64 GiB of Arrow at ten million"]
+  X --> G["<b>Graph</b><br/><i>seam 1 · still collects</i><br/>1.64 GiB of Arrow at ten million"]
   G --> F["<b>try_for_each_manifest</b><br/><i>seam 2 · the manifests only</i><br/>no payload, so no round trip"]
   G --> E["<b>enrich_layout_within</b><br/><i>the same number, honoured differently</i><br/>takes the batches, estimates, refuses"]
   F --> W[("GraphAr tree on disk<br/>713 MB · 87 files")]
   E --> W
 ```
 
-**Seam 2 forked, and that is the change.** It used to be the only edge out of `GraphArData`: the
+**Seam 2 forked, and that is the change.** It used to be the only edge out of `Graph`: the
 whole corpus was encoded to Parquet, written, and then re-read by the pass, which rewrote it as tiles
 and deleted what it had read. The manifests still take that edge; the payload takes the second one,
 straight from the same batches. [cost](/docs/design/later/cost#the-redesign-and-what-is-left-of-the-table)
@@ -378,7 +378,7 @@ meaning that depends on a ratio nobody can see.
 **Sequencing it — the layout told what the executor left resident — is the one that is right in
 principle, and it is refused for now on three grounds, in the order that decides it:**
 
-1. **What is resident at the seam is not the executor's transient.** It is `GraphArData`: the corpus
+1. **What is resident at the seam is not the executor's transient.** It is `Graph`: the corpus
    as a value, 1.64 GiB of Arrow at ten million, and it is held by the *caller* for the whole
    duration of the layout pass — `fossil-cli`'s `run` keeps `graph` alive across
    `enrich_written_layout` because `RunReport::of(&graph)` comes after it. Adding that to the
@@ -395,8 +395,8 @@ principle, and it is refused for now on three grounds, in the order that decides
 
 **What brings sequencing back is a value dropped, not an instrument added.** The day the caller
 builds its report before the pass rather than after, what crosses the seam stops being a resident
-set to sample and becomes a number to be handed over — `GraphArData::arrow_gib` is already that
-number — and `declared − carried` is arithmetic. Until then the honest sentence is the one the pass
+set to sample and becomes a number to be handed over — `ac1801d4:crates/fossil-df/src/lib.rs, arrow_gib` was that
+number until `fossil/1` deleted it — and `declared − carried` is arithmetic. Until then the honest sentence is the one the pass
 now prints when it refuses: **the number is this stage's.**
 
 
@@ -437,7 +437,7 @@ DataFusion already streams — it hands `RecordBatch`es out lazily and its opera
 release against the pool. The unbounded half of the write path is the seams we wrote around it. **The
 three did not end the same way**, and the difference is the useful part.
 
-### 1. `GraphArData` holds every batch — still true
+### 1. `Graph` holds every batch — still true
 
 `ac1801d4:crates/fossil-df/src/lib.rs, finalize_vertex` collects each vertex projection before registering it as a
 `MemTable`, and both edge orientations are collected beside them, so the whole materialised graph is
