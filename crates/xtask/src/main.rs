@@ -171,11 +171,20 @@ fn wasm_closure() -> BTreeSet<String> {
         if !ws.contains(id) {
             continue;
         }
-        let deps = n["dependencies"]
+        // `deps` and not `dependencies`: the latter counts dev edges, and a
+        // dev-dependency is built for a test on the host, never for wasm32. It
+        // put `fossil-introspect` (and `DuckDB` under it) in the gate the day
+        // `fossil-df`'s tests took it to read back what the executor wrote.
+        let deps = n["deps"]
             .as_array()
-            .expect("node dependencies")
+            .expect("node deps")
             .iter()
-            .filter_map(|d| d.as_str())
+            .filter(|d| {
+                d["dep_kinds"]
+                    .as_array()
+                    .is_some_and(|ks| ks.iter().any(|k| k["kind"].as_str() != Some("dev")))
+            })
+            .filter_map(|d| d["pkg"].as_str())
             .filter(|d| ws.contains(d))
             .collect();
         adj.insert(id, deps);
