@@ -42,6 +42,42 @@ that must write natively — a corpus larger than RAM, spilled — and the argum
 would be built on.
 </Callout>
 
+### What the wasm writer holds, and how it says no
+
+Inside the address space the executor declares a **budget**: a 2 GiB pool every `DataFusion`
+operator reserves against, and no disk. An operator told no has nowhere to spill, so the run stops
+while the graph is still executing — before the first byte of the corpus is written — and the host
+gets an `Error` named `OverBudget` that says which operator asked, for how much, and what was already
+held. `crates/fossil-df/src/memory.rs` is the pool and its reasons.
+
+The budget is half the address space because the pool only sees what operators *reserve*: the source
+bytes, the collected graph, the layout pass and the encoded Parquet are outside it. Measured on
+`docs/programs/shop` in Node, one join and two deduplicated types:
+
+| people · orders | outcome | linear memory | wall clock |
+| --- | --- | --- | --- |
+| 60,000 · 180,000 | written | 183 MiB | 1.6 s |
+| 200,000 · 600,000 | written | 624 MiB | 6.2 s |
+| 500,000 · 1,500,000 | written | 1,466 MiB | 22.1 s |
+| 900,000 · 2,700,000 | written | 2,704 MiB | 48.8 s |
+| 1,000,000 · 3,000,000 | `OverBudget` | 2,763 MiB | 39.8 s |
+
+A real corpus sits well inside it: Vermont — twelve types, 144,784 vertices and 426,781 edges — writes
+in 4.8 s at 684 MiB. What spends the budget first is the dedup of a vertex type (its
+`first_value … ORDER BY subject` aggregate), not the join.
+
+**Before the budget there was no bound at all, and it trapped.** `DataFusion`'s default pool summed
+reservations into a `usize` it never checked, and a `usize` is 32 bits on wasm32. The sort above a
+dedup was charged, for each of its `batch_size` slices, the whole batch the slice was cut from — 5.6
+GiB accounted for a 78 MiB batch of `Order` at 200,000 people — so the sum wrapped, a reservation split found
+less than had been put in, and the run died on `unreachable` with its promise never settled. The same
+run natively finished in 1.5 s, which is why no native test saw it. The executor now copies a slice
+out of its parent before a sort or a hash join's build side counts it, and
+`packages/corpus/integration/scale.test.ts` runs the scale that used to trap.
+
+**What would reverse it:** a `DataFusion` whose sort charges a slice for what it spans deletes the
+copy; a `wasm64` target, or a disk to spill to, moves the budget.
+
 One boundary here is a threat model rather than a preference. The host owns the credentials, and
 what crosses to fossil is never one of them: it is a **vended** credential — short-lived, scoped to
 one prefix, and enforced by the store rather than by the reader. See

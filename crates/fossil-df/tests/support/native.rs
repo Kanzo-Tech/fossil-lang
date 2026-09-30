@@ -388,7 +388,10 @@ async fn run_dir_async(
         }
     }
 
-    let report = exec.execute(&mut storage, DEST).await?;
+    let report = exec
+        .execute(&mut storage, DEST)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut files = BTreeMap::new();
     let listed: Vec<_> = out.list(None).try_collect().await.expect("list");
     for meta in listed {

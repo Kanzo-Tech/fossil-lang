@@ -60,6 +60,9 @@ export class FossilExecutor implements DocumentWorkspace {
    * Run with the storage `host` vends: each source read through its connection's credential —
    * by range requests, not whole — and the `fossil/1` corpus written under the one prefix `host`
    * vends `write` on for `job`, `fossil.json` last. Answers where it wrote and what it dropped.
+   *
+   * Rejects with an `Error` named `OverBudget` when the run needs more memory than the executor's
+   * budget; that is decided while the graph executes, so nothing has been written.
    */
   run(host: Host, job: string): Promise<RunReport> {
     return this.#raw.run(host, job) as Promise<RunReport>;
@@ -67,7 +70,8 @@ export class FossilExecutor implements DocumentWorkspace {
 
   /**
    * Run over files held in memory, for a host with no storage: `sources` maps each locator the
-   * program reads to its bytes, and the output stays in memory under `dest`.
+   * program reads to its bytes, and the output stays in memory under `dest`. Rejects as
+   * {@link run} does.
    */
   runInMemory(sources: Record<string, Uint8Array>, dest: string): Promise<ExecutorResult> {
     return this.#raw.runInMemory(sources, dest) as Promise<ExecutorResult>;

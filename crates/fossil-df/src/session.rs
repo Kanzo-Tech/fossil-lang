@@ -42,6 +42,8 @@ use datafusion::common::tree_node::{Transformed, TreeNode};
 use datafusion::common::{DataFusionError, Result};
 use datafusion::execution::TaskContext;
 use datafusion::execution::context::SessionContext;
+use datafusion::execution::disk_manager::{DiskManagerBuilder, DiskManagerMode};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::session_state::SessionStateBuilder;
 use datafusion::physical_optimizer::PhysicalOptimizerRule;
 use datafusion::physical_plan::buffer::BufferExec;
@@ -55,14 +57,34 @@ use datafusion::physical_plan::{
 };
 use datafusion::prelude::SessionConfig;
 
-/// The session every browser run executes in: one target partition, and
-/// [`OneTask`] after every built-in rule.
+use crate::memory::{BUDGET, Budget, Compact};
+
+/// The session every browser run executes in, under a fresh [`BUDGET`].
 #[must_use]
 pub fn session() -> SessionContext {
+    session_within(Arc::new(Budget::new(BUDGET)))
+}
+
+/// The session every browser run executes in: one target partition, `budget`
+/// as its pool and no disk, and [`OneTask`] and [`Compact`] after every
+/// built-in rule. The caller keeps `budget` to ask it what it refused.
+///
+/// [`crate::memory`] says why the pool is bounded and the plan compacted.
+#[must_use]
+pub fn session_within(budget: Arc<Budget>) -> SessionContext {
+    let runtime = RuntimeEnvBuilder::new()
+        .with_memory_pool(budget)
+        .with_disk_manager_builder(
+            DiskManagerBuilder::default().with_mode(DiskManagerMode::Disabled),
+        )
+        .build_arc()
+        .expect("a runtime with no disk opens nothing");
     let state = SessionStateBuilder::new()
         .with_config(SessionConfig::new().with_target_partitions(1))
+        .with_runtime_env(runtime)
         .with_default_features()
         .with_physical_optimizer_rule(Arc::new(OneTask))
+        .with_physical_optimizer_rule(Arc::new(Compact))
         .build();
     SessionContext::new_with_state(state)
 }
