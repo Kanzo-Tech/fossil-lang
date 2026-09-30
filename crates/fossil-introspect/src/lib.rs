@@ -21,7 +21,7 @@
 //!
 //! # Credentials came too, and they had to
 //!
-//! [`creds`] holds `RunCreds` — a host's connection credentials, rendered into a
+//! [`creds`] holds `ConnectionCreds` — a host's connection credentials, rendered into a
 //! `CREATE SECRET` by `fossil-storage`. Introspection and credentials are the
 //! same concern: the secret exists so that the `DESCRIBE` over a cloud `@conn`
 //! source authenticates.
@@ -48,7 +48,7 @@ use smol_str::SmolStr;
 
 pub mod creds;
 
-pub use creds::{ConnectionCreds, RunCreds, SecretSpec};
+pub use creds::{ConnectionCreds, SecretSpec};
 
 /// How far a host is willing to reach for a source's columns.
 ///
@@ -192,16 +192,17 @@ fn freshness_token(resolved: &str) -> String {
 /// If `path` cannot be read. Per-source introspection failures are NOT errors:
 /// they log and skip, so a compile can still succeed with no forward-propagated
 /// types for that source.
+#[allow(clippy::implicit_hasher)] // as `pre_introspect_and_register`.
 pub fn introspect_program(
     system: Arc<dyn System>,
     path: &Path,
-    creds: &RunCreds,
+    connections: &HashMap<String, ConnectionCreds>,
 ) -> std::io::Result<()> {
     let text = std::fs::read_to_string(path)?;
     let db = fossil_base::FossilDb::new(system);
     let file = fossil_base::SourceFile::new(&db, text, path.to_string_lossy().into_owned());
-    let sources = fossil_lineage::program_sources(&db, file, &connection_urls(&creds.connections));
-    pre_introspect_and_register(db.system(), &sources, &creds.connections, Reach::Anywhere);
+    let sources = fossil_lineage::program_sources(&db, file, &connection_urls(connections));
+    pre_introspect_and_register(db.system(), &sources, connections, Reach::Anywhere);
     Ok(())
 }
 
