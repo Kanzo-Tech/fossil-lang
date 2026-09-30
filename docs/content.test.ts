@@ -706,7 +706,9 @@ describe("every /docs route that is cited lands", () => {
   // Three vacuity traps rather than one, because this guard has three ways to stop guarding: the
   // tree walk can stop finding files, the regex can stop matching, and — the one the widening
   // introduced — the whole non-docs half can drop out while the MDX half keeps the suite green.
-  // Every floor is deliberately far below what is there today and above zero.
+  // Every floor is deliberately far below what is there today and above zero. The non-docs floor
+  // was 50 until fossil/1 deleted fossil-graph, fossil-graph-wasm and fossil-cli and the 46 routes
+  // cited from the code that is left fell under it; 25 is the same margin over what remains.
   it("finds files to read routes out of", () => {
     expect(routeCitingFiles.length).toBeGreaterThan(300);
   });
@@ -716,7 +718,7 @@ describe("every /docs route that is cited lands", () => {
     expect(
       routeCitations.filter((c) => !c.where.startsWith("docs/")).length,
       "no route is cited from outside this app, which is the half this guard was widened for",
-    ).toBeGreaterThan(50);
+    ).toBeGreaterThan(25);
     expect(routeCitations.filter((c) => c.route.includes("#")).length).toBeGreaterThan(20);
   });
 
