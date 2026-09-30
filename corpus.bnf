@@ -23,8 +23,8 @@
    And they had already drifted. «The columns the writer emits» was stated in
    three places with **two different contents**:
 
-     crates/fossil-graph/src/manifest.rs   five names, `cluster_id` included
-     packages/corpus/src/corpus.ts         four names, `cluster_id` absent
+     ac1801d4:crates/fossil-graph/src/manifest.rs   five names, `cluster_id` included
+     ac1801d4:packages/corpus/src/corpus.ts         four names, `cluster_id` absent
      a viewer app's encoding module        the same set spelled a third way
 
    Neither is wrong where it stands, and that is the point: they mean different

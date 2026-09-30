@@ -8,11 +8,12 @@
 //! relations (Arrow tables); the *graph* is an interpretation that declares:
 //! which relations are node types, what identifies a node (its **key** — here,
 //! the subject IRI), and which predicates **reference** another node type (the
-//! edges). RDF, `GraphAr` (`dense_id`/CSR-CSC), edge-lists, traversal, DCAT are
+//! edges). RDF, the `fossil/1` corpus (`dense_id`, `src`/`dst`), edge-lists,
+//! traversal, DCAT are
 //! then all **views or materializers** over this single schema + the relations.
 //!
 //! This type is that schema, made first-class and **format-neutral**: it carries
-//! no `dense_id`, no Parquet/CSR detail, no GraphAr/xsd spelling. Those belong to
+//! no `dense_id`, no Parquet detail, no manifest or xsd spelling. Those belong to
 //! the *materializers*, derived from this schema on demand. Keeping the contract
 //! free of any storage/format detail is what lets a new output format be "just
 //! another materializer" without touching the producer or the consumer — the
@@ -33,7 +34,7 @@
 //!
 //! Every node's key is its **subject IRI** (uniform across fossil). An edge
 //! `source → destination` references node types by `label`; the relational plan
-//! computes the actual IRI-valued columns, and a `GraphAr` materializer resolves
+//! computes the actual IRI-valued columns, and the corpus writer resolves
 //! those IRIs to dense ids. The schema only states the shape.
 //!
 //! # Two contracts, one crate

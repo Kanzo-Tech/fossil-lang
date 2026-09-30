@@ -22,9 +22,7 @@
 //! `fossil-df-wasm` is a `wasm-bindgen` shell over this, in the browser and in
 //! Node, and it is the only host that writes a corpus. This is target-agnostic:
 //! native tests drive it on a current-thread runtime, the browser on its own
-//! event loop. The native `fossil run` host that sat beside it was deleted on
-//! 2026-09-30 — no consumer used it, and it wrote a different corpus from the
-//! same program.
+//! event loop.
 
 use std::collections::HashMap;
 use std::path::Path;

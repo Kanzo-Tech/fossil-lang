@@ -17,8 +17,8 @@
 //! `io.csv("data/x.csv")` resolved against different directories. `check`
 //! pre-introspected against `path.parent()` while `run` executed against the
 //! cwd, so the two commands disagreed about where the same file was. And a
-//! program changed meaning when you `cd`: `fossil run
-//! docs/programs/hello/hello.fossil` from the repository root looked for
+//! program changed meaning when you `cd`: running
+//! `docs/programs/hello/hello.fossil` from the repository root looked for
 //! `<root>/data/people.csv`.
 //!
 //! # The rule

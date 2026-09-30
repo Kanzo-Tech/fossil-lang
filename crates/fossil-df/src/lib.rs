@@ -124,7 +124,8 @@ pub struct EdgeTable {
     pub dropped: u64,
 }
 
-/// Execute a whole program's mappings into the `GraphAr` graph.
+/// Execute a whole program's mappings into the graph [`write()`] lays out and
+/// writes.
 ///
 /// Two phases with a hard barrier between them: **(1)** materialise *every*
 /// vertex (assigning dense ids, registering each as a [`MemTable`]); **(2)**
@@ -458,10 +459,9 @@ fn prepend_dense_id(batches: Vec<RecordBatch>) -> datafusion::error::Result<Vec<
     let mut out = Vec::with_capacity(batches.len());
     let mut offset: u32 = 0;
     for batch in batches {
-        // `dense_id` is `uint32` in the corpus's own column table — that is the
-        // width `corpus.bnf` declares and the one GraphAr's reader chokes on — so
-        // a type of more than 4,294,967,295 rows is unaddressable before it is
-        // untruncatable. `try_from` here would invent an error the writer has no
+        // `dense_id` is `uint32` in the corpus's own column table — the width
+        // `corpus.bnf` declares — so a type of more than 4,294,967,295 rows is
+        // unaddressable before it is untruncatable. `try_from` here would invent an error the writer has no
         // way to report and no reader could act on.
         #[allow(clippy::cast_possible_truncation)]
         let n = batch.num_rows() as u32;

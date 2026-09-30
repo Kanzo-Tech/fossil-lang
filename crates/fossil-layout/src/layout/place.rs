@@ -163,7 +163,8 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
         // orientation puts first, so the corner the centre is measured from is
         // the block's alignment and not its first cell — reading the first cell
         // put 24,570 ids inside foreign groups, which
-        // `tests/cells.rs, a_cluster_is_one_run_of_dense_id` caught.
+        // `ac1801d4:crates/fossil-layout/tests/cells.rs, a_cluster_is_one_run_of_dense_id`
+        // caught; nothing holds it since that test left with the cells.
         let side_bits = blocks.trailing_zeros() / 2 + fine / 2;
         let (col, row) = (
             (col >> side_bits) << (side_bits - fine / 2),

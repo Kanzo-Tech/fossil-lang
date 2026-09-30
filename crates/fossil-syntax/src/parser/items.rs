@@ -535,7 +535,7 @@ fn parse_mapping_header(p: &mut Parser) {
 // was told. The `&` is not a token; the node is where the one shape lives.
 //
 // There is no `in g` either: the named-graph clause parsed into an IN_CLAUSE
-// nothing read, and GraphAr is vertex and edge tables, not quads.
+// nothing read, and a `fossil/1` corpus is vertex and edge tables, not quads.
 
 /// Whether [`parse_shape_expr`] left anything on the line for its caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

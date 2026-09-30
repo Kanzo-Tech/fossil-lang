@@ -10,7 +10,7 @@
 //! [`providers`] is a projection of [`fossil_base::providers`] and
 //! [`source_refs`] walks the def map, so its content is the language's. What
 //! keeps it out of `fossil-hir` is the other end: these are the shapes a HOST
-//! reads — serde JSON on the CLI's stdout, `serde-wasm-bindgen` values in the
+//! reads — serde JSON natively, `serde-wasm-bindgen` values in the
 //! browser — and `fossil-hir` answers to the compiler, not to a host.
 //!
 //! The four types below used to live in `fossil-run-status`, which this crate

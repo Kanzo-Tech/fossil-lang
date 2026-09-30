@@ -154,7 +154,7 @@ pub enum Op<'db> {
     /// `EmitVertex(input, type_name, rdf_type?, id, dedup, props)` — project rows
     /// to a typed property-graph VERTEX. The property-graph-canonical model: one
     /// `EmitVertex` per shape carrying ALL its columns (map-only wide-row). The
-    /// backend assigns the dense vertex id and materialises `GraphAr`; the PG model
+    /// backend assigns the dense vertex id and writes the `fossil/1` corpus; the PG model
     /// lives here, not in triples. `id` is the subject IRI expression (typically a
     /// `Concat` template); `dedup` collapses duplicate ids (single-valued shape).
     EmitVertex {
@@ -316,8 +316,8 @@ pub struct AggSpec<'db> {
 ///
 /// The PG-canonical replacement for a per-predicate triple emission: a vertex's
 /// properties are carried together so the backend emits one wide row per source
-/// row. `ty` is fossil's canonical type — the backend derives the `GraphAr`/xsd
-/// spelling from it (the core stays format-agnostic). `rdf_uri` is the predicate
+/// row. `ty` is fossil's canonical type — the backend derives the manifest's and
+/// xsd's spelling from it (the core stays format-agnostic). `rdf_uri` is the predicate
 /// IRI the manifest/DCAT layer reads; `single_valued` (shape cardinality) drives
 /// duplicate collapse.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
@@ -352,7 +352,7 @@ pub enum SourceFormat {
     /// and states no default for exactly this reason.
     ///
     /// It was a unit variant, which is why a pipe-delimited source had to be
-    /// converted to commas before `fossil run` would read it — the surface
+    /// converted to commas before the executor would read it — the surface
     /// could say `delimiter = "|"` (`grammar.bnf`, `NamedArg`) and the algebra
     /// had nowhere to put it.
     Csv { delimiter: Option<SmolStr> },
@@ -367,8 +367,9 @@ pub enum SourceFormat {
     Provider { name: SmolStr },
 }
 
-/// Sink references. `GraphAr` is the only one built; `Turtle`, `JsonLd` and
-/// `NQuads` are the serialisations this enum is shaped to take next.
+/// Sink references. `GraphAr` is the `fossil/1` corpus, the only sink built;
+/// `Turtle`, `JsonLd` and `NQuads` are the serialisations this enum is shaped
+/// to take next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum SinkRef {
     GraphAr,

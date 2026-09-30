@@ -28,8 +28,8 @@ workspace = true
 # Compiler-core crates wired into FossilWorkspace::compile
 # The wasm dep tree is the compiler front-end crates plus WASM glue. NO
 # fossil-layout (the write path's post-pass), NO fossil-lsp (a binary), NO
-# fossil-sinks/fossil-codegen (the SQL/GraphAr backend — the browser does not
-# compile to SQL anymore; the editor is LSP-only).
+# fossil-sinks (the corpus format — the editor writes no corpus; that is
+# fossil-df-wasm's job).
 fossil-base    = { path = "../fossil-base" }
 fossil-syntax  = { path = "../fossil-syntax" }
 fossil-hir     = { path = "../fossil-hir" }

@@ -330,8 +330,8 @@ MappingHeader       := IDENT SHAPE_SEP ShapeExpr 'from' Expression
    not a token.
 
    There is no `in g` either. The named graph clause parsed into an IN_CLAUSE
-   nothing read, and the corpus has nowhere to put a graph name: GraphAr is
-   vertex and edge tables, not quads. `in` is an ordinary identifier. *)
+   nothing read, and the corpus has nowhere to put a graph name: a `fossil/1`
+   corpus is vertex and edge tables, not quads. `in` is an ordinary identifier. *)
 ShapeExpr           := IDENT
 
 (* `from` takes a full expression, and that is where the verbs live: `from
@@ -504,8 +504,8 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (* ─── Record literals (blank node value position) ─── *)
 
 (* There is no record literal. `{ k = v }` in value position was the blank node,
-   and a blank node is a vertex with no IRI — which GraphAr's vertex table has no
-   row shape for and `MappingBody` has no way to declare. It went with the
+   and a blank node is a vertex with no IRI — which a vertex table, keyed on its
+   subject IRI, has no row shape for and `MappingBody` has no way to declare. It went with the
    annotation block it shared a `{` with: the one disambiguation rule this
    grammar had existed only to tell the two apart, and with neither of them
    there is nothing to tell apart. *)

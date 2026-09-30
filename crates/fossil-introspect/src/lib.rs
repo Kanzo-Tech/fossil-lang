@@ -1,26 +1,27 @@
 //! `fossil-introspect` — what a NATIVE host does before it asks the compiler to
 //! compile: read each source's columns, and hold the credentials that let it.
+//! The one native host is the language server, `fossil-lsp`.
 //!
-//! # Why this is a crate and not a module of the native host
+//! # Why this is a crate and not a module of a host
 //!
 //! Because the compiler does not introspect. **The host does**, and one host
 //! already proved it: `fossil-wasm` implements
 //! [`fossil_base::System::descriptors`], the browser runs
 //! `@fossil-lang/introspect` against its own DuckDB-WASM, and the registered
 //! descriptors are all the checker ever sees. The native side did the same job
-//! from *inside* the native host, which is what made that crate open a `DuckDB`
+//! from *inside* a native host, which is what made that crate open a `DuckDB`
 //! connection and carry a `compile_error!` for `wasm32`.
 //!
 //! Moving it does not change what the compiler infers, and that is the point of
 //! this shape rather than a `DataFusion` rewrite: **`DuckDB` is still the engine
 //! that DESCRIBES, on both sides.** `packages/introspect/tests/rust-parity.test.ts`
 //! compares this crate against the TypeScript for exactly that reason — «the
-//! browser and the CLI answer the same program differently» is the bug it
+//! browser and the language server answer the same program differently» is the bug it
 //! exists to catch, and CSV type sniffing is where two engines would disagree.
 //!
 //! # Credentials came too, and they had to
 //!
-//! [`creds`] holds `RunCreds` — the `--creds-stdin` payload, rendered into a
+//! [`creds`] holds `RunCreds` — a host's connection credentials, rendered into a
 //! `CREATE SECRET` by `fossil-storage`. Introspection and credentials are the
 //! same concern: the secret exists so that the `DESCRIBE` over a cloud `@conn`
 //! source authenticates.

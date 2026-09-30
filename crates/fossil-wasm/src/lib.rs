@@ -31,11 +31,11 @@
 //!
 //! ## Architecture
 //!
-//! `fossil-wasm` is the LSP server-side IN THE BROWSER — NOT a recompiled
+//! `fossil-wasm` is the language service IN THE BROWSER — NOT a recompiled
 //! `fossil-lsp` (which has a `compile_error!` cfg-tripwire because
-//! `lsp-server` uses crossbeam + stdio). Both `fossil-lsp` (native, stdio)
-//! and `fossil-wasm` (WASM, postMessage) are thin transport adapters over
-//! the same `fossil-ide` free functions — "one crate, two hosts".
+//! `lsp-server` uses crossbeam + stdio). Both `fossil-lsp` (native, JSON-RPC
+//! over stdio) and `fossil-wasm` (WASM, plain method calls) are thin transport
+//! adapters over the same `fossil-ide` free functions — "one crate, two hosts".
 //!
 //! ## Why the Workspace lifecycle is fan-out-safe
 //!

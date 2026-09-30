@@ -164,7 +164,7 @@ pub enum ConstraintValue {
     Datatype(String),
     /// An IRI-valued node (`nodeKind IRI`) or a reference to another shape — an
     /// object property. The value is the referenced subject's IRI. (What turns a
-    /// shape-ref into a typed `GraphAr` edge is `edge_targets` filling
+    /// shape-ref into a typed corpus edge is `edge_targets` filling
     /// [`PropertyConstraint::targets`], which
     /// `fossil_graph_schema::OutputShapes::to_graph_schema` reads; this INPUT
     /// narrowing only needs "is it an IRI".)
