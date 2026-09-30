@@ -310,7 +310,7 @@ const LAYOUT_BASE_BYTES: u64 = 32 * 1024 * 1024;
 /// second stage to charge them to.
 const VERTEX_PAYLOAD_PERMILLE: u64 = 1_000;
 
-/// What [`enrich_layout_within`] will hold, in bytes, for a corpus of this
+/// What [`layout`] will hold, in bytes, for a corpus of this
 /// shape — the terms above, summed: a floor the corpus does not change, one per
 /// vertex, one per adjacency row, and one per uncompressed byte of the vertex
 /// file.
