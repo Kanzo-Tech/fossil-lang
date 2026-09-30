@@ -39,7 +39,7 @@ workspace = true
 
 [dependencies]
 # The two `arrow` sub-crates and not the umbrella, for the reason `fossil-sinks`
-# and `fossil-kanon` give: `arrow` 58's default features pull `arrow-csv`,
+# gives: `arrow` 58's default features pull `arrow-csv`,
 # `arrow-json` and `arrow-cast`'s prettyprint, readers and a formatter this crate
 # never calls. It does NOT buy freedom from `arrow-ipc` — `parquet`'s own `arrow`
 # feature depends on it unconditionally, so it is in this tree either way and

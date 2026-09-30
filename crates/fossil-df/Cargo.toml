@@ -19,8 +19,8 @@ publish = false
 # eight pedantic findings surfaced only when code MOVED out of this crate into
 # one that does inherit the table, so the alternative — leaving it off and
 # letting the destination crate catch them — is a finding that waits for a
-# refactor. The three crates that were still without it — `fossil-graph-schema`,
-# `fossil-policy` and `xtask` — now inherit it too, so
+# refactor. The crates that were still without it — `fossil-graph-schema`
+# and `xtask` among them — now inherit it too, so
 # `grep -L lints crates/*/Cargo.toml` is empty and this is a policy again.
 [lints]
 workspace = true
@@ -39,22 +39,6 @@ fossil-hir = { path = "../fossil-hir" }
 # of the write path may depend on the other.
 fossil-mem-probe = { path = "../fossil-mem-probe" }
 fossil-mir = { path = "../fossil-mir" }
-# The policy document a corpus is verified against, and the vocabulary the
-# manifest records the verification in. A leaf (serde/serde_json/thiserror), so
-# `src/privacy.rs` costs the wasm build nothing beyond what is already here —
-# which it has to, because the browser host writes corpora too and a bound only
-# the native writer can establish is a bound with a second writer's worth of
-# hole in it.
-fossil-policy = { path = "../fossil-policy" }
-# Mondrian strict k-anonymity, for `src/generalize.rs`: the writer DERIVES the
-# generalisation a declared bound needs instead of only measuring what it was
-# handed. Two `arrow` sub-crates and serde/thiserror, on the workspace's arrow
-# 58 — the same line `datafusion` resolves to, so a `RecordBatch` crosses this
-# edge without a conversion. It declares `[package.metadata.fossil] wasm = true`
-# and was already in the gate closure on that declaration alone; this edge is
-# what makes it reachable, and the browser writer needs it for the same reason
-# the native one does.
-fossil-kanon = { path = "../fossil-kanon" }
 # Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name). WASM-clean
 # — the backend reuses them instead of re-deriving the GraphAr layout.
 fossil-sinks = { path = "../fossil-sinks" }
@@ -100,9 +84,8 @@ serde_yaml_ng = { workspace = true }
 #
 # `crypto_expressions` is deliberately OFF. It is the sibling package, and its
 # `sha256` had exactly one consumer — `anon.hash` — which is gone from the
-# language: anonymisation is a declared policy the writer applies, not an
-# operator a program names. Turning it on would grow the wasm surface for a
-# function no template says.
+# language. Turning it on would grow the wasm surface for a function no
+# template says.
 datafusion = { version = "54", default-features = false, features = [
   "parquet",
   "nested_expressions",
@@ -164,9 +147,6 @@ tempfile = { workspace = true }
 # tests/pipeline.rs builds the op list by hand — the MIR operators, which no
 # `.fossil` reaches yet — so it spells `SmolStr` directly.
 smol_str = { workspace = true }
-# `tests/privacy.rs` builds a `PrivacyPolicy` by hand — a policy document is a
-# host's job to read, and the check under test takes the parsed value.
-fossil-policy = { path = "../fossil-policy" }
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 fossil-sinks = { path = "../fossil-sinks" }
 # tests/spill.rs asserts that a declared budget is honoured by spilling, and the

@@ -164,7 +164,6 @@ fn a_cloud_source_introspects_through_duckdb_and_the_run_refuses_it() {
         &dir.path().join("out").to_string_lossy(),
         &fossil_introspect::connection_urls(&creds.connections),
         None,
-        None,
     )
     .expect_err("the DataFusion path has no object store for `s3://`");
     let message = format!("{err}");

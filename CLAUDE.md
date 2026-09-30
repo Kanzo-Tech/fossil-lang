@@ -167,20 +167,8 @@ crates/
                            this crate is the junta: in the closure of both the writer and the
                            reader, so no consumer grows an edge to reach it.
                            It byte-writes nothing —
-                           `arrow-schema` for the types, `serde_yaml_ng` to emit, and
-                           `fossil-policy` because a declared bound is part of what the
-                           artefact says about itself
+                           `arrow-schema` for the types and `serde_yaml_ng` to emit
   fossil-df/               DataFusion backend for the property-graph MIR
-  fossil-policy/           the privacy policy document a corpus is verified against — ODRL for
-                           structure, DPV for classification, and a fossil profile for the terms
-                           neither vocabulary has. A SECOND document and not an annotation on the
-                           shape: a shape is vocabulary and travels, a classification is
-                           jurisdiction and does not
-  fossil-kanon/            Mondrian strict multidimensional k-anonymity over Arrow arrays,
-                           WASM-clean. Two separable halves: `anonymize` DERIVES a
-                           generalisation, `verify::assess` CHECKS a published one needing no
-                           hierarchy and no sensitive column — so an auditor with the Parquet and
-                           no entitlement to the diagnosis column still gets the answer
   fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each source's columns,
                            and the `--creds-stdin` payload that authenticates one. `fossil-cli`
                            calls it before the compile. It links `DuckDB` on a normal edge, and

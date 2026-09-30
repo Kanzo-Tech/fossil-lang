@@ -102,7 +102,6 @@ fn run(dir: &tempfile::TempDir) -> (std::path::PathBuf, fossil_df::RunReport) {
         &dest.to_string_lossy(),
         &std::collections::HashMap::new(),
         None,
-        None,
     )
     .expect("the walking-skeleton shape of program runs");
     (dest, report)
