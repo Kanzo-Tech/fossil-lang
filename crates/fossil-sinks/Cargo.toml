@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "The canonical GraphAr manifest model — the tiling a corpus declares"
+description = "The fossil/1 corpus format — fossil.json and the writer's fixed columns"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -14,32 +14,17 @@ publish = false
 workspace = true
 
 [dependencies]
-# `Cardinality` alone, and the dependency runs THIS WAY on purpose: a manifest
-# records what a compiler decided, so it names
-# the substrate contract, and `fossil-graph-schema` names nothing — it is a
-# serde leaf. This is NOT the objection the `arrow-schema` note below raises:
-# that one is against taking a TYPE SYSTEM (`fossil-hir::Primitive`) into the
-# manifest layer. A cardinality is not a type, it is the shape a predicate was
-# declared with, and dropping it here is what made an edge's `{1,1}` a fact the
-# corpus could not state.
-fossil-graph-schema = { path = "../fossil-graph-schema" }
-# A plan + manifest generator, NOT an I/O library: it declares the tiling and never
-# byte-writes Parquet, so the only emission here is YAML.
+# The format declares what the writer emits and never byte-writes Parquet, so
+# the only emission here is JSON — `fossil.json`, parsed by a browser with
+# `JSON.parse`. Both leaves are wasm-clean.
 serde = { workspace = true }
-serde_yaml_ng = { workspace = true }
-# The tile manifest's encoding (`src/tiles.rs`): JSON, because a reader parses
-# it on every open and `JSON.parse` is what a browser has natively. A leaf, and
-# wasm-clean.
 serde_json = { workspace = true }
+# The JSON Schema of `fossil.json`, derived from the structs rather than
+# written beside them — `fossil.schema.json`, which `tests/schema.rs` holds
+# against them. Pure Rust, wasm-clean; `fossil-lineage` derives with it too.
+schemars = { workspace = true }
 # `arrow-schema` sub-crate ONLY — NOT the `arrow` umbrella crate, whose default features
 # pull `arrow-ipc`/`arrow-csv`, and with them `mio`, which wasm32 cannot build.
-# `arrow_schema::DataType` is the single authority for GraphAr `data_type` spellings, and it
-# is depended on ALONE rather than fossil-hir's `Primitive` so the manifest layer stays
-# decoupled from the type system.
+# `arrow_schema::DataType` is what `data_type_name` spells, and it is depended on ALONE
+# rather than fossil-hir's `Primitive` so the format stays decoupled from the type system.
 arrow-schema = { workspace = true }
-
-[dev-dependencies]
-insta = { workspace = true }
-# Dev-only, and for one test: `tests/level_plan_vectors.rs` reads
-# `packages/corpus/guards/vectors.json` at runtime rather than transcribing its rows,
-# so a border edited on the other writer's side turns this crate red.

@@ -92,19 +92,13 @@ async fn same_type_from_two_sources_merges_into_one_table() {
         "merged + sorted by subject",
     );
 
-    // The single registered manifest reflects the merged count.
-    let report = fossil_df::RunReport::of("mem://x", &graph);
-    assert_eq!(report.vertices.len(), 1);
-    assert_eq!(report.vertices[0].vertex_count, 5);
-    let paths: Vec<String> = graph
-        .manifests()
-        .expect("manifests")
-        .into_iter()
-        .map(|m| m.rel_path)
-        .collect();
+    // The single vertex table reflects the merged count.
+    let (written, files) = support::write_in_memory(&graph).await;
+    assert_eq!(written.manifest.vertex_tables.len(), 1);
+    assert_eq!(written.manifest.vertex_tables[0].record_count, 5);
     assert_eq!(
-        paths,
-        ["graph.graph.yml", "vertex/Person.vertex.yml"],
-        "one vertex manifest, no duplicate Person entry",
+        files.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["fossil.json", "vertex/Person.parquet"],
+        "one vertex table, no duplicate Person entry",
     );
 }

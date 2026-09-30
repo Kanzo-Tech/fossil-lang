@@ -99,7 +99,7 @@ async fn a_dangling_endpoint_is_counted_rather_than_swallowed() {
     assert_eq!(edge.label, "placedBy");
     // Four order rows in, three edges out — the ruling: the inner join stays.
     assert_eq!(
-        edge.by_source
+        edge.batches
             .iter()
             .map(datafusion::arrow::array::RecordBatch::num_rows)
             .sum::<usize>(),
@@ -111,20 +111,21 @@ async fn a_dangling_endpoint_is_counted_rather_than_swallowed() {
         "and the one that was discarded is on the record"
     );
 
-    // The report is what a caller reads, and it names the manifest entry the
-    // count belongs to rather than re-spelling the edge's triple.
-    let report = fossil_df::RunReport::of("file:///tmp/x", &graph);
+    // What the write answers is what a caller reads, and it names the edge
+    // table the count belongs to rather than re-spelling the edge's triple.
+    let (written, _) = support::write_in_memory(&graph).await;
     assert_eq!(
-        report.dropped,
-        vec![fossil_df::report::EdgeDrops {
-            prefix: "edge/Order_placedBy_Person/".to_string(),
+        written.dropped,
+        vec![fossil_df::EdgeDrops {
+            table: "Order_placedBy_Person".to_string(),
             dropped: 1,
         }],
     );
     assert_eq!(
-        report.edges[0].prefix, report.dropped[0].prefix,
-        "the drop is keyed by the prefix the manifest declares"
+        written.manifest.edge_tables[0].name, written.dropped[0].table,
+        "the drop is keyed by the table name the manifest declares"
     );
+    assert_eq!(written.manifest.edge_tables[0].record_count, 3);
 }
 
 /// And zero is a number the report states, not one it omits — a reader that has
@@ -134,11 +135,11 @@ async fn a_dangling_endpoint_is_counted_rather_than_swallowed() {
 async fn a_clean_run_reports_zero_rather_than_nothing() {
     let graph = run(CLEAN_PROGRAM).await;
     assert_eq!(graph.edges[0].dropped, 0);
-    let report = fossil_df::RunReport::of("file:///tmp/x", &graph);
+    let (written, _) = support::write_in_memory(&graph).await;
     assert_eq!(
-        report.dropped,
-        vec![fossil_df::report::EdgeDrops {
-            prefix: "edge/Order_placedBy_Person/".to_string(),
+        written.dropped,
+        vec![fossil_df::EdgeDrops {
+            table: "Order_placedBy_Person".to_string(),
             dropped: 0,
         }],
     );

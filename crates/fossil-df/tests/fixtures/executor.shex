@@ -1,4 +1,4 @@
-# The output contract of `fossil-df-wasm/tests/execute_core.rs`.
+# The output contract of `tests/execute_core.rs` and `tests/write.rs`.
 #
 # `csv_program_runs_through_the_in_memory_source_seam` and
 # `at_conn_source_alias_resolves_through_the_ref_map` need only `ex:Person`;

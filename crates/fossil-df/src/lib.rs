@@ -1,15 +1,19 @@
-//! `DataFusion` backend for the property-graph MIR.
+//! `DataFusion` backend for the property-graph MIR, and the one writer of a
+//! `fossil/1` corpus.
 //!
-//! Consumes a [`fossil_mir::lower_to_mir_pg`] graph and materialises the
-//! `GraphAr` VERTEX layout on `DataFusion`: read the source, project
-//! `id AS subject` + each prop + the `x`/`y`/`cluster_id` layout placeholders,
-//! dedup single-valued shapes, sort by `subject` for a deterministic dense id,
-//! `collect()`, and prepend `dense_id` (`0..N-1`, sort order). The result is
-//! registered in the [`SessionContext`] so the edge phase can resolve endpoint
-//! IRIs against it in memory (the hard barrier: vertices before edges).
+//! Consumes a [`fossil_mir::lower_to_mir_pg`] graph and materialises each
+//! vertex type on `DataFusion`: read the source, project `id AS subject` + each
+//! prop + the `x`/`y`/`cluster_id` layout placeholders, dedup single-valued
+//! shapes, sort by `subject` for a deterministic type-local id, `collect()`,
+//! and prepend `dense_id` (`0..N-1`, sort order). The result is registered in
+//! the [`SessionContext`] so the edge phase can resolve endpoint IRIs against
+//! it in memory (the hard barrier: vertices before edges).
 //!
-//! Column shape (writer-W0b contract):
-//! `dense_id(u32), subject(varchar IRI), <props…>, x(f32=0), y(f32=0), cluster_id(u32=0)`.
+//! [`write()`] lays the whole graph out and writes the corpus — one Parquet per
+//! vertex type and per relation, `fossil.json` last — and [`Executor`] is the
+//! whole run a host drives: compile, register documents, read sources through
+//! a [`fossil_storage::Storage`], execute, write. `fossil-df-wasm` is a
+//! `wasm-bindgen` shell over it, and it is the only write host.
 //!
 //! The crate compiles to `wasm32-unknown-unknown` (the whole executor runs in
 //! the browser). `zstd-sys` is an unavoidable C dep (datafusion 54 hardcodes
@@ -17,34 +21,40 @@
 //! `datafusion` entry in `Cargo.toml`.
 
 // The executor is single-threaded by construction — the browser has one thread,
-// and the native `run_to_dir` path drives the same future on a current-thread
-// runtime — so a future that is not `Send` costs nothing here. Nor is the bound
-// available: `DataFusion`'s `DataFrame`/`ExecutionPlan` futures are not `Send`,
-// so satisfying the nursery lint would mean a `Send` wrapper over every await in
-// the crate. `fossil-df-wasm` and `fossil-graph` allow it in the
-// same place for the same reason.
+// and native tests drive the same future on a current-thread runtime — so a
+// future that is not `Send` costs nothing here. Nor is the bound available:
+// `DataFusion`'s `DataFrame`/`ExecutionPlan` futures are not `Send`, so
+// satisfying the nursery lint would mean a `Send` wrapper over every await in
+// the crate.
 #![allow(clippy::future_not_send)]
 
 /// The output descriptor a program names, decoded from the document the
 /// checker read — the one resolution every host runs with.
 pub mod descriptor;
-pub mod files;
+/// The run a host drives: one compiled program, its documents, its sources,
+/// and the corpus it writes.
+pub mod executor;
 /// The relational operators executed: the walk from an emit op back to the
 /// sources it reads. Its own module doc lists which operators run here.
 pub mod plan;
 pub mod rdf;
-/// What a run tells its caller: the manifest it wrote, the destination, and the
-/// edges the join discarded. Built by [`report::RunReport::of`] and by nothing
-/// else.
+/// What a run tells its caller: where it wrote, and the edges the join
+/// discarded.
 pub mod report;
+/// A `DataFusion` session whose plans never spawn — the browser has no runtime
+/// to spawn on.
+pub mod session;
 /// The catalog rendered for this engine: which `DataFusion` function each
 /// stdlib entry becomes, and which rows this engine cannot render.
 pub mod stdlib;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub mod sink;
+/// The corpus, written: the layout pass over the whole graph, one Parquet per
+/// table, `fossil.json` last.
+pub mod write;
 
 pub use descriptor::output_descriptor;
+/// The executor a host drives. Named at the crate root because it is the
+/// crate's answer, not a detail of the module it is written in.
+pub use executor::Executor;
 /// Re-exported so callers name the program-resident output descriptor that
 /// [`execute_graph`] / [`provider_bindings`] take: it is passed as an argument,
 /// never read through `Db::system()`.
@@ -55,10 +65,10 @@ pub use fossil_mir::SourceFormat;
 /// The relation an op index produces — the seam a host (or a test that builds a
 /// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
 pub use plan::plan_relation;
-/// What `fossil run --output-json` prints, and what the browser executor hands
-/// JS. Named at the crate root because it is the crate's answer, not a detail
-/// of the module it is written in.
-pub use report::RunReport;
+/// What a run hands its caller.
+pub use report::{EdgeDrops, RunReport};
+/// The corpus writer, and what it answers.
+pub use write::{WriteError, Written, write};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -69,10 +79,6 @@ use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::Column;
 use datafusion::datasource::MemTable;
 use datafusion::error::DataFusionError;
-#[cfg(not(target_arch = "wasm32"))]
-use datafusion::execution::memory_pool::{FairSpillPool, TrackConsumersPool};
-#[cfg(not(target_arch = "wasm32"))]
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::logical_expr::{Expr as DfExpr, JoinType, Operator, binary_expr};
 use datafusion::prelude::{
     CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext, col, lit,
@@ -81,85 +87,41 @@ use fossil_base::SourceFile;
 use fossil_graph_schema::{
     Cardinality, EdgeType as GraphEdge, GraphSchema, NodeType, Primitive, Property as NodeProp,
 };
-use fossil_hir::shapes::{inner_primitive, primitive_to_graphar};
+use fossil_hir::shapes::inner_primitive;
 use fossil_hir::{MappingLoc, def_map::def_map};
 use fossil_locator::SourceAnchor;
 use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
-use fossil_sinks::manifest::{
-    Container, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPH_INFO_PATH, GraphInfo,
-    Projection, Property, VertexIndex, VertexInfo, data_type_name,
-};
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
 /// single source of all type/predicate/cardinality metadata) plus the relation
-/// data — vertex tables and edge tables (CSR + CSC) as in-memory `RecordBatch`es.
+/// data — vertex tables and edge tables as in-memory `RecordBatch`es.
 ///
 /// This is the universal substrate made concrete: **relations + a
-/// graph-schema**. The `GraphAr` view (the manifest + Parquet) is materialized
-/// *from* this; the data carriers hold no metadata of their own — it all lives
-/// in [`schema`](Self::schema).
+/// graph-schema**. The corpus is written *from* this by [`write()`]; the data
+/// carriers hold no metadata of their own — it all lives in
+/// [`schema`](Self::schema).
 #[derive(Debug)]
 pub struct GraphArData {
     pub schema: GraphSchema,
     pub vertices: Vec<VertexTable>,
     pub edges: Vec<EdgeTable>,
-    /// **The cell pyramid each vertex type carries**, keyed by its label — and
-    /// the one field here that is not data.
-    ///
-    /// Empty until the layout pass has written one. It is carried on the value
-    /// so that the tree and the rows it
-    /// summarises cannot be separated, and there is no call shape in which a
-    /// caller supplies a pyramid for rows it did not partition.
-    ///
-    /// A type absent from this list declares no tree, which is what a corpus
-    /// written before the block existed reads as — weaker than an empty one
-    /// rather than equivalent to it.
-    pub pyramids: Vec<(String, fossil_sinks::manifest::CellTree)>,
-    /// **The channels each vertex type's rows can be drawn with**, keyed by its
-    /// label — and the third field here that is not data.
-    ///
-    /// Empty until the layout pass has partitioned the rows, for exactly
-    /// [`Self::pyramids`]' reason: a categorical channel's `domain` is a count
-    /// of distinct values and no Parquet footer holds one, so it is a
-    /// measurement and cannot be carried by a caller that did not take it.
-    ///
-    /// A type absent from this list declares no channels at all, which is not
-    /// the same statement as declaring an empty list — see
-    /// `fossil_sinks::manifest::VertexInfo::channels` for the three states.
-    pub channels: Vec<(String, Vec<fossil_sinks::manifest::Channel>)>,
-    /// **The tile manifest each vertex type's tiles are described by**, keyed by
-    /// its label — the statistics of every tile the layout pass wrote, read off
-    /// the footers it closed. Empty until the pass has run, for
-    /// [`Self::pyramids`]' reason.
-    pub tiles: Vec<(String, fossil_sinks::tiles::TileManifest)>,
 }
 
-/// A materialised edge's adjacency data in both orientations — `by_source` (CSR,
-/// `ORDER BY src_dense, dst_dense`) and `by_target` (CSC). Both carry the same
-/// two `u32` columns (`src_dense`, `dst_dense`); only the row order differs. The
-/// `(src_type, label, dst_type)` triple identifies the edge in the schema and
-/// names its `<src>_<label>_<dst>` directory; all other metadata is in the
-/// [`GraphSchema`].
+/// A materialised edge's rows, `ORDER BY src_dense, dst_dense`: two `u32`
+/// columns, each a type-local id of its endpoint's type. The `(src_type, label,
+/// dst_type)` triple identifies the edge in the schema; all other metadata is
+/// in the [`GraphSchema`].
 #[derive(Debug)]
 pub struct EdgeTable {
     pub label: String,
     pub src_type: String,
     pub dst_type: String,
-    pub by_source: Vec<RecordBatch>,
-    pub by_target: Vec<RecordBatch>,
+    pub batches: Vec<RecordBatch>,
     /// Rows of this edge's input that resolved no endpoint pair, and so are not
-    /// in either orientation. See [`execute_edge`] for why they are discarded
+    /// in [`Self::batches`]. See [`execute_edge`] for why they are discarded
     /// and [`report::EdgeDrops`] for where the number goes.
     pub dropped: u64,
-}
-
-/// One emitted manifest document + its dataset-relative path: a `GraphAr`
-/// YAML, or a vertex type's JSON tile manifest.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManifestFile {
-    pub rel_path: String,
-    pub text: String,
 }
 
 /// Execute a whole program's mappings into the `GraphAr` graph.
@@ -245,9 +207,6 @@ pub async fn execute_graph<'db>(
         edges: edge_types,
     };
     Ok(GraphArData {
-        pyramids: Vec::new(),
-        channels: Vec::new(),
-        tiles: Vec::new(),
         schema,
         vertices,
         edges,
@@ -598,16 +557,17 @@ async fn execute_edges<'db>(
 
 /// Materialise one edge type. Projects the edge op's input relation (`rows`) to
 /// `src_iri`/`dst_iri`, joins both against the registered vertex tables to
-/// resolve endpoint IRIs to dense ids, then sorts the `(src_dense, dst_dense)`
-/// pairs into CSR (`by_source`) and CSC (`by_target`).
+/// resolve endpoint IRIs to type-local dense ids, then sorts the `(src_dense,
+/// dst_dense)` pairs. The write renumbers both into the global `dense_id` and
+/// sorts again, so this order is the executor's, not the corpus's.
 ///
 /// # The join is inner, and the discard is counted
 ///
 /// A row whose `src_iri` or `dst_iri` names a subject no vertex carries
 /// resolves nothing and does not become an edge. **That is intended and it
 /// stays** — a corpus cannot hold an edge to a vertex that is not there, and
-/// `fossil-cli`'s conformance assertion 4 reads every endpoint back and
-/// fails on a `dense_id` no vertex has.
+/// the `no-dangling-endpoint` guard reads every endpoint back and fails on a
+/// `dense_id` no vertex has.
 ///
 /// What it stopped being is silent. It reported nothing at any log level, and
 /// the only trace was an [`EdgeInfo::edge_count`] smaller than the input's row
@@ -722,26 +682,17 @@ async fn execute_edge(
     // is the sentence it makes true.
     //
     // **It is unconditional, and the reason is the schema rather than the
-    // cardinality**: an adjacency tile carries `src_dense` and `dst_dense` and
-    // nothing else, so two identical rows are not two edges a reader could tell
+    // cardinality**: an edge table carries `src` and `dst` and nothing else, so two identical rows are not two edges a reader could tell
     // apart — they are one edge stored twice. There is nowhere for a multiplicity
     // to live. The day an edge carries a property, this becomes a decision with
     // two answers and the `Multi` arm is the one that changes.
     let matched = resolved.clone().count().await? as u64;
     let resolved = resolved.distinct()?;
 
-    let by_source = resolved
-        .clone()
+    let batches = resolved
         .sort(vec![
             col("src_dense").sort(true, false),
             col("dst_dense").sort(true, false),
-        ])?
-        .collect()
-        .await?;
-    let by_target = resolved
-        .sort(vec![
-            col("dst_dense").sort(true, false),
-            col("src_dense").sort(true, false),
         ])?
         .collect()
         .await?;
@@ -764,8 +715,7 @@ async fn execute_edge(
         label: label.to_string(),
         src_type: src_type.to_string(),
         dst_type: dst_type.to_string(),
-        by_source,
-        by_target,
+        batches,
         dropped,
     })
 }
@@ -1192,124 +1142,6 @@ pub fn register_provider_sources(
         register_rdf(ctx, &binding, &turtle)?;
     }
     Ok(())
-}
-
-/// A `SessionContext` under a declared memory budget, or the unbounded default.
-///
-/// Ten million vertices peak at 15.7 GiB in the executor while the graph it
-/// produces is 1.64 GiB of Arrow, and nothing in between is retained — so the
-/// difference is operator memory that `DataFusion` is never told to bound. A pool
-/// bounds it and spills instead, and [`TrackConsumersPool`] names the operators
-/// that asked for it when the budget is too small to hold.
-///
-/// The budget is an input of the run — `memory_bytes` comes from the command
-/// that started it (`fossil run --memory-gib`), not from the environment the
-/// process happens to be carrying. `None` is today's behaviour, unbounded.
-#[cfg(not(target_arch = "wasm32"))]
-fn bounded_context(memory_bytes: Option<u64>) -> datafusion::error::Result<SessionContext> {
-    let Some(bytes) = memory_bytes else {
-        return Ok(SessionContext::new());
-    };
-    let pool = TrackConsumersPool::new(
-        FairSpillPool::new(usize::try_from(bytes).unwrap_or(usize::MAX)),
-        std::num::NonZeroUsize::new(5).expect("5 is not zero"),
-    );
-    let runtime = RuntimeEnvBuilder::new()
-        .with_memory_pool(Arc::new(pool))
-        .build_arc()?;
-    // A budget only means something if the operators can honour it. The edge
-    // phase joins every edge's endpoints against the vertex table, and a hash
-    // join's build side reports `can spill: false` — one reservation per
-    // partition, none of which will give anything back. A sort-merge join
-    // spills; that it is the slower plan on a small graph is not the trade being
-    // made here.
-    let config = datafusion::prelude::SessionConfig::new()
-        .set_bool("datafusion.optimizer.prefer_hash_join", false);
-    Ok(SessionContext::new_with_config_rt(config, runtime))
-}
-
-/// **Materialise a whole program into a corpus value, writing nothing.**
-///
-/// Native one-call orchestration the host (CLI/engine) drives: register every
-/// provider (RDF) source from host-read bytes, execute the whole program on
-/// `DataFusion`, and return the [`GraphArData`].
-///
-/// # It wrote a directory, and the directory is now the caller's
-///
-/// This was `run_to_dir`, and `dest_dir` was its only reason to know what a
-/// filesystem is: it ended with `write_manifests(dest_dir)`. The manifests are
-/// emitted **after** the payload now — by whoever ran the layout pass, with
-/// the counts the pass measured in them — so this function has nothing to write
-/// and no destination to be told.
-///
-/// What that buys is the invariant the manifest could not hold while it went
-/// first: **a manifest describes bytes that exist.** It used to promise them and
-/// a guard checked the promise, which is the right order only for a number that
-/// is arithmetic. A measured one — a rung's quotient edge count is the case that
-/// forced this — cannot be planned, so a document written first either omits it
-/// or guesses.
-///
-/// `connections` is the name→base-URL ref-map: `@conn/path` source aliases
-/// resolve through it for BOTH object-store reads (csv/json/parquet → the
-/// resolved URL feeds `read_csv`) and provider (RDF)
-/// bindings. `read_uri` is the host's byte seam for RDF only: given a (resolved)
-/// source URI, return its text — the host owns credentials + transport (fs /
-/// cloud). Object-store formats are NOT read through it; they stream via the
-/// ctx's `ObjectStore` (the local filesystem by default).
-///
-/// `memory_bytes` is the run's declared memory budget ([`bounded_context`]):
-/// under one, the executor spills instead of growing, and a corpus larger than
-/// the machine is a slower run rather than an OOM. `None` leaves the pool
-/// unbounded.
-///
-/// Blocks the async executor on a private current-thread runtime — the host
-/// stays synchronous. The browser path drives [`execute_graph`] directly from
-/// JS, so this native convenience never reaches the wasm build.
-///
-/// # Errors
-/// Host read errors (surfaced from `read_uri`), decode/registration failures,
-/// or `DataFusion` execution errors.
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
-pub fn materialise(
-    db: &dyn fossil_base::Db,
-    file: SourceFile,
-    descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
-    read_uri: impl Fn(&str) -> Result<String, String>,
-    memory_bytes: Option<u64>,
-) -> datafusion::error::Result<GraphArData> {
-    let mut probe = Probe::new("materialise");
-    let ctx = bounded_context(memory_bytes)?;
-    for binding in provider_bindings(db, file, descriptor, connections) {
-        let bytes = read_uri(&binding.uri).map_err(DataFusionError::Execution)?;
-        register_rdf(&ctx, &binding, &bytes)?;
-    }
-    probe.mark("register providers");
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| DataFusionError::Execution(format!("build tokio runtime: {e}")))?;
-    let graph = runtime.block_on(execute_graph(&ctx, db, file, descriptor, connections))?;
-    // What the boundary type itself holds, against what the process holds. The
-    // gap between them is the executor's transient — sort buffers, and pages the
-    // allocator has not returned — and the two want opposite fixes, so the mark
-    // reports both rather than leaving the difference to be assumed.
-    probe.mark(&format!(
-        "execute_graph — {:.2}G in Arrow",
-        graph.arrow_gib()
-    ));
-
-    // The executor's context still holds a `MemTable` per vertex type, and the
-    // edge phase joined against them. Nothing below reads them, and the encode
-    // that follows is the other half of the corpus resident at once — so this
-    // is the last moment they can be released rather than added to.
-    drop(ctx);
-    probe.mark("drop session context");
-
-    probe.finish();
-    Ok(graph)
 }
 
 /// Render a MIR [`Expr`] to a `DataFusion` logical [`DfExpr`]. Total over the
@@ -1807,426 +1639,4 @@ fn cast_target(sql_type: &str) -> Option<datafusion::arrow::datatypes::DataType>
 fn unsupported_call(func: &str, why: &str) -> DfExpr {
     DfExpr::Literal(datafusion::scalar::ScalarValue::Utf8(None), None)
         .alias(format!("__fossil_unsupported__{func}__{why}"))
-}
-
-// ── The manifest ───────────────────────────────────────────────────────────
-//
-// One description of the dataset, in the shape the fossil-graph reader
-// round-trips (`prefix = vertex/<Type>/`). Type-name casing is preserved
-// throughout. There used to be a second one — a `RunStatus` the CLI printed;
-// see `report.rs`.
-
-/// The `<src>_<label>_<dst>` adjacency directory name (writer convention).
-fn edge_dir(src: &str, label: &str, dst: &str) -> String {
-    format!("{src}_{label}_{dst}")
-}
-
-/// Total rows across a set of batches — the count the manifest declares.
-fn count_rows(batches: &[RecordBatch]) -> u64 {
-    batches.iter().map(RecordBatch::num_rows).sum::<usize>() as u64
-}
-
-impl GraphArData {
-    /// **Record the cell pyramids the layout pass wrote.**
-    ///
-    /// The seam the phase order needs: the pass is what measures a rung's
-    /// quotient, and [`Self::manifests`] is what states it. Replaces rather than
-    /// appends, for [`fossil_sinks::manifest::VertexInfo::with_coordinates`]'s
-    /// reason — the list **is** the declaration.
-    pub fn declare_pyramids(&mut self, pyramids: Vec<(String, fossil_sinks::manifest::CellTree)>) {
-        self.pyramids = pyramids;
-    }
-
-    /// **Record the tile manifests the layout pass read off its footers.**
-    ///
-    /// [`Self::declare_pyramids`]' seam and its rule: the list **is** the
-    /// declaration, so this replaces rather than appends.
-    pub fn declare_tiles(&mut self, tiles: Vec<(String, fossil_sinks::tiles::TileManifest)>) {
-        self.tiles = tiles;
-    }
-
-    /// **Record the channels the layout pass measured a domain for.**
-    ///
-    /// [`Self::declare_pyramids`]' seam and its rule: the list **is** the
-    /// declaration, so this replaces rather than appends. Two passes over one
-    /// corpus would otherwise declare the `community` channel twice, each with
-    /// its own domain, and a reader has no way to choose between them.
-    ///
-    /// What the pass measures is the DOMAIN. The rest of the entry — the name,
-    /// the column, the scale — is a plan and could have been written in front of
-    /// the bytes; it travels with the measurement because splitting a channel
-    /// across two writers is how the column name came to be stated six times
-    /// (`/docs/design/position`).
-    pub fn declare_channels(
-        &mut self,
-        channels: Vec<(String, Vec<fossil_sinks::manifest::Channel>)>,
-    ) {
-        self.channels = channels;
-    }
-
-    /// What this value costs in Arrow buffers, in `GiB` — every vertex batch plus
-    /// both orientations of every edge table. Cheap (a walk of the batch list, no
-    /// data touched) and the number the peak-memory work is about: the whole corpus
-    /// is resident in one value, and it is resident because the TYPE of the boundary
-    /// between executing and writing is a whole graph — a streaming boundary would
-    /// not hold it, and no amount of tuning inside either half can give it back.
-    #[must_use]
-    #[allow(clippy::cast_precision_loss)]
-    pub fn arrow_gib(&self) -> f64 {
-        let batches = self.vertices.iter().flat_map(|v| &v.batches).chain(
-            self.edges
-                .iter()
-                .flat_map(|e| e.by_source.iter().chain(&e.by_target)),
-        );
-        batches
-            .map(RecordBatch::get_array_memory_size)
-            .sum::<usize>() as f64
-            / (1024.0 * 1024.0 * 1024.0)
-    }
-
-    /// The corpus's own description — the `GraphAr`
-    /// *materializer*: the `graph.graph.yml` index, one [`VertexInfo`] per node
-    /// type and one [`EdgeInfo`] per edge type, in the order the index names
-    /// them. Reuses the WASM-clean `fossil_sinks::manifest` structs.
-    ///
-    /// **This is the single description of the dataset.** It is serialised to
-    /// YAML by [`Self::manifests`] and printed as JSON by `fossil run
-    /// --output-json` through [`RunReport`] — the same values, so stdout and the
-    /// disk cannot disagree without this function disagreeing with itself.
-    ///
-    /// `GraphInfo::vertices` / `GraphInfo::edges` are the rel-paths of the two
-    /// returned lists, positionally.
-    #[must_use]
-    pub fn manifest(&self) -> (GraphInfo, Vec<VertexInfo>, Vec<EdgeInfo>) {
-        let vertex_paths: Vec<String> = self
-            .schema
-            .nodes
-            .iter()
-            .map(|n| format!("vertex/{}.vertex.yml", n.label))
-            .collect();
-        let edge_paths: Vec<String> = self
-            .schema
-            .edges
-            .iter()
-            .map(|e| {
-                let dir = edge_dir(&e.source, &e.label, &e.destination);
-                format!("edge/{dir}/{dir}.edge.yml")
-            })
-            .collect();
-        // The container, declared. A reader cannot work it out — working it out
-        // means listing a directory, and there is no listing over HTTP — so it
-        // is written down here, once, for every payload set of the corpus. What
-        // fossil emits is the row-group one: `fossil-layout` cuts each set into
-        // one Parquet whose row groups ARE its tiles.
-        let graph = GraphInfo::new("graph", "", Container::RowGroups, vertex_paths, edge_paths);
-
-        // The counts come off the materialised batches and not off the schema,
-        // because the schema knows what types there are and only the data knows
-        // how many rows each one got. A declared type that materialised nothing
-        // is `0`, which is the honest answer and the one that says «no tiles»
-        // rather than «one empty tile».
-        let vertices = self
-            .schema
-            .nodes
-            .iter()
-            .map(|node| {
-                let rows = self
-                    .vertices
-                    .iter()
-                    .find(|v| v.label == node.label)
-                    .map_or(0, |v| count_rows(&v.batches));
-                let mut info = vertex_info(node, rows);
-                // **The pyramid the pass measured**, attached here because this
-                // is where a `VertexInfo` is assembled and because the tree is
-                // the one part of the document the writer cannot plan: a rung's
-                // cell count is `ceil(rows / 4^k)` and its quotient edge count
-                // is a measurement. A type the pass wrote none for declares
-                // none, which is weaker than declaring an empty one.
-                if let Some((_, tree)) =
-                    self.pyramids.iter().find(|(label, _)| *label == node.label)
-                {
-                    info = info.with_cells(tree.clone());
-                }
-                // **And the channels the pass measured a domain for**, attached
-                // the same way and for the same reason: `domain` is a count of
-                // distinct values, no footer holds one, and a writer that
-                // planned it would be planning the output of Louvain. A type
-                // the pass did not reach — one that materialised no rows —
-                // declares no channels, which says *nobody looked* rather than
-                // *this type carries none*.
-                if let Some((_, declared)) =
-                    self.channels.iter().find(|(label, _)| *label == node.label)
-                {
-                    info = info.with_channels(declared.clone());
-                }
-                // **And where its tile manifest is**, for a type the pass read
-                // footers for. The path goes in the document and the entries in
-                // a file of their own — see `VertexInfo::tile_manifest` for the
-                // measurement that put them there.
-                if self.tiles.iter().any(|(label, _)| *label == node.label) {
-                    info = info.with_tile_manifest();
-                }
-                info
-            })
-            .collect();
-        let edges = self
-            .schema
-            .edges
-            .iter()
-            .map(|edge| {
-                // One orientation, because the two are one relation stored
-                // twice — and `by_source` because that is the one a reader sums
-                // the CSR tiles against.
-                let rows = self
-                    .edge_table(edge)
-                    .map_or(0, |e| count_rows(&e.by_source));
-                edge_info(edge, rows)
-            })
-            .collect();
-        (graph, vertices, edges)
-    }
-
-    /// The materialised [`EdgeTable`] for a schema edge, matched on the
-    /// `(src, label, dst)` triple that identifies it. `None` for a declared edge
-    /// type nothing wrote.
-    // The three comparisons read to `suspicious_operation_groupings` as one
-    // mistyped conjunction, and it suggests `e.src_type == edge.src_type` — a
-    // field `GraphEdge` does not have. The two types spell the same triple
-    // differently (`src_type`/`label`/`dst_type` against
-    // `source`/`label`/`destination`), so only the middle pair matches by name
-    // and the heuristic counts the other two as the odd ones out.
-    #[allow(clippy::suspicious_operation_groupings)]
-    pub(crate) fn edge_table(&self, edge: &GraphEdge) -> Option<&EdgeTable> {
-        self.edges.iter().find(|e| {
-            e.src_type == edge.source && e.label == edge.label && e.dst_type == edge.destination
-        })
-    }
-
-    /// [`Self::manifest`] as documents and the paths they go to: the
-    /// top-level `graph.graph.yml` index, one `vertex/<Type>.vertex.yml` per
-    /// node type, the tile manifest each of those names, and one
-    /// `edge/<dir>/<dir>.edge.yml` per edge type.
-    ///
-    /// # Errors
-    /// Propagates serialization errors (cannot fail for these plain structs,
-    /// but the signature is honest).
-    pub fn manifests(&self) -> Result<Vec<ManifestFile>, files::EncodeError> {
-        let (graph, vertices, edges) = self.manifest();
-        let mut out = vec![ManifestFile {
-            rel_path: GRAPH_INFO_PATH.to_string(),
-            text: graph.to_yaml()?,
-        }];
-        for (rel_path, info) in graph.vertices.iter().zip(&vertices) {
-            out.push(ManifestFile {
-                rel_path: rel_path.clone(),
-                text: info.to_yaml()?,
-            });
-        }
-        for info in &vertices {
-            let (Some(name), Some((_, tiles))) = (
-                &info.tile_manifest,
-                self.tiles
-                    .iter()
-                    .find(|(label, _)| *label == info.vertex_type),
-            ) else {
-                continue;
-            };
-            out.push(ManifestFile {
-                rel_path: format!("{}{name}", info.prefix),
-                text: tiles.to_json()?,
-            });
-        }
-        for (rel_path, info) in graph.edges.iter().zip(&edges) {
-            out.push(ManifestFile {
-                rel_path: rel_path.clone(),
-                text: info.to_yaml()?,
-            });
-        }
-        Ok(out)
-    }
-}
-
-/// The `VertexInfo` manifest for one node type: `dense_id`, `subject`, the
-/// schema's props, then `x`/`y`/`cluster_id`, each with the **real** per-prop
-/// `data_type` the schema carries.
-///
-/// `rows` is the one argument that is not a function of the schema, and it is
-/// the whole of what the manifest could not say before: how far the corpus goes.
-fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
-    let mut properties = Vec::with_capacity(node.properties.len() + 5);
-    // `is_primary` marks the IDENTITY, and the identity is `subject`.
-    //
-    // This writer said `dense_id`, and it was the only thing in the tree that
-    // did: `packages/corpus/guards/guards.mjs`'s `identity-is-the-subject` says
-    // "`dense_id` is an address and cannot also be an identity", the
-    // conformance corpus's `vertex/Person.vertex.yml` marks `subject`, and
-    // `packages/corpus`'s reader keys on the column name precisely because it
-    // could not trust the flag with two writers spelling it two ways. One
-    // field, two answers, and the way that resolves in practice is that
-    // nothing reads it — which is `RunStatus` again, in one boolean.
-    //
-    // The address cannot be the identity for the reason `fossil-layout`
-    // exists: the pass ranks every vertex by the Hilbert code of its new
-    // position and lets that rank be its `dense_id`, so a `dense_id` held
-    // anywhere outside the corpus names a different vertex after the next
-    // write. `subject` is what survives that, and since `55f573e` it is
-    // load-bearing rather than decorative — `index:` below declares a second
-    // copy of the type ordered by it.
-    properties.push(Property {
-        name: "dense_id".to_string(),
-        data_type: "uint32".to_string(),
-        is_primary: false,
-        is_nullable: Some(false),
-        cardinality: Some(Cardinality::Single),
-    });
-    properties.push(Property {
-        name: "subject".to_string(),
-        data_type: data_type_name(&DataType::Utf8),
-        is_primary: true,
-        is_nullable: Some(false),
-        cardinality: Some(Cardinality::Single),
-    });
-    for p in &node.properties {
-        properties.push(Property {
-            name: p.name.clone(),
-            data_type: graphar_spelling(p.datatype),
-            is_primary: false,
-            is_nullable: None,
-            // What the shape said, which is the whole point of the field: the
-            // manifest took `NodeType` and dropped this, so a `?` property and
-            // a `*` property produced byte-identical manifests.
-            cardinality: Some(p.cardinality),
-        });
-    }
-    for layout_col in ["x", "y"] {
-        properties.push(Property {
-            name: layout_col.to_string(),
-            data_type: data_type_name(&DataType::Float32),
-            is_primary: false,
-            is_nullable: Some(false),
-            cardinality: Some(Cardinality::Single),
-        });
-    }
-    properties.push(Property {
-        name: "cluster_id".to_string(),
-        data_type: "uint32".to_string(),
-        is_primary: false,
-        is_nullable: Some(false),
-        cardinality: Some(Cardinality::Single),
-    });
-
-    let mut info = VertexInfo::new(
-        node.label.clone(),
-        rows,
-        DEFAULT_CHUNK_SIZE,
-        format!("vertex/{}/", node.label),
-        // The payload: the projection at scale one, carrying identity and the
-        // drawing columns. Not a special case and not a first-class block.
-        vec![Projection::payload("", properties)],
-    )
-    .with_iri(node.iri.clone().unwrap_or_default());
-    // Every vertex this writer emits carries `subject`, so every one of them gets
-    // an identity index and the manifest says so. Declared here, beside the
-    // properties that make it possible, rather than after the layout pass that
-    // fills it — which is the same order `prefix` is already declared in: the
-    // manifest is the plan, and `packages/corpus/guards`' `index-agrees-with-the-payload`
-    // is what goes red if the pass does not deliver it.
-    //
-    // The same `chunk_size` as the payload because there is no reason yet for
-    // them to differ, and a separate field because tile `k` here is the `k`th
-    // slice of the SORTED order and has nothing to do with the `dense_id` range
-    // tile `k` of the payload holds. One number in two fields would read as an
-    // alignment that does not exist.
-    info = info.with_index(VertexIndex {
-        prefix: "index/".to_string(),
-        ordered_by: "subject".to_string(),
-        chunk_size: DEFAULT_CHUNK_SIZE,
-    });
-    // **And where `x`/`y` came from**, which the two `Property` rows above
-    // cannot say: they give the columns a name and a `float32`, and a latitude
-    // and a phyllotaxis angle are the same two `float32`.
-    //
-    // The difference is the whole of whether a far view of this corpus means
-    // anything. A position that is DATA makes the plane a space, so its density
-    // is information; a position a drawing algorithm chose makes the density a
-    // statement about the algorithm, and a reader zooming out learns about
-    // `cluster_layout` rather than about the graph. Undeclared, a reader has to
-    // guess, and the guess that costs least to make is the wrong one.
-    //
-    // Declared here for the reason the index above is: the
-    // manifest is the plan and the layout pass is what fills it. And declared
-    // `derived` unconditionally because that is what this writer produces —
-    // every `x` in a corpus fossil writes is `fossil-layout`'s, and there is no
-    // surface in the language through which a program could supply its own.
-    // The day there is one, this stops being a constant and starts being a
-    // question about the mapping; `/docs/design/position` is where that is
-    // written down.
-    //
-    // No version in the deriver, and that is not an oversight — the argument
-    // for and against one is on that page, unsettled, and a version string
-    // invented here would settle it by accident.
-    info = info.with_coordinates(vec![CoordinateSystem::derived(
-        "layout",
-        "x",
-        "y",
-        "louvain+phyllotaxis",
-    )]);
-    info
-}
-
-/// The columns an adjacency tile carries — the pair that IS the edge, and the
-/// only two `fossil-df` writes into one.
-fn endpoint_columns() -> Vec<Property> {
-    ["src_dense", "dst_dense"]
-        .into_iter()
-        .map(|name| Property {
-            name: name.to_string(),
-            data_type: "uint32".to_string(),
-            is_primary: false,
-            is_nullable: Some(false),
-            cardinality: Some(Cardinality::Single),
-        })
-        .collect()
-}
-
-/// The `EdgeInfo` manifest for one edge type. W0b edges carry no properties
-/// (only `src_dense`/`dst_dense`); both CSR + CSC adjacencies are ordered.
-///
-/// `rows` is one orientation's row count, which is the relation's: the two
-/// orientations are the same edges twice.
-fn edge_info(edge: &GraphEdge, rows: u64) -> EdgeInfo {
-    EdgeInfo::new(
-        edge.source.clone(),
-        edge.label.clone(),
-        edge.destination.clone(),
-        rows,
-        DEFAULT_CHUNK_SIZE,
-        format!(
-            "edge/{}/",
-            edge_dir(&edge.source, &edge.label, &edge.destination)
-        ),
-        // Both orientations, each at scale one and each saying where its tiles
-        // are. `aligned_by` gives a reader the arithmetic — which endpoint
-        // column addresses this half — and `path` gives it the URL, so a hop out
-        // of a `dense_id` is derived from the manifest and never agreed between
-        // two repositories.
-        vec![
-            Projection::payload("by_source/", endpoint_columns()).aligned_by("src", true),
-            Projection::payload("by_target/", endpoint_columns()).aligned_by("dst", true),
-        ],
-    )
-    // The one line this function was missing. It has taken the whole
-    // `EdgeType` since it was written and read every field of it but this
-    // one, so a `{1,1}` edge and a `*` edge produced byte-identical
-    // manifests and every reader downstream had to re-derive from the data
-    // what the shape had already said -- when it can be re-derived at all,
-    // which it cannot: an edge type whose every source happens to have one
-    // destination today is not a functional relation.
-    .with_cardinality(edge.cardinality)
-    .with_iri(edge.iri.clone().unwrap_or_default())
-}
-
-/// The `GraphAr` `data_type` spelling (`string`/`int64`/…) of a schema datatype.
-fn graphar_spelling(p: Primitive) -> String {
-    primitive_to_graphar(p).to_string()
 }

@@ -241,7 +241,7 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
         ("KB", "Project")
     );
     let edge_count: usize = edge
-        .by_source
+        .batches
         .iter()
         .map(datafusion::arrow::array::RecordBatch::num_rows)
         .sum();

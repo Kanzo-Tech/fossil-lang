@@ -1935,45 +1935,43 @@ dependencies = [
 name = "fossil-df"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "datafusion",
+ "duckdb",
  "fossil-base",
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-layout",
  "fossil-locator",
  "fossil-mem-probe",
  "fossil-mir",
  "fossil-shex",
  "fossil-sinks",
- "log",
+ "fossil-storage",
+ "futures",
+ "object_store",
  "oxrdf",
  "oxttl",
- "parquet",
  "serde",
  "serde_json",
- "serde_yaml_ng",
  "slug",
  "smol_str",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "unicode-normalization",
+ "url",
 ]
 
 [[package]]
 name = "fossil-df-wasm"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "chrono",
  "console_error_panic_hook",
- "datafusion",
- "fossil-base",
- "fossil-descriptors-output",
  "fossil-df",
- "fossil-hir",
- "fossil-layout",
- "fossil-sinks",
  "fossil-storage",
  "futures",
  "getrandom 0.2.17",
@@ -1981,10 +1979,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "object_store",
- "serde",
  "serde-wasm-bindgen",
- "serde_json",
- "tokio",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -2085,13 +2080,9 @@ name = "fossil-layout"
 version = "0.1.0"
 dependencies = [
  "arrow",
- "bytes",
  "duckdb",
  "fossil-hir",
  "fossil-mem-probe",
- "fossil-sinks",
- "fossil-tile-writer",
- "parquet",
  "serde_json",
  "sha2",
  "thiserror 1.0.69",
@@ -2170,11 +2161,9 @@ name = "fossil-sinks"
 version = "0.1.0"
 dependencies = [
  "arrow-schema",
- "fossil-graph-schema",
- "insta",
+ "schemars",
  "serde",
  "serde_json",
- "serde_yaml_ng",
 ]
 
 [[package]]
@@ -2224,16 +2213,6 @@ dependencies = [
  "salsa",
  "smol_str",
  "text-size",
-]
-
-[[package]]
-name = "fossil-tile-writer"
-version = "0.1.0"
-dependencies = [
- "arrow-array",
- "arrow-schema",
- "parquet",
- "tempfile",
 ]
 
 [[package]]

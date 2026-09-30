@@ -39,9 +39,22 @@ fossil-hir = { path = "../fossil-hir" }
 # of the write path may depend on the other.
 fossil-mem-probe = { path = "../fossil-mem-probe" }
 fossil-mir = { path = "../fossil-mir" }
-# Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name). WASM-clean
-# — the backend reuses them instead of re-deriving the GraphAr layout.
+# The format: `fossil.json`'s structs and the writer's fixed columns. WASM-clean.
 fossil-sinks = { path = "../fossil-sinks" }
+# The layout pass `write` runs over the whole graph before it encodes a byte.
+# It reaches this crate over no edge — it links no compiler substrate — so the
+# edge runs this way; `crates/xtask/tests/substrate_reach.rs` holds that.
+fossil-layout = { path = "../fossil-layout" }
+# The one IO path of a run: sources read and the corpus written through
+# `object_store` stores built from vended credentials. `object-store` only — the
+# `js` host adapter is `fossil-df-wasm`'s.
+fossil-storage = { path = "../fossil-storage", features = ["object-store"] }
+# `Storage::stores` hands `object_store` stores to `DataFusion`, and `put` takes
+# `Bytes`; `futures` drives the one-task session's streams. All wasm-clean.
+object_store = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+url = "2"
 # The canonical graph-schema contract — the metadata fossil-df produces and the
 # manifest materializes from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
@@ -56,7 +69,6 @@ fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # at the I/O border, same as in the browser.
 oxttl = { workspace = true }
 oxrdf = { workspace = true }
-serde_yaml_ng = { workspace = true }
 # `default-features = false` drops datafusion's `sql` frontend (we build plans
 # via the DataFrame/LogicalPlan API, not `ctx.sql()`) and its own `compression`
 # feature — shrinking the wasm surface. We KEEP `parquet`: `io.parquet` sources
@@ -112,20 +124,13 @@ thiserror = { workspace = true }
 slug = { workspace = true }
 unicode-normalization = { workspace = true }
 
-# Native-only: the fs sink writes the encoded bytes to a directory. The browser
-# path hands the same bytes to JS for signed PUT, so std::fs + tokio never reach
-# the wasm build (keeps it lean).
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Native `run_to_dir` blocks the async executor on a current-thread runtime so
-# the synchronous host (the CLI/engine) drives it without being async itself.
-# The browser drives `execute_graph` from JS's own event loop, so tokio is
-# native-only (kept out of the wasm build).
-tokio = { workspace = true }
-
 [dev-dependencies]
-# `examples/tile_layout.rs` encodes its two candidate layouts directly; the
-# library writes no Parquet of its own — the layout pass does.
-parquet = { version = "58", default-features = false, features = ["arrow"] }
+# `tests/write.rs` reads the corpus back with a second engine: a corpus only
+# one writer can read is not a corpus.
+duckdb = { workspace = true }
+# `tests/write.rs` wraps an `object_store` store to record the order of the
+# writes, and the trait is an `async_trait`.
+async-trait = { workspace = true }
 # `NativeSystem` and the line-format decoder moved out of `fossil-base`'s
 # production surface into its `test_support` module, which is behind this
 # feature — they had no consumer that was not a test.
@@ -133,6 +138,8 @@ fossil-base = { path = "../fossil-base", features = ["test-support"] }
 # `tests/pipeline.rs` builds a `SourceAnchor` itself — a regular dependency is
 # invisible to an integration test, which links the crate plus its dev deps only.
 fossil-locator = { path = "../fossil-locator" }
+# Dev-only: the tests drive the async executor on a current-thread runtime. The
+# library holds no tokio at all — the browser drives it from JS's event loop.
 tokio = { workspace = true }
 fossil-hir = { path = "../fossil-hir" }
 # `tests/rdf_source.rs` builds a `ShExDescriptor` to exercise the ShEx→edge path
@@ -146,6 +153,3 @@ tempfile = { workspace = true }
 smol_str = { workspace = true }
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 fossil-sinks = { path = "../fossil-sinks" }
-# tests/spill.rs asserts that a declared budget is honoured by spilling, and the
-# spill only announces itself through a `log` record from DataFusion.
-log = { workspace = true }

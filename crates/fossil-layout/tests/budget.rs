@@ -1,23 +1,14 @@
 //! Integration: what a declared memory budget does to the layout pass, and what
 //! it must never do.
 //!
-//! `--memory-gib` used to reach `execute_graph` and stop there — `fossil-cli`'s
-//! `enrich_written_layout` took the run's `memory_bytes` and wrote `let _ =
-//! memory_bytes;`. At ten million vertices a declared 4 GiB run peaked at 8.39
-//! GiB, and a bound overshot by more than double is worse than no bound at all,
-//! because the person who declared it stopped worrying.
-//!
 //! The pass has no spill path — it holds Rust `Vec`s, and there is no disk
 //! manager under it to hand them to — so a budget can only be honoured here by
-//! *refusing*. These three assertions are that refusal's contract:
+//! *refusing*. These assertions are that refusal's contract:
 //!
-//! 1. over budget is an error, and it happens **before anything is written**;
-//! 2. under budget the corpus is byte-for-byte the corpus an unbounded run
-//!    writes, because a budget that changed the output would make `fossil run`
-//!    and the browser tab — which has no flag to declare one with — disagree
-//!    exactly when a budget was declared;
-//! 3. the estimate the refusal is made on **over**-estimates the one measurement
-//!    it is calibrated against, rather than under-estimating it.
+//! 1. over budget is an error, and it happens **before anything is computed**;
+//! 2. under budget the layout is exactly the one an unbounded run computes;
+//! 3. the estimate the refusal is made on **over**-estimates the measurements
+//!    it is calibrated against, rather than under-estimating them.
 //!
 //! The fourth — that a run which is allowed through then stays inside the number
 //! — is a resident-set measurement and cannot share a process with anything
@@ -25,36 +16,19 @@
 
 mod common;
 
-use common::{dir, fixture, tree};
-use fossil_layout::layout::{LayoutError, enrich_layout_within, estimated_peak_bytes};
+use common::fixture;
+use fossil_layout::layout::{LayoutError, estimated_peak_bytes, layout};
 
 /// **The refusal, and that it happens first.**
 ///
-/// One byte is a budget no corpus fits in, so what this pins is not the
+/// One byte is a budget no graph fits in, so what this pins is not the
 /// arithmetic — that is the third test — but the *order*: the pass counts three
-/// numbers off the batches it was handed, decides, and returns without having
-/// gathered a tile. A refusal at second zero is a different thing to offer a
-/// caller than an out-of-memory at second two hundred, and it leaves **nothing**
-/// behind — where it used to leave the corpus the writer had staged, because
-/// there was one.
+/// numbers off the batches it was handed and decides before it builds anything.
 #[test]
-fn a_budget_the_corpus_cannot_fit_is_refused_before_anything_is_written() {
-    let f = fixture(dir("refused"), 20_000, 14);
-    let before = tree(&f.root);
-    assert!(
-        before.is_empty(),
-        "the pass is handed Arrow, so nothing is on disk before it runs: {:?}",
-        before.iter().map(|(p, _)| p).collect::<Vec<_>>()
-    );
-
-    let err = enrich_layout_within(
-        &fossil_layout::io::LocalFs,
-        &f.targets(),
-        &f.adjacencies(),
-        Some(1),
-    )
-    .expect_err("one byte is not a budget any corpus fits in");
-
+fn a_budget_the_corpus_cannot_fit_is_refused_before_anything_is_computed() {
+    let f = fixture(20_000, 14);
+    let err = layout(&f.types(), &f.relations(), Some(1))
+        .expect_err("one byte is not a budget any graph fits in");
     match err {
         LayoutError::OverBudget {
             vertex_count,
@@ -63,7 +37,7 @@ fn a_budget_the_corpus_cannot_fit_is_refused_before_anything_is_written() {
             declared_bytes,
         } => {
             assert_eq!(vertex_count, 20_000, "the batches were counted");
-            assert!(adjacency_rows > 0, "both orientations were counted");
+            assert!(adjacency_rows > 0, "both directions were counted");
             assert!(
                 needed_bytes > declared_bytes,
                 "the error is only reachable when it does not fit"
@@ -71,57 +45,27 @@ fn a_budget_the_corpus_cannot_fit_is_refused_before_anything_is_written() {
         }
         other => panic!("expected OverBudget, got {other:?}"),
     }
-
-    assert_eq!(tree(&f.root), before, "a refusal must write nothing at all");
 }
 
-/// **The budget decides whether the pass runs, never what it writes.**
+/// **The budget decides whether the pass runs, never what it computes.**
 ///
-/// This is the invariant that rules out the other design. Degrading under
-/// pressure — fewer levels, coarser tiles, a second pass — is the obvious way to
-/// honour a budget, and it is unavailable here: `fossil run` and the wasm
-/// executor (`fossil-df-wasm`) write the same tree byte for byte through the same `LayoutIo`, and only
-/// one of them has a `--memory-gib`. A budget that changed the output would
-/// break that identity precisely when someone declared one.
-///
-/// So: two identical input corpora, one run unbounded and one under a budget it
-/// fits in, and every byte of every file has to match.
+/// Degrading under pressure — fewer levels, a coarser partition — is the
+/// obvious way to honour a budget, and it would make two runs of one program
+/// write different corpora exactly when one of them declared a budget. So: one
+/// run unbounded and one under a budget it fits in, and every id, position and
+/// community has to match.
 #[test]
-fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
-    let unbounded = fixture(dir("identity_unbounded"), 20_000, 14);
-    let bounded = fixture(dir("identity_bounded"), 20_000, 14);
-
-    enrich_layout_within(
-        &fossil_layout::io::LocalFs,
-        &unbounded.targets(),
-        &unbounded.adjacencies(),
-        None,
-    )
-    .expect("the unbounded control");
-
+fn a_budget_it_fits_in_computes_what_an_unbounded_run_computes() {
+    let f = fixture(20_000, 14);
+    let unbounded = layout(&f.types(), &f.relations(), None).expect("the unbounded control");
     // Generous on purpose: what is under test is that passing a budget changes
     // nothing, not where the threshold is.
-    enrich_layout_within(
-        &fossil_layout::io::LocalFs,
-        &bounded.targets(),
-        &bounded.adjacencies(),
-        Some(64 << 30),
-    )
-    .expect("a budget this corpus fits inside");
-
-    let a = tree(&unbounded.root);
-    let b = tree(&bounded.root);
-    assert_eq!(
-        a.iter().map(|(p, _)| p).collect::<Vec<_>>(),
-        b.iter().map(|(p, _)| p).collect::<Vec<_>>(),
-        "the two runs wrote different files"
-    );
-    for ((path, left), (_, right)) in a.iter().zip(&b) {
-        assert_eq!(
-            left, right,
-            "`{path}` differs between the bounded and the unbounded run"
-        );
-    }
+    let bounded =
+        layout(&f.types(), &f.relations(), Some(64 << 30)).expect("a budget this graph fits in");
+    assert_eq!(unbounded.ids, bounded.ids);
+    assert_eq!(unbounded.x, bounded.x);
+    assert_eq!(unbounded.y, bounded.y);
+    assert_eq!(unbounded.cluster, bounded.cluster);
 }
 
 /// **The estimate over-estimates both runs it is calibrated on.**
@@ -132,7 +76,8 @@ fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
 /// defect the budget exists to remove. So this is `>=` and never `abs() < eps`.
 ///
 /// The measurements, all `FOSSIL_MEM_PROBE=1 cargo run --release -p
-/// fossil-layout --example enrich_memory -- <N> <degree>` on a Mac16,8 — 14
+/// fossil-layout --example enrich_memory -- <N> <degree>` (as it was then, at
+/// `ac1801d4`) on a Mac16,8 — 14
 /// cores, 48 GiB, macOS 26.2 / Darwin 25.2.0 — on 2026-08-28:
 ///
 /// | N | degree | vertex Parquet | process peak | at `start` | **the pass** |
@@ -183,14 +128,7 @@ fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
 /// **What is bounded is the pass, not the process**, which is why the fourth
 /// column is the one asserted against. `enrich_memory` builds its fixture in the
 /// same process and the generator's pages are still resident when the pass
-/// starts; in a real `fossil run` that resident set belongs to `execute_graph`,
-/// which carries a `FairSpillPool` and a budget of its own.
-///
-/// **That composition is decided rather than open**: `--memory-gib` bounds each
-/// stage of the write path, not their sum, which is why this asserts the pass
-/// against the pass's own footprint and not against the process's. Splitting the
-/// number and sequencing it are both refused on `/docs/design/streaming`, with
-/// the measurements that refuse them.
+/// starts; in a real run that resident set belongs to `execute_graph`.
 #[test]
 fn the_estimate_over_estimates_the_runs_it_is_calibrated_on() {
     // (vertices, adjacency rows over both orientations, vertex payload as

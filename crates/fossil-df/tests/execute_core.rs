@@ -1,15 +1,16 @@
-//! Native gate for the browser executor core: a CSV program read through a
-//! [`Storage`] of in-memory stores runs end-to-end on `DataFusion`, writes the
-//! `GraphAr` files under its destination, and answers a `RunReport`. `packages/executor/tests/execute.test.ts`
-//! drives the same core through the `#[wasm_bindgen]` wrapper under Node, which
-//! is where wasm-bindgen-futures is proved.
-
+//! Native gate for the executor: a CSV program read through a [`Storage`] of
+//! in-memory stores runs end-to-end on `DataFusion`, writes the `fossil/1`
+//! corpus under its destination, and answers a `RunReport`.
+//! `packages/executor/tests/execute.test.ts` drives the same core through the
+//! `#[wasm_bindgen]` wrapper under Node, which is where wasm-bindgen-futures is
+//! proved.
+//!
 //! The shape document reaches the executor the way it reaches the checker —
 //! reported by `missing_documents`, registered under its key — and the run's
-//! output descriptor is decoded from that registration. The assertion on
-//! `VertexInfo::iri` is the guard that the document was READ: a bare header
-//! name is bound positionally against it, and a run that skipped it writes an
-//! empty type IRI.
+//! output descriptor is decoded from that registration. The assertion on the
+//! vertex table's `iri` is the guard that the document was READ: a bare header
+//! name is bound positionally against it, and a run that skipped it writes no
+//! type IRI.
 
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -17,7 +18,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fossil_df_wasm::Executor;
+use fossil_df::Executor;
+use fossil_sinks::manifest::Manifest;
 use fossil_storage::{Access, Host, Scope, Storage, StorageCredential};
 use futures::TryStreamExt;
 use futures::future::BoxFuture;
@@ -58,8 +60,7 @@ async fn storage(sources: &[(&str, &str)]) -> (Storage, Arc<InMemory>) {
         let key = locator
             .strip_prefix("https://data.example.com/")
             .expect("in the fixture authority");
-        let bytes =
-            std::fs::read(format!("../fossil-df/tests/fixtures/{fixture}")).expect("fixture");
+        let bytes = std::fs::read(format!("tests/fixtures/{fixture}")).expect("fixture");
         data.put(&Path::from(key), bytes.into())
             .await
             .expect("stage");
@@ -119,6 +120,12 @@ Person : Person from users
     name = users.name
 ";
 
+/// `fossil.json`, parsed out of what the run wrote.
+fn manifest(files: &HashMap<String, Vec<u8>>) -> Manifest {
+    serde_json::from_slice(files.get("fossil.json").expect("the run wrote fossil.json"))
+        .expect("fossil.json is the manifest")
+}
+
 #[tokio::test]
 async fn csv_program_runs_through_the_storage_seam() {
     let (mut storage, out) = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
@@ -128,50 +135,34 @@ async fn csv_program_runs_through_the_storage_seam() {
         .expect("executor runs the CSV program");
     let files = written(&out).await;
 
-    // The TILED tree, which is the one `fossil run` writes: the tiles under the
-    // declared prefix, the identity index beside them, and the staged
-    // single-file payload GONE — it is never written now, where it used to be
-    // written, read by the pass and removed from the map. Left in, it is a
-    // second, stale copy of every vertex and `packages/corpus/guards`' `exactly-once`
-    // fails a corpus for it.
-    let paths: Vec<&str> = files.keys().map(String::as_str).collect();
-    assert!(
-        paths.contains(&"vertex/Person/tiles.parquet"),
-        "expected the tiled Person payload, got {paths:?}"
-    );
-    assert!(
-        paths.contains(&"vertex/Person/index/tiles.parquet"),
-        "expected the identity index beside it, got {paths:?}"
-    );
-    assert!(
-        !paths.contains(&"vertex/Person.parquet"),
-        "nothing stages a single-file vertex payload; the tiles are the first write: {paths:?}"
-    );
-    assert!(paths.contains(&"graph.graph.yml"));
-    assert!(paths.contains(&"vertex/Person.vertex.yml"));
+    // One table per vertex type and the manifest over it; nothing else.
+    let mut paths: Vec<&str> = files.keys().map(String::as_str).collect();
+    paths.sort_unstable();
+    assert_eq!(paths, ["fossil.json", "vertex/Person.parquet"]);
+    assert!(!files["vertex/Person.parquet"].is_empty());
 
-    assert!(!files["vertex/Person/tiles.parquet"].is_empty());
+    assert_eq!(report.dest, DEST);
+    assert!(report.dropped.is_empty(), "no relation, nothing to drop");
 
     // 3 users → 3 vertices.
-    assert_eq!(report.dest, DEST);
-    assert_eq!(report.vertices.len(), 1);
-    let v = &report.vertices[0];
-    assert_eq!(v.vertex_type, "Person");
-    assert_eq!(v.vertex_count, 3);
+    let m = manifest(&files);
+    assert_eq!(m.vertex_tables.len(), 1);
+    let v = &m.vertex_tables[0];
+    assert_eq!(v.name, "Person");
+    assert_eq!(v.record_count, 3);
 
     // The document was READ, not merely named: a bare header name is bound
     // positionally against the shape document, so this IRI exists only if
-    // `executor.shex` reached the checker. The empty string is what a run that
-    // skipped registration produced, and it is indistinguishable from success
-    // everywhere else in this file.
+    // `executor.shex` reached the checker.
     assert_eq!(
-        v.iri, "https://example.org/Person",
+        v.iri.as_deref(),
+        Some("https://example.org/Person"),
         "the vertex's type IRI comes from the registered document"
     );
     assert!(
-        v.properties().iter().any(|p| p.name == "name"),
+        v.properties.iter().any(|p| p.name == "name"),
         "Person carries the name column: {:?}",
-        v.projections,
+        v.properties,
     );
 }
 
@@ -202,25 +193,10 @@ fn program_sources_lists_each_distinct_source_with_its_format() {
     assert!(srcs.iter().all(|(_, fmt, _)| *fmt == "csv"));
 }
 
-/// **The browser's report IS the documents the browser shipped** — every
-/// manifest, field for field, checked against the YAML the same run wrote.
-///
-/// It is written as an equality over the whole set and not as an assertion
-/// about two named fields, because the defect it guards is not about a field.
-/// `RunReport::of` snapshots `graph.manifest()`, so a report built at the wrong
-/// moment states the manifest as it was THEN: every key declared afterwards is
-/// simply absent from the JSON, with nothing anywhere going red. That is how the
-/// browser came to omit `cells:` and then `channels:` — the report was built
-/// before `declare_pyramids`/`declare_channels`, so the tab handed its host an
-/// account of a corpus missing two measured facts the YAML it uploaded beside it
-/// carried, while `fossil run --output-json` carried both. A test naming those
-/// two fields would have caught those two fields; this one catches the third.
-///
-/// The two-source program is used so neither half is vacuous: it materialises a
-/// vertex document and an edge document, and `Person` is a type the layout pass
-/// reaches — so the report has something to lose.
+/// **The report is where the run wrote and what the join dropped** — and the
+/// manifest is not in it: it is `fossil.json`, beside the tables it names.
 #[tokio::test]
-async fn the_report_is_the_manifest_the_browser_shipped() {
+async fn the_report_names_the_destination_and_the_drops() {
     let (mut storage, out) = storage(&[
         ("https://data.example.com/users.csv", "users.csv"),
         ("https://data.example.com/orders.csv", "orders.csv"),
@@ -231,53 +207,27 @@ async fn the_report_is_the_manifest_the_browser_shipped() {
         .await
         .expect("executor runs the two-source program");
     let files = written(&out).await;
+    let m = manifest(&files);
 
-    let shipped = |rel: &str| -> String {
-        let bytes = files
-            .get(rel)
-            .unwrap_or_else(|| panic!("the run emitted `{rel}`"));
-        String::from_utf8(bytes.clone()).expect("a manifest is UTF-8")
-    };
-
-    // The index, then every document it names — positionally, which is the
-    // agreement `GraphInfo::vertices`/`edges` already carry.
+    assert_eq!(report.dest, DEST);
+    let tables: Vec<&str> = m.edge_tables.iter().map(|e| e.name.as_str()).collect();
+    let dropped: Vec<&str> = report.dropped.iter().map(|d| d.table.as_str()).collect();
     assert_eq!(
-        shipped("graph.graph.yml"),
-        report.graph.to_yaml().expect("the index serialises"),
-        "the report's index is not the `graph.graph.yml` the run shipped"
+        tables, dropped,
+        "one drop count per edge table, in its order"
     );
-    assert!(!report.vertices.is_empty() && !report.edges.is_empty());
-    for (rel, info) in report.graph.vertices.iter().zip(&report.vertices) {
-        assert_eq!(
-            shipped(rel),
-            info.to_yaml().expect("a vertex document serialises"),
-            "the report's entry for `{rel}` is not the document the run shipped"
-        );
-    }
-    for (rel, info) in report.graph.edges.iter().zip(&report.edges) {
-        assert_eq!(
-            shipped(rel),
-            info.to_yaml().expect("an edge document serialises"),
-            "the report's entry for `{rel}` is not the document the run shipped"
-        );
-    }
-
-    // And the equality is not vacuous on the field that found this: the pass
-    // partitioned `Person`, so its document declares a channel with a measured
-    // domain — and therefore so must the report.
-    let person = report
-        .vertices
+    assert_eq!(tables, ["Order_placedBy_Person"]);
+    for table in m
+        .vertex_tables
         .iter()
-        .find(|v| v.vertex_type == "Person")
-        .expect("Person is in the report");
-    let channels = person
-        .channels
-        .as_ref()
-        .expect("the pass measured a channel for Person, so the report declares one");
-    assert!(
-        channels.iter().any(|c| c.domain.is_some()),
-        "a categorical channel carries the domain the pass measured: {channels:?}"
-    );
+        .map(|v| &v.path)
+        .chain(m.edge_tables.iter().map(|e| &e.path))
+    {
+        assert!(
+            files.contains_key(table),
+            "`{table}` is named and was not written"
+        );
+    }
 }
 
 const CONN_PROGRAM: &str = "\
@@ -319,13 +269,13 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     assert_eq!(listed[0].0, "https://data.example.com/users.csv");
     assert_eq!(listed[0].1, "csv");
 
-    let (mut storage, _) = storage(&[(listed[0].0.as_str(), "users.csv")]).await;
-    let report = exec
-        .execute(&mut storage, DEST)
+    let (mut storage, out) = storage(&[(listed[0].0.as_str(), "users.csv")]).await;
+    exec.execute(&mut storage, DEST)
         .await
         .expect("executor runs the @conn-aliased program");
-    let person = report.vertices.iter().find(|v| v.vertex_type == "Person");
-    assert_eq!(person.map(|v| v.vertex_count), Some(3));
+    let m = manifest(&written(&out).await);
+    let person = m.vertex_tables.iter().find(|v| v.name == "Person");
+    assert_eq!(person.map(|v| v.record_count), Some(3));
 }
 
 const CONN_DOCUMENT_PROGRAM: &str = "\
@@ -390,12 +340,15 @@ Late : Person from users.where(users.id >= 3)
 #[test]
 fn a_union_of_two_mappings_runs_with_no_tokio_runtime() {
     futures::executor::block_on(async {
-        let (mut storage, _) =
+        let (mut storage, out) =
             storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
-        let report = executor(UNION_PROGRAM, HashMap::new())
+        executor(UNION_PROGRAM, HashMap::new())
             .execute(&mut storage, DEST)
             .await
             .expect("the union runs on one future");
-        assert_eq!(report.vertices[0].vertex_count, 3);
+        assert_eq!(
+            manifest(&written(&out).await).vertex_tables[0].record_count,
+            3
+        );
     });
 }

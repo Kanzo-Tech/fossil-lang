@@ -1,14 +1,10 @@
 //! Where a vertex goes on the plane, given which community it is in.
 //!
-//! Split out of `layout.rs` unchanged. [`cluster_layout`] is the deterministic
-//! placement — every group an aligned square of the quaternary sized to its own
-//! membership, handed out by bumping a Hilbert-order frontier, members
-//! phyllotaxis-packed inside — and [`place_after`] is what keeps two vertex
-//! types from stacking.
-//!
-//! **Every position here is `derived`**, in the sense `/docs/design/position`
-//! gives the word: the algorithm chose it because a picture needed coordinates,
-//! and nothing measured it.
+//! [`cluster_layout`] is the deterministic placement — every group an aligned
+//! square of the quaternary sized to its own membership, handed out by bumping
+//! a Hilbert-order frontier, members phyllotaxis-packed inside. It places the
+//! whole graph at once, every vertex type on one plane: the types are not
+//! separated, because the communities that cross them are the picture.
 
 use super::hilbert::hilbert_decode;
 
@@ -51,10 +47,6 @@ pub(super) const CLUSTER_BUDGET: u32 = 2_048;
 /// `INTRA_CLUSTER_RADIUS · √(k+1)`, so a group of `m` fills a disc of area
 /// proportional to `m` and every group is packed at the same density.
 const INTRA_CLUSTER_RADIUS: f32 = 12.0;
-/// Empty space between one vertex type's region and the next — four finest
-/// blocks, so the seam between types reads as deliberate rather than as a gap
-/// that happened.
-const TYPE_GUTTER: f32 = CELL_UNIT * 4.0;
 
 /// Deterministic 2-D positions from a per-vertex `cluster_id` list (as produced
 /// by [`super::community::community_hierarchy`], `flatten_to_budget` and `order_by_hierarchy`).
@@ -228,33 +220,6 @@ const fn next_power_of_four(n: u64) -> u64 {
         blocks *= 4;
     }
     blocks
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// W3.1b — integration: apply the pure layout to the written GraphAr vertices.
-// ──────────────────────────────────────────────────────────────────────────
-
-/// Translate one vertex type's layout to start at `origin_x`, and answer where
-/// the next type should start.
-///
-/// [`cluster_layout`] always begins at the origin, so laying several types out
-/// independently puts every one of them in the same place. Read back by a camera
-/// that is worse than ugly: a rectangle answers with vertices from unrelated
-/// types that share nothing but coordinates, and the picture looks like a graph
-/// rather than like a mistake.
-///
-/// The gap is [`TYPE_GUTTER`], wide enough that the seam reads as a seam. This
-/// separates the types; it does not lay them out together — cross-type edges
-/// still pull on nothing, and will not until a force-directed pass is seeded
-/// from these positions. Separated is wrong in a way a reader can see and
-/// reason about; overlapped is wrong in a way that looks like data.
-pub(super) fn place_after(positions: &mut [(f32, f32)], origin_x: f32) -> f32 {
-    let mut width = 0.0f32;
-    for (x, _) in positions.iter_mut() {
-        width = width.max(*x);
-        *x += origin_x;
-    }
-    origin_x + width + TYPE_GUTTER
 }
 
 #[cfg(test)]
@@ -445,36 +410,5 @@ mod tests {
             small * 4.0 > large && large * 4.0 > small,
             "the two ends differ by more than the rounding: {small} against {large} per member",
         );
-    }
-
-    #[test]
-    fn place_after_separates_types_instead_of_stacking_them() {
-        // Two types laid out independently both start at the origin, which is
-        // how a two-type graph rendered as one blob with its communities
-        // interleaved at random — and a bbox query answered with vertices that
-        // share nothing but a coordinate.
-        let mut first = cluster_layout(&[0, 0, 1, 1]);
-        let mut second = cluster_layout(&[0, 0, 1, 1]);
-        assert_eq!(first, second, "independently, the two types coincide");
-
-        let next = place_after(&mut first, 0.0);
-        place_after(&mut second, next);
-
-        let first_right = first.iter().fold(f32::MIN, |m, &(x, _)| m.max(x));
-        let second_left = second.iter().fold(f32::MAX, |m, &(x, _)| m.min(x));
-        assert!(
-            second_left > first_right,
-            "the second type starts ({second_left}) clear of the first ({first_right})",
-        );
-    }
-
-    #[test]
-    fn place_after_leaves_a_single_type_where_it_was() {
-        // The common case is one vertex type, and it must not be pushed off the
-        // origin by the machinery that exists for the several-type case.
-        let mut only = cluster_layout(&[0, 0, 1]);
-        let untouched = only.clone();
-        place_after(&mut only, 0.0);
-        assert_eq!(only, untouched);
     }
 }

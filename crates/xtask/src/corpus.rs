@@ -2,9 +2,11 @@
 //!
 //! The sibling of [`crate::catalogue`], one data file along. That module turns
 //! *which names a program may write* into six files; this one turns *which
-//! columns the writer emits* into two — a Rust table for the crates and a
-//! TypeScript one for the packages — so that the set stops being stated by hand
-//! in three places with two different contents.
+//! columns the writer emits* into one Rust table, so that the set stops being
+//! stated by hand. A TypeScript reader takes the columns from `fossil.json`'s
+//! `properties`, which lists every one of them, and its types from
+//! `crates/fossil-sinks/fossil.schema.json`; the TypeScript projection this
+//! module also emitted went when the manifest started listing the columns.
 //!
 //! # Why a parser here and a lexer from next door
 //!
@@ -20,7 +22,7 @@
 //! A [`Role`] says what a column IS. Every reader that used to carry a
 //! hand-written list now names the roles it means, which is what makes the two
 //! surviving sets legibly different rather than accidentally different:
-//! `fossil-graph` hides *everything the writer emits* from a field listing, and
+//! one reader hides *everything the writer emits* from a field listing, and
 //! `packages/corpus` excludes only *the columns it already surfaces as named
 //! members*. Those are different questions and they were two literals.
 
@@ -34,12 +36,8 @@ use crate::catalogue::{Tok, lex, repo_root, rustfmt};
 pub enum Where {
     /// A vertex payload row.
     Payload,
-    /// An adjacency row, in either orientation.
-    Adjacency,
-    /// A cell row — one rung of the pyramid.
-    Cell,
-    /// A quotient edge between two cells of one rung.
-    Quotient,
+    /// An edge row — one relation's table.
+    Edge,
 }
 
 impl Where {
@@ -49,14 +47,12 @@ impl Where {
     /// of variants and both carried their own `match` for the prose, so adding
     /// an artefact meant editing four places and a compiler that noticed two of
     /// them. This is the array; [`Self::what`] is the prose.
-    pub const ALL: [Self; 4] = [Self::Payload, Self::Adjacency, Self::Cell, Self::Quotient];
+    pub const ALL: [Self; 2] = [Self::Payload, Self::Edge];
 
     fn parse(word: &str) -> Option<Self> {
         match word {
             "payload" => Some(Self::Payload),
-            "adjacency" => Some(Self::Adjacency),
-            "cell" => Some(Self::Cell),
-            "quotient" => Some(Self::Quotient),
+            "edge" => Some(Self::Edge),
             _ => None,
         }
     }
@@ -65,9 +61,7 @@ impl Where {
     const fn upper(self) -> &'static str {
         match self {
             Self::Payload => "PAYLOAD",
-            Self::Adjacency => "ADJACENCY",
-            Self::Cell => "CELL",
-            Self::Quotient => "QUOTIENT",
+            Self::Edge => "EDGE",
         }
     }
 
@@ -75,9 +69,7 @@ impl Where {
     const fn what(self) -> &'static str {
         match self {
             Self::Payload => "a vertex payload row",
-            Self::Adjacency => "an adjacency row, in either orientation",
-            Self::Cell => "a cell row of one rung of the pyramid",
-            Self::Quotient => "a quotient edge between two cells of one rung",
+            Self::Edge => "an edge row",
         }
     }
 }
@@ -93,20 +85,8 @@ pub enum Role {
     Coordinate,
     /// An ordinal the writer computed, for a reader to colour by.
     Categorical,
-    /// One end of a relation, in the aligned type's `dense_id` space.
+    /// One end of a relation: a vertex's global `dense_id`.
     Endpoint,
-    /// How many rows of the level below this one summarises.
-    Tally,
-    /// A summed edge weight.
-    Weight,
-    /// The majority value, over the rows summarised, of the channel the tree
-    /// names — `CellTree::mode_channel`, and never «a categorical»: the column
-    /// is a bare ordinal and carries no referent.
-    Mode,
-    /// What fraction of the rows summarised carry the mode.
-    Purity,
-    /// One end of a quotient edge, in its own rung's cell space.
-    Incident,
 }
 
 impl Role {
@@ -117,16 +97,11 @@ impl Role {
             "coordinate" => Some(Self::Coordinate),
             "categorical" => Some(Self::Categorical),
             "endpoint" => Some(Self::Endpoint),
-            "tally" => Some(Self::Tally),
-            "weight" => Some(Self::Weight),
-            "mode" => Some(Self::Mode),
-            "purity" => Some(Self::Purity),
-            "incident" => Some(Self::Incident),
             _ => None,
         }
     }
 
-    /// The Rust variant name, which is also the TypeScript string literal.
+    /// The Rust variant name.
     const fn variant(self) -> &'static str {
         match self {
             Self::Address => "Address",
@@ -134,11 +109,6 @@ impl Role {
             Self::Coordinate => "Coordinate",
             Self::Categorical => "Categorical",
             Self::Endpoint => "Endpoint",
-            Self::Tally => "Tally",
-            Self::Weight => "Weight",
-            Self::Mode => "Mode",
-            Self::Purity => "Purity",
-            Self::Incident => "Incident",
         }
     }
 
@@ -150,11 +120,6 @@ impl Role {
             Self::Coordinate => "COORDINATES",
             Self::Categorical => "CATEGORICAL",
             Self::Endpoint => "ENDPOINTS",
-            Self::Tally => "TALLY",
-            Self::Weight => "WEIGHT",
-            Self::Mode => "MODE",
-            Self::Purity => "PURITY",
-            Self::Incident => "INCIDENTS",
         }
     }
 }
@@ -164,11 +129,9 @@ impl Role {
 pub struct Column {
     pub name: String,
     pub whence: Where,
-    /// The `GraphAr` spelling, which is what the manifest writes.
+    /// The manifest's spelling of the type.
     pub data_type: String,
     pub role: Role,
-    /// Whether the manifest's `properties:` also declares it. Exactly one does.
-    pub declared: bool,
     /// `src` or `dst` on an endpoint, and `None` elsewhere.
     pub aligns: Option<String>,
 }
@@ -214,7 +177,6 @@ pub fn parse(text: &str) -> Vec<Column> {
         let mut whence = None;
         let mut data_type = None;
         let mut role = None;
-        let mut declared = false;
         let mut aligns = None;
 
         loop {
@@ -235,7 +197,6 @@ pub fn parse(text: &str) -> Vec<Column> {
                             .unwrap_or_else(|| panic!("corpus.bnf: `{r}` names no role")),
                     );
                 }
-                "declared" => declared = true,
                 "aligns" => aligns = Some(word(&mut pos)),
                 other => panic!("corpus.bnf: `{other}` is not a clause of `col {name}`"),
             }
@@ -254,7 +215,6 @@ pub fn parse(text: &str) -> Vec<Column> {
             data_type: data_type
                 .unwrap_or_else(|| panic!("corpus.bnf: `col {name}` declares no `type`")),
             role: role.unwrap_or_else(|| panic!("corpus.bnf: `col {name}` declares no `role`")),
-            declared,
             aligns,
             name,
         };
@@ -329,11 +289,9 @@ pub fn emit_rust(columns: &[Column]) -> String {
          pub struct WriterColumn {\n\
          \x20   /// The column name, as it appears in the Parquet schema.\n\
          \x20   pub name: &'static str,\n\
-         \x20   /// The `GraphAr` spelling of its type, which is what the manifest writes.\n\
+         \x20   /// The manifest's spelling of its type, which is what the manifest writes.\n\
          \x20   pub data_type: &'static str,\n\
          \x20   pub role: ColumnRole,\n\
-         \x20   /// Whether the manifest's `properties:` also declares it.\n\
-         \x20   pub declared: bool,\n\
          }\n",
     );
 
@@ -349,11 +307,10 @@ pub fn emit_rust(columns: &[Column]) -> String {
         for c in &cols {
             let _ = writeln!(
                 out,
-                "    WriterColumn {{ name: {:?}, data_type: {:?}, role: ColumnRole::{}, declared: {} }},",
+                "    WriterColumn {{ name: {:?}, data_type: {:?}, role: ColumnRole::{} }},",
                 c.name,
                 c.data_type,
                 c.role.variant(),
-                c.declared
             );
         }
         out.push_str("];\n");
@@ -382,22 +339,16 @@ pub fn emit_rust(columns: &[Column]) -> String {
         }
     }
 
-    let _ = writeln!(
-        out,
-        "\n/// The payload columns the manifest's `properties:` also declares.\n\
-         ///\n\
-         /// One of five, and that asymmetry is the whole of the manifest-versus-bytes\n\
-         /// difference a reader has to know about.\n\
-         pub const PAYLOAD_DECLARED: &[&str] = {};",
-        names(&of(columns, Where::Payload), |c| c.declared)
-    );
-
     for c in columns.iter().filter(|c| c.aligns.is_some()) {
         let _ = writeln!(
             out,
-            "\n/// The endpoint column a `{}`-aligned orientation is tiled by.\n\
-             pub const ALIGNED_{}: &str = {:?};",
-            c.aligns.as_deref().unwrap_or_default(),
+            "\n/// The edge column the manifest's `{}` endpoint names as its `key`.\n\
+             pub const ENDPOINT_{}: &str = {:?};",
+            if c.aligns.as_deref() == Some("src") {
+                "source"
+            } else {
+                "destination"
+            },
             c.aligns.as_deref().unwrap_or_default().to_uppercase(),
             c.name
         );
@@ -414,123 +365,15 @@ fn capitalise(s: &str) -> String {
         .unwrap_or_default()
 }
 
-/// One line of prose per role, used in both generated files so the two agree.
+/// One line of prose per role, for the generated doc comments.
 const fn role_doc(role: Role) -> &'static str {
     match role {
         Role::Address => "the row's rank in the ordering, which a re-layout renumbers",
         Role::Identity => "what a bookmark keys on, and what survives a rebuild",
         Role::Coordinate => "one axis of the plane",
         Role::Categorical => "an ordinal the writer computed, for a reader to colour by",
-        Role::Endpoint => "one end of a relation, in the aligned type's `dense_id` space",
-        Role::Tally => "how many rows of the level below this one summarises",
-        Role::Weight => "a summed edge weight",
-        Role::Mode => "the majority value, over the rows summarised, of the channel the tree names",
-        Role::Purity => "what fraction of the rows summarised carry the mode",
-        Role::Incident => "one end of a quotient edge, in its own rung's cell space",
+        Role::Endpoint => "one end of a relation, a vertex's global `dense_id`",
     }
-}
-
-/// The TypeScript table: `packages/corpus/src/vocabulary.generated.ts`.
-#[must_use]
-pub fn emit_ts(columns: &[Column]) -> String {
-    let mut out = String::from(
-        "// @generated by `cargo xtask corpus` from `corpus.bnf`. DO NOT EDIT.\n\
-         //\n\
-         // The columns the writer emits, and what each one IS. `corpus.bnf` carries the\n\
-         // rows and the argument; this is the TypeScript projection of them, and it is\n\
-         // the same table `crates/fossil-sinks/src/generated.rs` carries on the Rust side.\n\
-         //\n\
-         // Read a set by the ROLES it means. The two consumers that used to carry\n\
-         // hand-written lists meant different things by \"the writer's columns\".\n\n",
-    );
-
-    let mut seen: Vec<Role> = columns.iter().map(|c| c.role).collect();
-    seen.sort_unstable();
-    seen.dedup();
-    out.push_str(
-        "/** What a column IS — never what a reader does with it. */\nexport type ColumnRole =\n",
-    );
-    for role in &seen {
-        let _ = writeln!(out, "  /** {}. */", capitalise(role_doc(*role)));
-        let _ = writeln!(out, "  | '{}'", role.variant().to_lowercase());
-    }
-    out.push_str(";\n\n");
-
-    out.push_str(
-        "/** One column the writer emits. */\n\
-         export interface WriterColumn {\n\
-         \x20 readonly name: string;\n\
-         \x20 /** The GraphAr spelling of its type, which is what the manifest writes. */\n\
-         \x20 readonly dataType: string;\n\
-         \x20 readonly role: ColumnRole;\n\
-         \x20 /** Whether the manifest's `properties:` also declares it. */\n\
-         \x20 readonly declared: boolean;\n\
-         }\n",
-    );
-
-    for whence in Where::ALL {
-        let cols = of(columns, whence);
-        let what = whence.what();
-        let ident = whence.upper();
-        let _ = writeln!(
-            out,
-            "\n/** Every column of {what}, in writer order. */\nexport const {ident}_COLUMNS: readonly WriterColumn[] = ["
-        );
-        for c in &cols {
-            let _ = writeln!(
-                out,
-                "  {{ name: '{}', dataType: '{}', role: '{}', declared: {} }},",
-                c.name,
-                c.data_type,
-                c.role.variant().to_lowercase(),
-                c.declared
-            );
-        }
-        out.push_str("];\n");
-
-        let _ = writeln!(
-            out,
-            "\n/** The names of {what}, in writer order. */\nexport const {ident}_NAMES: readonly string[] = {};",
-            ts_names(&cols, |_| true)
-        );
-
-        let mut roles: Vec<Role> = cols.iter().map(|c| c.role).collect();
-        roles.sort_unstable();
-        roles.dedup();
-        for role in roles {
-            let _ = writeln!(
-                out,
-                "\n/** The {} column(s) of {what} — {}. */\nexport const {ident}_{}: readonly string[] = {};",
-                role.variant().to_lowercase(),
-                role_doc(role),
-                role.upper(),
-                ts_names(&cols, |c| c.role == role)
-            );
-        }
-    }
-
-    let _ = writeln!(
-        out,
-        "\n/**\n\
-         \x20* The payload columns the manifest's `properties:` also declares.\n\
-         \x20*\n\
-         \x20* One of five, and that asymmetry is the whole of the manifest-versus-bytes\n\
-         \x20* difference a reader has to know about.\n\
-         \x20*/\nexport const PAYLOAD_DECLARED: readonly string[] = {};",
-        ts_names(&of(columns, Where::Payload), |c| c.declared)
-    );
-
-    out
-}
-
-/// A TypeScript array literal of the names a predicate keeps, in file order.
-fn ts_names(columns: &[&Column], keep: impl Fn(&Column) -> bool) -> String {
-    let kept: Vec<String> = columns
-        .iter()
-        .filter(|c| keep(c))
-        .map(|c| format!("'{}'", c.name))
-        .collect();
-    format!("[{}]", kept.join(", "))
 }
 
 /// Read `corpus.bnf` from the repository root.
@@ -561,10 +404,6 @@ pub fn generated() -> Vec<(PathBuf, String)> {
             root.join("crates/fossil-sinks/src/generated.rs"),
             emit_rust(&columns),
         ),
-        (
-            root.join("packages/corpus/src/vocabulary.generated.ts"),
-            emit_ts(&columns),
-        ),
     ]
 }
 
@@ -580,22 +419,18 @@ mod tests {
         assert_eq!(cols[0].whence, Where::Payload);
         assert_eq!(cols[0].data_type, "float32");
         assert_eq!(cols[0].role, Role::Coordinate);
-        assert!(!cols[0].declared);
         assert!(cols[0].aligns.is_none());
     }
 
     #[test]
-    fn declared_and_aligns_are_flags_not_values() {
-        let cols = parse(
-            "col subject = in payload ; type string ; role identity ; declared .\n\
-             col src_dense = in adjacency ; type uint32 ; role endpoint ; aligns src .",
-        );
-        assert!(cols[0].declared);
-        assert_eq!(cols[1].aligns.as_deref(), Some("src"));
+    fn aligns_is_a_flag_with_a_value() {
+        let cols = parse("col src = in edge ; type uint32 ; role endpoint ; aligns src .");
+        assert_eq!(cols[0].whence, Where::Edge);
+        assert_eq!(cols[0].aligns.as_deref(), Some("src"));
     }
 
     /// The one cross-clause rule, and it is checked rather than documented:
-    /// `aligns` says which orientation tiles by a column, so it belongs to an
+    /// `aligns` says which end of a relation a column is, so it belongs to an
     /// endpoint and to nothing else.
     #[test]
     #[should_panic(expected = "belongs to an endpoint")]
@@ -611,49 +446,22 @@ mod tests {
 
     /// The real file, so a clause added to it without an emitter is caught here
     /// rather than in a generated file nobody reads.
-    ///
-    /// **Per artefact, and that is a correction.** This counted roles across the
-    /// whole file, which said what it meant while there were two sets and one
-    /// row of each interesting role. There are four sets now and both the
-    /// payload and a cell row carry an address and a coordinate pair, so a
-    /// global count of "one address" is a count of how many artefacts exist.
     #[test]
     fn every_artefact_declares_the_roles_a_reader_addresses_it_by() {
         let cols = read();
         let count =
             |w: Where, r: Role| cols.iter().filter(|c| c.whence == w && c.role == r).count();
 
-        // One address per addressable artefact, and at most one identity in the
-        // corpus: `subject` is what a bookmark keys on and nothing else is.
+        // One address, and one identity in the corpus: `subject` is what a
+        // bookmark keys on and nothing else is.
         assert_eq!(count(Where::Payload, Role::Address), 1);
-        assert_eq!(count(Where::Cell, Role::Address), 1);
         assert_eq!(cols.iter().filter(|c| c.role == Role::Identity).count(), 1);
         assert_eq!(count(Where::Payload, Role::Identity), 1);
-        assert_eq!(
-            count(Where::Cell, Role::Identity),
-            0,
-            "a cell is not an entity and no bookmark keys on one"
-        );
-
-        // A coordinate is declared as a pair, wherever it is declared.
-        for whence in [Where::Payload, Where::Cell] {
-            assert_eq!(count(whence, Role::Coordinate), 2, "{whence:?}");
-        }
-
-        // The two relation artefacts, and they index different spaces: an
-        // endpoint is a `dense_id` and an incident is a cell of one rung.
-        assert_eq!(count(Where::Adjacency, Role::Endpoint), 2);
-        assert_eq!(count(Where::Quotient, Role::Incident), 2);
-        assert_eq!(count(Where::Adjacency, Role::Incident), 0);
-        assert_eq!(count(Where::Quotient, Role::Endpoint), 0);
-
-        // What makes a cell row a summary rather than a row: how many it stands
-        // for, what it absorbed, and the categorical it carries a mode of.
-        for role in [Role::Tally, Role::Weight, Role::Mode, Role::Purity] {
-            assert_eq!(count(Where::Cell, role), 1, "{role:?}");
-        }
-
-        // Exactly one column of the whole corpus is also in `properties:`.
-        assert_eq!(cols.iter().filter(|c| c.declared).count(), 1);
+        // A coordinate is declared as a pair.
+        assert_eq!(count(Where::Payload, Role::Coordinate), 2);
+        // An edge is its two endpoints, one per end.
+        assert_eq!(count(Where::Edge, Role::Endpoint), 2);
+        let ends: Vec<_> = cols.iter().filter_map(|c| c.aligns.as_deref()).collect();
+        assert_eq!(ends, ["src", "dst"]);
     }
 }

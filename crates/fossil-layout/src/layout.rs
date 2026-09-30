@@ -1,36 +1,15 @@
-//! Graph layout precompute — pure, host-agnostic algorithms, and the pass that
-//! applies them to a written corpus.
-//!
-//! The writer emits `x`/`y`/`cluster_id` as placeholders (`0`); this fills them,
-//! so a reader addressing the corpus gets meaningful positions and the Parquet
-//! can be sorted along a Hilbert curve for predicate pushdown.
-//!
-//! The pure half, over a `dense_id` edge list:
-//!
-//! - [`community_hierarchy`] — modularity communities, and the whole hierarchy
-//!   of them, which is what [`enrich_layout`] partitions by. This is the pyramid
-//!   the level-of-detail plan is built from.
-//! - [`cluster_layout`] — a deterministic community-grouped placement: clusters
-//!   on a grid, nodes phyllotaxis-packed within their cell. Same-cluster nodes
-//!   land near each other. `ForceAtlas2` refinement is a later slice; this gives
-//!   the viewport real, stable coordinates without an iterative force sim.
-//!
-//! Each is pure (no I/O, no RNG, no engine) so they unit-test in isolation and
-//! [`enrich_layout`] can wire them with confidence.
-//!
-//! Each of those now has a file, and so does the pass that wires them. The cut
-//! is the one this comment already described — the pure half against the half
-//! that touches Parquet — made a module boundary rather than a paragraph:
+//! Graph layout — pure, host-agnostic algorithms, and the pass that wires
+//! them over the whole graph.
 //!
 //! - [`community`] — the partition. Louvain and its quotient graph.
 //! - [`place`] — where a vertex goes on the plane, given its community.
-//! - [`hilbert`] — Hilbert codes and the quantisation into one.
-//! - [`pass`] — [`enrich_layout`], which takes the executor's `RecordBatch`es
-//!   and writes Parquet through `arrow-rs` and the one encoder the writer itself
-//!   uses. There is no database here: see `docs/design/one-engine.mdx`.
+//! - [`hilbert`] — Hilbert codes, quantised as `DuckDB`'s `ST_Hilbert` does.
+//! - [`pass`] — [`layout()`], which takes the executor's `RecordBatch`es and
+//!   answers a [`Layout`]: a global `dense_id`, a position and a community for
+//!   every vertex.
 //!
-//! Every name below was `layout::<name>` before the split and still is. The file
-//! was 3,540 lines holding four subjects.
+//! Each of the first three is pure (no I/O, no RNG, no engine), so they
+//! unit-test in isolation.
 
 // This is deliberate numeric code: dense ids / cluster counts cast to/from `f32`
 // coordinates and `f64` grid maths, and tight index loops over `dense_id` arrays.
@@ -44,16 +23,11 @@
     clippy::option_if_let_else
 )]
 
-pub mod cells;
 pub mod community;
 pub mod hilbert;
 pub mod pass;
 pub mod place;
-mod statistics;
 
 pub use community::community_hierarchy;
-pub use pass::{
-    AdjacencyTarget, Endpoint, LayoutError, LayoutReport, VertexLayoutTarget, enrich_layout,
-    enrich_layout_with, enrich_layout_within, estimated_peak_bytes,
-};
+pub use pass::{Layout, LayoutError, Relation, VertexType, estimated_peak_bytes, layout};
 pub use place::cluster_layout;

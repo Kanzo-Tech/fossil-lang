@@ -94,3 +94,69 @@ pub(crate) fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<String> {
     }
     out
 }
+
+/// A [`fossil_storage::Host`] that vends nothing: every store a test needs is
+/// registered on the [`fossil_storage::Storage`] by hand.
+#[derive(Debug)]
+pub(crate) struct NoHost;
+
+impl fossil_storage::Host for NoHost {
+    fn connections(
+        &self,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<std::collections::HashMap<String, String>, String>,
+    > {
+        Box::pin(async { Ok(std::collections::HashMap::new()) })
+    }
+    fn credentials(
+        &self,
+        _: &fossil_storage::Scope,
+        _: fossil_storage::Access,
+    ) -> futures::future::BoxFuture<'static, Result<Vec<fossil_storage::StorageCredential>, String>>
+    {
+        Box::pin(async { Err("these tests vend nothing".to_string()) })
+    }
+}
+
+/// Where [`write_in_memory`] writes.
+pub(crate) const MEMORY_DEST: &str = "mem://out/corpus/";
+
+/// [`fossil_df::write`] into an in-memory store, and every file it wrote, by
+/// path under [`MEMORY_DEST`].
+pub(crate) async fn write_in_memory(
+    graph: &fossil_df::GraphArData,
+) -> (
+    fossil_df::Written,
+    std::collections::BTreeMap<String, Vec<u8>>,
+) {
+    use futures::TryStreamExt;
+    use object_store::{ObjectStore, ObjectStoreExt};
+    let mut storage = fossil_storage::Storage::new(Arc::new(NoHost));
+    let out = Arc::new(object_store::memory::InMemory::new());
+    storage
+        .with_store("mem://out/", Arc::clone(&out) as Arc<dyn ObjectStore>)
+        .expect("route the in-memory store");
+    let written = fossil_df::write(graph, &storage, MEMORY_DEST)
+        .await
+        .expect("write");
+    let mut files = std::collections::BTreeMap::new();
+    let listed: Vec<_> = out.list(None).try_collect().await.expect("list");
+    for meta in listed {
+        let bytes = out
+            .get(&meta.location)
+            .await
+            .expect("get")
+            .bytes()
+            .await
+            .expect("bytes");
+        let path = meta
+            .location
+            .as_ref()
+            .strip_prefix("corpus/")
+            .expect("under the destination")
+            .to_string();
+        files.insert(path, bytes.to_vec());
+    }
+    (written, files)
+}
