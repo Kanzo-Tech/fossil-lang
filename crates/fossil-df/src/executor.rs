@@ -11,7 +11,7 @@
 //! destination with [`crate::write()`], and answers the [`RunReport`].
 //!
 //! ## Storage seam
-//! Every byte goes through a [`Storage`]: the sources `DataFusion` reads, the
+//! Every byte goes through a [`Storage`](fossil_storage::Storage): the sources `DataFusion` reads, the
 //! RDF a provider decodes, and the files the run writes. A host with storage
 //! builds it from the credentials its `Host` vends, so `DataFusion` reads a
 //! remote source by range requests rather than whole; a host with none holds
@@ -84,7 +84,7 @@ impl System for ExecutorSystem {
 }
 
 /// One compiled program and the documents registered for it — the
-/// target-agnostic core behind [`FossilExecutor`].
+/// target-agnostic core behind `fossil-df-wasm`'s `FossilExecutor`.
 ///
 /// The order is forced: parse → ask which
 /// documents the program names → register them → list sources and run. The

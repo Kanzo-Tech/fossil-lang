@@ -11,8 +11,9 @@
 //! `CoalescePartitionsExec` over the union, and that operator spawns one task
 //! per input partition.
 //!
-//! [`OneTask`] runs last and rewrites the plan so nothing in it spawns:
-//! - `CoalescePartitionsExec` becomes [`OneTaskCoalesceExec`], which polls
+//! [`OneTask`](crate::session::OneTask) runs last and rewrites the plan so nothing in it spawns:
+//! - `CoalescePartitionsExec` becomes
+//!   [`OneTaskCoalesceExec`](crate::session::OneTaskCoalesceExec), which polls
 //!   every input partition from one stream (`futures::stream::select_all`) —
 //!   the fix upstream merged as apache/datafusion#24890, after 55.1.0.
 //! - `BufferExec` is a pure prefetch and is replaced by its input.
@@ -32,7 +33,7 @@
 //! runtime at all, which is the check that does not depend on the list.
 //!
 //! What would reverse it: a `DataFusion` release carrying #24890 deletes
-//! [`OneTaskCoalesceExec`] and the first arm; the refusal and the test stay.
+//! [`OneTaskCoalesceExec`](crate::session::OneTaskCoalesceExec) and the first arm; the refusal and the test stay.
 
 use std::fmt;
 use std::sync::Arc;
