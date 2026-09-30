@@ -15,10 +15,9 @@
 //! ```text
 //! Program             := TopLevel* EOF                     — as specified
 //! TopLevel            := SourceDef | MultiSourceDef
-//!                      | TypeDef | PolicyDef | Mapping     — as specified
+//!                      | TypeDef | Mapping                 — as specified
 //! TypeDef             := RenameAttr* 'type' LBRACE IDENT (COMMA IDENT)* RBRACE
 //!                        DEFINE Expression                 — as specified
-//! PolicyDef           := 'policy' DEFINE STRING            — as specified
 //! RenameAttr          := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN
 //!                                                          — as specified
 //! Rename              := STRING 'as' IDENT                 — as specified
@@ -94,13 +93,6 @@
 //!    operand followed by a bare `IDENT`, which no expression can continue
 //!    because the language has no juxtaposition. Everywhere else `as` is an
 //!    ordinary identifier and lexes as one.
-//! 8. `policy` at top level: `policy := STRING` is a `PolicyDef`, `policy :=`
-//!    anything else a `SourceDef` binding the name `policy`, `policy :` a
-//!    mapping called `policy`. TWO tokens of lookahead past the name, in
-//!    [`parse_program`], and it is two rather than rule 5's one because the
-//!    RIGHT-hand side decides — which is what leaves `policy` an ordinary
-//!    identifier in every position, where rule 5 costs `type` the `type {`
-//!    opening.
 
 use crate::kind::SyntaxKind;
 
@@ -148,26 +140,6 @@ pub(crate) fn parse_program(p: &mut Parser) {
             // with the forms that opened them.
             Some(SyntaxKind::LBRACE) => parse_multi_source_def(p),
             Some(SyntaxKind::IDENT) => match p.peek_kind(1) {
-                // `policy := "people.jsonld"` → the release's privacy policy
-                // (POLICY_DEF). TWO tokens of lookahead past the name, and the
-                // second one is what makes this cost nothing: the RHS decides,
-                // so `policy := io.csv("p.csv")` falls through to the arm below
-                // and still binds a source called `policy`. That is
-                // disambiguation rule 8 (grammar.bnf, § DISAMBIGUATION RULES),
-                // and it is stricter than rule 5 — `type` loses the `type {`
-                // opening, `policy` loses nothing.
-                //
-                // `SyntaxKind::STRING` and not `STRING_OPEN`: an interpolated
-                // reference has nothing in scope to interpolate, and the bound
-                // has to be readable off the source text without running the
-                // program. `policy := "p-{x}.jsonld"` is a SOURCE_DEF and the
-                // checker refuses it as one.
-                Some(SyntaxKind::DEFINE)
-                    if p.current_text() == Some("policy")
-                        && p.peek_kind(2) == Some(SyntaxKind::STRING) =>
-                {
-                    parse_policy_def(p);
-                }
                 // `IDENT :=` → source binding (SOURCE_DEF).
                 Some(SyntaxKind::DEFINE) => parse_source_def(p),
                 // `IDENT :` → start of a mapping header.
@@ -228,40 +200,6 @@ fn parse_source_def(p: &mut Parser) {
     p.skip_trivia();
     p.bump(); // DEFINE  (`:=`)
     p.parse_expr();
-    p.finish();
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// PolicyDef: `policy := "people.jsonld"`
-//   PolicyDef := 'policy' DEFINE STRING
-//
-// The ODRL document the release is verified against, and the second — and
-// last — external document a program names. `fossil run` refuses to seal a
-// corpus that misses the bound it declares.
-//
-// THREE TOKENS, NO EXPRESSION SLOT, and that is the production rather than a
-// simplification of it. Every other external document arrives through the `io.`
-// registry, and `io` is the TYPE-PROVIDER registry (`/docs/design/type-providers`):
-// a row there runs at COMPILE time and its output is types. The compiler never
-// opens a policy document — the WRITER does, after the check and immediately
-// before it seals — so an `io.policy` row would join a registry whose defining
-// property it lacks, and `fossil providers`, whose JSON populates a connector
-// UI, would advertise it as a data source. The reference goes through
-// `fossil-locator` like every other written reference, and that rule reads a
-// string.
-//
-// The caller has verified all three tokens (rule 8 needs two of lookahead), so
-// this bumps rather than expects — the opposite of `parse_type_def`, which has
-// two callers and therefore may assume nothing. If a second caller ever
-// appears, the three `bump`s become `expect_or_recover`s the same way.
-// ───────────────────────────────────────────────────────────────────────
-fn parse_policy_def(p: &mut Parser) {
-    p.start(SyntaxKind::POLICY_DEF);
-    p.bump(); // IDENT `policy`  (text-checked by parse_program)
-    p.skip_trivia();
-    p.bump(); // DEFINE  (`:=`)
-    p.skip_trivia();
-    p.bump(); // STRING  — the document reference
     p.finish();
 }
 
@@ -1260,89 +1198,6 @@ mod disambiguation {
         assert!(
             descendant_kind_exists(&root, SyntaxKind::NAMED_ARG),
             "`on = …` is still a named argument",
-        );
-    }
-
-    // ── RULE 8 — `policy` at top level ────────────────────────────────
-
-    /// The production `grammar.bnf` carried unparsed. `--policy` is a flag and
-    /// a flag can be forgotten; a binding is in the file that gets reviewed.
-    #[test]
-    fn rule8_a_policy_binding_is_a_policy_def() {
-        let src = "policy := \"people.jsonld\"\n\
-                   type { Person } := io.shex(\"p.shex\")\n";
-        let root = parse_str(src);
-        let policy = find_first_kind(&root, SyntaxKind::POLICY_DEF).expect("a POLICY_DEF");
-        assert_eq!(
-            crate::ast::PolicyDef::cast(policy)
-                .expect("the node is a POLICY_DEF")
-                .document()
-                .as_deref(),
-            Some("people.jsonld"),
-            "the accessor hands back what was WRITTEN, unquoted and unanchored",
-        );
-        assert!(messages(src).is_empty(), "got {:?}", messages(src));
-    }
-
-    /// **The half rule 5 could not buy for `type`.** The token after `:=`
-    /// decides, so the word costs nothing in the identifier space: a source
-    /// called `policy` still binds, and a corpus whose commonest column is
-    /// `policy` still compiles.
-    #[test]
-    fn rule8_policy_is_an_ordinary_identifier_everywhere_else() {
-        let src = "type { Person } := io.shex(\"p.shex\")\n\
-                   policy := io.csv(\"policy.csv\")\n\
-                   Users : Person from policy\n    \
-                   policy = policy.policy\n";
-        let root = parse_str(src);
-        assert!(
-            !descendant_kind_exists(&root, SyntaxKind::POLICY_DEF),
-            "`policy := io.csv(…)` is a SOURCE_DEF; only a STRING selects the \
-             policy binding",
-        );
-        assert!(
-            descendant_kind_exists(&root, SyntaxKind::SOURCE_DEF),
-            "and it is still a source binding",
-        );
-        assert!(messages(src).is_empty(), "got {:?}", messages(src));
-    }
-
-    /// An interpolated reference is NOT one. A policy reference has nothing in
-    /// scope to interpolate, and the bound has to be readable off the source
-    /// text without running the program — so the hole-opening token falls
-    /// through to `SourceDef`, where the checker refuses it as a source.
-    #[test]
-    fn rule8_an_interpolated_reference_is_not_a_policy_binding() {
-        let src = "policy := \"p-{users.id}.jsonld\"\n";
-        let root = parse_str(src);
-        assert!(!descendant_kind_exists(&root, SyntaxKind::POLICY_DEF));
-    }
-
-    /// A mapping called `policy` is still a mapping — the other fork of the
-    /// same word, and the one rule 5 also has to keep open.
-    #[test]
-    fn rule8_a_mapping_called_policy_is_a_mapping() {
-        let src = "type { Person } := io.shex(\"p.shex\")\n\
-                   users := io.csv(\"u.csv\")\n\
-                   policy : Person from users\n    \
-                   name = users.name\n";
-        let root = parse_str(src);
-        assert!(descendant_kind_exists(&root, SyntaxKind::MAPPING));
-        assert!(!descendant_kind_exists(&root, SyntaxKind::POLICY_DEF));
-        assert!(messages(src).is_empty(), "got {:?}", messages(src));
-    }
-
-    /// The CST stays LOSSLESS across the new node: every byte of the binding is
-    /// still under it. A production that dropped its own text would be
-    /// invisible to the LSP and to any formatter.
-    #[test]
-    fn rule8_the_policy_binding_is_lossless() {
-        let src = "policy   :=   \"a/b/people.jsonld\"\n";
-        let root = parse_str(src);
-        let policy = find_first_kind(&root, SyntaxKind::POLICY_DEF).expect("a POLICY_DEF");
-        assert_eq!(
-            policy.text().to_string(),
-            "policy   :=   \"a/b/people.jsonld\""
         );
     }
 }

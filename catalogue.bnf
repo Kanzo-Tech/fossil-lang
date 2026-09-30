@@ -381,13 +381,11 @@ fn math.round = (value: Float) -> Integer   ; expr "CAST(round(%0) AS BIGINT)" .
    literal `true` into it and nothing failed. Renderable and wrong is worse than
    absent.
 
-   `anon/` was two rows and it is a change of design, not of engine.
-   Anonymisation is a DECLARED POLICY the writer applies, so the language names
-   no anonymisation operator: a policy can be stated once for a corpus and
-   audited, where `anon.hash(x, salt = "…")` puts the salt in the program text
-   at every call site and makes «is this column anonymised?» a question you
-   answer by reading every mapping. `anon.hmac` had already gone for a third
-   reason — HMAC needs a key schedule and DuckDB has `sha256` and no HMAC.
+   `anon/` was two rows, and fossil has no anonymisation at all: privacy was
+   removed whole on 2026-09-30 (`/docs/design/discarded`), and when it returns
+   it returns as one design every write host enforces, not as a call a mapping
+   may forget. `anon.hmac` had already gone for another reason — HMAC needs a
+   key schedule and DuckDB has `sha256` and no HMAC.
 
    `anon.hash` was also the last consumer of `sha256`, which is why
    `crates/fossil-df/Cargo.toml` leaves `crypto_expressions` off. *)

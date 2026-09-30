@@ -2,12 +2,9 @@
 //!
 //! Only the wrappers a downstream consumer needs to walk the program:
 //! `SourceDef`, `Mapping`, `MappingHeader`, `MappingBody`, `Property` for
-//! `fossil-hir`, and `PolicyDef` for the HOSTS — the policy document is the one
-//! thing a program names that the compiler never opens, so its only consumer is
-//! the side that writes the corpus. Each is
-//! a thin newtype around `SyntaxNode` with `cast` (kind-checking constructor) +
-//! `syntax` (back-edge accessor) and a few convenience accessors for child
-//! tokens. A view is added when a consumer needs it, never ahead of one.
+//! `fossil-hir`. Each is a thin newtype around `SyntaxNode` with `cast`
+//! (kind-checking constructor) + `syntax` (back-edge accessor) and a few
+//! convenience accessors for child tokens. A view is added when a consumer needs it, never ahead of one.
 //!
 //! All AST nodes deliberately keep the underlying [`SyntaxNode`] public via
 //! `syntax()` so consumers can drop down to the lossless tree when needed —
@@ -42,7 +39,6 @@ macro_rules! ast_node {
 }
 
 ast_node!(SourceDef, SOURCE_DEF);
-ast_node!(PolicyDef, POLICY_DEF);
 ast_node!(Mapping, MAPPING);
 ast_node!(MappingHeader, MAPPING_HEADER);
 ast_node!(MappingBody, MAPPING_BODY);
@@ -59,27 +55,6 @@ impl SourceDef {
             .filter_map(rowan::NodeOrToken::into_token)
             .find(|t| t.kind() == SyntaxKind::IDENT)
             .map(|t| smol_str::SmolStr::from(t.text()))
-    }
-}
-
-impl PolicyDef {
-    /// The document reference as the program wrote it, unquoted — the
-    /// `people.jsonld` of `policy := "people.jsonld"`.
-    ///
-    /// It is what was WRITTEN and not a path: `@conn` aliases, schemes and
-    /// absolute paths all reach a caller verbatim, because turning a written
-    /// reference into something a reader can open is `fossil-locator`'s one
-    /// rule and there is no second one. A caller that anchored this itself
-    /// would be the fourth.
-    #[must_use]
-    pub fn document(&self) -> Option<smol_str::SmolStr> {
-        self.0
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .find(|t| t.kind() == SyntaxKind::STRING)
-            .map(|t| {
-                smol_str::SmolStr::from(t.text().trim_start_matches('"').trim_end_matches('"'))
-            })
     }
 }
 
