@@ -104,7 +104,7 @@ impl fossil_storage::Host for NoHost {
         &self,
     ) -> futures::future::BoxFuture<
         'static,
-        Result<std::collections::HashMap<String, String>, String>,
+        Result<std::collections::HashMap<String, String>, fossil_graph_schema::Foreign>,
     > {
         Box::pin(async { Ok(std::collections::HashMap::new()) })
     }
@@ -112,9 +112,16 @@ impl fossil_storage::Host for NoHost {
         &self,
         _: &fossil_storage::Scope,
         _: fossil_storage::Access,
-    ) -> futures::future::BoxFuture<'static, Result<Vec<fossil_storage::StorageCredential>, String>>
-    {
-        Box::pin(async { Err("these tests vend nothing".to_string()) })
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<Vec<fossil_storage::StorageCredential>, fossil_graph_schema::Foreign>,
+    > {
+        Box::pin(async {
+            Err(fossil_graph_schema::Foreign::named(
+                "Error",
+                "these tests vend nothing",
+            ))
+        })
     }
 }
 

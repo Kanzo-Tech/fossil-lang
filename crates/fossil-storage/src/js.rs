@@ -7,6 +7,7 @@
 //! wasm32.
 
 use crate::credential::{Access, StorageCredential};
+use fossil_graph_schema::Foreign;
 use std::collections::HashMap;
 
 use crate::store::{Host, Scope};
@@ -18,11 +19,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
 enum Request {
-    Connections(oneshot::Sender<Result<HashMap<String, String>, String>>),
+    Connections(oneshot::Sender<Result<HashMap<String, String>, Foreign>>),
     Credentials(
         Scope,
         Access,
-        oneshot::Sender<Result<Vec<StorageCredential>, String>>,
+        oneshot::Sender<Result<Vec<StorageCredential>, Foreign>>,
     ),
 }
 
@@ -66,21 +67,21 @@ impl JsHost {
 
     fn ask<T: Send + 'static>(
         &self,
-        request: impl FnOnce(oneshot::Sender<Result<T, String>>) -> Request,
-    ) -> BoxFuture<'static, Result<T, String>> {
+        request: impl FnOnce(oneshot::Sender<Result<T, Foreign>>) -> Request,
+    ) -> BoxFuture<'static, Result<T, Foreign>> {
         let (reply, answer) = oneshot::channel();
         let sent = self.requests.unbounded_send(request(reply));
         Box::pin(async move {
-            sent.map_err(|_| "the host is gone".to_string())?;
+            sent.map_err(|_| Foreign::named("Error", "the host is gone"))?;
             answer
                 .await
-                .map_err(|_| "the host dropped the request".to_string())?
+                .map_err(|_| Foreign::named("Error", "the host dropped the request"))?
         })
     }
 }
 
 impl Host for JsHost {
-    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, String>> {
+    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, Foreign>> {
         self.ask(Request::Connections)
     }
 
@@ -88,35 +89,40 @@ impl Host for JsHost {
         &self,
         scope: &Scope,
         access: Access,
-    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, String>> {
+    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, Foreign>> {
         let scope = scope.clone();
         self.ask(move |reply| Request::Credentials(scope, access, reply))
     }
 }
 
-fn method(host: &JsValue, name: &str) -> Result<Function, String> {
+fn method(host: &JsValue, name: &str) -> Result<Function, Foreign> {
     Reflect::get(host, &JsValue::from_str(name))
         .ok()
         .and_then(|f| f.dyn_into().ok())
-        .ok_or_else(|| format!("the host has no `{name}`"))
+        .ok_or_else(|| Foreign::named("TypeError", format!("the host has no `{name}`")))
 }
 
 // These three run on the page's event loop, which is the point: the host never
 // leaves it.
 #[allow(clippy::future_not_send)]
-async fn settle(returned: Result<JsValue, JsValue>, name: &str) -> Result<JsValue, String> {
+async fn settle(returned: Result<JsValue, JsValue>, name: &str) -> Result<JsValue, Foreign> {
     let promise: Promise = returned
         .map_err(|e| describe(&e))?
         .dyn_into()
-        .map_err(|_| format!("`{name}` returned something other than a promise"))?;
+        .map_err(|_| {
+            Foreign::named(
+                "TypeError",
+                format!("`{name}` returned something other than a promise"),
+            )
+        })?;
     JsFuture::from(promise).await.map_err(|e| describe(&e))
 }
 
 #[allow(clippy::future_not_send)]
-async fn connections(host: &JsValue) -> Result<HashMap<String, String>, String> {
+async fn connections(host: &JsValue) -> Result<HashMap<String, String>, Foreign> {
     let returned = method(host, "connections")?.call0(host);
     let map = settle(returned, "connections").await?;
-    serde_wasm_bindgen::from_value(map).map_err(|e| e.to_string())
+    serde_wasm_bindgen::from_value(map).map_err(|e| shape(&e))
 }
 
 #[allow(clippy::future_not_send)]
@@ -124,16 +130,24 @@ async fn credentials(
     host: &JsValue,
     scope: &Scope,
     access: Access,
-) -> Result<Vec<StorageCredential>, String> {
-    let scope = serde_wasm_bindgen::to_value(scope).map_err(|e| e.to_string())?;
-    let access = serde_wasm_bindgen::to_value(&access).map_err(|e| e.to_string())?;
+) -> Result<Vec<StorageCredential>, Foreign> {
+    let scope = serde_wasm_bindgen::to_value(scope).map_err(|e| shape(&e))?;
+    let access = serde_wasm_bindgen::to_value(&access).map_err(|e| shape(&e))?;
     let returned = method(host, "credentials")?.call2(host, &scope, &access);
     let vended = settle(returned, "credentials").await?;
-    serde_wasm_bindgen::from_value(vended).map_err(|e| e.to_string())
+    serde_wasm_bindgen::from_value(vended).map_err(|e| shape(&e))
 }
 
-fn describe(error: &JsValue) -> String {
-    error
-        .dyn_ref::<js_sys::Error>()
-        .map_or_else(|| format!("{error:?}"), |e| String::from(e.message()))
+/// A host's rejection as it threw it: its own `name` and `message`. A
+/// `JsValue` is not `Send`, so the object itself cannot ride the cause.
+fn describe(error: &JsValue) -> Foreign {
+    error.dyn_ref::<js_sys::Error>().map_or_else(
+        || Foreign::named("Error", format!("{error:?}")),
+        |e| Foreign::named(String::from(e.name()), String::from(e.message())),
+    )
+}
+
+/// A value the host handed back that is not the shape `Host` declares.
+fn shape(error: &serde_wasm_bindgen::Error) -> Foreign {
+    Foreign::named("TypeError", error.to_string())
 }

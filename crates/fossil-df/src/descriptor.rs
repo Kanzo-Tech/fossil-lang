@@ -11,6 +11,7 @@
 use fossil_base::providers::{Capability, provider};
 use fossil_base::{Db, SourceFile, file_at};
 use fossil_descriptors_output::OutputDescriptorKind;
+use fossil_graph_schema::{Failure, Foreign, Problem};
 use fossil_hir::def_map::def_map;
 use fossil_hir::documents::registry_key;
 
@@ -31,7 +32,7 @@ use fossil_hir::documents::registry_key;
 /// # Errors
 /// The document is unregistered, named by no provider or by one that reads no
 /// types, has an extension the row declines, or fails to decode.
-pub fn output_descriptor(db: &dyn Db, file: SourceFile) -> Result<OutputDescriptorKind, String> {
+pub fn output_descriptor(db: &dyn Db, file: SourceFile) -> Result<OutputDescriptorKind, Failure> {
     let def_map = def_map(db, file);
     if let Some((constructor, document)) = def_map.output_shape_binding(db) {
         return decode(db, file, constructor.as_deref(), &document);
@@ -49,9 +50,11 @@ pub fn output_descriptor(db: &dyn Db, file: SourceFile) -> Result<OutputDescript
         };
         match &schema {
             Some((_, existing)) if *existing != arg.as_str() => {
-                return Err(format!(
-                    "a program may declare only one io.rdf output shape (v1); found `{existing}` and `{arg}`"
-                ));
+                return Err(Problem::MoreThanOneOutput {
+                    first: (*existing).to_string(),
+                    second: arg.to_string(),
+                }
+                .into());
             }
             _ => schema = Some((s.schema_provider.as_deref(), arg.as_str())),
         }
@@ -71,35 +74,55 @@ fn decode(
     file: SourceFile,
     constructor: Option<&str>,
     document: &str,
-) -> Result<OutputDescriptorKind, String> {
+) -> Result<OutputDescriptorKind, Failure> {
     let table = fossil_descriptors_output::PROVIDERS;
     let ctor = constructor.ok_or_else(|| {
-        format!(
-            "the shape document `{document}` is named by no provider — write \
-             `io.shex(\"…\")` or `io.shacl(\"…\")`"
-        )
+        Failure::new(Problem::BareDocumentPath {
+            document: document.to_string(),
+        })
+        .with_help("write `io.shex(\"…\")` or `io.shacl(\"…\")`")
     })?;
-    let row = provider(table, ctor)
-        .ok_or_else(|| fossil_hir::refusals::unknown_constructor(ctor, table))?;
+    let row = provider(table, ctor).ok_or_else(|| {
+        Failure::new(Problem::UnknownProvider {
+            constructor: ctor.to_string(),
+        })
+        .with_help(fossil_hir::refusals::unknown_constructor(ctor, table))
+    })?;
     if !row.provides(Capability::ReadTypes) {
-        return Err(fossil_hir::refusals::decline_capability(
+        return Err(Failure::new(Problem::WrongCapability {
+            constructor: row.constructor(),
+            capability: "read types".to_string(),
+        })
+        .with_help(fossil_hir::refusals::decline_capability(
             row,
             Capability::ReadTypes,
             table,
-        ));
+        )));
     }
     if !row.accepts(document) {
-        return Err(fossil_hir::refusals::decline_extension(row, document));
+        return Err(Failure::new(Problem::WrongExtension {
+            constructor: row.constructor(),
+            document: document.to_string(),
+        })
+        .with_help(fossil_hir::refusals::decline_extension(row, document)));
     }
-    let read = row
-        .reads_types
-        .ok_or_else(|| format!("`{}` reads no types", row.constructor()))?;
+    let read = row.reads_types.ok_or_else(|| Problem::Bug {
+        what: format!(
+            "`{}` declares it reads types and has no decoder",
+            row.constructor()
+        ),
+    })?;
 
     let key = registry_key(db, file, document);
-    let registered = file_at(db, &key)
-        .ok_or_else(|| format!("the output shape document `{document}` is not registered"))?;
-    let shapes = read(&key, registered.text(db))
-        .map_err(|e| format!("parse output shape document `{document}`: {e:?}"))?;
+    let registered = file_at(db, &key).ok_or_else(|| Problem::NotRegistered {
+        document: document.to_string(),
+    })?;
+    let shapes = read(&key, registered.text(db)).map_err(|e| {
+        Failure::new(Problem::Unparseable {
+            document: document.to_string(),
+        })
+        .caused_by(Foreign::named("Rejection", format!("{e:?}")))
+    })?;
     Ok(OutputDescriptorKind::Lowered(
         shapes.to_graph_schema(&def_map(db, file).renames(db)),
     ))

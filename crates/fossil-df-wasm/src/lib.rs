@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fossil_df::Executor;
+use fossil_graph_schema::{Failure, Foreign, Problem};
 use fossil_storage::{Access, JsHost, Scope, Storage};
 use futures::TryStreamExt;
 use object_store::memory::InMemory;
@@ -117,7 +118,10 @@ impl FossilExecutor {
     /// A JS `Error` if the output shape document is unregistered or does not
     /// decode.
     pub fn sources(&self) -> Result<JsValue, JsError> {
-        let srcs = self.borrow()?.sources().map_err(|e| JsError::new(&e))?;
+        let srcs = self
+            .borrow()?
+            .sources()
+            .map_err(|e| JsError::new(&detail(&e)))?;
         let arr = js_sys::Array::new();
         for (uri, format, connection) in srcs {
             let obj = js_sys::Object::new();
@@ -263,12 +267,32 @@ impl FossilExecutor {
 /// A failed run as a JS `Error`. One that needed more memory than the budget
 /// is named `OverBudget`, so a host can tell it from a program's own failure
 /// without reading the message.
-fn run_error(e: &fossil_df::RunError) -> JsValue {
-    let error = js_sys::Error::new(&e.to_string());
-    if matches!(e, fossil_df::RunError::OverBudget(_)) {
+fn run_error(e: &Failure) -> JsValue {
+    let error = js_sys::Error::new(&detail(e));
+    if matches!(e.problem, Problem::OverBudget { .. }) {
         error.set_name("OverBudget");
     }
     error.into()
+}
+
+/// A failure's message followed by its causes', as one line — the text a
+/// run's `Error` carried before failures had codes, so a host reading it sees
+/// the engine's or the store's own words as it did. The boundary that carries
+/// the code and the cause as values replaces this.
+fn detail(e: &Failure) -> String {
+    let mut text = e.to_string();
+    let mut last = text.clone();
+    let mut next = std::error::Error::source(e);
+    while let Some(cause) = next {
+        let said = cause.to_string();
+        if said != last {
+            text.push_str(": ");
+            text.push_str(&said);
+            last = said;
+        }
+        next = cause.source();
+    }
+    text
 }
 
 /// The host of a run with no storage: it has no connections and vends nothing,
@@ -279,7 +303,7 @@ struct NoHost;
 impl fossil_storage::Host for NoHost {
     fn connections(
         &self,
-    ) -> futures::future::BoxFuture<'static, Result<HashMap<String, String>, String>> {
+    ) -> futures::future::BoxFuture<'static, Result<HashMap<String, String>, Foreign>> {
         Box::pin(async { Ok(HashMap::new()) })
     }
 
@@ -287,9 +311,12 @@ impl fossil_storage::Host for NoHost {
         &self,
         scope: &Scope,
         _access: Access,
-    ) -> futures::future::BoxFuture<'static, Result<Vec<fossil_storage::StorageCredential>, String>>
+    ) -> futures::future::BoxFuture<'static, Result<Vec<fossil_storage::StorageCredential>, Foreign>>
     {
-        let refused = format!("a run in memory has no storage to vend {scope} from");
+        let refused = Foreign::named(
+            "Error",
+            format!("a run in memory has no storage to vend {scope} from"),
+        );
         Box::pin(async move { Err(refused) })
     }
 }

@@ -1879,6 +1879,7 @@ dependencies = [
  "chrono",
  "console_error_panic_hook",
  "fossil-df",
+ "fossil-graph-schema",
  "fossil-storage",
  "futures",
  "getrandom 0.2.17",
@@ -1896,8 +1897,11 @@ dependencies = [
 name = "fossil-graph-schema"
 version = "0.1.0"
 dependencies = [
+ "miette",
+ "schemars",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2051,6 +2055,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "fossil-graph-schema",
  "futures",
  "js-sys",
  "object_store",

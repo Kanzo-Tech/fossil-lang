@@ -27,6 +27,12 @@
 // satisfying the nursery lint would mean a `Send` wrapper over every await in
 // the crate.
 #![allow(clippy::future_not_send)]
+// `result_large_err`: a run refuses with `fossil_graph_schema::Failure`, which
+// is a `Problem` plus its help, its related diagnostics and its cause — 144
+// bytes, over clippy's 128. It is returned once per run or per `sources()`
+// call, on the path that ends the run, so the copy costs nothing measurable;
+// boxing it would put `Box<Failure>` in every signature a host reads.
+#![allow(clippy::result_large_err)]
 
 /// The output descriptor a program names, decoded from the document the
 /// checker read — the one resolution every host runs with.
@@ -57,7 +63,7 @@ pub mod write;
 pub use descriptor::output_descriptor;
 /// The executor a host drives. Named at the crate root because it is the
 /// crate's answer, not a detail of the module it is written in.
-pub use executor::{Executor, RunError};
+pub use executor::Executor;
 /// Re-exported so callers name the program-resident output descriptor that
 /// [`execute_graph`] / [`provider_bindings`] take: it is passed as an argument,
 /// never read through `Db::system()`.
@@ -296,9 +302,12 @@ fn refuse_if_poisoned(
     db: &dyn fossil_base::Db,
 ) -> datafusion::error::Result<()> {
     if mir.error(db).is_some() {
-        return Err(datafusion::error::DataFusionError::Plan(
-            "the mapping did not compile; see the reported diagnostics".to_string(),
-        ));
+        // A `Failure`, not the engine's vocabulary: the executor finds it in
+        // whatever DataFusion wraps it in and answers `run/does-not-compile`
+        // with the program's diagnostics.
+        return Err(datafusion::error::DataFusionError::External(Box::new(
+            fossil_graph_schema::Failure::new(fossil_graph_schema::Problem::DoesNotCompile {}),
+        )));
     }
     Ok(())
 }

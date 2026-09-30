@@ -23,7 +23,7 @@ use datafusion::parquet::basic::{Compression, Encoding, ZstdLevel};
 use datafusion::parquet::errors::ParquetError;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::schema::types::ColumnPath;
-use fossil_graph_schema::NodeType;
+use fossil_graph_schema::{Failure, NodeType, Problem};
 use fossil_layout::layout::{Layout, LayoutError, Relation, VertexType, layout};
 use fossil_mem_probe::Probe;
 use fossil_sinks::generated::{EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_COLUMNS};
@@ -32,7 +32,7 @@ use fossil_sinks::manifest::{
     ROW_GROUP_ROWS, VertexTable as VertexEntry, data_type_name, edge_path, edge_table_name,
     vertex_path,
 };
-use fossil_storage::Storage;
+use fossil_storage::{Storage, StorageError};
 
 use crate::Graph;
 use crate::report::EdgeDrops;
@@ -69,9 +69,54 @@ pub enum WriteError {
         relation: String,
         vertex_type: String,
     },
-    /// Putting a file into the store.
-    #[error("write `{path}`: {message}")]
-    Store { path: String, message: String },
+    /// Putting a file into the store; the store's refusal, kept whole.
+    #[error("write `{path}`: {source}")]
+    Store {
+        path: String,
+        #[source]
+        source: StorageError,
+    },
+}
+
+/// The code each way a write fails is. The two a program's data can cause —
+/// a dangling endpoint, too many vertices — and the store's own refusal have
+/// codes; the rest are fossil's fault, `internal/bug`, with the error as cause.
+impl From<WriteError> for Failure {
+    fn from(e: WriteError) -> Self {
+        let bug = |what: &str| {
+            Self::new(Problem::Bug {
+                what: what.to_string(),
+            })
+        };
+        match e {
+            WriteError::Store { path, source } => {
+                Self::new(Problem::WriteFailed { path }).caused_by(Self::from(source))
+            }
+            WriteError::UnknownType {
+                relation,
+                vertex_type,
+            } => Self::new(Problem::UnknownType {
+                relation,
+                vertex_type,
+            }),
+            WriteError::Layout(LayoutError::DanglingEndpoint {
+                target,
+                before,
+                dropped,
+            }) => Self::new(Problem::DanglingEndpoint {
+                relation: target,
+                before,
+                dropped,
+            }),
+            WriteError::Layout(LayoutError::TooLarge { vertices }) => {
+                Self::new(Problem::TooLarge { vertices })
+            }
+            WriteError::Layout(e) => bug("the layout pass refused the graph").caused_by(e),
+            WriteError::Arrow(e) => bug("an Arrow kernel refused a batch").caused_by(e),
+            WriteError::Parquet(e) => bug("a table's Parquet did not encode").caused_by(e),
+            WriteError::Json(e) => bug("`fossil.json` did not encode").caused_by(e),
+        }
+    }
 }
 
 /// Lay `graph` out and write it under `dest`, a prefix ending in `/` that
@@ -213,9 +258,9 @@ async fn put(storage: &Storage, dest: &str, path: &str, bytes: Bytes) -> Result<
     storage
         .put(&format!("{dest}{path}"), bytes)
         .await
-        .map_err(|e| WriteError::Store {
+        .map_err(|source| WriteError::Store {
             path: path.to_string(),
-            message: e.to_string(),
+            source,
         })
 }
 

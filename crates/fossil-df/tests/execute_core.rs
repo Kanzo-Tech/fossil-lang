@@ -33,15 +33,22 @@ const DEST: &str = "s3://jobs/run-1/";
 struct NoHost;
 
 impl Host for NoHost {
-    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, String>> {
+    fn connections(
+        &self,
+    ) -> BoxFuture<'static, Result<HashMap<String, String>, fossil_graph_schema::Foreign>> {
         Box::pin(async { Ok(HashMap::new()) })
     }
     fn credentials(
         &self,
         _: &Scope,
         _: Access,
-    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, String>> {
-        Box::pin(async { Err("these tests vend nothing".to_string()) })
+    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, fossil_graph_schema::Foreign>> {
+        Box::pin(async {
+            Err(fossil_graph_schema::Foreign::named(
+                "Error",
+                "these tests vend nothing",
+            ))
+        })
     }
 }
 
@@ -249,7 +256,38 @@ async fn a_destination_no_store_covers_is_refused() {
         .execute(&mut storage, "s3://elsewhere/run-2/")
         .await
         .expect_err("refused");
-    assert!(refused.to_string().contains("no store covers"), "{refused}");
+    assert_eq!(
+        refused.problem,
+        fossil_graph_schema::Problem::DestinationUncovered {
+            destination: "s3://elsewhere/run-2/".to_string()
+        }
+    );
+}
+
+/// A program that does not compile is refused as `run/does-not-compile`, and
+/// the failure carries the diagnostics — the executor used to answer a sentence
+/// telling the host to see diagnostics it had no way to reach.
+#[tokio::test]
+async fn a_program_that_does_not_compile_fails_with_its_diagnostics() {
+    let broken = PROGRAM.replace(
+        "    @subject = \"https://example.org/person/{users.id}\"\n",
+        "",
+    );
+    let (mut storage, _) = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
+    let refused = executor(&broken, HashMap::new())
+        .execute(&mut storage, DEST)
+        .await
+        .expect_err("a program with no subject does not run");
+    assert_eq!(
+        refused.problem.code(),
+        "run/does-not-compile",
+        "{refused:?}"
+    );
+    assert!(
+        !refused.related.is_empty(),
+        "the diagnostics ride the failure"
+    );
+    assert!(refused.related.iter().all(|r| r.span.is_some()));
 }
 
 #[tokio::test]
@@ -309,7 +347,11 @@ fn a_document_is_missing_until_registered_and_the_run_waits_for_it() {
     let refused = exec
         .sources()
         .expect_err("no output shape is registered yet");
-    assert!(refused.contains("not registered"), "{refused}");
+    assert_eq!(
+        refused.problem.code(),
+        "document/not-registered",
+        "{refused}"
+    );
 
     exec.register_document(&missing[0].key, EXECUTOR_SHEX);
     assert!(exec.missing_documents().is_empty());

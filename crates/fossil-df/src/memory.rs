@@ -7,7 +7,7 @@
 //! [`BUDGET`](crate::memory::BUDGET) bytes, arithmetic that saturates instead
 //! of wrapping, and a refusal that names the consumer, what it asked for and
 //! what was already held. The run keeps that refusal and reports it as
-//! [`crate::executor::RunError::OverBudget`] before the corpus is written — the
+//! `run/over-budget` (`Problem::OverBudget`) before the corpus is written — the
 //! write starts only after `execute_graph` returns.
 //!
 //! **Why a bound and not the default.** `DataFusion`'s default pool is
@@ -68,6 +68,7 @@ use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
 };
+use fossil_graph_schema::Problem;
 use futures::StreamExt;
 
 /// The bytes a run's operators may reserve: 2 GiB, half of `wasm32`'s linear
@@ -87,22 +88,19 @@ pub struct Refusal {
     pub budget: usize,
 }
 
-impl fmt::Display for Refusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const MIB: f64 = (1 << 20) as f64;
-        #[allow(clippy::cast_precision_loss)] // a figure for a person, in MiB
-        let [requested, reserved, budget] =
-            [self.requested, self.reserved, self.budget].map(|n| n as f64 / MIB);
-        write!(
-            f,
-            "the run needs more memory than the executor's {budget:.0} MiB budget: {} asked for \
-             {requested:.1} MiB with {reserved:.1} MiB already held. Nothing was written.",
-            self.consumer
-        )
+/// The refusal as the catalogue states it. Its sentence is the variant's, so
+/// the engine's `ResourcesExhausted` and the run's failure say the same thing.
+impl From<Refusal> for Problem {
+    fn from(r: Refusal) -> Self {
+        let bytes = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
+        Self::OverBudget {
+            consumer: r.consumer,
+            requested: bytes(r.requested),
+            reserved: bytes(r.reserved),
+            budget: bytes(r.budget),
+        }
     }
 }
-
-impl std::error::Error for Refusal {}
 
 /// A bounded [`MemoryPool`] whose arithmetic cannot wrap, and which keeps its
 /// first refusal for the run to report.
@@ -175,7 +173,7 @@ impl MemoryPool for Budget {
                     reserved,
                     budget: self.limit,
                 };
-                let message = refusal.to_string();
+                let message = Problem::from(refusal.clone()).to_string();
                 if let Ok(mut first) = self.refused.lock() {
                     first.get_or_insert(refusal);
                 }
@@ -391,7 +389,10 @@ mod tests {
             .build();
         dedup_then_sort(&SessionContext::new_with_state(state)).expect_err("refused");
         let refusal = budget.refusal().expect("the budget refused it");
-        assert!(refusal.consumer.starts_with("ExternalSorter"), "{refusal}");
+        assert!(
+            refusal.consumer.starts_with("ExternalSorter"),
+            "{refusal:?}"
+        );
     }
 
     #[test]

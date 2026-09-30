@@ -15,6 +15,10 @@ workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
+# The one fossil crate this depends on: a `StorageError` becomes a `Failure`
+# with a code from the shared catalogue at the boundary, and a host's refusal
+# is a `Foreign` cause. The leaf is serde + the error crates, wasm-clean.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 # Key ids, secrets, session tokens and SAS tokens ride `SecretString`: never
 # `Debug`-printed, zeroed on drop.
 secrecy = { workspace = true }

@@ -90,15 +90,22 @@ Person : Person from users
 struct NoHost;
 
 impl Host for NoHost {
-    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, String>> {
+    fn connections(
+        &self,
+    ) -> BoxFuture<'static, Result<HashMap<String, String>, fossil_graph_schema::Foreign>> {
         Box::pin(async { Ok(HashMap::new()) })
     }
     fn credentials(
         &self,
         _: &Scope,
         _: Access,
-    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, String>> {
-        Box::pin(async { Err("these tests vend nothing".to_string()) })
+    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, fossil_graph_schema::Foreign>> {
+        Box::pin(async {
+            Err(fossil_graph_schema::Foreign::named(
+                "Error",
+                "these tests vend nothing",
+            ))
+        })
     }
 }
 
@@ -204,7 +211,7 @@ async fn run(
     files: Vec<(&'static str, Vec<u8>)>,
     fail_at: usize,
 ) -> (
-    Result<fossil_df::RunReport, fossil_df::RunError>,
+    Result<fossil_df::RunReport, fossil_graph_schema::Failure>,
     Arc<Recording>,
 ) {
     let mut storage = Storage::new(Arc::new(NoHost));
@@ -682,9 +689,16 @@ async fn a_write_that_fails_leaves_no_manifest() {
     for fail_at in [0, 1, 2] {
         let (result, out) = run(PROGRAM, sources(20, 30), fail_at).await;
         let refused = result.expect_err("the store refused a put");
+        assert_eq!(refused.problem.code(), "write/failed", "{refused}");
+        let chain =
+            std::iter::successors(Some(&refused as &(dyn std::error::Error + 'static)), |e| {
+                e.source()
+            })
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
         assert!(
-            refused.to_string().contains("refused on purpose"),
-            "{refused}"
+            chain.iter().any(|e| e.contains("refused on purpose")),
+            "the store's own error is kept as a cause: {chain:?}"
         );
         let listed: Vec<_> = out.inner.list(None).try_collect().await.expect("list");
         assert!(

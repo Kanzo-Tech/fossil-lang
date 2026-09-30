@@ -23,7 +23,9 @@
 //!
 //! The schema is spoken by every side at once — the producer (`fossil-df`), each
 //! materializer, and the wire/manifest. So this
-//! crate depends on nothing but `serde`: anyone can deserialize and interpret a
+//! crate depends on `serde` and, for [`problem`], the three error crates
+//! (`thiserror`, `schemars`, `miette`'s trait) — nothing that parses or stores
+//! anything: anyone can deserialize and interpret a
 //! graph without pulling the `ShEx` descriptor or Arrow. *Decoding* a `ShEx`
 //! document (which does need that machinery) lives next to the descriptor, not
 //! here — the contract stays pure. What the decoder produces is [`shapes`],
@@ -47,9 +49,11 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod problem;
 pub mod shapes;
 pub mod span;
 
+pub use problem::{CODES, Failure, Foreign, Problem, RETIRED, Related, Severity};
 pub use shapes::{
     Occurs, OutputShapes, PropertyConstraint, Rejection, Renames, Shape, local_name, short_name,
 };

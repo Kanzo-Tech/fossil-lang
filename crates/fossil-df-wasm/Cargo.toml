@@ -25,6 +25,9 @@ workspace = true
 # The executor itself — compile, documents, sources, execute, layout, write.
 # This crate is its `wasm-bindgen` shell.
 fossil-df = { path = "../fossil-df" }
+# `Failure` and `Problem` — what a run refuses with — and `Foreign`, the error
+# type of the `Host` this crate implements for a run with no storage.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 
 # Every byte of a run goes through `fossil-storage`'s `Storage` — stores built
 # from the credentials the JS `Host` vends, or `InMemory` for a host with no

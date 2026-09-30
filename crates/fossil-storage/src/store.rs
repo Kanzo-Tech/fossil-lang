@@ -35,6 +35,8 @@ use object_store::{
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 
+use fossil_graph_schema::Foreign;
+
 use crate::credential::{Access, Endpoint, Grant, S3, StorageCredential, StorageError, Store};
 
 /// Renew this long before a credential expires.
@@ -64,13 +66,15 @@ impl fmt::Display for Scope {
 /// What a host gives fossil to reach storage — `@fossil-lang/types`' `Host`.
 pub trait Host: fmt::Debug + Send + Sync {
     /// Connection name → canonical prefix, as `@name/…` expands against it.
-    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, String>>;
+    ///
+    /// A refusal is the host's own error, kept whole as a [`Foreign`].
+    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, Foreign>>;
     /// Vend `access` on `scope`: short-lived, scoped to a prefix.
     fn credentials(
         &self,
         scope: &Scope,
         access: Access,
-    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, String>>;
+    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, Foreign>>;
 }
 
 /// Every store a run reaches, keyed as `DataFusion` registers them.
@@ -106,14 +110,14 @@ impl Storage {
             .host
             .credentials(&scope, access)
             .await
-            .map_err(|reason| StorageError::Vend {
+            .map_err(|cause| StorageError::HostRefused {
                 scope: scope.to_string(),
-                reason,
+                cause,
             })?;
         if credentials.is_empty() {
-            return Err(StorageError::Vend {
+            return Err(StorageError::NoCredential {
                 scope: scope.to_string(),
-                reason: format!("the host vended no {} credential", access.as_str()),
+                access: access.as_str(),
             });
         }
         let mut prefixes = Vec::with_capacity(credentials.len());
@@ -138,9 +142,9 @@ impl Storage {
         self.host
             .connections()
             .await
-            .map_err(|reason| StorageError::Vend {
+            .map_err(|cause| StorageError::HostRefused {
                 scope: "its connections".to_string(),
-                reason,
+                cause,
             })
     }
 
@@ -158,17 +162,14 @@ impl Storage {
     pub fn public(&mut self, locator: &str) -> Result<(), StorageError> {
         let (authority, _) = split(locator)?;
         if !(authority.starts_with("https://") || authority.starts_with("http://")) {
-            return Err(StorageError::Outside {
-                locator: locator.to_string(),
-                prefix: "any prefix the host vended".to_string(),
-            });
+            return Err(StorageError::Store(locator.to_string()));
         }
         let routed = self.authorities.entry(authority.clone()).or_default();
         if routed.routes.iter().all(|r| !r.key.is_empty()) {
             let store = HttpBuilder::new()
                 .with_url(&authority)
                 .build()
-                .map_err(|e| io(locator, &e))?;
+                .map_err(|e| io(locator, e))?;
             routed.add(String::new(), Arc::new(store));
         }
         Ok(())
@@ -208,8 +209,8 @@ impl Storage {
     /// Nothing granted covers `locator`, or the store answers with an error.
     pub async fn get(&self, locator: &str) -> Result<Bytes, StorageError> {
         let (store, path) = self.resolve(locator)?;
-        let result = store.get(&path).await.map_err(|e| io(locator, &e))?;
-        result.bytes().await.map_err(|e| io(locator, &e))
+        let result = store.get(&path).await.map_err(|e| io(locator, e))?;
+        result.bytes().await.map_err(|e| io(locator, e))
     }
 
     /// Write `bytes` at `locator`, in parts when it is large.
@@ -222,13 +223,13 @@ impl Storage {
             store
                 .put(&path, PutPayload::from(bytes))
                 .await
-                .map_err(|e| io(locator, &e))?;
+                .map_err(|e| io(locator, e))?;
             return Ok(());
         }
         let mut upload = store
             .put_multipart(&path)
             .await
-            .map_err(|e| io(locator, &e))?;
+            .map_err(|e| io(locator, e))?;
         let parts: Vec<_> = bytes
             .chunks(PART_BYTES)
             .map(|chunk| upload.put_part(PutPayload::from(bytes.slice_ref(chunk))))
@@ -239,9 +240,9 @@ impl Storage {
             .await;
         if let Err(e) = sent {
             let _ = upload.abort().await;
-            return Err(io(locator, &e));
+            return Err(io(locator, e));
         }
-        upload.complete().await.map_err(|e| io(locator, &e))?;
+        upload.complete().await.map_err(|e| io(locator, e))?;
         Ok(())
     }
 
@@ -259,10 +260,10 @@ impl Storage {
     }
 }
 
-fn io(locator: &str, e: &object_store::Error) -> StorageError {
+fn io(locator: &str, e: object_store::Error) -> StorageError {
     StorageError::Io {
         locator: locator.to_string(),
-        reason: e.to_string(),
+        source: Box::new(e),
     }
 }
 
@@ -309,7 +310,7 @@ fn build(grant: &Grant, renewal: Renewal) -> Result<Arc<dyn ObjectStore>, Storag
             .build()
             .map(|s| Arc::new(s) as _),
     };
-    built.map_err(|e| io(grant.prefix(), &e))
+    built.map_err(|e| io(grant.prefix(), e))
 }
 
 /// The prefixes of one authority, each with the store of the credential vended
@@ -493,22 +494,22 @@ impl Renewal {
         }
     }
 
-    async fn renew(&self) -> Result<Grant, String> {
+    async fn renew(&self) -> Result<Grant, StorageError> {
         let fresh = self
             .host
             .credentials(&self.scope, self.access)
-            .await?
+            .await
+            .map_err(|cause| StorageError::HostRefused {
+                scope: self.scope.to_string(),
+                cause,
+            })?
             .into_iter()
             .find(|c| c.prefix == self.prefix)
-            .ok_or_else(|| {
-                format!(
-                    "the host no longer vends {} on {} for {}",
-                    self.access.as_str(),
-                    self.prefix,
-                    self.scope
-                )
+            .ok_or_else(|| StorageError::NoCredential {
+                scope: format!("{} on {}", self.scope, self.prefix),
+                access: self.access.as_str(),
             })?;
-        Grant::try_from(fresh).map_err(|e| e.to_string())
+        Grant::try_from(fresh)
     }
 }
 
@@ -608,7 +609,7 @@ impl<C: FromGrant + Send + Sync + 'static> CredentialProvider for Vended<C> {
                 Err(reason) if current.expires_at_ms.is_some_and(|at| at <= now_ms()) => {
                     return Err(object_store::Error::Generic {
                         store: "fossil-storage",
-                        source: format!("{} expired: {reason}", self.renewal.prefix).into(),
+                        source: Box::new(reason),
                     });
                 }
                 Err(_) => {}
@@ -638,7 +639,7 @@ mod tests {
     }
 
     impl Host for Fake {
-        fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, String>> {
+        fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, Foreign>> {
             Box::pin(async { Ok(HashMap::new()) })
         }
 
@@ -646,7 +647,7 @@ mod tests {
             &self,
             scope: &Scope,
             _access: Access,
-        ) -> BoxFuture<'static, Result<Vec<StorageCredential>, String>> {
+        ) -> BoxFuture<'static, Result<Vec<StorageCredential>, Foreign>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let prefix = match scope {
                 Scope::Connection(c) => format!("s3://lake/{c}/"),
@@ -749,7 +750,7 @@ mod tests {
         assert!(storage.resolve("https://example.org/other.csv").is_ok());
         assert!(matches!(
             storage.public("s3://lake/a.csv"),
-            Err(StorageError::Outside { .. })
+            Err(StorageError::Store(_))
         ));
     }
 

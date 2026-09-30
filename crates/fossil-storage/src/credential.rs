@@ -7,6 +7,8 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
+use fossil_graph_schema::{Failure, Foreign, Problem};
+
 use crate::resolved::{CloudSecret, ResolvedPath};
 
 /// A storage credential scoped to one prefix — Iceberg REST's
@@ -52,28 +54,91 @@ impl Access {
     }
 }
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+/// Why storage refused. Typed, and a [`Failure`] at the boundary — see the
+/// `From` below for the code each variant is.
+#[derive(Debug, thiserror::Error)]
 pub enum StorageError {
     #[error("a vended prefix names a directory and ends in `/`: {0:?}")]
     Prefix(String),
+    /// No kind of store fossil reads routes it: a vended prefix of another
+    /// scheme, or a locator no credential covers that is not public `http(s)`.
     #[error(
-        "{0:?} is not a store fossil reads: s3://bucket/… or abfss://container@account.dfs.core.windows.net/…"
+        "{0:?} has no route: fossil reads s3://bucket/… and \
+         abfss://container@account.dfs.core.windows.net/… through a vended credential, and \
+         http(s) without one"
     )]
     Store(String),
     #[error("the credential for {prefix} carries no `{key}`")]
     Missing { prefix: String, key: String },
     #[error("`{key}` is not {what}: {value:?}")]
     Malformed {
+        prefix: String,
         key: String,
         what: &'static str,
         value: String,
     },
     #[error("{locator} lies outside {prefix}, the prefix the credential was vended for")]
     Outside { locator: String, prefix: String },
-    #[error("the host vended nothing usable for {scope}: {reason}")]
-    Vend { scope: String, reason: String },
-    #[error("{locator}: {reason}")]
-    Io { locator: String, reason: String },
+    /// The host's own rejection, kept whole.
+    #[error("the host refused {scope}: {cause}")]
+    HostRefused {
+        scope: String,
+        #[source]
+        cause: Foreign,
+    },
+    #[error("the host vended no {access} credential for {scope}")]
+    NoCredential { scope: String, access: &'static str },
+    /// A store answered with an error, kept whole.
+    #[cfg(feature = "object-store")]
+    #[error("{locator}: {source}")]
+    Io {
+        locator: String,
+        #[source]
+        source: Box<object_store::Error>,
+    },
+}
+
+impl From<StorageError> for Failure {
+    fn from(e: StorageError) -> Self {
+        let malformed = |prefix: String, key: String, reason: String| {
+            Self::new(Problem::MalformedCredential {
+                prefix,
+                key,
+                reason,
+            })
+        };
+        match e {
+            StorageError::Prefix(prefix) => malformed(
+                prefix,
+                "prefix".to_string(),
+                "names a directory and must end in `/`".to_string(),
+            ),
+            StorageError::Store(locator) => Self::new(Problem::NoRoute { locator }),
+            StorageError::Missing { prefix, key } => {
+                malformed(prefix, key, "is missing".to_string())
+            }
+            StorageError::Malformed {
+                prefix,
+                key,
+                what,
+                value,
+            } => malformed(prefix, key, format!("is not {what}: {value:?}")),
+            StorageError::Outside { locator, prefix } => {
+                Self::new(Problem::OutsidePrefix { locator, prefix })
+            }
+            StorageError::HostRefused { scope, cause } => {
+                Self::new(Problem::HostRefused { scope }).caused_by(cause)
+            }
+            StorageError::NoCredential { scope, access } => Self::new(Problem::NoCredential {
+                scope,
+                access: access.to_string(),
+            }),
+            #[cfg(feature = "object-store")]
+            StorageError::Io { locator, source } => {
+                Self::new(Problem::Unreachable { locator }).caused_by(*source)
+            }
+        }
+    }
 }
 
 /// A parsed [`StorageCredential`].
@@ -136,6 +201,7 @@ impl TryFrom<StorageCredential> for Grant {
             take(key)
                 .map(|v| {
                     v.parse::<u64>().map_err(|_| StorageError::Malformed {
+                        prefix: prefix.clone(),
                         key: key.to_string(),
                         what: "milliseconds since the epoch",
                         value: v,
@@ -148,12 +214,15 @@ impl TryFrom<StorageCredential> for Grant {
             rest.split_once('/')
                 .filter(|(bucket, _)| !bucket.is_empty())
                 .ok_or_else(|| StorageError::Store(prefix.clone()))?;
-            let endpoint = take("s3.endpoint").map(|e| endpoint(&e)).transpose()?;
+            let endpoint = take("s3.endpoint")
+                .map(|e| endpoint(&prefix, &e))
+                .transpose()?;
             let path_style = match take("s3.path-style-access").as_deref() {
                 None | Some("false") => false,
                 Some("true") => true,
                 Some(other) => {
                     return Err(StorageError::Malformed {
+                        prefix: prefix.clone(),
                         key: "s3.path-style-access".to_string(),
                         what: "`true` or `false`",
                         value: other.to_string(),
@@ -205,8 +274,9 @@ impl TryFrom<StorageCredential> for Grant {
     }
 }
 
-fn endpoint(url: &str) -> Result<Endpoint, StorageError> {
+fn endpoint(prefix: &str, url: &str) -> Result<Endpoint, StorageError> {
     let malformed = || StorageError::Malformed {
+        prefix: prefix.to_string(),
         key: "s3.endpoint".to_string(),
         what: "an http(s) URL with no path",
         value: url.to_string(),

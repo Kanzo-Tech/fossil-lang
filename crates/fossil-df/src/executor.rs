@@ -29,9 +29,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use datafusion::error::DataFusionError;
 use datafusion::execution::context::SessionContext;
 use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
 use fossil_descriptors_output::OutputDescriptorKind;
+use fossil_graph_schema::{Failure, Problem, Related};
 use fossil_hir::documents::MissingDocument;
 use fossil_sinks::manifest::MANIFEST_FILE;
 use fossil_storage::{Access, Scope, Storage};
@@ -39,24 +41,6 @@ use url::Url;
 
 use crate::memory::{BUDGET, Budget, Refusal};
 use crate::{RunReport, SourceFormat};
-
-/// Why a run wrote no corpus.
-#[derive(Debug, thiserror::Error)]
-pub enum RunError {
-    /// An operator asked for more than the run's budget had left. Raised while
-    /// the graph executes, so no byte of the corpus was written.
-    #[error("{0}")]
-    OverBudget(Refusal),
-    /// Anything else, as a message for the host.
-    #[error("{0}")]
-    Failed(String),
-}
-
-impl From<String> for RunError {
-    fn from(message: String) -> Self {
-        Self::Failed(message)
-    }
-}
 
 /// Minimal [`System`] for the executor host. The executor reads sources through
 /// the object-store / provider seams and documents through the registry, never
@@ -156,7 +140,7 @@ impl Executor {
     ///
     /// # Errors
     /// The output shape document is unregistered or does not decode.
-    pub fn sources(&self) -> Result<Vec<(String, String, Option<String>)>, String> {
+    pub fn sources(&self) -> Result<Vec<(String, String, Option<String>)>, Failure> {
         let descriptor = self.descriptor()?;
         Ok(
             crate::program_sources(&self.db, self.file, &descriptor, &self.connections)
@@ -166,7 +150,7 @@ impl Executor {
         )
     }
 
-    fn descriptor(&self) -> Result<OutputDescriptorKind, String> {
+    fn descriptor(&self) -> Result<OutputDescriptorKind, Failure> {
         crate::output_descriptor(&self.db, self.file)
     }
 
@@ -176,16 +160,20 @@ impl Executor {
     /// execute the graph, and [`crate::write()`] it.
     ///
     /// # Errors
-    /// [`RunError::OverBudget`] when an operator asked for more than the run's
-    /// [`BUDGET`](crate::memory::BUDGET) had left, before anything is written;
-    /// otherwise a source or the destination no store covers, `DataFusion`
-    /// execution, the layout, Parquet encode, or a write — each as a message
-    /// for the host.
-    pub async fn execute(&self, storage: &mut Storage, dest: &str) -> Result<RunReport, RunError> {
+    /// A [`Failure`] with its code: `run/over-budget` when an operator asked
+    /// for more than the run's [`BUDGET`](crate::memory::BUDGET) had left,
+    /// before anything is written; `run/does-not-compile`, relating the
+    /// program's diagnostics; `run/destination-uncovered`; a `storage/…` code
+    /// for a source that will not route; `engine/failed`, with `DataFusion`'s
+    /// error as the cause; or what [`crate::write()`] refused.
+    pub async fn execute(&self, storage: &mut Storage, dest: &str) -> Result<RunReport, Failure> {
         let (db, file, connections) = (&self.db, self.file, &self.connections);
         let descriptor = self.descriptor()?;
         if !dest.ends_with('/') || !storage.covers(&format!("{dest}{MANIFEST_FILE}")) {
-            return Err(format!("no store covers the destination {dest}").into());
+            return Err(Problem::DestinationUncovered {
+                destination: dest.to_string(),
+            }
+            .into());
         }
 
         for source in crate::program_sources(db, file, &descriptor, connections) {
@@ -198,8 +186,7 @@ impl Executor {
                     .await
                     .map(drop),
                 None => storage.public(&source.uri),
-            }
-            .map_err(|e| format!("source {}: {e}", source.uri))?;
+            }?;
         }
 
         // No operator in any plan of this session spawns: the browser has no
@@ -209,24 +196,22 @@ impl Executor {
         let budget = Arc::new(Budget::new(BUDGET));
         let ctx = crate::session::session_within(Arc::clone(&budget));
         for (authority, store) in storage.stores() {
-            let url = Url::parse(authority).map_err(|e| format!("{authority}: {e}"))?;
+            let url = Url::parse(authority).map_err(|e| {
+                Failure::new(Problem::Bug {
+                    what: format!("the routed authority `{authority}` is not a URL"),
+                })
+                .caused_by(e)
+            })?;
             ctx.register_object_store(&url, store);
         }
         register_rdf_sources(&ctx, db, file, &descriptor, storage, connections).await?;
 
         let graph = crate::execute_graph(&ctx, db, file, &descriptor, connections)
             .await
-            .map_err(|e| {
-                budget.refusal().map_or_else(
-                    || RunError::Failed(format!("execute_graph: {e}")),
-                    RunError::OverBudget,
-                )
-            })?;
+            .map_err(|e| engine_failure(e, budget.refusal(), db, file))?;
         drop(ctx);
 
-        let written = crate::write(&graph, storage, dest)
-            .await
-            .map_err(|e| e.to_string())?;
+        let written = crate::write(&graph, storage, dest).await?;
         Ok(RunReport {
             dest: dest.to_string(),
             dropped: written.dropped,
@@ -266,16 +251,118 @@ async fn register_rdf_sources(
     descriptor: &OutputDescriptorKind,
     storage: &Storage,
     connections: &HashMap<String, String>,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     for binding in crate::provider_bindings(db, file, descriptor, connections) {
-        let bytes = storage
-            .get(&binding.uri)
-            .await
-            .map_err(|e| format!("RDF source: {e}"))?;
-        let turtle = std::str::from_utf8(&bytes)
-            .map_err(|e| format!("RDF source `{}` is not UTF-8: {e}", binding.uri))?;
-        crate::register_rdf(ctx, &binding, turtle)
-            .map_err(|e| format!("register RDF `{}`: {e}", binding.uri))?;
+        let bytes = storage.get(&binding.uri).await?;
+        let turtle = std::str::from_utf8(&bytes).map_err(|e| {
+            Failure::new(Problem::NotUtf8 {
+                locator: binding.uri.clone(),
+            })
+            .caused_by(e)
+        })?;
+        crate::register_rdf(ctx, &binding, turtle).map_err(|e| {
+            Failure::new(Problem::SourceUnparseable {
+                locator: binding.uri.clone(),
+            })
+            .caused_by(e)
+        })?;
     }
     Ok(())
+}
+
+/// What an engine error means for the run, in order: the budget refused an
+/// operator (whatever error the operator then raised), the program does not
+/// compile (`refuse_if_poisoned`'s [`Failure`], wherever `DataFusion`
+/// wrapped it), or the engine failed, its error kept as the cause.
+pub(crate) fn engine_failure(
+    e: DataFusionError,
+    refusal: Option<Refusal>,
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+) -> Failure {
+    if let Some(refusal) = refusal {
+        return Problem::from(refusal).into();
+    }
+    let mut next: Option<&(dyn std::error::Error + 'static)> = Some(&e);
+    while let Some(error) = next {
+        if let Some(found) = error.downcast_ref::<Failure>() {
+            let failure = Failure::new(found.problem.clone());
+            return if matches!(found.problem, Problem::DoesNotCompile {}) {
+                failure.with_related(program_diagnostics(db, file))
+            } else {
+                failure
+            };
+        }
+        next = error.source();
+    }
+    Failure::new(Problem::EngineFailed {}).caused_by(e)
+}
+
+/// The program's diagnostics as a failure relates them — file-absolute spans,
+/// as `fossil_mir::program_diagnostics` answers them.
+fn program_diagnostics(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<Related> {
+    fossil_mir::program_diagnostics(db, file)
+        .into_iter()
+        .map(|d| Related {
+            severity: d.severity,
+            detail: d.message,
+            help: d.help,
+            span: Some(d.span),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use datafusion::execution::memory_pool::{MemoryConsumer, MemoryPool};
+
+    use super::*;
+
+    /// An operator the budget refused makes the run `run/over-budget`, with
+    /// the refusal's four figures as data — whatever error the operator then
+    /// raised, and the engine's own sentence is the variant's.
+    #[test]
+    fn a_refused_operator_fails_the_run_as_over_budget() {
+        let budget = Arc::new(Budget::new(100));
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&budget) as _;
+        let held = MemoryConsumer::new("held").register(&pool);
+        held.try_grow(60).expect("inside the budget");
+        let engine = MemoryConsumer::new("ExternalSorter")
+            .register(&pool)
+            .try_grow(50)
+            .expect_err("past the budget");
+
+        let exec = Executor::new("");
+        let failure = engine_failure(engine, budget.refusal(), &exec.db, exec.file);
+        assert_eq!(failure.problem.code(), "run/over-budget");
+        assert_eq!(
+            failure.problem,
+            Problem::OverBudget {
+                consumer: "ExternalSorter".to_string(),
+                requested: 50,
+                reserved: 60,
+                budget: 100,
+            }
+        );
+    }
+
+    /// With no refusal, an engine error is `engine/failed` and keeps
+    /// `DataFusion`'s error whole as the cause.
+    #[test]
+    fn any_other_engine_error_is_the_cause_of_engine_failed() {
+        let exec = Executor::new("");
+        let failure = engine_failure(
+            DataFusionError::Plan("no".to_string()),
+            None,
+            &exec.db,
+            exec.file,
+        );
+        assert_eq!(failure.problem.code(), "engine/failed");
+        let original = std::error::Error::source(&failure)
+            .and_then(std::error::Error::source)
+            .expect("the engine's error");
+        assert!(original.downcast_ref::<DataFusionError>().is_some());
+    }
 }

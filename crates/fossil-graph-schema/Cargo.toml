@@ -1,10 +1,17 @@
 # The canonical graph-schema — the shared contract of the universal substrate,
 # and the point the whole design is most sensitive to: change this and every
 # side changes. A property graph is a SCHEMA over typed relations (SQL/PGQ: keys +
-# references); this crate is that schema, format-neutral. Dependency-free except
-# serde so EVERY side (producer fossil-df, materializers, the manifest writer,
+# references); this crate is that schema, format-neutral. It depends on serde and
+# the error crates below and nothing else, so EVERY side (producer fossil-df, materializers, the manifest writer,
 # the wire) can speak it without pulling the ShEx/Arrow machinery — that
 # decoupling is what keeps the substrate modifiable.
+#
+# It is also where the error catalogue lives (`problem`): `Problem` and
+# `Failure` are vocabulary every raising crate shares, so this leaf gained the
+# three crates an error needs — `thiserror` for the message, `schemars` for the
+# schema the TypeScript union is generated from, and `miette` (no default
+# features: the trait, no renderer) so a failure renders with its code. All
+# three are wasm-clean; none brings Arrow or ShEx.
 [package]
 name = "fossil-graph-schema"
 version.workspace = true
@@ -22,6 +29,9 @@ doctest = false
 
 [dependencies]
 serde = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+miette = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

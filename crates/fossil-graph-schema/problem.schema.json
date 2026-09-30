@@ -1,0 +1,1174 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Problem",
+  "description": "**One failure fossil can report**, identified by its code.\n\nSerialized as `{ \"code\": \"area/kind\", \"data\": { … } }`: the code is the serde tag, and `data` is always an object. `Display` is the message for a person, rendered from the data; nothing should parse it — a value a host needs is a field.",
+  "oneOf": [
+    {
+      "title": "The run needs more memory than its budget",
+      "description": "An operator asked for more memory than the run's budget had left. Raised while the graph executes, before any byte of the corpus is written. Sizes are bytes.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "run/over-budget"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "budget",
+            "consumer",
+            "requested",
+            "reserved"
+          ],
+          "properties": {
+            "budget": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "consumer": {
+              "type": "string"
+            },
+            "requested": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "reserved": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The program does not compile",
+      "description": "A run over a program that does not compile. The failure's `related` carries the program's diagnostics.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "run/does-not-compile"
+          ]
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "title": "No store covers the destination",
+      "description": "The destination a run writes under is not a prefix any store covers.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "run/destination-uncovered"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "destination"
+          ],
+          "properties": {
+            "destination": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "More than one output shape",
+      "description": "A program whose sources declare two different output shapes; one program writes one.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "shape/more-than-one-output"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "first",
+            "second"
+          ],
+          "properties": {
+            "first": {
+              "type": "string"
+            },
+            "second": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A document path with no provider",
+      "description": "A shape document written as a bare path, with no provider to read it. Also a compile code; the executor reaches it for the output shape.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "provider/bare-document-path"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "document"
+          ],
+          "properties": {
+            "document": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A document is not registered",
+      "description": "A document the program names that the host never registered.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "document/not-registered"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "document"
+          ],
+          "properties": {
+            "document": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A document does not parse",
+      "description": "A registered document its provider could not decode.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "document/unparseable"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "document"
+          ],
+          "properties": {
+            "document": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Documents could not be read",
+      "description": "Documents a run needed that the host could not read.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "document/unread"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "documents"
+          ],
+          "properties": {
+            "documents": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a provider this host installs",
+      "description": "A constructor no installed provider answers to.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "provider/unknown"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "constructor"
+          ],
+          "properties": {
+            "constructor": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The provider cannot do this",
+      "description": "A provider asked for something it does not do — types of a row reader.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "provider/wrong-capability"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "capability",
+            "constructor"
+          ],
+          "properties": {
+            "capability": {
+              "type": "string"
+            },
+            "constructor": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The provider does not read this extension",
+      "description": "A document whose extension the provider does not read.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "provider/wrong-extension"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "constructor",
+            "document"
+          ],
+          "properties": {
+            "constructor": {
+              "type": "string"
+            },
+            "document": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A source is not UTF-8",
+      "description": "A source's bytes are not UTF-8 text.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "source/not-utf8"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "locator"
+          ],
+          "properties": {
+            "locator": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A source does not parse",
+      "description": "A source's bytes did not parse in the format the program named.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "source/unparseable"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "locator"
+          ],
+          "properties": {
+            "locator": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The query engine failed",
+      "description": "The query engine failed; its own error is the cause.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "engine/failed"
+          ]
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "title": "A corpus file could not be written",
+      "description": "Writing one file of the corpus failed; the store's error is the cause.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "write/failed"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A relation names a missing vertex type",
+      "description": "A relation naming a vertex type the graph did not materialise.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "write/unknown-type"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "relation",
+            "vertex_type"
+          ],
+          "properties": {
+            "relation": {
+              "type": "string"
+            },
+            "vertex_type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A relation names missing vertices",
+      "description": "A relation whose rows name vertices that do not exist.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "layout/dangling-endpoint"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "before",
+            "dropped",
+            "relation"
+          ],
+          "properties": {
+            "before": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "dropped": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "relation": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The graph has too many vertices",
+      "description": "More vertices than a `u32` `dense_id` can number.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "layout/too-large"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "vertices"
+          ],
+          "properties": {
+            "vertices": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "No credential was vended",
+      "description": "The host vended no credential for a scope.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "storage/no-credential"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "access",
+            "scope"
+          ],
+          "properties": {
+            "access": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "More than one prefix was vended",
+      "description": "A scope whose credentials cover more than the one prefix a reader needs.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "storage/ambiguous-prefix"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "count",
+            "scope"
+          ],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "scope": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Outside the vended prefix",
+      "description": "A locator outside every prefix a credential was vended for.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "storage/outside-prefix"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "locator",
+            "prefix"
+          ],
+          "properties": {
+            "locator": {
+              "type": "string"
+            },
+            "prefix": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A credential is malformed",
+      "description": "A vended credential fossil cannot read: a missing or malformed key, or a prefix that is not a directory.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "storage/malformed-credential"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "key",
+            "prefix",
+            "reason"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "prefix": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "No store routes this locator",
+      "description": "A locator no kind of store fossil reads can route.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "storage/no-route"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "locator"
+          ],
+          "properties": {
+            "locator": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A store could not be reached",
+      "description": "A store answered with an error; the store's error is the cause.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "storage/unreachable"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "locator"
+          ],
+          "properties": {
+            "locator": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The engine cannot read remote storage",
+      "description": "The engine a host handed over cannot read remote storage.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "storage/no-httpfs"
+          ]
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "title": "The host refused",
+      "description": "The host refused a request for credentials; its rejection is the cause.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "storage/host-refused"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "scope"
+          ],
+          "properties": {
+            "scope": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The corpus could not be read",
+      "description": "A corpus whose manifest could not be read; the reader's error is the cause.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "corpus/unreadable"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The manifest is not JSON",
+      "description": "A manifest that is not JSON.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "corpus/not-json"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The corpus format is not supported",
+      "description": "A manifest declaring a format this reader does not read.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "corpus/unsupported-format"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "format",
+            "path"
+          ],
+          "properties": {
+            "format": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A table is declared twice",
+      "description": "A manifest declaring one table twice.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "corpus/duplicate-table"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "table"
+          ],
+          "properties": {
+            "table": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a table of this corpus",
+      "description": "A table the corpus does not have.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "corpus/unknown-table"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "table",
+            "tables"
+          ],
+          "properties": {
+            "table": {
+              "type": "string"
+            },
+            "tables": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a column of this table",
+      "description": "A column a table does not declare.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "corpus/unknown-column"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "column",
+            "columns",
+            "table"
+          ],
+          "properties": {
+            "column": {
+              "type": "string"
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "table": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The projection selects nothing",
+      "description": "A projection that selects no column.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "corpus/empty-projection"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "table"
+          ],
+          "properties": {
+            "table": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The table has no position",
+      "description": "A spatial filter over a table that declares no position.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "corpus/no-position"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "table"
+          ],
+          "properties": {
+            "table": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The filter compares different types",
+      "description": "A filter comparing a column with a value of another type.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "corpus/filter-type-mismatch"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "column",
+            "holds",
+            "value"
+          ],
+          "properties": {
+            "column": {
+              "type": "string"
+            },
+            "holds": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "An argument is invalid",
+      "description": "An argument a caller passed that is not what the call takes.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "api/invalid-argument"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "argument",
+            "expected"
+          ],
+          "properties": {
+            "argument": {
+              "type": "string"
+            },
+            "expected": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Another call is running",
+      "description": "A call made while another call on the same object is still running.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "api/busy"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "call"
+          ],
+          "properties": {
+            "call": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The handle names nothing",
+      "description": "A handle that names nothing — dropped, or never issued.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "api/unknown-handle"
+          ]
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "title": "An internal error",
+      "description": "Fossil's own fault, not the caller's. Nobody branches on it; a host shows it and reports it.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "internal/bug"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "what"
+          ],
+          "properties": {
+            "what": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

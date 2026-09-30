@@ -36,7 +36,7 @@
 //! `suggestion_source` precedent exactly — structured, not string-parsed.
 //! Defaults to `None`; plain data (wasm-clean).
 
-pub use fossil_graph_schema::Span;
+pub use fossil_graph_schema::{Severity, Span};
 
 /// What a [`Diagnostic`]'s span was measured against.
 ///
@@ -290,15 +290,10 @@ impl Diagnostic {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Severity {
-    Error,
-    Warning,
-    Info,
-}
-
 // `Span` was defined here and is `fossil_graph_schema::Span` now — re-exported
 // from this crate's root, so no consumer's `use fossil_base::Span` changed.
+// `Severity` followed it for the same reason: a run `Failure` carries compile
+// diagnostics as `fossil_graph_schema::Related`, which has to say how bad each is.
 //
 // It moved DOWN because `fossil-shex` needed it and cannot have it: this crate
 // carries salsa and that one is deliberately WASM-clean, so a shape document
