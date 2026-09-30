@@ -15,22 +15,20 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
-import { FossilExecutor, initFossilExecutor } from '@fossil-lang/executor';
 import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { open, type Corpus, type VertexTable } from '../src/index.js';
 import { duckdb } from '../tests/engine.js';
+import { runShop } from './shop.js';
 import { installSyncXhr } from './sync-xhr.js';
 
-const PROGRAM = new URL('../../../docs/programs/shop/', import.meta.url);
 const GUARDS = fileURLToPath(new URL('../guards/check.mjs', import.meta.url));
 /** People; three orders each, so `Order` is past one row group of 122,880. */
 const PEOPLE = 50_000;
@@ -41,17 +39,6 @@ let origin: { port: number; close: () => Promise<number> };
 let engine: Engine;
 let uninstall: (() => Promise<number>) | undefined;
 let corpus: Corpus;
-
-/** The program's two CSVs, generated: a fixed LCG so a failure reproduces. */
-function sources(): { users: string; orders: string } {
-  let state = 7;
-  const next = () => (state = (state * 1_103_515_245 + 12_345) >>> 0) / 2 ** 32;
-  const users = ['id,email,name,age'];
-  for (let i = 0; i < PEOPLE; i += 1) users.push(`${i},u${i}@shop.example,User ${i},${10 + Math.floor(next() * 70)}`);
-  const orders = ['id,user_id,amount'];
-  for (let i = 0; i < 3 * PEOPLE; i += 1) orders.push(`${i},${Math.floor(next() * PEOPLE)},${(next() * 500).toFixed(2)}`);
-  return { users: `${users.join('\n')}\n`, orders: `${orders.join('\n')}\n` };
-}
 
 /**
  * A static origin over `root` — `GET`, `HEAD` and single `Range`s, no directory listing — on a
@@ -95,22 +82,7 @@ function serve(root: string): Promise<{ port: number; close: () => Promise<numbe
 }
 
 beforeAll(async () => {
-  const wasm = createRequire(import.meta.url).resolve('@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm');
-  await initFossilExecutor(readFileSync(wasm));
-  const base = 'https://local.test/shop/';
-  const exec = new FossilExecutor(readFileSync(new URL('shop.fossil', PROGRAM), 'utf8'), `${base}shop.fossil`);
-  let files;
-  try {
-    for (const d of exec.missingDocuments()) {
-      exec.registerDocument(d.key, readFileSync(new URL(d.locator.slice(base.length), PROGRAM), 'utf8'));
-    }
-    const { users, orders } = sources();
-    const bytes: Record<string, Uint8Array> = {};
-    for (const s of exec.sources()) bytes[s.uri] = new TextEncoder().encode(s.uri.endsWith('users.csv') ? users : orders);
-    ({ files } = await exec.runInMemory(bytes, 'memory://shop'));
-  } finally {
-    exec.free();
-  }
+  const { files } = await runShop(PEOPLE);
   for (const f of files) {
     mkdirSync(dirname(join(dir, f.path)), { recursive: true });
     writeFileSync(join(dir, f.path), f.bytes);
