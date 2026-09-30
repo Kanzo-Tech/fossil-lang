@@ -1,0 +1,445 @@
+---
+title: One error, from Rust to the screen
+description: "PROPOSAL, not accepted — one catalogue of stable codes shared by compile diagnostics and run failures, one serialized shape across the wasm boundary, a typed `FossilError` in TypeScript, a page per code, and a host that branches on the code and never parses the message."
+direction:
+  summary: "Every failure that reaches a host — a compile diagnostic, a refused run, a corpus that will not open — carries a stable code from one catalogue, typed data generated from Rust, and a page of its own."
+---
+
+<Callout title="Proposal — written 2026-09-30 for the owner's review, and nothing on it is built">
+This page argues a design and inventories what exists. Every sentence in the present tense describes
+the tree at `8d6114a3`; everything about codes, `Problem` and `FossilError` is what is proposed. It
+becomes a page describing fossil, rather than a proposal, when the owner accepts it — and the first
+step of [the migration](#the-migration-in-steps-that-each-merge-green) is deleting this callout.
+</Callout>
+
+The request, in the owner's words: *una forma de mostrar mensajes de error, que venga de Rust, y que
+gestionemos en JavaScript bien, como lo haría un sistema en producción.* One way to show an error,
+coming from Rust, handled properly in JavaScript, the way a production system would.
+
+"Properly" has a test that can be run on the tree: **can a host decide what to do about a failure
+without reading its prose?** Today it almost never can.
+
+## What crosses into JavaScript today
+
+Counted on `main` at `8d6114a3`, sites this repository owns, pass-through of a host's or an engine's
+own errors excluded:
+
+| Where it is raised | Sites | Distinguishable without the message |
+| --- | --- | --- |
+| `fossil-df-wasm` — the executor's run, its arguments, its descriptor, its storage | 36 | 1 — `OverBudget`, by `name` |
+| `fossil-storage-wasm` and `@fossil-lang/storage` | 10 | 0 |
+| `fossil-wasm` — the workspace behind `@fossil-lang/wasm` | 5 | 0 |
+| `@fossil-lang/executor` | 1 | 0 |
+| `@fossil-lang/introspect` (reaches a host only through `onWarn`) | 1 | 0 |
+| `@fossil-lang/corpus` — `CorpusManifestError`, `CorpusReadError`, one `TypeError` | 17 | 17, by class — and then by message |
+| **Total** | **71** | **18** |
+
+**53 of 71 are a string and nothing else.** The 18 that are not are barely better: the two corpus
+classes say *which package* refused, not *what* — `CorpusReadError` covers an unknown table, an
+unknown column, a bad limit, an inverted box and a NaN, and the only way to tell them apart is the
+message. The one real discriminant is `run_error` in
+`crates/fossil-df-wasm/src/lib.rs, run_error`, which names an over-budget run `OverBudget` — and
+`runJob` (`packages/executor/src/run-job.ts, runJob`) then reduces it to `error: string` in its
+`CompletePayload`, so a host never sees the name. The `Refusal` behind it
+(`crates/fossil-df/src/memory.rs, Refusal`) carries the consumer, the bytes requested, the bytes held
+and the budget as four fields; all four reach JavaScript inside a sentence.
+
+What else is lost on the way, each one a place where structure existed and was flattened:
+
+- `RunError` (`crates/fossil-df/src/executor.rs, RunError`) is `OverBudget(Refusal)` or
+  `Failed(String)`, with a `From<String>`. Sixteen distinct failures — a destination no store covers,
+  a source that would not route, a DataFusion error, every variant of `WriteError` and `LayoutError` —
+  enter `Failed` through `format!` or `.to_string()`.
+- `StorageError` (`crates/fossil-storage/src/credential.rs, StorageError`) is a seven-variant enum
+  with typed fields, and is `.to_string()`'d at every boundary it crosses.
+- A host's own typed rejection from `credentials` is reduced to its `message` before it is wrapped.
+- `open` builds `did not read: ${cause.message}` and drops the `cause`.
+- A program that does not compile fails at `run` as `execute_graph: Error during planning: the
+  mapping did not compile; see the reported diagnostics` — and the executor exposes no diagnostics.
+
+**Compile diagnostics are the better half, and still have no identity.** `Diagnostic`
+(`crates/fossil-base/src/diagnostic.rs, Diagnostic`) is structured — severity, span and frame, labels,
+`help`, `suggestion_source`, `did_you_mean` — and reaches JavaScript as data, not as a throw: `check()`
+answers `CheckRow[]` (`crates/fossil-wasm/src/lib.rs, CheckRow`). But a `CheckRow` is
+`{ uri, range, severity, message, related }`: `help` is appended to `message` as a `\nhelp:` line,
+`did_you_mean` and `suggestion_source` are dropped, and there is no code.
+`packages/types/src/diagnostic.ts, Diagnostic` declares `code?` and `source?` and nothing fills them.
+Measured over the emitters: **about 126 distinct message templates, every one `Severity::Error`**,
+five that set labels, one that sets `suggestion_source`, one that sets the structured `did_you_mean` —
+and seven more that offer a *did you mean* only inside the message text.
+
+**The consumers show what that costs.** keasy's web app has about 38 places that catch or show an
+error. It parses no message — which is to its credit — and so it cannot branch on any fossil error at
+all: every one is rendered as raw `.message` (in an `Alert`, a `<pre>`, a toolbar span), logged to the
+console, or swallowed. The executor's failure reaches its UI as a stored string in a `<pre>`. The one
+place keasy *does* branch well is its own server's errors: an `ErrorBody { error, message }` whose
+`error` is a closed, namespaced enum (`auth/session_required`, `rbac/no_membership`), and a copy table
+in `web/src/lib/errors.ts` keyed by that code. That is the design below, already working one layer up.
+
+And **26 tests assert on message text** — eighteen in the TypeScript packages (sixteen on a thrown error, two on a
+diagnostic), eight in Rust — which is
+the tree's own evidence that the message is being used as an identifier because nothing else is one.
+
+## The references, and what each one decides
+
+| Reference | What it contributes | What is not taken |
+| --- | --- | --- |
+| rustc's error codes, `rustc --explain`, and the error index ([rustc-dev-guide, *Error codes*](https://rustc-dev-guide.rust-lang.org/diagnostics/error-codes.html); [the index](https://doc.rust-lang.org/error_codes/error-index.html)) | A code per kind of mistake, a long explanation per code kept beside the compiler, a tidy check that every code has one, and **a retired code is never reused** | The opaque `E0308` spelling — see [the format](#a-code-is-areakind) |
+| miette's `Diagnostic` trait ([docs.rs](https://docs.rs/miette/latest/miette/trait.Diagnostic.html)) | The field set: `code`, `severity`, `help`, `url`, `labels`, `related`, `diagnostic_source` — which is already what fossil's tests render with | Implementing it on every type; one type implements it |
+| thiserror ([docs.rs](https://docs.rs/thiserror/latest/thiserror/)) | `#[error("…")]` as the one place a message is written, `#[source]` for the chain | `#[error(transparent)]` across a boundary — that is how `WriteError` loses its variant today |
+| RFC 9457, Problem Details ([rfc-editor.org](https://www.rfc-editor.org/rfc/rfc9457)) | `type` as *the* identifier (§3.1.1), a `title` that **does not change between occurrences** (§3.1.3), a `detail` that **consumers should not parse** (§3.1.4), and typed extension members (§3.2) | `status` (there is no HTTP here) and, for now, `instance` |
+| ES2022 `Error` `cause` ([ECMA-262, InstallErrorCause](https://tc39.es/ecma262/#sec-installerrorcause)) | The chain, in the language's own spelling | A custom `inner`/`reason` field |
+| TypeScript discriminated unions ([handbook](https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions)) | `code` as the discriminant, so `if (e.code === 'run/over-budget')` narrows `e.data` to its fields | — |
+| LSP `Diagnostic.code` and `codeDescription` ([3.17](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#diagnostic)) | `code: string` plus `codeDescription.href`, so an editor links the squiggle to its page | Integer codes |
+
+They agree more than they differ, and where they agree the design takes the common part: **an
+identifier that is stable, a short title that is fixed per identifier, a detail for a person that is
+not parsed, typed data beside it, a link to a long explanation, and a chain of causes.**
+
+## A code is `area/kind`
+
+A code is two lowercase kebab-case words joined by a slash: `run/over-budget`, `type/property-mismatch`,
+`corpus/unknown-table`. The area names **where the mistake is**, not which crate noticed it — the same
+mistake found by `check` and again by `run` has one code, which is the point of sharing a namespace.
+
+It is `area/kind` rather than `E0308` because a code is read by people before it is looked up: a
+host author writing `case 'storage/outside-prefix':` needs no index to review the line. It is a slash
+because the code is also the route of its page, and because keasy's server already spells its own
+codes that way.
+
+**Stability.** A code, once it is in a tagged release, **never changes meaning and is never reused**.
+Its title, its detail and its help may be reworded in any release; its `data` may gain optional fields.
+Removing a field from `data`, or splitting one code into two, is a breaking change, stated in the
+consumer's words in the release notes — the same rule a renamed export is held to.
+
+**Retiring a code** is deleting its variant and moving it to a `RETIRED` list in the catalogue, one
+line: the code and the tag that last emitted it. A test fails if a live code equals a retired one. The
+page goes with the variant — see [the open questions](#open-questions-for-the-owner).
+
+**What this reverses.** [Tooling for machines](/docs/design/tooling-for-machines#a-diagnostic-is-an-api)
+ends *a diagnostic is an API* with a corollary: *their text is an interface; rewording an error message
+is a change to something a consumer parses.* That was true because the text was the only identifier. With
+a code and typed data, **the text stops being an interface**: a host that reads `message` for anything
+but showing it is outside the contract, and rewording is free. When this page is accepted, that
+paragraph is replaced by this one's first sentence.
+
+**What would reverse it.** A consumer that needs to branch at a granularity finer than a code — the
+same code meaning two things it must treat differently. The answer is a new code, never a message
+pattern; and if that happens repeatedly inside one area, the area is cut wrong.
+
+## Rust: one type, and `Diagnostic` carries it
+
+**The catalogue is one enum, `Problem`, in `fossil-graph-schema`.** That crate is the leaf where
+shared vocabulary already goes — `Span` moved down into it for the same reason — it depends on
+`serde` and nothing else, and every crate that raises an error can reach it (`fossil-storage` gains
+that one edge; today it depends on no fossil crate). A sketch, not a signature:
+
+```rust
+#[derive(Debug, Clone, thiserror::Error, Serialize, JsonSchema)]
+#[serde(tag = "code", content = "data")]
+pub enum Problem {
+    #[serde(rename = "run/over-budget")]
+    #[error("the run needs more memory than the executor's {budget} budget: {consumer} asked for {requested} with {reserved} already held. Nothing was written.")]
+    OverBudget { consumer: String, requested: u64, reserved: u64, budget: u64 },
+
+    #[serde(rename = "type/property-mismatch")]
+    #[error("`{property}` expects {expected}, and this is {actual}")]
+    PropertyMismatch { property: String, expected: String, actual: String },
+    // … one variant per code
+}
+
+impl Problem {
+    pub fn code(&self) -> &'static str;   // the serde tag, read back
+    pub fn title(&self) -> &'static str;  // fixed per code — RFC 9457 §3.1.3
+}
+```
+
+Three properties fall out of making the code the **serde tag of the data enum**, and they are the
+argument for this shape over a `code: &'static str` field beside a free `message`:
+
+- **The code and the data cannot disagree.** A variant *is* its code; there is no second list.
+- **The message is rendered from the data**, by the one `#[error]` on the variant. It cannot say
+  something the data does not carry, and a consumer that wants the column name reads `data.column`.
+- **The JSON Schema is derived**, so the TypeScript union is generated rather than restated (below).
+
+**`Diagnostic` keeps its spans and swaps `message: String` for `problem: Problem`.** It stays the salsa
+accumulator, keeps `severity`, `span`, `frame`, `labels`, `help`, `suggestion_source` and `did_you_mean`
+— everything positional, which a run failure has none of. `message` becomes `problem.to_string()`. That
+is the one-layer rule applied: there is one type that says *what went wrong* (`Problem`) and one that
+says *where in a program* (`Diagnostic`), and a compile diagnostic is the second holding the first. A
+parallel `RunDiagnostic` with its own code field is the thing this avoids.
+
+**`RunError` is deleted.** A failure that is not about a position is a `Failure`:
+
+```rust
+pub struct Failure {
+    pub problem: Problem,
+    pub help: Option<String>,
+    pub related: Vec<Diagnostic>,                        // run/does-not-compile carries the program's
+    pub cause: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+```
+
+`Failure` implements `std::error::Error` with `source()` returning `cause`, and `miette::Diagnostic`
+with `code`, `help`, `url` and `related` — so the native renderer the acceptance fixtures are blessed
+through prints the code without a second path. `From<String>` goes, and with it the route by which
+sixteen failures became one: a site that has no code yet does not compile.
+
+**`help` is per occurrence, `title` is per code.** `help` stays where it is — on the `Diagnostic` or
+`Failure` — because the best help names things only this occurrence knows (`` `Purchase.amount` is
+Float ``). The title is a constant of the variant.
+
+**A foreign error is a cause, never a code.** DataFusion, `object_store`, DuckDB and a host's own
+rejection have their own vocabularies, and fossil does not classify them. The layer that meets one
+wraps it in the fossil failure it *means* — `engine/failed`, `storage/unreachable`,
+`storage/host-refused` — and keeps the original as `cause`, whole. That is what `open` and `JsHost` do
+wrong today: they keep the text and drop the object.
+
+**What would reverse it.** A catalogue large enough that one enum in one file is the bottleneck of
+every change — at which point the catalogue becomes a data file with a generator, as
+`catalogue.bnf` already is for the standard library.
+
+## The boundary: one shape, and a real `Error`
+
+Everything that leaves fossil for JavaScript — thrown or returned — is one shape:
+
+```ts
+interface ProblemBase {
+  code: Code;                 // 'run/over-budget' — the identifier (RFC 9457 `type`)
+  title: string;              // fixed per code (RFC 9457 `title`)
+  detail: string;             // for a person; never parsed (RFC 9457 `detail`)
+  severity: 'error' | 'warning' | 'info';
+  help?: string;
+  related?: Problem[];        // miette `related`, LSP `relatedInformation`
+  cause?: Problem | Foreign;  // ES2022 `cause`, serialized
+}
+interface Foreign { name: string; detail: string }  // a cause fossil did not raise
+type Problem = { [C in Code]: ProblemBase & { code: C; data: ProblemData[C] } }[Code];
+```
+
+A compile diagnostic is the same object plus where: `uri`, `range`, `labels`, and the two structured
+repairs, `didYouMean` and `suggestion`. `CheckRow` becomes that, which is also what `lsp_diagnostic`
+fills an LSP `Diagnostic` from — `code`, and `codeDescription.href` pointing at the code's page.
+
+**It has no `type` URL on the wire, and that is the one departure from RFC 9457.** The published site
+lives under a prefix a deployment chooses, so a URL baked into every error would be wrong for someone.
+The code is the identifier, and `helpUrl(code, base?)` in TypeScript builds the link. **What would
+reverse it:** the site gets a stable canonical origin, at which point `type` is added and is exactly
+that function's answer.
+
+**What is thrown is a real `Error`, built in one place per side.** In Rust, one function turns a
+`Failure` into a `js_sys::Error` whose `name` is `FossilError`, whose `message` is `detail`, and which
+carries `code`, `data`, `problem` (the whole serialized object) and `cause` — a cause that is a
+`Failure` becomes a nested `FossilError`, a foreign one an `Error` of its own name. The three wasm
+crates call that function and nothing else; `run_error`, `busy_error`, `js_err` and every
+`JsError::new(&e.to_string())` go. In TypeScript, `new FossilError(problem)` builds the identical
+object for the codes the TypeScript packages raise themselves — the corpus's are all of that kind,
+because [reading is TypeScript](/docs/design/one-door).
+
+**Compile diagnostics are still returned, not thrown.** A program with errors is an answer to `check`,
+not a failure of it. The one place a diagnostic becomes a throw is a run over a program that does not
+compile: `run/does-not-compile`, whose `related` carries the diagnostics the executor currently
+withholds.
+
+**What would reverse it.** A host that cannot receive an `Error` subclass across its own boundary — a
+worker's `postMessage` strips the prototype. `problem` is there for exactly that: it is plain data,
+and `FossilError.from(problem)` rebuilds the error on the far side. If every host ended up passing
+`problem` rather than the error, the class is ceremony and goes.
+
+## TypeScript: `FossilError`, generated data, one guard
+
+```ts
+class FossilError<C extends Code = Code> extends Error {
+  readonly name = 'FossilError';
+  readonly code: C;
+  readonly data: ProblemData[C];
+  readonly problem: Problem & { code: C };
+}
+// the guard, `isFossilError`, has this type:
+type IsFossilError = {
+  (e: unknown): e is FossilError;
+  <C extends Code>(e: unknown, code: C): e is FossilError<C>;
+};
+```
+
+**The guard is structural, not `instanceof`.** Two copies of a package in one bundle, or an error built
+in wasm against one built in TypeScript, are different classes; `name === 'FossilError'` plus a `code`
+that is a member of the generated `CODES` set is not. `CorpusManifestError` and `CorpusReadError` are
+deleted — a consumer that caught one catches `isFossilError(e)` and reads `code`.
+
+**`message` is `detail`, in English, for a person.** It is what a log line and an unhandled rejection
+show, which is why it stays the real message rather than the code. It is not an identifier and nothing
+in the contract reads it.
+
+**`ProblemData` is generated from Rust.** `Problem`'s derived JSON Schema is written to
+`crates/fossil-graph-schema/problem.schema.json` and held by a bless test beside it, exactly as
+`crates/fossil-sinks/tests/schema.rs, the_schema_file_is_the_structs` holds `fossil.schema.json`. From
+that file `xtask` writes `problem.gen.ts` into `@fossil-lang/types` — `Code`, `CODES`, `ProblemData`, and each
+code's title — and a test fails when the checked-in file is stale. This departs from the manifest's
+precedent, where the TypeScript is written by hand and `packages/corpus/tests/manifest.test.ts` holds it
+to the schema: that is right for a dozen interfaces and wrong for a hundred and eight arms, where the hand is
+the drift. **What would reverse it:** the generator costing more to keep than the union does to write —
+a schema dialect it cannot read, say.
+
+`FossilError` lives in `@fossil-lang/types`, which gains its first runtime export; every package that
+raises already depends on it.
+
+## A page per code, and a test that holds them together
+
+Every code has a page in an `errors/` section of this site, under the code as its route — the error
+index. A page has the title as its heading, what the mistake is, why fossil refuses it, and how to
+repair it, and **where one exists it transcludes the failing program and its blessed rendering** with
+`<Program>`, the way this site already shows every program. The six directories under
+`docs/programs/errors/` — `colliding-name`, `join-one-side`, `missing-property`, `two-identities`,
+`unknown-field` and `wrong-type` — are the first six of those pages, already written and already
+compiled in CI; they are renamed to their codes.
+
+`content.test.ts` gains one suite: every code in `problem.schema.json` has a page, every page under
+`errors/` names a live code, and a page's heading is the code's title. A retired code has neither a
+variant nor a page, so it is in neither set. This is rustc's tidy check, stated in this repository's
+terms.
+
+**What would reverse it.** Pages written as stubs to satisfy the test. If a quarter of them are a
+title and one sentence a year after they exist, the requirement is wrong and becomes *every code
+reachable from a fixture has a page*.
+
+## The catalogue, derived from the inventory
+
+Nothing below is invented: each code is one or more of the sites counted above, merged where they
+are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no code; its variant goes.
+
+**Compile — 74 codes** (plus `internal/bug`, below):
+
+| Area | Codes |
+| --- | --- |
+| `syntax` (13) | `expected-token`, `unexpected-token`, `unknown-character`, `retired-spelling`, `malformed-rename`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `missing-value`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee` |
+| `name` (8) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `ambiguous-member`, `unknown-parameter`, `unknown-source` |
+| `argument` (6) | `arity`, `duplicate`, `skipped-parameter`, `positional-after-named`, `named-on-edge`, `alias-in-value-call` |
+| `type` (7) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch` |
+| `shape` (9) | `no-document`, `name-collision`, `missing-required-property`, `unsupported-disjunction`, `cyclic-reference`, `unresolved-reference`, `binding-arity`, `rename-unknown-type`, `rename-unknown-predicate` |
+| `document` (3) | `not-named`, `not-found`, `unparseable` |
+| `provider` (6) | `unknown`, `wrong-capability`, `wrong-extension`, `invalid-reader-option`, `foreign-reader-option`, `bare-document-path` |
+| `identity` (6) | `missing-subject`, `duplicate-subject`, `subject-not-first`, `conflicting`, `edge-without-template`, `edge-arity` |
+| `pipeline` (14) | `unknown-verb`, `unimplemented-verb`, `source-as-stage`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-foreign-binding`, `join-one-side` |
+| `unsupported` (2) | `literal`, `expression` — a gap in the compiler, not a mistake in the program |
+
+**Run, storage, corpus and the API — 33 codes.** The executor's descriptor errors reuse the compile
+codes above (`provider/unknown`, `provider/wrong-capability`, `document/unparseable`, …), because they
+are the same mistake found late:
+
+| Area | Codes | From |
+| --- | --- | --- |
+| `run` (3) | `over-budget`, `does-not-compile`, `destination-uncovered` | `RunError`, `refuse_if_poisoned`, the destination check |
+| `shape` (+1) | `more-than-one-output` | the executor's descriptor |
+| `document` (+2) | `not-registered`, `unread` | the executor's registry, `runJob`'s unread list |
+| `source` (2) | `not-utf8`, `unparseable` | the RDF sources a run decodes |
+| `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the corpus's `ATTACH`, `scan` and `sql` |
+| `write` (2) | `failed`, `unknown-type` | `WriteError` |
+| `layout` (2) | `dangling-endpoint`, `too-large` | `LayoutError`; its other variants are `internal/bug` |
+| `storage` (8) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` |
+| `corpus` (9) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `unknown-table`, `unknown-column`, `empty-projection`, `no-position`, `filter-type-mismatch` | `open`, `parseManifest`, `scan`, the filter binder |
+| `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy_error` and the executor's borrow, `WorkspaceError` |
+
+**`internal/bug` — 1 code** for everything that is fossil's fault and not the caller's: the
+`internal compiler error` sites, a serializer that failed on a value fossil built, a Reflect `set` on a
+fresh object. Nobody branches on it; a host shows it and reports it. A panic stays a
+`WebAssembly.RuntimeError` — it is not a value that can be built at the moment it happens.
+
+**108 codes**, 107 of them a mistake someone other than fossil can repair.
+
+## The screen: kanzo-ui's `Diagnostic`, and the product decides the words
+
+**No new component.** kanzo-ui already has the part, on its root barrel: the `Diagnostic` family —
+*"a machine's complaint, shown: a severity, a message, and the positions it points at"* — with
+`DiagnosticTitle`, `DiagnosticDescription`, `DiagnosticSeverity`, `DiagnosticSource` (monospace, *an
+identifier somebody has to type back into a tool*), `DiagnosticFrame` (a path, a line, a column, a
+label, jumpable), `DiagnosticActions`, and a collapsible `DiagnosticContent`. Every field of a problem
+has a slot:
+
+| `Problem` | `Diagnostic` part |
+| --- | --- |
+| `severity` | `variant` on the root, `DiagnosticSeverity` |
+| `title` | `DiagnosticTitle` |
+| `detail`, `help` | `DiagnosticDescription` — two of them, until a second call site asks `help` for a look of its own |
+| `code` and its page | `DiagnosticSource`, `asChild` onto a link to `helpUrl(code)` |
+| `range`, `labels` | `DiagnosticFrame`, `secondary` for a label in another document |
+| `cause`, `related` | a nested `DiagnosticList` in `DiagnosticContent` |
+| a retry | a `Button` in `DiagnosticActions` |
+
+Alert, toast, `FieldError` and Empty were each checked and each is the wrong host: an Alert has no code,
+no frame and no collapse, a toast is transient and takes an options object, a field error belongs to
+one control, and Empty is a zero state. kanzo-ui's own rule settles the rest — *the library displays,
+products produce*: it gains no `FossilError` type and no fossil dependency, and
+fossil ships no UI of its own.
+
+**So the mapping is keasy's, and it is one component.** keasy writes one `Problem` view that renders a
+`Problem` into `Diagnostic` parts, and it replaces every place in the inventory that shows `.message`
+today: the corpus `Alert`, the SQL panel, the run's `<pre>`, the studio's findings card, the ask panel's
+`Failure`.
+
+**keasy's rule, which is the rule for any host:**
+
+1. **Branch on `code`**, with `isFossilError(e, 'run/over-budget')`, and read `data` for the numbers.
+2. **Override copy only where the audience differs.** keasy's `registry` in `web/src/lib/errors.ts`
+   is already keyed by code; fossil's codes join it. A code with no entry renders fossil's `title` and
+   `detail` unchanged, which is the default and should stay the common case.
+3. **Never parse `message`.** Not to classify, not to extract a name. If a host needs a value that is
+   only in the message, that is a missing field in `data`, and the fix is in fossil.
+4. **Never swallow.** The five console-only or silent paths in the inventory — the wasm workspace
+   failing to load, `refs`, the relations publish, `describeDataSpace`, `rules-panel`'s unhandled
+   rejection — show a problem like any other.
+
+The run's failure changes shape end to end: `CompletePayload.error: string` becomes
+`problem: Problem`, keasy's server stores it as JSON rather than `Option<String>`, and the job page
+renders it rather than a `<pre>`.
+
+**What would reverse it.** A second product rendering fossil problems — the playground, say — that
+wants the same mapping. Then the mapping is a real candidate for a shared home, and the
+question is which package may depend on both.
+
+## The migration, in steps that each merge green
+
+Each step is one branch, one merge, and leaves every gate green; each names what a consumer must edit.
+
+1. **Accept the page.** The callout goes, and [tooling for machines](/docs/design/tooling-for-machines)
+   loses its corollary. *Breaking:* nothing.
+2. **`Problem` and `Failure` in Rust, the boundary unchanged.** The enum, `title()`, the schema file
+   and its bless test; `RunError`, `From<String>` and the `Result<_, String>` routes in `fossil-df`
+   and `fossil-storage` become `Failure`. The wasm crates still `.to_string()`. *Gate:* `cargo test`,
+   the schema test. *Breaking:* nothing outside Rust.
+3. **The boundary.** The one Rust-to-JS function in all three wasm crates; `problem.gen.ts`,
+   `FossilError` and `isFossilError` in `@fossil-lang/types`; the corpus and storage packages raise
+   `FossilError`; `runJob` completes with `problem`. The 16 TypeScript tests that match message text
+   assert `code` and `data` instead. *Breaking:* `name === 'OverBudget'` becomes
+   `code === 'run/over-budget'`; `CorpusManifestError` and `CorpusReadError` are gone;
+   `CompletePayload.error` is `problem`.
+4. **The error index.** Pages for the run, storage, corpus and API codes, the six fixture pages
+   renamed, and the codes-to-pages suite. *Gate:* the docs build.
+5. **Compile diagnostics.** `Diagnostic.problem`; `CheckRow` and the LSP `Diagnostic` gain `code`,
+   `title`, `data`, `help`, `didYouMean`, `suggestion`; the six blessed `diagnostic.txt` are re-blessed
+   with the code; the eight Rust tests and two TypeScript tests that match message text assert the variant; the remaining
+   compile pages. *Breaking:* `CheckRow.message` no longer carries a `\nhelp:` line — `help` is its own
+   field.
+6. **keasy**, on its own branch after 3 and again after 5: the `Problem` view, the registry, the stored
+   run problem, the five silent paths. *Gate:* keasy's own.
+
+Steps 2 and 3 are the ones a consumer feels; 4 and 5 can interleave. Nothing waits on the compile
+pages being complete — a code without a page fails step 4's suite, which is why the pages for a batch
+land with that batch.
+
+## Open questions for the owner
+
+1. **Does a retired code keep a page?** rustc keeps every retired code's explanation, marked *no
+   longer emitted*, so an old log still resolves. That is a tombstone, and fossil deletes rather than
+   keeps. *Recommendation:* the one-line `RETIRED` list and no page — it stops reuse, which is the part
+   that matters, and at `0.x` there are no old logs worth resolving.
+2. **Should keasy's server speak the same shape?** Its `ErrorBody { error, message, dependents }` is
+   the same idea with other names, snake_case kinds, and a `dependents` field the web drops.
+   *Recommendation:* yes, as its own keasy change after step 3 — `code`, `title`, `detail`, `data` —
+   so a keasy screen renders a server refusal and a fossil failure with the same view.
+3. **Is 108 the right grain?** The compile half is 74 codes for about 126 templates; `pipeline` alone is 14.
+   *Recommendation:* ship it as derived and let the codes-to-pages suite be the pressure: a code whose
+   page cannot say something different from its neighbour's is merged before its page is written.
+4. **Does `@fossil-lang/types` take runtime code?** It has none today. *Recommendation:* yes —
+   `FossilError` is ten lines and every raising package depends on `types` already; a new package for
+   it would be a second place to look.
