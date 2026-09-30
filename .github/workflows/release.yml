@@ -74,10 +74,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           # registry-url is REQUIRED for npm provenance / Trusted Publishing OIDC
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted Publishing needs npm >= 11.5.1; an older npm has no OIDC exchange
+      # and the publish fails with a 404 on the PUT.
+      - name: npm with OIDC support
+        run: npm install -g npm@latest
 
       - run: pnpm install --frozen-lockfile
 
@@ -147,10 +152,9 @@ jobs:
         # Scoped to packages/ for the same reason as the stamp above. `private: true`
         # on an app would also make pnpm skip it, but that is an implicit guard one
         # forgotten field away from a leaked publish. This one is explicit.
+        #
+        # No token: every @fossil-lang package has a Trusted Publisher on npmjs.com
+        # pointing at this file, and the job's `id-token: write` is the credential.
+        # A NEW package cannot take its first publish this way — it needs one token
+        # publish, then its publisher configured, then the token removed.
         run: pnpm --filter "./packages/*" publish --no-git-checks --tag "${{ steps.rel.outputs.tag }}"
-        env:
-          # BOOTSTRAP (one-time): npm OIDC/Trusted Publishing cannot create a
-          # brand-new package, so the FIRST publish needs `NPM_TOKEN` (a Granular
-          # Access Token with read+write on @fossil-lang/*). Afterwards, configure
-          # Trusted Publishers on npmjs.com per package and delete the secret.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
