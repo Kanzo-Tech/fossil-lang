@@ -30,8 +30,13 @@ import type { ExecutorResult, RunReport, SourceDescriptor } from './index.js';
 export class FossilExecutor implements DocumentWorkspace {
   readonly #raw: RawFossilExecutor;
 
-  constructor(program: string) {
-    this.#raw = new RawFossilExecutor(program);
+  /**
+   * `path` is where the program lives — a URL such as `file:///…/hello.fossil` — so the relative
+   * sources and documents it names resolve beside it. Without one, only `@conn/…` and absolute
+   * URLs resolve.
+   */
+  constructor(program: string, path?: string) {
+    this.#raw = new RawFossilExecutor(program, path);
   }
 
   setConnections(connections: Record<string, string>): void {
@@ -53,8 +58,8 @@ export class FossilExecutor implements DocumentWorkspace {
 
   /**
    * Run with the storage `host` vends: each source read through its connection's credential —
-   * by range requests, not whole — and the GraphAr graph written under the one prefix `host`
-   * vends `write` on for `job`. Answers the manifest it wrote.
+   * by range requests, not whole — and the `fossil/1` corpus written under the one prefix `host`
+   * vends `write` on for `job`, `fossil.json` last. Answers where it wrote and what it dropped.
    */
   run(host: Host, job: string): Promise<RunReport> {
     return this.#raw.run(host, job) as Promise<RunReport>;

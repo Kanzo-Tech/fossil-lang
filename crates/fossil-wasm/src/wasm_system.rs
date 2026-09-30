@@ -53,8 +53,8 @@ impl System for WasmSystem {
     }
 
     /// The workspace CHECKS programs — it is the LSP server-side in the
-    /// browser — so it installs the same rows the native host
-    /// does. A host with no rows checks every program against no output
+    /// browser — so it installs the same rows every compiling
+    /// host does. A host with no rows checks every program against no output
     /// contract, which would make the editor's target-side hover and
     /// completion silently empty for exactly the programs that declare a
     /// shape.

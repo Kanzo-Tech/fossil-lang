@@ -4,7 +4,7 @@
 //! the level-of-detail plan is built from.
 //!
 //! The output is reproducible, and that is load-bearing rather than incidental —
-//! `/docs/design/cells` is the page that depends on it and carries the
+//! `/docs/design/later/cells` is the page that depends on it and carries the
 //! measurement.
 
 /// Modularity-based community detection, returning the **whole hierarchy**
@@ -231,82 +231,13 @@ impl Csr {
     }
 }
 
-/// Build a [`Csr`] from rows that already arrive grouped by their key.
-///
-/// A run of equal keys **is** a vertex's neighbour list, so the offsets are
-/// written as the runs close and nothing is counted twice or written out of
-/// place. That is the whole of it: the degree pre-pass and the
-/// cursor scatter [`Weighted::from_edges`] needs exist only because its
-/// parameter is an unordered bag, and the file on disk has never been one.
-pub(super) struct CsrBuilder {
-    n: usize,
-    offsets: Vec<usize>,
-    targets: Vec<u32>,
-    /// The vertex whose run is open. Every key seen so far is `<=` it, which is
-    /// what makes a file that lies about its order detectable in one comparison.
-    open: usize,
-}
-
-impl CsrBuilder {
-    pub(super) fn new(n: usize, edges: usize) -> Self {
-        let mut offsets = Vec::with_capacity(n + 1);
-        offsets.push(0);
-        Self {
-            n,
-            offsets,
-            targets: Vec::with_capacity(edges),
-            open: 0,
-        }
-    }
-
-    /// One Arrow batch, as the two columns it already is. `false` means the keys
-    /// went backwards, i.e. the file is not what it declares itself to be.
-    pub(super) fn push(&mut self, keys: &[u32], values: &[u32], self_loops: &mut [f64]) -> bool {
-        for (&key, &value) in keys.iter().zip(values) {
-            let (key, value) = (key as usize, value as usize);
-            if key < self.open {
-                return false;
-            }
-            // Keys ascend, so the first one past the last vertex ends the useful
-            // part of the file. A clean writer emits none of these.
-            if key >= self.n {
-                break;
-            }
-            while self.open < key {
-                self.open += 1;
-                self.offsets.push(self.targets.len());
-            }
-            if value == key {
-                self_loops[key] += 1.0;
-            } else if value < self.n {
-                self.targets.push(value as u32);
-            }
-        }
-        true
-    }
-
-    pub(super) fn finish(mut self) -> Csr {
-        while self.open < self.n {
-            self.open += 1;
-            self.offsets.push(self.targets.len());
-        }
-        Csr {
-            offsets: self.offsets,
-            targets: self.targets,
-            weights: Weights::Unit,
-        }
-    }
-}
-
 /// An undirected weighted graph, as however many oriented adjacencies it was
 /// read from, with self-loops kept apart.
 ///
-/// `sides` is a list rather than one array because that is what the artefact
-/// hands over: a source-ordered file and a target-ordered file per edge table,
-/// each already grouped by the endpoint it is ordered on. Merging them into one
-/// adjacency would be a copy of the whole graph to buy nothing — a vertex's
-/// neighbourhood is the concatenation of its run in each. A contraction builds
-/// one symmetric side and so has a list of one.
+/// `sides` is a list rather than one array so a vertex's neighbourhood can be
+/// the concatenation of its run in several adjacencies without copying them
+/// into one. Every graph built today has a list of one: [`Self::from_pairs`]
+/// and a contraction both build a single symmetric side.
 ///
 /// Self-loops are separate because aggregation creates them — a community's
 /// internal edges become one — and because they enter the degree twice while
@@ -338,9 +269,23 @@ impl Weighted {
     /// one, which now means the tests and
     /// `examples/layout_memory.rs`. The write path reads [`Csr`]s instead.
     fn from_edges(vertex_count: u32, edges: &[(u32, u32)]) -> Self {
-        let n = vertex_count as usize;
+        Self::from_pairs(vertex_count as usize, || edges.iter().copied())
+    }
+
+    /// The graph `pairs` spells, read twice: once to count degrees and once to
+    /// scatter each pair into both endpoints' neighbour lists — one symmetric
+    /// [`Csr`], whatever order the pairs arrive in. A pair naming a vertex at or
+    /// past `n` is skipped; a pair with both ends equal is a self-loop.
+    ///
+    /// It is a closure and not a slice because the caller's pairs are Arrow
+    /// columns, one batch set per relation with an offset per endpoint type, and
+    /// collecting them into one `Vec` first would be a third copy of every edge.
+    pub(super) fn from_pairs<I: Iterator<Item = (u32, u32)>>(
+        n: usize,
+        pairs: impl Fn() -> I,
+    ) -> Self {
         let mut degree_count = vec![0usize; n];
-        for &(a, b) in edges {
+        for (a, b) in pairs() {
             if (a as usize) < n && (b as usize) < n && a != b {
                 degree_count[a as usize] += 1;
                 degree_count[b as usize] += 1;
@@ -353,10 +298,11 @@ impl Weighted {
             acc += *d;
             offsets.push(acc);
         }
+        drop(degree_count);
         let mut cursor = offsets.clone();
         let mut targets = vec![0u32; acc];
         let mut self_loops = vec![0.0f64; n];
-        for &(a, b) in edges {
+        for (a, b) in pairs() {
             if (a as usize) >= n || (b as usize) >= n {
                 continue;
             }
@@ -379,7 +325,7 @@ impl Weighted {
         )
     }
 
-    pub(super) fn finish(sides: Vec<Csr>, self_loops: Vec<f64>) -> Self {
+    fn finish(sides: Vec<Csr>, self_loops: Vec<f64>) -> Self {
         let n = self_loops.len();
         let mut degrees = vec![0.0f64; n];
         for v in 0..n {
@@ -526,7 +472,7 @@ impl Weighted {
 /// process peak that goes the wrong way by 0.36 GiB (8.54 → 8.90).
 ///
 /// That trade was refused once and the refusal was correct at the time: it spent
-/// the one quantity `--memory-gib` bounds to buy wall clock that was not the
+/// the one quantity the run's memory budget bounds to buy wall clock that was not the
 /// objective. What removed the objection was [`Weighted::contract`], after which
 /// the peak was 5.08 GiB and 90 MB was not a trade; the adjacency remap has
 /// taken it to **3.94** since, and 90 MB is less of one still.
@@ -834,85 +780,6 @@ mod hierarchy_tests {
             switches, 1,
             "families must not be interleaved: {families:?}"
         );
-    }
-
-    /// One orientation of `edges` as the writer emits it — keyed, sorted, then
-    /// pushed through the very builder `walk_orientation` feeds from Arrow.
-    fn side(
-        n: u32,
-        edges: &[(u32, u32)],
-        key: impl Fn(&(u32, u32)) -> (u32, u32),
-        self_loops: &mut [f64],
-    ) -> Csr {
-        let mut rows: Vec<(u32, u32)> = edges.iter().map(key).collect();
-        rows.sort_unstable();
-        let (keys, values): (Vec<u32>, Vec<u32>) = rows.into_iter().unzip();
-        let mut builder = CsrBuilder::new(n as usize, keys.len());
-        assert!(builder.push(&keys, &values, self_loops));
-        builder.finish()
-    }
-
-    /// The claim the CSR read path rests on: reading the two
-    /// orientations the artefact already stores builds the **same graph** as
-    /// handing the same edges over as an unordered bag. Exactly the same, not
-    /// nearly — modularity is defined over sums, every weight at level 0 is one,
-    /// and a sum of ones is exact in `f64`, so the two hierarchies are compared
-    /// whole rather than by some tolerance.
-    #[test]
-    fn the_orientations_on_disk_and_the_bag_are_one_graph() {
-        const N: u32 = 24;
-        let mut edges: Vec<(u32, u32)> = Vec::new();
-        for c in 0..4u32 {
-            let base = c * 6;
-            for a in 0..6u32 {
-                for b in (a + 1)..6 {
-                    edges.push((base + a, base + b));
-                }
-            }
-            if c > 0 {
-                edges.push((base, base - 6));
-            }
-        }
-        edges.push((7, 7)); // a self-loop, which is a row in *both* files
-
-        let mut self_loops = vec![0.0f64; N as usize];
-        let sides = vec![
-            side(N, &edges, |&(a, b)| (a, b), &mut self_loops),
-            side(N, &edges, |&(a, b)| (b, a), &mut self_loops),
-        ];
-        for count in &mut self_loops {
-            *count /= 2.0;
-        }
-
-        assert_eq!(
-            community_hierarchy(N, &edges),
-            hierarchy(Weighted::finish(sides, self_loops)),
-            "the CSR on disk and the bag in memory are the same graph",
-        );
-    }
-
-    /// A file that is not in the order it declares does not fail, it builds a
-    /// different graph — so the builder refuses it rather than believing it.
-    #[test]
-    fn a_key_that_goes_backwards_is_refused() {
-        let mut self_loops = vec![0.0f64; 4];
-        let mut builder = CsrBuilder::new(4, 3);
-        assert!(builder.push(&[0, 2], &[1, 3], &mut self_loops));
-        assert!(!builder.push(&[1], &[0], &mut self_loops));
-    }
-
-    /// Vertices with no edges are the common case at both ends of the range, and
-    /// the file says nothing about them. Their offsets still have to be written
-    /// — the ones it skips over and the tail it stops before — or one vertex's
-    /// neighbour list reads off into another's.
-    #[test]
-    fn the_builder_fills_the_vertices_the_file_never_mentions() {
-        let mut self_loops = vec![0.0f64; 5];
-        let mut builder = CsrBuilder::new(5, 2);
-        assert!(builder.push(&[1, 1], &[0, 3], &mut self_loops));
-        let csr = builder.finish();
-        assert_eq!(csr.offsets, vec![0, 0, 2, 2, 2, 2]);
-        assert_eq!(csr.targets, vec![0, 3]);
     }
 
     /// Degenerate shapes must not panic or invent levels.

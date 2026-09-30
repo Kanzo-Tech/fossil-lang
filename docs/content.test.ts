@@ -564,8 +564,10 @@ const workspaceCitations: WorkspaceCitation[] = contentPages.flatMap((file) => {
 
 describe("every workspace citation names a file that is there", () => {
   // Without these two a regex that stopped matching would report a clean sweep of nothing.
+  // Five and not twenty: `fossil/1` moved the tiled corpus's citations to `design/later/`, where they
+  // are spelled against a commit and not checked here. The bound is vacuity, never a floor.
   it("finds citations at all", () => {
-    expect(workspaceCitations.length).toBeGreaterThan(20);
+    expect(workspaceCitations.length).toBeGreaterThan(5);
   });
 
   it("reads items out of a cited file", () => {

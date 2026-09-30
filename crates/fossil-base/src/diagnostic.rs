@@ -2,7 +2,7 @@
 //!
 //! Any `#[salsa::tracked]` query can build a [`Diagnostic`] via the struct
 //! literal or via [`Diagnostic::new`] and call `.accumulate(db)`; the host
-//! (CLI / LSP / WASM) collects them via
+//! (LSP / WASM / executor) collects them via
 //! `query::accumulated::<Diagnostic>(db, input)`.
 //!
 //! ## `suggestion_source` field
@@ -90,8 +90,8 @@ pub enum SpanFrame {
 ///
 /// **A renderer owes one snippet per text.** miette resolves a range against
 /// ONE `SourceCode`, so a report that underlines two files is two `Rendered`s
-/// under one message (its `related()`); `fossil-cli`'s `cmd_check` and the
-/// conformance harness both group by this field before rendering. A renderer
+/// under one message; the conformance harness's renderer
+/// (`fossil-df/tests/support/native.rs`) groups by this field before rendering. A renderer
 /// that ignored it would resolve a `.shex` offset against the program's text
 /// and underline whatever happens to sit at that byte — silently, and inside
 /// the right file.

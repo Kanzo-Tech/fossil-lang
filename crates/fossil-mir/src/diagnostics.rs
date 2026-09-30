@@ -2,8 +2,8 @@
 //!
 //! # Why this is a crate function and not three copies of a loop
 //!
-//! «What is wrong with this program» was written three times: once in
-//! `fossil_cli::check`, once in `fossil-lsp`'s `diagnostics_for`, once in
+//! «What is wrong with this program» was written three times: once in the
+//! native CLI's `check`, once in `fossil-lsp`'s `diagnostics_for`, once in
 //! `fossil-wasm`'s `diagnostics_for_file`. The two editor copies were
 //! byte-identical to each other, comments included, and both were the SHORT
 //! version — a per-mapping drain and nothing else. The engine's was the long
@@ -43,10 +43,8 @@
 //!
 //! `fossil-ide` is the crate this would otherwise belong to — rust-analyzer
 //! puts diagnostics in its `ide` façade, and both editor hosts already share
-//! `fossil-ide`. It is ruled out by a decision already taken: `fossil-cli`
-//! may not depend on the editor surface, which is the arrangement
-//! `fossil-lineage` exists to prevent and whose module docs say so. `fossil-ide`
-//! also does not depend on `fossil-mir`, so it could not reach the lowering
+//! `fossil-ide`. It was ruled out while a native CLI existed, which
+//! could not depend on the editor surface; `fossil-ide` also does not depend on `fossil-mir`, so it could not reach the lowering
 //! drain without acquiring that edge too.
 
 use std::collections::HashSet;

@@ -1,18 +1,16 @@
 ---
 title: What a corpus is
-description: A graph on disk that outlives the process that wrote it, read by code that was never compiled against it. The artifact is the API.
+description: A graph on disk that outlives the process that wrote it, read by code that was never compiled against it — one fossil.json, a Parquet file per vertex type and one per relation. The artifact is the API.
 ---
 
-A **fossil corpus** is a graph written to disk: vertices, adjacency in both orientations, and a
-manifest that names them. Plain Parquet in a directory tree, read by code that was not compiled
+A **fossil corpus** is a graph written to disk: a Parquet file per vertex type, a Parquet file per
+relation, and one small JSON manifest that names them. It is read by code that was not compiled
 against the code that wrote it.
 
 That last clause is the whole design. A corpus is not a serialisation of somebody's object graph —
 it is the interface. **The seam between the two halves of fossil is the corpus on disk, not an
-API.** `kanzo-ui` reads fossil-written corpora with no `@fossil-lang/*` dependency of any kind, and
-three languages that do not know fossil exists read the same tree; the read surface here,
-`crates/fossil-graph`, reaches the rest of the tree exactly once, which
-`docs/content.test.ts` asserts as a build failure instead of a sentence.
+API.** A reader needs the manifest, a Parquet reader and the conventions on these pages, and nothing
+else of fossil's.
 
 <Callout title="Two products, one repository">
 The other half of fossil is a statically-typed language that produces a graph, documented at its own
@@ -22,69 +20,120 @@ conventions below are what makes that true instead of merely possible.
 
 ## One file is named in advance
 
-A reader over HTTP cannot list a directory, so nothing is discovered by listing. `graph.graph.yml`
-names every per-type manifest, each of those names a `prefix`, a `chunk_size` and a row count, and
-everything under them is arithmetic over those three fields.
+A reader over HTTP cannot list a directory, so nothing is discovered by listing. `fossil.json` is the
+one name known in advance, and it names every other file by its path relative to the corpus root.
 
-```mermaid
-graph LR
-  G["<b>graph.graph.yml</b><br/>the one file named in advance"]
-  V["<b>Person.vertex.yml</b><br/>prefix vertex/Person/<br/>chunk_size 4096<br/>vertex_count 70000"]
-  E["<b>Person_knows_Person.edge.yml</b><br/>prefix edge/Person_knows_Person/<br/>src_chunk_size 4096 · dst_chunk_size 4096<br/>edge_count 139993"]
-  P["vertex/Person/<br/>chunk0 … chunk17.parquet"]
-  I["vertex/Person/index/<br/>tile0 … tile17.parquet<br/>the same rows sorted by subject"]
-  S["…/by_source/<br/>tile0 … tile17.parquet<br/><b>CSR</b> · ordered by src_dense"]
-  T["…/by_target/<br/>tile0 … tile17.parquet<br/><b>CSC</b> · ordered by dst_dense"]
-  G --> V
-  G --> E
-  V -->|"ceil 70000 / 4096 = 18 files"| P
-  V -.->|"only when the manifest declares one"| I
-  E -->|"one tile per source tile"| S
-  E -->|"one tile per target tile"| T
-  classDef optional stroke-dasharray:4 3,color:#888,stroke:#888
-  class I optional
+```
+<dest>/
+  fossil.json                         the manifest, written last
+  vertex/<Type>.parquet               one per vertex type
+  edge/<Src>_<label>_<Dst>.parquet    one per relation
 ```
 
-Every arrow with a count on it is `ceil(count / chunk_size)` files, and every file name on the right
-is the tile number, which is `dense_id >> log2(chunk_size)`. Nothing is fetched to work either out.
-**A reader computes every URL it wants before it emits the first request.**
+**`fossil.json` is written last, and its presence is the commit.** A directory holding Parquet and
+no manifest is a write that did not finish, and a reader treats it as no corpus at all. Nothing else
+marks a corpus complete, and nothing else needs to: every file the manifest names is on disk before
+the manifest is.
 
-## The five conventions
+```jsonc
+{
+  "format": "fossil/1",
+  "vertex_tables": [{
+    "name": "Person",
+    "iri": "https://example.org/#Person",
+    "path": "vertex/Person.parquet",
+    "key": "dense_id",
+    "identity": "subject",
+    "record_count": 1000000,
+    "properties": [
+      { "name": "dense_id", "type": "uint32" },
+      { "name": "subject", "type": "string" },
+      { "name": "x", "type": "float" }, { "name": "y", "type": "float" },
+      { "name": "cluster_id", "type": "uint32" },
+      { "name": "birth_year", "type": "int32", "nullable": true }
+    ],
+    "position": { "by": "layout", "x": "x", "y": "y" }
+  }],
+  "edge_tables": [{
+    "name": "Order_placedBy_Person",
+    "label": "placedBy",
+    "path": "edge/Order_placedBy_Person.parquet",
+    "source":      { "key": "src", "references": "Order" },
+    "destination": { "key": "dst", "references": "Person" },
+    "record_count": 2000000,
+    "properties": [ { "name": "src", "type": "uint32" }, { "name": "dst", "type": "uint32" } ]
+  }]
+}
+```
 
-Five things define a corpus. Each is a measurement, and each is a guard below.
+The vocabulary is SQL/PGQ's rather than any graph-archive format's: a **vertex table** and an **edge
+table**, each with a `key`, and an edge table's `source` and `destination` naming the key column and
+the vertex table it `references`. A table's `name` is what a reader registers it under, and it is
+unique across the corpus. An edge table's `label` is not: one label can join several pairs of types,
+so `Src_label_Dst` is the name and `label` a field beside it.
+
+| field | what it says | what a reader does with it before reading Parquet |
+| --- | --- | --- |
+| `format` | `fossil/1` | refuses any other value |
+| `name`, `path` | the table and its file | registers one relation per table |
+| `key`, `source.key`, `destination.key` | `dense_id`, `src`, `dst` | joins edges to vertices without knowing column names |
+| `identity` | `subject` | keys anything held outside the corpus |
+| `record_count` | the rows in the file | sizes buffers, and checks a file it read in full |
+| `properties` | every column, in order, with its type | knows the schema without opening a footer |
+| `references` | the vertex table at each end | knows which relations join which types |
+| `position` | the two columns that place a vertex | knows which tables are drawn, and with what |
+
+`type` is one of `string`, `bool`, `int8` … `int64`, `uint8` … `uint64`, `float`, `double`, `date`,
+`timestamp`, `time`, `decimal` and `list<…>` — `corpus.bnf`'s spellings, written by
+`crates/fossil-sinks/src/manifest.rs, data_type_name`. The JSON Schema of the whole document is
+`crates/fossil-sinks/fossil.schema.json`. `iri` and `nullable` are
+optional and absent when there is nothing to say.
+
+**A vertex table with no `position` is not drawn.** `{"by": "layout"}` names the columns the layout
+pass wrote; `{"by": "program"}` names columns the program itself declared as a position, such as a
+longitude and a latitude. Which of the two a type carries is the writer's statement, and a reader
+dispatches on it rather than on column names.
+
+## The conventions
+
+Three things define a corpus beyond the manifest. Each is held by a guard below.
 
 | | the convention | what it buys |
 | --- | --- | --- |
-| [Identity](/docs/format/conventions/identity) | `dense_id` is a gapless `0..V−1` per vertex type, stored `uint32` and shifted as 64 bits; the identity is the subject IRI | a tile is a *range*, so its address is a shift |
-| [Addressing](/docs/format/conventions/addressing) | a tile is 4,096 rows of `dense_id`; `tile = dense_id >> 12` | no index to fetch, no directory to list |
-| [Order](/docs/format/conventions/addressing#the-order-that-makes-an-interval-mean-something) | `dense_id` ascends with the Hilbert code of the position | a rectangle in space is a few contiguous runs of ids |
-| [Adjacency](/docs/format/conventions/adjacency) | `by_source` is CSR, `by_target` is CSC, both tiled by the endpoint they are ordered by | every drawable edge is in a tile the window already fetched, and a hop is two addressed reads |
-| [Payload](/docs/format/conventions/addressing#the-footer-is-the-index) | plain Parquet, row-group statistics on the addressing columns | the footer is the index, bought in one request |
+| [Identity](/docs/format/conventions/identity) | `dense_id` is a gapless `0..V−1` across the whole graph, stored `uint32`, and every vertex table is sorted by it; the identity is the subject IRI | one id space, so an edge's endpoints are two integers and a vertex buffer is indexed by id |
+| [Adjacency](/docs/format/conventions/adjacency) | a relation is one table of `src`, `dst`, sorted by `(src, dst)` | the CSR a graph algorithm wants, read as it lies |
+| Payload | plain Parquet, row groups of **122,880** rows, default statistics | an engine prunes row groups off the footer, and any Parquet reader opens the file |
+
+The row-group size is DuckDB's own default, fixed by the writer rather than left to the Parquet
+library, whose default puts a million-row table in one row group and leaves nothing to prune.
+
+## Versions
+
+`format` is the only version a corpus carries, and it is one string for the whole corpus. **Within
+`fossil/1` a field is added only if it is optional and a reader may ignore it.** Changing what a
+fixed column means — `dense_id`, `src`, `dst`, their width or their order — or what a byte of a file
+means is `fossil/2`, and a `fossil/1` reader refuses it before reading a byte of Parquet.
 
 ## Why a format and not a library
 
 A library is a fine contract when there is one consumer and one language. This has neither: the
-corpus is already read from Rust, from TypeScript over DuckDB-WASM, and from a notebook that knows
+corpus is read from TypeScript over DuckDB-WASM, from native DuckDB, and from a notebook that knows
 nothing about any of it. A shared crate fails three ways at once. It puts a compiler *and a version*
 between writer and reader, which is the edge the two-core split removes. It gives a third party
-nothing. And it assumes one output format by construction, which is a
-[live design question](/docs/format/conventions/addressing#the-payload-format-is-open) a crate
-modelling *the* manifest cannot hold — the addressing guards survive a format change untouched.
+nothing. And it makes one reader's idea of the manifest the manifest, where a document that
+`JSON.parse` reads is everybody's.
 
 The reference for the stance is **Iceberg, Delta Lake and Lance**: a manifest plus files, many
-engines reading the same table, none of them the contract. For the read-by-ranges half the lineage
-is **Cloud-Optimized GeoTIFF → GeoParquet → PMTiles**: one file, an embedded directory, a spatial
-order, and a client asking for byte ranges over HTTP with no server. And the counter-example is
-**GraphAr**, whose manifest vocabulary this format borrows wholesale, down to `version: gar/v1` —
-[which keys, and where borrowing
-stops](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops). **Borrowing the
-words is not conformance, and a corpus here is not a GraphAr corpus.**
+engines reading the same table, none of them the contract. The vocabulary is **SQL/PGQ**'s, because a
+vertex table and an edge table with keys and references is what a property-graph query already
+names, and [nothing is borrowed from GraphAr any
+more](/docs/design/corpus#nothing-is-borrowed-from-graphar-any-more).
 
-The guards below exist because of the *other* half of that project. Every language's CI clones
-GraphAr's shared corpus and no job writes with one implementation and reads with another; through
-that gap a fourth implementation landed having re-derived the path arithmetic differently from the
-other three *and* from the corpus on disk, green on both sides, because its tests asserted
-hand-written strings instead of resolving against the artifact.
+The guards below exist because of the other lesson GraphAr taught. Every language's CI cloned its
+shared corpus and no job wrote with one implementation and read with another; through that gap a
+fourth implementation landed having re-derived the path arithmetic differently from the other three
+*and* from the corpus on disk, green on both sides, because its tests asserted hand-written strings
+instead of resolving against the artifact.
 
 ## The guards
 
@@ -94,9 +143,8 @@ node packages/corpus/guards/check.mjs /path/to/corpus
 
 `node` and the `duckdb` binary. No fossil crate, no npm package, no install, no build step — copy
 the `guards/` directory somewhere else and it runs, which is the position the third party this
-format exists for is in. `--explain` prints what each one proves, `packages/corpus/guards/README.md` has
-how each is proved to fire, and `packages/corpus/conformance/` is the other half of the question: two
-readers checked against one table of addresses instead of against each other's prose.
+format exists for is in. `--explain` prints what each one proves, and `packages/corpus/guards/README.md`
+has how each is proved to fire.
 
 The list is rendered from `packages/corpus/guards/guards.mjs` at build time, so it cannot name a guard
 that does not exist, omit one that does, or paraphrase what one proves. **There is deliberately no

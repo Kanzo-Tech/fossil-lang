@@ -1,4 +1,8 @@
-//! Repo-wide guard: the manifest version string is written down once.
+//! Repo-wide guard: the format string is written down once.
+//!
+//! It was `GRAPHAR_VERSION` and the string a YAML manifest opened with; it is
+//! `fossil_sinks::manifest::FOSSIL_FORMAT` now, the `format` field of
+//! `fossil.json`, and the argument below is unchanged by the rename.
 //!
 //! # What regressed, and what it cost
 //!
@@ -20,7 +24,7 @@
 //!
 //! # What this proves
 //!
-//! **In `crates/`, the bare string literal that `GRAPHAR_VERSION` holds appears
+//! **In `crates/`, the bare string literal that `FOSSIL_FORMAT` holds appears
 //! exactly once: in the `pub const` that defines it.** Both halves are read off
 //! the tree and neither is written down here:
 //!
@@ -36,22 +40,22 @@
 //!
 //! # Why a writer and an assertion are told apart by their quotes
 //!
-//! A site that PRODUCES a manifest writes the value: `version:
-//! GRAPHAR_VERSION.to_string()`, and before this guard, the same field carried a
-//! quoted literal of the value in the same position. The needle — the value
-//! **with its quotes** — matches that, and a doc comment that showed it here
-//! would match too, which is why this one does not show it.
+//! A site that PRODUCES a manifest writes the value: `format:
+//! FOSSIL_FORMAT.to_string()`, where a quoted literal of the value would sit in
+//! the same position. The needle — the value **with its quotes** — matches
+//! that, and a doc comment that showed it here would match too, which is why
+//! this one does not show it.
 //!
-//! A site that CHECKS what came out writes a substring of YAML:
-//! `assert!(yaml.contains("version: gar/v1"))`. That is a different string
-//! literal; the needle does not match inside it, because the quote that opens
-//! it is followed by `version: `, not by the value. So the assertions are not
-//! exempted, they are **not matched** — which is the difference between this
-//! guard and the hand-maintained allow-list this repository has rejected twice
-//! (`/docs/design/discarded` carries the row). There is no list here to drift.
+//! A site that CHECKS what came out writes a substring of the emitted JSON,
+//! with its quotes escaped: `\"format\": \"…\"`. The needle does not match
+//! inside it, because each quote is preceded by a backslash. So the assertions
+//! are not exempted, they are **not matched** — which is the difference between
+//! this guard and the hand-maintained allow-list this repository has rejected
+//! twice (`/docs/design/discarded` carries the row). There is no list here to
+//! drift.
 //!
-//! And the assertions must keep their literals. `contains(&format!("version:
-//! {GRAPHAR_VERSION}"))` passes whatever the constant says, which is to say it
+//! And the assertions must keep their literals. Comparing against
+//! `FOSSIL_FORMAT` passes whatever the constant says, which is to say it
 //! asserts nothing at all about what the writer emitted. The constant's doc
 //! comment states that split; this guard enforces only the half that is
 //! mechanical.
@@ -59,24 +63,24 @@
 //! # What this CANNOT prove
 //!
 //! - **That every writer reads the constant.** It proves no writer spells the
-//!   value. `let v = "gar".to_string() + "/v1"` defeats it, as does reading the
+//!   value. Concatenating two halves of it defeats it, as does reading the
 //!   string from a fixture file. The defect it closes is the one that happened
 //!   seven times, not every defect of its shape.
 //! - **Anything outside `crates/`.** `packages/corpus`'s conformance manifests and
-//!   test fixtures carry the string as DATA — YAML on disk, the
+//!   test fixtures carry the string as DATA — JSON on disk, the
 //!   bytes a reader is handed — and a Rust constant cannot reach them. They are
 //!   a separate problem with a separate answer, and this guard is silent on it
 //!   rather than pretending to cover it.
-//! - **That the string should be `gar/v1` at all.** That decision is open on
-//!   `/docs/design/corpus` and this file has no opinion. What it does is make
-//!   the decision cost one line instead of seven.
+//! - **That the string is the right one.** It was `GraphAr`'s own version
+//!   while the corpus did not conform to `GraphAr`; `fossil/1` replaced it, and
+//!   what this guard did is make that cost one line instead of seven.
 //!
 //! # Why it lives in `xtask`
 //!
 //! Same reason as `engine_reach.rs`, `substrate_reach.rs` and
 //! `tokio_placement.rs`: the claim is about the repository, not about any one
 //! crate, so it cannot live in a crate that is part of what it measures.
-//! `fossil-sinks` cannot assert that `fossil-graph` does not spell a literal.
+//! `fossil-sinks` cannot assert that `fossil-df` does not spell a literal.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -86,7 +90,7 @@ const DECLARATION: &str = "crates/fossil-sinks/src/manifest.rs";
 
 /// The text that opens the declaration. Everything up to the opening quote of
 /// the value — so this file names the constant without naming its value.
-const DECLARATION_PREFIX: &str = "pub const GRAPHAR_VERSION: &str = ";
+const DECLARATION_PREFIX: &str = "pub const FOSSIL_FORMAT: &str = ";
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -180,12 +184,11 @@ fn the_manifest_version_string_is_spelled_in_one_place() {
         offenders.is_empty(),
         "the manifest version string is spelled as a literal outside its own declaration:\n\
          \x20 {}\n\n\
-         A site that WRITES a manifest reads `fossil_sinks::manifest::GRAPHAR_VERSION` — a \
+         A site that WRITES a manifest reads `fossil_sinks::manifest::FOSSIL_FORMAT` — a \
          fixture whose bytes stand in for a written corpus included, since the whole point of \
-         the constant is that changing it changes what this tree emits. Five sites did not, and \
-         the constant governed none of them.\n\
-         A site that ASSERTS on emitted YAML keeps its literal and is not matched here: it \
-         writes `contains(\"version: …\")`, whose quote is followed by the key, not the value. \
+         the constant is that changing it changes what this tree emits.\n\
+         A site that ASSERTS on emitted JSON keeps its literal in escaped form and is not matched \
+         here: it writes `contains(\"\\\"format\\\": \\\"…\\\"\")`, whose quotes are escaped. \
          Asserting against the constant instead would pass whatever the constant said.",
         offenders.join("\n  "),
     );

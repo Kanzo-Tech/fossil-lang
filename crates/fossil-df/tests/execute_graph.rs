@@ -101,19 +101,14 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
     // orders.csv user_ids: 10→3, 11→1, 12→2, 13→1
     //   ⇒ (src_dense, dst_dense) = (0,2),(1,0),(2,1),(3,0)
     assert_eq!(
-        pairs(&edge.by_source),
+        pairs(&edge.batches),
         vec![(0, 2), (1, 0), (2, 1), (3, 0)],
-        "CSR: ORDER BY src_dense, dst_dense",
-    );
-    assert_eq!(
-        pairs(&edge.by_target),
-        vec![(1, 0), (3, 0), (2, 1), (0, 2)],
-        "CSC: ORDER BY dst_dense, src_dense",
+        "ORDER BY src_dense, dst_dense",
     );
 }
 
 #[tokio::test]
-async fn execute_graph_emits_one_manifest_and_the_report_repeats_it() {
+async fn the_write_emits_one_manifest_over_one_table_per_type_and_relation() {
     let (db, file) =
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
@@ -128,72 +123,70 @@ async fn execute_graph_emits_one_manifest_and_the_report_repeats_it() {
     .await
     .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
-    // ── Manifests: graph index + per-type YAML, W0b paths (Type casing) ──
-    let manifests = graph.manifests().expect("manifests serialize");
-    let paths: Vec<&str> = manifests.iter().map(|m| m.rel_path.as_str()).collect();
+    let (written, files) = support::write_in_memory(&graph).await;
     assert_eq!(
-        paths,
+        files.keys().map(String::as_str).collect::<Vec<_>>(),
         [
-            "graph.graph.yml",
-            "vertex/Person.vertex.yml",
-            "vertex/Order.vertex.yml",
-            "edge/Order_placedBy_Person/Order_placedBy_Person.edge.yml",
+            "edge/Order_placedBy_Person.parquet",
+            "fossil.json",
+            "vertex/Order.parquet",
+            "vertex/Person.parquet",
         ],
     );
-    let person_yml = &manifests[1].text;
-    assert!(person_yml.contains("type: Person"), "{person_yml}");
-    assert!(
-        person_yml.contains("iri: https://example.org/Person"),
-        "{person_yml}"
-    );
-    assert!(person_yml.contains("name: dense_id"), "{person_yml}");
-    assert!(person_yml.contains("version: gar/v1"), "{person_yml}");
 
-    // ── The report: the same manifest, plus `dest` and the drops ──
-    //
-    // The point of the assertions below is not that the numbers are right — the
-    // YAML above already says that — it is that the JSON a host reads and the
-    // YAML a reader opens are ONE value. `RunStatus` was a second account of
-    // this, and a second account can disagree with the bytes.
-    let report = fossil_df::RunReport::of("s3://bucket/job-1", &graph);
-    assert_eq!(report.dest, "s3://bucket/job-1");
+    // The document on disk IS the value the write answered.
+    let on_disk: fossil_sinks::manifest::Manifest =
+        serde_json::from_slice(&files["fossil.json"]).expect("fossil.json parses");
+    assert_eq!(on_disk, written.manifest);
+    let text = String::from_utf8(files["fossil.json"].clone()).expect("UTF-8");
+    assert!(text.contains("\"format\": \"fossil/1\""), "{text}");
 
-    let (graph_info, vertices, edges) = graph.manifest();
-    assert_eq!(report.graph, graph_info);
-    assert_eq!(report.vertices, vertices);
-    assert_eq!(report.edges, edges);
+    let m = &written.manifest;
+    let names: Vec<&str> = m.vertex_tables.iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(names, ["Person", "Order"], "the schema's order");
+    let person = &m.vertex_tables[0];
+    assert_eq!(person.path, "vertex/Person.parquet");
+    assert_eq!(person.iri.as_deref(), Some("https://example.org/Person"));
     assert_eq!(
-        report.graph.vertices,
-        paths[1..3],
-        "the index names the per-type documents, in the order the lists carry them"
+        (person.key.as_str(), person.identity.as_str()),
+        ("dense_id", "subject")
     );
-
-    let person = &report.vertices[0];
-    assert_eq!(person.vertex_type, "Person");
-    assert_eq!(person.prefix, "vertex/Person/");
-    assert_eq!(person.vertex_count, 3);
-    assert_eq!(person.iri, "https://example.org/Person");
-    assert_eq!(report.vertices[1].vertex_count, 4);
-
-    let edge = &report.edges[0];
-    assert_eq!(edge.edge_type, "placedBy");
-    assert_eq!(edge.prefix, "edge/Order_placedBy_Person/");
-    assert_eq!(edge.edge_count, 4);
+    assert_eq!(person.record_count, 3);
+    assert_eq!(m.vertex_tables[1].record_count, 4);
+    let columns: Vec<&str> = person.properties.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(
-        edge.projections
-            .iter()
-            .filter(|p| p.scale == 1)
-            .map(|p| p.path.as_str())
-            .collect::<Vec<_>>(),
-        ["by_source/", "by_target/"],
-        "both orientations, each saying where its tiles are",
+        &columns[..5],
+        ["dense_id", "subject", "x", "y", "cluster_id"]
     );
+    assert!(columns.contains(&"name"), "{columns:?}");
+    assert!(matches!(
+        person.position,
+        Some(fossil_sinks::manifest::Position::Layout { .. })
+    ));
+
+    let edge = &m.edge_tables[0];
+    assert_eq!(edge.name, "Order_placedBy_Person");
+    assert_eq!(edge.label, "placedBy");
+    assert_eq!(edge.path, "edge/Order_placedBy_Person.parquet");
+    assert_eq!(edge.iri.as_deref(), Some("https://example.org/placedBy"));
+    assert_eq!(
+        (edge.source.key.as_str(), edge.source.references.as_str()),
+        ("src", "Order")
+    );
+    assert_eq!(
+        (
+            edge.destination.key.as_str(),
+            edge.destination.references.as_str()
+        ),
+        ("dst", "Person")
+    );
+    assert_eq!(edge.record_count, 4);
 
     // Every `user_id` in `orders.csv` is a real person, so nothing dangled —
     // and `0` is stated rather than omitted.
-    assert_eq!(report.dropped.len(), 1);
-    assert_eq!(report.dropped[0].prefix, edge.prefix);
-    assert_eq!(report.dropped[0].dropped, 0);
+    assert_eq!(written.dropped.len(), 1);
+    assert_eq!(written.dropped[0].table, edge.name);
+    assert_eq!(written.dropped[0].dropped, 0);
 }
 
 /// Flatten edge batches into `(src_dense, dst_dense)` pairs, in row order.

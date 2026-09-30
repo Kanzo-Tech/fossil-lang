@@ -52,12 +52,12 @@ fn the_parse_actually_read_the_file() {
     let cols = corpus::read();
     assert!(
         cols.len() >= 7,
-        "corpus.bnf parsed to {} columns; the file declares at least seven",
+        "corpus.bnf parsed to {} columns; the file declares seven",
         cols.len()
     );
     let names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
     assert!(
-        names.contains(&"dense_id") && names.contains(&"src_dense"),
+        names.contains(&"dense_id") && names.contains(&"src"),
         "the parse missed columns it must see: {names:?}"
     );
 }
@@ -85,24 +85,5 @@ fn the_categorical_is_writer_emitted_and_is_not_a_named_member() {
             .iter()
             .any(|c| c.role == Role::Categorical && !named.contains(&c.name.as_str())),
         "the categorical is emitted by the writer and surfaced by no named member",
-    );
-}
-
-/// Exactly one payload column is also in the manifest's `properties:`, and that
-/// asymmetry is what the manifest-versus-bytes difference reduces to.
-#[test]
-fn one_column_is_declared_and_it_is_the_identity() {
-    let cols = corpus::read();
-    let declared: Vec<&str> = cols
-        .iter()
-        .filter(|c| c.declared)
-        .map(|c| c.name.as_str())
-        .collect();
-    assert_eq!(declared, ["subject"]);
-    assert!(
-        cols.iter()
-            .find(|c| c.name == "subject")
-            .is_some_and(|c| c.role == Role::Identity),
-        "the declared column is the identity",
     );
 }

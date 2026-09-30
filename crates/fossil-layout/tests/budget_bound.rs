@@ -35,8 +35,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use arrow::array::RecordBatch;
-use common::{dir, fixture};
-use fossil_layout::layout::{enrich_layout_within, estimated_peak_bytes};
+use common::fixture;
+use fossil_layout::layout::{estimated_peak_bytes, layout};
 
 /// Vertices in the fixture. Large enough that Louvain builds a real hierarchy
 /// over a planted partition — under a block of a thousand there is nothing to
@@ -75,7 +75,7 @@ fn gib(bytes: u64) -> f64 {
 
 /// **The bound is respected, and this is the measurement that says so.**
 ///
-/// The shape of the assertion matters as much as the number. `enrich_layout_within`
+/// The shape of the assertion matters as much as the number. `layout`
 /// is handed exactly the estimate for this corpus as its budget, so it is let
 /// through by the narrowest margin the check allows — and then what it actually
 /// costs is sampled while it runs and compared against that same number. Handing
@@ -83,7 +83,7 @@ fn gib(bytes: u64) -> f64 {
 /// for a pass that held ten times as much.
 #[test]
 fn a_run_the_budget_admits_stays_inside_the_budget() {
-    let f = fixture(dir("bound"), VERTICES, MEAN_DEGREE);
+    let f = fixture(VERTICES, MEAN_DEGREE);
 
     // The corpus's own shape, from the same numbers the check reads. Computing
     // the budget rather than writing a constant is what keeps this a statement
@@ -93,14 +93,20 @@ fn a_run_the_budget_admits_stays_inside_the_budget() {
     // the payload term used to be per uncompressed Parquet byte and is now per
     // resident Arrow byte, because that is what the pass is handed. See
     // `VERTEX_PAYLOAD_PERMILLE`.
-    let targets = f.targets();
-    let adjacencies = f.adjacencies();
-    let payload: u64 = targets[0]
+    let types = f.types();
+    let relations = f.relations();
+    let payload: u64 = types[0]
         .batches
         .iter()
         .map(|b| RecordBatch::get_array_memory_size(b) as u64)
         .sum();
-    let adjacency_rows = u64::from(VERTICES) * u64::from(MEAN_DEGREE / 2) * 2;
+    // Two per edge row, as the check counts them: the pass holds both directions.
+    let edge_rows: u64 = relations[0]
+        .batches
+        .iter()
+        .map(|b| b.num_rows() as u64)
+        .sum();
+    let adjacency_rows = edge_rows * 2;
     let declared = estimated_peak_bytes(u64::from(VERTICES), adjacency_rows, payload);
 
     // Everything the fixture allocated is resident and none of it is the pass's,
@@ -123,13 +129,8 @@ fn a_run_the_budget_admits_stays_inside_the_budget() {
         })
     };
 
-    enrich_layout_within(
-        &fossil_layout::io::LocalFs,
-        &targets,
-        &adjacencies,
-        Some(declared),
-    )
-    .expect("the pass is admitted by a budget computed from its own corpus");
+    layout(&types, &relations, Some(declared))
+        .expect("the pass is admitted by a budget computed from its own corpus");
 
     stop.store(true, Ordering::Relaxed);
     sampler.join().expect("the sampler thread");
@@ -138,7 +139,7 @@ fn a_run_the_budget_admits_stays_inside_the_budget() {
     assert!(
         held <= declared,
         "the pass declared {:.3} GiB and held {:.3} GiB — the bound was admitted and then \
-         exceeded, which is the defect `--memory-gib` exists to remove. \
+         exceeded, which is the defect a budget exists to remove. \
          Either the pass grew or `estimated_peak_bytes` did not grow with it.",
         gib(declared),
         gib(held)

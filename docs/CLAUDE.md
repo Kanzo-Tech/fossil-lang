@@ -55,9 +55,8 @@ and nothing more. And `unmeasured: true`, the honest alternative the schema offe
 **zero of nine** pages: every one preferred a weak citation to admitting there was no evidence.
 
 So prefer `<Program src= region= />`, which reads the file at build time — an absent region stops
-the build, and the code on the page *is* the code on disk. Same for `<GuardIndex />` and
-`<VectorTable of= />`, which render `packages/corpus/guards/{guards.mjs,vectors.json}` rather than
-transcribing them.
+the build, and the code on the page *is* the code on disk. Same for `<GuardIndex />`, which
+renders `packages/corpus/guards/guards.mjs` rather than transcribing it.
 
 **A line number is not a citation.** This paragraph used to end "a bare `file:line` is allowed and is
 your responsibility to verify by opening it", and that policy was measured: of **35 citations, 13

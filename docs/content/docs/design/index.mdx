@@ -37,17 +37,12 @@ of declarations, not a script.
 There is no build step and no artifact you handle. You point a program at its sources and its shape
 document, and you get a graph.
 
-## Six reasons this exists
+## Five reasons this exists
 
-Each of the six is an independent reason to want fossil, and most readers arrive caring about
+Each of the five is an independent reason to want fossil, and most readers arrive caring about
 exactly one.
 
 <Cards>
-  <Card
-    href="/docs/design/streaming"
-    title="Streaming and the budget"
-    description="A declared budget makes exceeding the machine a slower run and not a failed one — but only because no stage boundary outside the pool holds a whole value. Two halves of one mechanism, with the measurements."
-  />
   <Card
     href="/docs/design/types"
     title="Statically typed"
@@ -71,13 +66,13 @@ exactly one.
   <Card
     href="/docs/design/tooling-for-machines"
     title="Tooling for machines"
-    description="A diagnostic is an API, a verb surface is better than a schema an agent has to learn, and the documentation index is part of the product."
+    description="A diagnostic is an API, a manifest names every table before a byte is read, and the documentation index is part of the product."
   />
 </Cards>
 
 ## And one page underneath three of them
 
-Three of those six are meaningless without the thing in the middle. A mapping is not a template
+Three of those five are meaningless without the thing in the middle. A mapping is not a template
 with holes in it; it is an expression in **an algebra of graph construction**, with fourteen
 operators, each carrying a schema, and a schema is the thing a type can be attached to.
 
@@ -107,17 +102,27 @@ The remaining pages answer the questions that do not fit under a core.
   <Card
     href="/docs/design/corpus"
     title="The corpus"
-    description="Why the output is a set of addressable files rather than a server, and why write-once/read-many is what makes the whole-program checks available at all."
+    description="Why the output is Parquet files under a manifest written last rather than a server, one id space across the whole graph, and why write-once/read-many is what makes the whole-program checks available at all."
   />
   <Card
-    href="/docs/design/backend"
-    title="The backend"
-    description="fossil answers every view through one reader, shaped like Iceberg's scan and addressed like an OGC tile matrix, with the cell pyramid as the zoom levels."
+    href="/docs/design/one-door"
+    title="One door"
+    description="A corpus is read through open, manifest, scan, sql and close, and each thing the door does is done once, by one layer."
+  />
+  <Card
+    href="/docs/design/position"
+    title="Where x and y come from"
+    description="The writer's joint layout over the whole graph, or the program's own columns — and a table with no position is not drawn."
   />
   <Card
     href="/docs/design/three-hosts"
     title="Three hosts"
-    description="A native command, a browser, and a product embedding it — and why the code is cut by where it runs rather than by subject matter."
+    description="A command, a browser, and a product embedding it — one wasm build under all three — and why the code is cut by where it runs rather than by subject matter."
+  />
+  <Card
+    href="/docs/design/later/backend"
+    title="Later"
+    description="The tiled corpus — tiles, cells, the camera, the cost model and the larger-than-RAM writer — deferred with its measurements, each page with what brings it back."
   />
   <Card
     href="/docs/design/discarded"

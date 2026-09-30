@@ -4,8 +4,8 @@
 //! The text comes out of the document registry and never off a disk or an
 //! argument: a host registers what `fossil_hir::documents::missing_documents`
 //! reports, and the run decodes the same bytes, with the same registry row, as
-//! the check. `fossil-cli` read the file again through its anchor and
-//! `fossil-df-wasm` took a second copy as a `shex` string and sniffed its
+//! the check. The deleted native CLI read the file again through its anchor
+//! and `fossil-df-wasm` took a second copy as a `shex` string and sniffed its
 //! language; either could decode a document other than the one that compiled.
 
 use fossil_base::providers::{Capability, provider};

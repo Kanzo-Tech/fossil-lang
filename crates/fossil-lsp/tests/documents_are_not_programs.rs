@@ -93,8 +93,7 @@ const NOT_FOSSIL: &str = "id,name\n1,Ada\n";
 
 /// A fresh directory for one test, unique per process.
 ///
-/// The pid is load-bearing for the same reason it is in
-/// `fossil-cli/tests/common/mod.rs`: two concurrent `cargo test` runs over one
+/// The pid is load-bearing: two concurrent `cargo test` runs over one
 /// checkout otherwise share the path and delete each other's fixtures mid-run.
 fn workdir(test_name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(

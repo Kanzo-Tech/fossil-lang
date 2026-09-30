@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "The layout post-pass — Louvain communities and Hilbert tiling over Parquet through arrow-rs. Compiles for wasm32"
+description = "The layout pass — one Louvain partition and placement over the whole graph, and the global Hilbert dense_id. Compiles for wasm32"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -20,34 +20,9 @@ wasm = true
 workspace = true
 
 [dependencies]
-# Both on the workspace pin (58) — the single arrow line `datafusion` resolves
-# to, so a `RecordBatch` built here is the type `fossil-df` encodes.
-#
-# Default features on purpose, and the one that matters is snappy: everything
-# the write path emits is uncompressed, but a Parquet handed to this pass by
-# anything else (a `DuckDB` COPY, in the fixtures) is snappy by that engine's
-# default, and a reader that cannot decode it is a trap rather than a policy.
+# On the workspace pin (58) — the single arrow line `datafusion` resolves to, so
+# a `RecordBatch` the executor built is the type this pass reads.
 arrow = { workspace = true }
-parquet = { workspace = true }
-
-# `Bytes` is the currency of `parquet`'s `ChunkReader`, and `src/io.rs`'s
-# in-memory filesystem is a `ChunkReader` — the browser half of the seam that
-# lets this pass run without a disk under it. `parquet` already brings the crate
-# transitively; this makes the edge direct because a `pub` type in `io` is one.
-bytes = { workspace = true }
-
-# The row-group container the pass emits tiles through, rather than a second
-# writer of its own, so the row-group-per-tile property that makes the footer a
-# reader's index is stated in exactly one place. It was `fossil_df::files` and
-# this line cost `datafusion`, `fossil-hir`, `fossil-mir`,
-# `fossil-descriptors-output`, `fossil-base` and `salsa` — a compiler substrate
-# under a pass that resolves no name — for a struct `fossil-df` never called.
-fossil-tile-writer = { path = "../fossil-tile-writer" }
-
-# The manifest model, for the tile file names: declared in the same crate as the
-# `container:` field that selects them, so the writer and the manifest cannot
-# spell them two ways.
-fossil-sinks = { path = "../fossil-sinks" }
 
 thiserror = { workspace = true }
 

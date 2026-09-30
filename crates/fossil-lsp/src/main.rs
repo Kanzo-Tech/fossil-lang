@@ -69,7 +69,7 @@ fn init_tracing() {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("fossil=info"));
     // `try_init` so a second call (e.g. from a test harness) is a no-op rather
-    // than a panic, mirroring the fossil-cli pattern.
+    // than a panic.
     let _ = fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr)

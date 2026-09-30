@@ -145,12 +145,10 @@ describe('runJob', () => {
 
     expect(job.completed?.status).toBe('completed');
     expect(job.completed?.manifest).toEqual(report);
-    const person = report.vertices.find((v) => v.type === 'Person');
-    expect(person?.vertex_count).toBe(3);
-    // The edge exists only because the read shape document was the output
+    expect(report.dest).toBe(JOB);
+    // The relation exists only because the read shape document was the output
     // contract: without it `placedBy` would be a literal property.
-    const edge = report.edges.find((e) => e.edge_type === 'placedBy');
-    expect(edge?.edge_count).toBe(4);
+    expect(report.dropped).toEqual([{ table: 'Order_placedBy_Person', dropped: 0 }]);
 
     for (const path of Object.keys(FIXTURES)) {
       expect(gets).toContain(`http://localhost:9000${path}`);
@@ -158,18 +156,19 @@ describe('runJob', () => {
     expect(asks).toContainEqual({ scope: { connection: 'lake' }, access: 'read' });
     expect(asks).toContainEqual({ scope: { job: 'job-1' }, access: 'write' });
 
-    // Every GraphAr file was PUT at `<prefix><path>` — payload and index alike.
+    // Every file of the corpus was PUT at `<prefix><path>`, and the manifest
+    // last: it is the commit.
     const written = puts.map((u) => `s3:/${new URL(u).pathname}`);
     expect(written.every((w) => w.startsWith(JOB))).toBe(true);
     for (const need of [
-      'vertex/Person/tiles.parquet',
-      'vertex/Person/index/tiles.parquet',
-      'vertex/Order/tiles.parquet',
-      'edge/Order_placedBy_Person/by_source/tiles.parquet',
-      'graph.graph.yml',
+      'vertex/Person.parquet',
+      'vertex/Order.parquet',
+      'edge/Order_placedBy_Person.parquet',
+      'fossil.json',
     ]) {
       expect(written).toContain(`${JOB}${need}`);
     }
+    expect(written.at(-1)).toBe(`${JOB}fossil.json`);
   });
 
   it('fails the job, writing nothing, when a document the program names cannot be read', async () => {

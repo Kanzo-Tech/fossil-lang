@@ -1,6 +1,6 @@
 /**
  * A job, end to end in the browser: read the documents the program names, run the mapping on
- * DataFusion-WASM, write the GraphAr output, report the outcome.
+ * DataFusion-WASM, write the `fossil/1` corpus, report the outcome.
  *
  * Every byte goes through `object_store` stores built from credentials the host vends — `read`
  * per connection the program names, `write` on the job. `DataFusion` reads a source through its
@@ -25,8 +25,8 @@ export interface Job {
 export interface CompletePayload {
   status: 'completed' | 'failed';
   /**
-   * The manifest of what was written. The field was already called this and
-   * carried a `RunStatus` that was not one; it is the manifest now.
+   * The run's report — where it wrote and what it dropped. The field keeps the
+   * name its consumers read; the manifest itself is `<dest>fossil.json`.
    */
   manifest?: RunReport;
   error?: string;

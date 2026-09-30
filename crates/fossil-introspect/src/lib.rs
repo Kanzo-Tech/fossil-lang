@@ -31,7 +31,7 @@
 //! # What this crate is NOT
 //!
 //! It is not a second compiler entry point. It fills a cache and returns
-//! nothing; `fossil_cli::check` / `run` read that cache through `System`. The
+//! nothing; a compile reads that cache through `System`. The
 //! order — introspect, then compile — is the caller's, and it is the order the
 //! browser has always used.
 
@@ -57,8 +57,8 @@ pub use creds::{ConnectionCreds, RunCreds, SecretSpec};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reach {
     /// Every source the program names, including a locator whose `DESCRIBE` is
-    /// a network round trip. What a COMMAND does: `fossil check` and
-    /// `fossil run` are the thing the user is already waiting for, and a source
+    /// a network round trip. What a COMMAND does: a one-shot check is the
+    /// thing the user is already waiting for, and a source
     /// they cannot read is a source the answer would be wrong without.
     Anywhere,
     /// Only a source this host can `stat`: a local file that exists right now.
@@ -184,7 +184,7 @@ fn freshness_token(resolved: &str) -> String {
 /// `system` — the list the browser's `sources()` returns — so both hosts
 /// DESCRIBE the sources the compiler bound, and nothing reads them off the
 /// text a second way. The `System` is the caller's because only the caller
-/// knows which host it is: `fossil_cli::host_system(path)` natively.
+/// knows which host it is.
 ///
 /// # Errors
 ///
@@ -220,7 +220,7 @@ pub fn introspect_program(
 ///
 /// `reach` is the caller's answer to "may this block on the network?" — see
 /// [`Reach`]. It is a parameter and not a property of the source because the
-/// same `s3://` URI is a legitimate read for `fossil check` and a stalled
+/// same `s3://` URI is a legitimate read for a one-shot check and a stalled
 /// editor for `fossil-lsp`.
 #[allow(clippy::implicit_hasher)] // the host builds one map and passes it; a
 // generic hasher here would be a parameter no caller varies.
@@ -513,12 +513,9 @@ mod tests {
     /// the LAST thing a credential touches before the host sees only
     /// URLs.
     ///
-    /// The fixture is `fossil_base::test_support::NativeSystem` and not
-    /// `fossil-cli`'s `EngineSystem`, which is what these tests used when they
-    /// lived there. Both are a `System` with a descriptor cache; `NativeSystem`
-    /// is the one that exists so a test can have one without a host crate, and
-    /// taking `fossil-cli` as a dev-dependency here would close the loop these
-    /// tests are part of opening.
+    /// The fixture is `fossil_base::test_support::NativeSystem`: a `System`
+    /// with a descriptor cache, which exists so a test can have one without a
+    /// host crate.
     #[test]
     fn the_creds_map_projects_onto_the_anchor_the_rule_takes() {
         let c = conns(&[("sales", "s3://bucket/prefix")]);

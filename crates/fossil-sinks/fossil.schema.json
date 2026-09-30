@@ -1,0 +1,259 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Manifest",
+  "description": "The whole of `fossil.json`.",
+  "type": "object",
+  "required": [
+    "edge_tables",
+    "format",
+    "vertex_tables"
+  ],
+  "properties": {
+    "edge_tables": {
+      "description": "One per relation, in the order the compiled schema lists them.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/EdgeTable"
+      }
+    },
+    "format": {
+      "description": "Always [`FOSSIL_FORMAT`] for a corpus this writer produces.",
+      "type": "string"
+    },
+    "vertex_tables": {
+      "description": "One per vertex type, in the order the compiled schema lists them.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/VertexTable"
+      }
+    }
+  },
+  "definitions": {
+    "EdgeTable": {
+      "description": "One relation's table.",
+      "type": "object",
+      "required": [
+        "destination",
+        "label",
+        "name",
+        "path",
+        "properties",
+        "record_count",
+        "source"
+      ],
+      "properties": {
+        "destination": {
+          "description": "The column holding the destination vertex's `dense_id`, and its table.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Endpoint"
+            }
+          ]
+        },
+        "iri": {
+          "description": "The relation's IRI, when the program's shape document gives one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "description": "The relation's label, e.g. `placedBy`.",
+          "type": "string"
+        },
+        "name": {
+          "description": "`<Src>_<label>_<Dst>`, unique: the label repeats across relations.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The table's Parquet file, relative to the corpus root.",
+          "type": "string"
+        },
+        "properties": {
+          "description": "Every column of the file, in file order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Property"
+          }
+        },
+        "record_count": {
+          "description": "Rows in the file.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "source": {
+          "description": "The column holding the source vertex's `dense_id`, and its table.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Endpoint"
+            }
+          ]
+        }
+      }
+    },
+    "Endpoint": {
+      "description": "One end of a relation.",
+      "type": "object",
+      "required": [
+        "key",
+        "references"
+      ],
+      "properties": {
+        "key": {
+          "description": "The edge table's column.",
+          "type": "string"
+        },
+        "references": {
+          "description": "The vertex table whose `key` it holds.",
+          "type": "string"
+        }
+      }
+    },
+    "Position": {
+      "description": "Where a vertex table's rows are drawn.",
+      "oneOf": [
+        {
+          "description": "The writer's layout pass placed the rows.",
+          "type": "object",
+          "required": [
+            "by",
+            "x",
+            "y"
+          ],
+          "properties": {
+            "by": {
+              "type": "string",
+              "enum": [
+                "layout"
+              ]
+            },
+            "x": {
+              "description": "The column holding the horizontal coordinate.",
+              "type": "string"
+            },
+            "y": {
+              "description": "The column holding the vertical coordinate.",
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "The program declared two of its own columns as the position.",
+          "type": "object",
+          "required": [
+            "by",
+            "x",
+            "y"
+          ],
+          "properties": {
+            "by": {
+              "type": "string",
+              "enum": [
+                "program"
+              ]
+            },
+            "x": {
+              "description": "The column holding the horizontal coordinate.",
+              "type": "string"
+            },
+            "y": {
+              "description": "The column holding the vertical coordinate.",
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "Property": {
+      "description": "One column.",
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "properties": {
+        "iri": {
+          "description": "The predicate IRI the program mapped it from, when there is one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The column name, as in the Parquet schema.",
+          "type": "string"
+        },
+        "nullable": {
+          "description": "Whether a row may hold no value. Absent is `false`.",
+          "type": "boolean"
+        },
+        "type": {
+          "description": "Its type, in the spelling [`data_type_name`] writes.",
+          "type": "string"
+        }
+      }
+    },
+    "VertexTable": {
+      "description": "One vertex type's table.",
+      "type": "object",
+      "required": [
+        "identity",
+        "key",
+        "name",
+        "path",
+        "properties",
+        "record_count"
+      ],
+      "properties": {
+        "identity": {
+          "description": "The identity column: `subject`, unique within the table.",
+          "type": "string"
+        },
+        "iri": {
+          "description": "The type's IRI, when the program's shape document gives one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "description": "The key column: `dense_id`, global and gapless across every vertex table.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The type's label: the name of the table and its PGQ label.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The table's Parquet file, relative to the corpus root.",
+          "type": "string"
+        },
+        "position": {
+          "description": "The columns this table is drawn at. Absent: the table is not drawn.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Position"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "properties": {
+          "description": "Every column of the file, in file order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Property"
+          }
+        },
+        "record_count": {
+          "description": "Rows in the file.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

@@ -125,26 +125,21 @@ deny = [
         # out of the native host, and naming this crate is the review the rule
         # exists to force.
         "fossil-introspect",
-        # Links it TRANSITIVELY, through `fossil-introspect`. Both are hosts, and
-        # a host is where introspection belongs. `fossil-cli` is ALSO a direct
-        # parent by a dev edge, to read written Parquet back — it absorbed
-        # `fossil-engine`, which held that edge and is gone.
-        "fossil-cli",
+        # Links it TRANSITIVELY, through `fossil-introspect`. A host, and a host
+        # is where introspection belongs.
         "fossil-lsp",
-        # A direct parent by a DEV edge only — to bring an engine to a test. Not
-        # a ring crossing, and cargo-deny still counts it as a direct parent.
+        # Direct parents by a DEV edge only — to bring an engine to a test: the
+        # layout's `ST_Hilbert` check, and `fossil-df`'s reading of the corpus
+        # it wrote. Not a ring crossing, and cargo-deny still counts each as a
+        # direct parent.
         "fossil-layout",
-    ], reason = "The engine layer, plus the hosts that introspect a source before compiling it. The language layer may not link a database: it must start in milliseconds and it must compile to wasm32, and `fossil-base`/`-syntax`/`-hir`/`-mir`/`-ide` are none of them here. `fossil-lsp` is the third host beside `fossil-cli` and `fossil-wasm` — a native-only binary outside every wasm closure — and it reaches `duckdb` through `fossil-introspect` for the same reason `fossil check` does: without the columns a DESCRIBE finds, the editor is silent on every diagnostic whose evidence is a source's schema, which was measured on 2026-08-23 and is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`. It reads only what it can `stat`, never the network. The previous reason string said `fossil-cli` kept `duckdb` as a dev-dependency; `cargo tree -e normal` says it links it through `fossil-introspect`, which is exactly the transitive edge this list could not see." },
+        "fossil-df",
+    ], reason = "The engine layer, plus the hosts that introspect a source before compiling it. The language layer may not link a database: it must start in milliseconds and it must compile to wasm32, and `fossil-base`/`-syntax`/`-hir`/`-mir`/`-ide` are none of them here. `fossil-lsp` is the host beside `fossil-wasm` — a native-only binary outside every wasm closure — and it reaches `duckdb` through `fossil-introspect` for the reason the browser runs `@fossil-lang/introspect`: without the columns a DESCRIBE finds, the editor is silent on every diagnostic whose evidence is a source's schema, which was measured on 2026-08-23 and is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`. It reads only what it can `stat`, never the network. The native CLI that linked it the same way was deleted on 2026-09-30." },
     { name = "datafusion", wrappers = [
         # Links it, directly.
         "fossil-df",
         "fossil-df-wasm",
-        # Links it TRANSITIVELY, through `fossil-df`. Not new — it was
-        # undeclared for as long as the check could not see it, and it is
-        # recorded here rather than changed. `fossil-engine` was a second and is
-        # gone: `fossil-cli` absorbed it.
-        "fossil-cli",
-    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — compiling the engine to the browser asserts the opposite of a camera that is addressed rather than queried. `fossil-cli` reaches it through `fossil-df` and is recorded, not endorsed. `fossil-layout` was the other, for exactly two symbols — `files::TileWriter` and `files::batches_to_parquet`, neither of which is a DataFusion type — and this entry said retiring the edge meant moving `fossil_df::files` below the executor, a change to two crates it does not own. That change was made: `TileWriter` is `fossil-tile-writer` now, a leaf over `arrow` and `parquet`, and the dev edge the bench's baseline encoder kept went when the bench wrote its own. `cargo tree -p fossil-layout -i datafusion` prints nothing. `crates/xtask/tests/engine_reach.rs` is what made the edge visible; it has no opinion about it." },
+    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed: it is the one write host, and it runs the executor in the browser and in Node. The native CLI reached it through `fossil-df` and was deleted on 2026-09-30. `fossil-layout` was the other, for exactly two symbols — `files::TileWriter` and `files::batches_to_parquet`, neither of which is a DataFusion type — and this entry said retiring the edge meant moving `fossil_df::files` below the executor, a change to two crates it does not own. That change was made, and then the writer left the pass altogether: `fossil-df` depends on `fossil-layout` now, never the reverse. `cargo tree -p fossil-layout -i datafusion` prints nothing. `crates/xtask/tests/engine_reach.rs` is what made the edge visible; it has no opinion about it." },
 ]
 
 [sources]

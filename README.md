@@ -3,15 +3,11 @@
 A typed compiler for RDF graph construction. Surface syntax is a small DSL
 (`.fossil`) with bidirectional type checking — forward from input descriptors
 (introspected from the source itself), backward from target shapes
-(ShEx). It lowers to a typed operator algebra and executes it, writing a corpus
-of Parquet tiles under YAML manifests: DataFusion runs the mapping, DuckDB does
-source introspection, and the layout post-pass reads the written Parquet back
-through arrow-rs and links no engine at all.
-
-The manifest borrows [Apache GraphAr](https://graphar.apache.org/)'s field
-names and follows GraphAr as far as GraphAr specifies, which is not far enough
-to make this a GraphAr corpus — `/docs/design/corpus` states the boundary once
-and measures the divergences.
+(ShEx). It lowers to a typed operator algebra and executes it, writing a
+`fossil/1` corpus: one Parquet per vertex type and per relation, and a small
+`fossil.json` over them. DataFusion runs the mapping, the layout pass places the
+whole graph and numbers it in Hilbert order, and any SQL engine that reads Parquet
+reads the result — `/docs/design/corpus` is the argument.
 
 **Status:** pre-v0.1, in active development. Nothing is published; the surface
 is still changing.
@@ -52,34 +48,25 @@ register before assuming the compiler has arrived there.
 
 ## What runs today
 
-`fossil` has four subcommands — `check`, `run`, `providers`, `refs`
-(`crates/fossil-cli/src/main.rs`; `--help` on each is authoritative).
+The executor — `fossil_df::Executor`, published as `@fossil-lang/executor` — is
+the one host that runs a program and writes its corpus, in the browser and in
+Node. There is no native CLI; `/docs/design/discarded` says why and what would
+bring one back.
 
-The end-to-end one, against the walking-skeleton fixture in `examples/`:
-
-```bash
-cargo run --bin fossil -- run examples/hello.fossil --dest file:///tmp/hello
-```
-
-`--dest` is required, and it is a URL (`file:///path`, `s3://bucket/prefix`, …).
-It prints `wrote 1 vertex type(s), 0 edge type(s) to <dest>` and leaves a corpus
-there: `vertex/Person.vertex.yml` declaring the columns, and
-`vertex/Person/*.parquet` holding the rows in 4,096-row tiles. Inspect it with
+The walking skeleton is `examples/hello.fossil`: run through the executor it
+writes `fossil.json` and `vertex/Person.parquet`, five `Person` vertices with
+subjects `https://example.org/user/1` … `/5`. Inspect a written corpus with
 DuckDB:
 
 ```bash
-duckdb -c "SELECT * FROM read_parquet('/tmp/hello/vertex/Person/*.parquet')"
+duckdb -c "SELECT * FROM read_parquet('<dest>/vertex/Person.parquet')"
 ```
 
-Five `Person` vertices, subjects `https://example.org/user/1` … `/5`.
-`crates/fossil-cli/tests/walking_skeleton.rs` asserts that content — not merely
-that files appeared — and is the test that goes red if it stops holding.
-
-`examples/hello.fossil` is a CLI fixture, not a conformance program: it is the
-one thing that drives the *binary* end to end and asserts the GraphAr dataset on
-disk by content. The language itself is proved by the conformance programs under
-`docs/programs/`, which `crates/fossil-cli/tests/programs.rs` compiles
-and the documentation transcludes.
+`crates/fossil-df/tests/walking_skeleton.rs` asserts that content — not merely
+that files appeared — and is the test that goes red if it stops holding. The
+language itself is proved by the conformance programs under `docs/programs/`,
+which `crates/fossil-df/tests/programs.rs` compiles and runs and the
+documentation transcludes.
 
 ## Foundations
 
@@ -109,7 +96,7 @@ There is **one** reference, in three pieces:
   somewhere else and it runs — `node` and a `duckdb` binary, no install, no build.
 - [`docs/programs/`](docs/programs/) — the conformance programs. Every program the
   documentation shows is one of these, read off disk at build time and never retyped into prose.
-  No count here: `crates/fossil-cli/tests/programs.rs` walks the directory, and the number this
+  No count here: `crates/fossil-df/tests/programs.rs` walks the directory, and the number this
   line used to carry was five behind it.
 
 Plus [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev cycle and commit policy, and

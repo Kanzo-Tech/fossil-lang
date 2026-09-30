@@ -1,8 +1,8 @@
 //! The editor half of the shape-document seam: the OPEN BUFFER is the
 //! document, and editing it re-checks the programs that name it.
 //!
-//! This is the browser-side twin of `fossil-cli`'s
-//! `documents::tests::editing_the_document_rechecks_the_program_and_the_diagnostic_changes`.
+//! This is the browser-side twin of `fossil-df`'s
+//! `tests/documents.rs::editing_the_document_rechecks_the_program_and_the_diagnostic_changes`.
 //! There the document is registered from a filesystem; here a fetched document
 //! arrives through `register_document` (`tests/documents.rs`), and the one the
 //! user is editing through `open_file`, changing by `update_file` — which is

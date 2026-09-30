@@ -1564,9 +1564,9 @@ impl<'db> Expr<'db> {
     ///
     /// It used to be appended to the message (`— did you mean `name`?`) and
     /// then pulled back OUT of it by a `find("did you mean")` over the message
-    /// text: `fossil-cli`'s `extract_did_you_mean` and this crate's conformance
-    /// harness each did their own. Both still run, and neither has anything to
-    /// find now, because [`fossil_base::Diagnostic::help`] carries it.
+    /// text: the native CLI's `extract_did_you_mean` and the conformance harness
+    /// each did their own. The harness's still runs, and has nothing to find
+    /// now, because [`fossil_base::Diagnostic::help`] carries it.
     ///
     /// # The caret is on the NAME, and so is the quick-fix
     ///

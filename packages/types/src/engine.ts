@@ -12,7 +12,7 @@
  * **A host should cache Parquet metadata** — `SET parquet_metadata_cache = true`, once, when it
  * boots. A corpus's payload is one file per type with a row group per tile, so its footer lists
  * every tile and grows with the corpus, and without the cache every statement fetches and parses it
- * again: a tile read costs the corpus rather than the tile. Measured in `/docs/design/backend`, it
+ * again: a tile read costs the corpus rather than the tile. Measured in `/docs/design/later/backend`, it
  * is 2.2× on a window's reads in DuckDB-WASM and 2.5× over a 10 ms link.
  */
 export interface Engine {

@@ -22,46 +22,16 @@ doctest = false
 workspace = true
 
 [dependencies]
-# The executor itself (lower_to_mir_pg → DataFusion → GraphArData → to_files).
+# The executor itself — compile, documents, sources, execute, layout, write.
+# This crate is its `wasm-bindgen` shell.
 fossil-df = { path = "../fossil-df" }
-# The layout pass — Louvain communities and the Hilbert renumbering — run here,
-# in memory, after `execute_graph`. It is the same crate and the same entry
-# point the native host calls, driven through `fossil_layout::io::MemoryFs`
-# because a browser has no filesystem. Without this edge the tab wrote the
-# STAGED tree against a manifest declaring the TILED one, with `x`/`y`/
-# `cluster_id` at the writer's zeros — a corpus satisfying the manifest's shape
-# and violating the addressing property that shape exists to express.
-#
-# It costs the wasm bundle nothing it was not already paying: the crate declares
-# `[package.metadata.fossil] wasm = true`, and everything it links — DataFusion
-# included, which it takes transitively through `fossil-df` — is what the line
-# above already brings.
-fossil-layout = { path = "../fossil-layout" }
-# One name — `manifest::DEFAULT_CHUNK_SIZE` — so the tile size this pass emits
-# at and the tile size the manifest declares are one constant, as they are on
-# the native side.
-fossil-sinks = { path = "../fossil-sinks" }
-# FossilDb (production salsa db) + SourceFile + the System trait + the document
-# registry the host fills.
-fossil-base = { path = "../fossil-base" }
-# The type-reading provider rows `ExecutorSystem` installs, and the
-# `OutputDescriptorKind` `fossil_df::output_descriptor` hands back.
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-# `documents::missing_documents` — which documents the program names and does
-# not hold, keyed and located by the one rule the checker uses.
-fossil-hir = { path = "../fossil-hir" }
 
-# DataFusion (match fossil-df: no `sql` frontend, keep `parquet` reads). The
-# wasm host owns the SessionContext so it can register source object stores +
-# tune execution (target_partitions = 1 — single-thread, no tokio::spawn).
-datafusion = { version = "54", default-features = false, features = ["parquet"] }
 # Every byte of a run goes through `fossil-storage`'s `Storage` — stores built
 # from the credentials the JS `Host` vends, or `InMemory` for a host with no
 # storage — and `DataFusion` reads sources through the same stores.
 fossil-storage = { path = "../fossil-storage", features = ["js"] }
 object_store = { workspace = true }
 futures = { workspace = true }
-bytes = { workspace = true }
 url = "2"
 # chrono is transitive (datafusion / object_store) and pulled with wasmbind OFF,
 # so `Utc::now()` falls through to std `SystemTime::now()` — which PANICS on
@@ -77,8 +47,6 @@ chrono = { version = "0.4", features = ["wasmbind"] }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
 js-sys = { workspace = true }
 console_error_panic_hook = { workspace = true }
 
@@ -92,10 +60,3 @@ getrandom = { workspace = true }
 # `object_store`'s cloud client adds two more lines: 0.2 from `ring`, 0.4 from `rand`.
 getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
 getrandom04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
-
-[dev-dependencies]
-futures = { workspace = true }
-# Native test drives the async core on a real runtime (the browser uses JS's
-# event loop instead, so tokio never reaches the wasm build).
-tokio = { workspace = true }
-fossil-base = { path = "../fossil-base" }

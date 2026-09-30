@@ -14,118 +14,75 @@ this repository has paid for twice.
 
 ## What a corpus is
 
-**Four sets of columns, seventeen columns between them**, declared once in `corpus.bnf` and projected
-into `crates/fossil-sinks/src/generated.rs` and `packages/corpus/src/vocabulary.generated.ts` by
-`cargo xtask corpus`: the **payload** (5), the **adjacency** (2), the **cell** (7) and the
-**quotient** (3). Exactly one of the seventeen is also a declared `properties:` entry — `subject` —
-and every reader names the ROLE it means rather than the name, because the eight words the writer
-emits were 545 string literals with no declaration any of them derived from.
+**Two sets of columns, seven columns between them**, declared once in `corpus.bnf` and projected
+into `crates/fossil-sinks/src/generated.rs` by `cargo xtask corpus`: the **payload** (5) —
+`dense_id`, `subject`, `x`, `y`, `cluster_id` — and the **edge** (2), `src` and `dst`. Every reader
+names the ROLE it means rather than the name, because the words the writer emits were 545 string
+literals with no declaration any of them derived from.
 
-**Every one of the four is addressed by a shift, and nothing is listed.** `dense_id` is a vertex's
-rank in the Hilbert order of its own position; a tile is
-`crates/fossil-graph/src/plan.rs, tile_of`, and a cell of rung `k` is `dense_id >> shift` with
-parent `r >> 2`, two bits a rung by `crates/fossil-sinks/src/manifest.rs, CellTree` —
-`crates/fossil-layout/src/layout/cells.rs, Pyramid` writes it. There is no directory
-listing over HTTP and the format asks for none.
-[Addressing](/docs/format/conventions/addressing) is the specification.
+**One graph, one id space, and a file per table.** `dense_id` is global across every vertex type,
+gapless, and a vertex's rank in the Hilbert order of its position over the whole graph. A vertex type
+is `vertex/<Type>.parquet`, a relation is `edge/<Src>_<label>_<Dst>.parquet`, and
+`fossil.json` — `crates/fossil-sinks/src/manifest.rs, Manifest` — names every one of them with its
+columns, its row count and, for a vertex table, its position. There is no directory listing over HTTP
+and the format asks for none. [The format](/docs/format) is the specification.
 
-**The corpus carries one coarse face: the cell pyramid**, which *aggregates* into synthetic rows
-that no scale describes. The level pyramid that *sampled* beside it — `dense_id % scale == 0`, real
-rows in the payload's own numbering — was retired when the reader stopped asking for it;
-[the backend](/docs/design/backend#the-sample-goes-below-z-there-are-only-cells) has why, and
-[cells](/docs/design/cells) is the argument for the cell pyramid being a third artefact.
+**The corpus has no coarse face.** A reader draws every vertex; the tiles, the cell pyramid and the
+quotient edges that let a reader draw less were [deferred](/docs/design/later/cells) with their
+measurements and the condition that brings them back.
 
 ## What the writer is
 
-Three loops and a document, sequenced in `crates/fossil-cli/src/host.rs` in the order a corpus is
-true in.
+One call, `fossil_df::write`, and one host that makes it: the wasm build, in a browser tab or in
+Node. The native command that also wrote was [deleted](/docs/design/discarded) on 2026-09-30.
 
-| the loop | where | what it produces |
+| the step | where | what it produces |
 | --- | --- | --- |
-| every vertex, then every edge, with a hard barrier between them | `crates/fossil-df/src/lib.rs, execute_graph` | the payload columns and both adjacency orientations, as Arrow in memory |
-| partition, place, renumber into Hilbert order, tile | `crates/fossil-layout/src/layout/pass.rs, enrich_layout` | the payload on disk, its tile statistics and the identity index |
-| one linear scan per rung, over the payload rather than the rung below | `crates/fossil-layout/src/layout/cells.rs, Pyramid` | the cell rows and the quotient edges |
+| every vertex, then every edge, with a hard barrier between them | `crates/fossil-df/src/lib.rs, execute_graph` | the payload columns and the edges, as Arrow in memory |
+| one joint layout over the whole graph: Louvain, placement, renumber into Hilbert order | `crates/fossil-layout/src/layout/pass.rs` | `x`, `y`, `cluster_id` and the global `dense_id`; the edges remapped onto it |
+| one Parquet file per table, row groups of `crates/fossil-sinks/src/manifest.rs, ROW_GROUP_ROWS` | the executor | the payload and the edges on disk, sorted by `dense_id` and by `(src, dst)` |
 
 Nothing is staged and read back: the rows reach the pass as the batches the executor already held.
-The trip that is gone was 43.3 MB of the 115.9 MB a com-DBLP run wrote — **37.4%, a write
-amplification of 1.60×**.
 
-**The manifest is written last, and that is not tidiness.** A document written before the bytes can
-only *promise* them, which is the right shape for a count that is arithmetic and the wrong one for a
-number that is measured — and two of its fields are measured. A rung's quotient edge count, and a
-categorical channel's `domain`, because nothing in front of the bytes knows how many communities
-Louvain will find. [Streaming](/docs/design/streaming) argues the budget the write path runs under.
+**The manifest is written last, and that is not tidiness.** `fossil.json` is the commit: a reader
+opens nothing a manifest does not name, so a run that fails halfway leaves Parquet no reader will
+find. And a document written before the bytes can only *promise* them, while `record_count` is
+measured.
 
 ## What the reader is
 
-**One door, one name, and it always takes an engine** — `packages/corpus/src/open.ts, open`.
-`resolveCorpus` and `openCorpus` are both gone into it, and the addressing either of them answered
-with is internal to it:
-
-```ts
-await open(job, { engine, host })  // a job's corpus, under the credential the host vends
-await open(url, { engine })        // a corpus at a URL
-```
-
-`sql: 'allowed'` widens either to `SqlCorpus`.
-
-**What comes back has two halves, and the line between them is which bytes get chosen.**
-`tileMatrix`, `scan` and `edges` compute which tiles to read and read those. The verbs —
-`crates/fossil-graph/src/operations/mod.rs, Operation`, compiled to wasm32 — name a table and let the
-engine decide. The two halves meet at exactly one point, the host's `Engine`, and the reader brings
-no engine of its own to either.
-
-**What would merge them is pruning by predicate, and it was measured to lose.** DuckDB evaluates a
-range predicate per row instead of skipping row groups: a range join against the id runs at 237 ms
-and 179 `BETWEEN … OR …` predicates at 189 ms, against 5 ms for not pruning at all. A window written
-as a `WHERE` reads the whole file, so pruning stays the tiles' job and this change did not merge
-anything. [One door](/docs/design/one-door) argues the surface, and [the backend](/docs/design/backend) its
-shape: a tile matrix, a scan planned from the manifest, and a batch per tile.
+**One door, and it always takes an engine** — `@fossil-lang/corpus`: `open`, `manifest`, `scan`,
+`sql`, `close`. `open` reads `fossil.json` once and makes a view per table; `scan` is one `SELECT`
+over one table, and DuckDB prunes row groups by their footers. `sql: 'allowed'` widens it to a
+`SqlCorpus`. [One door](/docs/design/one-door) argues the surface.
 
 The reader's **policy** over that contract is deliberately not on the door, and not in this
 repository: what a corpus is drawn WITH and what is already LOADED belong to the viewer,
-`@kanzo-tech/graph`. A channel is read off a manifest, but an encoding is a reader's ranking of what
-to do with one and a residency budget is a number measured against one renderer on one corpus.
-Neither is a property of the artefact.
+`@kanzo-tech/graph`. An encoding is a reader's ranking of what to do with a column, and a residency
+budget is a number measured against one renderer on one corpus. Neither is a property of the
+artefact.
 
 ## What is declared and what is derived
 
-One rule, and `crates/fossil-sinks/src/manifest.rs, Channel` states it beside the field it is applied
-to: **a document carries a fact exactly when a reader cannot recover it from the bytes.**
-
-| the field | why the document carries it |
-| --- | --- |
-| `CellTree::vertices_per_cell` | the base of the pyramid is a choice about what a screen can draw, and a set of points is never full, so no writer derives it from the data |
-| `Channel::domain` | a categorical's distinct-value count is in no footer and costs a scan; a quantitative channel carries none, because Parquet's per-row-group min and max already are one |
-| `CoordinateSystem::provenance` | a latitude and a drawing algorithm's output are both two `float32` columns, and nothing but a declaration tells them apart |
-
-**The absences are the same rule read the other way.** A cell row carries no `parent`, because a cell
-of rung `k` covers a fixed interval of the `dense_id` axis and the parent is `r >> 2`; and no
-`subject`, because a cell is not an entity and no bookmark keys on one.
-`crates/fossil-sinks/src/manifest.rs, CellTree` carries no `chunk_size` of its own, because a rung's
-ids are a shift of the payload's and there is no second number to declare. And `corpus.bnf` declares
-no prefix, no file name and neither shift: those are addressing, and addressing already has one
-implementation in `crates/fossil-graph/src/plan.rs`.
+One rule: **a document carries a fact exactly when a reader cannot recover it from the bytes, or
+must have it before it reads them.** `fossil.json` carries the tables, their columns and their types
+because `open` makes views out of them; `record_count` because a viewer sizes its buffers before the
+first byte; and `position` because two `float32` columns are two numbers until something says which
+two are the plane. What it does not carry — an extent, a column's domain, statistics — is in the
+Parquet footers or one query away, and comes back as an additive field the day a reader needs it
+before reading. [Position](/docs/design/position) argues the one field that is a decision.
 
 ## The heuristic stops at the corpus
 
 > **What crosses to the reader is arithmetic and declared.**
 
-The fifth quality attribute, and the only one this page states rather than links, because it is the
-only one without a page of its own. The other four have one: a declared budget bounds the write path
-([streaming](/docs/design/streaming)), a read is bounded and reports what it read
-([one door](/docs/design/one-door)), addressing is arithmetic
-([addressing](/docs/format/conventions/addressing)), and a reader never holds the graph
-([cells](/docs/design/cells), [the backend](/docs/design/backend)).
-
-It is what decided the pyramid against the holarchy. A holarchy's extents are **measured** — they are
-wherever Louvain's sweeps stopped — so addressing one means fetching a heuristic's boundaries into
-the read path, where every reader pays for them and no reader can check them.
-[Cells](/docs/design/cells) carries that argument and this page does not repeat it.
+The quality attribute this page states rather than links, because it has no page of its own. Louvain
+is a heuristic, and what it decides reaches a reader as columns — `x`, `y`, `cluster_id` and the
+order of `dense_id` — never as a structure a reader must fetch to address the rest.
 
 **Its first measured violation was a dependency edge and not a format decision**, which is why it
-belongs here rather than on the format. `fossil-layout`'s pass wrote tiles through a Parquet encoder
-that lived in `fossil-df` and that `fossil-df` never called, and that one `use` put `datafusion`,
+belongs here rather than on the format. `fossil-layout`'s pass wrote through a Parquet encoder that
+lived in `fossil-df` and that `fossil-df` never called, and that one `use` put `datafusion`,
 `fossil-hir`, `fossil-mir`, `fossil-descriptors-output`, `fossil-base` and `salsa` into the normal
 closure of a pass that resolves no name and holds no database. `39d0fb8` cut it, and
 `crates/xtask/tests/substrate_reach.rs` is the attribute made checkable: it takes its subject from
@@ -142,20 +99,19 @@ drawn flat show nothing. The ugliness is the finding, not a failure of the drawi
 graph LR
   L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
-  M["<b>engine</b> · 4 crates<br/>df · df-wasm · cli · introspect"]
-  C["<b>corpus</b> · 7 crates<br/>graph · graph-wasm · layout<br/>sinks · tile-writer · storage · storage-wasm"]
+  M["<b>engine</b> · 3 crates<br/>df · df-wasm · introspect"]
+  C["<b>corpus</b> · 6 crates<br/>graph · graph-wasm · layout<br/>sinks · storage · storage-wasm"]
   X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
   E -->|18| L
   E -->|1| M
-  M -->|21| L
-  M -->|7| C
-  C -->|1| L
+  M -->|10| L
+  M -->|5| C
   M -->|1| X
   C -->|1| X
 ```
 
-**50 cross-group edges**, and no pair runs both ways. Every number above
+**36 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -165,43 +121,24 @@ the columns a `DESCRIBE` finds, the editor is silent on every diagnostic whose e
 schema, which is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`.
 
 `engine ↔ corpus` was the mutual pair, and one edge held it: `fossil-layout → fossil-df`, for one
-type — the row-group container the corpus's payload is written through. It looked like an edge with
-nowhere to go. `fossil-sinks` was the obvious home and takes `arrow-schema` alone, so moving the
-writer there would have put `arrow` + `parquet` into `fossil-graph-wasm`'s browser bundle, which has
-neither; a leaf crate of its own looked like a whole crate for one shared function.
-
-What settled it was what the edge cost rather than what it was worth. A struct `fossil-df` never
-called put `datafusion`, `fossil-hir`, `fossil-mir`, `fossil-descriptors-output`, `fossil-base` and
-`salsa` into the closure of a pass that resolves no name and holds no database — measurable as
+type — the Parquet encoder the pass wrote through. A struct `fossil-df` never called put
+`datafusion`, `fossil-hir`, `fossil-mir`, `fossil-descriptors-output`, `fossil-base` and `salsa`
+into the closure of a pass that resolves no name and holds no database — measurable as
 `cargo tree -p fossil-layout -e normal -i salsa`, which printed a tree and now prints nothing. The
-writer is `crates/fossil-tile-writer/src/lib.rs, TileWriter`, a leaf over `arrow` and `parquet`, and
-`fossil-layout` reaches the engine on a dev edge alone, for the bench that measures the tiling
-against the baseline encoder. The arrow that remains runs one way:
+encoder became a leaf crate, and the leaf went with the tiles it wrote: the pass computes columns and
+the writer encodes them. The arrow that remains runs one way:
 
 | direction | edge | why it is there |
 | --- | --- | --- |
-| engine → corpus | `fossil-cli → fossil-layout` | the post-pass **is** the payload write, so the thing that writes the manifests calls it |
 | engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
-| engine → corpus | `fossil-cli → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk |
+| engine → corpus | `fossil-df-wasm → fossil-layout` | the write host runs the layout pass over what the executor produced |
+| engine → corpus | `fossil-df-wasm → fossil-sinks`, `fossil-df-wasm → fossil-storage` | the host names the files it writes and writes them through the job's store |
 | engine → corpus | `fossil-introspect → fossil-storage` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
 
-`fossil-sinks` and `fossil-storage` are filed by subject and not by history, and that is the whole
-of the change: neither crate had a fossil dependency of its own when it was filed, so a leaf changed
-groups and no code moved.
-
-**`fossil-sinks` is not a leaf any more, and that is the whole of the `corpus → language` arrow.**
-It grew one: `fossil-graph-schema` — a manifest records what a compiler decided, so it names the
-substrate contract, and `crates/fossil-graph-schema/src/lib.rs, Cardinality` is what made an edge's
-`{1,1}` a fact the corpus could state rather than one a reader defaulted. The direction runs this
-way on purpose, and it is **not** the objection that keeps
-`fossil-hir::Primitive` out of the manifest layer: a cardinality is not a type, it is the shape a
-predicate was declared with. `fossil-storage` is still a leaf. It **cost** an edge rather than saving one — `fossil-df → fossil-sinks`,
-`fossil-cli → fossil-sinks` and `fossil-introspect → fossil-storage` used to be internal to the
-engine, three that started crossing against two that stopped — and it bought the cycle:
-`fossil-graph → fossil-sinks` and `fossil-mcp → fossil-storage` (a crate since deleted) moved inside `corpus`, so the
-return leg went from three edges to one — and that one has since gone too, which is the section
-above. There are still two cores; there is no longer a stitch closing the loop.
-[One engine](/docs/design/one-engine) is where the rest of the filing gets settled.
+`fossil-sinks` and `fossil-storage` are filed by subject and not by history, and both are leaves:
+`fossil-sinks` takes `serde`, `schemars` and `arrow-schema` and no fossil crate, so nothing on the
+corpus side reaches back into the language. [One engine](/docs/design/one-engine) is where the rest
+of the filing gets settled.
 
 Two things have left `fossil-base` and neither shows on this diagram in the same way. The `@conn`
 locator is `fossil-locator`, a crate with no dependencies at all — filing it under `language` is the
@@ -211,13 +148,10 @@ cost **no** edge: its only production caller was `fossil-hir` already, and `foss
 depended on `fossil-base`. A module crossing a boundary that was already crossed is the cheapest
 kind of move there is.
 
-`fossil-engine` is the crate that is gone. It was the native host, it was a library, and it had
-**one consumer** — `fossil-cli`, which called all five of its verbs and nothing else did. The other
-two hosts each keep theirs inside themselves, so the native one was the only host filed apart from
-the thing that used it. Folding it in removed a crate and three edges — 54 → 51 — because the two
-manifests shared five dependencies, and each of those stopped being counted twice. `providers()` did not survive the
-fold at all — it was `fossil_lineage::providers()` with a `Vec` around it, and the binary calls the
-projection directly.
+`fossil-engine` and `fossil-cli` are the crates that are gone. `fossil-engine` was the native host,
+a library with **one consumer** — `fossil-cli`, which called all five of its verbs — and it was folded
+into that consumer. `fossil-cli` was then [deleted](/docs/design/discarded) on 2026-09-30: nothing used
+it, and it wrote a different corpus from the browser's. The only write host left is `fossil-df-wasm`.
 
 ## What is left of the rings
 
@@ -305,14 +239,14 @@ So the fold is blocked while that edge stands. Three ways out were costed:
 | --- | --- |
 | a generic or associated type on `System` | impossible, not merely expensive: the trait is used as `Arc<dyn System>` and as `&dyn System`, and either shape is object-safety's own counterexample |
 | the types down into `fossil-graph-schema`, the leaf both sides already see | no new crate — and a `Mutex<HashMap>` of host-owned mutable state inside the crate that depends on nothing but `serde`, which is this page's own mistake committed a second time |
-| a new leaf holding `DescriptorCache` + `InferredDescriptor` | it works, and it is the only one that does: a 26th crate, an import path changed in eight crates, and **nothing removed from `fossil-base`** |
+| a new leaf holding `DescriptorCache` + `InferredDescriptor` | it works, and it is the only one that does: a 25th crate, an import path changed in eight crates, and **nothing removed from `fossil-base`** |
 
 **What reverses this:** the fold itself. It removes a crate, so the third way nets zero on the count
 and the cycle goes with it.
 
 ## The verdict is not the crate count
 
-**Twenty-six crates**, against Gluon's ~11 crates for 90k lines, Gleam's 15 (six real) for 228k
+**Twenty-four crates**, against Gluon's ~11 crates for 90k lines, Gleam's 15 (six real) for 228k
 and rust-analyzer's 36 for 571k. The line count that used to sit beside this number is deliberately
 not restated: it was measured on 2026-08-25 and the tree has changed since, so the only honest
 options were to re-measure or to drop it.
@@ -320,10 +254,10 @@ options were to re-measure or to drop it.
 
 Five of them moved and only two were new code: `fossil-locator` arrived by moving a module down out
 of `fossil-base`, `fossil-engine` left by moving three into the crate that already used them, two
-arrived carrying a write-time bound and left when it was [removed](/docs/design/discarded), and
-`fossil-tile-writer` arrived by moving a struct out of a crate that never called it. Which is the
-point of the heading — the count went 25 → 26 → 25 → 27 → 28 → 26 and none of those numbers is the
-verdict.
+arrived carrying a write-time bound and left when it was [removed](/docs/design/discarded),
+`fossil-tile-writer` arrived by moving a struct out of a crate that never called it and left with the
+tiles, and `fossil-cli` left with the native host. Which is the point of the heading — the count went
+25 → 26 → 25 → 27 → 28 → 26 → 24 and none of those numbers is the verdict.
 
 What makes two dozen feel like a maze is not the count. Two of them lie about what they are, and a
 false name costs more than a surplus crate because you cannot skip it while reading. There were
@@ -333,7 +267,7 @@ about itself is now a module of the one host that used it.
 | the name | what it actually is |
 | --- | --- |
 | `fossil-ide` | not an IDE: the set of LSP functions, and it exists only because `fossil-lsp` does not compile to wasm32. It also returns `lsp_types` structs directly (`crates/fossil-ide/src/completion.rs, completions`), which is the invariant rust-analyzer defends hardest and the one Gleam broke |
-| `fossil-sinks` | writes nothing: the manifest model, borrowing GraphAr's YAML field names without conforming to GraphAr ([where borrowing stops](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops)); half its dependents are readers |
+| `fossil-sinks` | writes nothing: the manifest model — `fossil.json` and its JSON Schema ([nothing is borrowed from GraphAr any more](/docs/design/corpus#nothing-is-borrowed-from-graphar-any-more)) — and the column table `corpus.bnf` generates |
 
 <Callout title="Deliberately absent">
 **No numbered layers.** A rule that needs a number to explain itself is a taxonomy, not a rule.

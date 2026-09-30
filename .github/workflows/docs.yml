@@ -2,8 +2,8 @@ name: docs
 
 # Path-filtered, and deliberately NOT a step inside `pnpm-ci.yml`.
 #
-# That job's ceiling is 60 minutes because a cold run compiles datafusion to wasm
-# and builds `fossil-cli --release`; hanging a Next.js build off it would slow every
+# That job's ceiling is 60 minutes because a cold run compiles datafusion to wasm;
+# hanging a Next.js build off it would slow every
 # PR that touches a crate in order to check a website that no crate can break. The
 # converse holds too: a change to an `.mdx` file has no business rebuilding
 # datafusion. So the two gates are separate and each one only runs when its own

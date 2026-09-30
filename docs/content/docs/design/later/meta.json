@@ -1,0 +1,15 @@
+{
+  "title": "Later",
+  "description": "Designs deferred with their measurements, and what would bring each one back.",
+  "pages": [
+    "backend",
+    "addressing",
+    "corpus-tiles",
+    "one-door-camera",
+    "camera",
+    "cells",
+    "position-plane",
+    "cost",
+    "streaming"
+  ]
+}

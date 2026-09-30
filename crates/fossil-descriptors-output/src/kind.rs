@@ -6,8 +6,8 @@
 //! they lack structural equality. Dispatch goes through this enum's variants
 //! (concrete types), not through `&dyn OutputDescriptor`.
 //!
-//! The consumers are the HOSTS — `fossil-cli`, `fossil-df` and
-//! `fossil-df-wasm` carry one into the executor. `fossil-hir` is not among
+//! The consumers are the HOSTS — `fossil-df` and `fossil-df-wasm` carry one
+//! into the executor. `fossil-hir` is not among
 //! them and cannot be: it has no dependency on this crate.
 
 use crate::AcceptAllDescriptor;

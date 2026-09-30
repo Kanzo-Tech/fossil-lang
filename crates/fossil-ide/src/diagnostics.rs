@@ -41,8 +41,8 @@ use crate::position::{line_index, offset_to_lsp_position};
 use crate::related::related_locations;
 
 /// Every diagnostic `file` produces, from the one implementation of that
-/// question — [`fossil_mir::program_diagnostics`], which `fossil-cli` also
-/// calls.
+/// question — [`fossil_mir::program_diagnostics`], which the conformance
+/// harness also calls.
 ///
 /// Each host used to run a per-mapping loop of its own instead, and what the
 /// editors did not show for as long as that was true: a file the parser

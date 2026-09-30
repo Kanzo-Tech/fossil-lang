@@ -116,10 +116,10 @@ pub fn parse(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Cst<'_>
     // The parser is pure (not Salsa-tracked), so it cannot
     // call `.accumulate(db)` itself. Drain its internal `Vec<ParseDiagnostic>`
     // here, inside the wrapping Salsa query, so each parse error reaches
-    // the host (CLI / LSP / WASM) via the `Diagnostic` accumulator.
+    // the host (LSP / WASM / executor) via the `Diagnostic` accumulator.
     // `.file_absolute()` and not the default frame: `parse` is FILE-keyed, so a
     // parse error's span is a file offset by construction. Left in the default
-    // `MappingRelative`, the per-mapping drain in the native host rebases it by
+    // `MappingRelative`, a per-mapping drain rebases it by
     // the mapping's own start — which moves the copy, so the dedup keyed on
     // (severity, message, span) stops collapsing the two and the reader gets the
     // same error twice, the second one pointing past the end of the file.

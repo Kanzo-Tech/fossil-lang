@@ -20,18 +20,8 @@ pub enum ColumnRole {
     Coordinate,
     /// An ordinal the writer computed, for a reader to colour by.
     Categorical,
-    /// One end of a relation, in the aligned type's `dense_id` space.
+    /// One end of a relation, a vertex's global `dense_id`.
     Endpoint,
-    /// How many rows of the level below this one summarises.
-    Tally,
-    /// A summed edge weight.
-    Weight,
-    /// The majority value, over the rows summarised, of the channel the tree names.
-    Mode,
-    /// What fraction of the rows summarised carry the mode.
-    Purity,
-    /// One end of a quotient edge, in its own rung's cell space.
-    Incident,
 }
 
 /// One column the writer emits.
@@ -39,11 +29,9 @@ pub enum ColumnRole {
 pub struct WriterColumn {
     /// The column name, as it appears in the Parquet schema.
     pub name: &'static str,
-    /// The `GraphAr` spelling of its type, which is what the manifest writes.
+    /// The manifest's spelling of its type, which is what the manifest writes.
     pub data_type: &'static str,
     pub role: ColumnRole,
-    /// Whether the manifest's `properties:` also declares it.
-    pub declared: bool,
 }
 
 /// Every column of a vertex payload row, in writer order.
@@ -52,31 +40,26 @@ pub const PAYLOAD_COLUMNS: &[WriterColumn] = &[
         name: "dense_id",
         data_type: "uint32",
         role: ColumnRole::Address,
-        declared: false,
     },
     WriterColumn {
         name: "subject",
         data_type: "string",
         role: ColumnRole::Identity,
-        declared: true,
     },
     WriterColumn {
         name: "x",
         data_type: "float",
         role: ColumnRole::Coordinate,
-        declared: false,
     },
     WriterColumn {
         name: "y",
         data_type: "float",
         role: ColumnRole::Coordinate,
-        declared: false,
     },
     WriterColumn {
         name: "cluster_id",
         data_type: "uint32",
         role: ColumnRole::Categorical,
-        declared: false,
     },
 ];
 
@@ -95,134 +78,28 @@ pub const PAYLOAD_COORDINATES: &[&str] = &["x", "y"];
 /// The categorical column(s) of a vertex payload row — an ordinal the writer computed, for a reader to colour by.
 pub const PAYLOAD_CATEGORICAL: &[&str] = &["cluster_id"];
 
-/// Every column of an adjacency row, in either orientation, in writer order.
-pub const ADJACENCY_COLUMNS: &[WriterColumn] = &[
+/// Every column of an edge row, in writer order.
+pub const EDGE_COLUMNS: &[WriterColumn] = &[
     WriterColumn {
-        name: "src_dense",
+        name: "src",
         data_type: "uint32",
         role: ColumnRole::Endpoint,
-        declared: false,
     },
     WriterColumn {
-        name: "dst_dense",
+        name: "dst",
         data_type: "uint32",
         role: ColumnRole::Endpoint,
-        declared: false,
     },
 ];
 
-/// The names of an adjacency row, in either orientation, in writer order.
-pub const ADJACENCY_NAMES: &[&str] = &["src_dense", "dst_dense"];
+/// The names of an edge row, in writer order.
+pub const EDGE_NAMES: &[&str] = &["src", "dst"];
 
-/// The endpoint column(s) of an adjacency row, in either orientation — one end of a relation, in the aligned type's `dense_id` space.
-pub const ADJACENCY_ENDPOINTS: &[&str] = &["src_dense", "dst_dense"];
+/// The endpoint column(s) of an edge row — one end of a relation, a vertex's global `dense_id`.
+pub const EDGE_ENDPOINTS: &[&str] = &["src", "dst"];
 
-/// Every column of a cell row of one rung of the pyramid, in writer order.
-pub const CELL_COLUMNS: &[WriterColumn] = &[
-    WriterColumn {
-        name: "cell_id",
-        data_type: "uint32",
-        role: ColumnRole::Address,
-        declared: false,
-    },
-    WriterColumn {
-        name: "x",
-        data_type: "float",
-        role: ColumnRole::Coordinate,
-        declared: false,
-    },
-    WriterColumn {
-        name: "y",
-        data_type: "float",
-        role: ColumnRole::Coordinate,
-        declared: false,
-    },
-    WriterColumn {
-        name: "count",
-        data_type: "uint32",
-        role: ColumnRole::Tally,
-        declared: false,
-    },
-    WriterColumn {
-        name: "internal",
-        data_type: "uint64",
-        role: ColumnRole::Weight,
-        declared: false,
-    },
-    WriterColumn {
-        name: "mode",
-        data_type: "uint32",
-        role: ColumnRole::Mode,
-        declared: false,
-    },
-    WriterColumn {
-        name: "purity",
-        data_type: "float",
-        role: ColumnRole::Purity,
-        declared: false,
-    },
-];
+/// The edge column the manifest's `source` endpoint names as its `key`.
+pub const ENDPOINT_SRC: &str = "src";
 
-/// The names of a cell row of one rung of the pyramid, in writer order.
-pub const CELL_NAMES: &[&str] = &["cell_id", "x", "y", "count", "internal", "mode", "purity"];
-
-/// The address column(s) of a cell row of one rung of the pyramid — the row's rank in the ordering, which a re-layout renumbers.
-pub const CELL_ADDRESS: &[&str] = &["cell_id"];
-
-/// The coordinate column(s) of a cell row of one rung of the pyramid — one axis of the plane.
-pub const CELL_COORDINATES: &[&str] = &["x", "y"];
-
-/// The tally column(s) of a cell row of one rung of the pyramid — how many rows of the level below this one summarises.
-pub const CELL_TALLY: &[&str] = &["count"];
-
-/// The weight column(s) of a cell row of one rung of the pyramid — a summed edge weight.
-pub const CELL_WEIGHT: &[&str] = &["internal"];
-
-/// The mode column(s) of a cell row of one rung of the pyramid — the majority value, over the rows summarised, of the channel the tree names.
-pub const CELL_MODE: &[&str] = &["mode"];
-
-/// The purity column(s) of a cell row of one rung of the pyramid — what fraction of the rows summarised carry the mode.
-pub const CELL_PURITY: &[&str] = &["purity"];
-
-/// Every column of a quotient edge between two cells of one rung, in writer order.
-pub const QUOTIENT_COLUMNS: &[WriterColumn] = &[
-    WriterColumn {
-        name: "src_cell",
-        data_type: "uint32",
-        role: ColumnRole::Incident,
-        declared: false,
-    },
-    WriterColumn {
-        name: "dst_cell",
-        data_type: "uint32",
-        role: ColumnRole::Incident,
-        declared: false,
-    },
-    WriterColumn {
-        name: "weight",
-        data_type: "uint64",
-        role: ColumnRole::Weight,
-        declared: false,
-    },
-];
-
-/// The names of a quotient edge between two cells of one rung, in writer order.
-pub const QUOTIENT_NAMES: &[&str] = &["src_cell", "dst_cell", "weight"];
-
-/// The weight column(s) of a quotient edge between two cells of one rung — a summed edge weight.
-pub const QUOTIENT_WEIGHT: &[&str] = &["weight"];
-
-/// The incident column(s) of a quotient edge between two cells of one rung — one end of a quotient edge, in its own rung's cell space.
-pub const QUOTIENT_INCIDENTS: &[&str] = &["src_cell", "dst_cell"];
-
-/// The payload columns the manifest's `properties:` also declares.
-///
-/// One of five, and that asymmetry is the whole of the manifest-versus-bytes
-/// difference a reader has to know about.
-pub const PAYLOAD_DECLARED: &[&str] = &["subject"];
-
-/// The endpoint column a `src`-aligned orientation is tiled by.
-pub const ALIGNED_SRC: &str = "src_dense";
-
-/// The endpoint column a `dst`-aligned orientation is tiled by.
-pub const ALIGNED_DST: &str = "dst_dense";
+/// The edge column the manifest's `destination` endpoint names as its `key`.
+pub const ENDPOINT_DST: &str = "dst";

@@ -679,7 +679,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
 /// blank line after it and any comment in between, so an untrimmed span ends on
 /// a LATER line and miette draws the label as a multi-line block — `╭─▶` down
 /// the gutter, with the caret under an empty line. Measured twice: on
-/// `fossil-cli`'s `broken_field` golden, and on `compound-key` with its join
+/// the native CLI's `broken_field` golden, and on `compound-key` with its join
 /// condition broken, where the `// #endregion on` comment and the blank line
 /// after it both ended up underlined.
 ///
@@ -1286,7 +1286,7 @@ Users : Person from User
     /// after this binding on purpose: rowan's `text_range()` carries the
     /// trailing trivia, so an untrimmed span ends on line 4 and miette renders
     /// the label as a multi-line block down the gutter, with the caret under
-    /// nothing. `fossil-cli`'s `broken_field` golden showed exactly that.
+    /// nothing. The native CLI's `broken_field` golden showed exactly that.
     #[test]
     fn a_source_binding_span_is_the_binding_and_no_trivia() {
         let (db, file) = db_with_hello();

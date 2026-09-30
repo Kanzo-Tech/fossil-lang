@@ -46,7 +46,7 @@ pub mod def_map;
 pub mod didyoumean;
 /// The source spelling of a lowered node — the HIR said back in surface syntax.
 ///
-/// Its consumer is the conformance census — `fossil-cli`'s `tests/census`,
+/// Its consumer is the conformance census — `fossil-df`'s `tests/census`,
 /// which commits a per-program record of what the compiler UNDERSTOOD. Rendering
 /// that from source text would prove nothing; rendering it from the HIR is the
 /// only version of the artefact that can be wrong.
@@ -64,8 +64,7 @@ pub mod item_tree;
 pub mod lower;
 pub mod provenance;
 /// What the compiler says when a program names a provider it cannot use. Three
-/// sentences, shared by every path that raises one — this crate's checker and
-/// the native host's run path. They were methods on `fossil_base::Provider`,
+/// sentences, shared by every path that raises one. They were methods on `fossil_base::Provider`,
 /// which put English Fossil compiler errors in the trait-and-db substrate.
 pub mod refusals;
 pub mod shape_documents;

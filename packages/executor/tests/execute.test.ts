@@ -3,7 +3,8 @@
  * build (`--target web`) through the package's typed surface. Proves the full
  * vertex+edge path runs in WASM and emits valid Parquet + the manifest.
  *
- * The Rust core is covered by `crates/fossil-df-wasm/tests/execute_core.rs`;
+ * The Rust core is covered by `crates/fossil-df/tests/execute_core.rs` and the
+ * corpus it writes by `crates/fossil-df/tests/write.rs`;
  * this suite covers the wasm-bindgen + JS-marshalling boundary cargo can't reach.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -117,23 +118,16 @@ describe('FossilExecutor', () => {
       exec.free();
     }
 
-    // The names are the TILED ones, and that is the layout pass running rather
-    // than a rename: a payload is `<prefix>/tiles.parquet` and the addressing
-    // that opens it without a scan is `<prefix>/index/tiles.parquet`. These
-    // read `vertex/Person.parquet` until the pass moved into the browser, and
-    // nothing on the Rust side goes red when it changes — this file is the gate.
+    // One Parquet per vertex type and per relation, and the manifest — and
+    // nothing else. Nothing on the Rust side sees the wasm build's tree; this
+    // file is the gate.
     const paths = result.files.map((f) => f.path).sort();
-    for (const need of [
-      'graph.graph.yml',
-      'vertex/Person/tiles.parquet',
-      'vertex/Person/index/tiles.parquet',
-      'vertex/Order/tiles.parquet',
-      'vertex/Order/index/tiles.parquet',
-      'edge/Order_placedBy_Person/by_source/tiles.parquet',
-      'edge/Order_placedBy_Person/by_target/tiles.parquet',
-    ]) {
-      expect(paths).toContain(need);
-    }
+    expect(paths).toEqual([
+      'edge/Order_placedBy_Person.parquet',
+      'fossil.json',
+      'vertex/Order.parquet',
+      'vertex/Person.parquet',
+    ]);
 
     // Every .parquet is a real Parquet file (magic "PAR1" at both ends).
     for (const f of result.files) {
@@ -144,24 +138,50 @@ describe('FossilExecutor', () => {
       }
     }
 
-    expect(result.report.dest).toBe('s3://jobs/run-1/');
-    const person = result.report.vertices.find((v) => v.type === 'Person');
-    expect(person?.vertex_count).toBe(3);
-    expect(person?.prefix).toBe('vertex/Person/');
-    const edge = result.report.edges.find((e) => e.edge_type === 'placedBy');
-    expect(edge?.src_type).toBe('Order');
-    expect(edge?.dst_type).toBe('Person');
-    expect(edge?.edge_count).toBe(4);
+    const manifest = JSON.parse(
+      new TextDecoder().decode(result.files.find((f) => f.path === 'fossil.json')!.bytes),
+    );
+    expect(manifest.format).toBe('fossil/1');
+    const person = manifest.vertex_tables.find((v: { name: string }) => v.name === 'Person');
+    expect(person.record_count).toBe(3);
+    expect(person.path).toBe('vertex/Person.parquet');
+    const edge = manifest.edge_tables.find((e: { label: string }) => e.label === 'placedBy');
+    expect(edge.source.references).toBe('Order');
+    expect(edge.destination.references).toBe('Person');
+    expect(edge.record_count).toBe(4);
 
-    // The report is the manifest the run just encoded — not a second account of
-    // it. Every document the index names is one of the files being uploaded.
-    for (const rel of [...result.report.graph.vertices, ...result.report.graph.edges]) {
-      expect(paths).toContain(rel);
+    // Every table the manifest names is one of the files written.
+    for (const t of [...manifest.vertex_tables, ...manifest.edge_tables]) {
+      expect(paths).toContain(t.path);
     }
+
+    expect(result.report.dest).toBe('s3://jobs/run-1/');
     // Every order names a real person, so nothing dangled — and `0` is stated.
-    expect(result.report.dropped).toEqual([
-      { prefix: 'edge/Order_placedBy_Person/', dropped: 0 },
-    ]);
+    expect(result.report.dropped).toEqual([{ table: 'Order_placedBy_Person', dropped: 0 }]);
+  });
+
+  // The getting-started page's script, as a test: a program located at a URL names its data and
+  // its shape relative to itself, and the host reads each by the locator fossil resolved.
+  it('resolves the relative sources of a program located at a URL', async () => {
+    const dir = new URL('../../../docs/programs/hello/', import.meta.url);
+    const base = 'https://local.test/hello/';
+    const local = (locator: string) => new URL(locator.slice(base.length), dir);
+    const exec = new FossilExecutor(
+      await readFile(new URL('hello.fossil', dir), 'utf8'),
+      `${base}hello.fossil`,
+    );
+    let result;
+    try {
+      for (const d of exec.missingDocuments()) {
+        exec.registerDocument(d.key, await readFile(local(d.locator), 'utf8'));
+      }
+      const sources: Record<string, Uint8Array> = {};
+      for (const s of exec.sources()) sources[s.uri] = new Uint8Array(await readFile(local(s.uri)));
+      result = await exec.runInMemory(sources, 'memory://hello');
+    } finally {
+      exec.free();
+    }
+    expect(result.files.map((f) => f.path).sort()).toEqual(['fossil.json', 'vertex/Person.parquet']);
   });
 
   // Two mappings of one type are a `UNION ALL`, and a union of two scans has two
@@ -196,6 +216,9 @@ describe('FossilExecutor', () => {
     } finally {
       exec.free();
     }
-    expect(result.report.vertices.find((v) => v.type === 'Person')?.vertex_count).toBe(3);
+    const manifest = JSON.parse(
+      new TextDecoder().decode(result.files.find((f) => f.path === 'fossil.json')!.bytes),
+    );
+    expect(manifest.vertex_tables[0].record_count).toBe(3);
   });
 });

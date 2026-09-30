@@ -46,8 +46,8 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 # `NativeSystem` — a `System` with a descriptor cache and nothing else. It is
-# what lets these tests have a host without depending on one: `fossil-cli`
-# would be a cycle, because it depends on this crate.
+# what lets these tests have a host without depending on one: a host that
+# depends on this crate would be a cycle.
 fossil-base = { path = "../fossil-base", features = ["test-support"] }
 # `SourceAnchor`, for the test that pins the creds projection it is built from.
 fossil-locator = { path = "../fossil-locator" }

@@ -4,12 +4,12 @@ description: A language designed to be embedded, cut by where the code runs rath
 ---
 
 fossil is designed to be embedded. Three destinations have to work, and they are not variations of
-one another: a **native command**, run from a terminal or a job scheduler; **wasm in a browser**,
+one another: a **command**, run from a terminal or a job scheduler; **wasm in a browser**,
 where the editor and the checker live next to the person typing; and a **product embedding it**,
 which supplies credentials, storage and a job lifecycle and wants the language to be a component
 rather than a subprocess it has to understand.
 
-Add the promise that a corpus has [no ceiling on its size](/docs/design/streaming) and the four
+Add the promise that a corpus has [no ceiling on its size](/docs/design/later/streaming) and the four
 requirements contradict each other — but only under one reading. If "this destination works" means
 *run the whole engine here*, then the browser must be larger-than-RAM, and it cannot be: wasm32 has
 roughly four gigabytes of address space and nowhere to spill. So the destinations are not
@@ -19,7 +19,7 @@ promise.
 ```mermaid
 graph TD
   H["<b>the host layer</b><br/>knows a memory budget, a credential, a destination<br/>promises nothing about what a program means<br/>wasm32 · each host is one target"]
-  C["<b>the compiler layer</b><br/>knows the elaborated program, the sources, and a disk<br/>promises no ceiling — a budget plus somewhere to spill<br/>wasm32 · <b>no</b>, and that is what the promise costs"]
+  C["<b>the compiler layer</b><br/>knows the elaborated program, the sources, and a store<br/>would promise no ceiling — a budget plus somewhere to spill<br/>wasm32 · <b>yes</b>, and that is why the promise is deferred"]
   L["<b>the language layer</b><br/>knows parsing, names, types, diagnostics, elaboration<br/>promises to start in milliseconds<br/>wasm32 · <b>yes</b>"]
   H --> C --> L
 ```
@@ -32,6 +32,15 @@ single negative fact that buys both of its positive ones — the checker in a br
 checker, not a reduced imitation. Gluon is the model, for a reason more specific than admiration:
 being embedded in a host application is its whole problem statement.
 [The architecture](/docs/architecture) is the shape this argument produces.
+
+<Callout type="warn" title="The middle box runs in wasm32, so no ceiling is deferred">
+The command was a native binary, `fossil-cli`, and it was the only place a spill could have lived. It
+was deleted on 2026-09-30: no consumer used it, and it wrote a different corpus from the browser's
+([discarded](/docs/design/discarded)). A command is now Node over the same wasm build a tab runs, so
+every write is bounded by wasm32's address space. What brings the native layer back is a consumer
+that must write natively — a corpus larger than RAM, spilled — and the argument above is what it
+would be built on.
+</Callout>
 
 One boundary here is a threat model rather than a preference. The host owns the credentials, and
 what crosses to fossil is never one of them: it is a **vended** credential — short-lived, scoped to
@@ -63,8 +72,8 @@ answered by what the host passes in.
 
 If the embedding host is a browser, a capability only a native binary can perform is a capability the
 product cannot reach. So the direction is that **every capability has one implementation, in a crate
-that compiles to `wasm32`, and each host is a transport over it** — the command line, the language
-server, the wasm shim and the machine-facing server are projections, and none of them is the API.
+that compiles to `wasm32`, and each host is a transport over it** — the language server, the wasm
+shim and the machine-facing server are projections, and none of them is the API.
 `cargo xtask wasm-check` derives that set from the cdylib crates plus any crate declaring
 `[package.metadata.fossil] wasm = true`, and the compile→run pipeline is inside it. Its size is
 deliberately not written here; this page carried a count once and it was stale by the next reading.
