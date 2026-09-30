@@ -15,8 +15,8 @@ that speaks the protocol. It reads stdin, writes stdout, and has no configuratio
 
 ## What it answers
 
-Everything below is served by both hosts: the native binary, and the same compiler built to
-WebAssembly behind a browser editor.
+Everything below is served by the native binary, and all but the quick fixes by the same compiler
+built to WebAssembly behind a browser editor.
 
 | you ask for | native | browser | and it answers |
 | --- | --- | --- | --- |
@@ -26,11 +26,11 @@ WebAssembly behind a browser editor.
 | a name, away from any dot | the whole catalogue | same | every row, spelled in full, because there is no receiver to narrow by |
 | hover, anywhere in a property | two type blocks | same | the type of what you wrote and where it came from, and the type the shape demands of that predicate |
 | go to definition | four positions | same | the shape document at the shape, the document at the predicate, a mapping, or the `:=` binding that introduced a name |
-| quick fix, on an unknown column | Replace with… | same | the nearest field of that row, swapped into exactly the span that was wrong |
-| quick fix, on a disjunctive shape | Split mapping… | same | one mapping per ShEx `OneOf` disjunct, as the checker already generated it |
+| quick fix, on an unknown column | Replace with… | — | the nearest field of that row, swapped into exactly the span that was wrong |
+| quick fix, on a disjunctive shape | Split mapping… | — | one mapping per ShEx `OneOf` disjunct, as the checker already generated it |
 | diagnostics as you type | on every edit | same | the diagnostics of [when it does not compile](/docs/book/diagnostics), at the same spans, with `help:` folded onto the message |
 
-It also advertises document symbols and semantic tokens. No code action fires on a clean file: both
+Natively it also advertises document symbols and semantic tokens. No code action fires on a clean file: both
 quick fixes hang off a diagnostic you can already see. And hover's second block appears only when the
 shape resolves — a program that names no output document gets the first block and no error, because
 the missing document is the checker's diagnostic and not the hover's.
@@ -47,7 +47,7 @@ Four things narrow the list further than you might expect, and each is deliberat
   an input, and an input is not drained — without that rule the parser blames a perfectly good
   `ShExJ` file for every complaint it has.
 
-## Two hosts, three wires, one set of answers
+## Two hosts, two wires, one set of answers
 
 `fossil-lsp` is native — it is a stdio transport and it refuses to compile for `wasm32`. What
 compiles to WebAssembly is everything under it. No transport implements a feature: they all call the
@@ -56,7 +56,7 @@ same `fossil-ide` free functions.
 ```mermaid
 sequenceDiagram
   participant E as your editor
-  participant S as fossil-lsp over stdio<br/>— or the wasm worker over postMessage<br/>— or the wasm workspace, called directly
+  participant S as fossil-lsp over stdio<br/>— or the wasm workspace, called directly
   participant C as the compiler<br/>fossil-ide, fossil-hir, fossil-mir
   E->>S: didOpen / didChange
   S->>S: introspect the sources the program binds
@@ -69,10 +69,11 @@ sequenceDiagram
   S-->>E: the response
 ```
 
-The third is the browser's short path and it exists because the second needs a client. A page that
-already calls the checker in-process should not have to stand up an LSP client, an id table and a
-second copy of every buffer to ask what type is under a cursor — so hover, completion and definition
-are also plain methods on the wasm workspace, and a browser editor calls them. Two rules fall out of
+The second is the browser's, and it is not the protocol. A page that already calls the checker
+in-process should not have to stand up an LSP client, an id table and a second copy of every buffer
+to ask what type is under a cursor — so check, hover, completion and definition are plain methods on
+the wasm workspace, and a browser editor calls them. Code actions and semantic tokens are not among
+them: those come from `fossil-lsp` alone. Two rules fall out of
 that and both are enforced rather than asserted: those three methods take a *shared* borrow, because
 none of them mutates and an editor asks at three different rates; and every one of them owes the
 caller's current text, because they answer about the last edit that was pushed.
