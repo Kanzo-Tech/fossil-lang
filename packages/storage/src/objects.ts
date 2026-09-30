@@ -1,6 +1,6 @@
-import type { Host, Scope } from '@fossil-lang/types';
+import type { Host } from '@fossil-lang/types';
 
-import { initStorage, storageRead, storageWrite } from './wasm.js';
+import { initStorage, storageRead } from './wasm.js';
 
 /** A file to read: where it is, and the connection it lies under when it has one. */
 export interface Target {
@@ -20,17 +20,4 @@ export type ReadResult = { ok: true; bytes: Uint8Array } | { ok: false; reason: 
 export async function read(host: Host, targets: readonly Target[]): Promise<ReadResult[]> {
   await initStorage();
   return (await storageRead(host, targets)) as ReadResult[];
-}
-
-/**
- * Write each file under the one prefix the host vends `write` on for `scope`, and answer the
- * prefix. A scope that vends several prefixes has no single place to write to, and is refused.
- */
-export async function write(
-  host: Host,
-  scope: Scope,
-  files: readonly { path: string; bytes: Uint8Array }[],
-): Promise<string> {
-  await initStorage();
-  return storageWrite(host, scope, [...files]);
 }

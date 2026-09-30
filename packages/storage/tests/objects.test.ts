@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { DocumentWorkspace, MissingDocument } from '@fossil-lang/types';
 
-import { read, resolveDocuments, write } from '../src/index.js';
+import { read, resolveDocuments } from '../src/index.js';
 import { countingHost, s3 } from './fixtures.js';
 
 const LAKE = 's3://b/lake/';
@@ -17,17 +17,15 @@ function fakeFetch(files: Record<string, string>) {
     const path = new URL(request.url).pathname;
     const body = files[path];
     const response =
-      request.method === 'PUT'
-        ? new Response(null, { status: 200, headers: { etag: '"e"' } })
-        : body === undefined
-          ? new Response('no', { status: 404 })
-          : new Response(body, {
-              headers: {
-                'content-length': String(new TextEncoder().encode(body).length),
-                'last-modified': 'Tue, 29 Sep 2026 08:00:00 GMT',
-                etag: '"e"',
-              },
-            });
+      body === undefined
+        ? new Response('no', { status: 404 })
+        : new Response(body, {
+            headers: {
+              'content-length': String(new TextEncoder().encode(body).length),
+              'last-modified': 'Tue, 29 Sep 2026 08:00:00 GMT',
+              etag: '"e"',
+            },
+          });
     // A fetched response carries its URL, and a client reads it back.
     return Object.defineProperty(response, 'url', { value: request.url });
   });
@@ -71,27 +69,6 @@ describe('read', () => {
     expect(missing).toMatchObject({ ok: false, reason: expect.stringMatching(/not found/i) });
     expect(outside).toMatchObject({ ok: false, reason: expect.stringMatching(/lies outside/) });
     expect(seen.map((r) => r.url)).toEqual(['http://localhost:9000/b/lake/gone.csv']);
-  });
-});
-
-describe('write', () => {
-  it('puts each file under the one prefix the job vends write on', async () => {
-    const seen = fakeFetch({});
-    const job = 's3://b/output/job-1/';
-    const { host, asks } = countingHost(() => [s3(job, 'W')]);
-    const prefix = await write(host, { job: 'job-1' }, [
-      { path: 'graph.graph.yml', bytes: new Uint8Array([1]) },
-    ]);
-    expect(prefix).toBe(job);
-    expect(asks).toEqual([{ scope: { job: 'job-1' }, access: 'write' }]);
-    expect(seen[0]!.method).toBe('PUT');
-    expect(seen[0]!.url).toBe('http://localhost:9000/b/output/job-1/graph.graph.yml');
-    expect(seen[0]!.headers.get('authorization')).toMatch(/^AWS4-HMAC-SHA256 Credential=W\//);
-  });
-
-  it('refuses a scope with no single prefix to write under', async () => {
-    const { host } = countingHost(() => [s3('s3://b/a/', 'A'), s3('s3://b/c/', 'C')]);
-    await expect(write(host, { job: 'j' }, [])).rejects.toThrow(/exactly one prefix/);
   });
 });
 

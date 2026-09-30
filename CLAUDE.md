@@ -254,7 +254,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   storage/                 how every package reaches storage from a vended credential, over
                            `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
                            expires−5min, refcounted per prefix; Azure lent file by file),
-                           `read`/`write` (`object_store` stores), and `resolveDocuments`.
+                           `read` (an `object_store` GET), and `resolveDocuments`.
                            No host ever signs a URL for fossil
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
                            and not an editor. FIVE of them, not two: highlighting from
