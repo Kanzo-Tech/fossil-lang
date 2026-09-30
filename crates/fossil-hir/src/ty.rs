@@ -109,15 +109,6 @@ impl<'db> Ty<'db> {
         names.dedup();
         Self::new(db, TyKind::Ref(names))
     }
-
-    /// The shapes this type references, or `None` when it is not a reference.
-    #[must_use]
-    pub fn referenced_shapes(self, db: &'db dyn salsa::Database) -> Option<&'db [SmolStr]> {
-        match self.kind(db) {
-            TyKind::Ref(names) => Some(names),
-            _ => None,
-        }
-    }
 }
 
 /// The rows a relation makes addressable, each under the name of the BINDING

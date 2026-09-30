@@ -68,7 +68,7 @@ use std::collections::{HashMap, HashSet};
 
 use fossil_graph_schema::{
     GraphSchema, Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Renames,
-    Shape as OutputShape, local_name,
+    Shape as OutputShape,
 };
 use prefixmap::{IriRef, PrefixMap};
 use rudof_iri::IriS;
@@ -175,13 +175,6 @@ pub enum ConstraintValue {
 }
 
 impl ResolvedConstraint {
-    /// The local name of the predicate IRI — the field/column name a mapping
-    /// references (`http://xmlns.com/foaf/0.1/name` / `foaf:name` → `name`).
-    #[must_use]
-    pub fn predicate_local_name(&self) -> String {
-        local_name(&self.predicate.to_string()).to_string()
-    }
-
     /// Narrow this constraint's `ShEx` `valueExpr` to the Fossil-relevant value
     /// kind. See [`ConstraintValue`].
     #[must_use]
@@ -804,6 +797,8 @@ fn label_to_string(label: &TripleExprLabel) -> String {
 // candidate. It's literal Fossil source — not a Rust format string.
 #[allow(clippy::literal_string_with_formatting_args)]
 mod tests {
+    use fossil_graph_schema::local_name;
+
     use super::*;
 
     /// The range survives the whole decode, and it is the range of the

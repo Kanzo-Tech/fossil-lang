@@ -542,17 +542,6 @@ impl SigTy {
             Self::Rows | Self::Predicate | Self::Column | Self::Binding | Self::Aggregate => None,
         }
     }
-
-    /// Whether this position NAMES something instead of evaluating to a value.
-    ///
-    /// The single place the distinction is drawn, because three consumers need
-    /// it and each would otherwise draw it again: `crate::lower` reads the CST
-    /// differently, `crate::infer` has nothing to type-check here, and
-    /// `xtask::reference` renders `User.id` rather than an expression.
-    #[must_use]
-    pub const fn names_rather_than_evaluates(self) -> bool {
-        matches!(self, Self::Column | Self::Binding)
-    }
 }
 
 impl From<ScalarTy> for SigTy {
