@@ -116,9 +116,9 @@ and one unit is a different Hilbert code and a different order.
 
 `v = 147, hi = 167` is what says so: **57687 in binary32, 57686 in binary64**. The other four rows are
 exact in both widths, so a table without it passes against a binary64 port — and the table is checked
-to still contain a row that separates them. Both sides execute it: `guards/arithmetic.mjs` wraps
-every step in `Math.fround`, and the engine asserts against the same `vectors.json` in a Rust test
-rather than restating it. Neither reaches the `::FLOAT` half of the contract inside the engine's own
+to still contain a row that separates them. Both sides executed it while the tiles were written:
+`guards/arithmetic.mjs` wrapped every step in `Math.fround`, and the engine asserted against the same
+`ac1801d4:packages/corpus/guards/vectors.json` in a Rust test rather than restating it. Neither reaches the `::FLOAT` half of the contract inside the engine's own
 SQL, or the bounding box the layout derives before quantising.
 </Callout>
 

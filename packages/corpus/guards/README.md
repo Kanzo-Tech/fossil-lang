@@ -32,7 +32,6 @@ form, take it.
 | `duck.mjs` | the only thing between the guards and the corpus: `duckdb` over stdin |
 | `fixture.mjs` | writes a conforming corpus in JavaScript and SQL, from the conventions alone |
 | `self-test.mjs` | non-vacuity, plus one mutation per guard |
-| `vectors.json` | the Hilbert and addressing borders of the tiled format, which no guard here reads any more; it goes when the last reader of it does |
 
 ## Why a checker rather than a library
 

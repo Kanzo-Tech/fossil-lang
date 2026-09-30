@@ -1,79 +1,123 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import { CorpusManifestError, FOSSIL_FORMAT, parseManifest } from '../src/manifest.js';
 
 /**
- * `fossil.json`: what the reader refuses, and the shape every fixture it is tested on has.
+ * `fossil.json`: what the reader refuses, and the one shape the writer and the reader agree on.
  *
- * ── MERGE HOOK ──────────────────────────────────────────────────────────────────────────────────
- * The writer's `fossil_sinks::manifest::Manifest` is the source of the shape, and `cargo xtask`
- * will emit a JSON Schema from it. Until that schema exists, `shapeOf` below is the contract
- * (`fossil/1` §2) written as a check, and `src/manifest.ts` is typed to it by hand. When the
- * schema lands: validate every fixture below against it instead of `shapeOf`, and hold
- * `src/manifest.ts`'s types against it (or generate them), then delete `shapeOf`. This block is the
- * one place that changes.
- * ────────────────────────────────────────────────────────────────────────────────────────────────
+ * The shape is the writer's. `crates/fossil-sinks/fossil.schema.json` is generated from
+ * `fossil_sinks::manifest::Manifest` (`FOSSIL_BLESS=1 cargo test -p fossil-sinks --test schema`),
+ * and it is held here twice: every fixture must validate against it, and every interface in
+ * `src/manifest.ts` must declare exactly the fields, optionality and types of the schema
+ * definition of the same name. The TypeScript is written by hand and this is what stops it
+ * drifting from the Rust.
  */
 
-/** Every way `m` departs from the contract's shape, as sentences. Empty when it conforms. */
-function shapeOf(m: unknown): string[] {
+type Schema = Record<string, unknown>;
+const SCHEMA = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../../../crates/fossil-sinks/fossil.schema.json', import.meta.url)), 'utf8'),
+) as Schema;
+const DEFINITIONS = SCHEMA.definitions as Record<string, Schema>;
+const deref = (s: Schema): Schema =>
+  typeof s.$ref === 'string' ? DEFINITIONS[s.$ref.replace('#/definitions/', '')]! : s;
+/** A `$ref`, or an `allOf`/`anyOf` that is one `$ref` (plus `null`), is that definition. */
+const refName = (s: Schema): string | undefined => {
+  if (typeof s.$ref === 'string') return s.$ref.replace('#/definitions/', '');
+  const arms = ((s.allOf ?? s.anyOf) as Schema[] | undefined)?.filter((a) => a.type !== 'null');
+  return arms?.length === 1 ? refName(arms[0]!) : undefined;
+};
+
+/** The keywords `validate` understands. A schema that grows another fails here, not silently. */
+const KNOWN = new Set([
+  '$schema', 'title', 'description', 'type', 'required', 'properties', 'items', '$ref',
+  'definitions', 'oneOf', 'anyOf', 'allOf', 'enum', 'format', 'minimum',
+]);
+
+/** Every way `v` departs from `s`, as `path: reason`. The subset of draft-07 the schema uses. */
+function validate(v: unknown, s: Schema, path = '$'): string[] {
+  const unknown = Object.keys(s).filter((k) => !KNOWN.has(k));
+  if (unknown.length) return [`${path}: the schema uses ${unknown.join(', ')}, which this check does not read`];
+  if (s.$ref) return validate(v, deref(s), path);
+  if (s.allOf) return (s.allOf as Schema[]).flatMap((a) => validate(v, a, path));
+  if (s.anyOf) return (s.anyOf as Schema[]).some((a) => !validate(v, a, path).length) ? [] : [`${path}: matches no anyOf arm`];
+  if (s.oneOf) {
+    const n = (s.oneOf as Schema[]).filter((a) => !validate(v, a, path).length).length;
+    return n === 1 ? [] : [`${path}: matches ${n} oneOf arms`];
+  }
+  const kinds = s.type === undefined ? undefined : ([] as unknown[]).concat(s.type);
+  const kindOf = (x: unknown) =>
+    x === null ? 'null' : Array.isArray(x) ? 'array' : Number.isInteger(x) ? 'integer' : typeof x;
+  if (kinds && !kinds.includes(kindOf(v)) && !(kinds.includes('number') && typeof v === 'number')) {
+    return [`${path}: is ${kindOf(v)}, not ${kinds.join(' | ')}`];
+  }
+  if (s.enum && !(s.enum as unknown[]).includes(v)) return [`${path}: ${JSON.stringify(v)} is not one of ${JSON.stringify(s.enum)}`];
+  if (typeof s.minimum === 'number' && typeof v === 'number' && v < s.minimum) return [`${path}: below ${s.minimum}`];
   const out: string[] = [];
-  const obj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-  const str = (v: unknown, what: string) => typeof v === 'string' || out.push(`${what} is not a string`);
-  const optStr = (v: unknown, what: string) => v === undefined || str(v, what);
-  const count = (v: unknown, what: string) =>
-    (Number.isSafeInteger(v) && (v as number) >= 0) || out.push(`${what} is not a count`);
-  const properties = (v: unknown, what: string) => {
-    if (!Array.isArray(v)) return out.push(`${what}.properties is not a list`);
-    v.forEach((p, i) => {
-      if (!obj(p)) return out.push(`${what}.properties[${i}] is not an object`);
-      str(p.name, `${what}.properties[${i}].name`);
-      str(p.type, `${what}.properties[${i}].type`);
-      optStr(p.iri, `${what}.properties[${i}].iri`);
-      if (p.nullable !== undefined && typeof p.nullable !== 'boolean') out.push(`${what}.properties[${i}].nullable is not a bool`);
-    });
+  if (Array.isArray(v) && s.items) v.forEach((x, i) => out.push(...validate(x, s.items as Schema, `${path}[${i}]`)));
+  if (kindOf(v) === 'object') {
+    const o = v as Record<string, unknown>;
+    for (const k of (s.required as string[] | undefined) ?? []) if (!(k in o)) out.push(`${path}.${k}: missing`);
+    for (const [k, sub] of Object.entries((s.properties as Record<string, Schema>) ?? {})) {
+      if (k in o) out.push(...validate(o[k], sub, `${path}.${k}`));
+    }
+  }
+  return out;
+}
+
+/** What a schema property is, spelled the way the TypeScript checker prints the type. */
+function spelled(s: Schema): string {
+  const ref = refName(s);
+  if (ref) return ref;
+  if (s.oneOf) return (s.oneOf as Schema[]).map(spelled).join(' | ');
+  if (s.enum) return (s.enum as unknown[]).map((e) => JSON.stringify(e)).join(' | ');
+  const kinds = ([] as unknown[]).concat(s.type).filter((k) => k !== 'null');
+  if (kinds.length !== 1) throw new Error(`no spelling for ${JSON.stringify(s)}`);
+  const kind = kinds[0];
+  if (kind === 'array') return `readonly ${spelled(s.items as Schema)}[]`;
+  if (kind === 'integer' || kind === 'number') return 'number';
+  return kind as string;
+}
+
+/** Each interface `src/manifest.ts` exports, as `{ field: 'type' }` with `?` on an optional one. */
+function interfaces(): Record<string, Record<string, string>> {
+  const file = fileURLToPath(new URL('../src/manifest.ts', import.meta.url));
+  const program = ts.createProgram([file], { strict: true, target: ts.ScriptTarget.ES2022 });
+  const checker = program.getTypeChecker();
+  const out: Record<string, Record<string, string>> = {};
+  ts.forEachChild(program.getSourceFile(file)!, (node) => {
+    if (!ts.isInterfaceDeclaration(node)) return;
+    const fields: Record<string, string> = {};
+    for (const symbol of checker.getDeclaredTypeOfSymbol(checker.getSymbolAtLocation(node.name)!).getProperties()) {
+      const optional = (symbol.flags & ts.SymbolFlags.Optional) !== 0;
+      const type = checker.getNonNullableType(checker.getTypeOfSymbol(symbol));
+      fields[symbol.name + (optional ? '?' : '')] = checker.typeToString(type);
+    }
+    out[node.name.text] = fields;
+  });
+  return out;
+}
+
+/** The same, read off the schema: a field is optional when it is not `required`. */
+function definitions(): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  const one = (s: Schema): Record<string, string> => {
+    // `Position` is a oneOf of two objects differing only in `by`: one interface with a union.
+    const arms = (s.oneOf as Schema[] | undefined) ?? [s];
+    const fields: Record<string, string[]> = {};
+    for (const arm of arms) {
+      const required = new Set((arm.required as string[]) ?? []);
+      for (const [k, sub] of Object.entries(arm.properties as Record<string, Schema>)) {
+        (fields[k + (required.has(k) ? '' : '?')] ??= []).push(spelled(sub));
+      }
+    }
+    return Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, [...new Set(v)].join(' | ')]));
   };
-  if (!obj(m)) return ['the manifest is not an object'];
-  if (m.format !== FOSSIL_FORMAT) out.push(`format is ${JSON.stringify(m.format)}`);
-  if (!Array.isArray(m.vertex_tables)) out.push('vertex_tables is not a list');
-  if (!Array.isArray(m.edge_tables)) out.push('edge_tables is not a list');
-  for (const [i, t] of ((m.vertex_tables as unknown[]) ?? []).entries()) {
-    const what = `vertex_tables[${i}]`;
-    if (!obj(t)) {
-      out.push(`${what} is not an object`);
-      continue;
-    }
-    for (const k of ['name', 'path', 'key', 'identity']) str(t[k], `${what}.${k}`);
-    optStr(t.iri, `${what}.iri`);
-    count(t.record_count, `${what}.record_count`);
-    properties(t.properties, what);
-    if (t.position !== undefined) {
-      const p = t.position;
-      if (!obj(p) || (p.by !== 'layout' && p.by !== 'program') || typeof p.x !== 'string' || typeof p.y !== 'string') {
-        out.push(`${what}.position is not { by: layout | program, x, y }`);
-      }
-    }
-  }
-  for (const [i, t] of ((m.edge_tables as unknown[]) ?? []).entries()) {
-    const what = `edge_tables[${i}]`;
-    if (!obj(t)) {
-      out.push(`${what} is not an object`);
-      continue;
-    }
-    for (const k of ['name', 'label', 'path']) str(t[k], `${what}.${k}`);
-    optStr(t.iri, `${what}.iri`);
-    for (const end of ['source', 'destination']) {
-      const e = t[end];
-      if (!obj(e) || typeof e.key !== 'string' || typeof e.references !== 'string') {
-        out.push(`${what}.${end} is not { key, references }`);
-      }
-    }
-    count(t.record_count, `${what}.record_count`);
-    properties(t.properties, what);
-  }
+  out.Manifest = one(SCHEMA);
+  for (const [name, s] of Object.entries(DEFINITIONS)) out[name] = one(s);
   return out;
 }
 
@@ -82,16 +126,31 @@ const FIXTURES = ['../conformance/corpus/fossil.json'].map((path) => [
   readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'),
 ]);
 
-describe('the fixtures have the contract’s shape', () => {
-  it.each(FIXTURES)('%s', (_, text) => {
-    expect(shapeOf(JSON.parse(text))).toEqual([]);
+describe('the writer’s schema', () => {
+  it.each(FIXTURES)('validates %s', (_, text) => {
+    expect(validate(JSON.parse(text), SCHEMA)).toEqual([]);
   });
 
-  it('and the check is not vacuous', () => {
+  it('and the validation is not vacuous', () => {
     const broken = JSON.parse(FIXTURES[0]![1]!);
     delete broken.vertex_tables[0].key;
     broken.edge_tables[0].source = 'Person';
-    expect(shapeOf(broken)).toEqual(['vertex_tables[0].key is not a string', 'edge_tables[0].source is not { key, references }']);
+    broken.vertex_tables[0].position.by = 'guess';
+    expect(validate(broken, SCHEMA)).toEqual([
+      '$.edge_tables[0].source: is string, not object',
+      '$.vertex_tables[0].key: missing',
+      '$.vertex_tables[0].position: matches no anyOf arm',
+    ]);
+  });
+
+  it('is what src/manifest.ts declares, interface by interface', () => {
+    const declared = interfaces();
+    // The one sanctioned narrowing: the reader types `format` as the one value it accepts.
+    expect(declared.Manifest!.format).toBe(JSON.stringify(FOSSIL_FORMAT));
+    declared.Manifest!.format = 'string';
+    const schema = definitions();
+    expect(Object.keys(schema).sort()).toEqual(['EdgeTable', 'Endpoint', 'Manifest', 'Position', 'Property', 'VertexTable']);
+    expect(declared).toEqual(schema);
   });
 });
 
