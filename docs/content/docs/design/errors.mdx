@@ -1,16 +1,9 @@
 ---
 title: One error, from Rust to the screen
-description: "PROPOSAL, not accepted — one catalogue of stable codes shared by compile diagnostics and run failures, one serialized shape across the wasm boundary, a typed `FossilError` in TypeScript, a page per code, and a host that branches on the code and never parses the message."
+description: "One catalogue of stable codes shared by compile diagnostics and run failures, one serialized shape across the wasm boundary, a typed `FossilError` in TypeScript, a page per code, and a host that branches on the code and never parses the message."
 direction:
   summary: "Every failure that reaches a host — a compile diagnostic, a refused run, a corpus that will not open — carries a stable code from one catalogue, typed data generated from Rust, and a page of its own."
 ---
-
-<Callout title="Proposal — written 2026-09-30 for the owner's review, and nothing on it is built">
-This page argues a design and inventories what exists. Every sentence in the present tense describes
-the tree at `8d6114a3`; everything about codes, `Problem` and `FossilError` is what is proposed. It
-becomes a page describing fossil, rather than a proposal, when the owner accepts it — and the first
-step of [the migration](#the-migration-in-steps-that-each-merge-green) is deleting this callout.
-</Callout>
 
 The request, in the owner's words: *una forma de mostrar mensajes de error, que venga de Rust, y que
 gestionemos en JavaScript bien, como lo haría un sistema en producción.* One way to show an error,
@@ -114,14 +107,14 @@ consumer's words in the release notes — the same rule a renamed export is held
 
 **Retiring a code** is deleting its variant and moving it to a `RETIRED` list in the catalogue, one
 line: the code and the tag that last emitted it. A test fails if a live code equals a retired one. The
-page goes with the variant — see [the open questions](#open-questions-for-the-owner).
+page goes with the variant — see [the decisions](#the-decisions-and-what-would-reverse-each).
 
 **What this reverses.** [Tooling for machines](/docs/design/tooling-for-machines#a-diagnostic-is-an-api)
 ends *a diagnostic is an API* with a corollary: *their text is an interface; rewording an error message
 is a change to something a consumer parses.* That was true because the text was the only identifier. With
 a code and typed data, **the text stops being an interface**: a host that reads `message` for anything
-but showing it is outside the contract, and rewording is free. When this page is accepted, that
-paragraph is replaced by this one's first sentence.
+but showing it is outside the contract, and rewording is free. That page says so now, in these
+words.
 
 **What would reverse it.** A consumer that needs to branch at a granularity finer than a code — the
 same code meaning two things it must treat differently. The answer is a new code, never a message
@@ -427,19 +420,24 @@ Steps 2 and 3 are the ones a consumer feels; 4 and 5 can interleave. Nothing wai
 pages being complete — a code without a page fails step 4's suite, which is why the pages for a batch
 land with that batch.
 
-## Open questions for the owner
+## The decisions, and what would reverse each
 
-1. **Does a retired code keep a page?** rustc keeps every retired code's explanation, marked *no
-   longer emitted*, so an old log still resolves. That is a tombstone, and fossil deletes rather than
-   keeps. *Recommendation:* the one-line `RETIRED` list and no page — it stops reuse, which is the part
-   that matters, and at `0.x` there are no old logs worth resolving.
-2. **Should keasy's server speak the same shape?** Its `ErrorBody { error, message, dependents }` is
-   the same idea with other names, snake_case kinds, and a `dependents` field the web drops.
-   *Recommendation:* yes, as its own keasy change after step 3 — `code`, `title`, `detail`, `data` —
-   so a keasy screen renders a server refusal and a fossil failure with the same view.
-3. **Is 108 the right grain?** The compile half is 74 codes for about 126 templates; `pipeline` alone is 14.
-   *Recommendation:* ship it as derived and let the codes-to-pages suite be the pressure: a code whose
-   page cannot say something different from its neighbour's is merged before its page is written.
-4. **Does `@fossil-lang/types` take runtime code?** It has none today. *Recommendation:* yes —
-   `FossilError` is ten lines and every raising package depends on `types` already; a new package for
-   it would be a second place to look.
+The owner accepted this page on 2026-10-01 and settled the four questions it had left open.
+
+1. **A retired code keeps no page.** It is one line in the `RETIRED` list — the code and the tag that
+   last emitted it — which is the part that stops reuse. rustc keeps a tombstone page per retired code
+   so an old log still resolves; fossil deletes rather than keeps, and at `0.x` there are no old logs
+   worth resolving. *What would reverse it:* a consumer holding logs across a release boundary that
+   cannot resolve a retired code from its release notes — then the tombstone is worth its page.
+2. **keasy's server speaks the same shape** — `code`, `title`, `detail`, `data` — as its own keasy
+   change after step 3, so a keasy screen renders a server refusal and a fossil failure with one view.
+   Its `dependents` field becomes `data`. *What would reverse it:* a server refusal that needs a field
+   the shape cannot carry as `data`, which would say the shape is fossil's and not general.
+3. **The catalogue ships at the grain derived above.** The codes-to-pages suite is the pressure: a
+   code whose page cannot say something different from its neighbour's is merged into it when the
+   pages are written, not before. *What would reverse it:* the pages for an area coming out as
+   near-copies — then the area is cut too fine, and the merge is the edit.
+4. **`FossilError` lives in `@fossil-lang/types`**, its first runtime export; every raising package
+   already depends on it, and a package of its own would be a second place to look. *What would
+   reverse it:* `types` growing runtime code that is not about the contract, at which point it is no
+   longer a types package and the split is by what the code is for.

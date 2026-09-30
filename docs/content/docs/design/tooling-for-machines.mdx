@@ -28,8 +28,9 @@ backwards knows the reverse. Only one holding both can write a message that name
 message that names both is the difference between a diagnostic a machine can act on and one it can
 only report.
 
-The corollary is a rule about how diagnostics evolve: their text is an interface. Rewording an error
-message is a change to something a consumer parses, in the same sense that renaming a field is.
+A code is the interface, and the text is not: every failure carries a stable code from [one
+catalogue](/docs/design/errors#a-code-is-areakind), and a host that reads `message` for anything but
+showing it is outside the contract.
 
 ## The door, and where the secrets go
 
