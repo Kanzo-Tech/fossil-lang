@@ -15,10 +15,9 @@ crate-type = ["cdylib", "rlib"]
 doctest = false
 # `test = false` stood here and it was scaffold boilerplate from `6bb78b4`, the
 # commit that created the workspace — no other manifest under `crates/` carries
-# it. What it did in the end was switch off the two `#[test]`s in
-# `src/lsp_worker.rs`, which had therefore never run: `cargo test -p fossil-wasm`
-# emitted no `Running unittests src/lib.rs` line at all, so there was nothing to
-# notice. Both pass. The `rlib` half of `crate-type` is what makes a unit test
+# it. What it did in the end was switch off the crate's unit tests, which had
+# therefore never run: `cargo test -p fossil-wasm` emitted no `Running unittests
+# src/lib.rs` line at all, so there was nothing to notice. The `rlib` half of `crate-type` is what makes a unit test
 # linkable, and the wasm gate compiles without `--all-targets`, so a test target
 # costs the browser build nothing.
 
@@ -54,7 +53,7 @@ fossil-lineage = { path = "../fossil-lineage" }
 # The `check()` method converts byte-offset spans to UTF-16 LSP ranges via
 # `fossil_ide::LineIndex` (the rust-analyzer model). fossil-ide is inside the
 # WASM gate — wasm32-clean by construction. Wiring this dep lets `check()`
-# return the same range shape the LSP Worker republishes verbatim.
+# return the same range shape the native LSP publishes.
 fossil-ide = { path = "../fossil-ide" }
 # `WasmDb` is a fresh `#[salsa::db]` struct (mirrors `LspDb` — production hosts
 # own their own db). Needs the
@@ -62,15 +61,10 @@ fossil-ide = { path = "../fossil-ide" }
 # trait-object level.
 salsa = { workspace = true }
 
-# The WASM LSP transport speaks raw LSP
-# JSON-RPC over `postMessage` to a Web Worker. lsp-types gives us the typed
-# request / notification params + capability surface (mirrors fossil-lsp 1:1);
-# web-sys gives us the `DedicatedWorkerGlobalScope.onmessage` hook the
-# `start_lsp_worker` entrypoint installs. Both are wasm32-clean (lsp-types
-# proven by the WASM gate; web-sys is the canonical
-# JsCast-able binding crate). No tokio, no mio.
+# `lsp_types::{Range, DiagnosticSeverity, CompletionItemKind}` are the shapes
+# `check()` and the editor surface in `src/ide.rs` answer in, so a row is the
+# LSP's own range and not a second spelling of it. wasm32-clean.
 lsp-types = { workspace = true }
-web-sys = { workspace = true, features = ["MessageEvent", "DedicatedWorkerGlobalScope"] }
 
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) per
 # The lib version MUST match the wasm-bindgen-cli

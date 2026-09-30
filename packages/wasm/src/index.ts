@@ -35,7 +35,6 @@ export { initFossilWasm } from './load.js';
 export type { InitInput } from './load.js';
 
 export {
-  start_lsp_worker,
   tokenize,
   tokenKinds,
   semanticLegend,

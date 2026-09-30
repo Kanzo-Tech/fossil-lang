@@ -17,7 +17,6 @@ import {
   tokenize as rawTokenize,
   semantic_legend as rawSemanticLegend,
   tokenKinds as rawTokenKinds,
-  start_lsp_worker as rawStartLspWorker,
   refs as rawRefs,
   providers as rawProviders,
 } from '../pkg/fossil_wasm.js';
@@ -38,24 +37,6 @@ import type {
   SourceRefInfo,
   ProviderInfo,
 } from './index.js';
-
-/**
- * Install the LSP-over-postMessage dispatcher on the current Worker scope.
- *
- * `fossil-wasm` IS the LSP server-side in the browser: `fossil-lsp` is
- * native-only (it speaks stdio over crossbeam and does not compile to
- * `wasm32`), so the Worker gets an equivalent 16-route dispatch loop over the
- * same `fossil-ide` free functions. The Rust function (re-exported from
- * `crates/fossil-wasm/src/lsp_worker.rs`) installs `self.onmessage` on the
- * Worker scope and owns LSP JSON-RPC dispatch from that point forward.
- *
- * MUST be called inside a Web Worker scope, AFTER {@link initFossilWasm} has
- * resolved. Calling it on the main thread is a no-op (the dispatcher needs
- * `DedicatedWorkerGlobalScope.onmessage`).
- */
-export function start_lsp_worker(): void {
-  rawStartLspWorker();
-}
 
 /**
  * Opaque file-handle returned by {@link FossilWorkspace.openFile}. Pass it
@@ -245,8 +226,7 @@ export class FossilWorkspace {
   }
 
   /**
-   * Per-file diagnostic drain — the accessor the LSP Worker uses for its
-   * per-file `publishDiagnostics` notifications.
+   * Per-file diagnostic drain: one file's rows of {@link check}.
    */
   diagnosticsFor(handle: FileHandle): CheckRow[] {
     return this._inner.diagnostics_for(handle) as CheckRow[];

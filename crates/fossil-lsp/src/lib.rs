@@ -23,11 +23,6 @@
 //! VALUES, plain serde structs with no channel in them, and building one costs
 //! what the server really pays to answer.
 //!
-//! This is the shape `fossil-wasm`'s `lsp_worker::dispatch` already had
-//! (`DispatchOutput { response, diagnostics }`), and it is why that side was
-//! callable in-process from `tests/transport_parity.rs` while this one had to be
-//! spawned as a subprocess.
-//!
 //! # The server
 //!
 //! Fossil wired the LSP from day 1, so it avoided the parser-and-typecheck
@@ -63,37 +58,15 @@
 //! and this crate is native-only. The dispatch loop pattern is derived from
 //! `rust-analyzer/lsp-server/examples/goto_def.rs`.
 //!
-//! # The other transport
+//! # The browser
 //!
-//! `fossil-wasm`'s `lsp_worker` serves the same LSP over `postMessage` to a Web
-//! Worker. Its module docs used to call the handlers here «the 1:1 model; the
-//! only difference is the wire channel», and that was not so — the two dropped
-//! `d.labels` separately, got the shape-document guard a day apart, and
-//! published diagnostics in two different JSON shapes.
-//!
-//! Neither can be deleted: two transports (stdio versus `postMessage`), two
-//! hosts (a filesystem versus buffers only), two `#[salsa::db]` structs. What
-//! IS one thing is the ANSWERS, and they are `fossil-ide` free functions that
-//! both call. `crates/fossil-lsp/tests/transport_parity.rs` drives both with the
-//! same buffers and compares the JSON, and holds the whole list of ways they are
-//! still allowed to differ. Three things remain outside it, and all three are
-//! about the HOST rather than the wire:
-//!
-//! - **The filesystem.** This server reads an unopened shape document off disk
-//!   (`LspState::register_named_documents`); the worker has no disk, so there
-//!   the only copy of a document is a buffer somebody opened.
-//! - **Introspected descriptors.** The worker answers
-//!   `fossil/registerInferredDescriptor`, because the browser has to push in
-//!   what a `DESCRIBE` found. This server has a filesystem and goes and looks
-//!   itself (`LspState::introspect`) — but only at sources it can `stat`. A
-//!   program whose CSV lives on `s3://` is therefore still checked here without
-//!   its columns, so `fossil check` reports things this editor does not; that
-//!   gap is deliberate, it is the price of never blocking the message loop on
-//!   the network, and
-//!   `tests/introspected_diagnostics.rs::a_remote_source_is_not_introspected_by_the_editor`
-//!   is what keeps it from going quiet.
-//! - **`fossil/checkAll`.** A workspace-wide drain for a diagnostics panel. An
-//!   editor already receives one `publishDiagnostics` per file.
+//! There is no second LSP transport. `fossil-wasm` carried one — a
+//! `postMessage` server to a Web Worker — with no consumer, and it is deleted:
+//! the browser asks the same `fossil-ide` free functions as ordinary method
+//! calls (`fossil-wasm`'s `ide` module). Its module docs had called the handlers
+//! here «the 1:1 model; the only difference is the wire channel», and that was
+//! not so — the two dropped `d.labels` separately, got the shape-document guard
+//! a day apart, and published diagnostics in two different JSON shapes.
 
 #[cfg(target_arch = "wasm32")]
 compile_error!(
@@ -463,15 +436,15 @@ impl LspState {
 
     /// Forget a closed buffer.
     ///
-    /// **This did not exist, and the worker had it from the day it was
-    /// written.** A file the user closed stayed in this table forever: still in
+    /// **This did not exist, and the browser workspace had it from the day it
+    /// was written.** A file the user closed stayed in this table forever: still in
     /// [`Self::open_files`], which IS the workspace goto-def and completion
     /// resolve against, so a name from a closed buffer kept resolving; and still
     /// carrying whatever diagnostics were last published for it, with no
     /// notification to clear them.
     ///
     /// It does NOT deregister the file from `fossil_base`'s registry, and that
-    /// is the same choice the worker makes. Closing the `.shex` a program names
+    /// is the same choice the browser workspace makes. Closing the `.shex` a program names
     /// must not silently re-check the program against nothing — the last text
     /// the user had is a better answer than no contract at all, and the
     /// registry is the only place holding it.
@@ -816,15 +789,13 @@ pub fn handle_notification(
 ///
 /// The payload is [`fossil_ide::lsp_diagnostics`] and nothing else — the drain,
 /// the `claimed` guard that keeps a shape document from being checked as a
-/// program, and the whole LSP rendering are one function shared with the browser
-/// worker.
+/// program, and the whole LSP rendering are one function.
 ///
 /// **All three of those lived here**, in a twin of `fossil-wasm`'s, and each was
 /// got wrong independently on one side or the other: `d.labels` dropped on the
 /// floor by both, the `claimed` guard added to the two a day apart, and the
 /// worker publishing `related` where LSP says `relatedInformation`.
-/// `crates/fossil-ide/src/diagnostics.rs` records which and when, and
-/// `tests/transport_parity.rs` is what notices next time.
+/// `crates/fossil-ide/src/diagnostics.rs` records which and when.
 fn publish_diagnostics(db: &LspDb, uri: &Uri, file: SourceFile) -> Notification {
     publish(uri, fossil_ide::lsp_diagnostics(db, file))
 }

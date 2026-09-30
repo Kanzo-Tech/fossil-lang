@@ -18,10 +18,8 @@
 //!   `location`, because it republished the wasm workspace's JS row shape verbatim.
 //!   A client reading the spec found nothing there.
 //!
-//! `crates/fossil-lsp/tests/transport_parity.rs` is the guard that would have
-//! caught all three: it drives both transports over the same buffer and compares
-//! the JSON. This module is what makes the comparison pass by construction
-//! rather than by vigilance.
+//! The worker transport is deleted since; this module is what made the two
+//! agree by construction rather than by vigilance.
 //!
 //! # The two questions are separate on purpose
 //!

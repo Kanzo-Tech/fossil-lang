@@ -1,5 +1,5 @@
 //! Workspace lifecycle — the `ty_wasm`-shaped multi-file API an editor host
-//! and the WASM LSP Worker share. Mirrors Astral's `ty_wasm::Workspace`
+//! uses. Mirrors Astral's `ty_wasm::Workspace`
 //! exactly: a small
 //! `FileHandle` newtype on the JS boundary plus an internal
 //! `HashMap<FileHandle, SourceFile>` open-files map.
@@ -62,11 +62,6 @@ pub struct FileHandle(pub(crate) u32);
 /// handle on `update_file` is NOT how this works — we KEEP the `SourceFile`
 /// and call `set_text` (Salsa `Setter`) so the revision bumps and
 /// queries are invalidated incrementally.
-///
-/// `by_uri` is a secondary index so `lookup_uri` (used by the LSP Worker
-/// to map `textDocument/...` URIs back to handles) is O(1). It
-/// stays consistent with `files` because every insert / remove touches
-/// both maps.
 // `pub(crate)` is the deliberate visibility (mirrors `WasmSystem` in
 // `wasm_system.rs` — the clippy `redundant_pub_crate` nursery lint suggests
 // `pub` since the parent module is private, but rustc's `unreachable_pub`
@@ -76,11 +71,10 @@ pub struct FileHandle(pub(crate) u32);
 pub(crate) struct OpenFiles {
     next: u32,
     files: HashMap<FileHandle, SourceFile>,
-    by_uri: HashMap<String, FileHandle>,
 }
 
 impl OpenFiles {
-    pub(crate) fn insert(&mut self, path: String, file: SourceFile) -> FileHandle {
+    pub(crate) fn insert(&mut self, file: SourceFile) -> FileHandle {
         let h = FileHandle(self.next);
         // Saturating would silently collide; panic is the honest signal.
         self.next = self
@@ -88,7 +82,6 @@ impl OpenFiles {
             .checked_add(1)
             .expect("FileHandle counter exhausted (u32::MAX files opened)");
         self.files.insert(h, file);
-        self.by_uri.insert(path, h);
         h
     }
 
@@ -97,18 +90,7 @@ impl OpenFiles {
     }
 
     pub(crate) fn remove(&mut self, h: FileHandle) -> Option<SourceFile> {
-        let f = self.files.remove(&h)?;
-        // Drop every URI that pointed at this handle. There is typically
-        // only one, but `retain` keeps the table honest if a URI was ever
-        // re-inserted under the same handle.
-        self.by_uri.retain(|_, v| *v != h);
-        Some(f)
-    }
-
-    /// URI → handle lookup, behind `FossilWorkspace::lookup_handle_by_uri`.
-    /// The LSP Worker dispatches `textDocument/...` notifications through it.
-    pub(crate) fn lookup_uri(&self, uri: &str) -> Option<FileHandle> {
-        self.by_uri.get(uri).copied()
+        self.files.remove(&h)
     }
 
     /// Iterate `(handle, file)` pairs. Used by `check()` to drain

@@ -2,8 +2,8 @@
 //!
 //! ## The surface
 //!
-//! The surface is the `ty_wasm`-shaped `Workspace` lifecycle an editor host and
-//! the WASM LSP Worker consume, because an editor edits files and re-checks
+//! The surface is the `ty_wasm`-shaped `Workspace` lifecycle an editor host
+//! consumes, because an editor edits files and re-checks
 //! them, and a one-shot compile has nowhere to put the file identity that
 //! requires:
 //!
@@ -22,8 +22,8 @@
 //! | [`WasmWorkspace::completions`] | `Array<{ label, kind, detail }>`     | `textDocument/completion`  |
 //! | [`WasmWorkspace::goto_definition`] | `Array<{ uri, range }>`          | `textDocument/definition`  |
 //!
-//! The last three are the [`ide`] module: the same `fossil-ide` answers the
-//! Worker dispatches, as ordinary method calls, because a tab that already
+//! The last three are the [`ide`] module: the `fossil-ide` answers the native
+//! LSP serves, as ordinary method calls, because a tab that already
 //! calls `check()` in-process should not have to stand up an LSP client to ask
 //! what type is under a cursor. That module's header is the whole argument,
 //! including why all three take a SHARED borrow and what a caller owes in
@@ -51,13 +51,11 @@
 //! `compile_error!` tripwires live on the native-only crates rather than here.
 
 pub mod ide;
-pub(crate) mod lsp_worker;
 pub mod tokenize;
 mod wasm_system;
 mod workspace;
 
 pub use crate::ide::{CompletionRow, DefinitionRow, HoverRow};
-pub use crate::lsp_worker::start_lsp_worker;
 pub use crate::tokenize::{TokenRow, token_kinds_native, tokenize_native};
 // The #[wasm_bindgen] `tokenize` and `semantic_legend` functions are exposed
 // to JS by virtue of their attribute. The `tokenize` module is `pub` so the
@@ -217,8 +215,7 @@ impl FossilWorkspace {
 /// its guard where a panic did not.
 ///
 /// The Rust-side [`FossilWorkspace`] keeps its `&mut self` signatures
-/// untouched: `lsp_worker` already owns it inside an `Rc<RefCell<…>>`, and the
-/// native tests drive it directly. Only the JS boundary changed.
+/// untouched: the native tests drive it directly. Only the JS boundary changed.
 #[wasm_bindgen(js_name = FossilWorkspace)]
 pub struct WasmWorkspace {
     inner: RefCell<FossilWorkspace>,
@@ -330,8 +327,8 @@ impl WasmWorkspace {
 
     /// Every open **program**'s diagnostics as a flat JS array of
     /// `{ uri, range, severity, message }` rows keyed by file URI — the
-    /// diagnostics panel's view. It is NOT what the LSP Worker publishes; see
-    /// [`CheckRow`], and `lsp_worker::publish_diagnostics` for the wire.
+    /// diagnostics panel's view. It is NOT the LSP wire's shape; see
+    /// [`CheckRow`].
     ///
     /// A buffer the installed provider catalogue claims — a `.shex` being
     /// edited, a `.csv`, a `.parquet` — is an INPUT and is not parsed as fossil.
@@ -361,8 +358,7 @@ impl WasmWorkspace {
     /// Per-file diagnostic drain: `check()` returns the workspace-wide flat
     /// array, this returns one file's rows, so a host can refresh one buffer's
     /// panel without partitioning the workspace array on the JS side. It is NOT
-    /// what the LSP Worker publishes — that is
-    /// [`fossil_ide::lsp_diagnostics`], through `lsp_worker::publish_diagnostics`.
+    /// the LSP wire's shape — that is [`fossil_ide::lsp_diagnostics`].
     ///
     /// # Errors
     ///
@@ -688,8 +684,8 @@ impl FossilWorkspace {
     /// buffer is the truth, not a copy the host fetched.
     pub fn open_file_native(&mut self, path: String, contents: String) -> FileHandle {
         let file = fossil_base::SourceFile::new(&self.db, contents, path.clone());
-        fossil_base::register_file(&mut self.db, path.clone(), file);
-        self.files.insert(path, file)
+        fossil_base::register_file(&mut self.db, path, file);
+        self.files.insert(file)
     }
 
     /// Pure-Rust mirror of [`WasmWorkspace::set_connections`].
@@ -731,32 +727,13 @@ impl FossilWorkspace {
         ))
     }
 
-    // ----- LSP-worker dispatch helpers (pub(crate)) -----
-    //
-    // These accessors are consumed by `lsp_worker::dispatch` to route LSP
-    // requests / notifications onto the existing fossil-ide free functions
-    // without leaking the `WasmDb` type or duplicating bookkeeping. They
-    // mirror the analogous `LspState` accessors in `fossil-lsp`.
-
-    /// URI → `FileHandle` lookup used by `textDocument/didChange` /
-    /// `didClose` / custom `fossil/compileFile` dispatch.
-    pub(crate) fn lookup_handle_by_uri(&self, uri: &str) -> Option<FileHandle> {
-        self.files.lookup_uri(uri)
-    }
-
-    /// URI → `SourceFile` lookup used by request handlers (hover, completion,
-    /// goto-def, etc.) that consume Salsa inputs directly.
-    pub(crate) fn lookup_file_by_uri(&self, uri: &str) -> Option<SourceFile> {
-        let handle = self.files.lookup_uri(uri)?;
-        self.files.get(handle)
-    }
+    // ----- Accessors for the editor surface in [`ide`] (pub(crate)) -----
 
     /// Handle → `SourceFile` lookup, for the main-thread surface in [`ide`].
     ///
-    /// The Worker routes by URI because LSP does; a direct caller already holds
-    /// the handle `open_file` gave it, and making it re-derive a URI to get
-    /// back to the file it just opened would be the sort of round trip
-    /// [`CheckRow::uri`]'s note exists to avoid.
+    /// A caller already holds the handle `open_file` gave it, and making it
+    /// re-derive a URI to get back to the file it just opened would be the sort
+    /// of round trip [`CheckRow::uri`]'s note exists to avoid.
     pub(crate) fn file_by_handle(&self, handle: FileHandle) -> Option<SourceFile> {
         self.files.get(handle)
     }
@@ -772,14 +749,6 @@ impl FossilWorkspace {
     /// `completions` for their workspace-wide name resolution pass.
     pub(crate) fn open_source_files(&self) -> Vec<SourceFile> {
         self.files.iter().map(|(_, f)| f).collect()
-    }
-
-    /// Drain Salsa `Diagnostic` accumulators for `file` in their structured
-    /// form (still carrying `did_you_mean` / `suggestion_source`). Used by
-    /// `textDocument/codeAction` to re-derive the carriers the wire form
-    /// drops — mirrors fossil-lsp's `diagnostics_for`.
-    pub(crate) fn drain_diagnostics_for_file(&self, file: SourceFile) -> Vec<Diagnostic> {
-        fossil_ide::diagnostics(&self.db, file)
     }
 
     // ----- Inferred-descriptor registration -----
@@ -900,12 +869,12 @@ pub struct MissingDocumentRow {
 
 /// One diagnostic row in the [`WasmWorkspace::check`] return array.
 ///
-/// The workspace's own shape, and **not the LSP wire's** — the LSP Worker
-/// publishes `lsp_types::Diagnostic` (`lsp_worker::publish_diagnostics`), which
-/// is the mistake this type's docblock used to make: it said it «mirrors the LSP
-/// `Diagnostic` shape exactly so the LSP Worker can republish each row as-is»,
-/// and the worker did, so an extra `uri` and a `related` spelled nothing like
-/// `relatedInformation` went out on the wire.
+/// The workspace's own shape, and **not the LSP wire's**, which is
+/// `lsp_types::Diagnostic` ([`fossil_ide::lsp_diagnostics`]). This type's
+/// docblock once said it «mirrors the LSP `Diagnostic` shape exactly so the LSP
+/// Worker can republish each row as-is», and the worker did, so an extra `uri`
+/// and a `related` spelled nothing like `relatedInformation` went out on the
+/// wire.
 ///
 /// What it is for is `check()`: one flat array across every open file, which
 /// needs a `uri` per row precisely because it is not per-file. The rows are
@@ -985,59 +954,3 @@ fn to_check_row(
 // The measurements this file used to carry — what a shape document produced
 // before the `claimed` guard — are in
 // `crates/fossil-wasm/tests/documents_are_not_programs.rs`.
-
-// ----- LSP dispatch test hook -----
-//
-// The LSP-worker `dispatch` function is `pub(crate)`; native integration
-// tests in `crates/fossil-wasm/tests/lsp_worker.rs` reach it through this
-// `#[doc(hidden)]` shim. The shim deserializes a `serde_json::Value` (the
-// shape every test builds) into the typed `LspRequest` and forwards.
-
-/// Dispatch test hook — not part of the published JS surface.
-///
-/// # Panics
-///
-/// Panics if `req` is not a valid LSP JSON-RPC payload (intentional — tests
-/// must not feed it malformed JSON).
-#[doc(hidden)]
-#[must_use]
-pub fn __dispatch_for_test(ws: &mut FossilWorkspace, req: serde_json::Value) -> DispatchTestOutput {
-    let parsed: lsp_worker::LspRequest = serde_json::from_value(req).expect("malformed test req");
-    let out = lsp_worker::dispatch(ws, parsed);
-    DispatchTestOutput {
-        response: out.response.map(|r| DispatchTestResponse {
-            id: r.id,
-            result: r.result,
-            error: r.error.map(|e| DispatchTestError {
-                code: e.code,
-                message: e.message,
-            }),
-        }),
-        diagnostics: out.diagnostics,
-    }
-}
-
-/// Native-test-only response wrapper. The `lsp_worker::LspResponse` /
-/// `LspError` types are `pub(crate)`; this mirrors them so the test surface
-/// has stable field access.
-#[doc(hidden)]
-#[derive(Debug, Clone)]
-pub struct DispatchTestOutput {
-    pub response: Option<DispatchTestResponse>,
-    pub diagnostics: Vec<serde_json::Value>,
-}
-
-#[doc(hidden)]
-#[derive(Debug, Clone)]
-pub struct DispatchTestResponse {
-    pub id: serde_json::Value,
-    pub result: Option<serde_json::Value>,
-    pub error: Option<DispatchTestError>,
-}
-
-#[doc(hidden)]
-#[derive(Debug, Clone)]
-pub struct DispatchTestError {
-    pub code: i32,
-    pub message: String,
-}

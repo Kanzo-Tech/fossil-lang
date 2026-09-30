@@ -2127,7 +2127,6 @@ dependencies = [
  "fossil-introspect",
  "fossil-lineage",
  "fossil-mir",
- "fossil-wasm",
  "lsp-server",
  "lsp-types",
  "salsa",
@@ -2262,7 +2261,6 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-test",
- "web-sys",
 ]
 
 [[package]]

@@ -35,8 +35,7 @@
 //!
 //! 1. A `ShExJ` document in the workspace contributes **zero** rows, and the
 //!    number is exact because 21 is what it was.
-//! 2. The per-file drain the LSP Worker publishes agrees — that is the one the
-//!    squiggles come from.
+//! 2. The per-file drain agrees — that is the one the squiggles come from.
 //! 3. It is the CATALOGUE and not a `.shex` special case: a `.csv` nobody could
 //!    parse either is silent for the same reason, and a file with an extension
 //!    no row claims is still checked.
@@ -122,8 +121,7 @@ fn a_shape_document_in_the_workspace_is_not_parsed_as_fossil() {
         in_document.len()
     );
 
-    // (2) The per-file drain — the one the LSP Worker turns into
-    // `publishDiagnostics` for the buffer the user is looking at.
+    // (2) The per-file drain — the rows for the buffer the user is looking at.
     let per_file = ws
         .diagnostics_for_rows(document)
         .expect("the document handle is open");
