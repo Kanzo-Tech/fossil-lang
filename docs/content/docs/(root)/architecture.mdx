@@ -23,18 +23,17 @@ emits were 545 string literals with no declaration any of them derived from.
 
 **Every one of the four is addressed by a shift, and nothing is listed.** `dense_id` is a vertex's
 rank in the Hilbert order of its own position; a tile is
-`crates/fossil-sinks/src/manifest.rs, tile_of`, a level's address is the payload's shift plus `2k`
-by `crates/fossil-sinks/src/manifest.rs, STRIDE_BITS`, and a cell of rung `k` is `dense_id >> shift`
-with parent `r >> 2` — `crates/fossil-layout/src/layout/cells.rs, Pyramid`. There is no directory
+`crates/fossil-sinks/src/manifest.rs, tile_of`, and a cell of rung `k` is `dense_id >> shift` with
+parent `r >> 2`, two bits a rung by `crates/fossil-sinks/src/manifest.rs, CellTree` —
+`crates/fossil-layout/src/layout/cells.rs, Pyramid` writes it. There is no directory
 listing over HTTP and the format asks for none.
 [Addressing](/docs/format/conventions/addressing) is the specification.
 
-**The corpus carries two coarse faces and neither of them was deleted.** The level pyramid *samples*
-— `dense_id % scale == 0`, real rows sharing the payload's own numbering — and the cell pyramid
-*aggregates* into synthetic rows that no scale describes. They draw different pictures rather than
-being two prices for one, which is why `level_vs_rung.rs` (deleted after `2fa5f22`) weighs them on
-ONE corpus: two instruments over two graphs compare two graphs.
-[Cells](/docs/design/cells) is the argument for the cell pyramid being a third artefact.
+**The corpus carries one coarse face: the cell pyramid**, which *aggregates* into synthetic rows
+that no scale describes. The level pyramid that *sampled* beside it — `dense_id % scale == 0`, real
+rows in the payload's own numbering — was retired when the reader stopped asking for it;
+[the backend](/docs/design/backend#the-sample-goes-below-z-there-are-only-cells) has why, and
+[cells](/docs/design/cells) is the argument for the cell pyramid being a third artefact.
 
 ## What the writer is
 
@@ -44,7 +43,7 @@ true in.
 | the loop | where | what it produces |
 | --- | --- | --- |
 | every vertex, then every edge, with a hard barrier between them | `crates/fossil-df/src/lib.rs, execute_graph` | the payload columns and both adjacency orientations, as Arrow in memory |
-| partition, place, renumber into Hilbert order, tile | `crates/fossil-layout/src/layout/pass.rs, enrich_layout` | the payload on disk and the level pyramid |
+| partition, place, renumber into Hilbert order, tile | `crates/fossil-layout/src/layout/pass.rs, enrich_layout` | the payload on disk, its tile statistics and the identity index |
 | one linear scan per rung, over the payload rather than the rung below | `crates/fossil-layout/src/layout/cells.rs, Pyramid` | the cell rows and the quotient edges |
 
 Nothing is staged and read back: the rows reach the pass as the batches the executor already held.
@@ -64,27 +63,27 @@ Louvain will find; and `reached` on `crates/fossil-sinks/src/manifest.rs, KAnony
 
 **One door, one name, and it always takes an engine** — `packages/corpus/src/open.ts, open`.
 `resolveCorpus` and `openCorpus` are both gone into it, and the addressing either of them answered
-with is `corpus.addressing`:
+with is internal to it:
 
 ```ts
 await open(job, { engine, host })  // a job's corpus, under the credential the host vends
-await open(url, { query })         // a corpus at a URL
+await open(url, { engine })        // a corpus at a URL
 ```
 
 `sql: 'allowed'` widens either to `SqlCorpus`.
 
-**What comes back has two halves, and the line between them is which bytes get chosen.** `extent`,
-`rows`, `frame`, `node` and `neighbours` compute which files to open and open those. The verbs —
+**What comes back has two halves, and the line between them is which bytes get chosen.**
+`tileMatrix`, `scan`, `edges` and `node` compute which tiles to read and read those. The verbs —
 `crates/fossil-graph/src/operations/mod.rs, Operation`, compiled to wasm32 — name a table and let the
-engine decide. The two halves meet at exactly one point, the host's `query` callback, and the reader
-brings no engine of its own to either.
+engine decide. The two halves meet at exactly one point, the host's `Engine`, and the reader brings
+no engine of its own to either.
 
 **What would merge them is pruning by predicate, and it was measured to lose.** DuckDB evaluates a
 range predicate per row instead of skipping row groups: a range join against the id runs at 237 ms
 and 179 `BETWEEN … OR …` predicates at 189 ms, against 5 ms for not pruning at all. A window written
 as a `WHERE` reads the whole file, so pruning stays the tiles' job and this change did not merge
-anything. [One door](/docs/design/one-door) argues the surface, and [the backend](/docs/design/backend) is
-where it is going: a tile matrix, a scan planned from the manifest, and one tile per read.
+anything. [One door](/docs/design/one-door) argues the surface, and [the backend](/docs/design/backend) its
+shape: a tile matrix, a scan planned from the manifest, and a batch per tile.
 
 The reader's **policy** over that contract is deliberately not on the door, and not in this
 repository: what a corpus is drawn WITH and what is already LOADED belong to the viewer,

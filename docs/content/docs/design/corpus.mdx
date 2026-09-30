@@ -343,38 +343,31 @@ one binding over it. **It closed at six on 2026-08-05 and is two now**: `read`, 
 | `execute_sql` | the escape hatch, which a host withholds unless it opens the corpus with `sql: 'allowed'` |
 
 The algebra answers questions and **does not draw**, because drawing is addressing: the camera works
-out which level and which tiles it needs and asks for bytes, with no bbox in flight and no database
-on that path. Level-of-detail is not a filter but a **decimation**: level *k* is the vertices whose
-`dense_id` is a multiple of 2^*k*, which over a Hilbert-ordered `dense_id` is one vertex per quadtree
-cell of that depth. A `where` selects rows from a table; zoom changes which rows exist at all. Once
-that is settled, every verb whose job was to make a picture stops having one.
+out which zoom and which tiles it needs and asks for bytes, with no bbox in flight and no database
+on that path. Level-of-detail is not a filter but a **different relation**: below the payload a row
+is a cell of [the pyramid](/docs/design/cells), `dense_id >> shift`, summarising its members. A
+`where` selects rows from a table; zoom changes which rows exist at all. Once that is settled, every
+verb whose job was to make a picture stops having one.
 
-<Callout type="warn" title="This paragraph claimed super-nodes, and there are none">
-It read *"a level-3 tile holds super-nodes that do not exist at level 0"*. Nothing writes one.
-Louvain builds a hierarchy in the layout pass — four levels at ten million, 3,757,900 / 8,832 /
-2,081 / 1,487 — and the pass **collapses it to a `cluster_id` column** and discards the levels
-above zero. `cluster_id` is a colour and not a level. The directories that *are* levels are
-`vertex/<Type>/l{k}/`, and what is in them is the decimation below rather than anything Louvain
-built: real vertices at real positions, one per quadtree cell of depth *k*.
-
-Aggregation is also the wrong primitive here, and the reason is the one below: **a synthetic
-centroid cannot nest.** Replace a super-node with its children and every point on screen moves.
-A decimation is real vertices at real positions, and level *k+1* is a strict subset of level *k*,
-so zooming in only ever ADDS. Louvain's levels could not serve as a pyramid anyway — 8,832 to
-2,081 to 1,487 is not a decimation, it is a hierarchy that stops decimating after one step.
+<Callout type="warn" title="This paragraph claimed super-nodes; the coarse rows are cells">
+It read *"a level-3 tile holds super-nodes that do not exist at level 0"*, and for a long time
+nothing wrote one: Louvain's hierarchy is collapsed to a `cluster_id` column, which is a colour and
+not a level, and the coarse view was a **decimation** — `vertex/<Type>/l{k}/`, the vertices whose
+`dense_id` is a multiple of `4^k` — on the argument that a synthetic centroid cannot nest. The
+decimation is retired and the coarse rows are synthetic after all, and the nesting argument is
+answered by the partition rather than by the rows: a cell is an aligned block of the quaternary, so
+its members at the zoom below are exactly the rows its id shifts from, and zooming in replaces a cell
+with them and never with something else. [Cells](/docs/design/cells) is the argument and
+[the backend](/docs/design/backend#the-sample-goes-below-z-there-are-only-cells) the ruling.
 </Callout>
 
-### The stride has to be a power of two, and this is what it costs when it is not
+### A coarse view has to nest, and an arbitrary stride does not
 
-The reader draws a bounded sample of what the window holds. It picks the sample by striding on
-`dense_id`, which is right — the ids ascend along the Hilbert curve, so every *s*-th id is spatially
-stratified where a prefix would be one corner. But `s` is `ceil(matched / limit)`, **an arbitrary
-integer**, and arbitrary integers do not nest: the multiples of 34 and the multiples of 21 share
-only the multiples of 714.
-
-So zoom does not refine the picture, it **replaces** it. Measured over a million-vertex corpus at a
-12,000-point cap, counting only the vertices that are still inside the window after the camera
-moves — every point lost below is lost to *resampling*, not to leaving the frame:
+The first reader drew a bounded sample of what a window held, striding on `dense_id` by
+`ceil(matched / limit)` — **an arbitrary integer**, and arbitrary integers do not nest: the multiples
+of 34 and the multiples of 21 share only the multiples of 714. So zoom did not refine the picture, it
+**replaced** it. Measured over a million-vertex corpus at a 12,000-point cap, counting only the
+vertices still inside the window after the camera moves:
 
 | zoom step | still drawn, `s` arbitrary | still drawn, `s` a power of two |
 | --- | --- | --- |
@@ -384,77 +377,22 @@ moves — every point lost below is lost to *resampling*, not to leaving the fra
 | 15% → 10% | 11.1% | 100% |
 | 10% → 6% | 20.0% | 100% |
 
-Quantising `s` up to the next power of two costs at most one extra halving of the sample and buys
-the nesting outright: a vertex drawn at one zoom is drawn at every closer zoom, at the same
-position, and nothing is thrown away that did not leave the frame. **That is the whole difference
-between a picture that refines and a picture that flashes**, and it is one expression.
+**That is the whole difference between a picture that refines and a picture that flashes**, and it
+is why every coarse structure this format has carried is cut on powers of the same quaternary: the
+decimation that was retired, and the cell pyramid that replaced it, whose rung `k` drops two more
+bits of `dense_id` than rung `k − 1` — `crates/fossil-sinks/src/manifest.rs, CellTree`.
 
-<Callout title="The levels are written, and they optimise the predicate rather than replace it">
-Level *k* selected by `dense_id % 4^k` needs no bytes on disk: it is a predicate. What a written
-`vertex/<Type>/l{k}/` buys is that a coarse camera reads a small file instead of striding a large
-one — which is where the byte cost of a zoomed-out view lives, and the view that pays it is the
-default one: over the million-vertex bench corpus, **245 of 245 tiles and 20,901 kB to draw 15,625
-points**, 98.4% of it read and thrown away.
+**What would reverse it.** A coarse view whose rows are not cut on the order — cells from a
+clustering, say — which would make nesting a property to test per corpus rather than one the
+addressing guarantees. [What was discarded](/docs/design/discarded) carries that alternative.
 
-**Both paths select the same rows by the same predicate**, so a corpus without the levels draws the
-identical picture and only reads more. That is the property that keeps the pyramid from being a
-second contract, and it is held as a test rather than as a sentence:
-`crates/fossil-layout/tests/levels.rs` diffs each written level against the predicate evaluated over
-the payload, `EXCEPT ALL` in both directions, every column and not only the id, with the row count as
-a separate statement because a duplicate and an omission net to zero. Shifting the writer's predicate
-by one level fails exactly that test and leaves the others green.
+### Which tiles a rectangle touches is the tile statistics' answer, and only theirs
 
-Two things about the pyramid are decided, and each is spelled where it lives —
-`crates/fossil-sinks/src/manifest.rs, VertexLevels` and
-`crates/fossil-layout/src/layout/pass.rs, write_levels`.
-
-- **Quarters, and the pyramid is complete.** A zoom step doubles the linear scale, which quadruples
-  the area and so the points, so a level per quarter is a level per zoom step — in halves one step
-  crossed two levels and a writer needed a window constant to bound what it wrote. Every level from
-  1 down to the one that fits a single tile is written, and coarser than that buys nothing because
-  one tile is already one range request. The series `1/4 + 1/16 + …` is **a third of the type
-  whatever V is**, the same third an OME-Zarr pyramid pays, so there is no window and no floor left
-  to bound it; the one size that gets no pyramid is the one a single range request already answers.
-- **The manifest declares the scales.** A level is one `projections` entry carrying `scale: 4^k`, so
-  the list is `log4(V / chunk_size)` entries, nothing here grows with the graph, and a reader
-  recomputing it from `vertex_count` would be reimplementing the writer and would 404 the day the
-  policy moved. One function chooses them, and both the pass that writes the files and the caller
-  that declares them call it. **The exponent never leaves the writer**: what crosses into the
-  document is the product, so addressing a level is the payload's own shift plus `log2(scale)`.
-</Callout>
-
-<Callout type="warn" title="The edges get a pyramid, and it is not the one this said was empty">
-**This callout was titled "the edges get no pyramid" and the measurement under it was the wrong
-set.** A level's **induced** edge set — both endpoints in it — nests exactly as its vertices do, so
-it is not refused for a centroid's reason; it is refused because it is empty. A level keeps 1/2^*k*
-of the vertices and an edge needs two of them, so it keeps on the order of 1/2^2*k* of the edges:
-measured over a fixture of **27,976 edges** at mean degree 14, the three written levels induce
-**1, 0 and 0**.
-
-The set a camera draws is not that one. `view` keeps an edge with **one** end drawn and both ends
-positioned, so the edges a coarse view draws scale with the marks — `V/4^k · degree` — and not with
-their square. **Level *k* of a relation is therefore the edges incident to a level-*k* vertex**,
-`src_dense % 4^k = 0 OR dst_dense % 4^k = 0`, and each row carries **both endpoints' coordinates**
-so that the line can be drawn without opening the payload the pyramid exists to avoid. It is a
-decimation like the vertex one: every row a real edge between two real vertices at their real
-positions, nothing contracted, and it nests because its vertices do —
-`crates/fossil-sinks/src/manifest.rs, Projection` and
-`crates/fossil-layout/tests/levels.rs, an_edge_level_holds_the_incident_edges_at_the_payload_s_own_coordinates`.
-
-What this page refuses is unchanged and it is the same refusal twice: an edge between two survivors
-standing in for a path through vertices nobody drew is synthetic, and replacing it with the real path
-as the camera zooms moves every line on screen. `Corpus.frame` reads it where every
-relation it draws has the level written, and [the backend](/docs/design/backend) retires it with the
-vertex levels — the argument, and the price, are there.
-</Callout>
-
-### Which tiles a rectangle touches is the footers' answer, and only theirs
-
-The addressing reads no bytes, so it cannot answer a rectangle: `tilesFor` takes tile numbers, and
-the host supplies them from the per-tile `x`/`y` statistics Parquet writes into every footer.
-`open` is the layer that has an engine to read them with,
-and it buys them while the corpus is opening rather than lazily — a request between the camera
-moving and a URL being computable is the `viewport` verb this format deleted.
+The addressing reads no bytes, so it cannot answer a rectangle: which tiles a box touches comes from
+the per-tile `x`/`y` statistics Parquet writes into every footer, which the writer publishes once
+more in the tile manifest. `open` reads that manifest while the corpus is opening rather than lazily
+— a request between the camera moving and an address being computable is the `viewport` verb this
+format deleted — and `tileMatrix` hands every tile's box to the view.
 
 **A second index over that question was written and deleted.** `vertex/<Type>/codes.json` published
 the first and last Z-curve code of every tile, and it pruned tighter than a footer's box because the
@@ -479,9 +417,8 @@ it.** GraphAr failed that in practice — its own reader cannot open a fossil co
 Zarr meets the condition on the half above and fails it on the half below, and the split is clean:
 
 - **Its addressing model is this one.** A metadata document plus chunks addressed by a key computed
-  from the index, no server, store-agnostic. That is the engine-free depth of `open`, spelled
-  differently — and its `multiscales` convention is the level pyramid described above, already
-  standardised.
+  from the index, no server, store-agnostic — and its `multiscales` convention is the multiscale
+  structure this format carries, already standardised.
 - **Its data model is not.** Zarr is dense N-dimensional arrays. A tile here is a typed table with a
   subject IRI and, load-bearing, **footer statistics**: a chunk of Zarr carries none, so adopting
   the container means building an explicit spatial index to replace what Parquet gives for free.
@@ -566,16 +503,13 @@ demonstration is a measurement. Not an argument.
 
 ### Identity and incidence are addressed, not queried
 
-The reader answers `node` and `neighbours` by computing which files to open, and they once had verb
+The reader answers `node` and `edges` by computing which files to open, and they once had verb
 twins — `read` and `expand` — that looked like duplicates. They were not, and the twins are what went.
 **A verb names a relation and lets the engine choose bytes; these compute which files to open.**
 `expand` was a recursive CTE over the whole edge relation, and it **did not return in 45 seconds at a
-million vertices**; `neighbours` opens the adjacency tiles its frontier's addresses name and no
-others, once per hop. The identity index is reachable the same way or not at all: it is addressing by
-construction, and no verb sees it.
-
-[The backend](/docs/design/backend) keeps the rule and moves the member: incidence becomes `edges`
-from a tile, in either orientation, and a walk of more than one hop is the caller's loop over it.
+million vertices**; `edges` reads the adjacency tiles its addresses name and no others, and a walk of
+more than one hop is the caller's loop over it. The identity index is reachable the same way or not
+at all: it is addressing by construction, and no verb sees it.
 
 ### `execute_sql` reaches the engine unparsed, and one token opens it
 
@@ -647,8 +581,8 @@ tile matrix per vertex type, a scan planned out of the manifest, and one tile pe
 A 10% window over a million vertices opened **17 of 245 tiles in 6 range requests and 1,466 kB** —
 2.56% of the corpus, 1.13× over-read at tile granularity — measured through the playground's
 `src/Canvas.tsx` (deleted after `2fa5f22`) and checked against bytes over a real HTTP server. The
-extent and the total were answered off the footers and the manifest, so the opening frame issued no
-query at all.
+extent and the total were answered off the footers and the manifest then, and are off the tile
+manifest now, so the opening view issues no query beyond `open`'s own.
 
 One constraint on any view, and it holds of kanzo-ui as it held of the playground: **no engine in
 `@fossil-lang/corpus`.** The view needs bytes; the *host* reads them, and the package links none.

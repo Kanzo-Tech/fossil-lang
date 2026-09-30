@@ -54,9 +54,8 @@ that is the test: what it checks is the aggregation, which is the half that was 
 The format did not have to be argued into this shape. It is in it.
 
 `crates/fossil-sinks/src/manifest.rs, TILE_SHIFT` is 12, and 4,096 is 4⁶.
-`crates/fossil-sinks/src/manifest.rs, STRIDE_BITS` is 2, so
-`crates/fossil-sinks/src/manifest.rs, stride` is `4^k` and a level's address is the payload's shift
-plus `2k`. And `dense_id` is not a name a writer chose: it is a vertex's **rank in the Hilbert order
+`CellTree::RUNG_BITS` in `crates/fossil-sinks/src/manifest.rs, CellTree` is 2, so a rung's
+address is the payload's shift plus two bits per rung. And `dense_id` is not a name a writer chose: it is a vertex's **rank in the Hilbert order
 of its own position**, which is what `crates/fossil-layout/src/layout/hilbert.rs, hilbert_ranks`
 computes and what
 [the order that makes an interval mean something](/docs/format/conventions/addressing#the-order-that-makes-an-interval-mean-something)
@@ -117,10 +116,11 @@ rounding of a disc into its block.
 columns, and the same `dense_id >> shift` computing a cell id. It changes what one of its rows is
 about, which is the only part of it a reader was ever going to see.
 
-And the pyramid is already the other half of a mipmap. A level in
-`crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex whose `dense_id` is a multiple of
-`4^k` — one **representative** per block. A rung is the **aggregate** of the same block. Same
-address, two answers to two questions, which is why one cannot be spelled as the other.
+And the pyramid was the other half of a mipmap. A level of the retired decimation was every vertex
+whose `dense_id` is a multiple of `4^k` — one **representative** per block. A rung is the
+**aggregate** of the same block. Same address, two answers to two questions, which is why one could
+not be spelled as the other — and why, when [the backend](/docs/design/backend#the-sample-goes-below-z-there-are-only-cells)
+kept one, it kept the aggregate.
 
 ## A cell is not an entity, and no reader is in a position to ask
 
@@ -157,13 +157,12 @@ declared list rather than a convention a second writer could spell differently.
 
 ## It is a third artefact, and the tree already ruled on that
 
-The obvious home for a cell tree is `levels:` — the pyramid is already a hierarchy, the addressing
+The obvious home for a cell tree was the level entries of `projections:` — the pyramid was already a hierarchy, the addressing
 is already arithmetic, and a cell level looks like a coarse level. It cannot go there, and the
 ruling is made here: **a level is a subset of real rows and a cell is a summary of them**, so a cell
 answers a different question and has to do it under a different name.
 
-A level in `crates/fossil-sinks/src/manifest.rs, VertexLevels` is every vertex whose `dense_id` is a
-multiple of `4^k`. Every row is a real vertex at the position the payload gives it; nothing is
+A level of the retired decimation was every vertex whose `dense_id` is a multiple of `4^k`. Every row is a real vertex at the position the payload gives it; nothing is
 synthesised. A cell is a synthetic row by construction. Putting one in a `Projection` would make
 `scale:` mean two different things in the same document, which is exactly the failure the
 one-contract rule exists to prevent. **Being a texel over the same cells does not soften that** — it
@@ -305,7 +304,7 @@ three coarse artefacts this corpus has:
 | how far a coarse view descends on com-DBLP | its floor |
 | --- | --- |
 | a holarchy, `crates/fossil-layout/src/layout/community.rs, Cut` at factor 4 and chunk 4,096 | **1,696 groups** — levels 4 and 5 are dropped, neither being a quarter of the one above it |
-| the level pyramid, at its one-tile floor | **1,239 marks** |
+| the level pyramid (retired), at its one-tile floor | **1,239 marks** |
 | the cell pyramid, at the rung holding a single cell | **1 cell** — 19,818 → 4,955 → 1,239 → 310 → 78 → 20 → 5 → 2 → 1, and every rung of that list carries a picture |
 
 **The holarchy stops above the level pyramid's own floor**, and six rungs above the cell pyramid's.
@@ -404,8 +403,8 @@ level 9 it is exactly 4.00×.** The turn is at level 8, and it is sharp: 61,210 
 
 The cost follows immediately. The whole pyramid, every level from 0 to 16, is **1,375,552 cells —
 4.34× V**, which is not a summary of anything. Taken from the saturation scale instead it is
-61,210 × 4/3 = **81,613**, the `1/4 + 1/16 + …` series that `crates/fossil-sinks/src/manifest.rs, STRIDE_BITS`
-already costs the tile pyramid at a third of the type. The 4/3 rule is exactly right — **once you
+61,210 × 4/3 = **81,613**, the `1/4 + 1/16 + …` series that cost the retired level pyramid a third
+of the type. The 4/3 rule is exactly right — **once you
 start at the right level**, and nothing in the data says which that is.
 
 So the base is a knob, and here is the whole of what it trades:
@@ -429,8 +428,7 @@ unknown.
 Once it is declared, the rest is arithmetic: **rung `k` has `ceil(base_count / 4^k)` cells.** That
 is not a projection of the measurement, it *is* the measurement — 61,210 → 15,303 → 3,826 → 957 →
 240 → 60 is `ceil(n/4)` at every step, and every one of those numbers is in the table two sections
-down. So `cell_count` per rung is derivable from one declared number, exactly as
-`crates/fossil-sinks/src/manifest.rs, rows_at` derives a level's rows from `vertex_count` and
+down. So `cell_count` per rung is derivable from one declared number, and
 `crates/fossil-sinks/src/manifest.rs, planned` plans the whole pyramid before a byte is written.
 
 **This dissolved the obstacle this page used to name, and the tree is written.** The block was
@@ -466,9 +464,8 @@ Same corpus, same cells, bit for bit. A cell whose referent moves between writes
 navigable: a reader who descends, pans and ascends must arrive back where they were, and a bookmark
 must still resolve tomorrow.
 
-It is the standard the tree already holds itself to elsewhere —
-`crates/fossil-layout/tests/levels.rs, a_level_file_holds_exactly_what_the_level_predicate_selects`
-compares written artefacts against a predicate rather than trusting the writer — and the code
+It is the standard the tree holds itself to elsewhere — `crates/fossil-layout/tests/aggregation.rs`
+compares written artefacts against their definition rather than trusting the writer — and the code
 already claimed it in comments: `local_moving` walks `0..n` and breaks ties strictly so the lower
 community id survives, and `Weighted::contract` carries a section arguing its counting sort makes
 the output bit-identical.
@@ -513,10 +510,10 @@ what runs on every PR is the property, and the corpus it was first measured on s
 
 ### 2 · The branching factor is declared, not inherited
 
-Every published step contracts by at least four — the same octave the tile pyramid already uses.
-`VertexLevels` fixes that exponent in one place and says why a second spelling of it is the bug the
-constant exists to prevent; a cell tree on the same octave inherits that arithmetic instead of
-inventing one.
+Every published step contracts by at least four — the quaternary's own octave.
+`CellTree::RUNG_BITS` fixes that exponent in one place and says why a second spelling of it is the
+bug the constant exists to prevent; everything that cuts on the same octave reaches it there instead
+of inventing one.
 
 Over cells the rule is met **with equality**, which is what a mipmap is: 61,210 → 15,303 → 3,826 is
 4.00× at every step. What the same rule does below saturation is the more useful half — the 1.0× to
@@ -560,7 +557,7 @@ walks the hierarchy and picks **one** level that fits a budget; `Cut` is the sam
 question.** This paragraph ended *it is the one thing the manifest block does not need to know,
 because it declares counts and not a method* — true of the manifest, and allowed to stand in for the
 whole question. The manifest does not need to know; a reader descending does, because a cut that
-ends at 1,696 groups is a coarse view that stops existing above the level pyramid's own floor of
+ends at 1,696 groups is a coarse view that stops existing above the retired level pyramid's floor of
 1,239 marks, where a quaternary keeps quartering the mark count past it — all the way to one, and
 measurably rather than on paper, which is
 [six rungs further and not one](/docs/design/cells#the-holarchy-does-not-reach-further-and-the-margin-is-six-rungs-nothing-asks-for).
@@ -571,14 +568,13 @@ is where that is weighed.
 **And the floor is checkable from the document alone.** Because a rung declares a count rather than
 a scale, `crates/fossil-sinks/src/manifest.rs, contracts_by_at_least` evaluates the whole rule over
 the manifest — every rung against the one below it, the finest against the type's own
-`vertex_count` — without opening a file. The factor it compares with is `VertexLevels::stride` at
-one and never a literal four, so the octave keeps the single spelling that constant exists to
+`vertex_count` — without opening a file. The factor it compares with is `CellTree::BRANCHING` and
+never a literal four, so the octave keeps the single spelling that constant exists to
 enforce. A reader weighing a descent finds out it is not worth taking before it pays for the rung.
 
 ### 3 · A cell is defined against the level below, so it is checkable
 
-This is the half the change of mind does not touch. The bar is the one `levels.rs` already clears —
-evaluate the definition against the data and diff, rather than trusting the writer. For a cell
+This is the half the change of mind does not touch. The bar is to evaluate the definition against the data and diff, rather than trusting the writer. For a cell
 there are three obligations and all three are falsifiable by symmetric difference:
 
 <div className="fd-steps">
@@ -988,7 +984,7 @@ them», which the tree states in three places.**
 
 A camera spends a budget in *marks* and takes the coarsest artefact that still carries them, so the
 floor on what anything is read at is the smallest budget anything spends — not the deepest zoom, since
-zooming in shrinks what the rectangle holds and answers level 0 off the payload.
+zooming in shrinks what the rectangle holds and answers `z = Z` off the payload.
 `asked_for` in `level_vs_rung.rs` (deleted after `2fa5f22`) collects the three budgets that exist in
 this tree: **15,000** marks (`SCREEN_MARKS`, the number the pyramid's own base is picked with),
 **20,000** (`BOUNDED_DEFAULTS.limit`, what the playground's `src/tiles.ts` (deleted after `2fa5f22`) actually spends), and

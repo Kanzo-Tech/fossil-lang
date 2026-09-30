@@ -402,62 +402,39 @@ endpoints costs more than it saves by a wide margin
 ([Adjacency](/docs/format/conventions/adjacency#csr-not-lca)). With nothing to hoist, the interior
 nodes are empty.
 
-**The level-of-detail pyramid is not that tree either**, and it is not the aggregation this
-paragraph used to describe. It said a level tile holds *super-nodes that do not exist at level 0*,
-each level carrying its own `dense_id` space and its own renumbering. What was built is a
-**decimation**, for the reason the design page gives at length: a synthetic centroid cannot nest, so
-replacing it with its children moves every point on screen.
+**The coarse zooms are not that tree either.** They are the cell tree: rung `k` is a partition of
+the same `dense_id` axis into cells of `2^shift` ids, a cell is `dense_id >> shift`, and a rung is
+tiled at the type's own `chunk_size` — so the parent of a tile is a shift of it, and rung `k` is one
+matrix of [the tile manifest](#the-tile-manifest-is-the-footers-published-once), `z = R − k`. A cell
+row is a summary of its members, not one of them, which is why the tree is a block of its own and
+not a projection.
 
-**Level `k` is the vertices whose `dense_id` is a multiple of `4^k`.** Over a Hilbert-ordered
-`dense_id` that is one vertex per quadtree cell of depth `k`. Quarters and not halves because that
-is what a camera does: a zoom step doubles the linear scale, quadruples the area, and so quadruples
-the points, which makes one level exactly one zoom step. Three things follow from the definition
-alone, and none of them needs a byte on disk:
+### `projections:` — the payload and the adjacencies in one list
 
-- **It nests, by construction.** `dense_id % 4^(k+1) == 0` is a strict subset of
-  `dense_id % 4^k == 0`, so refining only ever ADDS and a vertex drawn once stays drawn at the same
-  position.
-- **Every row is a real vertex** at the position the payload gives it. There is no synthetic node
-  anywhere in the pyramid, and `cluster_id` is a colour rather than a level of anything.
-- **There is no second `dense_id` space.** A level shares the payload's numbering, so a level tile is
-  addressed by the payload's own shift plus `log2(scale)`, and tile `j` covers
-  `[j · chunk_size · scale, (j+1) · chunk_size · scale)`.
-
-So it is **`k` flat tilings of one id space**, not a tree of `k` levels and not `k` id spaces.
-
-### `projections:` — the payload and the levels in one list
-
-A corpus is an order, a cut, and **projections of that sequence** — one block, finest first, in
-which the payload is the entry whose `scale` is `1` rather than a special case:
+A corpus is an order, a cut, and **projections of that sequence** — one block, in which the payload
+is the entry whose `scale` is `1` rather than a special case:
 
 ```yaml
 projections:
-- { path: '',  scale: 1,  file_type: parquet, properties: [ ... ] }
-- { path: l1/, scale: 4,  file_type: parquet, properties: [ ... ] }
-- { path: l2/, scale: 16, file_type: parquet, properties: [ ... ] }
+- { path: '', scale: 1, file_type: parquet, properties: [ ... ] }
 ```
 
+and an edge type's two adjacencies are the same entries with an `aligned_by`
+([Adjacency](/docs/format/conventions/adjacency)).
+
 `path` is where the tiles are, relative to the type's own `prefix`, and inside it the corpus's
-[container](#two-containers-one-address) spells the filenames exactly as it does for the payload —
-`l1/chunk0.parquet` where the payload is `chunk0.parquet`, `l1/tiles.parquet` where it is
-`tiles.parquet`. **`scale` is how many `dense_id`s one row stands for**, so a projection holds
-`vertex_count.div_ceil(scale)` rows and a reader adds `log2(scale)` to the type's own shift and needs
-no exponent of its own. Both are [OME-NGFF's own spellings](/docs/design/prior-art). No projection
-declares a `chunk_size` — the cut does not change with the scale — so the type's own number addresses
-every one of them, and [the identity index](/docs/format/conventions/identity), which is not a
-projection, is the one artefact carrying its own.
+[container](#two-containers-one-address) spells the filenames — `chunk0.parquet` under `files`,
+`tiles.parquet` under `rowgroups`. **`scale` is how many `dense_id`s one row stands for**, so a
+projection holds `vertex_count.div_ceil(scale)` rows and its tile `j` covers
+`[j · chunk_size · scale, (j+1) · chunk_size · scale)`: a reader adds `log2(scale)` to the type's own
+shift and needs no exponent of its own. Every projection fossil writes is at `scale: 1`. Both names
+are [OME-NGFF's own spellings](/docs/design/prior-art). No projection declares a `chunk_size` — the
+cut does not change with the scale — so the type's own number addresses every one of them, and
+[the identity index](/docs/format/conventions/identity), which is not a projection, is the one
+artefact carrying its own.
 
-**The scales are declared, and they are not derivable.** The list is
-`log4(vertex_count / chunk_size)` entries, so nothing here grows with the graph. And which levels a
-writer chose to spend bytes on is a *policy*: a reader re-deriving it from `vertex_count` and
-`chunk_size` would be reimplementing the writer's plan and would 404 the day the plan moved. One
-function chooses them: `crates/fossil-sinks/src/manifest.rs, VertexLevels`.
-`a-level-is-the-predicate` checks the files against the predicate rather than against the plan,
-because a corpus is free to declare a different set as long as what it wrote is what it says.
-
-**A single projection is a corpus and not a gap.** A type that fits a single tile declares the
-payload alone and draws the identical picture — one range request already answers it, so there is no
-coarser view left to write. Every type over that size carries the pyramid, complete.
+**A scale that is not a power of two is refused**, because it would make a tile address a division;
+and a type whose list names no `scale: 1` has no payload to address, and is refused too.
 
 ## Encoding is chosen per column
 

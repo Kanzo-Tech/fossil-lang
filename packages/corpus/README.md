@@ -5,27 +5,24 @@ The query layer for whatever draws the graph. **Fossil ships no viewer.**
 **One door, and it is one function.** `open(url, { engine })` returns
 discovery, the read path a view is built on (`tileMatrix`, `scan`, `edges`,
 `node`), and the verbs (`schema`, `relations`, and `executeSql` when the host
-asks) on one object — and, until step 5 of `/docs/design/backend` deletes them,
-the members that path replaces (`extent`, `frame`, `rows`, `neighbours`).
+asks) on one object. `/docs/design/backend` is the argument, and the members
+that path replaced — `extent`, `frame`, `rows`, `neighbours` — are gone.
 
 **It needs an engine, and the engine is the host's.** `@fossil-lang/types`'
 `Engine`: `query(sql, { signal })` answering in Arrow-shaped columns — an
 apache-arrow `Table` is one — and interrupting the running statement when the
 signal aborts. A job's corpus is opened through it under the credential the host
-vends; a corpus at a URL through it alone, or through the `query` callback that
-retires in step 5:
+vends; a corpus at a URL through it alone:
 
 ```ts
 await open(job, { engine, host })          // a job's corpus
 await open(url, { engine })                // a corpus at a URL
-await open(url, { query })                 // the same through a row callback — retiring
 await open(url, { engine, manifestFiles }) // with the manifests in hand
 ```
 
-Giving neither `engine` nor `query` is a `TypeError`. `corpus.addressing` is the
-arithmetic over the manifests the open already resolved — the URLs, for a
-caller that reads its own tiles. The engine-free rungs that used to answer with
-it directly went with the one viewer that used them.
+Giving no `engine` is a `TypeError`. The addressing the open resolves — the
+arithmetic over the manifests — is internal: a consumer that needs a URL has
+outgrown a surface whose claim is that a corpus is a URL.
 
 Everything else that was on the barrel is reachable through the door or not at
 all:
@@ -45,10 +42,6 @@ all:
 - `export type *` — an unbounded star publishes whatever the codegen makes, now
   and later, with nobody deciding. The params/results the members name
   are re-exported by name instead.
-
-`Corpus.levels()` is `levelsOf(addressing, type?)` inside the package, because
-every line of it is addressing rather than a member of a door; no reader outside
-the repository names a level file, so it is not exported.
 
 `./corpus` was a subpath whose one justification was that its closure reached no
 WASM; the door reaches the verbs now, so it does, and the subpath went with the
@@ -88,16 +81,14 @@ The barrel — every part of it — static-imports the wasm-bindgen output.
   ├─ src/client.ts      the verb transport, dispatched through by the door (not exported)
   ├─ src/query.ts       the engine's two faces: rows, and a Batch a read hands back
   ├─ src/manifest.ts    graph.graph.yml, scanned for the paths to fetch next
-  ├─ src/address.ts     addressManifests + levelsOf — the binding, not the reader
+  ├─ src/address.ts     addressManifests — the binding to fossil_graph::plan, not a reader
   ├─ src/open.ts        open(url, { engine } | { engine, host }) — THE DOOR
   ├─ src/corpus.ts      the Corpus surface's types
-  ├─ src/tile-manifest.ts   the published per-tile statistics; the footers `frame` still reads
+  ├─ src/tile-manifest.ts   the published per-tile statistics, read once per type
   ├─ src/tile-matrix.ts OGC's tile matrix set: every zoom, every tile, its rows and box
   ├─ src/expression.ts  Iceberg's Filter: bind, inclusive + strict evaluators, residual SQL
-  ├─ src/scan.ts        Table.scan: plan() over every zoom, read() of one tile
-  ├─ src/rows.ts        rows and frame's tile selection — step 5 deletes it
-  ├─ src/frame.ts       frame — step 5 deletes it
-  ├─ src/edges.ts       edges(): CSR/CSC at Z, the quotient below; neighbours
+  ├─ src/scan.ts        Table.scan: plan() over every zoom, read() a batch per tile
+  ├─ src/edges.ts       edges(): CSR/CSC at Z, the quotient below
   ├─ src/identity.ts    node: the index seek and its key ranges
   ├─ src/verbs.ts       the views the verbs read, schema, relations, executeSql
   └─ src/sql.ts         literals, identifiers, the 64-bit id guard
@@ -134,9 +125,10 @@ const answers = await corpus.edges({ from: visible, direction: 'src', signal });
 ```
 
 - **`tileMatrix(type)`** — OGC 17-083r4's `TileMatrixSet`: `extent`,
-  `coordinates`, and `tileMatrices[z]` with `kind` (`rows` at `Z`, `cells`
-  below), `count`, `shift`, `tileRows` and every tile's `{ tile, rows, bbox }`.
-  Throws for a type that publishes no tile manifest.
+  `coordinates`, `mode` (the channel a cell's `mode` summarises), and
+  `tileMatrices[z]` with `kind` (`rows` at `Z`, `cells` below), `count`,
+  `shift`, `tileRows` and every tile's `{ tile, rows, bbox }`. Throws for a type
+  that publishes no tile manifest.
 - **`scan({ type, filter?, select? })`** — Iceberg's `Table.scan`, bound when it
   is built (an unknown column throws here). `plan()` is `plan_files` at every
   zoom, pruned by the inclusive metrics evaluator over the published bounds and
@@ -152,74 +144,43 @@ const answers = await corpus.edges({ from: visible, direction: 'src', signal });
   declined there), skipping a tile the manifest says has none. A relation to
   another type is declined as `other-space` unless `relation` names it.
 
-What follows is the surface those three replace, which kanzo-ui still reads:
+- **`node(id)`** — one vertex by identity, with its `dense_id` and position, so
+  a pinned or searched vertex is placed without a scan; its tile is `denseId`
+  over `tileRows`.
 
-```ts
-import { open } from '@fossil-lang/corpus';
+A walk of more than one hop is the caller's loop over `node` and `edges`, and a
+rectangle is a filter on `x` and `y`: both are composed in
+`tests/corpus.test.ts` against the numbers `conformance/expected.json`'s full
+scan published.
 
-const corpus = await open('https://data.example/graph', {
-  // Adapt the host's DuckDB-WASM to row objects. In keasy this wraps the Mosaic
-  // coordinator; the binding stays free of an Arrow/Mosaic dependency.
-  query: async (sql) => {
-    const table = await coordinator.query(sql, { type: 'arrow' });
-    return table.toArray().map((r) => r.toJSON());
-  },
-  // No wasm URL: `open` boots the module (memoised) and the bundler already
-  // emitted its `.wasm`. The addressing needs it too — it asks
-  // `fossil_graph::plan` rather than re-deriving anything.
-});
-
-corpus.types;                              // vertex types with counts and columns, edge types
-const box = await corpus.extent();         // the coordinates a rectangle is expressed in
-const here = await corpus.rows({ x: box.minX, y: box.minY, w: 100, h: 100 });
-
-// The camera. Two questions, two names: `rows` is what is here, entire, and
-// `frame` is what to draw at this resolution. The level comes from the canvas.
-const rect = { x: box.minX, y: box.minY, w: 1000, h: 1000 };
-const frame = await corpus.frame({ ...rect, pixels: { w: 1200, h: 800 } });
-frame.level;         // which level the canvas could show — `level:` names one by hand
-frame.marks;         // a prefix length — everything past it is an anchor
-frame.cost.requests; // and `.bytes`: what it spent, in the terms a network tab has
-
-const one = await corpus.node('https://example.org/person/15');
-const hood = await corpus.neighbours([one.id], { depth: 2 });
-
-const { vertices } = await corpus.schema();
-```
-
-**One argument is the corpus and the other is the engine.** The host brings a
-`query` callback — DuckDB-WASM in a browser — and this package keeps its zero runtime dependencies. Three of the four
-members have to decode Parquet, and an engine also does the footer pruning a
-rectangle read would otherwise re-derive by hand. `read_text`, `read_parquet` and
-`parquet_metadata` are the whole of what it is asked for.
+**One argument is the corpus and the other is the engine.** The host brings an
+`Engine` — DuckDB-WASM in a browser — and this package keeps its zero runtime
+engine dependencies: it decodes no Parquet and links no engine. `read_text`,
+`read_parquet` and `parquet_metadata` are the whole of what it is asked for.
 
 **`id` is the subject IRI, never the `dense_id`.** Redoing the layout renumbers
 every vertex, so an address held outside the corpus names a different vertex
 after the next write. `node` refuses a `BigInt` with a `TypeError` that says so.
-The price is a scan of the `subject` column, because the corpus carries no index
-from a name to an address; `src/identity.ts` measures it at the call site.
+Where the type declares an `index:` the lookup is a seek; where it does not, it is
+a scan of the `subject` column, and `types.vertices[i].indexed` says which;
+`src/identity.ts` measures both at the call site.
 
-**An answer says what it is missing.** `complete` is `true` only when every edge
-incident to the answer's vertices is in it. `gaps` names an orientation that was
-not read — the caller not asking and the corpus not publishing are different
-reasons and are reported as different reasons — and `neighbours` also returns
-the `frontier` its depth bound stopped at.
+**An answer says what it is missing.** `edges` answers with the relations it read
+and the ones it `declined`, with fossil's `GapReason`: `not-declared` for an
+orientation the corpus does not publish, `other-space` for a relation whose far
+end is another type.
 
 **What it does not absorb**: the container. A tile is a range of rows, and
 whether one is a file (`chunk{k}.parquet`) or a row group inside a single
 `tiles.parquet` is a second question — the one `graph.graph.yml`'s `container`
 answers, because a reader over HTTP has no directory to list and cannot work it
 out. **Both are read.** `packages/corpus/integration/containers.test.ts` writes
-the same graph in each and asserts the answers back are identical — extent,
-window, `node`, `neighbours` — and that the row-group container names strictly
-fewer files for the same window (over HTTP, 5.6 requests per window against 22.3
-at five million vertices). Reading only the file-per-tile container `fossil run`
-writes and refusing the other by name is what this paragraph used to claim, and
-it is the one thing the reader must not do: the row-group container is the
-measured winner and the one fossil does not write yet, so refusing it would
-refuse the corpus this package exists to read. Neither is globbed, because a
-glob picks up the staged single-file copy beside the tiles and counts every row
-twice.
+the same graph in each and asserts the answers back are identical — the tile
+matrix, a window's tiles and their edges, `node` — and that the row-group
+container names strictly fewer files for the same window (over HTTP, 5.6
+requests per window against 22.3 at five million vertices). Neither is globbed,
+because a glob picks up the staged single-file copy beside the tiles and counts
+every row twice.
 
 ## The verbs
 
@@ -228,7 +189,7 @@ twice.
 
 Verb→SQL runs in WASM (`fossil-graph-wasm`, single-source with the Rust verb
 structs); SQL **execution** goes
-through the same `query` callback everything else does. The host's DuckDB
+through the same engine everything else does. The host's DuckDB
 streams Parquet over httpfs, so the binding never materialises rows in JS —
 that is what lets a host scale past RAM.
 
@@ -238,7 +199,7 @@ it — `CREATE OR REPLACE TEMP VIEW "Person"`, and `TEMP` because a host's own
 `Person` table is not unlikely and a temp view shadows it rather than replacing
 it.
 
-**A verb reads the manifest's vocabulary; the camera reads the bytes.** A verb
+**A verb reads the manifest's vocabulary; the door reads the bytes.** A verb
 composes SQL before it has seen a byte, so its column list is the payload
 projection's declared `properties`;
 `open` had a round trip to spend and spent it on a `DESCRIBE`. On the
@@ -258,8 +219,8 @@ vocabulary does not. Neither is wrong and they are not the same question.
   is what decides whether an axis may bin it. A host asks for the kind and
   keeps no table of spellings.
 - **`executeSql`** — the escape hatch: SQL over the views `relations` names.
-  **Withheld unless the host asks**: `open(url, { query })` returns a `Corpus`
-  with no `executeSql` member; `open(url, { query, sql: 'allowed' })` returns a
+  **Withheld unless the host asks**: `open(url, { engine })` returns a `Corpus`
+  with no `executeSql` member; `open(url, { engine, sql: 'allowed' })` returns a
   `SqlCorpus` with it. Closed by default because every other member costs a
   function of the answer and the hatch costs a function of whatever was typed.
   It is not a sanitiser and not a security boundary — the engine and the files
@@ -291,68 +252,36 @@ corpus is open, and a lease per file for Azure (`@fossil-lang/storage`). The
 host signs nothing, composes no path and derives no name. `close()` gives the
 credential back.
 
-`addressing.files()` is `fossil_graph::plan::ReadPlan::files`: every vertex
-type's projections and index, then every relation's projections. A projection
-whose count is not declared cannot be enumerated and is left out, not guessed.
-`relations()` is one bare `schema()` — the name is the corpus's `table_name`,
-the rows its `count(*)` — joined to the addressing for the files.
+What an Azure host lends file by file is `fossil_graph::plan::ReadPlan::files`:
+every vertex type's payload and index, then every relation's adjacency. A
+projection whose count is not declared cannot be enumerated and is left out, not
+guessed. `relations()` is one bare `schema()` — the name is the corpus's
+`table_name`, the rows its `count(*)` — joined to the addressing for the files.
 
 ## Addressing
 
-What gets drawn comes from tiles, and a tile's URL is arithmetic over four
+What gets read comes from tiles, and a tile's address is arithmetic over four
 manifest fields. That arithmetic is `fossil_graph::plan`, in Rust, and this
-package is how JavaScript asks it — one reader, reached from two languages,
-rather than one contract implemented in each.
-
-**It is not a second import.** `corpus.addressing` is the resolved plan the door
-already built while it was opening, so a drawing path that fetches its own tiles
-reaches it through the corpus it already has:
-
-```ts
-const { addressing } = await open(url, { query });
-
-addressing.vertexType().tileUrl(10);
-// '/bench/1000000/vertex/Person/chunk10.parquet'
-
-const { vertexUrls, edgeUrls, complete, gaps } = addressing.tilesFor({
-  tiles: [10, 11],          // from the host's own footer read — see below
-  directions: ['src'],      // out-edges only; see `drawing` for what a picture may draw
-});
-// complete: false
-// gaps: [{ edgeType: 'knows', direction: 'dst', reason: 'not-requested' }]
-```
-
-`container` on every address says which number a footer hands you is the tile:
-under `rowgroups` the row group **is** the tile, under `files` the file is. That
-rule used to live only in `/docs/format`, so a footer reader had the
-discriminant and not the rule.
+package asks it through `fossil-graph-wasm` — one reader, reached from two
+languages, rather than one contract implemented in each. It is internal: the door
+resolves it while it opens, and `tileMatrix`, `scan` and `edges` are what it is
+for.
 
 **It never composes an address the corpus does not publish.** An edge type with
 no projection at `scale: 1` for a direction, or one declaring it with no `path`,
-has tiles nobody can address: `adjacency('dst')` is `null` and the direction is
-absent from `directions`, rather than a string that 404s in a browser with no
-type error. A corpus whose `src_chunk_size` disagrees with the vertex type
-addressing it is refused when it is opened, not at the first request.
-
-**A partial answer says which part.** CSR alone is complete for *drawing* —
-every drawable edge has its source on screen — and incomplete for *incidence*.
-`complete` is about incidence, and `gaps` separates the caller not asking from
-the corpus not publishing.
-
-**No `fetch`, and no boxes.** The module is instantiated once and then answers
-without touching the network; which tiles a rectangle touches comes from the
-per-tile `x`/`y` statistics in the Parquet footers; reading a footer needs a
-Parquet reader, the host has one, and the tile numbers come back here. Tile
-cache, debounce, supersede-cancellation and sampling stay in the reader too.
+has tiles nobody can address, and `edges` declines that orientation as
+`not-declared` rather than asking for a string that 404s. A corpus whose
+`src_chunk_size` disagrees with the vertex type addressing it is refused when it
+is opened, not at the first request.
 
 The contract is executable: `packages/corpus/conformance/` holds a corpus, the
 manifest cases a corpus cannot hold, and `expected.json` — every address that
 must compose and every one that must be refused. `tests/conformance.test.ts`
-runs it here, through the wasm32 build that actually ships;
-`crates/fossil-graph/tests/conformance.rs` runs it natively, where `usize` is 64
-bits rather than 32; and `packages/corpus/conformance/verify.mjs` runs it in plain
-Node with no npm at all, which is the position a third-party reader is in and
-the only one of the three that is a separate implementation.
+runs what the published reader asks of it through the wasm32 build that actually
+ships; `crates/fossil-graph/tests/conformance.rs` runs all of it natively, where
+`usize` is 64 bits rather than 32; and `packages/corpus/conformance/verify.mjs`
+runs it in plain Node with no npm at all, which is the position a third-party
+reader is in and the only one of the three that is a separate implementation.
 
 ## Build
 

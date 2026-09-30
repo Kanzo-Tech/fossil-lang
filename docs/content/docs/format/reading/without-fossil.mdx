@@ -160,39 +160,38 @@ nothing.
 
 ```ts
 import { open } from '@fossil-lang/corpus';
-const corpus = await open('https://cdn.example.org/kg/2026-08', { query });
+const corpus = await open('https://cdn.example.org/kg/2026-08', { engine });
 
-corpus.types                                   // what is inside
-await corpus.extent('Person')                  // where it is, in coordinates
-await corpus.rows({ x, y, w, h })              // vertices + edges in a rectangle
-await corpus.node('http://example.org/p/17')   // one vertex by identity
-await corpus.neighbours([id], { depth: 2 })    // everything within N hops
+corpus.types                                             // what is inside
+const set = corpus.tileMatrix('Person')                  // every zoom, every tile, its rows and box
+const scan = corpus.scan({ type: 'Person', filter })     // bound once, planned over every zoom
+await scan.read(scan.plan())                             // a batch per tile
+await corpus.edges({ from: tiles, direction: 'src' })    // the relations incident to those tiles
+await corpus.node('http://example.org/p/17')             // one vertex by identity
 ```
 
-The one capability a host brings is `query`, a callback that runs SQL and hands back rows: the
-package has **zero runtime dependencies**, bundling a Parquet decoder would make it a driver, and
-the engine already prunes row groups off the footer statistics. Nothing a separate `fetch` could
-reach is out of its reach either — it has to see the tiles or it cannot answer a window.
-Cancellation, parameter binding and streaming are what the seam does not carry, each because a host
-would have to lie to provide it, and `query.ts` says so.
+The one capability a host brings is an `Engine`: SQL in, Arrow-shaped columns out, and an
+`AbortSignal` that interrupts the running statement. The package has **zero runtime
+dependencies** — bundling a Parquet decoder would make it a driver, and the engine already prunes
+row groups off the footer statistics. Nothing a separate `fetch` could reach is out of its reach
+either: it has to see the tiles or it cannot answer one.
 
-**An answer knows what it is missing.** `complete` means one narrow thing: every edge incident to a
-vertex in this answer is in this answer. `gaps` names an orientation that was not read — the
-caller did not ask, or the corpus publishes no address for it — and `frontier` names the vertices a
-depth bound stopped at, whose edges were never opened, without which a `depth: 1` result *looks*
-whole. **Every edge appears once**, too: the corpus stores one relation twice, so an answer that
-concatenates both orientations counts a self-type relation double — 1,192 edges against the 596
-the conformance manifest declares, which draws identically.
+**An answer says what it declined.** `edges` answers per tile, and beside its batches lists every
+incident relation it did not read with a reason: `not-declared` for an orientation the corpus
+publishes no address for, `other-space` for a relation whose far end is numbered in another type's
+`dense_id` space, read only when the call names it. One call reads one orientation, so a caller that
+reads both reads a self-type relation twice — the corpus stores it twice — and counts each edge once
+itself.
 
-It refuses three things: a corpus declaring no `vertex_count`; an edge label incident twice to one
-vertex type, which the addressing cannot name unambiguously; and an `index:` with a `prefix` and no
+It refuses two things: a corpus declaring no `vertex_count`, and an `index:` with a `prefix` and no
 `ordered_by`. It reads **both containers** and globs for neither — which one it is looking at comes
 off `graph.graph.yml`'s `container`, and a corpus that declares one and carries the other is what
 `declared-tiling` refuses.
 
-And it declares two costs. **`extent` is believed, not verified** — it comes from the footers, a
-box wider than its rows costs a read, a box narrower than its rows **loses vertices**, and only
-re-reading every page tells them apart. **`node(id)` scans a corpus that publishes no index**: at
+And it declares two costs. **A tile's box is believed, not verified** — it comes from the tile
+manifest, a box wider than its rows costs a read, a box narrower than its rows **loses vertices**,
+and only re-reading every page tells them apart; `tile-manifest` holds the manifest against the
+footers. **`node(id)` scans a corpus that publishes no index**: at
 five million vertices one lookup reads about 40 MB. Both answers are correct and only one is fast,
 so which one a caller gets is a property of the **type**, readable once as
 `corpus.types.vertices.find((t) => t.type === 'Person')?.indexed` and not a difference discovered by

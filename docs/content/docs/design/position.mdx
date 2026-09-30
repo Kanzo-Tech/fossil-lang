@@ -586,8 +586,8 @@ block does is make the row's number checkable from the artefact instead of from 
   draws exactly as it did, and a corpus that declares something is drawn by what it declares.
   **Done**, and both halves are asserted — the first against the harness's own copy of the old rule
   rather than against what the module now returns.
-- **What replaces the cross-check that is lost.** That harness also asserted that
-  `frame({fill})` and `frame({})` answer one rectangle with identical categories — a real
+- **What replaces the cross-check that is lost.** That harness also asserted that the door's
+  `frame({fill})` and `frame({})` answered one rectangle with identical categories — a real
   comparison while `encoding.ts` and `corpus.ts` wrote the name independently, and a tautology once
   both read `PAYLOAD_CATEGORICAL`. The check that is worth having instead is the one it was standing
   in for: **the column a corpus declares is a column the corpus has.** **Done**, with the door's own
@@ -602,13 +602,11 @@ mistake this page is about; naming one in the manifest is a third thing again.
 
 **What a reader colours by** is settled, and this section used to say the opposite —
 [`channels:`](#channels--a-column-a-scale-and-the-one-number-a-reader-cannot-recover) is above.
-**What a reader sizes by** is not, and it is a limit of the door rather than of the artefact.
-
-`Corpus.frame` carries one categorical per row and no measure, so the streaming path has
-nothing to spend a radius ramp on and the baseline beside it would be the only half of a comparison
-that had one. Every level file already carries every column, so what would change it is a second
-column on `FrameParams` and a second array on `Frame` — a projection, not an artefact — and nothing
-has asked for one.
+**What a reader sizes by** is not, and at a coarse zoom it is a limit of the artefact. At `z = Z` a
+scan projects any payload column, so a measure is one more name in `select`; below it a row is a
+cell, which carries `count` and one categorical's `mode`, so a view sizing by anything there has
+`count` and nothing else ([the backend](/docs/design/backend#what-a-row-carries-at-each-zoom)). What
+would change it is a second channel the writer summarises, and nothing has asked for one.
 
 **Whether `derived` should name a version.** *Derived by Louvain and phyllotaxis* is not
 reproducible across a change to either. A version string is the obvious answer and it is not

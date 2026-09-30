@@ -79,7 +79,7 @@ index:
 `ordered_by` is named rather than assumed, because a corpus whose identity is some other column
 indexes that column instead, and a `prefix` without it names files whose sort a reader would have to
 guess. **The index is the one artefact of a corpus that is not a
-[projection](/docs/format/conventions/addressing#projections-the-payload-and-the-levels-in-one-list):
+[projection](/docs/format/conventions/addressing#projections-the-payload-and-the-adjacencies-in-one-list):
 it is a second ORDER over the same rows, so the spatial cut does not address it.** Everything else is
 that one sequence at some `scale`, whose tile `k` is a `dense_id` range; tile `k` here is the `k`th
 slice of the **sorted** order. Hence its own `chunk_size`, no `scale`, and files spelled `tile{k}`

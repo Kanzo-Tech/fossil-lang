@@ -1,15 +1,13 @@
 ---
 title: The backend
 description: fossil is the backend and kanzo-ui is the view, with one path between them — a corpus read the way Apache Iceberg reads a table and addressed the way an OGC tile matrix set addresses a tile, with the cell pyramid as the zoom levels, the level files retired, and the reader split into modules that each follow one of the two.
-direction:
-  summary: "`@fossil-lang/corpus` answers every view through `open`, `tileMatrix`, `scan` (`plan` and `read`) and `edges`, planning by tile out of statistics the writer published and reading each run of consecutive tiles as one range, and `frame`, `rows`, `extent`, `neighbours`, `levelsOf` and the level files are gone."
 ---
 
 **fossil is the backend. The view is `@kanzo-tech/graph` and the rest of kanzo-ui, and there is one
 path between them.** Anything that answers the same question a second way is deleted rather than
 kept beside it — the playground went for being a second viewer, `@fossil-lang/draw` went with it, and
 `fossil-mcp` went for being a second binding. What is left on this side is one reader,
-`@fossil-lang/corpus`, and this page is the shape it is going to have.
+`@fossil-lang/corpus`, and this page is the shape it has.
 
 The shape is borrowed, and naming where it comes from is what makes it checkable rather than an
 analogy. **Reading a corpus follows Apache Iceberg's read path**, Catalog → Table → Scan: a table is
@@ -43,9 +41,7 @@ infrastructure, and it would belong in a package between the two, still not in t
 
 ## The contract
 
-This is everything that crosses. `tileMatrix`, `scan` and `edges` are built and exported beside the
-members they replace, which step 5 deletes; the `open` shapes that take a `query` callback go with
-them and are not listed. `Engine` and `Host` are `@fossil-lang/types`' own
+This is everything that crosses. `Engine` and `Host` are `@fossil-lang/types`' own
 (`packages/types/src/engine.ts, Engine`, `packages/types/src/host.ts, Host`), and `SchemaResult` and
 the SQL pair are the verbs' generated shapes, unchanged.
 
@@ -79,6 +75,7 @@ interface TileMatrixSet {
   readonly type: string;
   readonly extent: Box | null;
   readonly coordinates: string | null;
+  readonly mode: Channel | null;
   readonly tileMatrices: readonly TileMatrix[];
 }
 interface TileMatrix {
@@ -151,8 +148,8 @@ type Filter =
   | { not: Filter };
 ```
 
-`Box` keeps the half-open rectangle `rows` takes, `x <= v.x < x + w` and the same in `y` — except as
-a tile's `bbox`, where it is the tile's bounds and closed on both edges. A `bbox` and an `extent` are
+`Box` is `{ x, y, w, h }`, and as a tile's `bbox` or a set's `extent` it is bounds, closed on both
+edges; a window a view culls with is its own, and a `Filter` states one half-open. A `bbox` and an `extent` are
 `null` for a type with no `x` and `y`, and `coordinates` is `null` where the document declares no
 coordinate system; the contract had all three total, and a type without geometry still has tiles.
 `CorpusTypes`, `CorpusRelation`, `PlacedVertex` and the two errors are the ones
@@ -160,8 +157,9 @@ coordinate system; the contract had all three total, and a type without geometry
 manifest's `channels:` block. The page said the reader parsed it and did not surface it; nothing on
 the reader's side parsed it at all, so `fossil_graph::plan` reads it now
 (`crates/fossil-graph/src/plan/declared.rs, channels_of`) with the cell tree and the coordinate
-system beside it. `Direction`, `Gap` and `GapReason` are the ones `packages/corpus/src/address.ts`
-exports — `src` reads the source-aligned half of a relation and `dst` the target-aligned one.
+system beside it. `Channel`, `Direction`, `Gap` and `GapReason` are the ones
+`packages/corpus/src/address.ts` exports — `src` reads the source-aligned half of a relation and `dst`
+the target-aligned one — and they are the only names of the addressing on the barrel.
 
 What each member answers, in one line each:
 
@@ -207,9 +205,9 @@ What each member answers, in one line each:
 - **`node`, `schema`, `relations`, `executeSql`** — unchanged: identity through the index, the
   verbs' introspection, what a SQL host registers, and the escape hatch behind `sql: 'allowed'`.
 
-**Nothing else crosses.** `corpus.addressing`, the `CorpusAddressing` family, `QueryFn`,
-`Answer` and every `Frame*` type leave the barrel; a consumer that needs a URL has outgrown a
-surface whose claim is that a corpus is a URL.
+**Nothing else crosses.** The addressing a corpus is opened with — `CorpusAddressing` and its
+family — and `QueryFn` are internal, and the engine is the one capability; a consumer that needs a
+URL has outgrown a surface whose claim is that a corpus is a URL.
 
 **What would reverse it.** A view question that cannot be answered by composing these members
 without reading a byte twice. The test is kanzo-ui's showcase: if the graph code there cannot come
@@ -233,7 +231,9 @@ categorical is the tree's `mode_channel`, resolved against the type's `channels:
 `domain` is its value count over a writer's ordinal `0..domain` — which is the whole of what a
 legend can be drawn from. So a view colouring by that channel colours a cell by `mode`; a view
 colouring by any other column has no summary to colour with, and a view sizing by anything has
-`count` and nothing else. **A cell summarises one channel and its membership, and not the row.**
+`count` and nothing else. `tileMatrix(type).mode` is that channel, resolved, so a view reads the
+column to colour by off the set it already holds. **A cell summarises one channel and its membership,
+and not the row.**
 
 **What would reverse it.** A second channel the writer summarises. Then `mode` stops being one column
 with one referent, and a cell row grows a pair per channel, each naming its own.
@@ -334,9 +334,9 @@ integer number of bits and the parent stops being a shift — which is why
 ## The sample goes: below `Z` there are only cells
 
 **Every `z < Z` is a rung, and the level files are retired**: `vertex/<Type>/l{k}/`, the relation
-levels beside the adjacency, `crates/fossil-sinks/src/manifest.rs, VertexLevels`,
-`crates/fossil-layout/src/layout/pass.rs, write_levels` and
-`crates/fossil-layout/src/layout/pass.rs, write_edge_levels`.
+levels beside the adjacency, the plan that chose them and the two functions of the layout pass that
+wrote them. A manifest declares its payload and its adjacencies, all at `scale: 1`, and
+`crates/fossil-layout/tests/layout_renumber.rs` lists everything the pass writes under a type.
 
 This reverses a row of [what was discarded](/docs/design/discarded), and the row said what would do
 it: *a reader that addresses a cell — or, failing that, those three readers going away.* Both
@@ -344,7 +344,7 @@ happened.
 
 - **The three readers are gone.** A crossfilter mask indexed by `dense_id` and a residency pass that
   deduplicated answers taken at two levels were the playground and `@fossil-lang/draw`, deleted on
-  2026-09-29. The third was `pinned`, which exists only on `frame`, and `frame` is retired below.
+  2026-09-29. The third was `pinned`, which existed only on `frame`, and `frame` went with it.
 - **A cell is addressable.** A cell id is `dense_id >> shift`, and `(type, z, tile)` names the tile
   holding it by the same arithmetic that names a payload tile. A view that pins a vertex holds its
   `dense_id`, and at any `z` the cell containing it is one shift away — the pin draws as its cell,
@@ -356,7 +356,7 @@ Below `Z` the lines are now the rung's quotient where the writer published one, 
 did not; a coarse view draws the field and not the relation, which is the conclusion
 [cells](/docs/design/cells#no-coarse-quotient-is-drawable-and-the-partition-is-not-the-reason) had
 already reached about every rung but the finest. What is bought is one multiscale structure instead of
-two, and the bytes of the one that goes: on com-DBLP the level pyramid is **83.1%** of
+two, and the bytes of the one that went: on com-DBLP the level pyramid is **83.1%** of
 payload-plus-adjacency against the cell pyramid's **8.1%**.
 
 **What would reverse it.** A view that needs a real row at a coarse zoom — something that clicks,
@@ -389,7 +389,7 @@ Measured on 2026-09-29 over a corpus the layout pass wrote — `crates/fossil-la
 fixture, 1,000,000 vertices at mean degree 14 (6,993,608 edges), 4,096 rows a tile, pyramid base 16,
 `rowgroups` — for a window of 1% of the extent, a tenth of it on each axis at its centre. The finest
 zoom whose planned tiles fit 65,536 rows is `Z` itself: the box filter plans **8 of 245** payload
-tiles, 32,768 rows, of which 9,265 are in the window, exactly the vertices `rows` returns. Bytes and
+tiles, 32,768 rows, of which 9,265 are in the window, exactly the vertices `rows` returned. Bytes and
 requests are every statement replayed through the `duckdb` CLI's `httpfs` against a local HTTP origin
 that counts what it serves; times are medians of seven through DuckDB-WASM 1.32 over local files in
 Node, Mac16,8.
@@ -400,10 +400,10 @@ Node, Mac16,8.
 | `scan` + 8 `read`s, 4 columns | 1 | 37 | 0.54 MB | 121 ms | 84 ms |
 | `scan` + 8 `read`s, every column | 1 | 25 | 4.55 MB | — | 75 ms |
 | `edges`, both halves of the 8 tiles | 2 | 51 | 2.36 MB | 126 ms | 131 ms |
-| `rows` over the same box, today | 3 | 493 | 37.55 MB | 172 ms | 102 ms |
+| `rows` over the same box, as it was | 3 | 493 | 37.55 MB | 172 ms | 102 ms |
 
-Cost #1 and #3 are the difference, and they are the adjacency: `rows` reads its edges with an `IN`
-over the window's ids and no range on the aligned column, so the engine reads 17.5 MB of the 33 MB
+Cost #1 and #3 are the difference, and they are the adjacency: `rows` read its edges with an `IN`
+over the window's ids and no range on the aligned column, so the engine read 17.5 MB of the 33 MB
 `by_source` and 16.5 MB of `by_target` in 525 requests, where `edges` reads one row group of each per
 tile. What the tiles do not buy is the vertex side at `Z`: the same 4.55 MB either way, in 25
 requests over 8 statements against `rows`' 10 in one — each statement read the footer again and
@@ -432,11 +432,12 @@ window needs becomes one read and the per-run form costs round trips for nothing
 
 ### The writer publishes what the reader used to read from footers
 
-`packages/corpus/src/tile-manifest.ts, footers` reads every tile's footer while the corpus opens,
-and does it there on purpose: a level that arrived as a promise would be a request between the camera
-moving and an address being computable. The rule survives and the cost does not. **The writer already has every
-number the footer sweep recovers**, so it writes them once, beside the bytes, and `open` reads one
-file per type instead of one footer per tile.
+The reader used to read every tile's footer while the corpus opened, and did it there on purpose: a
+level that arrived as a promise would be a request between the camera moving and an address being
+computable. The rule survives and the cost does not. **The writer already has every number the footer
+sweep recovered**, so it writes them once, beside the bytes, and `open` reads one file per type
+instead of one footer per tile — `packages/corpus/src/tile-manifest.ts, published` — and no footer at
+all since the sweep's last readers, `rows` and `frame`, went.
 
 It is a manifest in Iceberg's sense, and it is published: one JSON file per vertex type, named by the
 type's `tile_manifest:` and written beside its tiles, listing every tile of every zoom — the payload
@@ -447,7 +448,7 @@ fill one; bounds are published for every numeric column and for no string, and a
 coordinate columns' bounds rather than a field of its own. The format is
 [the tile manifest](/docs/format/conventions/addressing#the-tile-manifest-is-the-footers-published-once).
 
-The edge sets are in it too, since step 3: at the payload's `z` an entry per adjacency orientation cut
+The edge sets are in it too, since `edges` landed: at the payload's `z` an entry per adjacency orientation cut
 on the type's tiles, and below it each rung's quotient, numbered by the aligned tile because an edge
 set's row-group ordinals skip where a tile of sources has no edges. `edges` is their first reader, and
 an absent entry is a tile it answers without a request. **The byte range did not land, and the
@@ -486,33 +487,29 @@ module follows one of the two references and none of them reaches 500 lines.
 | module | follows | what it holds | out of `corpus.ts` |
 | --- | --- | --- | --- |
 | `open.ts` | Iceberg's `load_table` | the two shapes, the manifest read, lending, the catalog's holders and `close`, and the `Corpus` assembled from one factory per module | `open`, `vended`, `opened` |
-| `tile-matrix.ts` | OGC 17-083r4 | the matrices from the manifest: `z`, shift, counts, the parent and the child range | `levelForCanvas`'s arithmetic, what `levelsOf` and `strideOf` spelled |
-| `tile-manifest.ts` | Iceberg's manifest | reading the published per-tile statistics once per type | `tileBoxes`, `footers`, `bytesOf`, `runsOf`, `extent` |
+| `tile-matrix.ts` | OGC 17-083r4 | the matrices from the manifest: `z`, shift, counts, boxes, the extent and the mode channel | `levelForCanvas`'s arithmetic, what `levelsOf` and `strideOf` spelled |
+| `tile-manifest.ts` | Iceberg's manifest | reading the published per-tile statistics once per type | `tileBoxes` and `footers`, which the writer's tile manifest replaced |
 | `expression.ts` | Iceberg's expressions | `Filter`, binding it to a matrix's columns, the inclusive and strict evaluators, and rendering the residual as SQL | the box predicate `boxOf` |
 | `scan.ts` | Iceberg's `Table.scan` | `scan`, `plan`, `read` | — |
-| `rows.ts` | — | `rows` and the tile selection `frame` reads, until step 5 retires them | the tile selection in `sampledRead` and `rows` |
-| `frame.ts` | — | `frame` and its types, until step 5 retires them | `frame`, `Frame`, `FrameParams`, `FrameCost`, `CoarseSource` |
-| `edges.ts` | CSR and CSC | `edges`, over the adjacency at `Z` and the quotient below it | `readEdges`, `adjacencyFor`, `neighbours` |
+| `edges.ts` | CSR and CSC | `edges`, over the adjacency at `Z` and the quotient below it | the adjacency read `rows` and `neighbours` made |
 | `identity.ts` | — | `node`: the index seek, its key ranges, byte-order comparison | `findByIdentity`, `indexRanges`, `couldHold`, `vertexOf` |
 | `verbs.ts` | — | the views the verbs read, `schema`, `relations`, `executeSql` | `verbs`, `relations` |
 | `sql.ts` | — | literals, identifiers and the 64-bit id guard | `lit`, `ident`, `list`, `idOf`, `floatOf`, `CorpusReadError` |
 
 `corpus.ts` keeps the surface's own types — `Corpus`, `SqlCorpus`, `CorpusTypes`, `CorpusRelation` —
-and each member's types went with the member. `frame.ts` and `rows.ts` are the two modules no
-reference names: the compositions they run have no seam of their own, and holding them apart is what
-lets step 5 delete two files rather than carve two. `query.ts` is where the engine's two faces meet —
-rows for the members that still walk objects, a `Batch` for the ones a view draws — and
-`address.ts`, at 950 lines, is the one module over the bound: the rung, channel and coordinate
-shapes it gained are `fossil_graph::plan`'s as they cross, and it sheds everything a level was in
-step 5. `address.ts` stays the one bridge to
-`crates/fossil-graph/src/plan.rs, ReadPlan`, and shrinks by everything a level was. `index.ts` stays
-the barrel.
+and each member's types went with the member. `frame` and `rows` ran compositions no reference names
+and were held in two modules of their own, so that retiring them deleted two files rather than
+carving two. `query.ts` is where the engine's two faces meet — rows for the members that walk
+objects, a `Batch` for the ones a view draws. `address.ts` stays the one bridge to
+`crates/fossil-graph/src/plan.rs, ReadPlan`, and it was the one module over the bound, at 950 lines,
+until it shed everything a level was, the window and the drawing `rows` and `frame` asked of it, and
+every field no reader reads: 453 lines. `index.ts` stays the barrel.
 
 **What would reverse it.** A module that cannot be stated against its reference without importing
 another module's internals. That is the sign the seam is wrong, and it is moved rather than the
 module being allowed to grow.
 
-## What dies, and in which order
+## What was retired, and in which order
 
 | retired | folded into |
 | --- | --- |
@@ -524,28 +521,23 @@ module being allowed to grow.
 | `corpus.addressing` and the `CorpusAddressing` family, `QueryFn` | internal; the engine is the one capability |
 | `VertexLevels`, `write_levels`, `write_edge_levels`, every `l{k}/` | the cell pyramid |
 
-The order is fixed by one rule: **nothing is deleted while something still reads it.**
+**Nothing was deleted while something still read it**, which fixed the order. The writer published
+the tile manifest first, with a guard holding it against the footers; `corpus.ts` split into the
+modules above with its behaviour unchanged, so the diff that moved code was not the diff that changed
+it; `tileMatrix`, `scan` and `edges` landed on those modules, held against `rows` over the same box
+and against the aggregation obligations of [cells](/docs/design/cells); kanzo-ui moved
+`@kanzo-tech/graph` onto them; then the reader's retired members went, then the level files, and the
+pages that described `frame` — [one door](/docs/design/one-door) and [the camera](/docs/design/camera)
+— were rewritten to what replaced it.
 
-1. **The writer publishes the tile manifest**, and a guard holds it against the footers. Additive; no
-   reader changes. Landed, for the vertex zooms; where it lives is ruled [below](#where-the-tile-manifest-lives).
-2. **`corpus.ts` splits into the modules above**, behaviour unchanged, so the diff that moves code is
-   not the diff that changes it.
-3. **`tileMatrix`, `scan` and `edges` land** on those modules, reading the tile manifest. The
-   conformance suite holds `scan` at `Z` against `rows` over the same box, and a rung read through
-   `scan` against the aggregation obligations of [cells](/docs/design/cells). Landed, with the
-   adjacency and quotient entries the writer now publishes and `Engine.query`'s signal; the rung
-   corpus is written by `@fossil-lang/executor`, the layout pass in wasm, because the JS fixture
-   writes no rung.
-4. **kanzo-ui moves `@kanzo-tech/graph` onto them.** That is kanzo-ui's phase, and fossil waits for it.
-5. **The reader's retired members go**, with every type that only they named.
-6. **The writer stops emitting the level files**, the manifest stops declaring them, and the fixture is
-   regenerated — last, because until step 5 a reader still asks for them.
-7. **The pages that describe `frame` are rewritten to what replaced it** — [one door](/docs/design/one-door),
-   [the camera](/docs/design/camera) — and this page loses its `direction:`.
+The conformance that held `scan` against `rows` holds it against an oracle neither wrote: SQL over the
+payload with no tile and no statistic, in `packages/corpus/tests/scan.test.ts` and the integration
+suite, and the window and walk rows of `conformance/expected.json`'s full scan, composed out of
+`scan`, `edges` and `node` in `packages/corpus/tests/corpus.test.ts`.
 
-**What would reverse it.** A consumer outside kanzo-ui that reads `frame` or the level files. There
-is none that this repository can find, and keasy consumes this repository by git tag, so step 5 is
-preceded by asking rather than by a grep.
+**What would reverse it.** Nothing reverses an order that has been carried out; the rule it followed
+stands for the next retirement. keasy consumes this repository by git tag, so a consumer outside
+kanzo-ui is found by asking rather than by a grep — and keasy was asked, and reads none of it.
 
 ## Four rulings the contract rests on
 
@@ -589,7 +581,7 @@ DuckDB-WASM interrupts through the pending-query API: `AsyncDuckDBConnection.sen
 `cancelPendingQuery` underneath, which is what `packages/corpus/tests/engine.ts` drives. Measured
 there, a statement over twenty billion rows aborted at 50 ms rejects at about 200 ms — one polling
 interval — and the connection answers the next statement. Hosts outside it — kanzo-ui's `engine()`,
-keasy — move with step 4.
+keasy — moved with kanzo-ui's move onto the tile members.
 
 **What would reverse it.** A host engine that can neither interrupt a statement nor answer in
 columns. Then the reader converts at the boundary and drops a stale answer instead, and both costs
