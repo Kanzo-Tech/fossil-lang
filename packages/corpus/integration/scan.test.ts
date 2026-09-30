@@ -35,13 +35,17 @@ const PEOPLE = 20_000;
 const EDGES = PEOPLE;
 
 /**
- * ONE mapping, where `fossil-cli`'s conformance program has two unioned. The union panics inside
- * the wasm executor — DataFusion 54's `JoinSet::spawn` with no runtime to spawn on — and hangs the
- * run, so the ring is written from the edge source alone: every person is in it once.
+ * `fossil-cli`'s conformance program: two mappings of `Person`, unioned and deduplicated by subject,
+ * so every person is in the corpus once though both sources name them.
  */
 const PROGRAM = `type { Person } := io.shex("person.shex")
 
+Users := io.csv("https://example.org/users.csv")
 Knows := io.csv("https://example.org/knows.csv")
+
+People : Person from Users
+    @subject = "https://example.org/person/{Users.id}"
+    name = Users.name
 
 Links : Person from Knows
     @subject = "https://example.org/person/{Knows.id}"
@@ -86,15 +90,19 @@ afterAll(() => {
 
 beforeAll(async () => {
   await initFossilExecutor(await readFile(require.resolve('@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm')));
+  let users = 'id,name\n';
   let knows = 'id,name,target\n';
-  for (let i = 0; i < PEOPLE; i += 1) knows += `${i},person-${i},${(i + 1) % PEOPLE}\n`;
+  for (let i = 0; i < PEOPLE; i += 1) {
+    users += `${i},person-${i}\n`;
+    knows += `${i},person-${i},${(i + 1) % PEOPLE}\n`;
+  }
   const exec = new FossilExecutor(PROGRAM);
   let files;
   try {
     for (const d of exec.missingDocuments()) exec.registerDocument(d.key, SHAPE);
     const encode = (text: string) => new TextEncoder().encode(text);
     ({ files } = await exec.runInMemory(
-      { 'https://example.org/knows.csv': encode(knows) },
+      { 'https://example.org/users.csv': encode(users), 'https://example.org/knows.csv': encode(knows) },
       's3://jobs/scan',
     ));
   } finally {

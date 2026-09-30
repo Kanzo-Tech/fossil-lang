@@ -38,7 +38,6 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use datafusion::execution::context::SessionContext;
-use datafusion::prelude::SessionConfig;
 use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
 use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_df::RunReport;
@@ -51,6 +50,8 @@ use object_store::memory::InMemory;
 use object_store::{ObjectStore, ObjectStoreExt};
 use url::Url;
 use wasm_bindgen::prelude::*;
+
+pub mod session;
 
 /// Files written at once.
 const WRITES_IN_FLIGHT: usize = 4;
@@ -185,11 +186,9 @@ impl Executor {
             .map_err(|e| format!("source {}: {e}", source.uri))?;
         }
 
-        // Single partition: no RepartitionExec, no detached `tokio::spawn` — the
-        // whole plan is drivable by one top-level future, which is what makes
-        // DataFusion run under wasm-bindgen-futures (no tokio runtime in the browser).
-        let config = SessionConfig::new().with_target_partitions(1);
-        let ctx = SessionContext::new_with_config(config);
+        // No operator in any plan of this session spawns: the browser has no
+        // Tokio runtime to spawn on. `session` says how, and what it cannot prove.
+        let ctx = session::session();
         for (authority, store) in storage.stores() {
             let url = Url::parse(authority).map_err(|e| format!("{authority}: {e}"))?;
             ctx.register_object_store(&url, store);
