@@ -332,7 +332,12 @@ mod tests {
         for d in (0..(1u32 << 22)).step_by(3) {
             let (x0, y0) = hilbert_decode(d);
             let (x1, y1) = hilbert_decode(d + 1);
-            assert_eq!(x0.abs_diff(x1) + y0.abs_diff(y1), 1, "codes {d} and {}", d + 1);
+            assert_eq!(
+                x0.abs_diff(x1) + y0.abs_diff(y1),
+                1,
+                "codes {d} and {}",
+                d + 1
+            );
         }
     }
 
