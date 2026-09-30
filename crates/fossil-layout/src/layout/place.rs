@@ -126,33 +126,27 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     // leaves the density uniform, since a uniform scale is invisible to a
     // quantisation that normalises.
     let demand: u64 = sizes.iter().map(|&m| blocks_for(m)).sum();
-    let root = next_power_of_four(demand);
+    // The alignment pads, so the frontier can end past a root sized to the
+    // demand alone — and a block past the root has no code on the curve: every
+    // one of them decoded to the same corner, and the groups there stopped
+    // being runs of `dense_id`. The root grows until the frontier fits.
+    let mut root = next_power_of_four(demand);
+    let starts = loop {
+        let (starts, end) = frontier(&sizes, demand, root);
+        if end <= root {
+            break starts;
+        }
+        root *= 4;
+    };
     let root_order = root.trailing_zeros() / 2;
 
-    // The frontier, in finest blocks, walked in group-id order. A group takes
-    // the smallest power of four that holds it, aligned to its own size — so its
-    // block is one node of the quaternary and the ids inside it are one interval
-    // — and `next` only ever moves forward.
     let mut centre = vec![(0.0f32, 0.0f32); num_clusters as usize];
-    let mut next = 0u64;
-    let mut asked = 0u64;
     for (c, &members) in sizes.iter().enumerate() {
         if members == 0 {
-            // An id nothing carries takes no plane. `flatten_to_budget` densifies
-            // and `order_by_hierarchy` is a permutation, so this is unreachable
-            // through the pass; skipping is still the answer that keeps the
-            // frontier a function of the sizes that exist.
             continue;
         }
         let blocks = blocks_for(members);
-        let spread = if demand == 0 {
-            0
-        } else {
-            asked * root / demand
-        };
-        asked += blocks;
-        let start = next.max(spread).div_ceil(blocks) * blocks;
-        next = start + blocks;
+        let start = starts[c];
 
         // The frontier walks the root square in the order the codes will sort
         // it: block `start` of a root of `4^K` blocks is the `start`-th aligned
@@ -164,7 +158,7 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
         // the block's alignment and not its first cell — reading the first cell
         // put 24,570 ids inside foreign groups, which
         // `ac1801d4:crates/fossil-layout/tests/cells.rs, a_cluster_is_one_run_of_dense_id`
-        // caught; nothing holds it since that test left with the cells.
+        // caught; `crates/fossil-df/tests/write.rs` holds it now.
         let side_bits = blocks.trailing_zeros() / 2 + fine / 2;
         let (col, row) = (
             (col >> side_bits) << (side_bits - fine / 2),
@@ -195,6 +189,37 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
         ));
     }
     out
+}
+
+/// The frontier, in finest blocks, walked in group-id order: each group's first
+/// block, and where the frontier ended. A group takes the smallest power of four
+/// that holds it, aligned to its own size — so its block is one node of the
+/// quaternary and the ids inside it are one interval — and the frontier only
+/// ever moves forward.
+fn frontier(sizes: &[u32], demand: u64, root: u64) -> (Vec<u64>, u64) {
+    let mut starts = vec![0u64; sizes.len()];
+    let mut next = 0u64;
+    let mut asked = 0u64;
+    for (c, &members) in sizes.iter().enumerate() {
+        if members == 0 {
+            // An id nothing carries takes no plane. `flatten_to_budget` densifies
+            // and `order_by_hierarchy` is a permutation, so this is unreachable
+            // through the pass; skipping is still the answer that keeps the
+            // frontier a function of the sizes that exist.
+            continue;
+        }
+        let blocks = blocks_for(members);
+        let spread = if demand == 0 {
+            0
+        } else {
+            asked * root / demand
+        };
+        asked += blocks;
+        let start = next.max(spread).div_ceil(blocks) * blocks;
+        next = start + blocks;
+        starts[c] = start;
+    }
+    (starts, next)
 }
 
 /// How many finest blocks a group of `members` takes: the smallest power of
@@ -228,6 +253,28 @@ mod tests {
 
     fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
         (a.0 - b.0).hypot(a.1 - b.1)
+    }
+
+    /// Alignment padding can carry the frontier past a root sized to the demand:
+    /// 963 pairs of a one-block and a sixteen-block group ask 16,371 blocks of a
+    /// 16,384 root and need nearly twice that. Every block past the root decoded
+    /// to one corner, so groups shared a centre.
+    #[test]
+    fn the_frontier_never_leaves_the_root() {
+        let clusters: Vec<u32> = (0..963u32)
+            .flat_map(|p| std::iter::once(2 * p).chain(std::iter::repeat_n(2 * p + 1, 5)))
+            .collect();
+        let positions = cluster_layout(&clusters);
+        let mut centres: Vec<(u32, u32)> = clusters
+            .iter()
+            .zip(&positions)
+            .filter(|&(&c, _)| c % 2 == 0)
+            .map(|(_, &(x, y))| (x.to_bits(), y.to_bits()))
+            .collect();
+        let groups = centres.len();
+        centres.sort_unstable();
+        centres.dedup();
+        assert_eq!(centres.len(), groups, "two singleton groups share a centre");
     }
 
     #[test]

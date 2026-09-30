@@ -578,6 +578,76 @@ async fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// **A cluster is one run of `dense_id`** — over the union of the vertex
+/// tables, because the layout is joint: one partition and one placement over
+/// the whole graph, and one rank across every type.
+///
+/// `fossil_layout::layout::cluster_layout` gives each group one aligned block
+/// off a frontier that never goes back, and `order_by_hierarchy` numbers the
+/// groups so a run of consecutive ids is a subtree — so a group is a run of
+/// adjacent blocks, hence of Hilbert codes, hence of ids. This goes red for a
+/// buddy allocation that reuses its holes, a placement that ignores the
+/// hierarchy's order, or a type laid out apart from the others: each writes a
+/// corpus that opens and draws, with a reader colouring scattered packets.
+///
+/// A budget and not a zero: `dense_id` is the Hilbert rank over the union's
+/// bounding box, quantised per axis over the extent the positions turned out
+/// to have, and that box is square only to within the margins of the groups at
+/// its corners. What is asserted is the mass — ids inside a group's range that
+/// are not the group's — against one per cent of the corpus.
+#[tokio::test]
+async fn a_cluster_is_one_run_of_dense_id() {
+    let (result, out) = run(PROGRAM, sources(2_000, 6_000), usize::MAX).await;
+    result.expect("the run");
+    let root = materialise(&out, "cluster_runs").await;
+    let m = manifest(&root);
+    let conn = Connection::open_in_memory().expect("duckdb");
+    let all = m
+        .vertex_tables
+        .iter()
+        .map(|v| format!("'{}'", root.join(&v.path).display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // More than one group, and a group that spans types, or the property is
+    // vacuous: a partition of one is an interval whatever the placement did,
+    // and a partition that never mixes types could be laid out per type.
+    let groups = scalar(
+        &conn,
+        &format!("SELECT count(DISTINCT cluster_id) FROM read_parquet([{all}])"),
+    );
+    assert!(groups > 1, "one group is not a partition to check");
+    let mixed = scalar(
+        &conn,
+        &format!(
+            "SELECT count(*) FROM (SELECT cluster_id FROM read_parquet([{all}], filename = true) \
+             GROUP BY cluster_id HAVING count(DISTINCT filename) > 1)"
+        ),
+    );
+    assert!(
+        mixed > 0,
+        "no group spans two types, so the layout is not shown to be joint"
+    );
+
+    let total: i64 = m.vertex_tables.iter().map(|v| v.record_count as i64).sum();
+    let foreign = scalar(
+        &conn,
+        &format!(
+            "SELECT coalesce(sum(hi - lo + 1 - n), 0)::BIGINT FROM ( \
+               SELECT count(*) AS n, min(dense_id) AS lo, max(dense_id) AS hi \
+               FROM read_parquet([{all}]) GROUP BY cluster_id)"
+        ),
+    );
+    let budget = total / 100;
+    assert!(
+        foreign <= budget,
+        "{foreign} ids fall inside a group's range without belonging to it, over {groups} \
+         groups — the budget is {budget}, and a partition scattered across the axis reaches {}",
+        total * groups,
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A table past one row group is cut at [`ROW_GROUP_ROWS`], which is what lets
 /// a reader prune a bounding box by the footer's statistics.
 #[tokio::test]
