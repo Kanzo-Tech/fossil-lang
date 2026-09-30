@@ -20,7 +20,7 @@
  * **What it refuses rather than guesses:** anchors and aliases, flow style (`[a, b]`), and
  * multi-line scalars (`|`, `>`). A manifest using them throws with the line named, which is the
  * honest outcome — a scanner that silently reads half a document composes half the URLs and reports
- * none of it. A nested mapping (`privacy:`) is *skipped* rather than refused: it is legal, no
+ * none of it. A nested mapping is *skipped* rather than refused: it is legal, no
  * address is composed from it, and refusing it would fail on a corpus this reads fine.
  */
 

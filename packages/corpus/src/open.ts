@@ -27,9 +27,8 @@ import type { Engine, Host } from '@fossil-lang/types';
  * `crates/fossil-graph/src/operations/raw_sql.rs` is the Rust half of the same permission.
  *
  * **What it does NOT claim.** It is not a sanitiser and it is not a security boundary: the engine
- * is the host's, the corpus is files the host already holds, and `/docs/design/privacy` is why a
- * read-time gate has no chokepoint to stand on. What this holds is the fact that a host must
- * write the word down.
+ * is the host's and the corpus is files the host already holds, so a read-time gate has no
+ * chokepoint to stand on. What this holds is the fact that a host must write the word down.
  */
 export type SqlPolicy = 'withheld' | 'allowed';
 
