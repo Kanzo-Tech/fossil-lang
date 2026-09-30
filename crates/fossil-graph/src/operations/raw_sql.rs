@@ -27,10 +27,8 @@
 //!
 //! It is also not a sanitiser. [`RawSql`] does not parse, validate or escape
 //! anything; it records that a caller with the permission supplied it. The
-//! reason there is nothing to sanitise towards is
-//! [the privacy argument](https://fossil-lang.org/docs/design/privacy): a
-//! corpus is files and a recipient holds them, so a read-time gate has no
-//! chokepoint to stand on. This is about which *bindings* expose the engine,
+//! reason there is nothing to sanitise towards is that a corpus is files and a
+//! recipient holds them, so a read-time gate has no chokepoint to stand on. This is about which *bindings* expose the engine,
 //! not about making the engine safe.
 
 use serde::Serialize;

@@ -435,13 +435,13 @@ the field already exists and is the wrong one.
 <Callout type="warn" title="The declaration was already being made, by a privacy field and by a generated constant nobody read">
 `encodingFor` in `@fossil-lang/draw`'s `encoding.ts` (deleted after `2fa5f22`) picked the column whose distribution it offers to
 brush by ranking the numeric columns and preferring the ones `quasi_identifiers` names. That field
-is specified on [privacy](/docs/format/conventions/privacy) as *the one field a reader cannot
-derive, and the one the whole bound turns on* — a disclosure-control vocabulary, doing encoding work
-because it was the only writer-side statement in reach.
+was specified as *the one field a reader cannot derive, and the one the whole bound turns on* — a
+disclosure-control vocabulary, since [removed](/docs/design/discarded), doing encoding work because
+it was the only writer-side statement in reach.
 
 **That ranking is the defect the block was written to remove, and it is removed.** A declared
-`quantitative` channel now outranks the privacy field, which ranks only where the manifest declares
-none — [what the implementation owes](#what-the-implementation-owes) has the whole of it. The
+`quantitative` channel now decides, and the first numeric column is what an undeclared corpus gets
+— [what the implementation owes](#what-the-implementation-owes) has the whole of it. The
 paragraph above is the diagnosis and not the behaviour.
 
 And the honest statement existed on the other side, unread. `corpus.bnf` marks `cluster_id`
@@ -567,8 +567,8 @@ block does is make the row's number checkable from the artefact instead of from 
   `readChannels` in `@fossil-lang/draw`'s `encoding.ts` (deleted after `2fa5f22`) as the scanner over the block.
 - **The chart's ranking, which is the defect this section opened with.** Which numeric column's
   distribution is worth a chart was answered by `quasi_identifiers`, and there is a declaration for
-  it now: a declared `quantitative` channel is the chart's column, the privacy field ranks what is
-  left only where the block declares none, and the first numeric column stays the last resort.
+  it now: a declared `quantitative` channel is the chart's column, and the first numeric column stays the
+  last resort.
   **Done**, in `encodingFor` in `@fossil-lang/draw`'s `encoding.ts` (deleted after `2fa5f22`). An empty block does not silence the
   chart the way it silences the colour: `categorical` **is** the colour role, so declaring none of
   it says there is nothing to colour by, while a histogram over a column nobody called a channel is

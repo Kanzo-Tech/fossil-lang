@@ -14,13 +14,8 @@ publish = false
 workspace = true
 
 [dependencies]
-# The privacy policy vocabulary, for `AbsentQuasiIdentifier` alone. The
-# dependency runs THIS WAY on purpose: the manifest records the outcome of a
-# policy check, so it names policy vocabulary, and `fossil-policy` names nothing
-# — it is a serde/serde_json/thiserror leaf and knows nothing about GraphAr.
-fossil-policy = { path = "../fossil-policy" }
-# `Cardinality` alone, and the dependency runs THIS WAY for the same reason
-# `fossil-policy` does: a manifest records what a compiler decided, so it names
+# `Cardinality` alone, and the dependency runs THIS WAY on purpose: a manifest
+# records what a compiler decided, so it names
 # the substrate contract, and `fossil-graph-schema` names nothing — it is a
 # serde leaf. This is NOT the objection the `arrow-schema` note below raises:
 # that one is against taking a TYPE SYSTEM (`fossil-hir::Primitive`) into the

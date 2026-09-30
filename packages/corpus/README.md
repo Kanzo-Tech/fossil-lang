@@ -224,8 +224,8 @@ vocabulary does not. Neither is wrong and they are not the same question.
   `SqlCorpus` with it. Closed by default because every other member costs a
   function of the answer and the hatch costs a function of whatever was typed.
   It is not a sanitiser and not a security boundary — the engine and the files
-  are the host's; see [`/docs/design/privacy`]. What it holds is the fact that a
-  host has to write the word down.
+  are the host's, and a corpus is files the host already holds. What it holds
+  is the fact that a host has to write the word down.
 
 **None of them draws.** The camera is addressed, not queried — the
 LOD is not a filter but a different relation, and a `WHERE` cannot change which

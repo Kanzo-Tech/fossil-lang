@@ -331,10 +331,9 @@ fn the_deleted_names_are_gone() {
         // reader's work inside a mapping invites a program to parse its own
         // input twice. It was `split_part`'s only user.
         "parse.csv_row",
-        // The `anon.` namespace goes entirely. Anonymisation is a DECLARED
-        // POLICY the writer applies; the language names no anonymisation
-        // operator. `anon.hash` was also `sha256`'s last user, which is why
-        // `fossil-df` leaves `crypto_expressions` off.
+        // The `anon.` namespace goes entirely: fossil has no anonymisation
+        // (`/docs/design/discarded`). `anon.hash` was also `sha256`'s last
+        // user, which is why `fossil-df` leaves `crypto_expressions` off.
         "anon.hash",
         "anon.redact",
     ] {

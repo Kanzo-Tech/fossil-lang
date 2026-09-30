@@ -6,8 +6,7 @@
 //! asymmetry is the design and this test does not touch it — a name the file DEFINES is exempt
 //! from the tombstone reader however far behind the parser is, and
 //! `the_tombstone_guard_is_reading_both_trees` derives that exemption rather than naming an
-//! instance of it. It named one until `PolicyDef` landed in the parser, at which point the pin
-//! was asserting a property of a production that no longer had it.
+//! instance of it.
 //!
 //! The asymmetry is safe in one direction only. Deleting a tombstone and adding the production
 //! puts the parser's own tests red, so that direction announces itself. **A tombstone written
@@ -520,8 +519,7 @@ fn the_tombstone_guard_is_reading_both_trees() {
     // The ahead-ness is the design, and it is a property of the READER rather than of any one
     // production: a name the file DEFINES is skipped by `tombstones`, whether the parser builds
     // it or not. Derived over every definition, so a production written tomorrow is covered with
-    // no edit here — the pin used to name `PolicyDef` as the live instance, and stopped being
-    // about ahead-ness the moment `PolicyDef` was parsed.
+    // no edit here.
     let defined_canon: BTreeSet<String> = defined(&src).iter().map(|n| canon(n)).collect();
     for name in found.keys() {
         assert!(
@@ -531,13 +529,13 @@ fn the_tombstone_guard_is_reading_both_trees() {
         );
     }
 
-    // `PolicyDef` keeps a pin of its own, with its direction reversed by the landing. The parser
-    // builds `POLICY_DEF`, so the file has to keep defining `PolicyDef` — which is the ONE
-    // node-level instance of direction 2 (see this file's header: the general form needs a name
-    // mapping neither file supplies, and this one name maps by `canon` alone).
+    // `TypeDef` is pinned the other way. The parser builds `TYPE_DEF`, so the file has to keep
+    // defining `TypeDef` — the ONE node-level instance of direction 2 (see this file's header:
+    // the general form needs a name mapping neither file supplies, and this one name maps by
+    // `canon` alone).
     assert!(
-        defined(&src).contains("PolicyDef"),
-        "crates/fossil-syntax builds POLICY_DEF and grammar.bnf stopped defining PolicyDef — \
+        defined(&src).contains("TypeDef"),
+        "crates/fossil-syntax builds TYPE_DEF and grammar.bnf stopped defining TypeDef — \
          the parser may never run ahead of the grammar",
     );
 

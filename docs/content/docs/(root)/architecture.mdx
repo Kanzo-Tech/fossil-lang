@@ -52,12 +52,9 @@ amplification of 1.60×**.
 
 **The manifest is written last, and that is not tidiness.** A document written before the bytes can
 only *promise* them, which is the right shape for a count that is arithmetic and the wrong one for a
-number that is measured — and three of its fields are measured. A rung's quotient edge count; a
+number that is measured — and two of its fields are measured. A rung's quotient edge count, and a
 categorical channel's `domain`, because nothing in front of the bytes knows how many communities
-Louvain will find; and `reached` on `crates/fossil-sinks/src/manifest.rs, KAnonymity`, which
-`crates/fossil-df/src/privacy.rs` takes after the corpus is a value and before any of it is a file.
-[Streaming](/docs/design/streaming) argues the budget the write path runs under, and
-[privacy](/docs/format/conventions/privacy) argues the bound.
+Louvain will find. [Streaming](/docs/design/streaming) argues the budget the write path runs under.
 
 ## What the reader is
 
@@ -146,19 +143,19 @@ graph LR
   L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 4 crates<br/>df · df-wasm · cli · introspect"]
-  C["<b>corpus</b> · 9 crates<br/>graph · graph-wasm · layout<br/>sinks · tile-writer · storage · storage-wasm<br/>policy · kanon"]
+  C["<b>corpus</b> · 7 crates<br/>graph · graph-wasm · layout<br/>sinks · tile-writer · storage · storage-wasm"]
   X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
   E -->|18| L
   E -->|1| M
-  M -->|22| L
-  M -->|10| C
+  M -->|21| L
+  M -->|7| C
   C -->|1| L
   M -->|1| X
   C -->|1| X
 ```
 
-**54 cross-group edges**, and no pair runs both ways. Every number above
+**50 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -185,9 +182,7 @@ against the baseline encoder. The arrow that remains runs one way:
 | --- | --- | --- |
 | engine → corpus | `fossil-cli → fossil-layout` | the post-pass **is** the payload write, so the thing that writes the manifests calls it |
 | engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
-| engine → corpus | `fossil-cli → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk — and `Privacy`, which the run summary prints |
-| engine → corpus | `fossil-df → fossil-policy` | the bound is verified where the release is still a value, before any of it is a file |
-| engine → corpus | `fossil-cli → fossil-policy` | reading the document is a host's job, the way reading a shape document is: the program's `policy := "…"` and `--policy` are both a reference, and a `PrivacyPolicy` by the time the write path is handed one. Unlike a shape document it never enters the database — the compiler does not open a policy |
+| engine → corpus | `fossil-cli → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk |
 | engine → corpus | `fossil-introspect → fossil-storage` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
 
 `fossil-sinks` and `fossil-storage` are filed by subject and not by history, and that is the whole
@@ -195,11 +190,10 @@ of the change: neither crate had a fossil dependency of its own when it was file
 groups and no code moved.
 
 **`fossil-sinks` is not a leaf any more, and that is the whole of the `corpus → language` arrow.**
-It grew two: `fossil-policy`, which is inside `corpus` and so invisible here, and
-`fossil-graph-schema`, which is not — a manifest records what a compiler decided, so it names the
+It grew one: `fossil-graph-schema` — a manifest records what a compiler decided, so it names the
 substrate contract, and `crates/fossil-graph-schema/src/lib.rs, Cardinality` is what made an edge's
 `{1,1}` a fact the corpus could state rather than one a reader defaulted. The direction runs this
-way for the same reason `fossil-policy` does, and it is **not** the objection that keeps
+way on purpose, and it is **not** the objection that keeps
 `fossil-hir::Primitive` out of the manifest layer: a cardinality is not a type, it is the shape a
 predicate was declared with. `fossil-storage` is still a leaf. It **cost** an edge rather than saving one — `fossil-df → fossil-sinks`,
 `fossil-cli → fossil-sinks` and `fossil-introspect → fossil-storage` used to be internal to the
@@ -208,25 +202,6 @@ engine, three that started crossing against two that stopped — and it bought t
 return leg went from three edges to one — and that one has since gone too, which is the section
 above. There are still two cores; there is no longer a stitch closing the loop.
 [One engine](/docs/design/one-engine) is where the rest of the filing gets settled.
-
-`fossil-policy` is filed under **corpus** and not under the engine that reads it, for the reason
-`fossil-sinks` is: the declared bound is part of what the artefact says about itself, and the crate
-that models it has no fossil dependency of its own. Four of the eight `engine → corpus` edges are
-its arrivals, which is what took that arrow from four to eight in one landing.
-
-`fossil-kanon` was filed under *no home* on the strongest version of that reason: it had no
-dependents **and** no dependencies inside the tree, so it was the one node this diagram drew with no
-arrow at either end — a disclosure-control pass over Arrow arrays that nothing in the pipeline
-called. It has a caller now. `fossil-df`'s write path derives the generalisation a declared bound
-needs before verifying one, which is the seventh `engine → corpus` edge and the reason that arrow
-went from six to seven.
-
-It is filed under **corpus** rather than under the engine that calls it, for the reason
-`fossil-policy` is: what it models is a property of the artefact — what these bytes disclose — and
-not a capability of the executor. The crate itself is unchanged by the edge; it was already
-`[package.metadata.fossil] wasm = true` on the claim that the pass belongs in the data holder's
-browser, and the gate was already reading that declaration.
-[Deriving k-anonymity](/docs/design/anonymity) is the argument for the crate.
 
 Two things have left `fossil-base` and neither shows on this diagram in the same way. The `@conn`
 locator is `fossil-locator`, a crate with no dependencies at all — filing it under `language` is the
@@ -240,8 +215,7 @@ kind of move there is.
 **one consumer** — `fossil-cli`, which called all five of its verbs and nothing else did. The other
 two hosts each keep theirs inside themselves, so the native one was the only host filed apart from
 the thing that used it. Folding it in removed a crate and three edges — 54 → 51 — because the two
-manifests shared `fossil-df`, `fossil-sinks`, `fossil-layout`, `fossil-policy` and
-`fossil-introspect`, and each of those stopped being counted twice. `providers()` did not survive the
+manifests shared five dependencies, and each of those stopped being counted twice. `providers()` did not survive the
 fold at all — it was `fossil_lineage::providers()` with a `Vec` around it, and the binary calls the
 projection directly.
 
@@ -338,17 +312,18 @@ and the cycle goes with it.
 
 ## The verdict is not the crate count
 
-**Twenty-eight crates**, against Gluon's ~11 crates for 90k lines, Gleam's 15 (six real) for 228k
+**Twenty-six crates**, against Gluon's ~11 crates for 90k lines, Gleam's 15 (six real) for 228k
 and rust-analyzer's 36 for 571k. The line count that used to sit beside this number is deliberately
-not restated: it was measured on 2026-08-25 and `fossil-kanon` and `fossil-policy` have landed
-since, so the only honest options were to re-measure or to drop it.
+not restated: it was measured on 2026-08-25 and the tree has changed since, so the only honest
+options were to re-measure or to drop it.
 **At this size the honest target is five to eight.**
 
-Five of them moved and only two are new code: `fossil-locator` arrived by moving a module down out
-of `fossil-base`, `fossil-engine` left by moving three into the crate that already used them,
-`fossil-kanon` and `fossil-policy` arrived carrying the privacy clause, and `fossil-tile-writer`
-arrived by moving a struct out of a crate that never called it. Which is the point of the heading —
-the count went 25 → 26 → 25 → 27 → 28 and none of those numbers is the verdict.
+Five of them moved and only two were new code: `fossil-locator` arrived by moving a module down out
+of `fossil-base`, `fossil-engine` left by moving three into the crate that already used them, two
+arrived carrying a write-time bound and left when it was [removed](/docs/design/discarded), and
+`fossil-tile-writer` arrived by moving a struct out of a crate that never called it. Which is the
+point of the heading — the count went 25 → 26 → 25 → 27 → 28 → 26 and none of those numbers is the
+verdict.
 
 What makes two dozen feel like a maze is not the count. Two of them lie about what they are, and a
 false name costs more than a surplus crate because you cannot skip it while reading. There were

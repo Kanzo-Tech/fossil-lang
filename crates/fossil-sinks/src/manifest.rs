@@ -91,136 +91,6 @@ pub enum Container {
     RowGroups,
 }
 
-/// The privacy bound a corpus declares, and the population it was measured over.
-///
-/// **A declaration, not an enforcement.** A corpus is files and there is no
-/// chokepoint, so the protection is total at write time: the bytes that would
-/// violate the bound are never written. What travels with the artifact is this
-/// declaration plus a property a stranger can re-derive from the files —
-/// `packages/corpus/guards/guards.mjs`'s `declared-privacy` is that stranger.
-/// `/docs/format/conventions/privacy` has the argument, and what a *served*
-/// corpus can guarantee on top of it.
-///
-/// Not `Option`: [`Self::Undeclared`] is a value a producer writes and means
-/// "this corpus carries no bound", while a missing `privacy:` key means
-/// "written before this field existed". Neither may be read as "public". This
-/// is [`VertexInfo::vertex_count`]'s argument and not [`VertexInfo::index`]'s —
-/// the quasi-identifier set is a judgement about a jurisdiction, so no amount
-/// of scanning recovers it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "bound", rename_all = "kebab-case")]
-pub enum Privacy {
-    /// No bound. The corpus may hold anything, and a reader is told so rather
-    /// than left to infer it from a missing key.
-    #[default]
-    Undeclared,
-    /// Every equivalence class over the declared quasi-identifiers holds at
-    /// least [`KAnonymity::k`] records of the released population.
-    KAnonymity(KAnonymity),
-}
-
-/// What a verified k-anonymity bound records, and what a third party needs to
-/// re-derive it from the files alone.
-///
-/// Every field here is either a parameter of the check or an outcome of it.
-/// Nothing is a summary: a reader that recomputes from the Parquet must reach
-/// these numbers exactly, and `declared-privacy` fails when it does not.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct KAnonymity {
-    /// The bound the policy asked for. The claim is `reached >= k`.
-    pub k: u64,
-    /// The smallest equivalence class actually measured, over the whole
-    /// released population. Published beside [`Self::k`] because the two answer
-    /// different questions — what was required, and what there is.
-    pub reached: u64,
-    /// How a `NULL` in a quasi-identifier column is read. **A parameter and not
-    /// a default**, because both extremes are wrong and the field that settles
-    /// it says so by exposing the choice as a number rather than making it —
-    /// see [`AbsentQuasiIdentifier`].
-    pub absent_quasi_identifier: AbsentQuasiIdentifier,
-    /// The records the bound was measured over: every row of every tile of
-    /// every type carrying a quasi-identifier, summed — so equal to the sum of
-    /// those types' [`VertexInfo::vertex_count`]. That equality is the **scope
-    /// assertion**: a corpus is tiles, so a check that silently ran per-tile is
-    /// the easiest wrong answer available, and publishing the population is what
-    /// makes it detectable by somebody else.
-    pub population: u64,
-    /// Records excluded from certification and charged to the budget. Non-zero
-    /// only under [`AbsentQuasiIdentifier::Suppress`]; zero by construction
-    /// under the other two.
-    pub suppressed: u64,
-    /// The suppression allowance, in **parts per million of
-    /// [`Self::population`]**. The bound requires
-    /// `suppressed * 1_000_000 <= population * suppression_budget_ppm`.
-    ///
-    /// An integer because a manifest is a text document four independent
-    /// readers parse (`serde_yaml_ng`, two line scanners in JavaScript and
-    /// TypeScript, and whatever a stranger brings), and a float is the one
-    /// scalar where they can disagree about the same bytes. `20000` is 2%, and
-    /// `BigInt` reproduces the comparison without rounding. Why a budget is
-    /// part of the bound at all, and where ARX's own sweeps land, is on
-    /// `/docs/format/conventions/privacy` and `/docs/design/prior-art`.
-    pub suppression_budget_ppm: u64,
-    /// The quasi-identifier set, as `<Type>.<column>` names separated by single
-    /// spaces — `Person.birth_year Person.postcode Person.sex`.
-    ///
-    /// **The one field a reader cannot derive and the one the whole bound turns
-    /// on.** A flat scalar and not a sequence: `packages/corpus/guards/manifest.mjs`
-    /// and `packages/corpus/src/manifest.ts` are line scanners over a flat
-    /// mapping, and they **skip** what they cannot see rather than failing on
-    /// it — so a set emitted as a YAML sequence scans as absent.
-    pub quasi_identifiers: String,
-    /// **What the writer did to reach [`Self::k`]**, per generalised column.
-    ///
-    /// `none` when the policy declared no hierarchy and the quasi-identifiers
-    /// were published as the program produced them. Otherwise a space-separated
-    /// token per generalised column, in the same `<Type>.<column>` spelling and
-    /// the same flat-scalar grammar as [`Self::quasi_identifiers`]:
-    ///
-    /// ```text
-    /// generalization: Person.birthYear@bucket Person.postcode@1-3/4
-    /// ```
-    ///
-    /// `@bucket` is a numeric column published as its enclosing **declared**
-    /// bucket. `@<coarsest>-<finest>/<declared>` is a levelled column — prefix
-    /// or date — with the coarsest and finest hierarchy levels any published
-    /// class sits at, over the levels the hierarchy declares.
-    ///
-    /// It earns its place because **`reached` means two different things
-    /// without it**: a `reached: 20` over raw postcodes and one over postcodes
-    /// truncated to three characters are not the same release, and a recipient
-    /// recomputing `k` gets 20 either way. It is checkable only by a recipient
-    /// who also has the hierarchy, which lives in the policy document
-    /// [`Self::policy`] names — `/docs/format/conventions/privacy` states that
-    /// caveat rather than papering over it.
-    #[serde(default)]
-    pub generalization: String,
-    /// The `odrl:uid` of the policy document this corpus was verified against.
-    /// A name, not a location: the document is not in the corpus, and a corpus
-    /// that carried its own policy would be a corpus that can be handed on with
-    /// the policy rewritten.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub policy: String,
-    /// The `odrl:profile` IRI the policy declared, so a reader knows which
-    /// vocabulary the `leftOperand`s came from before it tries to read them.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub profile: String,
-}
-
-/// The declared reading of an absent quasi-identifier, re-exported from the
-/// crate that owns it.
-///
-/// It lives in `fossil-policy` and not here because it is a **policy
-/// parameter**: the producer chooses it in the document, and the manifest
-/// records the choice. The dependency runs manifest → policy vocabulary →
-/// nothing, which is the direction that makes sense — a record of a check names
-/// the vocabulary of the check, and a policy document knows nothing about
-/// `GraphAr`. Re-exported rather than mirrored so that there is exactly one
-/// spelling of `value` / `wildcard` / `suppress` in the tree; two enums with a
-/// conversion between them is how the two halves of a manifest start
-/// disagreeing.
-pub use fossil_policy::AbsentQuasiIdentifier;
-
 /// `GraphAr` vertex-info manifest (one per vertex/shape type).
 ///
 /// Serializes with the spec field names; `vertex_type` renames to `type`.
@@ -1249,16 +1119,6 @@ pub struct GraphInfo {
     /// schemes in one corpus. See [`Container`].
     #[serde(default)]
     pub container: Container,
-    /// The privacy bound this corpus declares — here once, because the bound is
-    /// a property of the **whole release** and not of a column, and because
-    /// `packages/corpus/src/open.ts` takes the payload vocabulary from the
-    /// bytes rather than from a projection's `properties`: a field the reader never opens
-    /// is not a policy. See [`Privacy`].
-    ///
-    /// `#[serde(default)]` so a corpus written before this field existed still
-    /// deserialises, to "unknown" rather than to "public".
-    #[serde(default)]
-    pub privacy: Privacy,
     /// Relative paths to each vertex-info YAML, e.g. `vertex/Person.vertex.yml`.
     pub vertices: Vec<String>,
     /// Relative paths to each edge-info YAML, e.g.
@@ -1601,10 +1461,9 @@ impl EdgeInfo {
     ///   "many". [`Self::with_cardinality`] is how a writer that read a shape
     ///   says so, for [`VertexInfo::with_index`]'s reason: the caller that knows
     ///   is the one that can say.
-    /// - `directed` is `true`, for the reason [`GraphInfo::new`] gives for
-    ///   presetting `privacy` — an argument every caller passes the same value
-    ///   to is a way of getting it wrong once, and fossil writes no undirected
-    ///   relation. A producer of one assigns the field.
+    /// - `directed` is `true`, because an argument every caller passes the
+    ///   same value to is a way of getting it wrong once, and fossil writes no
+    ///   undirected relation. A producer of one assigns the field.
     ///
     /// None of this constrains what a *document* may say: `EdgeInfo` is also the
     /// deserialization target for manifests other writers produced, and those
@@ -1694,28 +1553,10 @@ impl GraphInfo {
             name: name.into(),
             prefix: prefix.into(),
             container,
-            // [`Privacy::Undeclared`] and not a parameter, because the great
-            // majority of corpora carry no bound and a constructor argument
-            // every caller passes the same value to is a way of getting it
-            // wrong once. The bound is attached by [`Self::with_privacy`],
-            // which only the verifier calls.
-            privacy: Privacy::Undeclared,
             vertices,
             edges,
             version: GRAPHAR_VERSION.to_string(),
         }
-    }
-
-    /// Attach a verified privacy bound.
-    ///
-    /// **Only a verifier calls this**, and it is a separate method rather than
-    /// a `new` parameter for that reason: a bound that could be set by the
-    /// builder is a bound that can be declared without being measured, which is
-    /// the one failure mode this whole field exists to make impossible.
-    #[must_use]
-    pub fn with_privacy(mut self, privacy: Privacy) -> Self {
-        self.privacy = privacy;
-        self
     }
 
     /// Serialize this graph-info to `GraphAr` v1.0.0 YAML.
@@ -2148,7 +1989,7 @@ version: gar/v1
     fn a_source_channel_names_no_deriver() {
         let from_source = Channel::categorical("sex", "sex", 2);
         assert_eq!(from_source.derived_by, None);
-        let computed = from_source.clone().derived_by("k-anonymity generalisation");
+        let computed = from_source.clone().derived_by("the layout pass");
         assert_ne!(from_source, computed);
         assert_eq!(
             computed.domain,
@@ -2242,108 +2083,6 @@ version: gar/v1
         assert!(yaml.contains("directed: true"), "{yaml}");
         // The literal, deliberately — see `GRAPHAR_VERSION`.
         assert!(yaml.contains("version: gar/v1"), "{yaml}");
-    }
-
-    fn bounded_graph() -> GraphInfo {
-        GraphInfo::new(
-            "graph",
-            "",
-            Container::RowGroups,
-            vec!["vertex/Person.vertex.yml".to_string()],
-            vec![],
-        )
-        .with_privacy(Privacy::KAnonymity(KAnonymity {
-            k: 5,
-            reached: 12,
-            absent_quasi_identifier: AbsentQuasiIdentifier::Suppress,
-            population: 70_000,
-            suppressed: 143,
-            suppression_budget_ppm: 20_000,
-            quasi_identifiers: "Person.birth_year Person.postcode Person.sex".to_string(),
-            generalization: "Person.birth_year@bucket Person.postcode@1-3/4".to_string(),
-            policy: "https://example.org/policies/persons-v1".to_string(),
-            profile: "https://fossil-lang.org/ns/privacy/v1".to_string(),
-        }))
-    }
-
-    #[test]
-    fn an_undeclared_bound_is_written_down_rather_than_left_out() {
-        // Mandatory on write: a producer with no bound says so, because "no
-        // bound" and "written before the field existed" must not collapse.
-        let yaml = GraphInfo::new("graph", "", Container::RowGroups, vec![], vec![])
-            .to_yaml()
-            .expect("serialize");
-        assert!(yaml.contains("privacy:"), "{yaml}");
-        assert!(yaml.contains("bound: undeclared"), "{yaml}");
-        assert!(
-            !yaml.contains("k:"),
-            "an undeclared bound declares no k\n{yaml}"
-        );
-    }
-
-    #[test]
-    fn a_manifest_written_before_the_field_existed_still_reads() {
-        // Ignorable on read: the `graph.graph.yml` of every corpus written
-        // before the field, deserialising to «unknown» and not to «public».
-        let old = "name: graph\nprefix: ''\ncontainer: rowgroups\n\
-                   vertices:\n- vertex/Person.vertex.yml\nedges: []\nversion: gar/v1\n";
-        let parsed: GraphInfo = serde_yaml_ng::from_str(old).expect("deserialize");
-        assert_eq!(parsed.privacy, Privacy::Undeclared);
-    }
-
-    #[test]
-    fn graph_info_round_trips_a_bound_through_yaml() {
-        let original = bounded_graph();
-        let yaml = original.to_yaml().expect("serialize");
-        let parsed: GraphInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
-        assert_eq!(original, parsed);
-    }
-
-    /// `packages/corpus/guards/manifest.mjs` and `packages/corpus/src/manifest.ts`
-    /// are line scanners that **skip silently** what falls outside a flat
-    /// mapping, so the emitted `privacy:` block has to stay inside one — said
-    /// here, in the crate that emits it, rather than in the two that read it.
-    #[test]
-    fn the_privacy_block_stays_inside_the_grammar_the_line_scanners_read() {
-        let yaml = bounded_graph().to_yaml().expect("serialize");
-        let lines: Vec<&str> = yaml.lines().collect();
-        let start = lines
-            .iter()
-            .position(|l| *l == "privacy:")
-            .expect("a privacy block");
-        let block: Vec<&str> = lines[start + 1..]
-            .iter()
-            .take_while(|l| l.starts_with("  "))
-            .copied()
-            .collect();
-        assert!(!block.is_empty(), "{yaml}");
-        for line in &block {
-            // Exactly two spaces of indent and a `key: scalar` — one level, no
-            // sequence, no third level. A `- ` item or a four-space line here is
-            // what the scanners drop on the floor.
-            assert!(
-                line.starts_with("  ") && !line.starts_with("   "),
-                "`{line}` is deeper than one level\n{yaml}"
-            );
-            let rest = &line[2..];
-            assert!(
-                !rest.starts_with("- "),
-                "`{line}` is a sequence item\n{yaml}"
-            );
-            let (_, value) = rest.split_once(": ").unwrap_or_else(|| {
-                panic!("`{line}` is not `key: scalar`\n{yaml}");
-            });
-            assert!(
-                !value.starts_with('[') && !value.starts_with('{'),
-                "`{line}` is flow style, which both scanners REFUSE\n{yaml}"
-            );
-        }
-        // And the set is one scalar, which is the whole reason it is spelled
-        // with spaces instead of as a list.
-        assert!(
-            block.contains(&"  quasi_identifiers: Person.birth_year Person.postcode Person.sex"),
-            "{yaml}"
-        );
     }
 
     /// **Every spelling the generated column tables use has an Arrow type**, and
@@ -2499,24 +2238,6 @@ version: gar/v1
             vec![CellRung::at(1, 0, props)],
         );
         assert!(!empty.contracts_by_at_least(317_080));
-    }
-
-    /// The budget is integer arithmetic, and this is the comparison a reader
-    /// reproduces. 143 suppressed of 70,000 is 2,042.8 ppm, under a 20,000 ppm
-    /// (2%) allowance — and the point is that no float appears on either side.
-    #[test]
-    fn the_suppression_budget_compares_without_a_float() {
-        let Privacy::KAnonymity(bound) = bounded_graph().privacy else {
-            panic!("a bound");
-        };
-        assert!(bound.suppressed * 1_000_000 <= bound.population * bound.suppression_budget_ppm);
-        // And it bites: 1,401 of 70,000 is 20,014 ppm, which is over. Read off
-        // a value, not written as a constant expression the compiler folds.
-        let over = KAnonymity {
-            suppressed: 1_401,
-            ..bound
-        };
-        assert!(over.suppressed * 1_000_000 > over.population * over.suppression_budget_ppm);
     }
 
     /// **The bytes the hand-written line scanners have to read**, pinned here

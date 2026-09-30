@@ -39,25 +39,13 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # `run` prints. The write path is DataFusion end to end; the only DuckDB left
 # on a normal edge of this crate is `fossil-introspect`'s pre-compile DESCRIBE.
 fossil-df           = { path = "../fossil-df" }
-# The privacy policy a run is verified against. The host READS the document
-# (a file is a host's job, like a shape document) and hands the parsed value to
-# the write path, which refuses rather than sealing a corpus that misses the
-# bound. `--policy` is a path on the command line and a `PrivacyPolicy` by the
-# time `host::run` is called, which is the same shape every other host job has.
-fossil-policy       = { path = "../fossil-policy" }
-# The CST, and a NORMAL dependency: the policy binding (`policy :=
-# "people.jsonld"`, grammar.bnf, PolicyDef) is the one thing a program names that
-# the compiler never opens, so it has no def-map entry to read and `host::run`
-# walks the tree for it. `tests/census` counts `PROPERTY` nodes with it too.
-fossil-syntax       = { path = "../fossil-syntax" }
 # The layout post-pass — `enrich_layout`, called by `enrich_written_layout`
 # after the write. It links no DuckDB — no connection, no secret, no path
 # resolver — though it does reach DataFusion through `fossil-df` for one
 # encoder; `crates/xtask/tests/engine_reach.rs` is what derives that.
 fossil-layout       = { path = "../fossil-layout" }
 # `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot
-# disagree about a chunk — and `Privacy`, because the run summary says what the
-# corpus claims and «undeclared» is the outcome of forgetting `--policy`.
+# disagree about a chunk.
 fossil-sinks        = { path = "../fossil-sinks" }
 # The host half: DESCRIBE each source before the compile, and hold the
 # credentials that let it. See its module doc for why it is not compiler work.
@@ -103,6 +91,8 @@ salsa = { workspace = true }
 # back with plain SQL — never through our own reader. tempfile gives it a
 # destination; duckdb is already a dev dependency for reading Parquet back.
 tempfile = { workspace = true }
+# `tests/census` counts `PROPERTY` nodes in the CST.
+fossil-syntax = { path = "../fossil-syntax" }
 
 [[bin]]
 name = "fossil"

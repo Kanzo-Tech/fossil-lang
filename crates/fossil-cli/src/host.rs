@@ -162,91 +162,6 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
     })
 }
 
-// ======================================================================= policy
-
-/// The privacy policy this run verifies against — the ONE place the two ways of
-/// naming one meet.
-///
-/// # Two ways, and neither may quietly win
-///
-/// `policy := "people.jsonld"` in the program (grammar.bnf, `PolicyDef`) and
-/// `fossil run --policy <path>` on the command line. Where both are given this
-/// **REFUSES**, and that is a decision rather than an omission:
-///
-/// - **If the flag won**, an operator could weaken a bound the program declares
-///   by passing a looser document, and the corpus would seal with the looser
-///   number and no trace of the one the program asked for. That is the failure
-///   this whole mechanism exists to make impossible.
-/// - **If the program won**, `--policy` would be silently inert against a
-///   program that binds one — a flag that is accepted and ignored, which is the
-///   worst of the three because the operator has evidence they were checked
-///   against a document that was never opened.
-/// - **Refusing** costs one message and is repaired by deleting one of the two.
-///   It is the shape `/docs/design/privacy` already takes everywhere else: a
-///   type the policy is silent about is an ERROR rather than an exemption,
-///   because silence is indistinguishable from a judgement.
-///
-/// The flag is NOT deprecated by the binding and the two are not redundant. A
-/// binding is how a PRODUCER carries the obligation in the artifact that gets
-/// reviewed; the flag is how a RECIPIENT — or a CI gate — imposes a bound on a
-/// program they did not write and cannot edit. Neither can do the other's job.
-///
-/// # Reading it is a host job
-///
-/// Like a shape document, and for the same reason: `fossil_base::register_file`
-/// takes `&mut dyn Db`, which no query body has. Unlike a shape document, it
-/// never enters the database at all — the compiler does not open a policy, the
-/// WRITER does, after the check and immediately before it seals. That is why
-/// there is no `io.policy` row and no def-map entry: this walks the CST.
-///
-/// The reference goes through [`SourceAnchor`] like every other written
-/// reference, so `@conn/people.jsonld`, `s3://…`, an absolute path and a path
-/// beside the program all mean here what they mean everywhere else.
-fn resolve_policy(
-    db: &fossil_base::FossilDb,
-    file: fossil_base::SourceFile,
-    anchor: &SourceAnchor<'_>,
-    flag: Option<&fossil_policy::PrivacyPolicy>,
-) -> miette::Result<Option<fossil_policy::PrivacyPolicy>> {
-    let cst = fossil_syntax::parse(db, file);
-    let mut bound = cst
-        .root(db)
-        .syntax()
-        .children()
-        .filter_map(fossil_syntax::ast::PolicyDef::cast);
-    let Some(first) = bound.next() else {
-        return Ok(None);
-    };
-    // ONE binding, not one per type (grammar.bnf, PolicyDef). The bound is a
-    // property of the whole release — `graph.graph.yml` carries it beside
-    // `container` — so two of them is a question with no answer rather than a
-    // merge. Refused here because there is no def-map entry to refuse it in.
-    if bound.next().is_some() {
-        return Err(miette::miette!(
-            "the program binds more than one `policy := …`, and the bound is a property of the \
-             whole release: `graph.graph.yml` carries ONE. Two policies is not a merge — delete \
-             all but the one this corpus is verified against"
-        ));
-    }
-    if flag.is_some() {
-        return Err(miette::miette!(
-            "the program binds `policy := …` and `--policy` was given as well. Neither may \
-             quietly win: the flag would weaken a bound the program declares, and the program \
-             would make the flag silently inert. Drop one — the binding is how a producer \
-             carries the obligation, the flag is how a recipient imposes one"
-        ));
-    }
-    let written = first
-        .document()
-        .ok_or_else(|| miette::miette!("`policy := …` names no document"))?;
-    let locator = anchor.locator(&written);
-    let text = std::fs::read_to_string(&locator)
-        .map_err(|e| miette::miette!("read policy `{locator}` (bound as `{written}`): {e}"))?;
-    fossil_policy::parse(&text)
-        .map(Some)
-        .map_err(|e| miette::miette!("policy `{locator}`: {e}"))
-}
-
 // The pre-introspection block stood here — `pre_introspect_and_register`, the
 // DuckDB type table, the freshness token — and it is
 // `fossil-introspect` now. It is what a HOST does before compiling, which the
@@ -276,25 +191,6 @@ fn local_dest_dir(url: &str) -> Option<PathBuf> {
 /// The output descriptor is program-resident (invariant #1). `creds` carries the
 /// cloud config (empty ⇒ local / public-URL behaviour).
 ///
-/// `policy_flag` is `--policy`'s document, and it is no longer the only way to
-/// name one: a program binds its own with `policy := "people.jsonld"`, and
-/// [`resolve_policy`] is where the two meet — the binding wins over nothing,
-/// because giving both is refused. Whichever is in force, the run **refuses**
-/// rather than writing a corpus that does not satisfy it; the verification
-/// happens after the corpus is a value and before any of it is a file, because
-/// there is no read path to put a control on afterwards.
-///
-/// **The resolution is INSIDE this function on purpose.** It could have been the
-/// caller's, the way the flag's own parse is, and then every caller of `run`
-/// would have to remember to look for the binding — which is the forgettable
-/// obligation this landing exists to remove, moved up one level into the API.
-/// A program that binds a policy is verified against it whoever calls `run`.
-///
-/// Neither given seals `privacy: undeclared` into the manifest, which is a claim
-/// a recipient can read rather than a silence they have to interpret: the corpus
-/// says `undeclared` on its face and `packages/corpus/guards`' `declared-privacy` repeats
-/// it to whoever receives the files.
-///
 /// `memory_bytes` is the run's declared memory budget, and it is one number held
 /// against each STAGE rather than against their sum: the `DataFusion` pool the
 /// write path executes under, and then the layout pass, which plans no query —
@@ -310,7 +206,6 @@ pub fn run(
     dest_url: &str,
     connections: &HashMap<String, String>,
     memory_bytes: Option<u64>,
-    policy_flag: Option<&fossil_policy::PrivacyPolicy>,
 ) -> miette::Result<RunReport> {
     tracing::debug!(?path, dest_url, "fossil run");
     let text = std::fs::read_to_string(path)
@@ -331,14 +226,6 @@ pub fn run(
     // against this db's `System`, before this call — which is the order the
     // browser has always used, and the reason `connections` arrives as URLs
     // rather than as credentials.
-
-    // The bound, resolved before anything is compiled: a policy that cannot be
-    // read is a message about the policy rather than a run that gets most of the
-    // way and then cannot say what it was checking against. Held here so that
-    // the reference below can borrow it — the program's binding, else the flag,
-    // and both given is refused inside.
-    let from_program = resolve_policy(&db, file, &anchor, policy_flag)?;
-    let policy = from_program.as_ref().or(policy_flag);
 
     if fossil_hir::def_map::def_map(&db, file)
         .mappings(&db)
@@ -389,16 +276,9 @@ pub fn run(
         let locator = anchor.locator(uri);
         std::fs::read_to_string(&locator).map_err(|e| format!("read source `{locator}`: {e}"))
     };
-    let mut graph = fossil_df::materialise(
-        &db,
-        file,
-        &descriptor,
-        connections,
-        read_uri,
-        memory_bytes,
-        policy,
-    )
-    .map_err(|e| miette::miette!("execute: {e}"))?;
+    let mut graph =
+        fossil_df::materialise(&db, file, &descriptor, connections, read_uri, memory_bytes)
+            .map_err(|e| miette::miette!("execute: {e}"))?;
 
     // **The write, in the order a corpus is true in.** The payload first, out of
     // the batches `graph` holds — a community partition, a deterministic

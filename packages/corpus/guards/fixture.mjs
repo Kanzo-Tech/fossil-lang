@@ -183,34 +183,16 @@ export function write(
   const points = positions(count, clusters);
   const { ordered, denseOf } = renumber(points);
 
-  // Two quasi-identifiers, because a corpus with none cannot exercise the
-  // convention that a corpus declares what its bytes guarantee — and a guard
-  // that only ever runs on a corpus with nothing to protect is a guard that has
-  // never been asked a question.
+  // Two attribute columns beside the position, so the payload carries more
+  // than geometry and a channel has something to draw. They are functions of the
+  // PRE-layout index rather than of `dense_id`, so their values are a property
+  // of the data and not of the tiling.
   //
-  // They are functions of the PRE-layout index rather than of `dense_id`, so the
-  // equivalence classes are a property of the data and not of the tiling, and
-  // the smallest class is the same number however the corpus is cut. That is
-  // what makes `declared-privacy` and
-  // `the_class_is_the_release_and_not_the_tile` the same assertion in two
-  // languages.
-  //
-  // # The grain is chosen, because a fixed one declares a bound small corpora cannot hold
-  //
-  // This read `1950 + index % 40` and `PC${index % 25}` unconditionally, with a
-  // comment claiming 1,000 combinations of `count / 1000` records each. **Both
-  // halves were wrong.** `index % 40` and `index % 25` do not range over 40×25
-  // pairs: they repeat every `lcm(40, 25)`, and `gcd` is 5, so there are **200**
-  // classes and never were a thousand. And at the conformance corpus's 300
-  // records, 200 classes hold one or two records apiece — so the manifest
-  // declared `k: 5` over files that reach `k: 1`, and `declared-privacy` said so.
-  //
-  // The grain now falls with the corpus. `PAIRS` is ordered coarsest-first and
-  // the first entry whose class count the corpus can fill `K` deep wins, so the
-  // 70,000-record default still lands on `(40, 25)` and writes the same bytes it
-  // always did, while 300 records land on `(8, 5)` — 40 classes of seven or
-  // eight. A fixture that emits a corpus violating the convention it exists to
-  // demonstrate is worse than no fixture.
+  // The grain falls with the corpus: `PAIRS` is ordered coarsest-first and the
+  // first entry the corpus can fill `K` deep wins — every combination repeats at
+  // least `K` times — so the 70,000-record default lands on `(40, 25)` and 300
+  // records on `(8, 5)`. `index % 40` and `index % 25` repeat every
+  // `lcm(40, 25)`, which is 200 and not 1,000, and `lcm` below is that.
   const K = 5;
   const PAIRS = [
     [40, 25],
@@ -225,9 +207,9 @@ export function write(
   };
   const [years, postcodes] =
     PAIRS.find(([y, pc]) => lcm(y, pc) * K <= count) ?? PAIRS[PAIRS.length - 1];
-  const quasi = (index) => [1950 + (index % years), `PC${index % postcodes}`];
+  const attributes = (index) => [1950 + (index % years), `PC${index % postcodes}`];
   const rows = ordered.map((p, dense) => {
-    const [birthYear, postcode] = quasi(p.index);
+    const [birthYear, postcode] = attributes(p.index);
     return `${dense},https://example.org/person/${p.index},${birthYear},${postcode},${p.x},${p.y},${p.cluster}`;
   });
   const vertexCsv = join(dir, "vertices.csv");
@@ -236,18 +218,7 @@ export function write(
     `dense_id,subject,birth_year,postcode,x,y,cluster_id\n${rows.join("\n")}\n`,
   );
 
-  // The smallest equivalence class, counted rather than derived — the fixture
-  // publishes it and the guard re-derives it off the Parquet, so a formula here
-  // and a formula there agreeing would prove only that one was copied.
-  const classes = new Map();
-  for (const p of ordered) {
-    const key = quasi(p.index).join("\u0000");
-    classes.set(key, (classes.get(key) ?? 0) + 1);
-  }
-  const reached = Math.min(...classes.values());
-
-  // The categorical channel's domain, COUNTED — the same rule `reached` is
-  // counted under. `clusters` is what this fixture was asked for and the number
+  // The categorical channel's domain, COUNTED. `clusters` is what this fixture was asked for and the number
   // of discs that end up carrying a vertex is what it wrote, and those two part
   // company whenever the count does not fill the last disc. A manifest states
   // what is on disk, so the guard that recounts it off the Parquet is comparing
@@ -368,21 +339,6 @@ export function write(
       // directory to list, so the one thing it cannot derive is which of the two
       // it is looking at, and this is where it is told.
       `container: ${layout}`,
-      // What the bytes guarantee, beside the container, because both are
-      // properties of the whole release rather than of a column. A flat mapping
-      // of scalars: the manifest's grammar is what `manifest.mjs` reads, and a
-      // nested sequence here would be SKIPPED rather than refused.
-      "privacy:",
-      "  bound: k-anonymity",
-      `  k: ${K}`,
-      `  reached: ${reached}`,
-      "  absent_quasi_identifier: value",
-      `  population: ${count}`,
-      "  suppressed: 0",
-      "  suppression_budget_ppm: 0",
-      "  quasi_identifiers: Person.birth_year Person.postcode",
-      "  policy: https://example.org/policies/fixture-v1",
-      "  profile: https://fossil-lang.org/ns/privacy/v1",
       "vertices:",
       "- vertex/Person.vertex.yml",
       "edges:",
@@ -564,7 +520,7 @@ export function write(
     }
   }
 
-  return { dir, count, edges: pairs.length, tiles, layout, chunkSize: tileRows, reached, communities };
+  return { dir, count, edges: pairs.length, tiles, layout, chunkSize: tileRows, communities };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -160,7 +160,7 @@ describe('open — what is inside', () => {
     // Seven on disk against THREE in the payload projection — the manifest's promise is not the
     // artefact, which is why the vocabulary is a DESCRIBE and not a read of the manifest. The
     // gap is what matters and not its width: it was five against one before the fixture grew
-    // the two quasi-identifiers the declared privacy bound is measured over.
+    // `birth_year` and `postcode`.
     expect(person.fields.map((f) => f.name)).toEqual([
       'dense_id',
       'subject',
