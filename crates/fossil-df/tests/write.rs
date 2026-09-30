@@ -203,7 +203,10 @@ async fn run(
     program: &str,
     files: Vec<(&'static str, Vec<u8>)>,
     fail_at: usize,
-) -> (Result<fossil_df::RunReport, String>, Arc<Recording>) {
+) -> (
+    Result<fossil_df::RunReport, fossil_df::RunError>,
+    Arc<Recording>,
+) {
     let mut storage = Storage::new(Arc::new(NoHost));
     let data = Arc::new(InMemory::new());
     storage
@@ -609,7 +612,10 @@ async fn a_write_that_fails_leaves_no_manifest() {
     for fail_at in [0, 1, 2] {
         let (result, out) = run(PROGRAM, sources(20, 30), fail_at).await;
         let refused = result.expect_err("the store refused a put");
-        assert!(refused.contains("refused on purpose"), "{refused}");
+        assert!(
+            refused.to_string().contains("refused on purpose"),
+            "{refused}"
+        );
         let listed: Vec<_> = out.inner.list(None).try_collect().await.expect("list");
         assert!(
             listed
