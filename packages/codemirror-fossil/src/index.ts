@@ -66,7 +66,7 @@
  * **Semantic highlighting.** `semanticLegend()` is exported and `fossil-ide`
  * knows a type from a binding from a column; `tokenize()` does not, which is why
  * `Ident` carries no tag in `tags.ts`. The legend is on the main thread but the
- * tokens themselves still only come back over the Worker.
+ * tokens themselves come only from the native `fossil-lsp`.
  *
  * **Code actions.** `fossil-ide` has two quick fixes and both hang off a
  * diagnostic. `@codemirror/lint`'s `Diagnostic.actions` is the place they go, and

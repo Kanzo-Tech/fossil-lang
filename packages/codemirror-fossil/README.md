@@ -74,7 +74,8 @@ lexer itself — on the side that knows.
 ## What it does not do
 
 - **Semantic highlighting.** `semanticLegend()` is on the main thread but the
-  tokens are not — they still come back only over the Worker. This is why `Ident`
+  tokens are not — only the native `fossil-lsp` serves them, and the browser has
+  no path to them. This is why `Ident`
   carries no tag: the lexer cannot tell a type from a binding from a column, and
   guessing would only have to be undone by the overlay that can.
 - **Code actions.** `fossil-ide` has two quick fixes and both hang off a

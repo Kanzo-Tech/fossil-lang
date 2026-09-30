@@ -48,8 +48,7 @@ export { openProgram } from './program.js';
 export type { FossilProgram, OpenProgramOptions } from './program.js';
 
 /** One external reference a program makes — the typed lineage returned by
- *  {@link refs}. Mirrors `fossil_lineage::SourceRefInfo` (the SAME struct the
- *  native `fossil refs` emits). `connection` is the `@conn` alias the reference
+ *  {@link refs}. Mirrors `fossil_lineage::SourceRefInfo`. `connection` is the `@conn` alias the reference
  *  targets, or `null` for a direct URL/path; `role` is where it appears in the
  *  source constructor. The host resolves `@conn` → `{base}/path` itself. */
 export interface SourceRefInfo {

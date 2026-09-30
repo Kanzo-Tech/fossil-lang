@@ -12,9 +12,8 @@ served over HTTP) — and reads them back through `src/`. None of the three is i
 never sees them. The prose half is `docs/content/docs/format/`.
 
 `src/` is TypeScript and nothing else: `fossil.json` through `JSON.parse`, a view per table, and the
-SQL a scan composes. It was a binding over `fossil-graph` compiled to wasm32, and that reader — four
-parsers of one manifest and an addressing layer — went with the tiles. **Do not put a second reader
-of the manifest back**, in Rust or here: the writer's `fossil_sinks::manifest` types are the one
+SQL a scan composes. **Do not put a second reader of the manifest back**, in Rust or here —
+`/docs/design/one-door` measured four of them over one read. The writer's `fossil_sinks::manifest` types are the one
 definition. `tests/manifest.test.ts` holds `src/manifest.ts` against the schema generated from them
 (`crates/fossil-sinks/fossil.schema.json`), interface by interface, and validates every fixture
 against it: change a field there and this package's `test` goes red until the TypeScript follows.

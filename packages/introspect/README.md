@@ -16,7 +16,7 @@ table and the descriptor shape.
 
 `crates/fossil-introspect` does the same job natively, and the two are separate
 implementations, not a shared one. Three things must agree or a program means
-something different in the browser and on the CLI: the DuckDB reader each `io.`
+something different in the browser and in the language server: the DuckDB reader each `io.`
 constructor picks (`read_csv_auto`, `read_json_auto`, `read_parquet`), what
 DuckDB calls a reader option (`delim`), and the DuckDB→primitive table.
 `tests/rust-parity.test.ts` reads that crate's source, derives all three from
