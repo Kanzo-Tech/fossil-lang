@@ -16,16 +16,9 @@ This is a whole program. Three rows of CSV go in and three `Person` nodes come o
 shape document declares. Those two meeting is the type check — so `User.nmae` is a squiggle in your
 editor rather than a null in the graph.
 
-```bash
-fossil run hello.fossil --dest file:///tmp/hello
-```
-
-```
-wrote 1 vertex type(s), 0 edge type(s) to file:///tmp/hello
-```
-
-Under `/tmp/hello` is the corpus: Parquet files and a manifest, three `Person` nodes in them, one
-per row.
+Run it with `@fossil-lang/executor` — WebAssembly, in a browser tab or in Node — and what comes out
+is the corpus: a `fossil.json` that names everything, and `vertex/Person.parquet` with three `Person`
+nodes in it, one per row.
 
 ## Start here
 
@@ -33,7 +26,7 @@ per row.
   <Card
     href="/docs/book/getting-started"
     title="Getting started"
-    description="Install the binary, run the program above against the three rows it reads, and open what it wrote."
+    description="Install the executor, run the program above against the three rows it reads, and open what it wrote."
   />
 </Cards>
 

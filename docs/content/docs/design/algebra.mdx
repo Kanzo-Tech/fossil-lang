@@ -141,8 +141,8 @@ it.
 
 What the checker can say and the engine cannot is **where** — a span over the author's own text.
 By the time a `JoinSide` reaches the engine the program is a plan, which is what makes
-`` `User` is never named `` a sentence at a source location rather than a `DataFusionError` at
-`fossil run`.
+`` `User` is never named `` a sentence at a source location rather than a `DataFusionError` in
+the middle of a run.
 
 #### A side is a set of names, because a join composes
 
@@ -161,7 +161,7 @@ that name with the pipeline's after a join, and the pipeline's name qualified no
 refused `User` as *«neither input (`Both`, `Region`)»* while `Both` addressed no column of either
 side. The rule was not a narrower one than the checker's but an **inverted** one — it named as the
 alternative the single spelling that could not resolve, and refused the only spelling that could.
-Two programs `fossil check` accepted could not be planned, and the second had been described here
+Two programs the checker accepted could not be planned, and the second had been described here
 as working since this page was written: `Purchase.join(Adults, …)`, where `Adults := User.where(…)`
 is addressed as `User` because a filter renames nothing.
 

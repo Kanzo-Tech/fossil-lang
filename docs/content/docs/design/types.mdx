@@ -42,7 +42,7 @@ Neither direction is a fallback for the other, and the split is what makes the e
 at every property assignment the checker holds a synthesised type and an expected one and knows the
 origin of each, so a mismatch names two places.
 
-<Program src="errors/wrong-type/expected/diagnostic.txt" title="fossil check program.fossil" />
+<Program src="errors/wrong-type/expected/diagnostic.txt" title="program.fossil" />
 
 A single-direction checker cannot write that. Working forward only, it does not know what was
 expected; working backward only, it does not know what arrived.
@@ -55,7 +55,7 @@ The provider generated `User` from the file, so the compiler knows its columns e
 is not among them is a typo with a location, refused by `resolve_predicate`
 (`crates/fossil-hir/src/check.rs, resolve_predicate`).
 
-<Program src="errors/unknown-field/expected/diagnostic.txt" title="fossil check program.fossil" />
+<Program src="errors/unknown-field/expected/diagnostic.txt" title="program.fossil" />
 
 Notice *where* the suggestion searched: among the members of `User`, not among every name in the
 program — a property of [the dot meaning member-of](/docs/design/the-dot), not of the diagnostic.
@@ -74,7 +74,7 @@ A constraint table carries counts, not just kinds, so a property the shape requi
 never writes is knowable from the program alone — `check_required_properties`
 (`crates/fossil-hir/src/check.rs, check_required_properties`):
 
-<Program src="errors/missing-property/expected/diagnostic.txt" title="fossil check program.fossil" />
+<Program src="errors/missing-property/expected/diagnostic.txt" title="program.fossil" />
 
 `shop:phone` is also declared and also absent, and it is *not* an error, because the shape says it
 is optional. A contract that could not tell "one" from "zero or one" would not be a contract.

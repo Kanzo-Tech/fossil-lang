@@ -1,0 +1,577 @@
+---
+title: The tiled corpus
+description: "What the corpus was when it was addressed rather than read whole: paths computed from a YAML manifest, tiles as row groups, an identity index, two verbs over a Rust reader, and a conformance round trip over three readers — with every measurement that decided it."
+---
+
+> **Deferred, not reversed.** A `fossil/1` corpus is one Parquet file per table under a
+> `fossil.json`, read whole through [one door](/docs/design/one-door); this is the addressed
+> corpus it replaced, split out of [the corpus](/docs/design/corpus). The GraphAr sections record
+> what the YAML manifest borrowed, and `fossil.json` replaced that manifest rather than deferring
+> it. The code existed at commit `ac1801d4` (main `e5b2113f`), and every path on this page is
+> spelled against that commit. What brings it back: a `fossil/1` corpus that fails the in-browser
+> thresholds — open over 1.5 s, first paint over 3 s, or heap over 1.5 GB at a million vertices
+> over HTTP.
+
+## Addressable, and what that buys
+
+An address is computed, not discovered: given the manifest, a reader derives the location of every
+piece it wants **before it issues a single request**. The constraint that forces it is that **you
+cannot list a directory over HTTP.** Expanding a wildcard over files *is* listing a directory — it
+works on a local filesystem and on an object store, and fails in a browser against a plain origin,
+which is the worst distribution of a failure a design can have. The lineage is explicit —
+**Cloud-Optimized GeoTIFF → GeoParquet → PMTiles** — and copying that schema beats inventing one.
+
+### Where a wildcard survives, counted
+
+The rule has one exception left in the tree, and it is bounded rather than argued.
+`ac1801d4:packages/corpus/src/verbs.ts, verbs` composes every path a verb reads, and what is left was
+measured over the conformance corpus in both containers by `fossil-mcp`'s `src/lib.rs` (deleted after
+`2fa5f22`), which composed the same paths the same way:
+
+| container | globs registered | where |
+| --- | --- | --- |
+| `rowgroups` | **0** | every payload set is one file the manifest's `prefix` names |
+| `files` | **one per edge orientation**, none elsewhere | a vertex type's tiles come out of `vertex_count` and `chunk_size`; an edge orientation's cannot, because a tile whose vertices have no edges is a file that was never written and a run of them is a gap no arithmetic predicts |
+
+**What bounds it is which container fossil writes**, measured rather than reasoned: `fossil run
+examples/hello.fossil` emits `container: rowgroups`, and `ac1801d4:crates/fossil-df/src/lib.rs` has the one
+call that decides it. So a corpus fossil wrote registers no wildcard at all, and the surviving one is
+reachable only through a corpus another writer produced — which the conformance corpus is, because it
+is written through DuckDB and DuckDB clamps a row group under its 2,048-row vector.
+
+### `chunk_size` is what was written, never what was asked for
+
+DuckDB's `ROW_GROUP_SIZE` is a **request**. It writes row groups in whole 2,048-row vectors and
+rounds a smaller one up without saying so, and a generator that takes `chunk_size` from the number it
+passed in publishes a manifest describing a corpus it did not write. `--chunk-size 1024` produced
+exactly that: a corpus declaring 1,024 over row groups of 2,048, against which this repository's own
+`tile-of` guard finds **14,643 violations**.
+
+The fixture now **refuses** when the two disagree. Writing the size it observed was the tempting fix
+and is the same lie pointed the other way — the manifest would agree with the bytes while silently
+disowning what the caller asked for, and a `chunk_size` that quietly means something else is what
+produced a flat sweep curve for somebody measuring from outside. Refusing is the only outcome that
+reaches the person who can act on it.
+
+**This is DuckDB's floor and not the format's**, which is why fossil's own writer is unaffected:
+`TileWriter` goes through arrow-rs with both automatic limits set to `None`, so the cut is the
+explicit one the caller made. A 64-row tile round-trips as `[64, 64, 64, 64, 44]`. The conformance
+corpus therefore declares `container: files` at a `chunk_size` of 64 — the field exists to say which
+— while fossil emits `rowgroups`.
+
+It is not closed, and the reason is that closing it is a format change rather than a binding change:
+it needs a per-orientation tile census in the edge manifest, a field with its own argument about what
+a reader may derive. Until a `files` corpus is served, the cost is one nobody is paying.
+
+### The reader prunes the identity index, because the engine declines to
+
+The [identity index](/docs/format/conventions/identity) is built so that footers name the one tile a
+key can be in. Nothing makes an engine use them. **DuckDB prunes no disjunction over a `VARCHAR`
+column**, so a batched lookup — `key IN (a, b)` — opened all 245 index tiles of a million-vertex
+corpus and read **44.1 MB**, where the single `key = a` opened one and read **3.98 MB**. The index
+was doing its job and the query was reading past it.
+
+So the pruning moves to the reader, out of the same statistics the engine declined to use: one
+`parquet_metadata` sweep over the index tiles, cached per type exactly as the payload's `x`/`y` boxes
+are, and the batch stays **one** query over only the files its keys can be in. Under the `rowgroups`
+container a row group has no URL and there is nothing to address, so the batched read over the whole
+index is what there is, and the cache records that with `null` rather than pretending it pruned.
+
+<Callout type="warn" title="Two hazards in the comparison, and neither is visible in a passing test">
+**The comparison is on bytes, not on strings.** Parquet orders a string column by unsigned UTF-8
+bytes and JavaScript compares UTF-16 code units. The two disagree above `U+E000`, and an IRI reaching
+there would be pruned out of the very tile holding it and reported **absent** — a wrong answer, not a
+slow one.
+
+**A truncated statistic must widen the range, never narrow it.** A writer may shorten a long min/max:
+parquet-rs increments a truncated max, but a writer that did not would store a prefix, so a key
+extending the stored max is **kept** rather than excluded.
+</Callout>
+
+## What is borrowed from GraphAr, and where borrowing stops
+
+**GraphAr's YAML field names are borrowed wholesale** — three files named the way GraphAr names
+them, `<name>.graph.yml`, `<label>.vertex.yml` and `<source>_<edge>_<destination>.edge.yml`, plus
+`version: gar/v1`, which is GraphAr's own string.
+
+| file | the keys, all of them GraphAr's |
+| --- | --- |
+| graph info | `name`, `prefix`, `vertices`, `edges`, `version` |
+| vertex info | `type`, `chunk_size`, `prefix`, `version`; per property `name`, `data_type`, `is_primary`, `is_nullable` |
+| edge info | `src_type`, `edge_type`, `dst_type`, `chunk_size`, `src_chunk_size`, `dst_chunk_size`, `directed`, `prefix`, `version`; per projection `ordered`, `aligned_by`, `file_type` |
+
+> **fossil follows GraphAr as far as GraphAr specifies, and no further** — because past that point
+> there is nothing left to follow but a C++ implementation.
+
+Is the thing in `specification/format.md`, under GraphAr's `docs/`? Then fossil spells it that way and a difference is a
+defect. Is it only in that repository's `cpp/`? Then it is somebody's code, it binds nobody, and the
+decision is taken here. **This is not a GraphAr-conformant corpus and does not claim to be.**
+
+The count is the worked example. The specification never defines one — the word appears zero times —
+and the reference implementation stores one anyway, as raw native-endian bytes in a file with no
+declared width and no test vector. Here a count is a **manifest field**, required and not optional,
+checked against the rows on disk after the layout pass has re-read, renumbered and re-tiled them
+(`c573e73`). Required, because tiles are addressed and never listed: a hole in the middle is caught
+by the addressing, and **a missing tail is caught by nothing.**
+
+Nine divergences follow from that rule. None of them is a bug.
+
+| key or artefact | GraphAr specifies | fossil does | why |
+| --- | --- | --- | --- |
+| `data_type` | ten built-ins, none unsigned; its parser accepts eight spellings and throws on the rest | `uint32` for `dense_id` and `cluster_id`, `binary` as the Arrow fallback (`ac1801d4:crates/fossil-df/src/lib.rs`) | the address is a `u32`, so GraphAr's own reader throws on the first property of every corpus fossil writes |
+| a count | nothing; three files under `cpp/` that no specification names | `vertex_count` and `edge_count` in the YAML | a decimal integer has a width and cannot have a byte order |
+| offset table | required for `ordered_by_source`/`ordered_by_dest` edges | none emitted, anywhere | a vertex's run is a predicate on the tile already fetched, not a second request. **A real divergence from a specified thing** |
+| `chunk_size` on an edge | rows per edge chunk, recommended 2²² | equals `src_chunk_size` and is the addressing unit, so nothing bounds the row count (`ac1801d4:crates/fossil-sinks/src/manifest.rs`) | `by_source/chunk{k}.parquet` holds every edge out of vertex tile `k`. Same key, different meaning: a reader taking the borrowed name at its borrowed value gets a number instead of an error |
+| data-file paths | none, anywhere | `<type prefix><projection path>chunk{k}.parquet`, and `<vertex prefix><index prefix>tile{k}.parquet` for the one artefact that is not a projection | there is nothing here to diverge from |
+| `chunk_size` on a vertex | any value; recommends 2¹⁸ | 4,096, and a power of two | the address is `dense_id >> 12`, not a division; the value is measured on five million vertices, not recommended |
+| `iri` | no field; its one escape hatch is on the graph info | on the vertex info and the edge info, omitted when empty | RDF type and predicate IRIs. A non-RDF corpus is exactly the borrowed shape |
+| a projection entry with no `path` | prose names the prefix; the worked example omits it from all three `adj_lists` entries | reported absent rather than composed from convention | conformance case `unaddressable`. The specification's own example reads here as a corpus nobody can address |
+| `projections` | `property_groups` on both infos and `adj_lists` on the edge — three blocks for the payload, the orientations and the columns each carries | one block, whose entries are `{ path, scale, aligned_by?, ordered?, file_type, properties }` (`ac1801d4:crates/fossil-sinks/src/manifest.rs, Projection`) | the four blocks fossil had described one rule: a corpus is an order, a cut, and projections of that sequence, and the payload is the projection at `scale: 1`. A GraphAr reader looks for `property_groups` and `adj_lists` and finds neither, which makes this the largest of the nine — and it costs nothing that was not already spent on `uint32` |
+
+<Callout type="warn" title="What would reverse all of this">
+GraphAr specifying what it presently leaves to `cpp/`: a data-file path, a count with a declared
+width and byte order, and a table of vectors. The stronger trigger is the one
+[discarded alternatives](/docs/design/discarded) records against conforming at all — **a second
+reader that is not ours and already speaks it** — because a specification nobody reads is not
+interoperability.
+</Callout>
+
+### The version string names a format this page declares non-conformant
+
+**Nine divergences up, and then `version: gar/v1`.** The paragraph above says this is not a
+GraphAr-conformant corpus and does not claim to be; the manifest it describes opens with GraphAr's
+own version string, which is a claim of exactly that. A reader who takes the string at its word
+reaches for GraphAr's reader and it throws on `dense_id` — the first property of every corpus fossil
+writes — which is the first row of the table above. **The string is the only line of a fossil
+manifest that contradicts the page specifying it.**
+
+That is the same defect as the one [the cell pyramid's old name](/docs/design/later/cells#the-name-promised-a-nesting-this-does-not-have-and-the-name-is-gone)
+carried, and that one has been paid off: a borrowed name promising a contract the artefact does not
+honour. It is not a tenth divergence —
+a divergence is a place where fossil does something else on purpose, and this is a place where the
+manifest says something untrue about all nine.
+
+<Callout title="Nothing in this tree keys on it, and that is the fact the decision turns on">
+`gar/v1` appears **69 times in 34 files**, and **not one of them reads it**. There is no comparison,
+no `match`, no branch, no rejection path, no version gate — in the crates, in
+`ac1801d4:packages/corpus/conformance/corpus/graph.graph.yml` and its siblings, in the guards, or in the
+TypeScript. `ac1801d4:packages/executor/src/index.ts, GraphInfo` carries `version` as an opaque `string` and
+nothing ever looks at it.
+
+| what the 69 are | count | files |
+| --- | --- | --- |
+| a corpus or a fixture on disk | 27 | 25 |
+| a test asserting the writer emitted the string | 10 | 6 |
+| doc comments and fixture literals | 18 | 5 |
+| `ac1801d4:crates/fossil-sinks/src/manifest.rs, GRAPHAR_VERSION` and its five uses by the writer | 6 | 3 |
+| the string hard-coded past that constant | 5 | 5 |
+| prose on this site | 2 | 2 |
+| **a reader that decides anything on it** | **0** | **0** |
+
+**The five that bypass the constant are their own finding.** `ac1801d4:crates/fossil-graph/src/manifest.rs`,
+`ac1801d4:crates/fossil-graph/src/executor.rs`, `fossil-mcp`'s `src/lib.rs` (deleted after `2fa5f22`) and two examples/tests beside
+them write `"gar/v1"` as a literal rather than reading `GRAPHAR_VERSION`, so *changing the constant
+does not change the string* in three crates. Whatever is decided, that is a defect today: there is
+one name for the version and six places that state it.
+</Callout>
+
+So the compatibility question that made [the pyramid's rename](/docs/design/later/cells#the-name-promised-a-nesting-this-does-not-have-and-the-name-is-gone)
+expensive **does not arise here**, and it is worth being precise about why. A manifest key is read
+by name, so renaming one changes what a reader finds. A manifest *value* nobody reads is inert: an
+old corpus keeps saying `gar/v1`, a new one says something else, and every reader in this tree
+behaves identically on both because none of them looks. The cost of changing it is the cost of
+rewriting a string in six write sites, 25 fixture files and 10 assertions — mechanical, and the
+compiler and the test suite find all of it.
+
+**What each option costs, and what it forecloses.**
+
+| option | cost | what it forecloses |
+| --- | --- | --- |
+| **Keep `gar/v1`** | nothing | the manifest keeps making a claim this page denies, and the denial lives only here. A third party reading the corpus and not this page has no way to learn it |
+| **A fossil string** — `fossil/v1`, or a version that carries the divergence set | six write sites, 25 fixtures, 10 assertions, and a paragraph on `/docs/format` saying what the string means | conformance as a *later* option: a corpus that once said `gar/v1` and now says `fossil/v1` has said two things, and a reader that cached the first is a reader this format has not thought about |
+| **Keep the string and state the claim** — a second field naming what is borrowed | one new optional key, which is a format change with all of a format change's obligations | nothing, and it also fixes nothing: a reader that does not read `version` will not read its annotation either |
+
+**What this needs in order to be taken.** Not a measurement — the measurement is above and it is
+`0`. Two things:
+
+1. **Whether the version string is for a reader or for a human.** Nothing reads it, so today it is
+   for a human, and a string that is for a human and says the wrong thing has no defence. If it is
+   ever to be for a reader, the thing to decide is not its spelling but whether a reader may reject
+   a corpus on it — and [one clock, running one way](/docs/design/corpus#the-artifact-is-the-api) says that decision is
+   cheap exactly until a corpus reaches somebody who cannot regenerate it.
+2. **The same ruling the cell pyramid waits on**, about whether two spellings of one thing may be
+   legal at once. Answering it differently in the same manifest is the outcome to avoid.
+
+The five hard-coded literals are worth fixing either way, and do not wait on any of this.
+
+## The verb surface: two, and neither draws
+
+`fossil-graph` defines the surface; the in-process TS package, through `fossil-graph-wasm`, is the
+one binding over it. **It closed at six on 2026-08-05 and is two now**: `read`, `expand`, `path` and
+`aggregate` went with the MCP server that was their other caller. What is left are the variants of
+`Operation` (`ac1801d4:crates/fossil-graph/src/operations/mod.rs`).
+
+| verb | what it answers |
+| --- | --- |
+| `schema` | what types, fields and relations exist, with field stats on request |
+| `execute_sql` | the escape hatch, which a host withholds unless it opens the corpus with `sql: 'allowed'` |
+
+The algebra answers questions and **does not draw**, because drawing is addressing: the camera works
+out which zoom and which tiles it needs and asks for bytes, with no bbox in flight and no database
+on that path. Level-of-detail is not a filter but a **different relation**: below the payload a row
+is a cell of [the pyramid](/docs/design/later/cells), `dense_id >> shift`, summarising its members. A
+`where` selects rows from a table; zoom changes which rows exist at all. Once that is settled, every
+verb whose job was to make a picture stops having one.
+
+<Callout type="warn" title="This paragraph claimed super-nodes; the coarse rows are cells">
+It read *"a level-3 tile holds super-nodes that do not exist at level 0"*, and for a long time
+nothing wrote one: Louvain's hierarchy is collapsed to a `cluster_id` column, which is a colour and
+not a level, and the coarse view was a **decimation** — `vertex/<Type>/l{k}/`, the vertices whose
+`dense_id` is a multiple of `4^k` — on the argument that a synthetic centroid cannot nest. The
+decimation is retired and the coarse rows are synthetic after all, and the nesting argument is
+answered by the partition rather than by the rows: a cell is an aligned block of the quaternary, so
+its members at the zoom below are exactly the rows its id shifts from, and zooming in replaces a cell
+with them and never with something else. [Cells](/docs/design/later/cells) is the argument and
+[the backend](/docs/design/later/backend#the-sample-goes-below-z-there-are-only-cells) the ruling.
+</Callout>
+
+### A coarse view has to nest, and an arbitrary stride does not
+
+The first reader drew a bounded sample of what a window held, striding on `dense_id` by
+`ceil(matched / limit)` — **an arbitrary integer**, and arbitrary integers do not nest: the multiples
+of 34 and the multiples of 21 share only the multiples of 714. So zoom did not refine the picture, it
+**replaced** it. Measured over a million-vertex corpus at a 12,000-point cap, counting only the
+vertices still inside the window after the camera moves:
+
+| zoom step | still drawn, `s` arbitrary | still drawn, `s` a power of two |
+| --- | --- | --- |
+| 60% → 40% | **5.9%** | **100%** |
+| 40% → 25% | 4.8% | 100% |
+| 25% → 15% | 7.7% | 100% |
+| 15% → 10% | 11.1% | 100% |
+| 10% → 6% | 20.0% | 100% |
+
+**That is the whole difference between a picture that refines and a picture that flashes**, and it
+is why every coarse structure this format has carried is cut on powers of the same quaternary: the
+decimation that was retired, and the cell pyramid that replaced it, whose rung `k` drops two more
+bits of `dense_id` than rung `k − 1` — `ac1801d4:crates/fossil-sinks/src/manifest.rs, CellTree`.
+
+**What would reverse it.** A coarse view whose rows are not cut on the order — cells from a
+clustering, say — which would make nesting a property to test per corpus rather than one the
+addressing guarantees. [What was discarded](/docs/design/discarded) carries that alternative.
+
+### Which tiles a rectangle touches is the tile statistics' answer, and only theirs
+
+The addressing reads no bytes, so it cannot answer a rectangle: which tiles a box touches comes from
+the per-tile `x`/`y` statistics Parquet writes into every footer, which the writer publishes once
+more in the tile manifest. `open` reads that manifest while the corpus is opening rather than lazily
+— a request between the camera moving and an address being computable is the `viewport` verb this
+format deleted — and `tileMatrix` hands every tile's box to the view.
+
+**A second index over that question was written and deleted.** `vertex/<Type>/codes.json` published
+the first and last Z-curve code of every tile, and it pruned tighter than a footer's box because the
+box is the rectangular hull of an arc that snakes. What it cost was a document per corpus, a request
+to fetch it, a parser, a guard, a code path, a fallback for corpora written before it, and a field
+on the cost report whose entire content was which of the two indexes had answered.
+[`design/discarded`](/docs/design/discarded) carries the measurement and what would bring it back.
+
+`ac1801d4:packages/corpus/integration/address-cost.test.ts` is what the surviving path costs, in tiles, in `Range`
+requests and in kilobytes, against a denominator DuckDB supplies: the tiles that actually hold a
+vertex inside the rectangle, so a path answering with fewer has not read less, it has drawn a wrong
+picture.
+
+
+### Zarr, against the condition this repo wrote down for reopening a format
+
+Conforming to an existing interchange specification is [discarded](/docs/design/discarded), and the
+reversal condition recorded there is exact: **a second reader that is not ours, that already speaks
+it.** GraphAr failed that in practice — its own reader cannot open a fossil corpus, because
+`TypeNameToDataType` throws on `dense_id`'s `uint32`.
+
+Zarr meets the condition on the half above and fails it on the half below, and the split is clean:
+
+- **Its addressing model is this one.** A metadata document plus chunks addressed by a key computed
+  from the index, no server, store-agnostic — and its `multiscales` convention is the multiscale
+  structure this format carries, already standardised.
+- **Its data model is not.** Zarr is dense N-dimensional arrays. A tile here is a typed table with a
+  subject IRI and, load-bearing, **footer statistics**: a chunk of Zarr carries none, so adopting
+  the container means building an explicit spatial index to replace what Parquet gives for free.
+
+So the honest reading is that Zarr is worth borrowing at the manifest and the key arithmetic, where
+this format already agrees with it and would gain a vocabulary readers know, and is not worth
+adopting as the container while the footer is the index. **Neither half is decided here** — this
+section exists so the next person argues against the right thing.
+
+The measurement above moves the bottom half rather than the top. A tile's code range prunes a
+rectangle *better* than its `x`/`y` box does, so "the footer is the index" is now only true of byte
+offsets: the spatial index a Zarr container would have to grow is 8 B per chunk and the writer
+already publishes it, in a document beside the chunks rather than inside them — which is the shape a
+Zarr store would want anyway. What that does **not** settle is the reversal condition, which is a reader and not
+a size — and no Zarr reader opens a corpus of typed tables with a subject IRI in them.
+
+### The npm package is named for the corpus; the crates are named for the surface
+
+The published binding was `@fossil-lang/graph` and it is now **`@fossil-lang/corpus`**. The section
+title is the reason: no verb draws, the package's door is `open`, and every type it
+exports is `Corpus*`. What forced the rename rather than merely recommending it is that the thing
+which *does* draw arrived and took the obvious name — the playground's `package.json` (deleted after `2fa5f22`) listed
+`@kanzo-tech/graph`, a GPU canvas, and listed `@fossil-lang/graph` beside it. Two dependencies
+called `graph`, one addressing files and one painting vertices, and no import statement said which.
+
+**The Rust crates keep their names.** `fossil-graph` and `fossil-graph-wasm` are unchanged, and the
+argument is that the collision is specific to a namespace they are not in. A cargo name resolves in
+a workspace that has no `@kanzo-tech/graph` and never will; nothing in `ac1801d4:crates/` had an ambiguous
+import to disambiguate. And the crate is not misnamed the way the package was: `fossil-graph` is a
+verb surface over a **property graph**, which is what it says it is, whereas the package's whole
+public shape had already moved to the corpus. Renaming them would have spent a cross-language
+rename — every `fossil_graph::plan` in the conformance tables, the `fossil_graph_wasm` artefact
+stem in `ac1801d4:packages/corpus/pkg/`, and the `pkg/` filenames in the published `files` list — to fix an
+ambiguity that does not exist there.
+
+The name it took was held by the private app that executed the corpus contract. The published
+name won that collision because it is the one that appears in a stranger's import; the app's name
+was a pnpm resolution handle referenced from nowhere else in the tree. The app is gone since: its
+`guards/`, `conformance/` and `integration/` are directories of `ac1801d4:packages/corpus/`, beside the
+reader that fulfils them and outside its `files`, so there is one name for the corpus and it is the
+published one.
+
+<Callout type="info">
+  The rename touched no arithmetic. What changed the count of readers of
+  `conformance/expected.json` was the commit after it, in which the published TypeScript stopped
+  being a second implementation of `fossil_graph::plan` and [became a binding over
+  it](#conformance-is-a-round-trip-and-what-it-rests-on-is-not-a-headcount).
+</Callout>
+
+```mermaid
+graph LR
+  LVT["list_vertex_types"] --> SCH["schema"]
+  LET["list_edge_types"] --> SCH
+  DFI["describe_field"] --> SCH
+  DVT["describe_vertex_type"] --> SCH
+  GV["get_vertex"] --> RD["read"]
+  TK["top_k"] --> RD
+  FN["find_neighbors"] --> EX["expand"]
+  FP["find_path"] --> PA["path"]
+  HI["histogram"] --> AG["aggregate"]
+  AG0["aggregate"] --> AG
+  SQ0["execute_sql"] --> SQ["execute_sql"]
+  VP["viewport"] --> GONE["deleted: drawing is addressing, not a query"]
+  MG["materialize_graph"] --> GONE
+  SBL["search_by_label"] --> STUB["deleted: declared, never implemented"]
+  SUC["summarize_cluster"] --> STUB
+  AWC["answer_with_communities"] --> STUB
+  SEL["set_selection"] --> STUB
+  classDef gone stroke-dasharray:4 3,color:#888,stroke:#888,fill:none
+  class GONE,STUB gone
+  classDef kept stroke-width:2
+  class SCH,RD,EX,PA,AG,SQ kept
+```
+
+Deleting the four stubs took `GraphError::NotImplemented` with them, so **the `match` is exhaustive
+and a verb can no longer be declared without being wired.**
+
+<Callout title="The rule that keeps it small">
+A new verb enters only if it serves a case the single path demonstrably cannot, and that
+demonstration is a measurement. Not an argument.
+</Callout>
+
+### Identity and incidence are addressed, not queried
+
+The reader answers `edges` — and answered `node`, deleted after `8326b8f` with no caller — by
+computing which files to open, and they once had verb
+twins — `read` and `expand` — that looked like duplicates. They were not, and the twins are what went.
+**A verb names a relation and lets the engine choose bytes; these compute which files to open.**
+`expand` was a recursive CTE over the whole edge relation, and it **did not return in 45 seconds at a
+million vertices**; `edges` reads the adjacency tiles its addresses name and no others, and a walk of
+more than one hop is the caller's loop over it. The identity index is reachable the same way or not
+at all: it is addressing by construction, and no verb sees it.
+
+### `execute_sql` reaches the engine unparsed, and one token opens it
+
+`execute_sql` takes a **raw SQL string**, evaluated by the host's engine; it is not a parsed
+predicate language, and nothing that reaches it is. The permission is enforced by one argument
+rather than a check:
+
+- The field is `RawSql`, a newtype whose only constructor takes a `RawSqlAccess` token.
+- `RawSql` has **no `Deserialize` impl**. That propagates: `ExecuteSqlParams` and `Operation` itself
+  cannot derive one either.
+- So the one door from wire JSON is `Operation::from_wire(value, sql: Option<RawSqlAccess>)`. `None`
+  refuses `execute_sql` and `Some` admits it, and a binding cannot parse the verb without having
+  taken the decision.
+
+It held two fields together while `read` carried a `where` of the same authority, which is what the
+mechanism was built for: a binding that gated the hatch and left `where` open would have had the same
+surface with a second door. `read` is gone and the token still does the other half of its job.
+`ac1801d4:crates/fossil-graph/src/operations/raw_sql.rs` carries the argument, and
+`ac1801d4:crates/fossil-graph/tests/schemas.rs` exercises it.
+
+Two things it does not claim. It does not stop a binding *granting* access — withholding SQL is a
+policy and a library cannot hold a policy for its consumers. And `RawSql` is not a sanitiser: it
+parses, validates and escapes nothing, because there is no chokepoint to sanitise towards: a
+corpus is files and a recipient holds them.
+
+<Callout title="It cost nothing on the wire">
+The published JSON Schemas were byte-identical across the change apart from prose — `where` and `sql`
+stayed `{"type": "string"}`, because `RawSql` is `#[schemars(transparent)]`. Measured by the
+snapshot diff in `ac1801d4:crates/fossil-graph/tests/snapshots/`: two files touched, and both diffs are a
+`description:` line. No binding that speaks the wire has anything to update.
+</Callout>
+
+<Callout type="warn" title="Two is enumerated; nothing says two is right">
+The operation envelope snapshot is the wire contract every binding consumes and it enumerates
+exactly these two, so a third cannot land without it changing. What nothing on disk asserts is a
+target *count*. The closed set is a discipline, argued in
+[tooling for machines](/docs/design/tooling-for-machines).
+</Callout>
+
+<Callout type="warn" title="Nothing answers a camera today">
+`viewport` was deleted **before its replacement existed** — `c6c87fa` records the breakage as
+expected and accepted, and **neither verb answers a camera** — which is the decision, and
+it holds: the camera is addressed, not queried.
+
+What used to stand here beside it was that there is no tile emission and no tile index anywhere in
+`ac1801d4:crates/`, and **both stopped being true**. `fossil run` writes `vertex/<Type>/tiles.parquet`,
+`edge/<E>/by_source/tiles.parquet` in both orientations, and an identity index at
+`vertex/<Type>/index/tiles.parquet` that the manifest declares under `index:` — one file per payload
+set, whose row groups are the tiles, and `graph.graph.yml` says which container that is. Verified by
+reproducing a corpus and listing it, and now held by `ac1801d4:crates/fossil-cli/tests/conformance.rs`,
+which asserts the index exists, that the prefix the manifest declares is the one the writer used,
+and that it is tiled by the same shift as the vertices it addresses. There is still no tile
+**store**, which is a different noun.
+</Callout>
+
+## What addressing costs a camera, measured
+
+A 10% window over a million vertices opened **17 of 245 tiles in 6 range requests and 1,466 kB** —
+2.56% of the corpus, 1.13× over-read at tile granularity — measured through the playground's
+`src/Canvas.tsx` (deleted after `2fa5f22`) and checked against bytes over a real HTTP server. The
+extent and the total were answered off the footers and the manifest then, and are off the tile
+manifest now, so the opening view issues no query beyond `open`'s own.
+
+One constraint on any view, and it holds of kanzo-ui as it held of the playground: **no engine in
+`@fossil-lang/corpus`.** The view needs bytes; the *host* reads them, and the package links none.
+What it does not offer is a *WASM-free* way in — the `@fossil-lang/corpus/address` subpath was that,
+and composing a URL loads `fossil-graph-wasm`, which is what the addressing having one implementation
+costs.
+
+## Conformance is a round trip, and what it rests on is not a headcount
+
+Write with the writer, read back with every independent reader, diff the results. GraphAr ships a
+shared corpus with no round trip, and through that gap its fourth implementation landed having
+re-derived the path arithmetic differently from the other three *and* from the corpus on disk, green
+on both sides, because its tests asserted hand-written strings instead of resolving against the
+artefact.
+
+**The lesson there is not "have four implementations".** It is the two the other formats state
+plainly, and fossil follows both:
+
+- **Iceberg publishes the arithmetic and a table of vectors**, and ports are checked against the
+  table rather than against a sentence. `ac1801d4:packages/corpus/guards/vectors.json` is that table here, every
+  value a border, read by the guard *and* rendered by [addressing](/docs/design/later/addressing)
+  so the documented table and the executed one cannot drift apart.
+- **Arrow requires two implementations and integration tests _before_ a format change lands**, not
+  after. Two. What that buys is the ordering, not the count.
+
+```mermaid
+graph LR
+  W["writer (Rust)"] --> C[("corpus on disk")]
+  R[["recipe · provenance.mjs"]] --> C
+  C --> JS["reader.mjs · from the conventions alone"]
+  C --> RS["fossil_graph::plan · native, usize 64"]
+  C --> WS["the same plan · wasm32, usize 32<br/>re-entered from JS as open"]
+  JS --> D{"diff"}
+  RS --> D
+  WS --> D
+  V[["vectors.json · the borders"]] --> D
+  S[["full scan · none of them wrote it"]] --> D
+```
+
+**Two implementations that never read each other, and three legs of diff over them** — the second is
+entered twice, natively and as the wasm32 build the published package binds. The numbers all three
+are diffed against come from a **full scan** — every tile read with no addressing at all and
+filtered in SQL, a third thing neither implementation wrote. All of them prune and all have to land
+where an unpruned read already is, which is what closes GraphAr's gap: an assertion here cannot be
+satisfied by agreeing with another implementation, only by agreeing with the bytes.
+
+The corpus they resolve against is itself generated, and **the parameters that generated it are
+executed rather than remembered.** They were not written down, and the cost of that was a
+misdiagnosis: regenerating with the fixture's defaults produces 600 edges against the 596 the
+manifest declares, which reads exactly like a fixture that has drifted from its generator. It has
+not. `clusters` decides how many chords the ring carries and the default is 256; at **16** the
+generator reproduces the checked-in corpus **byte for byte**, all twenty-three files.
+`ac1801d4:packages/corpus/conformance/provenance.mjs` carries the recipe and proves it, asserting the manifests
+as text and every payload's rows in order — and *reporting* byte-identity rather than requiring it,
+because a writer may change an encoding without changing a row, and a check that went red on a
+DuckDB point release would teach everyone to regenerate the fixture instead of reading the diff.
+
+**This said three readers, and there are two.** The reader in Rust exists because **both readers
+used to be JavaScript**, and a mistake they share is invisible to a diff of the two — a shift taken
+as signed, a count that went through a `Number`, exactly the borders `vectors.json` publishes.
+Then the second JavaScript one went: the published TypeScript was a thousand lines that agreed with
+the Rust because people kept making it agree, nothing compared the two, and it is a binding over
+`fossil_graph::plan` now. So `ac1801d4:packages/corpus/tests/conformance.test.ts` is not a second
+implementation diffed against the first — it is **the same reader re-entered at wasm32 width**.
+`ac1801d4:packages/corpus/conformance/reader.mjs` carries the independence.
+
+`fossil_graph::plan` is that reader. It goes through no struct of the writer's — `fossil-graph`'s
+other manifest module deserialises into `fossil-sinks`' own types, which proves those types
+round-trip and says nothing about the artefact, so this one reads a generic YAML value and asks the
+document a stranger's questions. It opens no byte, which is also what makes it indifferent to which
+engine anybody would open the files with. `ac1801d4:crates/fossil-graph/tests/conformance.rs` runs it
+natively; `ac1801d4:packages/corpus/conformance/wasm-reader.mjs` runs the wasm32 build of it, through
+`fossil-graph-wasm`, which is a separate claim rather than the same one twice — `usize` is 64 bits in
+one and 32 in the other.
+
+What that buys is Arrow's ordering, and it remains an obligation rather than an intention:
+**a format change lands after every reader has been moved to it and diffed, never before.**
+
+That obligation has been discharged once, and the shape of it is what to copy. The
+[row-group container](/docs/design/later/addressing#two-containers-one-address) is a change of
+format; both readers were moved to it and diffed **while the writer still emitted only the old one**,
+which is the only window in which two containers of one corpus exist at the same time to be compared.
+`ac1801d4:packages/corpus/conformance/containers.mjs` and `ac1801d4:packages/corpus/integration/containers.test.ts` are that diff:
+the same graph written both ways, every answer required to match. After the writer moves there is
+one container and nothing left to compare against.
+
+What runs lives in `ac1801d4:packages/corpus/conformance/` — `verify.mjs` (the table, against each reader in
+turn), `containers.mjs` (the same graph in both containers) and `provenance.mjs` (the corpus from its
+recipe) — plus `ac1801d4:crates/fossil-graph/tests/conformance.rs` and
+`ac1801d4:packages/corpus/tests/conformance.test.ts`. The conventions they check are documented for reader
+implementors on the corpus site rather than here.
+
+The wasm leg is the one part of that directory needing more than `node` and a `duckdb` binary, and it
+is **refused explicitly rather than skipped**: `verify.mjs --without-wasm` is the opt-out, passed by
+the workflow whose whole install list is those two, and a missing build output is otherwise a
+failure. A leg that disappears with its dependency is the same failure as a guard that passes over
+NULL — it stops guarding and nothing says so.
+
+<Callout title="The consumer that did not read through the conventions, and now does">
+`fossil-mcp` registered its relations with `read_parquet('{base}/vertex/<Type>/*.parquet')` and read
+edges from `by_source.parquet`, the uncut relation the writer published beside its own tiles.
+**Expanding a wildcard is listing a directory**, which is the one thing this design says a reader may
+never need, and the second file was a second container for bytes the tiles already held. It worked —
+MCP is native and can list — but two readers disagreeing about where the bytes are is GraphAr's
+failure wearing a different coat.
+
+That second file is not there to be read any more, by this consumer or a future one: the writer
+stages no Parquet at all, and the tiles are the first and only time the payload is written. Which
+does not retire the lesson, because the defect was a reader composing a path the manifest had not
+given it.
+
+It composed both paths from the manifest before it was deleted, and
+`ac1801d4:packages/corpus/src/verbs.ts, verbs` composes them the same way: `container` says whether a tile is a file or a row
+group and `prefix` says where the set is, so under the container fossil writes each relation is one
+named file and there is nothing to expand. Under the other one a vertex type's tiles are enumerated
+from `vertex_count` and `chunk_size`, which is why the count is declared. The single wildcard left is
+an edge orientation in the file-per-tile container, where a tile whose vertices have no edges is a
+file that was never written and no arithmetic predicts the gaps.
+</Callout>
+
+<Callout title="Checked for vacuity">
+Most assertions count violations, so **an empty corpus satisfies them all at once** — which is
+exactly how a conformance suite comes to pass vacuously and stops being evidence. The guard is a
+non-emptiness check numbered before the rest, repeated for the edge directories because an empty
+directory satisfies everything after it. And the ordering check is known to measure ordering rather
+than pass by construction because inverting its predicate over the published conformance corpus
+turns 0 disorders into 299 over 596 edge rows.
+</Callout>

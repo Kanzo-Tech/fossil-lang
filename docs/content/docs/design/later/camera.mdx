@@ -3,6 +3,12 @@ title: The camera
 description: Residency against visibility, a canonical camera, and the three properties a multiscale view owes its reader — fidelity, monotone refinement and path independence — each with the number that was measured rather than chosen, and what the tile contract changed about each.
 ---
 
+> **Deferred, not reversed.** A `fossil/1` corpus is drawn whole, so there is no residency to
+> manage and no zoom to pick. The code existed at commit `ac1801d4` (main `e5b2113f`), and every
+> path on this page is spelled against that commit. What brings it back: a `fossil/1` corpus that
+> fails the in-browser thresholds — open over 1.5 s, first paint over 3 s, or heap over 1.5 GB at
+> a million vertices over HTTP.
+
 A corpus is [addressed, not queried](/docs/design/corpus): a reader computes the address of every tile
 it wants before it issues a request. [One door](/docs/design/one-door) is the shape that arithmetic is
 published in. This page is the other side of it — what a *view* has to be, and what it owes whoever
@@ -38,7 +44,7 @@ reader answered a rectangle, so an answer could not be reused for the next one.
 **A cache over bytes is not buildable at the reader's seam, and building one proved it.** DuckDB
 issues `read_parquet` from inside its Worker; the thread that holds the reader never sees a tile's
 bytes and has nothing to cache. What that thread can hold is **answers** — and
-[the backend](/docs/design/backend#three-layers-and-what-each-owns) moved the seam so that an answer
+[the backend](/docs/design/later/backend#three-layers-and-what-each-owns) moved the seam so that an answer
 is one tile, which makes the answer cache a tile cache after all, held by the view. The measured win
 was the one latency predicted rather than the one bytes did: `@fossil-lang/draw`'s residency (deleted
 with the playground on 2026-09-29) settled a rectangle already held in 3 ms against 175. The byte
@@ -53,7 +59,7 @@ under the reader; it would still be one cache, not two.
 The interval between the camera moving and an answer arriving is the one residency buys back, with
 the trick of not clearing the previous frame until the next one is ready: **a cell tile is drawn until
 the row tiles under it arrive, and then it goes.** That is the one crossing
-[cells](/docs/design/cells) admits, and the backend states it as a ruling — rows and cells cross only
+[cells](/docs/design/later/cells) admits, and the backend states it as a ruling — rows and cells cross only
 while loading. What makes the parent *correct* to leave up rather than merely better than blank is
 [monotone refinement](#2-monotone-refinement): the rows that replace a cell are exactly its members.
 
@@ -81,7 +87,7 @@ small" but "is it larger than a subsample of the same size with no spatial struc
 
 Under `frame` the coarse view was a decimation along `dense_id`, and it beat an unstructured
 subsample of its own size at every level — 3.8× closer at 250,000 marks, 1.4× at 3,907. The coarse
-view is a rung of [the pyramid](/docs/design/cells) now, where a mark is a cell drawn at its members'
+view is a rung of [the pyramid](/docs/design/later/cells) now, where a mark is a cell drawn at its members'
 centroid, and the same statistic is taken there: rung by rung the margin over the null grows rather
 than decays down the pyramid, **+0.1470** at rung 4's 310 marks on com-DBLP. Cells carries the table.
 
@@ -102,7 +108,7 @@ where nothing is asked to fill more bins than it has points, the same rung beats
 **+0.1470**.
 
 **This was published as a fact about the pyramid before it was recognised as a fact about the grid**,
-and the retraction is on [cells](/docs/design/cells#the-quotient-saturates-down-the-pyramid-and-the-marks-do-not).
+and the retraction is on [cells](/docs/design/later/cells#the-quotient-saturates-down-the-pyramid-and-the-marks-do-not).
 Measured across two corpora at five resolutions, **no arm at one bin per mark or finer fails, and
 every failure is at two bins per mark or coarser** — 130 rows, zero counterexamples in either
 direction. So a fidelity figure quoted without the mark count it was taken at, and the grid it was
@@ -125,7 +131,7 @@ Under the tile contract it is bought by the partition instead, and it is arithme
 measurement: **a cell is `dense_id >> shift` and the partition is quaternary**, so the parent of
 `(z, t)` is `(z − 1, t >> (shift(z−1) − shift(z)))`, a cell's rows at the zoom below are exactly its
 members, and every member is placed where the payload places it. Zooming in replaces a cell with the
-rows it summarised and never with something else. `crates/fossil-layout/tests/cells.rs`
+rows it summarised and never with something else. `ac1801d4:crates/fossil-layout/tests/cells.rs`
 holds the membership against the payload.
 
 **What would reverse it.** A partition that is not a shift of `dense_id` — a base that is not a power

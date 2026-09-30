@@ -18,9 +18,8 @@ diagnostic below is the one that program produces.
 | [named a predicate two shapes share](#5-two-predicates-with-the-same-short-name) | both full IRIs, and `@rename` as the repair |
 | [wrote a join that names one side twice](#6-a-join-that-names-one-side-twice) | the pipeline, and which of the two sides the condition never mentions |
 
-One thing about the blocks below, so that running one yourself is not a surprise: `fossil check` puts
-a count in front of them — `× type-checking failed: 2 error(s)` — which the artefacts here do not
-carry, because the count is the CLI's and the diagnostics are the compiler's.
+Each block is the compiler's rendering of the diagnostic, the text the executor refuses a run with;
+your editor draws the same diagnostic as a squiggle on the spans the block underlines.
 
 ## 1. A field that is not in the source
 
@@ -28,7 +27,7 @@ The shop program, one letter changed:
 
 <Program src="errors/unknown-field/program.fossil" title="program.fossil" />
 
-<Program src="errors/unknown-field/expected/diagnostic.txt" title="fossil check program.fossil" />
+<Program src="errors/unknown-field/expected/diagnostic.txt" title="program.fossil" />
 
 **Why it can say that.** `User` is a type, and its fields are the columns of the CSV it names — so
 `nmae` is not an open question, it is a name that is not there. The suggestion comes from `User`'s
@@ -42,7 +41,7 @@ own fields rather than from everything the language knows, which is why it is a 
 
 <Program src="errors/wrong-type/program.fossil" title="program.fossil" />
 
-<Program src="errors/wrong-type/expected/diagnostic.txt" title="fossil check program.fossil" />
+<Program src="errors/wrong-type/expected/diagnostic.txt" title="program.fossil" />
 
 **Why two spans.** The error is a disagreement between the program and the document, and blaming one
 of them would be half the story. The expectation came from `shop.shex`, so `shop.shex` is on screen.
@@ -60,7 +59,7 @@ whole number is a float, and you do not write a conversion to say so.
 
 <Program src="errors/missing-property/program.fossil" title="program.fossil" />
 
-<Program src="errors/missing-property/expected/diagnostic.txt" title="fossil check program.fossil" />
+<Program src="errors/missing-property/expected/diagnostic.txt" title="program.fossil" />
 
 **Why it points at the header.** There is no line to blame — the error is a line that is not there —
 so it is reported against the mapping, and against the place in the document that required it.
@@ -72,7 +71,7 @@ so it is reported against the mapping, and against the place in the document tha
 
 <Program src="errors/two-identities/program.fossil" title="program.fossil" />
 
-<Program src="errors/two-identities/expected/diagnostic.txt" title="fossil check program.fossil" />
+<Program src="errors/two-identities/expected/diagnostic.txt" title="program.fossil" />
 
 **Why this is an error and not a warning.** What a warning here buys you is two nodes where you meant
 one, discovered later, in a graph that will not join up. There is no version of that which is worth a
@@ -88,7 +87,7 @@ changes too.
 
 <Program src="errors/colliding-name/program.fossil" title="program.fossil" />
 
-<Program src="errors/colliding-name/expected/diagnostic.txt" title="fossil check program.fossil" />
+<Program src="errors/colliding-name/expected/diagnostic.txt" title="program.fossil" />
 
 **Why fossil does not pick.** A short name is the last segment of a predicate IRI, and when two of
 them end in the same word there is no principled winner. Numbering them would make the name of a
@@ -104,7 +103,7 @@ Full program in [naming what you produce](/docs/book/what-you-produce#when-two-o
 
 <Program src="errors/join-one-side/program.fossil" title="program.fossil" />
 
-<Program src="errors/join-one-side/expected/diagnostic.txt" title="fossil check program.fossil" />
+<Program src="errors/join-one-side/expected/diagnostic.txt" title="program.fossil" />
 
 **Why this is an error and not a slow program.** Nothing here is misspelt and nothing is mistyped:
 `Purchase.id` and `Purchase.user_id` are both columns of `Purchase`, and comparing them is a

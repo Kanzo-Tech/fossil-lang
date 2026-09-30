@@ -25,8 +25,7 @@ prose.
 | crate | reaches `duckdb` | `wasm32` | what it is |
 | --- | --- | --- | --- |
 | `fossil-introspect` | **directly** | no | the `DESCRIBE`, and the credentials that reach a cloud source |
-| `fossil-cli` | via `fossil-introspect` | no — `run` writes a directory | **the** native host: it introspects, compiles, runs, and is the binary over all three |
-| `fossil-lsp` | via `fossil-introspect` | no | a host, for the reason `fossil check` is one |
+| `fossil-lsp` | via `fossil-introspect` | no | a host: it checks a program against the columns it reads |
 | `fossil-layout` | dev-dependency only | **yes** | the post-pass, over Parquet through `arrow-rs` |
 
 Removing the database from `fossil-layout` was necessary and not sufficient: `fossil-resolver` (now `fossil-storage`) was an
@@ -34,26 +33,18 @@ unused edge carrying its own wasm32 refusal for an unrelated reason, and `cargo 
 an unused dependency. The crate still links `datafusion` transitively through `fossil-df`, which is
 not the same claim — what it takes from there is one Arrow → Parquet encoder.
 
-In the native host the reason changed rather than the fact: `pre_introspect` and the credentials
-went to `fossil-introspect`, a crate a **host** takes, and `run` takes a map of connection URLs
-rather than a `RunCreds`, so the compiler cannot see a secret. One wasm32 error is left and it is
-the filesystem — `run` writes a corpus to a local directory, through the layout pass and then
-`GraphArData::write_manifests` over it. (`fossil_df::materialise`, which it calls first, is wasm-gated
-too and for another reason: it blocks on a private `tokio` runtime. It wrote the manifests once and
-writes nothing now.) **`check` is
-wasm-capable and `run` is not, in one crate**, and that does not contradict the sentence the project
-is built on the way bundling a database did, because writing files to a disk is what a native host
-does. None of it is the DataFusion rewrite either: **DuckDB is still the engine that `DESCRIBE`s, on
-both sides.**
-
-That host was `fossil-engine` when this was measured. It is `fossil-cli`'s `host` module now — one
-library crate with one consumer, folded into the consumer — which changes where the row above points
-and nothing about which engine is reachable from it.
+**There is no native write host.** `fossil-cli` was one — it introspected, compiled, ran and wrote a
+corpus to a local directory — and it was deleted on 2026-09-30, because nothing used it and it wrote
+a different corpus from the browser's ([discarded](/docs/design/discarded)). The one host that writes
+is `fossil-df-wasm`, in a browser tab or in Node, so the compiler and the write path are both the
+wasm32 build and neither links a database. **DuckDB is still the engine that `DESCRIBE`s**: natively
+in the language server, and as DuckDB-WASM in a browser editor.
 
 ## What the layout pass paid for it
 
 `--memory` used to cap the DuckDB connection and DuckDB's sort spilled; nothing in the Arrow pass
-spills. Measured 2026-08-22, one million nodes and ten million edges through `fossil run`:
+spills. Measured 2026-08-22, one million nodes and ten million edges through the native host that
+existed then:
 
 | | |
 | --- | --- |
@@ -75,12 +66,6 @@ writes its output through the job's store — measured 2026-09-29 in Chrome agai
 credentials keasy vended: a ranged GET, a PUT, a three-part multipart upload, and a 403 outside the
 prefix. A host with no storage hands the executor `InMemory` stores, and the run
 cannot tell.
-
-**The native host does not yet.** Measured 2026-08-23 against a real S3 (MinIO in Docker), reading
-`@sales/users.csv`: introspection **works** through the host's DuckDB, and `fossil run` refuses the
-source by name. Building its `Storage` from the CLI's credentials is a host change and no longer an
-engine one. `crates/fossil-cli/tests/cloud_source.rs` pins both halves and asserts the
-*introspection* too, because a test that only asserted the failure would pass with a wrong credential.
 
 ## Why this does not reopen "unifying the two execution engines"
 

@@ -1,6 +1,6 @@
 ---
 title: Tooling for machines
-description: A machine reader is a first-class consumer of fossil — through diagnostics that are repairable rather than merely descriptive, a typed verb surface with a permission on its one untyped verb, and a documentation index that cannot drift from the pages.
+description: A machine reader is a first-class consumer of fossil — through diagnostics that are repairable rather than merely descriptive, a manifest that names every table before a byte is read and a permission on the one untyped member, and a documentation index that cannot drift from the pages.
 ---
 
 An agent reading and writing fossil is a consumer the design accounts for, not a use case that
@@ -13,7 +13,7 @@ A type error that says *type mismatch* is a message. A type error that names the
 it has, the constraint that expected otherwise and where that constraint came from is **a
 machine-repairable error** — the receiver has everything needed to propose the edit.
 
-<Program src="errors/wrong-type/expected/diagnostic.txt" title="fossil check program.fossil" />
+<Program src="errors/wrong-type/expected/diagnostic.txt" title="program.fossil" />
 
 Every element of that is load-bearing for an automated reader. **Two spans**, because the repair may
 belong at either end — the value could be converted, or the shape could be wrong, and only the caller
@@ -31,38 +31,35 @@ only report.
 The corollary is a rule about how diagnostics evolve: their text is an interface. Rewording an error
 message is a change to something a consumer parses, in the same sense that renaming a field is.
 
-## The verb surface, and where the secrets go
+## The door, and where the secrets go
 
 The second surface is querying a corpus that has already been written.
 
 The generic answer would be *give the agent SQL*. It works, and it costs the agent the whole of the
-layout: which files exist, how identifiers are laid out, how adjacency is stored in each direction,
-what a tile is. An agent writing SQL against a corpus has to learn a physical schema before it can
-ask a question, and every answer it gets is only as correct as its model of that schema.
+layout: which files exist, how identifiers are laid out, how an edge names its endpoints. An agent
+writing SQL against a corpus has to learn a physical schema before it can ask a question, and every
+answer it gets is only as correct as its model of that schema.
 
-So what fossil types is the part an agent would otherwise reconstruct. `schema` answers what types,
-fields and relations exist, with field statistics on request, and its params and result are JSON
-Schemas published off `crates/fossil-graph/src/operations/mod.rs, Verb` — a malformed request is
-rejected at the boundary rather than producing a plausible wrong answer. `execute_sql` is the one
-verb that is not typed, and it is behind a permission rather than beside the others.
+So what fossil publishes is the part an agent would otherwise reconstruct. `fossil.json` names every
+vertex and edge table, its columns with their types, its row count and, for an edge table, which
+vertex table each endpoint references — and `@fossil-lang/corpus` hands it over parsed, as
+`manifest`, before a byte of Parquet is read. A `scan` names a table, a filter and a projection, and
+a table that is not in the manifest is refused at the door rather than producing a plausible wrong
+answer.
 
 ### One binding, and no protocol server
 
-The verbs used to be served over the **Model Context Protocol** as well, by `fossil-mcp`: six tools,
-one per verb, each tool's input schema its verb's params. It was deleted with no consumer, and with
-it `read`, `expand`, `path` and `aggregate`, whose other caller it was. What an agent reaches now is
-the one binding — `@fossil-lang/corpus`, in process, over the host's engine — and a host that wants
-to hand the verbs to an agent over a protocol wraps that binding rather than growing a second one
-beside it. **One binding is what keeps the schemas single-source**: the names, the prose and the
-params all come off `Verb` behind exhaustive matches, and a third verb cannot land without the wire
-snapshots changing.
+The verbs used to be served over the **Model Context Protocol** as well, by `fossil-mcp`, and it was
+deleted with no consumer. What an agent reaches now is the one binding — `@fossil-lang/corpus`, in
+process, over the host's engine — and a host that wants to hand it to an agent over a protocol wraps
+that binding rather than growing a second one beside it.
 
 <Callout title="The escape hatch is a thing a host opens">
-`execute_sql` costs a function of whatever was typed, where `schema` costs a function of the answer,
-so it is withheld by default. A host opens it with `sql: 'allowed'` on `open`, and the type system
-carries the decision: the answer widens to `SqlCorpus`, and a corpus opened without it has no
-`executeSql` member to call. [The corpus](/docs/design/corpus#executesql-reaches-the-engine-unparsed-and-one-token-opens-it)
-has the token underneath.
+`sql` costs a function of whatever was typed, where `scan` costs a function of the answer, so it is
+withheld by default. A host opens it with `sql: 'allowed'` on `open`, and the type system carries the
+decision: the answer widens to `SqlCorpus`, and a corpus opened without it has no `sql` member to
+call. [The corpus](/docs/design/corpus#sql-reaches-the-engine-unparsed-and-one-option-opens-it) has
+the rest.
 </Callout>
 
 ### Credentials ride the call, never argv, never the environment

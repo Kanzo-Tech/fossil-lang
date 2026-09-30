@@ -3,6 +3,12 @@ title: The backend
 description: fossil is the backend and kanzo-ui is the view, with one path between them — a corpus read the way Apache Iceberg reads a table and addressed the way an OGC tile matrix set addresses a tile, with the cell pyramid as the zoom levels, the level files retired, and the reader split into modules that each follow one of the two.
 ---
 
+> **Deferred, not reversed.** A `fossil/1` corpus has no tile contract: it is read whole, through
+> `open` and `scan`, and a scan is one task. The code existed at commit `ac1801d4` (main
+> `e5b2113f`), and every path on this page is spelled against that commit. What brings it back: a
+> `fossil/1` corpus that fails the in-browser thresholds — open over 1.5 s, first paint over 3 s,
+> or heap over 1.5 GB at a million vertices over HTTP.
+
 **fossil is the backend. The view is `@kanzo-tech/graph` and the rest of kanzo-ui, and there is one
 path between them.** Anything that answers the same question a second way is deleted rather than
 kept beside it — the playground went for being a second viewer, `@fossil-lang/draw` went with it, and
@@ -33,7 +39,7 @@ The line under the reader is the one that matters. **A reader that caches is a s
 reader's answers are pure functions of an address, a filter and a projection, which is what lets a
 view cache them without asking; the moment the reader holds a cache of its own there are two
 residency policies over one set of tiles, and the camera page measured what the first one cost to
-build at the wrong seam ([the camera](/docs/design/camera)).
+build at the wrong seam ([the camera](/docs/design/later/camera)).
 
 **What would reverse it.** A second view — anything other than kanzo-ui reading a corpus at
 interactive rates — that would otherwise have to rebuild the same cache. Then the cache is shared
@@ -42,7 +48,7 @@ infrastructure, and it would belong in a package between the two, still not in t
 ## The contract
 
 This is everything that crosses. `Engine` and `Host` are `@fossil-lang/types`' own
-(`packages/types/src/engine.ts, Engine`, `packages/types/src/host.ts, Host`), and `SchemaResult` and
+(`ac1801d4:packages/types/src/engine.ts, Engine`, `ac1801d4:packages/types/src/host.ts, Host`), and `SchemaResult` and
 the SQL pair are the verbs' generated shapes, unchanged.
 
 ```ts
@@ -152,12 +158,12 @@ edges; a window a view culls with is its own, and a `Filter` states one half-ope
 `null` for a type with no `x` and `y`, and `coordinates` is `null` where the document declares no
 coordinate system; the contract had all three total, and a type without geometry still has tiles.
 `CorpusTypes`, `CorpusRelation` and the two errors are the ones
-`packages/corpus/src/index.ts` already exported, with one addition: each vertex type carries its
+`ac1801d4:packages/corpus/src/index.ts` already exported, with one addition: each vertex type carries its
 manifest's `channels:` block. The page said the reader parsed it and did not surface it; nothing on
 the reader's side parsed it at all, so `fossil_graph::plan` reads it now
-(`crates/fossil-graph/src/plan/declared.rs, channels_of`) with the cell tree and the coordinate
+(`ac1801d4:crates/fossil-graph/src/plan/declared.rs, channels_of`) with the cell tree and the coordinate
 system beside it. `Channel`, `Direction`, `Gap` and `GapReason` are the ones
-`packages/corpus/src/address.ts` exports — `src` reads the source-aligned half of a relation and `dst`
+`ac1801d4:packages/corpus/src/address.ts` exports — `src` reads the source-aligned half of a relation and `dst`
 the target-aligned one — and they are the only names of the addressing on the barrel.
 
 What each member answers, in one line each:
@@ -196,7 +202,7 @@ What each member answers, in one line each:
   columns, and a tile the tile manifest lists no entry for is answered empty without a request;
   below it, the rung's quotient — `src_cell`, `dst_cell` and a `weight` — where the writer published
   one. **The quotient is undirected**, and the page said source-aligned: one row per cell pair, keyed
-  and tiled on the pair's LOWER cell (`crates/fossil-layout/src/layout/cells.rs, pair_edges`), so
+  and tiled on the pair's LOWER cell (`ac1801d4:crates/fossil-layout/src/layout/cells.rs, pair_edges`), so
   `src` reads the pairs whose lower cell is in the tile, `dst` is declined, and the pairs whose upper
   cell is in the tile are in the tiles below it. Mass is conserved either way, which is the
   obligation cells states; what the orientation costs is the view's, which draws a rung's lines from
@@ -220,7 +226,7 @@ whatever it names, because they are not a projection of the payload's and there 
 choose.
 
 Below `Z` a row is a cell, and its columns are the writer's, not a projection of the payload's
-(`crates/fossil-sinks/src/generated.rs, CELL_COLUMNS`): `cell_id`; `x` and `y`, **the centroid of
+(`ac1801d4:crates/fossil-sinks/src/generated.rs, CELL_COLUMNS`): `cell_id`; `x` and `y`, **the centroid of
 its members** — a mean weighted by membership, declared `derived` by `cell-member-centroid`; `count`,
 how many vertices it holds; `internal`, the weight of the edges absorbed inside it; and `mode` and
 `purity`, the majority value of **one** categorical and the share of the members holding it. Which
@@ -240,7 +246,7 @@ with one referent, and a cell row grows a pair per channel, each naming its own.
 | Iceberg | fossil | taken or departed, and why |
 | --- | --- | --- |
 | `Catalog.load_table`, `StaticTable.from_metadata(metadata_location)` | `open(url, { engine })`, `open(job, { engine, host })` | **Taken.** A corpus has no catalog service, so the URL case is the static table; the job case reuses what [storage access](/docs/design/prior-art#storage-access) already took from the REST catalog — a vended credential scoped to one prefix. |
-| `Table.schema()` | `corpus.types` | **Taken**, read off the bytes at `open` for the reason `packages/corpus/src/open.ts, open` gives: the manifest declares three properties against seven columns on disk. |
+| `Table.schema()` | `corpus.types` | **Taken**, read off the bytes at `open` for the reason `ac1801d4:packages/corpus/src/open.ts, open` gives: the manifest declares three properties against seven columns on disk. |
 | `Table.scan(row_filter, selected_fields, case_sensitive, snapshot_id, options, limit)` | `corpus.scan({ type, filter, select })` | **Departs twice.** No `snapshot_id`: a corpus is written once and never appended to, so there is one snapshot and nothing to name. **No `limit`**: a task is a tile, and a tile holds at most `tileRows` rows by construction, so every read is bounded by its address rather than by a clause. No zoom and no box either, though a camera always has both: a scan is planned once over every zoom, and which of its tasks a camera sees is the view's cull against the boxes `tileMatrix` publishes. |
 | `EqualTo`, `In`, `IsNull`, `And`, `Or`, `Not`; `UnboundPredicate.bind(schema)`, `rewrite_not` | `Filter`, bound in `scan()` | **Taken**, including the timing: an unknown column is an error at bind, before anything is planned, and a `not` is pushed to the leaves as `rewrite_not` does. Spelled as JSON rather than classes so it crosses a worker boundary as it is. `StartsWith` and `IsNaN` are left out until something asks, and NaN is Iceberg's: not a literal, and matched by no comparison — the rendered SQL says `NOT isnan(x)` beside `x > v`, because DuckDB orders NaN above every number. Nulls are SQL's. |
 | `plan_files()` → `FileScanTask { file, delete_files, residual }`; iceberg-rust adds `start`, `length`, `record_count` | `plan()` → `ScanTask { z, tile, rows, bbox, residual }` | **Departs on the unit.** A task is a **tile**, which under `container: rowgroups` is one row group — iceberg-rust's `start`/`length` split, not PyIceberg's whole file. No delete files: nothing is ever deleted from a corpus. The byte range stays inside the reader; a view keys on the address. |
@@ -283,21 +289,21 @@ derivable, and a document carries a fact exactly when a reader cannot recover it
 ## The cell pyramid is the tile matrix
 
 **The zoom levels are the pyramid that is already on disk**, and the arithmetic is the arithmetic
-[cells](/docs/design/cells) decided, restated as matrices rather than rungs.
+[cells](/docs/design/later/cells) decided, restated as matrices rather than rungs.
 
-For a vertex type of `V` rows, a tile of `C` rows — `crates/fossil-sinks/src/manifest.rs,
+For a vertex type of `V` rows, a tile of `C` rows — `ac1801d4:crates/fossil-sinks/src/manifest.rs,
 TILE_SHIFT` is 12, so 4,096 — and a declared base of `b = 2^B` vertices per cell
-(`crates/fossil-sinks/src/manifest.rs, DEFAULT_VERTICES_PER_CELL`, sixteen):
+(`ac1801d4:crates/fossil-sinks/src/manifest.rs, DEFAULT_VERTICES_PER_CELL`, sixteen):
 
 - **Rung `k` is matrix `z = R − k`**, where `R` is the rung holding a single cell, and the payload is
   **`z = Z = R`**. So `z = 0` is the root, one cell, and `z = Z` is every row — the standard's order,
   coarsest first.
 - A row at rung `k` stands for `2^shift` ids, **`shift = B + 2(k − 1)`**
-  (`crates/fossil-sinks/src/manifest.rs, CellTree`), and a cell id is `dense_id >> shift`. At `z = Z`
+  (`ac1801d4:crates/fossil-sinks/src/manifest.rs, CellTree`), and a cell id is `dense_id >> shift`. At `z = Z`
   the shift is zero and a row is a vertex.
 - Matrix `z` holds **`count = ceil(V / 2^shift)`** rows in **`tiles = ceil(count / C)`** tiles,
   because a rung is tiled at the type's own `chunk_size` and declares none of its own
-  (`crates/fossil-layout/src/layout/cells.rs, Pyramid`).
+  (`ac1801d4:crates/fossil-layout/src/layout/cells.rs, Pyramid`).
 - **Tile `t` of matrix `z` is the contiguous `dense_id` range `[t·C·2^shift, (t+1)·C·2^shift)`.**
   Every tile at every zoom is an interval of one axis, which is what lets a single conjunctive range
   select it and lets its parent be a shift.
@@ -317,15 +323,15 @@ The last row is what the tile manifest holds, one entry per tile, and it is why 
 cheap: at ten million vertices it is 2,654 entries, against the 4,892 footer reads an open costs
 without it.
 
-What is kept from [cells](/docs/design/cells) unchanged: the base is declared and never derived;
+What is kept from [cells](/docs/design/later/cells) unchanged: the base is declared and never derived;
 the partition is quaternary, so a cell carries no `parent` column; a rung is summarised from the
 payload, never folded from the rung below; the quotient is one undirected row per cell pair, tiled on
-the pair's lower cell's tile (`crates/fossil-layout/src/layout/cells.rs, write_quotient`); and a cell
+the pair's lower cell's tile (`ac1801d4:crates/fossil-layout/src/layout/cells.rs, write_quotient`); and a cell
 is not an entity, so no lookup by identity returns one.
 
 **What would reverse it.** A base that is not a power of four. Then a rung's shift stops being an
 integer number of bits and the parent stops being a shift — which is why
-`crates/fossil-sinks/src/manifest.rs, CellTree` refuses one — and the tile matrix would need a
+`ac1801d4:crates/fossil-sinks/src/manifest.rs, CellTree` refuses one — and the tile matrix would need a
 `scaleDenominator` in earnest.
 
 ## The sample goes: below `Z` there are only cells
@@ -333,7 +339,7 @@ integer number of bits and the parent stops being a shift — which is why
 **Every `z < Z` is a rung, and the level files are retired**: `vertex/<Type>/l{k}/`, the relation
 levels beside the adjacency, the plan that chose them and the two functions of the layout pass that
 wrote them. A manifest declares its payload and its adjacencies, all at `scale: 1`, and
-`crates/fossil-layout/tests/layout_renumber.rs` lists everything the pass writes under a type.
+`ac1801d4:crates/fossil-layout/tests/layout_renumber.rs` lists everything the pass writes under a type.
 
 This reverses a row of [what was discarded](/docs/design/discarded), and the row said what would do
 it: *a reader that addresses a cell — or, failing that, those three readers going away.* Both
@@ -351,7 +357,7 @@ happened.
 whose rows carried both endpoints' coordinates, so a coarse view could draw real edges off one file.
 Below `Z` the lines are now the rung's quotient where the writer published one, and nothing where it
 did not; a coarse view draws the field and not the relation, which is the conclusion
-[cells](/docs/design/cells#no-coarse-quotient-is-drawable-and-the-partition-is-not-the-reason) had
+[cells](/docs/design/later/cells#no-coarse-quotient-is-drawable-and-the-partition-is-not-the-reason) had
 already reached about every rung but the finest. What is bought is one multiscale structure instead of
 two, and the bytes of the one that went: on com-DBLP the level pyramid is **83.1%** of
 payload-plus-adjacency against the cell pyramid's **8.1%**.
@@ -382,7 +388,7 @@ mechanism.
 
 ### What the backend's half measures at a million vertices
 
-Measured on 2026-09-29 over a corpus the layout pass wrote — `crates/fossil-layout/examples/enrich_memory`'s
+Measured on 2026-09-29 over a corpus the layout pass wrote — `ac1801d4:crates/fossil-layout/examples/enrich_memory`'s
 fixture, 1,000,000 vertices at mean degree 14 (6,993,608 edges), 4,096 rows a tile, pyramid base 16,
 `rowgroups` — for a window of 1% of the extent, a tenth of it on each axis at its centre. The finest
 zoom whose planned tiles fit 65,536 rows is `Z` itself: the box filter plans **8 of 245** payload
@@ -415,7 +421,7 @@ A statement selects its tiles with **one conjunctive range** on the aligned colu
 a vertex tile, `src_dense` or `dst_dense` for an adjacency — and never a disjunction of them. That is
 the one shape the engine is measured to prune row groups on. The identity lookup `node` (deleted after
 `8326b8f`) measured DuckDB pruning a conjunctive range and declining a disjunction over a string
-column, and `crates/fossil-graph/src/lib.rs` records 179 `BETWEEN … OR …` ranges evaluated per row
+column, and `ac1801d4:crates/fossil-graph/src/lib.rs` records 179 `BETWEEN … OR …` ranges evaluated per row
 rather than skipped — which is why a run of consecutive tiles is one read and two runs are two reads,
 and not one read with an `OR`.
 
@@ -433,17 +439,17 @@ The reader used to read every tile's footer while the corpus opened, and did it 
 level that arrived as a promise would be a request between the camera moving and an address being
 computable. The rule survives and the cost does not. **The writer already has every number the footer
 sweep recovered**, so it writes them once, beside the bytes, and `open` reads one file per type
-instead of one footer per tile — `packages/corpus/src/tile-manifest.ts, published` — and no footer at
+instead of one footer per tile — `ac1801d4:packages/corpus/src/tile-manifest.ts, published` — and no footer at
 all since the sweep's last readers, `rows` and `frame`, went.
 
 It is a manifest in Iceberg's sense, and it is published: one JSON file per vertex type, named by the
 type's `tile_manifest:` and written beside its tiles, listing every tile of every zoom — the payload
 and each rung — with Iceberg's `record_count`, `null_value_counts`, `lower_bounds` and
-`upper_bounds` (`crates/fossil-sinks/src/tiles.rs, TileManifest`). The writer reads the numbers off
+`upper_bounds` (`ac1801d4:crates/fossil-sinks/src/tiles.rs, TileManifest`). The writer reads the numbers off
 the footer each container closes rather than computing them twice, which is how Iceberg's own writers
 fill one; bounds are published for every numeric column and for no string, and a tile's box is its
 coordinate columns' bounds rather than a field of its own. The format is
-[the tile manifest](/docs/format/conventions/addressing#the-tile-manifest-is-the-footers-published-once).
+[the tile manifest](/docs/design/later/addressing#the-tile-manifest-is-the-footers-published-once).
 
 The edge sets are in it too, since `edges` landed: at the payload's `z` an entry per adjacency orientation cut
 on the type's tiles, and below it each rung's quotient, numbered by the aligned tile because an edge
@@ -454,9 +460,9 @@ engine prunes against the footer it reads anyway — so an offset would be a fie
 What would bring it is a host that issues its own `Range` request for a row group.
 
 **What would reverse it.** A writer other than fossil's. The statistics are then a claim the reader
-has to check rather than trust, and the check exists: `packages/corpus/guards`' `tile-manifest` holds
+has to check rather than trust, and the check exists: `ac1801d4:packages/corpus/guards`' `tile-manifest` holds
 the file against the footers read back from disk, tile for tile and bound for bound, and
-`crates/fossil-cli/tests/conformance.rs` holds a corpus `fossil run` wrote — payload and every rung —
+`ac1801d4:crates/fossil-cli/tests/conformance.rs` holds a corpus `fossil run` wrote — payload and every rung —
 against `parquet_metadata` the same way.
 
 ### Cancellation is a signal the engine honours
@@ -478,7 +484,7 @@ against the latency of a cancel on the host's engine.
 
 ## How the reader splits
 
-`packages/corpus/src/corpus.ts` was 2,570 lines, and the seams above are where it came apart. Each
+`ac1801d4:packages/corpus/src/corpus.ts` was 2,570 lines, and the seams above are where it came apart. Each
 module follows one of the two references and none of them reaches 500 lines.
 
 | module | follows | what it holds | out of `corpus.ts` |
@@ -497,7 +503,7 @@ and each member's types went with the member. `frame` and `rows` ran composition
 and were held in two modules of their own, so that retiring them deleted two files rather than
 carving two. `query.ts` is where the engine's two faces meet — rows for the members that walk
 objects, a `Batch` for the ones a view draws. `address.ts` stays the one bridge to
-`crates/fossil-graph/src/plan.rs, ReadPlan`, and it was the one module over the bound, at 950 lines,
+`ac1801d4:crates/fossil-graph/src/plan.rs, ReadPlan`, and it was the one module over the bound, at 950 lines,
 until it shed everything a level was, the window and the drawing `rows` and `frame` asked of it, and
 every field no reader reads: 453 lines. `index.ts` stays the barrel.
 
@@ -521,15 +527,15 @@ module being allowed to grow.
 the tile manifest first, with a guard holding it against the footers; `corpus.ts` split into the
 modules above with its behaviour unchanged, so the diff that moved code was not the diff that changed
 it; `tileMatrix`, `scan` and `edges` landed on those modules, held against `rows` over the same box
-and against the aggregation obligations of [cells](/docs/design/cells); kanzo-ui moved
+and against the aggregation obligations of [cells](/docs/design/later/cells); kanzo-ui moved
 `@kanzo-tech/graph` onto them; then the reader's retired members went, then the level files, and the
-pages that described `frame` — [one door](/docs/design/one-door) and [the camera](/docs/design/camera)
+pages that described `frame` — [one door](/docs/design/one-door) and [the camera](/docs/design/later/camera)
 — were rewritten to what replaced it.
 
 The conformance that held `scan` against `rows` holds it against an oracle neither wrote: SQL over the
-payload with no tile and no statistic, in `packages/corpus/tests/scan.test.ts` and the integration
+payload with no tile and no statistic, in `ac1801d4:packages/corpus/tests/scan.test.ts` and the integration
 suite, and the window and walk rows of `conformance/expected.json`'s full scan, composed out of
-`scan` and `edges` in `packages/corpus/tests/corpus.test.ts`.
+`scan` and `edges` in `ac1801d4:packages/corpus/tests/corpus.test.ts`.
 
 **What would reverse it.** Nothing reverses an order that has been carried out; the rule it followed
 stands for the next retirement. keasy consumes this repository by git tag, so a consumer outside
@@ -549,7 +555,7 @@ summarise per filter value, which is a second pyramid per channel rather than a 
 
 **Rows and cells cross only while loading.** A cell tile is drawn until the row tiles under it
 arrive, and then it goes: the two are never on screen together at rest. That is the one crossing
-[cells](/docs/design/cells) admits, and it is the same condition stated there. The backend's part is
+[cells](/docs/design/later/cells) admits, and it is the same condition stated there. The backend's part is
 that both are addressable in one matrix and a parent is a shift of its child; when to swap is the
 view's.
 
@@ -570,11 +576,11 @@ rows.
 
 **`Engine.query` takes an `AbortSignal` and returns Arrow-shaped data.** The signal reaches the
 running statement, and the answer is a table a `Batch` reads, so no reader turns columns into objects
-and back. It is `packages/types/src/engine.ts, Engine` now, with `Table` and `Column` beside it —
+and back. It is `ac1801d4:packages/types/src/engine.ts, Engine` now, with `Table` and `Column` beside it —
 the part of apache-arrow's `Table` fossil reads — and every host in this repository moved with it.
 DuckDB-WASM interrupts through the pending-query API: `AsyncDuckDBConnection.send` then
 `cancelSent()`, and the blocking bindings' `startPendingQuery`, `pollPendingQuery` and
-`cancelPendingQuery` underneath, which is what `packages/corpus/tests/engine.ts` drives. Measured
+`cancelPendingQuery` underneath, which is what `ac1801d4:packages/corpus/tests/engine.ts` drives. Measured
 there, a statement over twenty billion rows aborted at 50 ms rejects at about 200 ms — one polling
 interval — and the connection answers the next statement. Hosts outside it — kanzo-ui's `engine()`,
 keasy — moved with kanzo-ui's move onto the tile members.
@@ -589,7 +595,7 @@ are measured rather than assumed.
 `tile_manifest: tile-manifest.json` — and not inline in the YAML. It was decided by building both
 behind a switch, measuring them, and deleting the loser.
 
-Measured on 2026-09-29 over corpora the layout pass wrote (`crates/fossil-layout/examples/enrich_memory`'s
+Measured on 2026-09-29 over corpora the layout pass wrote (`ac1801d4:crates/fossil-layout/examples/enrich_memory`'s
 fixture at mean degree 14, pyramid base 16, seven payload columns of which four are numeric), with the
 manifest served over local HTTP and parsed the way the reader parses it: the YAML by
 `fossil-graph-wasm`'s `Corpus`, the file by `JSON.parse`. Medians of 31 opens and of 31 verb calls,
@@ -633,8 +639,8 @@ the same four names.
 **`dense_id` is a vertex's rank in the Hilbert order of its quantised position, and the tile manifest
 keeps one box per tile.** Ruled on 2026-09-30, on the investigation kanzo-ui's graph view asked for.
 The curve is Wikipedia's `xy2d` at `n = 2^16` over the same binary32 quantisation the Z-curve used,
-published with vectors on [addressing](/docs/format/conventions/addressing#the-arithmetic) and in
-`corpus.bnf`'s gloss, and written by `crates/fossil-layout/src/layout/hilbert.rs, hilbert2`. Nothing
+published with vectors on [addressing](/docs/design/later/addressing#the-arithmetic) and in
+`corpus.bnf`'s gloss, and written by `ac1801d4:crates/fossil-layout/src/layout/hilbert.rs, hilbert2`. Nothing
 reads both orders: every corpus is written again, and one written before the ruling fails
 `hilbert-order`.
 
@@ -645,7 +651,7 @@ zoom that fit was a rung. And one payload tile cost about 230 ms, as three seque
 
 ### What a payload tile's box claims, measured
 
-Measured on 2026-09-29 and again after the ruling by `crates/fossil-layout/examples/tile_compactness.rs`
+Measured on 2026-09-29 and again after the ruling by `ac1801d4:crates/fossil-layout/examples/tile_compactness.rs`
 over three corpora of 1,000,000 vertices: the bench corpus kanzo-ui's view was built against, and
 `enrich_memory`'s fixture at mean degree 14 through the real layout pass, in each order.
 *Compactness* is a tile's box over the area its rows would cover on a uniformly filled extent — one
@@ -674,7 +680,7 @@ geometry's share of the cost.
 **`dense_id` was already a pure curve rank**, and the community-major order is not a second sort
 underneath it. On all three corpora the written order is exactly the order of the recomputed codes —
 the `hilbert-order` guard's rule — and the groups come out contiguous because
-`crates/fossil-layout/src/layout/place.rs, cluster_layout` gives each one an aligned block of the
+`ac1801d4:crates/fossil-layout/src/layout/place.rs, cluster_layout` gives each one an aligned block of the
 quaternary, and an aligned block is one interval of codes on either curve. So there was no community
 order to trade away for a spatial one: they are the same order by construction.
 
@@ -741,18 +747,18 @@ that is worse than it needs to be: it widens the contract, quadruples the boxes 
 and leaves every rung's cells as uneven as they are.
 
 **What it cost, paid in one change.** The writer's two functions —
-`crates/fossil-layout/src/layout/hilbert.rs, hilbert_codes` codes with `hilbert2`, and
-`crates/fossil-layout/src/layout/place.rs, cluster_layout` walks its frontier along the same curve,
+`ac1801d4:crates/fossil-layout/src/layout/hilbert.rs, hilbert_codes` codes with `hilbert2`, and
+`ac1801d4:crates/fossil-layout/src/layout/place.rs, cluster_layout` walks its frontier along the same curve,
 taking a block's corner from its alignment because Hilbert enters a block at whichever corner its
 orientation puts first (reading the first cell put 24,570 ids inside foreign groups, and
-`crates/fossil-layout/tests/cells.rs, a_cluster_is_one_run_of_dense_id` caught it). The format: the
-rule on [addressing](/docs/format/conventions/addressing#the-order-that-makes-an-interval-mean-something),
+`ac1801d4:crates/fossil-layout/tests/cells.rs, a_cluster_is_one_run_of_dense_id` caught it). The format: the
+rule on [addressing](/docs/design/later/addressing#the-order-that-makes-an-interval-mean-something),
 `corpus.bnf`'s gloss, and `vectors.json`'s `hilbert2` table where `morton2` was — written by
-`crates/fossil-layout/examples/hilbert_vectors.rs` from the writer's own curve and held against it by
+`ac1801d4:crates/fossil-layout/examples/hilbert_vectors.rs` from the writer's own curve and held against it by
 a Rust test, because a curve is exactly the arithmetic Iceberg publishes vectors for and PMTiles left
 every port to re-derive ([prior art](/docs/design/prior-art#the-corpus-and-how-a-format-ships)).
 `guards/arithmetic.mjs` carries the function and `guards.mjs` sixteen unrolled steps of SQL for the
-`hilbert-order` guard. `packages/corpus/conformance/corpus` was regenerated from its recipe and every
+`hilbert-order` guard. `ac1801d4:packages/corpus/conformance/corpus` was regenerated from its recipe and every
 test corpus is written through the pass. kanzo-ui changes no view code — it culls against the boxes
 it is handed, and they are tighter — and rebuilds its bench corpora; its row budget is its own call,
 which the floor above bounds.
@@ -775,7 +781,7 @@ gap the anchor would have closed, with no second index.
 **`scan.read` and `edges` take a list of addresses and answer one batch per address, and a run of
 consecutive tiles of one zoom is read as one statement with one conjunctive range, split back into
 batches on the aligned column.** And **a host's engine caches Parquet metadata** —
-`SET parquet_metadata_cache = true`, once — which `packages/types/src/engine.ts, Engine` now says a
+`SET parquet_metadata_cache = true`, once — which `ac1801d4:packages/types/src/engine.ts, Engine` now says a
 host should, beside the interrupt it already requires. Ruled on 2026-09-30.
 
 ### Three statements a tile, and what they actually cost
@@ -849,7 +855,7 @@ maximal run of consecutive tiles is one statement. A tile whose statistics exclu
 with no request and breaks the run; a run whose tiles carry different residuals is read under the
 scan's whole filter, which selects the same rows on each. The aligned column is selected whether or
 not the scan named it, the answer is cut at `key / span`, and a column the scan did not select is
-dropped from each batch. `packages/corpus/tests/scan.test.ts` holds a run as one statement with one
+dropped from each batch. `ac1801d4:packages/corpus/tests/scan.test.ts` holds a run as one statement with one
 range and no `OR`, every batch of a run against the same tile read alone, and an abort mid-run.
 
 **What would reverse it.** A host engine that shares footers across statements without being told

@@ -1,125 +1,38 @@
 ---
-title: One door for a camera
-description: "A camera reads a corpus through `open` and three members — `tileMatrix`, `scan` and `edges` — where every answer is a function of a tile's address; why the zoom is picked off the tile matrix and not derived from a canvas, why the coarse zooms are cells and not a sample, and why this grew `open` instead of opening a port next to it."
+title: One door
+description: "A corpus is read through `open` and four members — `manifest`, `scan`, `sql` and `close` — and each thing the door does is done once, by one layer; why a scan still plans tasks when it only ever plans one."
 ---
 
-A consumer that wanted a picture out of a corpus used to order three concepts by hand — the
-addressing, the door and a renderer's source contract — and sew them together with SQL of its own.
-There is one door now, and a camera goes through it in three calls:
+A consumer reads a corpus through one door, and the whole of it is five names:
 
 ```ts
 const corpus = await open(url, { engine });
-const set = corpus.tileMatrix('Person');                 // every zoom, every tile, its rows and box
-const scan = corpus.scan({ type: 'Person', select });    // bound once per filter, not per camera move
-const batches = await scan.read(visible);                // a batch per tile address
-const lines = await corpus.edges({ from: visible, direction: 'src' });
+const { vertex_tables, edge_tables } = corpus.manifest;       // fossil.json, parsed once
+const scan = corpus.scan({ table: 'Person', select: ['dense_id', 'x', 'y'] });
+const batches = await scan.read(scan.plan());
+await corpus.close();
 ```
 
-[The backend](/docs/design/backend) is where the contract is argued against Apache Iceberg and the OGC
-tile matrix set. This page is what a camera owes that contract, and what it replaced: `frame(rect,
-pixels)`, one call that took a rectangle and a resolution and answered with a decimated sample. It
-was retired with `rows`, `extent`, `neighbours` and the level files, and what survived it is the
-rule it was built on.
+`open` (`packages/corpus/src/open.ts, open`) fetches `fossil.json`, rejects a `format` that is not `fossil/1` before a byte of Parquet is
+read, and creates one view per table in the host's engine. `manifest` is that document, parsed once.
+`scan` reads any table — vertices or edges — with a filter, a projection and a limit. `sql` is the
+escape hatch, present only on a corpus opened with `sql: 'allowed'`. `close` detaches. The contract is
+[the corpus](/docs/design/corpus); the format underneath is [/docs/format](/docs/format).
 
-## An answer is a function of an address
+**A consumer states what it wants, and how it is fetched is the door's business.** Whole, by range or
+by tile is decided behind `scan`, never by the caller, which is why the door has no `tileMatrix`, no
+`edges` and no addressing member: those were the camera's door over a tiled corpus, and
+[a door for a camera](/docs/design/later/one-door-camera) keeps what it was and what it measured.
 
-`scan.read` and `edges` answer **one batch per `(type, z, tile)`**, and the batch is a pure function
-of that address, the scan's filter and its projection — the corpus bytes and nothing else. No cap
-that moves with what a window happens to hold, no stride derived from a running count, no state
-carried between calls.
+## `scan` plans tasks, and plans one
 
-That is the form in which the two properties a multiscale reader owes its reader can be *stated*:
+`scan(params)` returns a plan and a read — `plan()` then `read(tasks)` — and `plan()` answers exactly
+one task, the whole table under the filter. The split is the seam and nothing more: it is where a
+tiled read would go without a consumer changing a line, and it is kept for that one reason.
 
-- **Refinement** compares an address with its parent. The parent of `(z, t)` is
-  `(z − 1, t >> (shift(z−1) − shift(z)))` — two bits between rungs, the quad tree's own branching —
-  and a cell is `dense_id >> shift`, so the rows under a cell at `z + 1` are exactly its members.
-  Zooming in replaces a cell with the rows it summarised, never with something else.
-- **Path independence** compares one address reached two ways. There is no other way for it to
-  differ: the answer takes no argument a route could have changed.
-
-Both are what lets the view cache by address without asking — [the camera](/docs/design/camera) has
-what that cache is, and why it is the view's rather than the reader's.
-
-**What would reverse it.** A member whose answer has to depend on something that is not in its
-arguments — a session, a budget, what was asked before. That member would not be a read, and it
-would belong in the view.
-
-## The zoom is picked off the tile matrix
-
-**The canvas no longer comes in.** `frame` derived its level from the pixels it was drawn into, at
-one mark per pixel, and estimated what a rectangle held as the tiles it touched times `chunk_size`.
-`tileMatrix` publishes the answer that estimate stood in for: every tile of every zoom with its row
-count and its box, read at `open` and synchronous after it. A view culls against the boxes and
-takes **the finest zoom whose visible tiles' rows fit its budget** — a sum over numbers it already
-holds, without a request and without an estimate.
-
-The budget is the view's, and it is stated in rows against the tile granularity: a window of *N*
-vertices touches about (√*N*/64 + 1)² tiles of 4,096 however they are drawn, which is the floor
-[the backend](/docs/design/backend#the-id-is-a-hilbert-rank) measured.
-
-**What would reverse it.** A zoom that cannot be chosen from row counts and boxes — one that needs a
-number the tile manifest does not publish. Then that number is published beside the others, and the
-choice stays the view's.
-
-## The coarse zooms are cells, and a sample is not answered
-
-Below `Z` a row is a cell of [the pyramid](/docs/design/cells): a centroid, a count, the internal
-weight and the mode of one channel, summarised from every member. The level files `frame` read — the
-vertices whose `dense_id` is a multiple of `4^k`, and the edges incident to them with both endpoints'
-coordinates — are no longer written, and nothing reads a sample: a coarse view draws the field and not
-the relation, and the lines at a coarse zoom are the rung's quotient. The ruling is on
-[the backend](/docs/design/backend#the-sample-goes-below-z-there-are-only-cells), with the one
-measurement that decided it: on com-DBLP the level pyramid was 83.1% of payload-plus-adjacency
-against the cell pyramid's 8.1%. What would bring a sample back is written there too.
-
-What `frame` reported as a ledger — `cost.requests`, `cost.bytes`, `matchedAt` — has no successor,
-and does not need one. A tile's cost is its row count, which `tileMatrix` publishes before anything is
-read, and what a read costs over the wire is measured on the backend page per statement, not
-reported per answer.
-
-## The relational work is ranges, and the SQL still cannot go
-
-Only two clauses a camera needs are relational: the filter a scan carries, and the range that
-selects a run of tiles. Everything else — which tiles, which zoom, which parent — is arithmetic over
-the manifest the reader performs before a character of SQL exists.
-
-**It still cannot come out, and the reason is the host contract.** `@fossil-lang/corpus` asks a host
-for exactly one capability — an engine whose `query(sql, { signal })` answers in Arrow-shaped columns
-(`packages/types/src/engine.ts, Engine`) — and links no engine of its own. SQL is not a language
-choice here; it is the *only channel* through which a byte of a corpus reaches this package.
-
-So what the SQL is allowed to be is the constraint that survives: **every clause in it is a function
-of numbers computed above it**, never of anything read. A run of consecutive tiles is one statement
-with one conjunctive range on the column its rows are a range of, and a filter reaches SQL once,
-rendered from a `Filter` tree that was bound against the matrix's columns when the scan was built.
-
-**What would reverse it.** A host that hands this package bytes rather than an engine. Then the
-ranges are byte ranges and the filter is evaluated here, and neither is SQL.
-
-## It grew `open` rather than opening a port beside it
-
-A camera needs an engine — reading tiles is SQL — so it was never going to live on a subpath that had
-none. **Both of the subpaths that did are gone**, and for one reason each time: `./corpus` was
-justified by a closure that reached no WASM and the door reached the verbs, and `./address` by the
-same promise kept at the price of
-[a second implementation of the arithmetic](/docs/design/corpus#conformance-is-a-round-trip-and-what-it-rests-on-is-not-a-headcount).
-
-**This package made the same mistake three times and corrected it each time.** `createGraphClient`
-took `{ query, manifestFiles }` and returned the verbs beside a door that took `(url, { query })`:
-two entry points over one manifest with no rule for choosing, folded in so that the verbs are the
-transport and this is the door. `resolveCorpus` needed no engine and outlived both subpaths, until
-its one consumer went and every open took an engine and published the addressing as
-`corpus.addressing`. And that member went with `frame`: the addressing is internal, a consumer that
-needs a URL has outgrown a surface whose claim is that a corpus is a URL, and the engine is the one
-capability a host supplies.
-
-`tileMatrix`, `scan` and `edges` are **three members of one door and not three doors**: they read the
-same manifest, the same tiles and the same engine, and a view composes them rather than choosing
-between them.
-
-**What would reverse it.** A second consumer that needs the addresses without the bytes — a host
-that signs URLs for an engine it does not own, say. Then the addressing earns a member again, and it
-is a member of this door rather than a door of its own.
+**What would reverse it.** A year with no reader that needed a second task — no corpus that failed
+the in-browser thresholds on [the page that keeps the tiles](/docs/design/later/backend). Then the
+split is ceremony, and `scan` answers batches directly.
 
 ## One door, and one layer behind it
 
@@ -129,15 +42,19 @@ call it could have made itself, is a second implementation with a longer path, a
 The door stays minimal and hides everything underneath: a consumer states what it wants, and how it
 is fetched — whole, by range, or by tile — is the door's business and never the consumer's.
 
-**Reading a corpus breaks this today, measured 2026-09-30 on `main` `ac1801d4`.** One read crosses
-four layers that each know the manifest: the TS door scans it line by line
-(`packages/corpus/src/manifest.ts`), the WASM crate resolves it again (`fossil-graph/src/plan.rs`,
-`plan::resolve`, which `open(job)` runs twice), the Rust verb path loads it once more on every call
-(`fossil-graph-wasm/src/lib.rs`, `dispatch_graph` → `Manifest::load`), and the verb it serves ends
-as SQL that DuckDB could have been sent directly — `executeSql` loads the manifest and never reads it
-(`fossil-graph/src/executor.rs`). keasy's discover view parses the manifest six times before it
-draws anything. Writing has the same shape: the CLI and the browser were two hosts that wrote
-different corpora, and no test compared them.
+**Reading a corpus broke this, measured 2026-09-30 on `main` `ac1801d4`.** One read crossed
+four layers that each knew the manifest: the TS door scanned it line by line
+(`ac1801d4:packages/corpus/src/manifest.ts`), the WASM crate resolved it again (`fossil-graph/src/plan.rs`,
+`plan::resolve`, which `open(job)` ran twice), the Rust verb path loaded it once more on every call
+(`fossil-graph-wasm/src/lib.rs`, `dispatch_graph` → `Manifest::load`), and the verb it served ended
+as SQL that DuckDB could have been sent directly — `executeSql` loaded the manifest and never read it
+(`fossil-graph/src/executor.rs`). keasy's discover view parsed the manifest six times before it
+drew anything. The door above is the repair: `fossil.json` is parsed once, in TypeScript, and a
+read is one statement to the host's engine.
+
+Writing had the same shape: the native CLI and the browser were two hosts that wrote different
+corpora, and no test compared them. The CLI is gone ([discarded](/docs/design/discarded)), and the
+wasm executor is the one host that writes, in a browser and in Node.
 
 The same pattern is expected elsewhere, so the rule obliges an audit rather than a fix to this one
 case: for every capability, count the layers that implement it, and keep one.

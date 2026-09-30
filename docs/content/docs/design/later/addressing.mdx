@@ -3,6 +3,13 @@ title: Addressing
 description: A tile is 4,096 rows of dense_id ordered by Hilbert code, its address is a shift, and the Parquet footer turns that address into a byte range. There is no tile tree and no index to discover.
 ---
 
+> **Deferred, not reversed.** This is the addressing a `fossil/1` corpus does not have: tiles,
+> `tile_of`,
+> the tile manifest and two containers. The code existed at commit `ac1801d4` (and main `e5b2113f`), and
+> every path on this page is spelled against that commit. What brings it back: a `fossil/1` corpus that
+> fails the in-browser thresholds — open > 1.5 s, first paint > 3 s, or heap > 1.5 GB at 1M vertices
+> over HTTP.
+
 **A tile is a fixed range of 4,096 rows of `dense_id`**, and tile `i` *is* the range
 `[i·4096, (i+1)·4096)`. Its address is a cut in the id:
 
@@ -54,7 +61,7 @@ neighbouring cells**, so a run that is *not* an aligned square — a tile, which
 ranks put it — is one connected patch, and its box is close to its own area. A Z-curve run that
 crosses a quad boundary jumps diagonally across its parent, and its box is the hull of both ends.
 
-Measured over a million vertices the layout pass wrote (`crates/fossil-layout/examples/tile_compactness.rs`
+Measured over a million vertices the layout pass wrote (`ac1801d4:crates/fossil-layout/examples/tile_compactness.rs`
 over `enrich_memory`'s fixture at mean degree 14), a tile's box is **1.41×** the area its rows would
 cover on a uniformly filled extent at the median and **1.9×** at worst, and a window of about 5,000
 vertices intersects **5 tiles at the median and 7 at p90** where 4 and 6 hold one of its vertices.
@@ -77,7 +84,7 @@ positions** — each type is laid out and renumbered independently. A degenerate
 q = round(clamp((v − lo) / (hi − lo), 0, 1) × 65535)
 ```
 
-<VectorTable of="quantize" />
+The `quantize` vectors were published in `ac1801d4:packages/corpus/guards/vectors.json`, read by the guard and rendered here as a table while the convention held.
 
 **Index** the quantised pair on the order-16 Hilbert curve — Wikipedia's `xy2d` at `n = 2^16`, the
 spelling a port is most likely to start from:
@@ -92,14 +99,14 @@ for s = 2^15, 2^14, …, 1:
     swap(x, y)
 ```
 
-<VectorTable of="hilbert2" />
+The `hilbert2` vectors were published in `ac1801d4:packages/corpus/guards/vectors.json`, read by the guard and rendered here as a table while the convention held.
 
 `x = 65535, y = 32767` and `x = 32768, y = 32768` are the rows that matter most: one step adds
 `3 · 2^30`, the total reaches bit 31, and a port that keeps `d` in a signed 32-bit integer sorts the
 second half of the curve first. That corpus satisfies every count-based check ever written and
 addresses nothing. The pair `x = 32768, y = 0` and `x = 65535, y = 32767` is the reflection: a port
 that swaps without reflecting gives each the other's index. The table is written by the engine's own
-curve (`crates/fossil-layout/examples/hilbert_vectors.rs`) and held against it by a Rust test, so
+curve (`ac1801d4:crates/fossil-layout/examples/hilbert_vectors.rs`) and held against it by a Rust test, so
 neither can move without the other going red.
 
 <Callout type="warn" title="The quantisation is binary32, and the width is part of the contract">
@@ -173,7 +180,7 @@ them in SQL gets that:
 Both attempts are **slower than not pruning at all**, because DuckDB evaluates the ranges per row
 instead of skipping row groups. A `WHERE` clause selects rows from a table; it does not select which
 bytes get read. So the camera asks for bytes and the
-[verbs](/docs/design/corpus#the-verb-surface-two-and-neither-draws) answer
+[door](/docs/design/one-door) answers
 questions; when a filter has to change the picture it returns **ids**, and the canvas applies them as
 a mask over the tiles it holds.
 
@@ -389,7 +396,7 @@ declares `container: files`, and the two-container comparison runs on a fixture 
 
 **It is a limit of that writer and not of the format**, and fossil is not that writer: `parquet`'s
 `ArrowWriter` cuts a row group where it is told, and the same 300 rows at 64 come back as
-`[64, 64, 64, 64, 44]`. `a_tile_can_be_smaller_than_duckdbs_vector` in `crates/fossil-df/src/files.rs`
+`[64, 64, 64, 64, 44]`. `a_tile_can_be_smaller_than_duckdbs_vector` in `ac1801d4:crates/fossil-df/src/files.rs`
 is that measurement, and it is why the container fossil emits is not the container its own fixture
 generator can produce.
 </Callout>
@@ -399,7 +406,7 @@ generator can produce.
 A tree of tiles would only earn its keep by **containing** something that does not fit in a leaf. The
 one candidate was the edge that crosses tiles, and hoisting it to the deepest tile holding both
 endpoints costs more than it saves by a wide margin
-([Adjacency](/docs/format/conventions/adjacency#csr-not-lca)). With nothing to hoist, the interior
+([Adjacency](/docs/design/discarded#the-corpus)). With nothing to hoist, the interior
 nodes are empty.
 
 **The coarse zooms are not that tree either.** They are the cell tree: rung `k` is a partition of
@@ -497,7 +504,7 @@ is `null`, never a string), a tile size that disagrees with the vertex type addr
 tiles a rectangle touches, which comes from the footer boxes.
 
 The seam is tested by the question it exists to answer: **can a reader that is not fossil's open the
-same corpus with only what fossil publishes?** `packages/corpus/conformance/reader.mjs` is that reader —
+same corpus with only what fossil publishes?** `ac1801d4:packages/corpus/conformance/reader.mjs` is that reader —
 plain Node, no npm, no build. `verify.mjs` runs it against the same table of addresses the module
 does; `writer.mjs` runs it against a corpus `fossil run` has just written, because the first cannot
 catch two readers being wrong *together*.
@@ -505,10 +512,10 @@ catch two readers being wrong *together*.
 ## The published vectors
 
 The arithmetic ships as a formula **and a table of vectors**, because the vectors are what gets
-copied. Every value below is a border, they live in `packages/corpus/guards/vectors.json`, the guard
+copied. Every value below is a border, they live in `ac1801d4:packages/corpus/guards/vectors.json`, the guard
 `published-vectors` executes that file, and these tables are rendered from it.
 
-<VectorTable of="tile_of" />
+The `tile_of` vectors were published in `ac1801d4:packages/corpus/guards/vectors.json`, read by the guard and rendered here as a table while the convention held.
 
 The last three rows are the marked bits of the diagram at the top of this page. All three exceed the
 width a `dense_id` column carries in any corpus that has been written, and that is why they are
@@ -517,7 +524,7 @@ published: they are where a wrong implementation is still right.
 Which tile an id is in is one question; **how many tiles there are** is the other, and it is the
 manifest's declared count divided the same way:
 
-<VectorTable of="declared_count" />
+The `declared_count` vectors were published in `ac1801d4:packages/corpus/guards/vectors.json`, read by the guard and rendered here as a table while the convention held.
 
 `count = 4096` at `chunk_size = 4096` is the row that catches ports: that is **one** tile, and an
 off-by-one addresses a `chunk1.parquet` nothing wrote. `count = 0` is the other — zero tiles, not one
@@ -527,13 +534,13 @@ empty one, and a reader that assumed at least one pays a request to be told 404.
 Which tile an id is in and how many there are are both numbers. **Where a tile is** is a path, and
 the container is the one field of it a reader is told rather than derives:
 
-<VectorTable of="tile_url" />
+The `tile_url` vectors were published in `ac1801d4:packages/corpus/guards/vectors.json`, read by the guard and rendered here as a table while the convention held.
 
 The last row of the pair on `vertex/Person/` is the one that separates the containers: every tile of
 a set is the same file, and a reader that hands the same path to `read_parquet` once per tile scans
 the relation once per tile — 9,240 vertices where the window holds 1,848, exactly five times over
 five tiles. Guard: `published-vectors`; harness:
-`packages/corpus/conformance/containers.mjs`, which writes one graph both ways and requires every answer
+`ac1801d4:packages/corpus/conformance/containers.mjs`, which writes one graph both ways and requires every answer
 to match.
 
 ## The payload format is open

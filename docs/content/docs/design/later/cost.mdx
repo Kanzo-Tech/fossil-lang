@@ -1,9 +1,14 @@
 ---
 title: The cost model
 description: Every claim fossil makes about what something costs, as a shape rather than a number, with the measurement that decides it and what it says today. A correct answer looks exactly like a cheap one, which is why this page exists.
-direction:
-  summary: Every obligation below is asserted by something that runs, so a claim cannot go stale without going red.
 ---
+
+> **Deferred, not reversed.** The per-tile cost shapes below have nothing to measure in a
+> `fossil/1` corpus, which is read whole; the write-path phases were measured through the native
+> host, which is deleted. The code existed at commit `ac1801d4` (main `e5b2113f`), and every path
+> on this page is spelled against that commit. What brings it back: a `fossil/1` corpus that fails
+> the in-browser thresholds — open over 1.5 s, first paint over 3 s, or heap over 1.5 GB at a
+> million vertices over HTTP.
 
 A window that returns the right answer looks exactly like a window that returns it cheaply. That is
 not a figure of speech: `open` opened every tile in the corpus on every window for as long as
@@ -66,7 +71,7 @@ boxes the wrong fix and the row-group container the right one, because one file 
 footer of one file grows with the tiles it lists — 2.24 MB at ten million — and a statement reads it
 again, so the writer publishes every tile's statistics once, in a tile manifest per type, and `open`
 reads that file and no footer at all:
-[the backend](/docs/design/backend#the-writer-publishes-what-the-reader-used-to-read-from-footers)
+[the backend](/docs/design/later/backend#the-writer-publishes-what-the-reader-used-to-read-from-footers)
 has the ruling and the measurement.
 
 **What would reverse it.** A writer other than fossil's, whose statistics a reader has to check
@@ -98,7 +103,7 @@ pool and a declared 4 GiB run peaked at 8.39 GiB. The number reaches the layout 
 honoured there by **refusing** rather than spilling — `estimated_peak_bytes` over three numbers the
 batches carry, checked before the first tile is gathered. That closes the *declaration* for that stage — and the flag
 bounds each stage rather than their sum, which is decided rather than outstanding and argued on
-[streaming](/docs/design/streaming). It does not close the shape below, and the two should not be
+[streaming](/docs/design/later/streaming). It does not close the shape below, and the two should not be
 confused. **The peak still grows with N, and a
 refusal is what happens when it grows past what was declared.**
 
@@ -112,7 +117,7 @@ The whole build, `/usr/bin/time -l` over the generator plus `fossil run`, unboun
 | 10,000,000 | **20.72 GiB** | 404.4 s |
 
 For 1.5 GB of corpus. There is no spill path in the pass, so exceeding the machine is a failed run
-rather than a slow one, which is the opposite of what [streaming](/docs/design/streaming) promises.
+rather than a slow one, which is the opposite of what [streaming](/docs/design/later/streaming) promises.
 
 **The line got shallower twice, and that row above predates both.** The layout pass on its own was
 7.22 GiB at ten million — 0.72 per million — then 3.80 after the Louvain contraction stopped
@@ -180,7 +185,7 @@ phase of the pass — `remap adjacencies + write edge tiles` is.
 
 One run of the whole write path over com-DBLP — 317,080 vertices, 1,049,866 undirected edges — with
 HEAD's binary in **debug** profile, 2026-09-15, reported by the probe below
-(`crates/fossil-mem-probe/src/lib.rs, Probe`).
+(`ac1801d4:crates/fossil-mem-probe/src/lib.rs, Probe`).
 
 **The seconds are indicative and the bytes are exact.** A debug build is nobody's shipping profile,
 so what the clock column is for is the *share* each phase takes of it and not the number of seconds;
@@ -214,12 +219,12 @@ removes a barrier. Anyone reading the table for a speedup is reading the wrong c
 
 ### The redesign, and what is left of the table
 
-**The staged bytes are not written.** `crates/fossil-df/src/files.rs, manifest_files` is the whole
+**The staged bytes are not written.** `ac1801d4:crates/fossil-df/src/files.rs, manifest_files` is the whole
 of what the writer emits; the payload is emitted once, by the layout pass, out of the
 `RecordBatch`es the executor returns —
-`crates/fossil-layout/src/layout/pass.rs, VertexLayoutTarget` takes them rather than a URL. So the
+`ac1801d4:crates/fossil-layout/src/layout/pass.rs, VertexLayoutTarget` takes them rather than a URL. So the
 third row of that table is zero **by construction** rather than by measurement, and what holds it
-there is a test asserting the absence: `crates/fossil-df/tests/sink.rs` fails if a
+there is a test asserting the absence: `ac1801d4:crates/fossil-df/tests/sink.rs` fails if a
 `vertex/<Type>.parquet` or a `by_{source,target}.parquet` appears beside the manifests.
 
 Two consequences worth separating, because only one of them is measured:
@@ -237,9 +242,9 @@ Two consequences worth separating, because only one of them is measured:
 ### What bounded the redesign, and the probe printed it
 
 The same run marks `execute_graph — 0.05G in Arrow` against a process peak of 0.80 GiB. That mark is
-`crates/fossil-df/src/lib.rs, arrow_gib` over the boundary value, and the boundary value already
-held everything: `crates/fossil-df/src/lib.rs, GraphArData` carries a `Vec<RecordBatch>` per vertex
-type and `crates/fossil-df/src/lib.rs, EdgeTable` carries one per orientation of every relation. So
+`ac1801d4:crates/fossil-df/src/lib.rs, arrow_gib` over the boundary value, and the boundary value already
+held everything: `ac1801d4:crates/fossil-df/src/lib.rs, GraphArData` carries a `Vec<RecordBatch>` per vertex
+type and `ac1801d4:crates/fossil-df/src/lib.rs, EdgeTable` carries one per orientation of every relation. So
 the data never left memory in the first place. The trip was **Arrow → Parquet → Arrow**, and the
 original Arrow was alive the whole time it happened.
 
@@ -253,11 +258,11 @@ estimated, which is the only reason it belonged on this page — and it is what 
 **The reader's bill is the tile, and it is published before a read.** A tile's cost is its row
 count and its box, both in the tile manifest `tileMatrix` hands back at `open`, so a view knows what
 a window will read before it reads it. What a read costs over the wire is measured per statement on
-[the backend](/docs/design/backend#a-read-does-not-cost-the-corpus), not reported per answer:
+[the backend](/docs/design/later/backend#a-read-does-not-cost-the-corpus), not reported per answer:
 `bytes` out of `parquet_metadata` is footer arithmetic and never bytes weighed on a wire, because the
 engine reads inside its own process, a Worker in the browser.
 
-**R1 is asserted through the seam, by `packages/corpus/integration/cost.test.ts`.** The one
+**R1 is asserted through the seam, by `ac1801d4:packages/corpus/integration/cost.test.ts`.** The one
 capability this package asks a host for is an `Engine`, so everything a reader does passes through
 `Engine.query` and the test counts the statements that reach *its own* engine — a wrapper in the
 test file, not a mechanism this package publishes. Two corpora an order of magnitude apart and one
@@ -281,7 +286,7 @@ when the defect they were written against — every tile URL handed to one state
 (deleted after `2fa5f22`) walked ten written-down rectangles over a bench corpus and reported the
 door's ledger per frame, asking each three times and exiting 1 if any cost column but the clock
 moved, because a bench that flaps is not evidence. It left with the viewer it ran through; under
-[the backend](/docs/design/backend) the unit it would measure is one tile, whose cost is its row
+[the backend](/docs/design/later/backend) the unit it would measure is one tile, whose cost is its row
 count out of the manifest.
 
 The write half has its probe already — `FOSSIL_MEM_PROBE=1` and the two examples under
