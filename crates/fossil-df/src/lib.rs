@@ -95,7 +95,7 @@ use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
     Container, CoordinateSystem, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Privacy, Projection,
-    Property, VertexIndex, VertexInfo, VertexLevels, data_type_name,
+    Property, VertexIndex, VertexInfo, data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -2033,17 +2033,7 @@ impl GraphArData {
                 let rows = self
                     .edge_table(edge)
                     .map_or(0, |e| count_rows(&e.by_source));
-                // The SOURCE type's own row count, because a level of a relation
-                // is *which vertices are in it*: a relation whose source type
-                // gets no pyramid gets none either, and one whose source writes
-                // `1..=k` writes `1..=k`. `VertexLevels::planned` stays the one
-                // place the numbers are chosen.
-                let source_rows = self
-                    .vertices
-                    .iter()
-                    .find(|v| v.label == edge.source)
-                    .map_or(0, |v| count_rows(&v.batches));
-                edge_info(edge, rows, source_rows)
+                edge_info(edge, rows)
             })
             .collect();
         (graph, vertices, edges)
@@ -2184,8 +2174,7 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
         DEFAULT_CHUNK_SIZE,
         format!("vertex/{}/", node.label),
         // The payload: the projection at scale one, carrying identity and the
-        // drawing columns. Not a special case and not a first-class block —
-        // the pyramid below appends to the same list.
+        // drawing columns. Not a special case and not a first-class block.
         vec![Projection::payload("", properties)],
     )
     .with_iri(node.iri.clone().unwrap_or_default());
@@ -2206,20 +2195,6 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
         ordered_by: "subject".to_string(),
         chunk_size: DEFAULT_CHUNK_SIZE,
     });
-    // And the pyramid, when the type is big enough to have earned one — same
-    // place and same reasoning as the index above: the manifest is the plan, and
-    // the layout pass is what fills it. Each level is another projection on the
-    // same list, at `scale: 4^k` and carrying the payload's own columns, which
-    // is what the pass writes into them.
-    //
-    // **`VertexLevels::planned` is the one place the levels are chosen**, and
-    // the pass calls it over the same two numbers this does — `rows` is the
-    // count this manifest declares and the count the pass writes — so the
-    // manifest cannot name a level nobody wrote. A second copy of the rule on
-    // either side is a 404 in a camera the day one of them moves.
-    if let Some(plan) = VertexLevels::planned(rows, DEFAULT_CHUNK_SIZE) {
-        info = info.with_levels(&plan);
-    }
     // **And where `x`/`y` came from**, which the two `Property` rows above
     // cannot say: they give the columns a name and a `float32`, and a latitude
     // and a phyllotaxis angle are the same two `float32`.
@@ -2231,7 +2206,7 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
     // `cluster_layout` rather than about the graph. Undeclared, a reader has to
     // guess, and the guess that costs least to make is the wrong one.
     //
-    // Declared here for the reason the index and the pyramid above are: the
+    // Declared here for the reason the index above is: the
     // manifest is the plan and the layout pass is what fills it. And declared
     // `derived` unconditionally because that is what this writer produces —
     // every `x` in a corpus fossil writes is `fossil-layout`'s, and there is no
@@ -2253,8 +2228,7 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
 }
 
 /// The columns an adjacency tile carries — the pair that IS the edge, and the
-/// only two `fossil-df` writes into one. A level of the relation carries four
-/// more, and `fossil-layout` is what adds them.
+/// only two `fossil-df` writes into one.
 fn endpoint_columns() -> Vec<Property> {
     ["src_dense", "dst_dense"]
         .into_iter()
@@ -2268,32 +2242,13 @@ fn endpoint_columns() -> Vec<Property> {
         .collect()
 }
 
-/// The columns a level of a relation carries: both endpoints and both of their
-/// positions, which is what makes the projection **self-drawing** — the lines
-/// and their far ends come out of one file, and no vertex tile is opened.
-fn edge_level_columns() -> Vec<Property> {
-    let mut properties = endpoint_columns();
-    for name in ["src_x", "src_y", "dst_x", "dst_y"] {
-        properties.push(Property {
-            name: name.to_string(),
-            data_type: data_type_name(&DataType::Float32),
-            is_primary: false,
-            is_nullable: Some(false),
-            cardinality: Some(Cardinality::Single),
-        });
-    }
-    properties
-}
-
 /// The `EdgeInfo` manifest for one edge type. W0b edges carry no properties
 /// (only `src_dense`/`dst_dense`); both CSR + CSC adjacencies are ordered.
 ///
 /// `rows` is one orientation's row count, which is the relation's: the two
-/// orientations are the same edges twice. `source_rows` is the SOURCE vertex
-/// type's count, and it is here for one reason: the levels of a relation are the
-/// levels of the vertices in it.
-fn edge_info(edge: &GraphEdge, rows: u64, source_rows: u64) -> EdgeInfo {
-    let info = EdgeInfo::new(
+/// orientations are the same edges twice.
+fn edge_info(edge: &GraphEdge, rows: u64) -> EdgeInfo {
+    EdgeInfo::new(
         edge.source.clone(),
         edge.label.clone(),
         edge.destination.clone(),
@@ -2321,16 +2276,7 @@ fn edge_info(edge: &GraphEdge, rows: u64, source_rows: u64) -> EdgeInfo {
     // which it cannot: an edge type whose every source happens to have one
     // destination today is not a functional relation.
     .with_cardinality(edge.cardinality)
-    .with_iri(edge.iri.clone().unwrap_or_default());
-    // The pyramid of edges, when the source type earned one — more entries on
-    // the same list, declared here and written by the layout pass, the same
-    // split the vertex levels have. Derived from `VertexLevels::planned` over
-    // the SOURCE type's count rather than chosen again, so a manifest cannot
-    // name a level nobody wrote.
-    match VertexLevels::planned(source_rows, DEFAULT_CHUNK_SIZE) {
-        Some(plan) => info.with_levels(&plan, &edge_level_columns()),
-        None => info,
-    }
+    .with_iri(edge.iri.clone().unwrap_or_default())
 }
 
 /// The `GraphAr` `data_type` spelling (`string`/`int64`/…) of a schema datatype.

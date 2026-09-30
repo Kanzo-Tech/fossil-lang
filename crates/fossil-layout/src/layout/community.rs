@@ -9,7 +9,7 @@
 //! `/docs/design/cells` is the page that depends on it and carries the
 //! measurement.
 
-use fossil_sinks::manifest::VertexLevels;
+use fossil_sinks::manifest::CellTree;
 
 /// Assign each vertex `0..vertex_count` a dense, contiguous `cluster_id` via
 /// weakly-connected components (union-find with path halving).
@@ -922,12 +922,12 @@ impl Dendrogram {
     ///
     /// # Where the factor comes from, and why there is no `4` here
     ///
-    /// The tile pyramid already fixes the octave —
-    /// `crates/fossil-sinks/src/manifest.rs, VertexLevels` says a second
-    /// spelling of that exponent is the bug its constant exists to prevent — so
-    /// a rung's ceiling is `VertexLevels::rows_at(current, 1)`, which is level
-    /// one of the tile pyramid over `current` rows. Same arithmetic, same
-    /// integer, in every language that reads this corpus.
+    /// The cell pyramid already fixes the octave —
+    /// `crates/fossil-sinks/src/manifest.rs, CellTree` says a second spelling
+    /// of that exponent is the bug its constant exists to prevent — so a rung's
+    /// ceiling is `ceil(current / CellTree::BRANCHING)`, one rung of that
+    /// pyramid over `current` rows. Same arithmetic, same integer, in every
+    /// language that reads this corpus.
     ///
     /// # What it does NOT do
     ///
@@ -947,9 +947,9 @@ impl Dendrogram {
         let mut current = u64::from(self.vertex_count);
         let mut from = 0usize;
         while chunk > 0 && current > chunk {
-            // `rows_at(.., 1)` is `ceil(current / 4)`: one level of the tile
-            // pyramid, over this many rows instead of over the whole type.
-            let ceiling = VertexLevels::rows_at(current, 1);
+            // One rung of the cell pyramid, over this many rows instead of over
+            // the whole type.
+            let ceiling = current.div_ceil(CellTree::BRANCHING);
             // The FINEST level that fits under the ceiling, which is the one
             // that gives up least detail while still being worth a step. Levels
             // are scanned in index order from wherever the last rung landed, so
@@ -1021,12 +1021,12 @@ impl Rung {
 impl Cut {
     /// **The branching factor, as the pyramid declares it.**
     ///
-    /// `VertexLevels::stride(1)` and not a literal: the exponent lives in
-    /// `crates/fossil-sinks/src/manifest.rs, VertexLevels` and a cell tree on
-    /// the same octave inherits that arithmetic instead of inventing one.
+    /// `CellTree::BRANCHING` and not a literal: the exponent lives in
+    /// `crates/fossil-sinks/src/manifest.rs, CellTree` and a cut on the same
+    /// octave inherits that arithmetic instead of inventing one.
     #[must_use]
     pub const fn declared_branching() -> u64 {
-        VertexLevels::stride(1)
+        CellTree::BRANCHING
     }
 
     /// The rungs, finest first.

@@ -344,7 +344,6 @@ fn enrich_layout_in_memory(
                 ordered_by,
                 batches,
                 tile_prefix: format!("{}{dir}/", relation(e)),
-                levels_prefix: relation(e),
             })
         })
         .collect();

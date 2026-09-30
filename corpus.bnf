@@ -60,7 +60,7 @@
    # What is NOT here, on purpose
 
    **Prefixes and file names** (`tiles.parquet`, `by_source/`, `index/`,
-   `l{k}/`, `graph.graph.yml`). They are addressing, and addressing is
+   `cell/`, `graph.graph.yml`). They are addressing, and addressing is
    `crates/fossil-graph/src/plan.rs` — one implementation already, compiled to
    wasm32 for the TypeScript side. A second declaration of them here would be a
    second source for a fact that already has one. Columns are different: nothing

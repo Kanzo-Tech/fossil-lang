@@ -148,7 +148,6 @@ fn targets<'a>(
         ordered_by,
         batches,
         tile_prefix: prefix(&root.join(dir)),
-        levels_prefix: prefix(root),
     };
     (
         vec![VertexLayoutTarget {
@@ -311,10 +310,11 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
 
     // ONE Parquet in the prefix, and it is the payload. Two containers at once
     // is one too many — a reader that globs finds both — which is the convention
-    // `packages/corpus/guards`' `declared-tiling` fires on. `index/`, `l1/` and `cell/`
-    // are not a second one: they are directories. The list is exhaustive so that
-    // a fifth entry cannot appear unremarked — and `cell/` is the entry that
-    // proved it works, having appeared here the moment the pass grew a pyramid.
+    // `packages/corpus/guards`' `declared-tiling` fires on. `index/` and `cell/` are
+    // not a second one: they are directories. The list is exhaustive so that a
+    // fourth entry cannot appear unremarked — `cell/` proved it works, having
+    // appeared here the moment the pass grew a pyramid, and `l1/` proved it the
+    // other way, leaving it when the level files were retired.
     let mut emitted: Vec<String> = fs::read_dir(&chunks)
         .expect("read the tile prefix")
         .filter_map(Result::ok)
@@ -326,7 +326,6 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
         vec![
             "cell".to_string(),
             "index".to_string(),
-            "l1".to_string(),
             "tiles.parquet".to_string(),
         ],
         "the tile prefix holds the payload, the index, the one level six vertices at two a \

@@ -27,25 +27,14 @@
 //! are pure data with no transport coupling. The binding runs one through
 //! [`dispatch`], which matches on the enum.
 //!
-//! **No verb draws. The camera is addressed, not queried** — the LOD is a
+//! **No verb draws. The camera is addressed, not queried** — a zoom is a
 //! different RELATION and not a filter, and a `WHERE` cannot change which table
-//! it reads. This said *a level-3 tile holds supernodes that do not exist at
-//! level 0*, and that is not what was built: a level is the DECIMATION
-//! `dense_id % scale == 0`, every row a real vertex sharing the payload's own
-//! numbering, because a synthetic centroid cannot nest. What makes it a
-//! different relation is still the point — a level is its own
-//! [`plan::ProjectionAddress`], as the payload and each adjacency are — and what
-//! makes it addressable is that the numbering is shared: a projection's tile is
-//! the payload's shift plus `log2(scale)`.
-//!
-//! **The exponent does not reach this crate.** `4^k` is chosen once, by
-//! `fossil_sinks::manifest::VertexLevels`, and what crosses into a manifest is
-//! the product — so a reader divides a count by `scale` and shifts by its
-//! trailing zeros, and there is no `4` on this side of the document. The camera
-//! computes a scale and tile addresses and asks for bytes; no bbox, no SQL, no
-//! `DuckDB` on that path. A filter that must change the picture answers with ids
-//! and the canvas masks its resident tiles with them — one mechanism, not a
-//! second renderer.
+//! it reads. The payload at `z = Z` and each rung of the cell tree below it are
+//! separate artefacts, each tiled on one `dense_id` axis, so a camera computes a
+//! zoom and tile addresses and asks for bytes; no bbox, no SQL, no `DuckDB` on
+//! that path. A filter that must change the picture answers with ids and the
+//! canvas masks its resident tiles with them — one mechanism, not a second
+//! renderer.
 //!
 //! ## The executor is a trait
 //!

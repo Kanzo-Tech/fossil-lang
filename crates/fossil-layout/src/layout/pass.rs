@@ -1,6 +1,6 @@
 //! The pass itself: read the staged Parquet, apply the partition and the
 //! placement, renumber into Hilbert order, and write the payload, the tiles and
-//! the level pyramids back.
+//! the cell pyramid back.
 //!
 //! Split out of `layout.rs` unchanged. This is the half that touches files;
 //! [`super::community`], [`super::place`] and [`super::hilbert`] are the halves
@@ -21,13 +21,13 @@ use std::sync::Arc;
 
 use arrow::array::{Array, ArrayRef, Float32Array, RecordBatch, StringArray, UInt32Array};
 use arrow::compute::{cast, interleave_record_batch};
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use arrow::datatypes::{DataType, Schema, SchemaRef};
 use arrow::error::ArrowError;
 use fossil_mem_probe::Probe;
 use fossil_tile_writer::TileWriter;
 
 use crate::io::{LayoutIo, LocalFs, Sink};
-use fossil_sinks::manifest::{CELL_PREFIX, CellTree, Channel, TILES_FILE, VertexLevels};
+use fossil_sinks::manifest::{CELL_PREFIX, CellTree, Channel, TILES_FILE};
 use fossil_sinks::tiles::{AdjacencyTiles, TileManifest, TileStatistics};
 
 /// `row_of_dense[d]` when no row of the vertex file carries `dense_id` `d`.
@@ -170,17 +170,6 @@ pub struct AdjacencyTarget<'a> {
     /// Where **this orientation's** tiles go — e.g. `…/edge/A_b_A/by_source/`,
     /// trailing separator included.
     pub tile_prefix: String,
-    /// Where the **relation's** level sets go — e.g. `…/edge/A_b_A/`, trailing
-    /// separator included.
-    ///
-    /// The relation's directory and not the orientation's, because a level of a
-    /// relation is one artefact and not one per direction; it is written from
-    /// the source-ordered half, which already holds every edge. Passed in beside
-    /// [`Self::tile_prefix`] rather than derived as its parent: the two happen to
-    /// nest in the tree the writer lays out, and "the level sets are one
-    /// directory up from the tiles" is a claim about addressing that this pass is
-    /// not the place to make.
-    pub levels_prefix: String,
 }
 
 impl AdjacencyTarget<'_> {
@@ -901,17 +890,6 @@ pub fn enrich_layout_with(
     // reported dangling endpoint, not as a lookup with nothing to look in.
     let mut maps: Vec<Vec<u32>> = vec![Vec::new(); targets.len()];
 
-    // `new_dense_id → (x, y)` per vertex type, index-aligned with `targets`.
-    //
-    // Held past the vertex phase for one reason: an EDGE level carries both of
-    // its endpoints' coordinates, and the far end of an edge is an arbitrary
-    // vertex rather than one of the level's own. Without this the adjacency
-    // phase would have to read the payload back to place a line — which is the
-    // read the whole pyramid exists to avoid, moved from the reader to the
-    // writer. Two `f32` per vertex: 8 MB at a million, against the batches this
-    // pass already holds.
-    let mut placed: Vec<Vec<(f32, f32)>> = vec![Vec::new(); targets.len()];
-
     // **What the manifest cannot plan**, filled as the pass measures it. Opened
     // here rather than after the loops because its two fields are measured in
     // two different phases: a channel's domain is a function of the PARTITION,
@@ -933,8 +911,7 @@ pub fn enrich_layout_with(
     let mut pyramids: Vec<Option<Pyramid>> = (0..targets.len()).map(|_| None).collect();
 
     // Each type's vertex count, which the pyramid's declaration needs after the
-    // loop that computed it. `max + 1` over the ids and not the row count — the
-    // same number the levels are planned from.
+    // loop that computed it. `max + 1` over the ids and not the row count.
     let mut counts: Vec<u64> = vec![0; targets.len()];
 
     // Each type's payload tile statistics, off the footer its writer closes —
@@ -1228,36 +1205,6 @@ pub fn enrich_layout_with(
         payload_tiles[index] = tile_statistics(&footer, &batch_refs[0].schema());
         probe.mark("gather + write vertex tiles");
 
-        // The pyramid, when the type is big enough to have earned one.
-        //
-        // Level `k` is the rows whose NEW `dense_id` is a multiple of 4^k, and
-        // it is selected by that predicate over `new_dense` rather than by
-        // striding the write order — the two are the same list only where the
-        // numbering is gapless, and a gap would silently make the file and the
-        // predicate disagree. Which is the one property this must not break:
-        // the file is an optimisation of the predicate, so a corpus without it
-        // draws the identical picture and only reads more.
-        //
-        // `VertexLevels::planned` is the only place the levels are chosen, and
-        // whoever declares them in the manifest calls the same function.
-        if let Some(plan) = VertexLevels::planned(rows as u64, target.chunk_size) {
-            write_levels(
-                io,
-                target,
-                &plan,
-                &batch_refs,
-                &starts,
-                &Enriched {
-                    gather: &gather,
-                    new_dense: &new_dense,
-                    xs: &xs,
-                    ys: &ys,
-                    cluster_ids: &cluster_ids,
-                },
-            )?;
-            probe.mark("write levels");
-        }
-
         // The identity index: the SAME rows a second time, ordered by `subject`
         // instead of by position, carrying only the identity and the address it
         // maps to.
@@ -1281,19 +1228,6 @@ pub fn enrich_layout_with(
             write_identity_index(io, &subjects, target)?;
             probe.mark("write identity index");
         }
-
-        // Where every vertex of this type ended up, keyed by the address it
-        // ended up with. `xs`/`ys` are in WRITE order and `new_dense` is that
-        // row's address, so this is a permutation and not a second computation.
-        // The adjacency phase draws its level sets out of it — see `placed`.
-        let mut by_address = vec![(0f32, 0f32); rows];
-        for i in 0..rows {
-            let at = new_dense[i] as usize;
-            if at < by_address.len() {
-                by_address[at] = (xs[i], ys[i]);
-            }
-        }
-        placed[index] = by_address;
 
         // The rows half of the pyramid, off the four arrays that are still in
         // hand — one linear pass per rung, and the cells it allocates are 4/3 of
@@ -1469,28 +1403,6 @@ pub fn enrich_layout_with(
             tiles: numbered(tile_statistics(&footer, &schema), &written),
         });
         probe.sample(&format!("{step}: write tiles"));
-
-        // The pyramid of EDGES, written once per relation and from the
-        // source-ordered half — the two orientations are one relation stored
-        // twice, and `keys` here is already every edge of it, sorted by source.
-        if adjacency.ordered_by == Endpoint::Src {
-            let src = index_of(&adjacency.src_type, alabel)?;
-            let dst = index_of(&adjacency.dst_type, alabel)?;
-            let source_count = placed[src].len() as u64;
-            // The SOURCE type's own plan and not a second one: a level of a
-            // relation is *which vertices are in it*. One plan, two artefacts.
-            if let Some(plan) = VertexLevels::planned(source_count, endpoint.chunk_size) {
-                write_edge_levels(
-                    io,
-                    &adjacency.levels_prefix,
-                    &plan,
-                    &keys,
-                    &placed[src],
-                    &placed[dst],
-                )?;
-                probe.sample(&format!("{step}: write edge levels"));
-            }
-        }
     }
     probe.mark("remap adjacencies + write edge tiles");
 
@@ -1760,121 +1672,6 @@ fn replace_columns(
     RecordBatch::try_new(schema, columns).map_err(arrow_err(url))
 }
 
-/// The four columns the layout pass replaces, plus the permutation that says
-/// which file row each written row came from — borrowed as one argument so that
-/// [`write_levels`] takes six and not ten.
-struct Enriched<'a> {
-    /// File row of each written row, in write order.
-    gather: &'a [u32],
-    /// The new `dense_id` of each written row. **Not** its index: a `dense_id`
-    /// that no row carries is skipped, so these are the values a level's
-    /// predicate is evaluated against.
-    new_dense: &'a [u32],
-    xs: &'a [f32],
-    ys: &'a [f32],
-    cluster_ids: &'a [u32],
-}
-
-/// Write one vertex type's **level sets** — the decimated pyramid a zoomed-out
-/// camera reads instead of striding the whole type.
-///
-/// # What a level is
-///
-/// Level `k` is the rows whose `dense_id` is a multiple of `4^k`, which over a
-/// Hilbert-ordered `dense_id` is one vertex per quadtree cell of depth `k`. Every
-/// row is a real vertex at its real position — there is no synthetic centroid
-/// here, because a centroid cannot nest: replace it with its children and every
-/// point on screen moves. A decimation nests by construction, so zooming in only
-/// ever ADDS.
-///
-/// # The property this must not break
-///
-/// **The file and the predicate select the same rows.** A level set is an
-/// optimisation of `dense_id % 4^k == 0` over the payload and nothing else, so a
-/// corpus without one draws the same picture and only reads more. That is what
-/// keeps the pyramid from becoming a second contract, and it is why the
-/// selection here is a predicate over [`Enriched::new_dense`] rather than a
-/// stride over the write order: the two coincide only while the numbering is
-/// gapless, and a hole would make the file quietly disagree with the predicate
-/// a reader without one evaluates.
-/// `crates/fossil-layout/tests/levels.rs` is that test.
-///
-/// # Each level is a payload set, addressed by the same rule
-///
-/// Level `k` goes under `<chunk_prefix><stem>{k}/`, tiled at the plan's
-/// `chunk_size` into one Parquet whose row groups are its tiles — the same
-/// shape, the same filename and the same container as the payload beside it. So
-/// a reader that can address a type can address a level of it with no new
-/// arithmetic, and tile `j` of level `k` is the `dense_id` range
-/// `[j·chunk·4^k, (j+1)·chunk·4^k)`.
-fn write_levels(
-    io: &dyn LayoutIo,
-    target: &VertexLayoutTarget<'_>,
-    plan: &VertexLevels,
-    batch_refs: &[&RecordBatch],
-    starts: &[u32],
-    rows: &Enriched<'_>,
-) -> Result<(), LayoutError> {
-    let Some(first) = batch_refs.first() else {
-        return Ok(());
-    };
-    for &level in &plan.levels {
-        // `VertexLevels::stride` is the only place the pyramid's base is
-        // written down, and it saturates rather than panicking past `u64`.
-        let stride = VertexLevels::stride(level);
-        let picks: Vec<usize> = rows
-            .new_dense
-            .iter()
-            .enumerate()
-            .filter(|&(_, &dense)| u64::from(dense) % stride == 0)
-            .map(|(i, _)| i)
-            .collect();
-        let prefix = format!("{}{}", target.chunk_prefix, plan.level_prefix(level));
-        io.ensure_prefix(&prefix)?;
-        let url = format!("{prefix}{TILES_FILE}");
-        let mut writer = open_tiles(io, &url, first.schema())?;
-        for tile in picks.chunks(plan.chunk_size as usize) {
-            let gathered: Vec<(usize, usize)> = tile
-                .iter()
-                .map(|&i| locate(starts, rows.gather[i]))
-                .collect();
-            let batch = interleave_record_batch(batch_refs, &gathered).map_err(arrow_err(&url))?;
-            let take = |pick: &dyn Fn(usize) -> u32| -> Vec<u32> {
-                tile.iter().map(|&i| pick(i)).collect()
-            };
-            let enriched = replace_columns(
-                &batch,
-                &url,
-                &[
-                    (
-                        "dense_id",
-                        Arc::new(UInt32Array::from(take(&|i| rows.new_dense[i]))) as ArrayRef,
-                    ),
-                    (
-                        "x",
-                        Arc::new(Float32Array::from(
-                            tile.iter().map(|&i| rows.xs[i]).collect::<Vec<f32>>(),
-                        )),
-                    ),
-                    (
-                        "y",
-                        Arc::new(Float32Array::from(
-                            tile.iter().map(|&i| rows.ys[i]).collect::<Vec<f32>>(),
-                        )),
-                    ),
-                    (
-                        "cluster_id",
-                        Arc::new(UInt32Array::from(take(&|i| rows.cluster_ids[i]))),
-                    ),
-                ],
-            )?;
-            writer.tile(&enriched).map_err(write_err(&url))?;
-        }
-        writer.finish().map_err(write_err(&url))?;
-    }
-    Ok(())
-}
-
 /// Open the row-group container one payload set goes into, at `url`.
 ///
 /// Through [`TileWriter`] and not through a writer of its own, because one row
@@ -2060,126 +1857,6 @@ fn unpack(
     columns[src_index] = Arc::new(UInt32Array::from(src));
     columns[dst_index] = Arc::new(UInt32Array::from(dst));
     RecordBatch::try_new(Arc::clone(schema), columns).map_err(arrow_err(url))
-}
-
-/// Write one relation's **level sets** — the edges a zoomed-out camera draws
-/// without opening the vertex payload.
-///
-/// # What a level of a relation is
-///
-/// Level `k` is the edges **incident to a level-`k` vertex** in either
-/// orientation — `src % 4^k == 0 || dst % 4^k == 0` — and every row carries
-/// BOTH endpoints' coordinates.
-///
-/// The coordinates are the reason this file exists. A camera keeps an edge with
-/// ONE end drawn, so the far end has to be positioned to draw the line, and a
-/// vertex level holds one row in `4^k`: on the bench corpus at the app's own
-/// three-pixel floor, levels 1 to 4 position 14.3%, 3.2%, 0.79% and 0.12% of the
-/// edges the same view draws. Carrying `src_x`/`src_y`/`dst_x`/`dst_y` makes the set
-/// **self-drawing** — the lines and their ends come out of this file and no
-/// vertex tile is opened for them.
-///
-/// # It decimates and does not aggregate
-///
-/// Every row is a real edge between two real vertices at their real positions.
-/// Nothing is contracted, which is what keeps the standing refusal intact: an
-/// edge between two survivors standing in for a path through vertices that are
-/// not drawn is synthetic, and replacing it with the path when the camera zooms
-/// moves every line on screen. And it nests, because level `k+1`'s vertices are
-/// a subset of level `k`'s.
-///
-/// # Tiled by the rule the vertex levels already have
-///
-/// Tile `j` holds the rows whose `src_dense` is in
-/// `[j · chunk_size · 4^k, (j+1) · chunk_size · 4^k)` — the source level's own
-/// tile range, so a reader addresses these with the shift it already has.
-/// `keys` arrives sorted by source, so each tile is a run and one pass finds
-/// every one of them.
-fn write_edge_levels(
-    io: &dyn LayoutIo,
-    relation: &str,
-    plan: &VertexLevels,
-    keys: &[u64],
-    src_placed: &[(f32, f32)],
-    dst_placed: &[(f32, f32)],
-) -> Result<(), LayoutError> {
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("src_dense", DataType::UInt32, false),
-        Field::new("dst_dense", DataType::UInt32, false),
-        Field::new("src_x", DataType::Float32, false),
-        Field::new("src_y", DataType::Float32, false),
-        Field::new("dst_x", DataType::Float32, false),
-        Field::new("dst_y", DataType::Float32, false),
-    ]));
-    let shift = shift_for(plan.chunk_size).ok_or_else(|| LayoutError::TileSize {
-        vertex_type: String::new(),
-        rows: plan.chunk_size,
-    })?;
-
-    for &level in &plan.levels {
-        // A level tile's address is the payload's own shift plus the bits the
-        // level drops, which is `VertexLevels::stride_bits` and nowhere else.
-        // `checked_shr` rather than a mask: past the width of a `dense_id` the
-        // whole level is one tile, which is the answer and not an overflow.
-        let stride = VertexLevels::stride(level);
-        let span = shift + VertexLevels::stride_bits(level);
-        let tile_of = |key: u64| (key >> 32).checked_shr(span).unwrap_or(0);
-        let prefix = format!("{relation}{}", plan.level_prefix(level));
-        io.ensure_prefix(&prefix)?;
-        let url = format!("{prefix}{TILES_FILE}");
-        let mut writer = open_tiles(io, &url, Arc::clone(&schema))?;
-
-        let mut start = 0usize;
-        while start < keys.len() {
-            let tile = tile_of(keys[start]);
-            let mut end = start + 1;
-            while end < keys.len() && tile_of(keys[end]) == tile {
-                end += 1;
-            }
-            let (mut src, mut dst) = (Vec::new(), Vec::new());
-            let (mut sx, mut sy, mut dx, mut dy) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-            for &key in &keys[start..end] {
-                let s = (key >> 32) as u32;
-                let d = key as u32;
-                if u64::from(s) % stride != 0 && u64::from(d) % stride != 0 {
-                    continue;
-                }
-                // An endpoint outside its type's table is a dangling one, which
-                // this pass reports elsewhere and does not draw: skipped rather
-                // than placed at the origin, because a line to (0, 0) is a lie
-                // about where a vertex is.
-                let (Some(&(x0, y0)), Some(&(x1, y1))) =
-                    (src_placed.get(s as usize), dst_placed.get(d as usize))
-                else {
-                    continue;
-                };
-                src.push(s);
-                dst.push(d);
-                sx.push(x0);
-                sy.push(y0);
-                dx.push(x1);
-                dy.push(y1);
-            }
-            if !src.is_empty() {
-                let batch = RecordBatch::try_new(
-                    Arc::clone(&schema),
-                    vec![
-                        Arc::new(UInt32Array::from(src)) as ArrayRef,
-                        Arc::new(UInt32Array::from(dst)),
-                        Arc::new(Float32Array::from(sx)),
-                        Arc::new(Float32Array::from(sy)),
-                        Arc::new(Float32Array::from(dx)),
-                        Arc::new(Float32Array::from(dy)),
-                    ],
-                )
-                .map_err(arrow_err(&url))?;
-                writer.tile(&batch).map_err(write_err(&url))?;
-            }
-            start = end;
-        }
-        writer.finish().map_err(write_err(&url))?;
-    }
-    Ok(())
 }
 
 /// The target-ordered half of the relation a source-ordered one belongs to —

@@ -523,7 +523,6 @@ fn enrich_written_layout(
                     ordered_by,
                     batches,
                     tile_prefix: format!("{}{dir}/", relation(e)),
-                    levels_prefix: relation(e),
                 },
             )
         })

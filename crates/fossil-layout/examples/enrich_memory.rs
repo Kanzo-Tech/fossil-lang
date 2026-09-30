@@ -176,7 +176,6 @@ fn main() {
         ordered_by,
         batches,
         tile_prefix: format!("{}{}", path(&root.join(dir)), std::path::MAIN_SEPARATOR),
-        levels_prefix: format!("{}{}", path(&root), std::path::MAIN_SEPARATOR),
     });
 
     fossil_layout::layout::enrich_layout(std::slice::from_ref(&target), &adjacencies)

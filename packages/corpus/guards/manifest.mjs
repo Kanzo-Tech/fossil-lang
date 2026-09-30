@@ -52,11 +52,6 @@ const REFUSED = [
  * shape is decided by the first child line instead of assumed: `- ` makes it a sequence, `  k: v`
  * makes it a map, and anything deeper is skipped.
  *
- * It read one level deeper than that for a while, for a sequence of SCALARS nested in a mapping —
- * `levels:`'s list of level numbers. There is no such shape left: a level is a `projections:` entry
- * like the payload beside it, and its `scale` is a scalar in a mapping in a sequence, which is the
- * grammar this had before the pyramid arrived.
- *
  * The failure this replaces was silent and worth naming: `index:` scanned to `[]`, which is truthy,
  * carries no `prefix`, and made every reader conclude the corpus declares no index. A manifest that
  * says something the scanner cannot see reads exactly like one that does not say it.

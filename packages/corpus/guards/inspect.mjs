@@ -267,19 +267,16 @@ export const partOf = (entry) =>
  * The projections a manifest declares, resolved against the type's own prefix.
  *
  * **One function for a vertex type and a relation**, because there is one list. A corpus is an
- * order, a cut and some projections of that sequence: the payload is the entry at `scale: 1`, a
- * level is the entry at `scale: 4^k`, an adjacency is a `scale: 1` entry with an `aligned_by`, and
- * a level of a relation is a `scale: 4^k` entry with one. The four vocabularies this replaced —
- * `property_groups`, a vertex `levels:`, `adj_lists` and an edge `levels:` — were one rule written
- * four times.
+ * order, a cut and some projections of that sequence: the payload is the entry at `scale: 1`, and
+ * an adjacency is a `scale: 1` entry with an `aligned_by`. `GraphAr`'s two vocabularies for them —
+ * `property_groups` and `adj_lists` — were one rule written twice.
  *
- * **The scale is read and never derived.** `4 ** level` used to appear in every guard that touched
- * a pyramid; the manifest carries the product now, so no checker here spells the exponent.
+ * **The scale is read and never derived.** A reader shifts by its trailing zeros, and no checker
+ * here spells an exponent.
  *
  * An entry that names no `path` is not a projection — it declares tiles nobody can address, which
- * `declared-tiling` reports. An entry whose files are not on disk comes back with an empty `files`,
- * which `a-level-is-the-predicate` reports. Neither throws: an inspector that did would decide
- * which violation a reader hears about first.
+ * `declared-tiling` reports. An entry whose files are not on disk comes back with an empty `files`.
+ * Neither throws: an inspector that did would decide which violation a reader hears about first.
  */
 function projectionsOf(info, root, prefix) {
   const declared = Array.isArray(info.projections) ? info.projections : [];
@@ -375,9 +372,6 @@ export function inspect(root) {
       /**
        * Every projection this type declares, the payload included — see {@link projectionsOf}.
        *
-       * A type declaring only its payload is a legal corpus and the common one: a level is the
-       * predicate `dense_id % scale == 0` over the payload, so every scale is answerable with or
-       * without a file, and a written one changes a byte count rather than an answer.
        */
       projections: projectionsOf(info, root, prefix),
     };
@@ -423,9 +417,7 @@ export function inspect(root) {
       dstChunkSize: BigInt(info.dst_chunk_size ?? 0),
       /**
        * Every projection this relation declares — see {@link projectionsOf}. The two adjacencies
-       * are its `scale: 1` entries, and a level of it is the edges incident to a level-`scale`
-       * vertex, carrying both endpoints' coordinates so a coarse camera draws the line without
-       * opening the vertex payload.
+       * are its `scale: 1` entries.
        */
       projections,
       bySource: orientation("src", "by_source", "src_dense"),

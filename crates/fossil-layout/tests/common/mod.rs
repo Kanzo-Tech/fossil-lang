@@ -233,7 +233,6 @@ impl Fixture {
             ordered_by,
             batches,
             tile_prefix: prefix(&self.root.join(dir)),
-            levels_prefix: prefix(&self.root),
         })
         .collect()
     }

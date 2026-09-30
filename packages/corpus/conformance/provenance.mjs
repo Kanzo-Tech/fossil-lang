@@ -1,8 +1,8 @@
 /**
  * Where `conformance/corpus/` came from, executed.
  *
- * The corpus every address in `expected.json` resolves against is checked in — twenty-six Parquet
- * files and three manifests. Nothing said how it was made, and the cost of that showed up as a
+ * The corpus every address in `expected.json` resolves against is checked in — twenty Parquet
+ * files, three manifests and a tile manifest. Nothing said how it was made, and the cost of that showed up as a
  * diagnosis: regenerating with `guards/fixture.mjs`'s defaults gives **600** edges against the
  * **596** the manifest declares, which reads exactly like a fixture that has drifted from its
  * generator. It has not. `clusters` decides how many chords the ring carries and the default is
@@ -47,14 +47,8 @@ const CORPUS = join(HERE, "corpus");
  * is five tiles of 64 with the last deliberately partial (44 rows), because a corpus whose count
  * divides its tile size never exercises a tail; `chunkSize: 64` is small enough to read by hand and
  * a power of two, which is what the conventions require and 4,096 is only the measured default of.
- *
- * `levels: [1, 2]` is what `fossil_sinks::manifest::VertexLevels::planned(300, 64)` answers, and it
- * is TOLD to the fixture rather than derived by it — which levels exist is a policy with one
- * implementation, and a second copy of it here is the drift the fixture's header refuses. Without
- * it `a-level-is-the-predicate` ran over a corpus with no pyramid, which is a guard passing over
- * nothing.
  */
-export const RECIPE = { count: 300, clusters: 16, layout: "files", chunkSize: 64, levels: [1, 2] };
+export const RECIPE = { count: 300, clusters: 16, layout: "files", chunkSize: 64 };
 
 const failures = [];
 const notes = [];
@@ -96,11 +90,10 @@ try {
   const regenerated = tree(written.dir);
 
   // Non-vacuity first: two empty trees agree about everything, and so do two trees this failed to
-  // read. The committed corpus is 4 manifests and 26 payloads — five vertex tiles, five index,
-  // five of each adjacency orientation, and the pyramid's three vertex tiles and three edge tiles
-  // — and the numbers are here so a walker that stopped descending is a failure rather than a
-  // smaller success.
-  if (committed.manifests.length < 4 || committed.payloads.length < 26) {
+  // read. The committed corpus is 4 manifests and 20 payloads — five vertex tiles, five index and
+  // five of each adjacency orientation — and the numbers are here so a walker that stopped
+  // descending is a failure rather than a smaller success.
+  if (committed.manifests.length < 4 || committed.payloads.length < 20) {
     fail(
       `non-vacuity: the committed corpus reads as ${committed.manifests.length} manifest(s) and ` +
         `${committed.payloads.length} payload(s), so the comparison below is over almost nothing`,

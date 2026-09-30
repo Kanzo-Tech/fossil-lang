@@ -16,12 +16,9 @@
 //! The only way to catch it is to evaluate the definition against the level
 //! below and diff.
 //!
-//! So this is `levels.rs`'s standard applied one artefact along:
-//! `a_level_file_holds_exactly_what_the_level_predicate_selects` compares a
-//! written level against the predicate that defines it rather than trusting the
-//! writer, and these compare a cell against the aggregation that defines it.
-//! The comparison is **symmetric difference in both directions** for the same
-//! reason it is there: one direction passes over an aggregate that is a strict
+//! So these compare a cell against the aggregation that defines it rather
+//! than trusting the writer. The comparison is **symmetric difference in both
+//! directions**: one direction passes over an aggregate that is a strict
 //! subset of the truth, and equality of counts passes over an aggregate that
 //! has the right number of the wrong members. Each obligation below is
 //! therefore run twice — green against the truth, and **red against a

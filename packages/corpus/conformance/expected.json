@@ -12,7 +12,7 @@
       "name": "corpus",
       "root": "corpus",
       "on_disk": true,
-      "about": "300 vertices in 5 tiles of 64, both orientations tiled, and a written pyramid of the two levels `fossil_sinks::manifest::VertexLevels::planned(300, 64)` answers. Passes every guard — `node guards/check.mjs conformance/corpus` — so every address below names a file that is there, the level tiles included: this is the only case whose pyramid is BYTES rather than a manifest, so it is the one where a wrongly composed level URL is a 404 a reader can be shown rather than a string a reader can be told.",
+      "about": "300 vertices in 5 tiles of 64, both orientations tiled. Passes every guard — `node guards/check.mjs conformance/corpus` — so every address below names a file that is there: this is the one case whose addresses are BYTES rather than a manifest, so a wrongly composed URL is a 404 a reader can be shown rather than a string a reader can be told.",
       "container": "files",
       "types": [
         {
@@ -113,84 +113,30 @@
       ],
       "projections": [
         {
-          "about": "The type as its projections, ON DISK. `scale: 1` is the payload and it is in this list rather than beside it — that is the claim the whole vocabulary rests on. `rows` is `count / scale` and a projection's address is the payload's own shift of 6 plus `log2(scale)` — so scale 4 is a shift of 8 and scale 16 a shift of 10, and both are wider than the payload's because a coarser tile stands for that many times as many ids. No reader here computes an exponent: the manifest carries the product. Scale 16 holding 19 rows in one tile is why `VertexLevels::planned` stops there — one tile is already one range request.",
+          "about": "The type as its projections, ON DISK: one, the payload, at `scale: 1` — in this list rather than beside it, which is the claim the whole vocabulary rests on. A coarse zoom is not a projection of this sequence; it is the cell tree, a third artefact whose rows are synthetic, and this corpus declares none. A scale the document does not declare is refused by naming the ones it does.",
           "type": "Person",
-          "scales": [1, 4, 16],
-          "sizes": [
-            { "scale": 1, "rows": "300", "tiles": "5" },
-            { "scale": 4, "rows": "75", "tiles": "2" },
-            { "scale": 16, "rows": "19", "tiles": "1" }
-          ],
-          "tile_of": [
-            { "scale": 1, "dense_id": "64", "tile": "1" },
-            { "scale": 4, "dense_id": "0", "tile": "0" },
-            { "scale": 4, "dense_id": "255", "tile": "0" },
-            { "scale": 4, "dense_id": "256", "tile": "1" },
-            { "scale": 4, "dense_id": "299", "tile": "1" },
-            { "scale": 16, "dense_id": "0", "tile": "0" },
-            { "scale": 16, "dense_id": "299", "tile": "0" }
-          ],
-          "addresses": [
-            { "scale": 1, "tile": 3, "path": "vertex/Person/chunk3.parquet" },
-            { "scale": 4, "tile": 0, "path": "vertex/Person/l1/chunk0.parquet" },
-            { "scale": 4, "tile": 1, "path": "vertex/Person/l1/chunk1.parquet" },
-            { "scale": 16, "tile": 0, "path": "vertex/Person/l2/chunk0.parquet" }
-          ],
-          "files": [
-            {
-              "scale": 4,
-              "paths": ["vertex/Person/l1/chunk0.parquet", "vertex/Person/l1/chunk1.parquet"]
-            },
-            { "scale": 16, "paths": ["vertex/Person/l2/chunk0.parquet"] }
-          ],
-          "refused": [
-            {
-              "about": "Coarser than anything this corpus wrote, and still answerable off the payload by the predicate — which is what the message has to say rather than 404ing a camera that asked to zoom out one more step.",
-              "scale": 64,
-              "message": "at scales 1, 4, 16 and not 64"
-            }
-          ]
+          "scales": [1],
+          "sizes": [{ "scale": 1, "rows": "300", "tiles": "5" }],
+          "tile_of": [{ "scale": 1, "dense_id": "64", "tile": "1" }],
+          "addresses": [{ "scale": 1, "tile": 3, "path": "vertex/Person/chunk3.parquet" }],
+          "files": [],
+          "refused": [{ "scale": 4, "message": "at scales 1 and not 4" }]
         },
         {
-          "about": "The relation, in the same vocabulary. The adjacency is the projection at `scale: 1` — which is why its files are `chunk{k}` like every other projection rather than a stem of their own — and a level of the relation is a coarser entry beside it, always source-aligned because a level of a relation is which vertices are in it. `rows` and `tiles` are the SOURCE type's at that scale and never `edge_count`: a tile here is a range of `src_dense`, and the relation's own row count says nothing about how many of those ranges there are.",
+          "about": "The relation, in the same vocabulary. The adjacency is the projection at `scale: 1` — which is why its files are `chunk{k}` like the payload's rather than a stem of their own. `rows` and `tiles` are the SOURCE type's and never `edge_count`: a tile here is a range of `src_dense`, and the relation's own row count says nothing about how many of those ranges there are. The refusal names the adjacency and the payload: those are the bytes that answer the relation.",
           "edge_type": "knows",
           "direction": "src",
-          "scales": [1, 4, 16],
-          "sizes": [
-            { "scale": 1, "rows": "300", "tiles": "5" },
-            { "scale": 4, "rows": "75", "tiles": "2" },
-            { "scale": 16, "rows": "19", "tiles": "1" }
-          ],
-          "tile_of": [
-            { "scale": 1, "dense_id": "64", "tile": "1" },
-            { "scale": 4, "dense_id": "256", "tile": "1" },
-            { "scale": 16, "dense_id": "299", "tile": "0" }
-          ],
+          "scales": [1],
+          "sizes": [{ "scale": 1, "rows": "300", "tiles": "5" }],
+          "tile_of": [{ "scale": 1, "dense_id": "64", "tile": "1" }],
           "addresses": [
-            { "scale": 1, "tile": 2, "path": "edge/Person_knows_Person/by_source/chunk2.parquet" },
-            { "scale": 4, "tile": 1, "path": "edge/Person_knows_Person/l1/chunk1.parquet" },
-            { "scale": 16, "tile": 0, "path": "edge/Person_knows_Person/l2/chunk0.parquet" }
+            { "scale": 1, "tile": 2, "path": "edge/Person_knows_Person/by_source/chunk2.parquet" }
           ],
-          "files": [
-            {
-              "scale": 4,
-              "paths": [
-                "edge/Person_knows_Person/l1/chunk0.parquet",
-                "edge/Person_knows_Person/l1/chunk1.parquet"
-              ]
-            },
-            { "scale": 16, "paths": ["edge/Person_knows_Person/l2/chunk0.parquet"] }
-          ],
-          "refused": [
-            {
-              "about": "The refusal names the ADJACENCY and the payload, not the vertex predicate: those are the bytes that answer an unwritten relation level, and a reader handed the wrong sentence debugs the wrong file.",
-              "scale": 64,
-              "message": "at scales 1, 4, 16 and not 64 aligned by src"
-            }
-          ]
+          "files": [],
+          "refused": [{ "scale": 4, "message": "at scales 1 and not 4 aligned by src" }]
         },
         {
-          "about": "The target orientation is one projection and no more: a level of a relation is source-aligned, so the CSC half stops at the adjacency. A reader that mirrored the pyramid onto it would compose `l1/` under a `by_target` that never had one.",
+          "about": "The target orientation, likewise one projection.",
           "edge_type": "knows",
           "direction": "dst",
           "scales": [1],
@@ -456,7 +402,7 @@
       "name": "levels",
       "root": "manifests/levels",
       "on_disk": false,
-      "about": "A corpus that declares a WRITTEN PYRAMID. Level `k` is `dense_id % 4^k == 0` over the payload — a predicate, answerable by any reader with or without a file — and `levels:` says which of those levels a writer spent bytes on. That is the one thing here a reader cannot derive: re-deriving it from `vertex_count` and `chunk_size` means reimplementing the writer's plan, and 404ing the day the plan moves. The numbers are the bench corpus's, and they are exactly what `fossil_sinks::manifest::VertexLevels::planned(1000000, 4096)` answers: a million vertices at 4,096 to a tile is 245 payload tiles, the coarsest level that fits in ONE tile is 4, and the pyramid is complete from 1 — 62 + 16 + 4 + 1 = 83 tiles, a third of the payload whatever the corpus is. Addressing them needs nothing new: level `k`'s tile `j` covers `[j·4096·4^k, (j+1)·4096·4^k)`, which is the payload's own shift plus `2k`. The container spells the filename exactly as it spells the payload's, which the `rowgroups` case pins for the other spelling.",
+      "about": "A document that declares projections at coarser scales — the shape the retired level pyramid had, and one no writer of this repository emits: its coarse zooms are the cell tree (`/docs/design/backend`). The format still declares `scale`, so the arithmetic a reader spends on one is pinned here, as a manifest with no bytes: a projection at scale `s` holds `ceil(count / s)` rows, and its tile `j` covers `[j·4096·s, (j+1)·4096·s)`, the payload's own shift plus `log2(s)`. The container spells the filename exactly as it spells the payload's.",
       "container": "files",
       "types": [
         {
@@ -500,7 +446,7 @@
       "refused": [],
       "projections": [
         {
-          "about": "The pyramid, as a reader must compose it — and there is no second `chunk_size` in it. The cut does not change with the scale: a projection is a run of `chunk_size` rows of its own sequence, so `rows` is `vertex_count / scale` and `tiles` is that over the type's own tile size. The four levels are 62 + 16 + 4 + 1 = 83 tiles against the payload's 245, which is the series `1/4 + 1/16 + …` and is the pyramid's whole cost at any corpus size.",
+          "about": "The coarser projections, as a reader must compose them — and there is no second `chunk_size` in them. The cut does not change with the scale: a projection is a run of `chunk_size` rows of its own sequence, so `rows` is `vertex_count / scale` and `tiles` is that over the type's own tile size.",
           "type": "Person",
           "scales": [1, 4, 16, 64, 256],
           "sizes": [
@@ -531,7 +477,7 @@
           "files": [{ "scale": 256, "paths": ["vertex/Person/l4/chunk0.parquet"] }],
           "refused": [
             {
-              "about": "A projection nobody wrote is not addressable and is still ANSWERABLE — by the predicate over the payload, which is what the message has to say. A reader that composed `l5/chunk0.parquet` here would 404 against a corpus that can draw that level perfectly well. 1024 is coarser than the coarsest level `planned` writes, which is the level a writer stops at because one tile is already one request.",
+              "about": "A scale the document does not declare is not addressable, and the refusal names the ones it does: a reader that composed `l5/chunk0.parquet` here would 404.",
               "scale": 1024,
               "message": "at scales 1, 4, 16, 64, 256 and not 1024"
             }

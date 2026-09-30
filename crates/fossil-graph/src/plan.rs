@@ -55,9 +55,8 @@ pub const GRAPH_INFO_PATH: &str = "graph.graph.yml";
 /// The payload file of a row-group container: one per set, its row groups the tiles.
 const TILES_FILE: &str = "tiles.parquet";
 
-/// The filename stem of **every projection's** tiles under `files` — the payload,
-/// a level of it, an adjacency, a level of that. One spelling, because they are
-/// one kind of thing.
+/// The filename stem of **every projection's** tiles under `files` — the payload
+/// and each adjacency. One spelling, because they are one kind of thing.
 const PROJECTION_STEM: &str = "chunk";
 
 /// The filename stem of the identity index's tiles, and the one place a corpus
@@ -227,40 +226,31 @@ impl IndexAddress {
 /// **One projection of a corpus's sequence, resolved into an address.**
 ///
 /// A corpus is an order, a cut, and some projections of that sequence, and every
-/// artefact of one except [`IndexAddress`] is one of these: the payload at
-/// `scale: 1`, a vertex level at `scale: 4^k`, an orientation of an adjacency at
-/// `scale: 1` with a [`Self::direction`], an edge level at `scale: 4^k` with
-/// one. **The payload is not a special case** — it is the projection whose scale
+/// artefact of one except [`IndexAddress`] and the cell tree is one of these:
+/// the payload at `scale: 1`, and an orientation of an adjacency at `scale: 1`
+/// with a [`Self::direction`]. **The payload is not a special case** — it is the projection whose scale
 /// is one, and this type does not know which of its instances is which.
 ///
 /// # It reads the scale and never the exponent
 ///
 /// Tile `j` covers `[j · chunk_size · scale, (j+1) · chunk_size · scale)`, so
 /// [`Self::shift`] is the type's own plus `log2(scale)` and [`Self::rows`] is
-/// `count.div_ceil(scale)`. There is no `4` and no `2k` on this side of the
-/// document: `fossil_sinks::manifest::VertexLevels` is where a WRITER turns a
-/// level into a scale, and what crosses into the manifest is the product. That
-/// is the whole reason `scale` is the declared field rather than the level.
+/// `count.div_ceil(scale)`. The writer declares `scale: 1` for everything it
+/// writes; a document declaring a coarser one is addressed by the same
+/// arithmetic, which `packages/corpus/conformance/expected.json` pins.
 ///
 /// # What is declared, and what is not
 ///
-/// The **scale and the path**, and neither is derivable. Which projections a
-/// writer spent bytes on is a policy — a reader re-deriving the set from
-/// `vertex_count` and `chunk_size` would reimplement the writer's plan and 404
-/// the day the plan moved — and the path is the one part of a tile's URL nothing
-/// computes, there being no directory to list over HTTP.
-///
-/// A projection nobody wrote is still ANSWERABLE: a level is the predicate
-/// `dense_id % scale == 0` over the payload, and a written `l{k}/` is a cache of
-/// it. So a corpus declaring one projection draws the identical picture as one
-/// declaring five, and only reads more.
+/// The **scale and the path**, and neither is derivable: the path is the one
+/// part of a tile's URL nothing computes, there being no directory to list over
+/// HTTP.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectionAddress {
     /// Where its tiles are, resolved against the corpus base and with a trailing
     /// separator. The type's own prefix joined to the manifest's `path`.
     pub prefix: String,
     /// **How many rows of the underlying sequence one row here stands for** —
-    /// `1` for a payload or an adjacency, `4^k` for level `k`.
+    /// `1` for a payload or an adjacency.
     pub scale: u64,
     /// Which endpoint column addresses these tiles, on an edge projection.
     /// `None` on a vertex one, whose address is its own `dense_id`.
@@ -364,12 +354,7 @@ pub struct VertexAddress {
     /// whose absence makes a question unanswerable.
     pub index: Option<IndexAddress>,
     /// **Every projection of this type**, in manifest order: the payload at
-    /// `scale: 1` and one per written level. See [`ProjectionAddress`].
-    ///
-    /// A type declaring only its payload is a legal corpus and the most legal of
-    /// them: a level is a predicate, so every scale is answerable with or
-    /// without a file for it, and what a written one changes is which bytes
-    /// answer it.
+    /// `scale: 1`. See [`ProjectionAddress`].
     pub projections: Vec<ProjectionAddress>,
     /// **The zooms below the payload** — the cell tree, when the document
     /// declares one. See [`CellsAddress`].
@@ -410,7 +395,7 @@ impl VertexAddress {
     }
 
     /// One projection of this type by its scale, or `None` when the manifest
-    /// wrote none at that scale — which is a cost and not a refusal.
+    /// declares none at that scale.
     #[must_use]
     pub fn projection(&self, scale: u64) -> Option<&ProjectionAddress> {
         self.projections.iter().find(|p| p.scale == scale)
@@ -423,14 +408,13 @@ impl VertexAddress {
 
     /// Every file of the projection at `scale`, in order and distinct.
     ///
-    /// Refuses a scale nobody wrote by naming the ones that were, because a URL
-    /// under an unwritten `l{k}/` is the one failure a reader cannot tell from
-    /// an empty level — and the predicate over the payload answers it anyway.
+    /// Refuses a scale the document does not declare by naming the ones it
+    /// does, because a URL under a path nobody wrote is a 404 a reader cannot
+    /// tell from an empty set.
     pub fn projection_files(&self, scale: u64) -> Result<Vec<String>> {
         let projection = self.projection(scale).ok_or_else(|| {
             invalid(format!(
-                "{} writes {} at scales {} and not {scale}, so its files are not addressable — \
-                 the predicate over the payload is what answers that scale",
+                "{} writes {} at scales {} and not {scale}, so its files are not addressable",
                 self.path,
                 self.vertex_type,
                 written_scales(&self.projections)
@@ -471,13 +455,8 @@ pub struct EdgeAddress {
     /// `path`, is not here.
     pub directions: Vec<Direction>,
     /// **Every projection of this relation**: one per orientation at `scale: 1`
-    /// — the adjacency — and one per written level, source-aligned and carrying
-    /// both endpoints' coordinates.
-    ///
-    /// The same list a vertex type has, told apart by
-    /// [`ProjectionAddress::direction`]. A relation declaring only its
-    /// adjacencies is a corpus and not a gap: a reader draws the same edges out
-    /// of the adjacency and the payload, and only reads more.
+    /// — the adjacency. The same list a vertex type has, told apart by
+    /// [`ProjectionAddress::direction`].
     pub projections: Vec<ProjectionAddress>,
 }
 
@@ -489,9 +468,7 @@ impl EdgeAddress {
         self.projection(1, direction)
     }
 
-    /// One projection of this relation by scale and orientation. A level is
-    /// always source-aligned: a level of a relation is *which vertices are in
-    /// it*, and the source type's own pyramid is what says which.
+    /// One projection of this relation by scale and orientation.
     #[must_use]
     pub fn projection(&self, scale: u64, direction: Direction) -> Option<&ProjectionAddress> {
         self.projections
@@ -502,14 +479,13 @@ impl EdgeAddress {
     /// Every file of the projection at `scale` in `direction`, in order and
     /// distinct.
     ///
-    /// Refuses a scale nobody wrote by naming the ones that were: the adjacency
-    /// and the payload are what answer it, and a URL under an unwritten `l{k}/`
-    /// is the one failure a reader cannot tell from an empty level.
+    /// Refuses a scale the document does not declare by naming the ones it
+    /// does.
     pub fn projection_files(&self, scale: u64, direction: Direction) -> Result<Vec<String>> {
         let projection = self.projection(scale, direction).ok_or_else(|| {
             invalid(format!(
                 "{} writes {} at scales {} and not {scale} aligned by {}, so its files are not \
-                 addressable — the adjacency and the payload are what answer that scale",
+                 addressable",
                 self.prefix,
                 self.edge_type,
                 written_scales(
@@ -610,9 +586,7 @@ pub struct Drawing {
     /// label could not be attributed to either.
     pub relations: Vec<usize>,
     /// The relations incident to this type that the picture leaves out, and why.
-    /// Source-aligned, because the drawing read is: a level of a relation is
-    /// which vertices are in it, and the source type's pyramid is what says
-    /// which.
+    /// Source-aligned, because the drawing read is.
     pub undrawn: Vec<Gap>,
 }
 
@@ -658,9 +632,9 @@ impl ReadPlan {
     }
 
     /// **Every file the corpus can address**, distinct and in declaration
-    /// order: each vertex type's projections (the payload and every written
-    /// level) and its identity index, then each relation's projections (both
-    /// orientations of the adjacency, and its written levels).
+    /// order: each vertex type's projections (the payload) and its identity
+    /// index, then each relation's projections (both orientations of the
+    /// adjacency).
     ///
     /// It is the list a host that must grant access file by file — signing
     /// URLs, registering them with an engine — hands over, so it never composes
@@ -1177,8 +1151,6 @@ fn declared_projections(path: &str, doc: &Value) -> Result<Vec<DeclaredProjectio
 ///
 /// The whole of the arithmetic, and there is no exponent in it: the shift is the
 /// type's own plus `log2(scale)` and the rows are the count divided by `scale`.
-/// `fossil_sinks::manifest::VertexLevels` is where a writer turns a level into a
-/// scale; what reaches this side is the product.
 fn resolve_projection(
     type_prefix: &str,
     path: &str,
@@ -1302,11 +1274,10 @@ fn edge_address(
         )));
     }
 
-    // Every projection of this relation, adjacency and level alike: the aligned
-    // endpoint's cut and count are what address it, so an edge level is counted
-    // against the SOURCE type's `vertex_count` and never against `edge_count`.
-    // A level tile here is a range of `src_dense`, and the relation's own row
-    // count says nothing about how many of those ranges there are.
+    // Every projection of this relation: the aligned endpoint's cut and count
+    // are what address it, never `edge_count`. A tile here is a range of the
+    // aligned column, and the relation's own row count says nothing about how
+    // many of those ranges there are.
     let mut projections: Vec<ProjectionAddress> = Vec::new();
     for declared in declared_projections(path, doc)? {
         // An edge projection with no orientation names no column to filter on,

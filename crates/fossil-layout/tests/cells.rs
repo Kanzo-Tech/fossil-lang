@@ -193,7 +193,6 @@ fn targets<'a>(
         ordered_by,
         batches,
         tile_prefix: prefix(&root.join(dir)),
-        levels_prefix: prefix(root),
     };
     (
         vec![VertexLayoutTarget {

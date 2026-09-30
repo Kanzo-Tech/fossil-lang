@@ -16,14 +16,6 @@ projections:
   - name: postcode
     data_type: string
     is_primary: false
-- path: l1/
-  scale: 4
-  file_type: parquet
-  properties: []
-- path: l2/
-  scale: 16
-  file_type: parquet
-  properties: []
 index:
   prefix: index/
   ordered_by: subject
