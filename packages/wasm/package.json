@@ -5,7 +5,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kanzo-tech/fossil.git",
+    "url": "git+https://github.com/Kanzo-Tech/fossil-lang.git",
     "directory": "packages/wasm"
   },
   "publishConfig": {
