@@ -34,6 +34,9 @@ pub mod descriptor;
 /// The run a host drives: one compiled program, its documents, its sources,
 /// and the corpus it writes.
 pub mod executor;
+/// What a run's operators may reserve, and the compaction that keeps
+/// `DataFusion`'s count of it true.
+pub mod memory;
 /// The relational operators executed: the walk from an emit op back to the
 /// sources it reads. Its own module doc lists which operators run here.
 pub mod plan;
@@ -54,7 +57,7 @@ pub mod write;
 pub use descriptor::output_descriptor;
 /// The executor a host drives. Named at the crate root because it is the
 /// crate's answer, not a detail of the module it is written in.
-pub use executor::Executor;
+pub use executor::{Executor, RunError};
 /// Re-exported so callers name the program-resident output descriptor that
 /// [`execute_graph`] / [`provider_bindings`] take: it is passed as an argument,
 /// never read through `Db::system()`.

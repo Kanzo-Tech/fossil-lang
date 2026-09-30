@@ -249,7 +249,7 @@ async fn a_destination_no_store_covers_is_refused() {
         .execute(&mut storage, "s3://elsewhere/run-2/")
         .await
         .expect_err("refused");
-    assert!(refused.contains("no store covers"), "{refused}");
+    assert!(refused.to_string().contains("no store covers"), "{refused}");
 }
 
 #[tokio::test]

@@ -138,12 +138,13 @@ impl FossilExecutor {
     ///
     /// # Errors
     /// A JS `Error` when the host vends no single prefix to write under, or the
-    /// run fails.
+    /// run fails — named `OverBudget` when it needed more memory than the
+    /// executor's budget, which is raised before anything is written.
     // The shared borrow is held across the run on purpose: it is what makes a
     // `registerDocument` issued mid-run fail instead of changing the program
     // under it.
     #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
-    pub async fn run(&self, host: JsValue, job: String) -> Result<JsValue, JsError> {
+    pub async fn run(&self, host: JsValue, job: String) -> Result<JsValue, JsValue> {
         let mut storage = Storage::new(Arc::new(JsHost::new(host)));
         let scope = Scope::Job(job);
         let dest = match storage.grant(scope.clone(), Access::Write).await {
@@ -152,15 +153,16 @@ impl FossilExecutor {
                 return Err(JsError::new(&format!(
                     "the host vended {} write credentials for {scope}; a run writes under exactly one prefix",
                     prefixes.len()
-                )));
+                ))
+                .into());
             }
-            Err(e) => return Err(JsError::new(&e.to_string())),
+            Err(e) => return Err(JsError::new(&e.to_string()).into()),
         };
         let exec = self.borrow()?;
         let report = exec
             .execute(&mut storage, &dest)
             .await
-            .map_err(|e| JsError::new(&e))?;
+            .map_err(|e| run_error(&e))?;
         Ok(serde_wasm_bindgen::to_value(&report)?)
     }
 
@@ -170,10 +172,10 @@ impl FossilExecutor {
     ///
     /// # Errors
     /// A JS `Error` when `sources` is not an object of `Uint8Array`s, or the run
-    /// fails.
+    /// fails — named `OverBudget` as [`Self::run`]'s is.
     #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
     #[wasm_bindgen(js_name = runInMemory)]
-    pub async fn run_in_memory(&self, sources: JsValue, dest: String) -> Result<JsValue, JsError> {
+    pub async fn run_in_memory(&self, sources: JsValue, dest: String) -> Result<JsValue, JsValue> {
         let dest = format!("{}/", dest.trim_end_matches('/'));
         let mut storage = Storage::new(Arc::new(NoHost));
         let mut held: HashMap<String, Arc<InMemory>> = HashMap::new();
@@ -221,7 +223,7 @@ impl FossilExecutor {
         let report = exec
             .execute(&mut storage, &dest)
             .await
-            .map_err(|e| JsError::new(&e))?;
+            .map_err(|e| run_error(&e))?;
 
         let key = Url::parse(&dest)
             .map_err(|e| JsError::new(&e.to_string()))?
@@ -256,6 +258,17 @@ impl FossilExecutor {
             .map_err(|e| JsError::new(&e))?;
         Ok(result.into())
     }
+}
+
+/// A failed run as a JS `Error`. One that needed more memory than the budget
+/// is named `OverBudget`, so a host can tell it from a program's own failure
+/// without reading the message.
+fn run_error(e: &fossil_df::RunError) -> JsValue {
+    let error = js_sys::Error::new(&e.to_string());
+    if matches!(e, fossil_df::RunError::OverBudget(_)) {
+        error.set_name("OverBudget");
+    }
+    error.into()
 }
 
 /// The host of a run with no storage: it has no connections and vends nothing,

@@ -39,7 +39,26 @@ use fossil_sinks::manifest::MANIFEST_FILE;
 use fossil_storage::{Access, Scope, Storage};
 use url::Url;
 
+use crate::memory::{BUDGET, Budget, Refusal};
 use crate::{RunReport, SourceFormat};
+
+/// Why a run wrote no corpus.
+#[derive(Debug, thiserror::Error)]
+pub enum RunError {
+    /// An operator asked for more than the run's budget had left. Raised while
+    /// the graph executes, so no byte of the corpus was written.
+    #[error("{0}")]
+    OverBudget(Refusal),
+    /// Anything else, as a message for the host.
+    #[error("{0}")]
+    Failed(String),
+}
+
+impl From<String> for RunError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
 
 /// Minimal [`System`] for the executor host. The executor reads sources through
 /// the object-store / provider seams and documents through the registry, never
@@ -159,13 +178,16 @@ impl Executor {
     /// execute the graph, and [`crate::write()`] it.
     ///
     /// # Errors
-    /// A source or the destination no store covers, `DataFusion` execution,
-    /// the layout, Parquet encode, or a write — each as a message for the host.
-    pub async fn execute(&self, storage: &mut Storage, dest: &str) -> Result<RunReport, String> {
+    /// [`RunError::OverBudget`] when an operator asked for more than the run's
+    /// [`BUDGET`](crate::memory::BUDGET) had left, before anything is written;
+    /// otherwise a source or the destination no store covers, `DataFusion`
+    /// execution, the layout, Parquet encode, or a write — each as a message
+    /// for the host.
+    pub async fn execute(&self, storage: &mut Storage, dest: &str) -> Result<RunReport, RunError> {
         let (db, file, connections) = (&self.db, self.file, &self.connections);
         let descriptor = self.descriptor()?;
         if !dest.ends_with('/') || !storage.covers(&format!("{dest}{MANIFEST_FILE}")) {
-            return Err(format!("no store covers the destination {dest}"));
+            return Err(format!("no store covers the destination {dest}").into());
         }
 
         for source in crate::program_sources(db, file, &descriptor, connections) {
@@ -184,7 +206,10 @@ impl Executor {
 
         // No operator in any plan of this session spawns: the browser has no
         // Tokio runtime to spawn on. `session` says how, and what it cannot prove.
-        let ctx = crate::session::session();
+        // `budget` is kept to ask what it refused: an operator told no can fail
+        // with an error of its own — a sort, that it has no disk to spill to.
+        let budget = Arc::new(Budget::new(BUDGET));
+        let ctx = crate::session::session_within(Arc::clone(&budget));
         for (authority, store) in storage.stores() {
             let url = Url::parse(authority).map_err(|e| format!("{authority}: {e}"))?;
             ctx.register_object_store(&url, store);
@@ -193,7 +218,12 @@ impl Executor {
 
         let graph = crate::execute_graph(&ctx, db, file, &descriptor, connections)
             .await
-            .map_err(|e| format!("execute_graph: {e}"))?;
+            .map_err(|e| {
+                budget.refusal().map_or_else(
+                    || RunError::Failed(format!("execute_graph: {e}")),
+                    RunError::OverBudget,
+                )
+            })?;
         drop(ctx);
 
         let written = crate::write(&graph, storage, dest)

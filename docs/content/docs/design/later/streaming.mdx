@@ -8,7 +8,9 @@ description: A budget bounds the operators inside the pool; a stream bounds ever
 > this page is spelled against that commit. What brings it back: a `fossil/1` corpus that fails
 > the in-browser thresholds — open over 1.5 s, first paint over 3 s, or heap over 1.5 GB at a
 > million vertices over HTTP. A write that has to spill past RAM brings back a native host with
-> it.
+> it. What the wasm writer does in its place is refuse: a 2 GiB pool and no disk, and a run over it
+> stops before writing a byte — [three hosts](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no)
+> has the pool and its measured ceiling.
 
 "Efficient" is a comparison. **Larger than RAM is a guarantee**: exceeding the machine is a slower
 run, not a failed one, and the corpus that comes out is the same corpus. Two mechanisms produce it
