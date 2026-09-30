@@ -37,6 +37,6 @@
     "@fossil-lang/types": "workspace:*",
     "@fossil-lang/wasm": "workspace:*",
     "typescript": "^5.6.0",
-    "vitest": "^2.0.0"
+    "vitest": "^4.1.11"
   }
 }
