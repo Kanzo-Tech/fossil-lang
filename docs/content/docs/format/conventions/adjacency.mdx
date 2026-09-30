@@ -3,10 +3,10 @@ title: Adjacency
 description: A relation is one table of src and dst, global ids, sorted by (src, dst) — the CSR a graph algorithm wants, read as it lies. There is no second copy sorted by destination.
 ---
 
-Every relation is **one table**: `edge/<Src>_<label>_<Dst>.parquet`, whose first two columns are
-`src` and `dst` — both `uint32`, both [global `dense_id`s](/docs/format/conventions/identity) — and
-whose remaining columns are the relation's properties in the order the manifest lists them. The rows
-are **sorted by `(src, dst)`**.
+Every relation is **one table**: `edge/<Src>_<label>_<Dst>.parquet`, whose columns are `src` and
+`dst` — both `uint32`, both [global `dense_id`s](/docs/format/conventions/identity) — and nothing
+else, because the language has no way to put a property on an edge; the manifest's `properties`
+lists those two. The rows are **sorted by `(src, dst)`**.
 
 ## Why the order is worth a convention
 
