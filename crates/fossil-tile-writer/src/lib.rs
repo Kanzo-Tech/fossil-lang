@@ -30,9 +30,8 @@ use parquet::file::properties::WriterProperties;
 /// One payload set as ONE Parquet whose row groups **are** its tiles: each
 /// [`Self::tile`] closes a row group, so the `k`th call is row group `k`.
 ///
-/// It is the other half of the property `fossil_df::files::batches_to_parquet`
-/// states: a tile is a row group either way, and what changes is whether the
-/// file boundary sits between them. Measured at five million in 1,221 tiles:
+/// The alternative is one Parquet per tile: a tile is a row group either way,
+/// and what changes is whether the file boundary sits between them. Measured at five million in 1,221 tiles:
 /// 5.6 range requests per window against 22.3, and a 496,373 B footer in one
 /// piece against 1,150,490 B in 1,221.
 ///

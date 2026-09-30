@@ -144,12 +144,7 @@ deny = [
         # recorded here rather than changed. `fossil-engine` was a second and is
         # gone: `fossil-cli` absorbed it.
         "fossil-cli",
-        # A parent by a DEV edge only, and it was a linker until the tile writer
-        # left `fossil_df::files`. `examples/compaction_pass.rs` is what keeps
-        # the name here: it measures the tiling against `batches_to_parquet`, the
-        # baseline encoder, and a bench's dependency is not the library's.
-        "fossil-layout",
-    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — compiling the engine to the browser asserts the opposite of a camera that is addressed rather than queried. `fossil-cli` reaches it through `fossil-df` and is recorded, not endorsed. `fossil-layout` was the other, for exactly two symbols — `files::TileWriter` and `files::batches_to_parquet`, neither of which is a DataFusion type — and this entry said retiring the edge meant moving `fossil_df::files` below the executor, a change to two crates it does not own. That change was made: `TileWriter` is `fossil-tile-writer` now, a leaf over `arrow` and `parquet`, and the layout pass reaches `fossil-df` on a dev edge alone for the bench's baseline encoder. `cargo tree -p fossil-layout -e normal -i datafusion` prints nothing. `crates/xtask/tests/engine_reach.rs` is what made the edge visible; it has no opinion about it." },
+    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — compiling the engine to the browser asserts the opposite of a camera that is addressed rather than queried. `fossil-cli` reaches it through `fossil-df` and is recorded, not endorsed. `fossil-layout` was the other, for exactly two symbols — `files::TileWriter` and `files::batches_to_parquet`, neither of which is a DataFusion type — and this entry said retiring the edge meant moving `fossil_df::files` below the executor, a change to two crates it does not own. That change was made: `TileWriter` is `fossil-tile-writer` now, a leaf over `arrow` and `parquet`, and the dev edge the bench's baseline encoder kept went when the bench wrote its own. `cargo tree -p fossil-layout -i datafusion` prints nothing. `crates/xtask/tests/engine_reach.rs` is what made the edge visible; it has no opinion about it." },
 ]
 
 [sources]

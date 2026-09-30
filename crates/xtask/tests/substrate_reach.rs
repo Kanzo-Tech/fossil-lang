@@ -15,10 +15,8 @@
 //!
 //! `39d0fb8` cut it: `TileWriter` is the leaf crate `fossil-tile-writer` now,
 //! over `arrow` and `parquet` alone, and `fossil-df` fell to a dev-dependency
-//! for the one thing that still needs it — `examples/compaction_pass.rs`, which
-//! measures the tiling against `batches_to_parquet` as a baseline encoder. An
-//! example links dev-dependencies, so the bench keeps its baseline and the
-//! library links no engine. `cargo tree -p fossil-layout -e normal -i salsa`
+//! for one example's baseline encoder — and then to no dependency at all, when
+//! that example wrote its own. `cargo tree -p fossil-layout -e normal -i salsa`
 //! went from a four-branch tree to *nothing to print*.
 //!
 //! Nothing held that. It was true on the day it was measured and the only thing
@@ -62,11 +60,10 @@
 //! - **That the subject SHOULD be free of the substrate.** It proves the rule
 //!   is enforced, not that it is right. The argument for it is in the bullet
 //!   and in `39d0fb8`, and this file has no opinion.
-//! - **That the dev edge is harmless.** It is excluded on purpose:
-//!   `examples/compaction_pass.rs` links `fossil-df` and therefore `salsa`, and
-//!   that is the arrangement the repair chose. `-e normal` is the edge
-//!   `deny.toml`, the WASM gate and `docs/content.test.ts` all read, so it
-//!   is the one to assert on.
+//! - **Anything about a dev edge.** It is excluded on purpose: a test or an
+//!   example may link the substrate without the library doing so. `-e normal`
+//!   is the edge `deny.toml`, the WASM gate and `docs/content.test.ts` all
+//!   read, so it is the one to assert on.
 //! - **Anything about a feature-gated edge.** `cargo metadata`'s resolve graph
 //!   is taken as given, for the default features and the host target — the same
 //!   caveat, in the same conservative direction, that `engine_reach.rs` carries.

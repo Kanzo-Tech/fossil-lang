@@ -47,7 +47,7 @@
 //!   clumpy 2-D placement, and that is reproduced exactly; what is not reproduced
 //!   is a skewed community-size distribution, which would change the *needed*
 //!   counts and is untested here.
-//! - **Compression is off**, because `batches_to_parquet` leaves it off. Byte
+//! - **Compression is off**, because `parquet`'s default leaves it off. Byte
 //!   figures are therefore uncompressed-page figures and are a **ceiling**; the
 //!   ratios between the two layouts are what survives turning it on, not the
 //!   absolute megabytes.
@@ -90,7 +90,6 @@ use std::time::Instant;
 use datafusion::arrow::array::{Float32Array, StringArray, UInt32Array};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
-use fossil_df::files::batches_to_parquet;
 use parquet::arrow::ArrowWriter;
 use parquet::file::metadata::{PageIndexPolicy, ParquetMetaData, ParquetMetaDataReader};
 use parquet::file::properties::WriterProperties;
@@ -100,8 +99,7 @@ use parquet::schema::types::ColumnPath;
 /// Which columns get `parquet`'s dictionary encoding.
 #[derive(Clone, Copy)]
 enum Dict {
-    /// What `batches_to_parquet` does today: the crate default, dictionary on
-    /// for everything.
+    /// The crate default, dictionary on for everything.
     Default,
     /// Dictionary off for everything.
     Off,
@@ -381,8 +379,8 @@ fn batch(c: &Corpus, lo: usize, hi: usize) -> RecordBatch {
 // The two writers
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Layout A — one file per tile, through `fossil_df::files::batches_to_parquet`,
-/// which is the encoder that ships. Returns the file paths in tile order.
+/// Layout A — one file per tile, through [`encode_tile`]. Returns the file
+/// paths in tile order.
 fn write_per_tile(dir: &Path, c: &Corpus, n: usize) -> Vec<PathBuf> {
     fs::create_dir_all(dir).expect("mkdir tiles");
     let tiles = n.div_ceil(TILE_ROWS);
@@ -390,9 +388,7 @@ fn write_per_tile(dir: &Path, c: &Corpus, n: usize) -> Vec<PathBuf> {
     for t in 0..tiles {
         let lo = t * TILE_ROWS;
         let hi = ((t + 1) * TILE_ROWS).min(n);
-        let bytes = batches_to_parquet(&[batch(c, lo, hi)])
-            .expect("encode tile")
-            .expect("a tile is never empty");
+        let bytes = encode_tile(&batch(c, lo, hi));
         let path = dir.join(format!("chunk{t}.parquet"));
         fs::write(&path, bytes).expect("write tile");
         paths.push(path);
@@ -400,8 +396,18 @@ fn write_per_tile(dir: &Path, c: &Corpus, n: usize) -> Vec<PathBuf> {
     paths
 }
 
+/// One tile as its own Parquet file: `parquet`'s default properties, which is
+/// the baseline layout A is measured with.
+fn encode_tile(batch: &RecordBatch) -> Vec<u8> {
+    let mut buf = Vec::new();
+    let mut writer = ArrowWriter::try_new(&mut buf, batch.schema(), None).expect("writer");
+    writer.write(batch).expect("encode tile");
+    writer.close().expect("close tile");
+    buf
+}
+
 /// Layout B — one file, row groups of [`TILE_ROWS`]. This encoder does not
-/// exist in the tree; it is `batches_to_parquet` with the row-group size set,
+/// exist in the tree; it is [`encode_tile`] with the row-group size set,
 /// which is the whole of the proposal this example exists to check. `dictionary` is the
 /// `parquet` default (on) unless a caller says otherwise — it is a parameter
 /// because on these four columns the default is not free, and §1 shows what it
