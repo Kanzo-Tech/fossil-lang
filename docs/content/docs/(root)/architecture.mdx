@@ -70,7 +70,7 @@ await open(url, { engine })        // a corpus at a URL
 `sql: 'allowed'` widens either to `SqlCorpus`.
 
 **What comes back has two halves, and the line between them is which bytes get chosen.**
-`tileMatrix`, `scan`, `edges` and `node` compute which tiles to read and read those. The verbs —
+`tileMatrix`, `scan` and `edges` compute which tiles to read and read those. The verbs —
 `crates/fossil-graph/src/operations/mod.rs, Operation`, compiled to wasm32 — name a table and let the
 engine decide. The two halves meet at exactly one point, the host's `Engine`, and the reader brings
 no engine of its own to either.

@@ -64,9 +64,9 @@ fn the_parse_actually_read_the_file() {
 
 /// **The two sets that diverged, held apart on purpose.**
 ///
-/// `fossil-graph` hides every column the writer emits from a field listing;
-/// `packages/corpus` excludes only the four `PlacedVertex` surfaces as named
-/// members. Five against four, and the difference is `cluster_id`. Asserted
+/// `fossil-graph` hides every column the writer emits from a field listing; a
+/// viewer reads the address, the identity and the two coordinates by name.
+/// Five against four, and the difference is `cluster_id`. Asserted
 /// here so that a column added to `corpus.bnf` without a role makes a decision
 /// rather than silently joining both sets or neither.
 #[test]

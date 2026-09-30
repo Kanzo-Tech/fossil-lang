@@ -225,84 +225,6 @@ describe('the tile matrix — the box a caller has no other way to know', () => 
   });
 });
 
-describe('node — the identity, and what it refuses to be', () => {
-  it('finds a vertex by its subject IRI', async () => {
-    const subject = String(
-      await scalar(`SELECT subject FROM read_parquet(${vertexTiles()}) WHERE dense_id = 137`),
-    );
-    const vertex = await corpus.node(subject);
-    expect(vertex).not.toBeNull();
-    expect(vertex!.id).toBe(subject);
-    expect(vertex!.denseId).toBe(137n);
-    expect(vertex!.type).toBe('Person');
-    // The payload minus the four the answer reads by name.
-    expect(Object.keys(vertex!.fields)).toEqual(['birth_year', 'postcode', 'cluster_id']);
-  });
-
-  it('refuses a dense id, because an address is not a name', async () => {
-    await expect(corpus.node(137n as unknown as string)).rejects.toThrow(TypeError);
-    await expect(corpus.node(137n as unknown as string)).rejects.toThrow(/re-layout/);
-  });
-
-  it('returns null for an IRI the corpus does not carry', async () => {
-    expect(await corpus.node('https://example.org/person/nobody')).toBeNull();
-  });
-
-  it('round-trips every id a scan hands out', async () => {
-    const scan = corpus.scan({ type: 'Person', select: ['dense_id', 'subject'] });
-    const [batch] = await scan.read([{ type: 'Person', z: payloadZ(), tile: 0 }]);
-    const ids = Array.from(batch!.getChild('dense_id')!.toArray(), (v) => BigInt(v as number));
-    const subjects = Array.from(batch!.getChild('subject')!.toArray(), String);
-    expect(ids.length).toBeGreaterThan(0);
-    for (const [k, subject] of subjects.slice(0, 5).entries()) {
-      expect((await corpus.node(subject))!.denseId).toBe(ids[k]);
-    }
-  });
-});
-
-/** The subject IRI of one address, read by this file rather than by the code under test. */
-const seedOf = async (denseId: number) =>
-  String(
-    await scalar(`SELECT subject FROM read_parquet(${vertexTiles()}) WHERE dense_id = ${denseId}`),
-  );
-
-describe('node — what a lookup reads', () => {
-  it('asks only the index tiles whose footers say a key could be in them', async () => {
-    // The index is five tiles of 64 sorted by `subject`, with disjoint ranges. Two identities that
-    // land in one tile must not read the other four — which is the defect this replaced: DuckDB
-    // prunes no disjunction over a VARCHAR column, so `key IN (a, b)` opened all five and only
-    // `key = a` opened one.
-    const statements: string[] = [];
-    const counted = await open(CORPUS, { engine: recording(statements) });
-    const named = (): string[][] =>
-      statements
-        .filter((sql) => sql.includes('/index/'))
-        .map((sql) => sql.match(/index\/tile\d+\.parquet/g) ?? []);
-    // Sorted lexicographically, `.../person/0` and `.../person/1` are neighbours, so this is the
-    // pair most likely to share a tile — and the assertion is a relationship, not a tile number:
-    // fewer than every tile, and never fewer than the one holding the answer.
-    const pair = [await seedOf(0), await seedOf(1)];
-    statements.length = 0;
-    const found = await Promise.all(pair.map((id) => counted.node(id)));
-    expect(found.every((v) => v !== null)).toBe(true);
-
-    // The footer sweep names every index tile once — that is what a sweep is — and the lookups
-    // after it name a strict subset. The first is the sweep; the rest are the reads it decided.
-    const [sweep, ...reads] = named();
-    expect(sweep).toHaveLength(Number(TILES));
-    for (const read of reads) {
-      expect(read.length).toBeGreaterThanOrEqual(1);
-      expect(read.length).toBeLessThan(Number(TILES));
-    }
-  });
-
-  it('the type says whether a lookup on it is a seek or a scan', () => {
-    // Both answers are correct and only one is fast, so a consumer that cannot tell them apart
-    // finds out by measuring. This corpus has an index; `refuses` below covers one without.
-    expect(corpus.types.vertices.every((v) => v.indexed)).toBe(true);
-  });
-});
-
 describe('the verbs, through the same door', () => {
   /**
    * The six verbs answer over a corpus that was opened by URL — which is the whole of the merge.
@@ -476,8 +398,6 @@ describe('the conformance table, executed against the published API', () => {
         tiles: number[];
         edges: number;
       }>;
-      node: Array<{ id: string; found: boolean; dense_id?: number }>;
-      index: { indexed: boolean; same_either_way: string[] };
       neighbours: Array<{
         ids: string[];
         depth: number;
@@ -538,50 +458,23 @@ describe('the conformance table, executed against the published API', () => {
     },
   );
 
-  it.each(table.answers.node)('node $id resolves to found=$found', async ({ id, found, dense_id }) => {
-    const got = await corpus.node(id);
-    if (!found) {
-      expect(got).toBeNull();
-      return;
-    }
-    expect(got).not.toBeNull();
-    expect(got!.id).toBe(id);
-    expect(got!.denseId).toBe(BigInt(dense_id!));
-  });
-
-  it('hands back the same vertex with the index and without it', async () => {
-    // The one assertion that makes the index an OPTIMISATION rather than a second truth. Nothing
-    // else here can see which route ran: both return the same answer by construction, which is
-    // exactly the gap `packages/corpus/guards`' `index-agrees-with-the-payload` names in its own
-    // `cannotProve`, closed from the reader's side.
-    const dir = mkdtempSync(join(tmpdir(), 'fossil-noindex-'));
-    scratch.push(dir);
-    cpSync(CORPUS, dir, { recursive: true });
-    const yml = join(dir, 'vertex/Person.vertex.yml');
-    writeFileSync(yml, readFileSync(yml, 'utf8').replace(/^index:\n(?: {2}.*\n)*/m, ''));
-
-    const scanning = await open(dir, { engine });
-    // The comparison is worthless if the strip did not strip, and worthless the other way if the
-    // fixture never had one. Both are asserted.
-    expect(corpus.types.vertices[0]!.indexed).toBe(true);
-    expect(scanning.types.vertices[0]!.indexed).toBe(false);
-
-    for (const id of (table.answers as { index: { same_either_way: string[] } }).index
-      .same_either_way) {
-      const seek = await corpus.node(id);
-      const scan = await scanning.node(id);
-      expect(seek).not.toBeNull();
-      expect(scan).toEqual(seek);
-    }
-  });
-
   it.each(table.answers.neighbours)(
-    'a walk of depth $depth, as node and a loop over edges',
+    'a walk of depth $depth, as a scan and a loop over edges',
     async ({ ids, depth, vertices, edges, frontier }) => {
-      // A walk of more than one hop is the caller's loop: resolve the seeds by identity, then per
-      // hop read both halves from the frontier's tiles and keep what is incident to the frontier.
-      const seeds = await Promise.all(ids.map((id) => corpus.node(id)));
-      const seen = new Set(seeds.map((v) => v!.denseId));
+      // A walk of more than one hop is the caller's loop: resolve the seeds by identity with a
+      // scan, then per hop read both halves from the frontier's tiles and keep what is incident to
+      // the frontier.
+      const seeding = corpus.scan({
+        type: 'Person',
+        filter: { column: 'subject', op: 'in', values: ids },
+        select: ['dense_id'],
+      });
+      const seen = new Set(
+        (await seeding.read(seeding.plan().filter((t) => t.z === payloadZ()))).flatMap((b) =>
+          Array.from(b.getChild('dense_id')!.toArray(), (v) => BigInt(v as number)),
+        ),
+      );
+      expect(seen.size).toBe(ids.length);
       const emitted = new Set<string>();
       let reached = [...seen];
       for (let hop = 0; hop < depth && reached.length > 0; hop += 1) {

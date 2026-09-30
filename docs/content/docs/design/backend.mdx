@@ -64,7 +64,6 @@ interface Corpus {
   tileMatrix(type: string): TileMatrixSet;
   scan(params: ScanParams): Scan;
   edges(params: EdgesParams): Promise<readonly EdgeAnswer[]>;
-  node(id: string, params?: { type?: string }): Promise<PlacedVertex | null>;
   schema(params?: SchemaParams): Promise<SchemaResult>;
   close(): Promise<void>;
 }
@@ -152,7 +151,7 @@ type Filter =
 edges; a window a view culls with is its own, and a `Filter` states one half-open. A `bbox` and an `extent` are
 `null` for a type with no `x` and `y`, and `coordinates` is `null` where the document declares no
 coordinate system; the contract had all three total, and a type without geometry still has tiles.
-`CorpusTypes`, `CorpusRelation`, `PlacedVertex` and the two errors are the ones
+`CorpusTypes`, `CorpusRelation` and the two errors are the ones
 `packages/corpus/src/index.ts` already exported, with one addition: each vertex type carries its
 manifest's `channels:` block. The page said the reader parsed it and did not surface it; nothing on
 the reader's side parsed it at all, so `fossil_graph::plan` reads it now
@@ -202,8 +201,7 @@ What each member answers, in one line each:
   cell is in the tile are in the tiles below it. Mass is conserved either way, which is the
   obligation cells states; what the orientation costs is the view's, which draws a rung's lines from
   the tiles it holds and the ones below them.
-- **`node`, `schema`, `relations`, `executeSql`** — unchanged: identity through the index, the
-  verbs' introspection, what a SQL host registers, and the escape hatch behind `sql: 'allowed'`.
+- **`schema`, `relations`, `executeSql`** — unchanged: the verbs' introspection, what a SQL host registers, and the escape hatch behind `sql: 'allowed'`.
 
 **Nothing else crosses.** The addressing a corpus is opened with — `CorpusAddressing` and its
 family — and `QueryFn` are internal, and the engine is the one capability; a consumer that needs a
@@ -216,9 +214,8 @@ rather than as a second path.
 
 ### What a row carries at each zoom
 
-At `z = Z` a row is a vertex: the payload's columns, of which `select` chooses. `node` answers one by
-identity with its `x` and `y`, so a pinned or searched vertex is placed without a scan, and its tile
-is `denseId` over `tileRows`. `select` does not reach below `Z`: a cell row carries every cell column
+At `z = Z` a row is a vertex: the payload's columns, of which `select` chooses, and its tile is
+`denseId` over `tileRows`. `select` does not reach below `Z`: a cell row carries every cell column
 whatever it names, because they are not a projection of the payload's and there is nothing of them to
 choose.
 
@@ -324,7 +321,7 @@ What is kept from [cells](/docs/design/cells) unchanged: the base is declared an
 the partition is quaternary, so a cell carries no `parent` column; a rung is summarised from the
 payload, never folded from the rung below; the quotient is one undirected row per cell pair, tiled on
 the pair's lower cell's tile (`crates/fossil-layout/src/layout/cells.rs, write_quotient`); and a cell
-is not an entity, so `node` never returns one.
+is not an entity, so no lookup by identity returns one.
 
 **What would reverse it.** A base that is not a power of four. Then a rung's shift stops being an
 integer number of bits and the parent stops being a shift — which is why
@@ -416,8 +413,8 @@ is the other half of the trade — the tiles' edges are every edge of the 8 tile
 
 A statement selects its tiles with **one conjunctive range** on the aligned column — `dense_id` for
 a vertex tile, `src_dense` or `dst_dense` for an adjacency — and never a disjunction of them. That is
-the one shape the engine is measured to prune row groups on. `packages/corpus/src/identity.ts,
-indexRanges` records DuckDB pruning a conjunctive range and declining a disjunction over a string
+the one shape the engine is measured to prune row groups on. The identity lookup `node` (deleted after
+`8326b8f`) measured DuckDB pruning a conjunctive range and declining a disjunction over a string
 column, and `crates/fossil-graph/src/lib.rs` records 179 `BETWEEN … OR …` ranges evaluated per row
 rather than skipped — which is why a run of consecutive tiles is one read and two runs are two reads,
 and not one read with an `OR`.
@@ -492,7 +489,6 @@ module follows one of the two references and none of them reaches 500 lines.
 | `expression.ts` | Iceberg's expressions | `Filter`, binding it to a matrix's columns, the inclusive and strict evaluators, and rendering the residual as SQL | the box predicate `boxOf` |
 | `scan.ts` | Iceberg's `Table.scan` | `scan`, `plan`, `read` | — |
 | `edges.ts` | CSR and CSC | `edges`, over the adjacency at `Z` and the quotient below it | the adjacency read `rows` and `neighbours` made |
-| `identity.ts` | — | `node`: the index seek, its key ranges, byte-order comparison | `findByIdentity`, `indexRanges`, `couldHold`, `vertexOf` |
 | `verbs.ts` | — | the views the verbs read, `schema`, `relations`, `executeSql` | `verbs`, `relations` |
 | `sql.ts` | — | literals, identifiers and the 64-bit id guard | `lit`, `ident`, `list`, `idOf`, `floatOf`, `CorpusReadError` |
 
@@ -533,7 +529,7 @@ pages that described `frame` — [one door](/docs/design/one-door) and [the came
 The conformance that held `scan` against `rows` holds it against an oracle neither wrote: SQL over the
 payload with no tile and no statistic, in `packages/corpus/tests/scan.test.ts` and the integration
 suite, and the window and walk rows of `conformance/expected.json`'s full scan, composed out of
-`scan`, `edges` and `node` in `packages/corpus/tests/corpus.test.ts`.
+`scan` and `edges` in `packages/corpus/tests/corpus.test.ts`.
 
 **What would reverse it.** Nothing reverses an order that has been carried out; the rule it followed
 stands for the next retirement. keasy consumes this repository by git tag, so a consumer outside

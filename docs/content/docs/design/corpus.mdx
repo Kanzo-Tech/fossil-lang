@@ -65,13 +65,13 @@ a reader may derive. Until a `files` corpus is served, the cost is one nobody is
 
 ### A reader is handed the subject IRI, because an address is not something to key on
 
-`open`'s `node(id)` takes the subject IRI. The alternative was the `dense_id`, and it is the
-cheap one: a shift names the tile, one request answers, the whole lookup is `O(1)`. It is refused
+A lookup by identity is a `scan` filtered on `subject`, the IRI. The alternative was the `dense_id`,
+and it is the cheap one: a shift names the tile, one request answers, the whole lookup is `O(1)`. It is refused
 because **the spatial order is the id space** — redoing the layout ranks every vertex by the Hilbert
 code of its new position and lets that rank be its id, so a `dense_id` held anywhere outside the
 corpus names a *different vertex* after the next write. A bookmark, a selection, a link from another
 system and a row in somebody else's database all key on something, and an address is not something
-to key on. `node` refuses a `BigInt` with a `TypeError` that says so.
+to key on.
 
 What would reverse it is a corpus whose ids survive a re-layout — a stable id column written beside
 the address. Nothing writes one, and adding one is a format change and not a reader change.
@@ -503,7 +503,8 @@ demonstration is a measurement. Not an argument.
 
 ### Identity and incidence are addressed, not queried
 
-The reader answers `node` and `edges` by computing which files to open, and they once had verb
+The reader answers `edges` — and answered `node`, deleted after `8326b8f` with no caller — by
+computing which files to open, and they once had verb
 twins — `read` and `expand` — that looked like duplicates. They were not, and the twins are what went.
 **A verb names a relation and lets the engine choose bytes; these compute which files to open.**
 `expand` was a recursive CTE over the whole edge relation, and it **did not return in 45 seconds at a
