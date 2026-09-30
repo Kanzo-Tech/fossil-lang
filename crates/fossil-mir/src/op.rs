@@ -367,12 +367,12 @@ pub enum SourceFormat {
     Provider { name: SmolStr },
 }
 
-/// Sink references. `GraphAr` is the `fossil/1` corpus, the only sink built;
+/// Sink references. `Corpus` is the `fossil/1` corpus, the only sink built;
 /// `Turtle`, `JsonLd` and `NQuads` are the serialisations this enum is shaped
 /// to take next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum SinkRef {
-    GraphAr,
+    Corpus,
 }
 
 /// Typed MIR expression.

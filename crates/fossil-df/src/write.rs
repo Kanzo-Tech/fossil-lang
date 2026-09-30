@@ -34,7 +34,7 @@ use fossil_sinks::manifest::{
 };
 use fossil_storage::Storage;
 
-use crate::GraphArData;
+use crate::Graph;
 use crate::report::EdgeDrops;
 
 /// What [`write`] answers: the manifest it wrote, and what the edge join
@@ -85,7 +85,7 @@ pub enum WriteError {
 /// [`WriteError`] on the first failure. Nothing is written after it, and
 /// `fossil.json` never is.
 pub async fn write(
-    graph: &GraphArData,
+    graph: &Graph,
     storage: &Storage,
     dest: &str,
 ) -> Result<Written, WriteError> {

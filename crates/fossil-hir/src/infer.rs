@@ -1300,7 +1300,7 @@ mod tests {
     /// The `AnyUri` row moved because the vocabulary carries the distinction the
     /// old `ConstraintValue::Iri` threw away: an opaque IRI column is
     /// `Some(Primitive::AnyUri)` with no targets, and `AnyUri` is in the
-    /// lattice. `primitive_to_graphar` writes both as `string`, so nothing
+    /// lattice. The writer stores both as a `string` column, so nothing
     /// downstream of the writer changes; what changes is that the checker can
     /// now tell an IRI column from a text column.
     ///

@@ -6,7 +6,7 @@
 //! body invalidates neither the file's item tree nor its sibling mappings —
 //! and the per-mapping TYPES from
 //! [`fossil_hir::check::typecheck_mapping`]. Emits a [`MirGraph`] of the shape
-//! `Source → (pipeline verbs) → EmitVertex → Sink(GraphAr)`;
+//! `Source → (pipeline verbs) → EmitVertex → Sink(Corpus)`;
 //! [`apply_output_shape`] is the pass that adds [`Op::EmitEdge`].
 //!
 //! # Reachability
@@ -158,7 +158,7 @@ pub fn lower_to_mir_pg<'db>(
         ),
     };
     // v0.1: every prop is typed String. The descriptor-driven type refinement is
-    // the next increment; the backend derives the GraphAr/xsd spelling from `Ty`.
+    // the next increment; the backend derives the manifest/xsd spelling from `Ty`.
     let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
 
     let mut ops: Vec<Op<'db>> = Vec::with_capacity(3);
@@ -196,7 +196,7 @@ pub fn lower_to_mir_pg<'db>(
     // constant prefixed-name → neither (v0.1).
     // (a) Type refinement: a FieldRef prop carries the source field's type
     // (refined when the source declares a schema; String otherwise). The backend derives the
-    // GraphAr/xsd spelling from `ty`. Cardinality stays `single_valued = true`
+    // manifest/xsd spelling from `ty`. Cardinality stays `single_valued = true`
     // here (the ShEx-descriptor refinement that would set multi-valued needs the
     // descriptor wired into the lowering — a later increment).
     let field_ty = |field: &str| -> Ty<'db> {
@@ -350,7 +350,7 @@ pub fn lower_to_mir_pg<'db>(
     let sink_input = ops.len() - 1;
     ops.push(Op::Sink {
         input: sink_input,
-        sink: SinkRef::GraphAr,
+        sink: SinkRef::Corpus,
     });
 
     MirGraph::new(db, ops, None)

@@ -7,7 +7,7 @@
 //!
 //! `sig.ret` is what the CHECKER believes — `fossil_hir::check::check_call`
 //! returns it, `fossil_mir::lower::call_result_ty` gives the property that type,
-//! and the `GraphAr` writer stamps the column from it. `lowering` is what RUNS.
+//! and the corpus writer stamps the column from it. `lowering` is what RUNS.
 //! When the two disagree the program type-checks and produces something else,
 //! and nothing anywhere fails.
 //!

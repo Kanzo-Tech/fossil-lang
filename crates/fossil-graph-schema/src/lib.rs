@@ -84,7 +84,7 @@ pub struct Property {
     /// Column / predicate local name, e.g. `"name"`.
     pub name: String,
     /// The canonical (format-neutral) datatype. A materializer derives its own
-    /// spelling from this (`GraphAr` `int64`, xsd `…#integer`, …).
+    /// spelling from this (`fossil.json` `int64`, xsd `…#integer`, …).
     pub datatype: Primitive,
     /// The full RDF predicate IRI (e.g. `https://example.org/name`) — RDF-border
     /// metadata. `None` for a non-RDF graph.
@@ -117,7 +117,7 @@ pub struct EdgeType {
 /// the schema, the checker and the descriptors all speak it, and a lattice that
 /// crosses a crate boundary as a string is a lattice with no single definition.
 ///
-/// Materializers map it to their own vocabulary (`GraphAr` `string/int64/double/…`,
+/// Materializers map it to their own vocabulary (`fossil.json` `string/int64/double/…`,
 /// `DataFusion` scalars, `DuckDB` column types) next to the materializer; only the
 /// xsd direction lives here, because xsd is the RDF border every side reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

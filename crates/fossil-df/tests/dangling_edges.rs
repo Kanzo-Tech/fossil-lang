@@ -72,7 +72,7 @@ Order : Order from orders
 // The executor's futures are not `Send` and are not meant to be — see the
 // crate-level allow in `src/lib.rs`. A test that awaits one inherits the lint.
 #[allow(clippy::future_not_send)]
-async fn run(program: &str) -> fossil_df::GraphArData {
+async fn run(program: &str) -> fossil_df::Graph {
     let (db, file) =
         support::db_with_shapes(program, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
     let ctx = SessionContext::new();
