@@ -160,6 +160,30 @@ describe('FossilExecutor', () => {
     expect(result.report.dropped).toEqual([{ table: 'Order_placedBy_Person', dropped: 0 }]);
   });
 
+  // The getting-started page's script, as a test: a program located at a URL names its data and
+  // its shape relative to itself, and the host reads each by the locator fossil resolved.
+  it('resolves the relative sources of a program located at a URL', async () => {
+    const dir = new URL('../../../docs/programs/hello/', import.meta.url);
+    const base = 'https://local.test/hello/';
+    const local = (locator: string) => new URL(locator.slice(base.length), dir);
+    const exec = new FossilExecutor(
+      await readFile(new URL('hello.fossil', dir), 'utf8'),
+      `${base}hello.fossil`,
+    );
+    let result;
+    try {
+      for (const d of exec.missingDocuments()) {
+        exec.registerDocument(d.key, await readFile(local(d.locator), 'utf8'));
+      }
+      const sources: Record<string, Uint8Array> = {};
+      for (const s of exec.sources()) sources[s.uri] = new Uint8Array(await readFile(local(s.uri)));
+      result = await exec.runInMemory(sources, 'memory://hello');
+    } finally {
+      exec.free();
+    }
+    expect(result.files.map((f) => f.path).sort()).toEqual(['fossil.json', 'vertex/Person.parquet']);
+  });
+
   // Two mappings of one type are a `UNION ALL`, and a union of two scans has two
   // partitions. DataFusion 54 coalesces them by spawning a Tokio task per
   // partition, and there is no runtime here: the run panicked, trapped inside a

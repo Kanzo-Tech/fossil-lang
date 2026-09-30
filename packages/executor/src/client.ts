@@ -30,8 +30,13 @@ import type { ExecutorResult, RunReport, SourceDescriptor } from './index.js';
 export class FossilExecutor implements DocumentWorkspace {
   readonly #raw: RawFossilExecutor;
 
-  constructor(program: string) {
-    this.#raw = new RawFossilExecutor(program);
+  /**
+   * `path` is where the program lives — a URL such as `file:///…/hello.fossil` — so the relative
+   * sources and documents it names resolve beside it. Without one, only `@conn/…` and absolute
+   * URLs resolve.
+   */
+  constructor(program: string, path?: string) {
+    this.#raw = new RawFossilExecutor(program, path);
   }
 
   setConnections(connections: Record<string, string>): void {

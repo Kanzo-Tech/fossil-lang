@@ -42,13 +42,21 @@ impl FossilExecutor {
     /// a `console.error` stack trace instead of an opaque `unreachable`.
     // `wasm_bindgen` dictates these by value: it owns the JS→Rust conversion
     // and cannot hand out borrows across the boundary.
+    ///
+    /// `path` is where the program lives — a URL, e.g. `file:///…/hello.fossil`
+    /// — so the relative sources and documents it names resolve beside it.
+    /// Without one, only `@conn/…` and absolute URLs resolve.
     #[wasm_bindgen(constructor)]
     #[must_use]
     #[allow(clippy::needless_pass_by_value)]
-    pub fn new(program: String) -> Self {
+    pub fn new(program: String, path: Option<String>) -> Self {
         console_error_panic_hook::set_once();
+        let executor = path.map_or_else(
+            || Executor::new(&program),
+            |path| Executor::at(&program, &path),
+        );
         Self {
-            inner: RefCell::new(Executor::new(&program)),
+            inner: RefCell::new(executor),
         }
     }
 
