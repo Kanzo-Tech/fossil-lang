@@ -601,6 +601,16 @@ fn grouped_scope<'db>(
     let reg = crate::stdlib::stdlib();
     let mut rows: Vec<crate::ty::NamedRow<'db>> = Vec::new();
     for binding in scope.bindings() {
+        // A row that declares no schema stays undeclared: grouping it knows no
+        // more about its keys than the source did, and an empty record would
+        // refuse every key as «not a field».
+        if scope.fields_of(db, binding).is_none() {
+            rows.push(crate::ty::NamedRow {
+                binding: binding.clone(),
+                row: None,
+            });
+            continue;
+        }
         let fields: Vec<RecordField<'db>> = keys
             .iter()
             .filter(|k| &k.binding == binding)

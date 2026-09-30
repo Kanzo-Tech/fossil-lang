@@ -1,12 +1,11 @@
-//! **One registry, dispatch by name, end to end through the real host** — and
+//! **One registry, dispatch by name, end to end through a whole host** — and
 //! the two diagnostics a mismatch produces.
 //!
-//! `fossil-cli` is the crate with the WHOLE host: it installs
-//! `fossil_descriptors_output::PROVIDERS` (`src/system.rs`) and registers the
-//! documents a program names (`src/documents.rs`), so a `.ttl` sitting on disk
-//! beside the program is enough. In any crate below it the document has to be
-//! pushed into Salsa by hand, and a harness that registered its own documents
-//! would be testing its own registration.
+//! The check host in `tests/support/native.rs` installs
+//! `fossil_descriptors_output::PROVIDERS` and registers the documents a program
+//! names from disk, so a `.ttl` sitting beside the program is enough; nothing
+//! here registers a document by hand, which would be testing its own
+//! registration.
 //!
 //! # What each test here is evidence for
 //!
@@ -25,6 +24,10 @@
 
 use std::path::{Path, PathBuf};
 
+#[path = "support/native.rs"]
+mod native;
+mod support;
+
 /// `docs/programs/` — the conformance set, on disk.
 fn programs_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -33,24 +36,20 @@ fn programs_dir() -> PathBuf {
         .expect("docs/programs is on disk")
 }
 
-/// Every diagnostic message `fossil check` produces for `path`.
+/// Every diagnostic message a check of `path` produces.
 fn messages(path: &Path) -> Vec<String> {
-    introspect(path);
-    fossil_cli::check(path)
-        .expect("the program is readable")
-        .diagnostics
-        .into_iter()
-        .map(|d| d.message)
-        .collect()
+    native::messages(path)
 }
 
 /// A program (and its neighbours) written into a tempdir, checked.
 fn check_program(files: &[(&str, &str)]) -> Vec<String> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    for (name, text) in files {
-        std::fs::write(dir.path().join(name), text).expect("write");
-    }
+    let dir = native::write_dir(files);
     messages(&dir.path().join(files[0].0))
+}
+
+/// The registry as a host lists it to a connector UI.
+fn providers() -> Vec<fossil_lineage::ProviderInfo> {
+    fossil_lineage::providers(fossil_descriptors_output::PROVIDERS)
 }
 
 /// A real `ShExC` document declaring `ex:Person` with one `ex:name`.
@@ -85,14 +84,11 @@ fn program_binding(type_line: &str) -> String {
 /// different criterion.
 #[test]
 fn one_table_carries_every_constructor() {
-    let listed: Vec<String> = fossil_cli::providers()
-        .into_iter()
-        .map(|p| p.name)
-        .collect();
+    let listed: Vec<String> = providers().into_iter().map(|p| p.name).collect();
     assert_eq!(
         listed,
         ["csv", "json", "parquet", "rdf", "shacl", "shex"],
-        "`fossil providers` lists the whole registry, sorted"
+        "the listing is the whole registry, sorted"
     );
 }
 
@@ -101,7 +97,7 @@ fn one_table_carries_every_constructor() {
 /// behind it was half a table.
 #[test]
 fn the_wire_contract_finally_reports_a_schema_provider() {
-    let listed = fossil_cli::providers();
+    let listed = providers();
     let kind = |name: &str| {
         listed
             .iter()
@@ -403,16 +399,5 @@ fn a_file_with_no_mapping_still_reports_its_bindings() {
             .iter()
             .any(|m| m.starts_with("`io.csv` reads rows, not types")),
         "got {diagnostics:?}"
-    );
-}
-
-/// Introspect before compiling — what `fossil-cli` does, and what `check`/`run`
-/// stopped doing for themselves. Without it a program's sources have no
-/// forward-propagated types, which is a different (and quietly weaker) answer.
-fn introspect(path: &std::path::Path) {
-    let _ = fossil_introspect::introspect_program(
-        fossil_cli::host_system(path),
-        path,
-        &fossil_introspect::RunCreds::default(),
     );
 }

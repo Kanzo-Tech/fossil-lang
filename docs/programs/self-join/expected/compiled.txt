@@ -12,5 +12,5 @@ Categories: 3 written, 3 lowered
     parent_label
 
 ── run ──
-vertex Category (https://shop.example/voc#Category) × 3 — dense_id, subject, label, parent_label, x, y, cluster_id
+vertex Category (https://shop.example/voc#Category) × 3 — dense_id, subject, x, y, cluster_id, label, parent_label
 NO EDGE TYPE was written

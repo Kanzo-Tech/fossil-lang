@@ -2,7 +2,7 @@
  * The hand-written half of the prompt — and every sentence of it is held to something.
  *
  * - {@link EXAMPLE} is `docs/programs/shop/shop.fossil` with its region markers removed: a
- *   conformance program `crates/fossil-cli/tests/programs.rs` runs, so the example a model copies
+ *   conformance program `crates/fossil-df/tests/programs.rs` runs, so the example a model copies
  *   is one that compiles and produces its expected corpus.
  * - Every other fossil line in {@link SURFACE} is a line of SOME conformance program. A form the
  *   prose shows and no program writes is a form nobody has run.

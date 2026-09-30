@@ -399,12 +399,10 @@ pub fn read() -> Vec<Column> {
 pub fn generated() -> Vec<(PathBuf, String)> {
     let columns = read();
     let root = repo_root();
-    vec![
-        (
-            root.join("crates/fossil-sinks/src/generated.rs"),
-            emit_rust(&columns),
-        ),
-    ]
+    vec![(
+        root.join("crates/fossil-sinks/src/generated.rs"),
+        emit_rust(&columns),
+    )]
 }
 
 #[cfg(test)]

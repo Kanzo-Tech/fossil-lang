@@ -47,7 +47,7 @@ pub struct InferredDescriptor {
     /// Ordered columns; the order is the source's own and is significant.
     pub columns: Vec<InferredColumn>,
     /// Opaque token identifying the state of the source this was read from.
-    /// The cache compares it; nothing interprets it. The native host writes
+    /// The cache compares it; nothing interprets it. `fossil-introspect` writes
     /// `mtime` + size, a host that has a strong `ETag` or a content digest
     /// writes that instead, and a host that cannot cheaply tell writes `""` —
     /// which [`crate::DescriptorCache::is_fresh`] reads as "never fresh", so

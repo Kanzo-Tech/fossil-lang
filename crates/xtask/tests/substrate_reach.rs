@@ -207,7 +207,7 @@ fn the_batch_pass_does_not_link_the_compiler_substrate() {
          encoder `fossil-df` never called, put `salsa` and `datafusion` into the \
          closure of a pass that resolves no name. `39d0fb8` cut it and this \
          guard is what holds it. The repair is to move the borrowed item below \
-         the executor — `fossil-tile-writer` is where the last one went — or to \
+         the executor into a leaf the pass can take, or to \
          demote the edge to a dev-dependency if only a test or an example needs \
          it. Amending the bullet to drop the crate makes this green and is the \
          one repair that is not one.",

@@ -41,7 +41,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       # Cache cargo registry + target — without it every release rebuilds
-      # datafusion (executor wasm) + fossil-cli from scratch (~20-40 min).
+      # datafusion (executor wasm) from scratch (~20-40 min).
       - uses: Swatinem/rust-cache@v2
         with:
           cache-all-crates: true

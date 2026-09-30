@@ -33,12 +33,12 @@ jobs:
           targets: wasm32-unknown-unknown
 
       # Cache cargo registry + target across runs. Without it every PR rebuilds
-      # datafusion (the executor's wasm) + fossil-cli from scratch (~20-40 min,
+      # datafusion (the executor's wasm) from scratch (~20-40 min,
       # the likely cause of the canceled run). Warm runs reuse the build.
       - uses: Swatinem/rust-cache@v2
         with:
-          # The wasm32 artifacts + the native fossil-cli release build both land
-          # in target/; cache keyed on Cargo.lock + toolchain by default.
+          # The wasm32 artifacts land in target/; cache keyed on Cargo.lock +
+          # toolchain by default.
           cache-all-crates: true
 
       - name: Install wasm-bindgen-cli (0.2.120, matches Cargo.toml pin)
@@ -77,10 +77,10 @@ jobs:
         run: pnpm --filter "./packages/*" build
 
       # There is no exclusion here any more. `@fossil-lang/examples` was carved
-      # out because its variations harness built `fossil-cli` (datafusion/duckdb
+      # out because its variations harness built the native CLI (datafusion/duckdb
       # — minutes) just to spawn `fossil check`, and `examples.yml` owned that
-      # gate. Both are gone: the acceptance corpus is `docs/programs/`, run
-      # by `crates/fossil-cli/tests/programs.rs`, which is a Rust test on the
+      # gate. All three are gone: the acceptance corpus is `docs/programs/`, run
+      # by `crates/fossil-df/tests/programs.rs`, which is a Rust test on the
       # Rust side of the seam and never enters a pnpm filter.
       # For `packages/corpus/integration/`, two steps down. They were
       # `packages/corpus/tests/{address-cost,cost,containers,frame-levels}.test.ts`,

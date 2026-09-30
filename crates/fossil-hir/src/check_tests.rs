@@ -232,7 +232,7 @@ fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
         "the refusal names the column and the relation"
     );
     // The repair is a FIELD. It used to be a clause of the message, and the two
-    // readers that wanted it (`fossil-cli`, the conformance harness) each
+    // readers that wanted it (the native CLI, the conformance harness) each
     // searched the message text for `did you mean` to get it back out.
     assert_eq!(
         d.help.as_deref(),

@@ -22,7 +22,9 @@
 //! 7. `dense_id` order is `ST_Hilbert` order over the union's bounding box —
 //!    asked of a `duckdb` binary with the spatial extension, and skipped with a
 //!    message when there is none;
-//! 8. `fossil.json` is the last object written, and a write that fails before
+//! 8. a value travels with its row and an edge connects the identities it was
+//!    written from — asked through `subject`, since `dense_id` is an address;
+//! 9. `fossil.json` is the last object written, and a write that fails before
 //!    it leaves no `fossil.json` at all.
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -502,7 +504,68 @@ async fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         Err(_) => eprintln!("skipped the ST_Hilbert check: no `duckdb` on the path"),
     }
 
-    // 8. fossil.json went last.
+    // 8. The payload half: a value travels with its row, and an edge connects
+    //    the identities it was written from. Every check above is about counts,
+    //    ids and order, so a writer that renumbered the rows and attached each
+    //    name to the wrong vertex, or pointed each edge at the wrong id, keeps
+    //    them all. Joined through `subject`, never `dense_id`: the id is an
+    //    address the layout assigns, and the IRI is what a stranger holds.
+    let ordinal = |column: &str| format!("regexp_extract({column}, '([0-9]+)$', 1)");
+    let person = m
+        .vertex_tables
+        .iter()
+        .find(|v| v.name == "Person")
+        .expect("Person");
+    let order = m
+        .vertex_tables
+        .iter()
+        .find(|v| v.name == "Order")
+        .expect("Order");
+    assert_eq!(
+        scalar(
+            &conn,
+            &format!(
+                "SELECT count(*) FROM read_parquet({}) WHERE name <> 'person ' || {}",
+                at(&person.path),
+                ordinal("subject")
+            )
+        ),
+        0,
+        "a vertex carries a name that was not built from its own identity"
+    );
+    let orders_csv = root.join("orders.csv");
+    std::fs::write(&orders_csv, &sources(400, 1_200)[1].1).expect("write orders.csv");
+    let placed_by = m
+        .edge_tables
+        .iter()
+        .find(|e| e.name == "Order_placedBy_Person")
+        .expect("the relation");
+    let written = format!(
+        "SELECT {} AS o, {} AS u FROM read_parquet({}) e \
+         JOIN read_parquet({}) s ON s.dense_id = e.src \
+         JOIN read_parquet({}) d ON d.dense_id = e.dst",
+        ordinal("s.subject"),
+        ordinal("d.subject"),
+        at(&placed_by.path),
+        at(&order.path),
+        at(&person.path),
+    );
+    let asked = format!(
+        "SELECT order_id::VARCHAR AS o, user_id::VARCHAR AS u FROM read_csv('{}')",
+        orders_csv.display()
+    );
+    assert_eq!(
+        scalar(
+            &conn,
+            &format!(
+                "SELECT count(*) FROM (({written} EXCEPT ALL {asked}) UNION ALL ({asked} EXCEPT ALL {written}))"
+            )
+        ),
+        0,
+        "the edges are not the (order, person) pairs the input named"
+    );
+
+    // 9. fossil.json went last.
     let puts = out.puts.lock().expect("lock").clone();
     assert_eq!(
         puts.last().map(String::as_str),

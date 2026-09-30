@@ -36,9 +36,8 @@ const CELL_UNIT: f32 = 2.0 * INTRA_CLUSTER_RADIUS * (1.0 + CLUSTER_MARGIN_RATIO)
 /// How many clusters `cluster_id` may carry.
 ///
 /// Not an aesthetic choice: a caller that draws the graph aggregates one
-/// super-node per `(type_idx, cluster_id)`, and every read path out of
-/// `fossil-graph` is row-capped — `ExecuteSqlParams::row_cap` defaults to
-/// 10,000 and the executor applies an outer `LIMIT` whatever the SQL says. A
+/// super-node per `(type_idx, cluster_id)`, and the graph reader's paths were
+/// row-capped at 10,000 with an outer `LIMIT` whatever the SQL said. A
 /// cap truncates, it does not degrade: a partition finer than the cap makes
 /// the picture silently lose whole communities rather than coarsen. A budget
 /// of 2,048 stays under 10,000 for up to four vertex types.
@@ -78,7 +77,7 @@ const INTRA_CLUSTER_RADIUS: f32 = 12.0;
 /// ([`super::hilbert::hilbert_ranks`]), so a plane carrying one vertex per unit of
 /// area makes the rank axis an area axis: an interval of `n` ids covers `n`
 /// blocks of plane wherever on the plane it is taken. That is the whole
-/// precondition of the cell pyramid — `/docs/design/cells` calls a cell row a
+/// precondition of the cell pyramid — `/docs/design/later/cells` calls a cell row a
 /// texel, and what is equal across a texel is area. Under the uniform pitch it
 /// was not: sixteen consecutive ids inside com-DBLP's 20,459-member group are a
 /// patch 85 units across, and sixteen out at the median group are five whole

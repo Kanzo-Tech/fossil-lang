@@ -140,9 +140,9 @@ pub struct EdgeTable {
 /// # Errors
 /// Propagates `DataFusion` read/plan/execute errors.
 // The hasher is not ours to choose: `connections` is the host's connection map —
-// `fossil-cli`'s `host.rs` builds one and the browser's `parse_refs` builds one,
-// both plain `HashMap`. Generalising over `BuildHasher` would add a parameter no
-// caller can vary, which is the same call `fossil-df-wasm` and `fossil-cli` made.
+// the browser's `parse_refs` builds one, a plain `HashMap`. Generalising over
+// `BuildHasher` would add a parameter no caller can vary, which is the same call
+// `fossil-df-wasm` made.
 #[allow(clippy::implicit_hasher)]
 pub async fn execute_graph<'db>(
     ctx: &SessionContext,
@@ -578,8 +578,8 @@ async fn execute_edges<'db>(
 /// This used to say it mirrored `fossil-sinks`'s `writer.rs`. There is no
 /// second writer to mirror any more — `fossil-sinks/src/` is the manifest model
 /// and nothing else, so THIS is where an edge becomes CSR/CSC. What still reads
-/// the pair afterwards is the layout pass, which re-sorts the tiles in place
-/// (`fossil-layout/src/layout.rs`).
+/// the pair afterwards is the layout pass and then `crate::write()`, which
+/// renumbers both ends into the global `dense_id`.
 #[allow(clippy::too_many_arguments)] // the edge spec is a flat tuple, not worth a struct here
 async fn execute_edge(
     ctx: &SessionContext,
@@ -670,10 +670,9 @@ async fn execute_edge(
     // from `People.join(Interests, …)` wrote `Person_isLocatedIn_Place` **1,256
     // times for 50 distinct pairs** — 1,206 duplicates in a `{1,1}` edge.
     //
-    // Nothing caught it and nothing could. `exactly-once` asks whether the
-    // tiles hold exactly the relation they cut, and a duplicate is *in* the
-    // relation; `one-relation-twice` compares the two orientations, and both
-    // carry it. The only visible trace was an `edge_count` too large, which is
+    // Nothing caught it and nothing could: every corpus check then asked
+    // whether the stored relation was self-consistent, and a duplicate is *in*
+    // the relation. The only visible trace was an `edge_count` too large, which is
     // the same shape as a corpus that legitimately has more edges.
     //
     // `EmitVertex` has carried `dedup: true` for exactly this reason since the

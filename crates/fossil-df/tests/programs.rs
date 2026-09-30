@@ -16,34 +16,33 @@
 //! # Why here and not in the web app
 //!
 //! The thing that has to go red is the COMPILER. A script under `docs/` that
-//! shelled out to `fossil check` would put the failure on the documentation
-//! build, which is the wrong side of the seam: a parser regression is not a docs
+//! compiled the programs would put the failure on the documentation build,
+//! which is the wrong side of the seam: a parser regression is not a docs
 //! problem, and the docs build already has two ways to be red for reasons that
 //! are its own.
 //!
-//! And `fossil-cli` specifically, of the crates that could host it, because it
-//! is the only one with the WHOLE host. It installs the whole provider registry
-//! (`src/system.rs`, `providers`) and registers the documents a program
-//! names (`src/documents.rs`, `register_shape_documents`), so a `.shex` sitting
-//! on disk beside the program is enough. In any crate below it the document has
-//! to be pushed into Salsa by hand, because `decoded_document` resolves through
-//! `fossil_base::file_at` — the input registry, not the filesystem — and a
-//! harness that registered its own documents would be testing its own
-//! registration.
+//! # Why `fossil-df`
 //!
-//! # `tests/conformance.rs` is next door and is not this
+//! Because [`fossil_df::Executor`] is the one host that writes a corpus, and a
+//! program is kept here for the corpus it writes. This file lived beside the
+//! native `fossil` binary, whose `fossil run` wrote a different corpus from the
+//! same program; that host was deleted on 2026-09-30, and what it did around
+//! the compiler is `tests/support/native.rs` now — a check host (the real
+//! filesystem, the whole provider registry, every source described first, the
+//! documents a program names registered from disk) and a run through the
+//! executor over the program's directory served from memory. So a `.shex`
+//! sitting on disk beside the program is still enough, and neither half
+//! registers a document the program did not name.
 //!
-//! The name was already taken, by something good and different:
-//! `the_corpus_keeps_the_promises_it_makes_to_a_stranger` writes ONE fixture into
-//! a tempdir and validates the `GraphAr` corpus it produces with twelve numbered
-//! SQL checks over `DuckDB` — density of `dense_id`, CSR/CSC ordering, the two
-//! orientations agreeing, the tiling being the partition the manifest declares.
-//! It is one corpus in great depth. This file is twenty-one programs at the depth
-//! of «did it compile, and did it keep every property the author wrote». Both are
-//! needed and neither substitutes for the other; `conformance.rs` is misnamed for
-//! what it does (it is a corpus artefact validator) and this file did not take
-//! the name back, because renaming somebody else's red test in the middle of a
-//! surface migration buys nothing.
+//! # `tests/write.rs` is next door and is not this
+//!
+//! `the_corpus_keeps_the_promises_it_makes_to_a_stranger` writes ONE generated
+//! graph and validates the `fossil/1` corpus it produces with numbered SQL checks
+//! over `DuckDB` — `dense_id` global and gapless, the edge endpoints, the row
+//! groups, the Hilbert order. It is one corpus in great depth. This file is
+//! every program at the depth of «did it compile, did it keep every property the
+//! author wrote, and is every table `fossil.json` names in the store». Both are
+//! needed and neither substitutes for the other.
 //!
 //! # What replaces the `file:line` citation check
 //!
@@ -57,15 +56,15 @@
 //! Two files per program, under `<program>/expected/`:
 //!
 //! - `diagnostic.txt` — every diagnostic, rendered exactly as `fossil check`
-//!   renders it (miette graphical, unicode, no colour, width 100). Empty is a
+//!   rendered it (miette graphical, unicode, no colour, width 100). Empty is a
 //!   statement, not an absence: it says this program produces no diagnostic, and
 //!   it goes red the day that stops being true.
 //! - `compiled.txt` — what the compiler UNDERSTOOD. Type bindings and the shape
 //!   IRI each resolved to, source bindings, and per mapping the properties
-//!   written against the properties lowered. Then the manifest the run wrote,
-//!   for the twenty-one that are meant to produce one — which is all of them
-//!   that are not under `errors/`. This line read «the thirteen» while
-//!   eighteen `expected/compiled.txt` carried a `── run ──` section.
+//!   written against the properties lowered. Then the tables `fossil.json`
+//!   declares — each with its `record_count` and its columns — and every
+//!   relation's dropped count from the run's report, for every program that is
+//!   not under `errors/`.
 //!
 //!   A source binding that DERIVES a relation carries its pipeline, rendered from
 //!   the HIR by `fossil_hir::display` — the join key, the filter predicate, the
@@ -75,7 +74,7 @@
 //!   subjects. Every number in the artefact is equal across a change that breaks
 //!   the program. The predicate is the only thing that is not.
 //!
-//! `FOSSIL_BLESS=1 cargo test -p fossil-cli --test programs` regenerates them.
+//! `FOSSIL_BLESS=1 cargo test -p fossil-df --test programs` regenerates them.
 //! A diagnostic text nobody produces is a promise the compiler does not make.
 //!
 //! # Every `expected/diagnostic.txt` is blessed, and five were hand-written
@@ -91,8 +90,8 @@
 //!
 //! - **`two-identities` needed nothing.** Message, both spans, both labels and
 //!   the `help` were already identical; what differed was a `[{severity:?}]`
-//!   prefix this file's own renderer added and `fossil check` does not (see
-//!   [`render_diagnostics`]), and the context lines around the snippet. Both
+//!   prefix this file's own renderer added and `fossil check` did not (see
+//!   `native::render_diagnostics`), and the context lines around the snippet. Both
 //!   are how the report is DRAWN, and the hand-written file was drawn by hand.
 //! - **`unknown-field` needed a second label in the same file and a narrower
 //!   caret.** The label is the line that bound the row, saying which fields it
@@ -153,8 +152,7 @@
 //! nothing in the language produces a per-row `Iri`. `check.rs` types an
 //! interpolation as `IriTemplate` only in subject position, and the RDF term
 //! constructors were deleted from the catalogue — so an edge whose shape declares
-//! a shape-valued range reads as `expected Iri, got String`, which is why
-//! `tests/conformance.rs` is red too.
+//! a shape-valued range reads as `expected Iri, got String`.
 //!
 //! # Five of the twenty-six exist because the grammar promised and nobody paid
 //!
@@ -206,6 +204,10 @@
 //!    a program with no contract can write no property at all.
 //! 6. The twenty-one `run` and produce at least one vertex type — the artefact
 //!    each one is kept for.
+//! 7. Every table `fossil.json` names is in the store when `execute` returns,
+//!    and nothing else is: a reader fetches the manifest and follows it, and
+//!    nothing is discovered by listing, so every path it names owes its
+//!    existence.
 //!
 //! # It is red today, and the report is the point
 //!
@@ -221,13 +223,15 @@
 /// this file is the only caller it has ever had, and its own docblock had
 /// already named this as where it goes.
 mod census;
+#[path = "support/native.rs"]
+mod native;
+mod support;
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use census::ProgramCensus;
 use fossil_base::Severity;
-use miette::{GraphicalReportHandler, GraphicalTheme, LabeledSpan, NamedSource, SourceSpan};
 
 /// How many programs the conformance set has, and how many of them are meant to
 /// be rejected. Pinned rather than counted, because the set moving is a decision
@@ -351,203 +355,85 @@ fn properties_in_text(text: &str) -> usize {
 
 // ─────────────────────────────────────────────────────────────────── rendering
 
-/// A diagnostic in the shape miette renders. Hand-rolled rather than derived so
-/// this file needs no `thiserror`: what is wanted is a `&dyn miette::Diagnostic`
-/// carrying its labels and an optional `help`, which is what
-/// `fossil-cli`'s `CheckError` is, and duplicating its derive would tie the
-/// artefact to a binary the harness does not run.
-///
-/// `labels` rather than one `span`: a diagnostic about a RELATION between two
-/// places underlines both and names each (`fossil_base::Diagnostic::labels`).
-/// The docblock at the top of this file said the hand-written targets describe
-/// «two-file reports … which the single-span `fossil_base::Diagnostic` cannot
-/// express yet»; the two-mapping half of that is what the one-identity-per-type
-/// check needs — a diagnostic naming both mappings and both templates — and it
-/// is expressible now.
-#[derive(Debug)]
-struct Rendered {
-    message: String,
-    src: NamedSource<String>,
-    labels: Vec<LabeledSpan>,
-    help: Option<String>,
-}
-
-impl std::fmt::Display for Rendered {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for Rendered {}
-
-impl miette::Diagnostic for Rendered {
-    fn source_code(&self) -> Option<&dyn miette::SourceCode> {
-        Some(&self.src)
-    }
-
-    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
-        Some(Box::new(self.labels.clone().into_iter()))
-    }
-
-    fn help(&self) -> Option<Box<dyn std::fmt::Display + '_>> {
-        self.help
-            .as_ref()
-            .map(|h| Box::new(h) as Box<dyn std::fmt::Display>)
-    }
-}
-
-/// Render every diagnostic the way `fossil check` does, into one stable string.
-///
-/// Unicode, no colour, fixed width: the artefact is compared byte-for-byte and
-/// committed, so it may not depend on a terminal. The `NamedSource` carries the
-/// program's FILE NAME and not its path — an artefact with an absolute path in
-/// it is an artefact that only holds on one machine.
-///
-/// # The severity is not in the artefact, and that is not an omission
-///
-/// The message used to be prefixed `[{severity:?}]`, which made the sentence
-/// above false: `fossil-cli`'s `to_check_error` copies the message across
-/// verbatim, so no user has ever seen `[Error]`. It went, and nothing replaced
-/// it, because `Severity::Warning` and `Severity::Info` have no constructor in
-/// the workspace outside `fossil-base`'s own tests — every diagnostic a program
-/// can produce is an error, and miette draws `×` for one.
-///
-/// The day an emitter raises a warning, this is where it has to become visible:
-/// [`Rendered`] would implement `miette::Diagnostic::severity`, and
-/// `to_check_error` with it, or the artefact will call a warning an error and
-/// say nothing.
-fn render_diagnostics(
-    source: &str,
-    file_name: &str,
-    diagnostics: &[fossil_base::Diagnostic],
-    documents: &[(String, String)],
-) -> String {
-    let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor())
-        .with_width(100)
-        .with_context_lines(1);
-    let named = NamedSource::new(file_name, source.to_string());
-    let mut out = String::new();
-    let at = |span: fossil_base::Span, text: &str| {
-        LabeledSpan::new_with_span(
-            Some(text.to_string()),
-            SourceSpan::new(
-                (span.start as usize).into(),
-                span.end.saturating_sub(span.start) as usize,
-            ),
-        )
-    };
-    for d in diagnostics {
-        let help = d
-            .help
-            .clone()
-            .or_else(|| d.suggestion_source.clone())
-            .or_else(|| {
-                d.message
-                    .find("did you mean")
-                    .map(|i| d.message[i..].to_string())
-            });
-        let labels = if d.labels.is_empty() {
-            vec![at(d.span, "here")]
-        } else {
-            d.labels
-                .iter()
-                .filter(|l| l.document.is_none())
-                .map(|l| at(l.span, &l.text))
-                .collect()
-        };
-        let rendered = Rendered {
-            message: d.message.clone(),
-            src: named.clone(),
-            labels,
-            help,
-        };
-        let _ = handler.render_report(&mut out, &rendered);
-        // **The other half of a two-file report.** miette resolves every range
-        // against the one `SourceCode` its report carries, so a label in
-        // `shape.shex` is a SECOND report over that document's text — the same
-        // arrangement `fossil-cli`'s `document_errors` makes with `related()`.
-        // Rendering it against the program's text instead would underline
-        // whatever sits at that byte: inside the right file, and silently.
-        //
-        // A label naming a document `documents` does not carry is dropped. That
-        // is a document the host could not read, which is what the checker saw
-        // too, and one missing label beats a range resolved against the wrong
-        // text.
-        for (name, text) in documents {
-            let in_this: Vec<LabeledSpan> = d
-                .labels
-                .iter()
-                .filter(|l| l.document.as_deref() == Some(name.as_str()))
-                .map(|l| at(l.span, &l.text))
-                .collect();
-            if in_this.is_empty() {
-                continue;
-            }
-            let rendered = Rendered {
-                message: d.message.clone(),
-                src: NamedSource::new(name, text.clone()),
-                labels: in_this,
-                // The `help:` rode on the program's snippet; one repair said
-                // twice is not two repairs.
-                help: None,
-            };
-            let _ = handler.render_report(&mut out, &rendered);
-        }
-        out.push('\n');
-    }
-    out
-}
-
-/// The manifest the run wrote, rendered without a single machine-dependent
-/// byte. `dest` is a tempdir and is deliberately not here.
+/// What the run wrote, rendered without a single machine-dependent byte: the
+/// tables `fossil.json` declares, in its order, and the run's dropped count
+/// beside each relation. The destination is not here.
 ///
 /// The column list is the manifest's, so it carries `dense_id`, `subject` and
 /// the three layout columns beside the program's own properties — those are
-/// declared and a reader gets them, and the artefact used to show only the
-/// half the program wrote. What each mapping wrote is the section above this
-/// one; this section is what the corpus says.
-fn render_run(report: &fossil_df::RunReport) -> String {
+/// declared and a reader gets them. What each mapping wrote is the section above
+/// this one; this section is what the corpus says.
+fn render_run(corpus: &native::Corpus) -> String {
+    let manifest = corpus.manifest();
     let mut out = String::from("\n── run ──\n");
-    if report.vertices.is_empty() {
+    if manifest.vertex_tables.is_empty() {
         out.push_str("NO VERTEX TYPE was written\n");
     }
-    for v in &report.vertices {
-        let columns: Vec<&str> = v.properties().iter().map(|p| p.name.as_str()).collect();
+    for v in &manifest.vertex_tables {
+        let columns: Vec<&str> = v.properties.iter().map(|p| p.name.as_str()).collect();
         let _ = writeln!(
             out,
             "vertex {} ({}) × {} — {}",
-            v.vertex_type,
-            if v.iri.is_empty() {
-                "no rdf:type"
-            } else {
-                &v.iri
-            },
-            v.vertex_count,
+            v.name,
+            v.iri.as_deref().unwrap_or("no rdf:type"),
+            v.record_count,
             columns.join(", "),
         );
     }
-    if report.edges.is_empty() {
+    if manifest.edge_tables.is_empty() {
         out.push_str("NO EDGE TYPE was written\n");
     }
-    for (e, drops) in report.edges.iter().zip(&report.dropped) {
+    for e in &manifest.edge_tables {
+        let dropped = corpus
+            .report
+            .dropped
+            .iter()
+            .find(|d| d.table == e.name)
+            .map_or(0, |d| d.dropped);
         let _ = writeln!(
             out,
-            "edge {}_{}_{} × {}{}",
-            e.src_type,
-            e.edge_type,
-            e.dst_type,
-            e.edge_count,
+            "edge {} × {}{}",
+            e.name,
+            e.record_count,
             // Silent on a clean run: an artefact that says «0 dropped» on every
             // program stops being read, and the one program that drops a row is
             // the whole reason the number exists.
-            if drops.dropped == 0 {
+            if dropped == 0 {
                 String::new()
             } else {
-                format!(", {} input row(s) dropped", drops.dropped)
+                format!(", {dropped} input row(s) dropped")
             },
         );
     }
     out
+}
+
+/// Invariant 7: the store holds `fossil.json` and exactly the tables it names.
+fn unnamed_or_missing(corpus: &native::Corpus) -> Vec<String> {
+    let manifest = corpus.manifest();
+    let mut named: Vec<String> = manifest
+        .vertex_tables
+        .iter()
+        .map(|v| v.path.clone())
+        .chain(manifest.edge_tables.iter().map(|e| e.path.clone()))
+        .collect();
+    named.push("fossil.json".to_string());
+    let mut findings = Vec::new();
+    for path in &named {
+        if !corpus.files.contains_key(path) {
+            findings.push(format!(
+                "  RUN `{path}` is what fossil.json tells a reader to fetch, and it is not there"
+            ));
+        }
+    }
+    for path in corpus.files.keys() {
+        if !named.contains(path) {
+            findings.push(format!(
+                "  RUN `{path}` was written and fossil.json names it nowhere"
+            ));
+        }
+    }
+    findings
 }
 
 // ────────────────────────────────────────────────────────────── the artefacts
@@ -628,16 +514,8 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
             .to_string_lossy()
             .into_owned();
 
-        // ── stage 1: compile, the production path ─────────────────────────────
-        introspect(&program.source);
-        let outcome = match fossil_cli::check(&program.source) {
-            Ok(outcome) => outcome,
-            Err(e) => {
-                findings.push(format!("  COMPILE the engine refused the file: {e}"));
-                record(&mut report, &mut failed, &program.name, &findings);
-                continue;
-            }
-        };
+        // ── stage 1: compile, through the check host ──────────────────────────
+        let outcome = native::check(&program.source);
 
         let errors: Vec<_> = outcome
             .diagnostics
@@ -666,8 +544,7 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
         }
 
         // ── stage 2: the census — what survived being read ────────────────────
-        let census = census::census(&program.source)
-            .unwrap_or_else(|e| panic!("census {}: {e}", program.source.display()));
+        let census = census::census(&program.source);
 
         // The measured trap, and the distinction that makes it precise.
         //
@@ -730,7 +607,7 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
         }
 
         // ── stage 3: the artefacts ────────────────────────────────────────────
-        let diagnostic = render_diagnostics(
+        let diagnostic = native::render_diagnostics(
             &outcome.source,
             &file_name,
             &outcome.diagnostics,
@@ -744,34 +621,20 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
         // same reason and the second message says nothing the first did not.
         if !program.must_fail {
             if errors.is_empty() {
-                let dest = tempfile::tempdir().expect("tempdir");
-                let url = format!("file://{}", dest.path().display());
-                // No `chdir`. The harness used to stand the process in each
-                // program's directory, because `io.csv("data/items.csv")` was
-                // resolved by the EXECUTOR against the process working
-                // directory while `io.shex("shop.shex")` in the same program was
-                // resolved beside it. The working directory is process state and
-                // the other test in this binary runs on another thread, so the
-                // workaround was also a race nobody had lost yet. One rule now
-                // anchors both to the program's own directory, which is what
-                // lets twenty-five programs be compiled from one process
-                // without any of them caring where that process stands.
-                introspect(&program.source);
-                let outcome = fossil_cli::run(
-                    &program.source,
-                    &url,
-                    &std::collections::HashMap::new(),
-                    None,
-                );
-                match outcome {
-                    Ok(report) => {
-                        compiled.push_str(&render_run(&report));
-                        if report.vertices.is_empty() {
+                // The program's directory, served as it would be to any reader
+                // of the file: every relative source and document resolves
+                // beside the program, and nothing consults a working directory.
+                let dir = program.source.parent().expect("a program has a directory");
+                match native::run_dir(dir, &file_name, &[]) {
+                    Ok(corpus) => {
+                        compiled.push_str(&render_run(&corpus));
+                        if corpus.manifest().vertex_tables.is_empty() {
                             findings.push(
                                 "  RUN it ran and wrote no vertex type — the artefact is empty"
                                     .to_string(),
                             );
                         }
+                        findings.extend(unnamed_or_missing(&corpus));
                     }
                     Err(e) => {
                         let _ = write!(compiled, "\n── run ──\nREFUSED: {e}\n");
@@ -833,7 +696,7 @@ fn the_census_counts_hello_by_hand() {
         "hello.fossil writes `@subject` and `name`, and the independent reader must see both"
     );
 
-    let census: ProgramCensus = census::census(&hello).expect("census hello");
+    let census: ProgramCensus = census::census(&hello);
     assert_eq!(
         census.written(),
         2,
@@ -849,13 +712,65 @@ fn the_census_counts_hello_by_hand() {
     );
 }
 
-/// Introspect before compiling — what `fossil-cli` does, and what `check`/`run`
-/// stopped doing for themselves. Without it a program's sources have no
-/// forward-propagated types, which is a different (and quietly weaker) answer.
-fn introspect(path: &std::path::Path) {
-    let _ = fossil_introspect::introspect_program(
-        fossil_cli::host_system(path),
-        path,
-        &fossil_introspect::RunCreds::default(),
+/// A check of `text`, written as the only file of a fresh directory.
+fn check_text(text: &str) -> native::CheckOutcome {
+    let dir = native::write_dir(&[("subject.fossil", text)]);
+    native::check(&dir.path().join("subject.fossil"))
+}
+
+/// An EMPTY file: zero mappings, zero diagnostics. Nothing in it is wrong, and
+/// it builds no graph — the mapping count is what tells the two apart, because
+/// «no errors» on a file that declares nothing is not the same answer as a
+/// clean program.
+#[test]
+fn an_empty_file_has_no_diagnostic_and_no_mapping() {
+    let outcome = check_text("");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.mappings, 0);
+}
+
+/// A WHOLLY-UNPARSEABLE file: zero mappings, and parse errors a drain over the
+/// mappings alone could not reach. Before the file-level drain it read as clean.
+#[test]
+fn an_unparseable_file_reports_its_parse_error() {
+    let outcome = check_text("!@#$%^&*() )))\n{{{ ]]]\n");
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error
+                && d.message.to_lowercase().contains("unexpected")),
+        "garbage is not a program; got {:?}",
+        outcome.diagnostics
+    );
+}
+
+/// The double-report guard. `def_map` sits in EVERY mapping's dependency
+/// subtree, so draining it alongside the per-mapping loop would publish each
+/// parse error twice. One mapping, one parse error — a property written without
+/// its `=`, which the parser recovers from cleanly — one diagnostic about it.
+///
+/// The count is `assert_eq!`, never `>= 1`: "at least once" is the assertion
+/// this test would pass with the bug it exists to catch.
+#[test]
+fn a_parse_error_in_a_file_with_a_mapping_is_reported_once() {
+    let outcome = check_text(concat!(
+        "type { Person } := io.shex(\"person.shex\")\n",
+        "\n",
+        "users := io.csv(\"users.csv\")\n",
+        "\n",
+        "User : Person from users\n",
+        "    @subject = \"https://example.org/user/{users.id}\"\n",
+        "    name users.name\n",
+    ));
+    let occurrences = outcome
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("expected ASSIGN, found IDENT"))
+        .count();
+    assert_eq!(
+        occurrences, 1,
+        "the parse error must be reported exactly once; got {:?}",
+        outcome.diagnostics
     );
 }

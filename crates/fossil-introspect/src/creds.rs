@@ -1,4 +1,4 @@
-//! Credential intake for `fossil run --creds-stdin`.
+//! Credential intake for a native host's introspection (`RunCreds`).
 //!
 //! Cloud credentials must never ride argv or the environment — both are
 //! world-readable on a shared host via `ps` / `/proc/<pid>/{cmdline,environ}`.
@@ -23,12 +23,10 @@
 //! # There is no `dest` section, and there was
 //!
 //! The payload carried `{"dest": {"secret": …}}` and nothing ever read it: the
-//! `run` path resolves its destination through `local_dest_dir`, which refuses
-//! every URL carrying a scheme before any credential is consulted. A field a
-//! host can fill in and be ignored is worse than an absent one — it reads as
-//! support for a cloud destination that does not exist.
-//! `fossil-cli/tests/cloud_dest.rs` is the refusal, asserted rather than
-//! described, so this paragraph cannot outlive it.
+//! native `run` refused every URL carrying a scheme before any credential was
+//! consulted. A field a host can fill in and be ignored is worse than an absent
+//! one. The destination is the executor's `Storage` now, built from the
+//! credentials a host vends, and this payload never names it.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -172,8 +170,7 @@ mod tests {
     /// An unknown key is not an error, and that is the reason a `dest` section
     /// could sit in the payload for as long as it did without anything
     /// noticing. Asserted rather than assumed: a host still sending one gets a
-    /// run, not a parse failure, and the refusal it deserves comes from
-    /// `fossil-cli/tests/cloud_dest.rs` instead.
+    /// parse, not a failure.
     #[test]
     fn a_section_nothing_reads_is_silently_ignored() {
         let creds = RunCreds::from_json(r#"{ "dest": { "secret": { "type": "s3" } } }"#)

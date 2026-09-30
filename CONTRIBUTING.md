@@ -75,7 +75,7 @@ claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-gra
 
 ## Generated files
 
-Two data files generate nine, and none of the nine may be hand-edited. Each data
+Two data files generate eight, and none of the eight may be hand-edited. Each data
 file has its own command and its own `--check`, because they answer different
 questions and a single command would make one file's staleness the other's
 failure.
@@ -89,8 +89,8 @@ catalogue.bnf ──cargo├─▶ crates/fossil-hir/src/stdlib/generated.rs
                      ├─▶ docs/content/generated/stdlib.mdx
                      └─▶ packages/prompt/src/catalogue.generated.ts
 
-corpus.bnf ─────cargo┌─▶ crates/fossil-sinks/src/generated.rs
-              xtask  └─▶ packages/corpus/src/vocabulary.generated.ts
+corpus.bnf ─────cargo──▶ crates/fossil-sinks/src/generated.rs
+              xtask
               corpus
 ```
 
@@ -126,6 +126,12 @@ the tool the problem broke. Cargo does not build dev-dependencies for a plain
 `run -p xtask`, so the binary links none of it; the tests still do, and
 `the_generated_table_is_the_file` holds the emitted table against the registry it
 becomes, parameter by parameter.
+
+`crates/fossil-sinks/fossil.schema.json` is generated too, but from the Rust
+structs of `fossil.json` rather than from a data file: change a field in
+`crates/fossil-sinks/src/manifest.rs`, run `FOSSIL_BLESS=1 cargo test -p
+fossil-sinks --test schema`, and commit the schema beside it. The test fails on a
+stale one, and it is what a reader outside Rust checks `fossil.json` against.
 
 Add or change a column in `corpus.bnf`, run `cargo xtask corpus`, commit what it
 wrote; `crates/xtask/tests/corpus_generated.rs` is its `--check` as a test, and

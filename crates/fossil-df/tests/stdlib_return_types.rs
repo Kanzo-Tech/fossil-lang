@@ -1,7 +1,7 @@
 //! Every `LoweringKind::Expr` row returns the type its `sig.ret` declares, and
 //! a real `DuckDB` is the one asked.
 //!
-//! NATIVE-ONLY (`fossil-cli` carries a `wasm32` `compile_error!` tripwire).
+//! NATIVE-ONLY: it links `DuckDB`, a dev-dependency of this crate.
 //!
 //! # The defect this is the guard for
 //!
@@ -25,7 +25,7 @@
 //! The two guards that existed could not see any of them. `builtin_smoke.rs`
 //! executes each template and asks whether `DuckDB` BOUND it, which every one of
 //! the five passed — they are all valid SQL, they are the WRONG valid SQL.
-//! `fossil-df`'s `UNREACHABLE_ON_DATAFUSION` asks whether a template renders at
+//! This crate's `UNREACHABLE_ON_DATAFUSION` asks whether a template renders at
 //! all. Neither reads `sig.ret`, so neither could compare the halves.
 //!
 //! # Why `DESCRIBE` and not `typeof`
@@ -35,7 +35,7 @@
 //! validator working, not its type. `DESCRIBE SELECT <expr>` answers from the
 //! BINDER, before a row exists, so every one of the 35 templates is covered with
 //! no exclusion list to keep in step. That is the difference between this and
-//! putting it on `fossil-df`, where `error()` has no spelling and six rows would
+//! asking `DataFusion`, where `error()` has no spelling and six rows would
 //! have had to be declared unprovable.
 //!
 //! # The dummy arguments are CAST, and that is load-bearing
@@ -64,7 +64,7 @@
 //!   `builtin_smoke.rs` is where a value is asserted.
 //! - **`DataFusion`.** `DuckDB` is the engine every template was measured against
 //!   and the only one that can render all 35. What the other engine does with a
-//!   row is `fossil-df`'s `UNREACHABLE_ON_DATAFUSION`, and it answers a
+//!   row is this crate's `UNREACHABLE_ON_DATAFUSION`, and it answers a
 //!   different question: *does it render*, not *what does it return*.
 
 #![cfg(not(target_arch = "wasm32"))]

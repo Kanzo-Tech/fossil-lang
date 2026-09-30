@@ -1,7 +1,6 @@
 // These items are `pub(crate)` (a private module ⇒ `unreachable_pub` wants
 // `pub(crate)`), which trips the inverse `redundant_pub_crate` nursery lint —
-// the same pair `fossil-cli`'s `system.rs` is caught between, silenced the same
-// way.
+// silenced the way the rest of the workspace silences it.
 #![allow(clippy::redundant_pub_crate)]
 
 //! The host half these integration tests owe the checker: a filesystem, a

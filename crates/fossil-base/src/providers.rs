@@ -19,7 +19,7 @@
 //! `io.shex` is *input* by the bytes and *output* by the meaning: a file is
 //! read, and what it describes is the output contract. That is why it never fit
 //! an axis with one direction in it. The bottom-right cell already exists in the
-//! artefact and not in the language — a `GraphAr` manifest is a written type
+//! artefact and not in the language — `fossil.json` is a written type
 //! document and nothing names it.
 //!
 //! **The write half is deliberately not modelled.** `grammar.bnf` says in as

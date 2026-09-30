@@ -11,5 +11,5 @@ Observed: 2 written, 2 lowered
     name
 
 ── run ──
-vertex Species (https://field.example/voc#Species) × 2 — dense_id, subject, name, x, y, cluster_id
+vertex Species (https://field.example/voc#Species) × 2 — dense_id, subject, x, y, cluster_id, name
 NO EDGE TYPE was written

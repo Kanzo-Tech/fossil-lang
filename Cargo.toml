@@ -88,13 +88,6 @@ oxrdf = { version = "0.3", features = ["rdf-12"] }
 # === Did-you-mean diagnostics ===
 strsim = "0.11"
 
-# === Native CLI pre-introspection ===
-# Source-binding extraction in fossil-cli scans the .fossil text for
-# io.csv("...") / io.json("...") references via regex. It is a placeholder for
-# an AST walk, and it is wrong on any binding a regex cannot see. NATIVE-ONLY
-# consumer; never referenced by a WASM-gated crate.
-regex = "1"
-
 # === Sinks ===
 # `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc,
 # either of which would break the wasm32 gate). The `arrow` umbrella + `parquet` stay
@@ -103,26 +96,19 @@ regex = "1"
 # 2026-05; the prior `= "59"` placeholders were aspirational and never resolved). 58.3.0
 # is what Cargo.lock already resolves transitively via duckdb's parquet.
 arrow-schema = "58"
-# `arrow-array` alongside it, for the same reason and one crate further in:
-# `fossil-tile-writer` needs the array types and not the umbrella's four format
-# readers. Same 58.3.0 the lockfile already resolves.
-arrow-array = "58"
 arrow = "58"
 parquet = "58"
-# `bytes` for `fossil-layout`'s in-memory filesystem, which is how the layout
-# pass runs in a browser: `parquet`'s `ChunkReader` is defined in terms of
-# `Bytes`, so a reader over memory has to speak it, and slicing one is a
-# refcount rather than a copy — which is what keeps the browser path at one
-# resident copy per file instead of one per read. Not a new crate in the tree:
-# `parquet` already depends on it and `Cargo.lock` already resolves it, so this
-# line names a version rather than adding a dependency. Pure Rust, so it costs
-# the wasm32 gate nothing.
+# `bytes` is what `object_store` puts and gets — the currency of every file
+# `fossil-df` writes and `fossil-storage` moves. Not a new crate in the tree:
+# `object_store` and `parquet` already depend on it, so this line names a
+# version rather than adding a dependency. Pure Rust, so it costs the wasm32
+# gate nothing.
 bytes = "1"
 
 # === The native engine — NATIVE ONLY ===
-# `fossil-introspect` is the one crate on a normal edge; `fossil-engine`,
-# `fossil-layout` and `fossil-cli` keep it as a dev-dependency, to
-# read written Parquet back or to bring an engine to a test. `deny.toml`'s
+# `fossil-introspect` is the one crate on a normal edge; `fossil-df` and
+# `fossil-layout` keep it as a dev-dependency, to read a written corpus back or
+# to bring an engine to a test. `deny.toml`'s
 # `duckdb` wrappers list is the enforced version of that sentence.
 duckdb = { version = "1.10502", features = ["bundled"] }
 

@@ -28,7 +28,7 @@
 //! ```text
 //! fossil-hir/src/lower.rs   `io.linkml` is not a provider this host installs — it has `io.csv`, …
 //! fossil-hir/src/shapes.rs  `io.linkml` is not a provider — this host installs `io.csv`, …
-//! fossil-cli/src/host.rs    `io.linkml` is not a provider this host installs
+//! (native CLI) host.rs      `io.linkml` is not a provider this host installs
 //! ```
 //!
 //! The third one dropped the list, so the `fossil run` path told an author their

@@ -49,7 +49,7 @@ impl ErrorGuaranteed {
 /// **Invariant:** every call to `delay_span_bug` pushes EXACTLY ONE
 /// [`Diagnostic`] to the accumulator and returns a fresh [`ErrorGuaranteed`].
 /// The Salsa accumulator's per-query collection semantics ensure the
-/// diagnostic flows to the LSP / CLI host via
+/// diagnostic flows to the LSP / WASM host via
 /// `query::accumulated::<Diagnostic>(db, ...)`.
 #[must_use = "ErrorGuaranteed must be propagated to the caller to taint downstream queries"]
 pub fn delay_span_bug(

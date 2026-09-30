@@ -18,7 +18,7 @@ import { GRAMMAR_DIGEST, SURFACE } from '../src/surface.js';
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const PROGRAMS = join(ROOT, 'docs/programs');
 
-/** Every conformance program, recursively — `crates/fossil-cli/tests/programs.rs` walks the same tree. */
+/** Every conformance program, recursively — `crates/fossil-df/tests/programs.rs` walks the same tree. */
 function programs(dir = PROGRAMS): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);

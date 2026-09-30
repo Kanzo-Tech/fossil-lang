@@ -1,6 +1,6 @@
 //! What the compiler UNDERSTOOD from a program — the reading, not the verdict.
 //!
-//! [`fossil_cli::check`] answers «is anything wrong», and a program can be
+//! A check answers «is anything wrong», and a program can be
 //! entirely right about nothing. It was built for a hole `check` could not see —
 //! a property whose right-hand side the lowering cannot read, dropped in silence
 //! — and that hole is closed: every refusal path in `lower_property` and
@@ -18,14 +18,11 @@
 //! properties that SURVIVED (`HirBody::properties`). Equality is the invariant
 //! — a compiler may reject a property, but it may not lose one.
 //!
-//! It runs over the same [`fossil_cli::open_db`] as `check` and `run`, which
-//! is the point: the shape documents the program names are registered, the real
-//! `ShEx` decoder is installed, and the reading reported here is the reading the
-//! executor will act on. A second database built beside this one would be a
-//! second compiler — which is why the move made that function `pub` rather than
-//! rebuilding the database out here from `host_system`. One `pub fn` crossed the
-//! crate boundary outwards; 25 crossed it inwards, and are `pub(crate)` on this
-//! side because a test binary has no outside to be public to.
+//! It runs over the same database as the check in `super` —
+//! `crate::native::open_db` — which is the point: the shape documents the program
+//! names are registered, the real `ShEx` decoder is installed, and the reading
+//! reported here is the reading the checker acted on. A second database built
+//! beside this one would be a second compiler.
 
 // These items are `pub(crate)` (private module ⇒ unreachable_pub wants pub(crate));
 // that trips the inverse `redundant_pub_crate` nursery lint, silenced here — the
@@ -41,7 +38,7 @@ use fossil_hir::display::pipe_text;
 use fossil_hir::lower::{PropertyKey, lower_to_hir};
 use fossil_syntax::SyntaxKind;
 
-use fossil_cli::open_db;
+use crate::native::open_db;
 
 /// One `type { … } := io.shex("…")` name, and what it bound.
 #[derive(Debug, Clone)]
@@ -259,14 +256,9 @@ impl ProgramCensus {
     }
 }
 
-/// Read `path` through the production compile path and report what it understood.
-///
-/// # Errors
-/// Returns a read error if `path` is unreadable.
-pub(crate) fn census(path: &Path) -> miette::Result<ProgramCensus> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
-    let (db, file) = open_db(text, path);
+/// Read `path` through the check host and report what it understood.
+pub(crate) fn census(path: &Path) -> ProgramCensus {
+    let (db, file) = open_db(path);
     let dm = def_map(&db, file);
 
     let types = dm
@@ -374,11 +366,11 @@ pub(crate) fn census(path: &Path) -> miette::Result<ProgramCensus> {
         })
         .collect();
 
-    Ok(ProgramCensus {
+    ProgramCensus {
         types,
         sources,
         mappings,
-    })
+    }
 }
 
 /// The key of a property as written: everything before the first `=` that is

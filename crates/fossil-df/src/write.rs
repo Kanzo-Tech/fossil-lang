@@ -23,8 +23,7 @@ use datafusion::parquet::basic::Encoding;
 use datafusion::parquet::errors::ParquetError;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::schema::types::ColumnPath;
-use fossil_graph_schema::{Cardinality, NodeType};
-use fossil_hir::shapes::primitive_to_graphar;
+use fossil_graph_schema::NodeType;
 use fossil_layout::layout::{Layout, LayoutError, Relation, VertexType, layout};
 use fossil_mem_probe::Probe;
 use fossil_sinks::generated::{EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_COLUMNS};
@@ -279,23 +278,18 @@ fn vertex_parquet(
         .iter()
         .map(|c| fixed(c.name, c.data_type))
         .collect();
-    let program = |name: &str, arrow: &DataType| {
-        let declared = node.properties.iter().find(|p| p.name == name);
-        Property {
-            name: name.to_string(),
-            data_type: declared.map_or_else(
-                || data_type_name(arrow),
-                |p| {
-                    let item = primitive_to_graphar(p.datatype);
-                    match p.cardinality {
-                        Cardinality::Single => item.to_string(),
-                        Cardinality::Multi => format!("list<{item}>"),
-                    }
-                },
-            ),
-            iri: declared.and_then(|p| p.iri.clone()),
-            nullable: true,
-        }
+    // The type is the column's, as written: `properties` describes the file a
+    // reader opens, and the checker's belief about a column the executor never
+    // introspected is not what the bytes hold. The IRI is the shape's.
+    let program = |name: &str, arrow: &DataType| Property {
+        name: name.to_string(),
+        data_type: data_type_name(arrow),
+        iri: node
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.iri.clone()),
+        nullable: true,
     };
 
     let Some(first) = batches.first() else {

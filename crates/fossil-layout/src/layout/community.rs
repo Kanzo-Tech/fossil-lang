@@ -4,7 +4,7 @@
 //! the level-of-detail plan is built from.
 //!
 //! The output is reproducible, and that is load-bearing rather than incidental —
-//! `/docs/design/cells` is the page that depends on it and carries the
+//! `/docs/design/later/cells` is the page that depends on it and carries the
 //! measurement.
 
 /// Modularity-based community detection, returning the **whole hierarchy**
@@ -472,7 +472,7 @@ impl Weighted {
 /// process peak that goes the wrong way by 0.36 GiB (8.54 → 8.90).
 ///
 /// That trade was refused once and the refusal was correct at the time: it spent
-/// the one quantity `--memory-gib` bounds to buy wall clock that was not the
+/// the one quantity the run's memory budget bounds to buy wall clock that was not the
 /// objective. What removed the objection was [`Weighted::contract`], after which
 /// the peak was 5.08 GiB and 90 MB was not a trade; the adjacency remap has
 /// taken it to **3.94** since, and 90 MB is less of one still.

@@ -102,7 +102,7 @@ pub enum FsError {
 // and the one in `fossil-lsp` is a docblock saying `LspSystem` replaced it. That
 // is not an accident of history — a host that COMPILES a program has to install
 // the rows that read types, and the trait default is the data rows alone, so
-// every real host (`LspSystem`, the CLI's, the wasm workspace's) declares its
+// every real host (`LspSystem`, the wasm workspace's) declares its
 // own. What was left is a fixture: the cheapest `System` a test can stand up.
 //
 // A fixture on the crate root is a fixture something will eventually reach for

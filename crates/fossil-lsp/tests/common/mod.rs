@@ -46,7 +46,7 @@
 // the restriction redundant and rustc's `unreachable_pub` calls the unrestricted
 // form unreachable. Only one of the two can be satisfied, and the rustc lint is
 // the one this workspace opted into by name (root `Cargo.toml`,
-// `[workspace.lints.rust]`). Same dance as `fossil-cli/tests/common/mod.rs`.
+// `[workspace.lints.rust]`).
 #![allow(clippy::redundant_pub_crate)]
 
 use std::io::{Read as _, Write as _};

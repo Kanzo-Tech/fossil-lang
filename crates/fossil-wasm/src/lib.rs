@@ -808,8 +808,8 @@ impl Default for FossilWorkspace {
 // program's typed lineage (which `@conn`s + `schema =` it references) and the
 // supported source providers WITHOUT subprocessing the `fossil` binary. Both
 // delegate to `fossil_lineage` (WASM-clean) over
-// `fossil_descriptors_output::PROVIDERS` — the SAME two calls `fossil-cli`'s
-// `host.rs` makes natively — so the browser and the CLI can never diverge.
+// `fossil_descriptors_output::PROVIDERS` — the same calls
+// `fossil-df/tests/provider_registry.rs` makes natively.
 //
 // Free functions (not `FossilWorkspace` methods): they are stateless and
 // program-text-driven (the job runner has the script string, not the editor's

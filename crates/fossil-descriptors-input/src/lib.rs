@@ -15,7 +15,7 @@
 //!
 //! A host does not ship a schema sidecar. It runs `DuckDB` `DESCRIBE
 //! read_csv_auto(...)` (browser-side `DuckDB-WASM`, or the native `duckdb`
-//! crate in `fossil-cli`) and passes the introspected column list as an
+//! crate through `fossil-introspect`) and passes the introspected column list as an
 //! [`InferredDescriptor`] (see [`inferred`]) ahead of `compile()`. RDF is the
 //! other half: `schema =` names a provider (`schema = io.shex("…")`) and the
 //! declared shape gives the columns, resolved by `fossil_hir::def_map` through

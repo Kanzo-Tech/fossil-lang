@@ -69,7 +69,7 @@ impl System for ExecutorSystem {
 /// One compiled program and the documents registered for it — the
 /// target-agnostic core behind [`FossilExecutor`].
 ///
-/// The order is the native host's and it is forced: parse → ask which
+/// The order is forced: parse → ask which
 /// documents the program names → register them → list sources and run. The
 /// output descriptor is decoded from the registry on each call, so it is always
 /// the document the checker read.

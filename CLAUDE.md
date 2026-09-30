@@ -11,8 +11,8 @@ Keep it under 200 lines, rules-not-context.
 - `corpus.bnf` — WHAT A CORPUS IS MADE OF: the columns the writer emits and what each
   one IS. The third data file, and the newest. A reader that needs «the writer's columns»
   names the ROLES it means rather than the names — two readers used to write the names and
-  meant different questions by them. `cargo xtask corpus` generates the Rust and TypeScript
-  projections; `crates/xtask/tests/corpus_generated.rs` is the `--check` as a test.
+  meant different questions by them. `cargo xtask corpus` generates the Rust projection;
+  `crates/xtask/tests/corpus_generated.rs` is the `--check` as a test.
 - `catalogue.bnf` — WHICH NAMES EXIST, both halves: the `io.` constructors and every stdlib
   function with its signature and lowering. Generated from, not compared against — seven files
   come out of `cargo xtask catalogue` and no Rust states a row a second time. Adding a
@@ -23,12 +23,11 @@ Keep it under 200 lines, rules-not-context.
   `/docs/design` is where an argument lives, with `design/discarded` for every rejected
   alternative and what would bring it back, and `design/prior-art` for every source named.
 - `packages/corpus/` — the artifact's contract, executable: `guards/`, `conformance/` and
-  `integration/`. Its prose is `/docs/format`; the two server components that render `guards.mjs`
-  and `vectors.json` live on the docs side and read across, so renaming either file breaks the
-  docs build on purpose. `integration/` is the one directory here that needs `pnpm install`, and
+  `integration/`. Its prose is `/docs/format`; the server component that renders `guards.mjs`
+  lives on the docs side and reads across, so renaming it breaks the docs build on purpose. `integration/` is the one directory here that needs `pnpm install`, and
   `pnpm test:integration` is the only script that reaches it.
 - `docs/programs/` — the conformance programs. Documentation transcludes them; nothing
-  retypes a program into prose. No number here: `crates/fossil-cli/tests/programs.rs` walks
+  retypes a program into prose. No number here: `crates/fossil-df/tests/programs.rs` walks
   the directory, and the count in this line was already wrong.
 - `crates/` — the crate list. There is no number to quote; `cargo xtask wasm-check` prints
   the wasm32 subset it derived from the dependency graph.
@@ -98,13 +97,10 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   what NOT to do because tried-it. Read on return before any code change. Solo plus an open
   timeline means breaks are inevitable, and without the ritual the third one leaves the codebase
   opaque to its own author.
-- **Walking-skeleton invariant:** `fossil run examples/hello.fossil --dest <tmp>` must keep
-  producing a readable corpus — 5 `Person` vertices, asserted by content, not existence. It said
-  "a valid GraphAr dataset", and that is not the claim: fossil borrows GraphAr's manifest field
-  names and stops where the spec stops specifying, and a fossil corpus is not openable by GraphAr's
-  own reader (its `TypeNameToDataType` throws on `dense_id`'s `uint32`). See
-  `/docs/design/corpus` for the boundary and the nine measured divergences.
-  `crates/fossil-cli/tests/walking_skeleton.rs` is the test that goes red. A refactor that
+- **Walking-skeleton invariant:** `examples/hello.fossil`, run through the executor
+  (`fossil_df::Executor`, the one write host), must keep producing a readable `fossil/1`
+  corpus — 5 `Person` vertices, asserted by content read back with DuckDB, not existence.
+  `crates/fossil-df/tests/walking_skeleton.rs` is the test that goes red. A refactor that
   breaks it for >3 days is reverted and broken into smaller steps.
 
 ## Stack Pins
@@ -122,7 +118,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating the graph wasm on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
 | serde_yaml_ng | 0.10 | NOT serde_yml (RUSTSEC) |
 | lsp-server | 0.7 | NOT tower-lsp (unmaintained) |
-| arrow + parquet | 58 | for GraphAr writer (no Apache GraphAr Rust SDK exists) |
+| arrow + parquet | 58 | the corpus writer, `fossil_df::write` (through `datafusion`'s re-export) |
 | shex_ast + rudof_iri | 0.3 | ShEx target shapes; explicit features only — `default-features` drags in what wasm32 cannot build |
 | datafusion | 54, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there |
 
@@ -162,16 +158,17 @@ crates/
                            hosts' included
   fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
-  fossil-sinks/            the canonical GraphAr manifest model, plus `generated.rs` — the
-                           writer's column table from `corpus.bnf`, which lives here because
-                           this crate is the junta: in the closure of both the writer and the
-                           reader, so no consumer grows an edge to reach it.
-                           It byte-writes nothing —
-                           `arrow-schema` for the types and `serde_yaml_ng` to emit
-  fossil-df/               DataFusion backend for the property-graph MIR
+  fossil-sinks/            the `fossil/1` format: `fossil.json`'s structs (serde + schemars;
+                           `fossil.schema.json` beside them is what a reader in another
+                           language checks against), `FOSSIL_FORMAT`, and `generated.rs` —
+                           the writer's column table from `corpus.bnf`. It byte-writes
+                           nothing: `arrow-schema` for the types, `serde_json` to emit
+  fossil-df/               DataFusion backend for the property-graph MIR, the one corpus
+                           writer (`write`: layout, then a Parquet per table, `fossil.json`
+                           last), and `Executor` — the whole run a host drives
   fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each source's columns,
-                           and the `--creds-stdin` payload that authenticates one. `fossil-cli`
-                           calls it before the compile. It links `DuckDB` on a normal edge, and
+                           and the payload that authenticates one. `fossil-lsp` calls it
+                           before the compile. It links `DuckDB` on a normal edge, and
                            it is not the only crate that does — `cargo tree -e normal -i duckdb
                            --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
                            holds it against `deny.toml`. Native by that edge, without a
@@ -179,23 +176,13 @@ crates/
                            DESCRIBEs is `fossil_lineage::program_sources` — the list the
                            browser's `sources()` returns — so it links the compiler front-end,
                            as every host does
-  fossil-layout/           the layout post-pass — Louvain + Hilbert over Parquet through
-                           arrow-rs. It links no engine: `DuckDB` is a dev-dependency, and
-                           `fossil-df` is no dependency at all since `TileWriter` became
-                           `fossil-tile-writer` and stopped dragging `DataFusion` and
-                           `salsa` in behind it. `crates/xtask/tests/engine_reach.rs`
-                           derives the real linkers and is what made that edge visible. It
-                           COMPILES for wasm32 and declares it with `[package.metadata.fossil]
-                           wasm = true`, which is what puts it in the gate closure. It was
-                           `fossil-runtime`, and it is not a runtime: the crate IS the pass
-  fossil-tile-writer/      the row-group container a corpus's payload is written through —
-                           one tile, one row group, and the only byte-writer of tiles in the
-                           tree. A leaf over `arrow` and `parquet`. It was a struct in
-                           `fossil_df::files` that `fossil-df` never called, and the layout
-                           pass's one `use` of it is what put `salsa` and `DataFusion` under
-                           a pass that resolves no name. NOT in `fossil-sinks`: that crate
-                           takes `arrow-schema` alone and declares the tiling without
-                           byte-writing it
+  fossil-layout/           the layout pass — one Louvain partition and placement over the
+                           whole graph, and the global `dense_id` as the `ST_Hilbert` rank of
+                           each position. It computes and writes nothing, over arrow-rs
+                           alone; `fossil-df` depends on it, never the reverse. It links no
+                           engine: `DuckDB` is a dev-dependency. It COMPILES for wasm32 and
+                           declares it with `[package.metadata.fossil] wasm = true`, which is
+                           what puts it in the gate closure
   fossil-mem-probe/        `FOSSIL_MEM_PROBE` — peak RSS + elapsed seconds per phase of a
                            write. Depends on NOTHING; both halves of the write path
                            (fossil-df, fossil-layout) report through it
@@ -203,16 +190,12 @@ crates/
   fossil-graph/            the typed verb surface over a GraphAr corpus. It EMITS SQL in
                            DuckDB's dialect and links no engine to run it (WASM-clean)
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
-  fossil-cli/              fossil's native HOST *and* the binary over it: `src/host.rs` is the
-                           `System` the compiler runs against, the shape documents a program
-                           names, and the compile→run pipeline; `src/main.rs` is
-                           `fossil check/run/providers/refs` and does the rendering. It was
-                           `fossil-engine` plus a shell, and the library half had exactly one
-                           consumer — this one. `fossil-lsp` and `fossil-wasm` keep their hosts
-                           inside themselves too: three hosts, three crates  [NATIVE-ONLY]
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
   fossil-wasm/             WASM host shim (FossilWorkspace API + the tokenizer the editor reuses)
-  fossil-df-wasm/          the fossil-df executor exposed to JS
+  fossil-df-wasm/          `fossil_df::Executor` exposed to JS — the only host that writes a
+                           corpus, in the browser and in Node. There is no native CLI: it
+                           was deleted on 2026-09-30 (`/docs/design/discarded` says what
+                           brings it back)
   fossil-graph-wasm/       wasm-bindgen binding for the fossil-graph verb surface
   xtask/                   repo automation. Three commands: `wasm-check` derives the wasm32
                            subset from the cdylib closure, and `catalogue [--check]` and
@@ -246,8 +229,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            resolved. The boot is internal: the `.wasm` is a bundler asset (`new
                            URL(…, import.meta.url)` in the glue), and `wasm` on the options is for
                            a host with no bundler
-  executor/                datafusion-wasm query executor, and the manifest wire mirror, because
-                           a run HANDS THAT BACK
+  executor/                the datafusion-wasm executor — the one writer of a corpus. A run
+                           answers `{ dest, dropped }`; what it wrote is `<dest>fossil.json`
   types/                   Host — `connections()` + `credentials(scope, access)` — the one host
                            contract, and StorageCredential (Iceberg REST's, verbatim); the
                            Engine. Types only
@@ -287,10 +270,10 @@ docs/                      Next.js + fumadocs, and ALL of the prose: the book, t
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
                            source of seven generated files; no Rust states a row twice
-corpus.bnf                 what a corpus is made of — the payload and adjacency columns and
-                           the ROLE of each. The source of two generated files, one Rust and
-                           one TypeScript. Prefixes and file names are NOT here: those are
-                           addressing, and `fossil-graph`'s plan already owns them
+corpus.bnf                 what a corpus is made of — the vertex and edge columns the writer
+                           emits and the ROLE of each. The source of one generated file,
+                           `fossil-sinks/src/generated.rs`. File names are NOT here: they are
+                           `fossil.json`'s `path`, and `fossil-sinks::manifest` owns them
 tests/wasm_parity/         the manual DuckDB-WASM cross-engine parity harness
 ```
 
