@@ -138,8 +138,7 @@ crates/
                            the cwd. It was a module of `fossil-base` and is not one now: a
                            substrate «doesn't know about file paths». It depends on NOTHING and
                            `fossil-base` does not depend on IT — each of its readers
-                           (`fossil-hir`, `-cli`, `-introspect`, `-df`, `-lsp`, `-lineage`)
-                           takes it direct
+                           (`fossil-hir`, `-introspect`, `-df`, `-lineage`) takes it direct
   fossil-syntax/           lossless CST + parser
   fossil-hir/              types + name resolution + bidirectional checker + the stdlib
                            catalog. `stdlib.rs` owns the TYPES a row is written in; the ROWS
@@ -229,8 +228,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            `tokenize()` + `tokenKinds()`, squiggles from `check()` through
                            `@codemirror/lint`, and hover / completion / goto-definition
                            over the three position queries `FossilWorkspace` grew. The
-                           two that stay OUT are semantic tokens (they come back only
-                           over the Worker) and code actions (the two quick fixes hang
+                           two that stay OUT are semantic tokens (only the native
+                           `fossil-lsp` serves them) and code actions (the two quick fixes hang
                            off a structured diagnostic the `CheckRow` wire shape
                            flattens); `src/index.ts` says so. A package of this name was deleted in
                            `873cbc0` and it is not restored — the old one hard-copied the
@@ -270,7 +269,7 @@ over somebody else's editor, and the somebody else is `@kanzo-tech/ui`.
 ## Style
 
 - Prefer enum dispatch over `Box<dyn Trait>`. Salsa interning needs concrete types.
-- `Result<T, E>` with thiserror-style enums in lib crates; `miette::Result` in CLI / LSP / runtime.
+- `Result<T, E>` with thiserror-style enums in lib crates; `miette` only where a host renders a diagnostic.
 - `tracing` for structured logs (not `log`). `RUST_LOG=fossil=debug` is the canonical filter.
 - Snapshot tests via `insta` — `git ls-files '*.snap'` shows which crates carry them (not the
   parser CST: too brittle).

@@ -1,16 +1,18 @@
 # Fossil
 
-A typed compiler for RDF graph construction. Surface syntax is a small DSL
-(`.fossil`) with bidirectional type checking — forward from input descriptors
-(introspected from the source itself), backward from target shapes
-(ShEx). It lowers to a typed operator algebra and executes it, writing a
+A statically typed mapping language that turns tables and RDF into a property
+graph. Surface syntax is a small DSL (`.fossil`) with bidirectional type
+checking — forward from input descriptors (introspected from the source
+itself), backward from target shapes (ShEx). Every vertex has one static type,
+the shape its mapping declares. It lowers to a typed operator algebra and
+executes it, writing a
 `fossil/1` corpus: one Parquet per vertex type and per relation, and a small
 `fossil.json` over them. DataFusion runs the mapping, the layout pass places the
 whole graph and numbers it in Hilbert order, and any SQL engine that reads Parquet
 reads the result — `/docs/design/corpus` is the argument.
 
-**Status:** pre-v0.1, in active development. Nothing is published; the surface
-is still changing.
+**Status:** alpha. The `@fossil-lang/*` packages are published to npm under the
+`alpha` dist-tag, one version per git tag; the surface is still changing.
 
 ## Quick look
 
@@ -43,10 +45,10 @@ People : Person from User
 
 That is `docs/programs/hello/hello.fossil` verbatim — one of the programs
 the documentation is written against. The surface is the one [`grammar.bnf`](grammar.bnf)
-specifies, and the grammar is ahead of the parser on purpose — read a page's `today:`
-register before assuming the compiler has arrived there.
+specifies, and the grammar is ahead of the parser on purpose — a production the parser
+does not implement yet is work outstanding, not an error in the file.
 
-## What runs today
+## What runs
 
 The executor — `fossil_df::Executor`, published as `@fossil-lang/executor` — is
 the one host that runs a program and writes its corpus, in the browser and in
@@ -91,8 +93,9 @@ There is **one** reference, in three pieces:
   is the argument for why any of it is shaped this way. A page describing something not yet built
   says so in a `direction:` field rather than in its tone; everything else describes what is there.
   Every push to `main` publishes it to <https://kanzo-tech.github.io/fossil-lang/>.
-- [`packages/corpus/`](packages/corpus/) — the artifact's contract, executable: the guards that make a
-  convention checkable and the conformance corpus that makes two readers agree. Copy `guards/`
+- [`packages/corpus/`](packages/corpus/) — the reader, `@fossil-lang/corpus`, and beside it the
+  artifact's contract, executable: the guards that make a convention checkable and a conformance
+  corpus that satisfies every one of them. Copy `guards/`
   somewhere else and it runs — `node` and a `duckdb` binary, no install, no build.
 - [`docs/programs/`](docs/programs/) — the conformance programs. Every program the
   documentation shows is one of these, read off disk at build time and never retyped into prose.

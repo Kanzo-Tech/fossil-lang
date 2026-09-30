@@ -265,24 +265,23 @@ local enforcement, put `cargo fmt --all -- --check`, `cargo clippy --workspace
 
 ## Releasing
 
-One rmlext release publishes the `@fossil-lang/*` npm packages at version `vX.Y.Z`, through
-`.github/workflows/release.yml` (changesets). The version's source of truth is the git tag `vX.Y.Z`
-that `changesets/action` creates when it publishes. There is no image: the OCI image that carried
-`fossil` and an MCP server had no consumer and was deleted.
+**The tag is the version.** Pushing a tag `vX.Y.Z[-pre.N]` runs `.github/workflows/release.yml`,
+which builds every package, runs `pnpm --filter "./packages/*" test` as the gate, stamps the tag's
+version into each published `package.json` in the CI checkout only, and publishes the
+`@fossil-lang/*` packages. There are no changesets, no "Version Packages" PR and no commit pushed
+back: every `package.json` in the tree says `0.0.0-development`, and nothing in the repository
+records a version but the tag.
 
-**Two one-time operator actions gate the first release.**
+```bash
+git tag v0.3.0-alpha.16 && git push --tags   # or cut a GitHub Release, which creates the tag
+```
 
-1. **npm Trusted Publisher.** npmjs.com → scope `@fossil-lang` → Settings → Trusted Publishers →
-   repository `Kanzo-Tech/fossil-lang`, workflow `release.yml`, environment blank. Without it the
-   first `changeset publish --provenance` fails with a missing-OIDC error. **That is the gate
-   working, not a bug** — do not debug it as one.
-2. **The first stable version.** The linked `@fossil-lang/*` group sits at `0.3.0-alpha.0`. When
-   merging the "Version Packages" PR, confirm it lands on `0.3.0` rather than jumping to `1.0.0`.
-
-After that the per-release flow has no manual step beyond one merge: land changes with
-`pnpm changeset`; `release.yml` opens the "Version Packages" PR; merging it publishes to npm and
-creates the tag; keasy's Renovate opens one grouped PR bumping the packages and the git-dep tag
-together.
+The prerelease identifier is the npm dist-tag — `v0.3.0-alpha.16` publishes under `alpha` and does
+not move `latest`; a tag with none publishes under `latest`. Publishing goes through npm Trusted
+Publishing (the job's `id-token: write` is the credential, and no token is stored), so a **new**
+package needs one token publish and its Trusted Publisher configured before a tag can publish it.
+Re-running a tag is safe: a version already on the registry is skipped. There is no image: the OCI
+image that carried `fossil` and an MCP server had no consumer and was deleted.
 
 A dry run, which does not publish:
 
