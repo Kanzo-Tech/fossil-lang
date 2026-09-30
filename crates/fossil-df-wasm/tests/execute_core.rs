@@ -365,3 +365,37 @@ fn a_document_is_missing_until_registered_and_the_run_waits_for_it() {
     assert!(exec.missing_documents().is_empty());
     assert_eq!(exec.sources().expect("sources").len(), 1);
 }
+
+/// Two mappings of one type: `finalize_vertex` unions them, and a `UNION ALL` of
+/// two scans has two partitions however few the session targets.
+const UNION_PROGRAM: &str = "\
+type { Person, Order } := io.shex(\"executor.shex\")
+
+users := io.csv(\"https://data.example.com/users.csv\")
+
+Early : Person from users.where(users.id < 3)
+    @subject = \"https://example.org/person/{users.id}\"
+    name = users.name
+
+Late : Person from users.where(users.id >= 3)
+    @subject = \"https://example.org/person/{users.id}\"
+    name = users.name
+";
+
+/// **The browser's situation, natively: no Tokio runtime at all.** Every other
+/// test here runs under `#[tokio::test]`, where a `DataFusion` operator that
+/// spawns simply succeeds — which is how a union that panicked in the browser
+/// and hung the tab passed this file. `futures::executor::block_on` has no
+/// reactor, so a spawn anywhere in the plan fails here as it does in the tab.
+#[test]
+fn a_union_of_two_mappings_runs_with_no_tokio_runtime() {
+    futures::executor::block_on(async {
+        let (mut storage, _) =
+            storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
+        let report = executor(UNION_PROGRAM, HashMap::new())
+            .execute(&mut storage, DEST)
+            .await
+            .expect("the union runs on one future");
+        assert_eq!(report.vertices[0].vertex_count, 3);
+    });
+}

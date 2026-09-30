@@ -163,4 +163,39 @@ describe('FossilExecutor', () => {
       { prefix: 'edge/Order_placedBy_Person/', dropped: 0 },
     ]);
   });
+
+  // Two mappings of one type are a `UNION ALL`, and a union of two scans has two
+  // partitions. DataFusion 54 coalesces them by spawning a Tokio task per
+  // partition, and there is no runtime here: the run panicked, trapped inside a
+  // microtask and never settled. The Rust mirror is `execute_core.rs`
+  // `a_union_of_two_mappings_runs_with_no_tokio_runtime`.
+  it('runs a union of two mappings of one type to completion', async () => {
+    const exec = new FossilExecutor(
+      [
+        'type { Person, Order } := io.shex("graph.shex")',
+        '',
+        'users := io.csv("https://data.example.com/users.csv")',
+        '',
+        'Early : Person from users.where(users.id < 3)',
+        '    @subject = "https://example.org/person/{users.id}"',
+        '    name = users.name',
+        '',
+        'Late : Person from users.where(users.id >= 3)',
+        '    @subject = "https://example.org/person/{users.id}"',
+        '    name = users.name',
+        '',
+      ].join('\n'),
+    );
+    let result;
+    try {
+      for (const d of exec.missingDocuments()) exec.registerDocument(d.key, SHEX);
+      result = await exec.runInMemory(
+        { 'https://data.example.com/users.csv': await fixture('users.csv') },
+        's3://jobs/union',
+      );
+    } finally {
+      exec.free();
+    }
+    expect(result.report.vertices.find((v) => v.type === 'Person')?.vertex_count).toBe(3);
+  });
 });
