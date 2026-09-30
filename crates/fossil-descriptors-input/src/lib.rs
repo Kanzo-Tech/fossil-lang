@@ -18,7 +18,8 @@
 //! crate in `fossil-cli`) and passes the introspected column list as an
 //! [`InferredDescriptor`] (see [`inferred`]) ahead of `compile()`. RDF is the
 //! other half: `schema =` names a provider (`schema = io.shex("…")`) and the
-//! declared shape gives the columns (see [`shex`]).
+//! declared shape gives the columns, resolved by `fossil_hir::def_map` through
+//! the provider registry.
 //!
 //! ## Trait stability
 //!
@@ -29,11 +30,9 @@
 
 pub mod cache;
 pub mod inferred;
-pub mod shex;
 
 pub use cache::DescriptorCache;
 pub use inferred::{InferredColumn, InferredDescriptor};
-pub use shex::{ShExInputError, inferred_descriptor_from_shex};
 
 /// Input-side schema descriptor.
 ///

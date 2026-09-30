@@ -9,9 +9,7 @@
 //! the reader that would notice is the one asking the tree what is down there.
 //!
 //! So this is `levels.rs`'s standard one artefact along — compare the written
-//! bytes against the definition rather than trusting the writer — and
-//! `tests/aggregation.rs` is the same three obligations over an in-memory `Cut`,
-//! where what stands in for a writer is a struct. This is the writer.
+//! bytes against the definition rather than trusting the writer.
 //!
 //! **The assertions are `DuckDB` and the pass under test is not.** A second
 //! engine reads the Parquet back, which is also the only thing in the tree that
@@ -642,8 +640,7 @@ const CHILD: &str = "one_corpus_written_where_the_parent_asked";
 /// differ.
 ///
 /// **And a second process, which is the load-bearing half.**
-/// `tests/aggregation.rs, the_same_graph_gives_the_same_cell_rows_twice` evaluates
-/// the aggregation twice inside one process, which cannot rule out anything drawn
+/// Evaluating the aggregation twice inside one process cannot rule out anything drawn
 /// **once per process and then reused** — the pid, a seed behind a `OnceLock`, an
 /// address the allocator settled on, a clock read at startup. Two calls in one
 /// process see the same value of each and agree; two processes are free to

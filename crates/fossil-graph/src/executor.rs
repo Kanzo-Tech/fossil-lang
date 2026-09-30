@@ -411,8 +411,9 @@ fn is_identifier_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::{GRAPH_INFO_PATH, ManifestSource};
+    use crate::manifest::ManifestSource;
     use crate::operations::raw_sql::{RawSql, RawSqlAccess};
+    use crate::plan::GRAPH_INFO_PATH;
     use fossil_sinks::manifest::{
         Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
         VertexInfo,

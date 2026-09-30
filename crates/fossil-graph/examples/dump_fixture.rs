@@ -26,8 +26,8 @@
 //! ```
 
 use fossil_sinks::manifest::{
-    Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Projection, Property,
-    VertexInfo,
+    Cardinality, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPH_INFO_PATH, GraphInfo, Projection,
+    Property, VertexInfo,
 };
 use serde_json::{Map, Value, json};
 
@@ -92,7 +92,7 @@ fn main() {
 
     let mut files = Map::new();
     files.insert(
-        "graph.graph.yml".into(),
+        GRAPH_INFO_PATH.into(),
         Value::String(graph.to_yaml().unwrap()),
     );
     files.insert(

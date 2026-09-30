@@ -23,7 +23,7 @@ emits were 545 string literals with no declaration any of them derived from.
 
 **Every one of the four is addressed by a shift, and nothing is listed.** `dense_id` is a vertex's
 rank in the Hilbert order of its own position; a tile is
-`crates/fossil-sinks/src/manifest.rs, tile_of`, and a cell of rung `k` is `dense_id >> shift` with
+`crates/fossil-graph/src/plan.rs, tile_of`, and a cell of rung `k` is `dense_id >> shift` with
 parent `r >> 2`, two bits a rung by `crates/fossil-sinks/src/manifest.rs, CellTree` —
 `crates/fossil-layout/src/layout/cells.rs, Pyramid` writes it. There is no directory
 listing over HTTP and the format asks for none.

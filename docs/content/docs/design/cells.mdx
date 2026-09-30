@@ -46,8 +46,9 @@ The weaker promise is what makes the three obligations further down **necessary 
 optional**. If the grouping carried meaning, a reader could take the writer's word for the counts as
 well; because it carries none, the counts are the entire content of a rung, and a rung whose counts
 do not reconcile against the level below is not a coarser view of anything.
-`crates/fossil-layout/tests/aggregation.rs` does not change a line for this page's change of mind, and
-that is the test: what it checks is the aggregation, which is the half that was never arbitrary.
+`crates/fossil-layout/tests/aggregation.rs` (deleted after `8326b8f`) did not change a line for this
+page's change of mind, and that was the test: what it checked is the aggregation, which is the half
+that was never arbitrary.
 
 ## A cell is a texel, and the corpus is already a mipmap
 
@@ -59,7 +60,7 @@ address is the payload's shift plus two bits per rung. And `dense_id` is not a n
 of its own position**, which is what `crates/fossil-layout/src/layout/hilbert.rs, hilbert_ranks`
 computes and what
 [the order that makes an interval mean something](/docs/format/conventions/addressing#the-order-that-makes-an-interval-mean-something)
-specifies. `crates/fossil-sinks/src/manifest.rs, tile_of` states the consequence in its own doc:
+specifies. `crates/fossil-graph/src/plan.rs, tile_of` states the consequence in its own doc:
 
 > tile `i` **is** the range `[i·4096, (i+1)·4096)`, its parent is a further shift, and the lowest
 > common ancestor of two vertices is the common prefix of their ids.
@@ -303,7 +304,7 @@ three coarse artefacts this corpus has:
 
 | how far a coarse view descends on com-DBLP | its floor |
 | --- | --- |
-| a holarchy, `crates/fossil-layout/src/layout/community.rs, Cut` at factor 4 and chunk 4,096 | **1,696 groups** — levels 4 and 5 are dropped, neither being a quarter of the one above it |
+| a holarchy, `Cut` (deleted after `8326b8f`) at factor 4 and chunk 4,096 | **1,696 groups** — levels 4 and 5 are dropped, neither being a quarter of the one above it |
 | the level pyramid (retired), at its one-tile floor | **1,239 marks** |
 | the cell pyramid, at the rung holding a single cell | **1 cell** — 19,818 → 4,955 → 1,239 → 310 → 78 → 20 → 5 → 2 → 1, and every rung of that list carries a picture |
 
@@ -464,7 +465,7 @@ Same corpus, same cells, bit for bit. A cell whose referent moves between writes
 navigable: a reader who descends, pans and ascends must arrive back where they were, and a bookmark
 must still resolve tomorrow.
 
-It is the standard the tree holds itself to elsewhere — `crates/fossil-layout/tests/aggregation.rs`
+It is the standard the tree holds itself to elsewhere — `crates/fossil-layout/tests/cells.rs`
 compares written artefacts against their definition rather than trusting the writer — and the code
 already claimed it in comments: `local_moving` walks `0..n` and breaks ties strictly so the lower
 community id survives, and `Weighted::contract` carries a section arguing its counting sort makes
@@ -482,9 +483,9 @@ A spatial partition inherits it for free and for a duller reason — a cell id i
 the payload already fixed — which is one more thing the texel reading costs nothing.
 
 A measurement is not a guard, though, and for a while nothing kept the property holding.
-`crates/fossil-layout/tests/aggregation.rs, the_same_graph_gives_the_same_cell_rows_twice` keeps the
-**cell rows** reproducible, which is a narrower claim one artefact along: the rows come out of
-`Dendrogram` in memory, and the measurement above was of `enrich_layout` writing Parquet across two
+A test over the in-memory `Dendrogram` (deleted with it after `8326b8f`) kept the
+**cell rows** reproducible, which is a narrower claim one artefact along: the rows came out of
+memory, and the measurement above was of `enrich_layout` writing Parquet across two
 processes. `crates/fossil-layout/tests/cells.rs` narrowed the gap without closing it — it evaluates
 every obligation against the written rungs, so a *wrong* summary is caught, and the same corpus
 summarising *differently* twice was not.
@@ -537,8 +538,8 @@ partitions after the zoom one.
 you get at most that many rungs.
 </Callout>
 
-Measured on com-DBLP at a chunk of 4,096, `crates/fossil-layout/src/layout/community.rs, Cut` keeps
-three of the five levels, and that is the cut that exists in code today:
+Measured on com-DBLP at a chunk of 4,096, `Cut` (deleted after `8326b8f`) kept three of the five
+levels:
 
 | rung | groups | ceiling it had to clear | contraction |
 | --- | --- | --- | --- |
@@ -550,7 +551,7 @@ Levels 4 and 5 are dropped because neither is a quarter of the one above it — 
 1.2× step that moved modularity by 0.0001. **The tree has no root**, and the cut does not invent
 one: it ends where the dendrogram stops delivering.
 `crates/fossil-layout/src/layout/community.rs, flatten_to_budget` is the existing half of this: it
-walks the hierarchy and picks **one** level that fits a budget; `Cut` is the same walk choosing a
+walks the hierarchy and picks **one** level that fits a budget; `Cut` was the same walk choosing a
 **sequence**. A quaternary tree ends the other way round — at one cell, whose members are the graph.
 
 **Which end a rung sequence has read as immaterial here, and it is the thing that decided the
@@ -593,7 +594,7 @@ parents. A child edge whose two ends have the **same** parent is not an edge of 
 </div>
 
 **None of the three mentions how the partition was chosen**, which is why
-`crates/fossil-layout/tests/aggregation.rs, the_three_obligations_hold_up_a_cut_of_a_partition_nobody_designed`
+`crates/fossil-layout/tests/aggregation.rs` (deleted after `8326b8f`)
 already ran them over a partition with no design behind it and they held. A grid is such a partition.
 *The partition is arbitrary, the aggregation is exact* is the sentence those tests were written
 under before the page had it.
@@ -602,8 +603,8 @@ under before the page had it.
 **That third bullet said "its edges are the aggregation of its children's edges", and that is
 false as a union.** It reads as *relabel the endpoints and keep the set*, which emits self-loops
 where a quotient has none — and on a graph with any community structure it is not an edge case but
-the overwhelming majority. Measured on the planted fixture
-`crates/fossil-layout/tests/aggregation.rs` uses — 256 vertices, 1,095 edges — **1,088 of the 1,095 are
+the overwhelming majority. Measured on the planted fixture of
+`crates/fossil-layout/tests/aggregation.rs` (deleted after `8326b8f`) — 256 vertices, 1,095 edges — **1,088 of the 1,095 are
 absorbed** and the aggregate quotient has **seven**.
 
 The check that catches both mistakes is **mass conservation per rung**: cross weight plus internal
@@ -858,8 +859,8 @@ which is what `corpus.bnf` had been calling its columns all along.
 The rename waited on one condition, and the condition was met before it was taken: *a writer that
 partitions spatially, so that nothing in the tree is a community any more*. That writer exists — the
 pass writes `crates/fossil-layout/src/layout/cells.rs, Pyramid`, and
-`crates/fossil-layout/src/layout/community.rs, Cut` is reached only from tests and from
-`main` in `hierarchy_stats.rs` (deleted after `2fa5f22`). So nothing in a written tree is a
+`Cut` was reached only from tests and from `main` in `hierarchy_stats.rs` (deleted after `2fa5f22`),
+and went itself after `8326b8f`. So nothing in a written tree is a
 community, and the old name described a thing that no longer exists in the artefact.
 
 The three sections below are what it cost, and they are kept because two of the three estimates this

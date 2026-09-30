@@ -534,9 +534,8 @@ impl Rung {
     /// The other half of what [`Self::pair_edges`] produced: a run whose two
     /// cells are the same cell is mass that stops being an edge. **Not a
     /// self-loop on the quotient** — an edge whose ends share a cell is not an
-    /// edge of that cell — and on the planted fixture
-    /// `crates/fossil-layout/tests/aggregation.rs` evaluates, 1,088 of 1,095 edges
-    /// are absorbed, so a writer that kept them would be wrong about the
+    /// edge of that cell — and on the planted fixture `/docs/design/cells`
+    /// measures, 1,088 of 1,095 edges are absorbed, so a writer that kept them would be wrong about the
     /// overwhelming majority rather than in an edge case.
     fn absorb_runs(&mut self, pairs: &[u64]) {
         for &key in pairs {
