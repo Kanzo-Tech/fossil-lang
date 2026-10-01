@@ -57,8 +57,9 @@ thing that can wait forever is the person's own patience, and they can end it.
 
 1. **Every async function that crosses a package boundary takes `{ signal }`** and passes it down to
    every wait it makes. `open`, `mount`, `introspect`, `runJob`, `openProgram`, `engine()` gain one;
-   `Engine.query`'s stays and becomes required in the type a host implements, so that an engine that
-   drops it fails to compile.
+   `Engine.query`'s options become required, so fossil always passes one. TypeScript still accepts an
+   engine that declares fewer parameters, so honouring the signal is the engine's contract, not the
+   compiler's.
 2. **Every outside wait races a deadline**: `AbortSignal.any([signal, AbortSignal.timeout(ms)])`, in
    one helper per repository, not one per call site. The figures, each the slowest honest answer
    rather than a guess at the fastest. **Deadlines nest**: an inner wait must expire before the one
@@ -68,7 +69,7 @@ thing that can wait forever is the person's own patience, and they can end it.
    | Wait | Deadline | Where |
    | --- | --- | --- |
    | A `Host` promise — credentials, connections | 30 s | `@fossil-lang/storage`, and `js.rs` on the Rust side |
-   | An object-store request (connect / whole request) | 5 s / 30 s, two retries | `fossil-storage`'s builders — the figures keasy's server already uses |
+   | An object-store request (connect / whole request) | 5 s / 30 s, two retries natively; 30 s raced and no retries on wasm32 | `fossil-storage` — on wasm32 `object_store` ignores the timeouts and its retry backoff needs Tokio, so fossil races each request itself |
    | Fetching a `.wasm` or the DuckDB worker | 60 s | the three wasm loaders, `@kanzo-tech/mosaic` |
    | DuckDB booting (`instantiate`, `LOAD httpfs`) | 60 s | `@kanzo-tech/mosaic` |
    | cosmos.gl creating its GPU device (`ready`) | 10 s | `@kanzo-tech/graph` |
