@@ -84,11 +84,12 @@ fn published_for(name: &str) -> Vec<Value> {
         })
 }
 
-fn messages(diagnostics: &[Value]) -> Vec<&str> {
+/// Whether one of `diagnostics` is `name/unknown-field` for `field` — read off
+/// the code and the problem's data, never the message.
+fn unknown_field(diagnostics: &[Value], field: &str) -> bool {
     diagnostics
         .iter()
-        .filter_map(|d| d.get("message").and_then(Value::as_str))
-        .collect()
+        .any(|d| d["code"] == "name/unknown-field" && d["data"]["data"]["field"] == field)
 }
 
 /// The control. `errors/two-identities` conflicts two `@subject` templates,
@@ -118,13 +119,26 @@ fn the_transport_is_not_what_is_missing() {
 #[test]
 fn a_misspelt_source_field_reaches_the_editor() {
     let published = published_for("unknown-field");
-    let msgs = messages(&published);
     assert!(
-        msgs.iter().any(|m| m.contains("nmae")),
+        unknown_field(&published, "nmae"),
         "`fossil check` reports ``nmae` is not a field of `User`` for this exact \
          file and exits 1. The editor published {} diagnostic(s), none naming \
-         `nmae`: {msgs:#?}",
-        msgs.len()
+         `nmae`: {published:#?}",
+        published.len()
+    );
+    let d = published
+        .iter()
+        .find(|d| d["code"] == "name/unknown-field")
+        .expect("found above");
+    assert_eq!(
+        d["codeDescription"]["href"],
+        "https://kanzo-tech.github.io/fossil-lang/docs/errors/name/unknown-field"
+    );
+    assert_eq!(d["data"]["title"], "Not a field of this row");
+    assert_eq!(d["data"]["help"], "did you mean `name`?");
+    assert!(
+        !d["message"].as_str().unwrap_or_default().contains("help:"),
+        "the message is the problem and nothing else: {d:#?}"
     );
 }
 
@@ -229,12 +243,11 @@ Out : Person from Users
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let msgs = messages(&published);
     assert!(
-        !msgs.iter().any(|m| m.contains("nmae")),
+        !unknown_field(&published, "nmae"),
         "an `https://` source was introspected on the message loop. If that is \
          now deliberate, this test is the thing to delete — but the didOpen \
          handler is a blocking read and a network round trip in it stalls every \
-         other buffer. Got: {msgs:#?}"
+         other buffer. Got: {published:#?}"
     );
 }

@@ -42,6 +42,10 @@ smol_str = { workspace = true }
 # return `lsp_types` structs directly. Had it not, every feature here would have
 # had to return Fossil-domain byte-range structs for fossil-lsp to translate.
 lsp-types = { workspace = true }
+# `DiagnosticData` — what an LSP diagnostic's `data` and a wasm `CheckRow`
+# carry beside the code: a problem's `data` is a `serde_json::Value`.
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # The host with a shape decoder installed, so a test can ask the CHECKER

@@ -25,7 +25,7 @@
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use fossil_wasm::FossilWorkspace;
+use fossil_wasm::{CheckRow, FossilWorkspace};
 
 /// A program that names its output shape document and writes `name` from a CSV
 /// column.
@@ -99,12 +99,12 @@ const USERS_DESCRIPTOR: &str = r#"{
   "freshness_token": ""
 }"#;
 
-/// Every diagnostic message the workspace reports, across all open files.
-fn messages(ws: &FossilWorkspace) -> Vec<String> {
-    ws.check_rows().into_iter().map(|r| r.message).collect()
+/// Every diagnostic the workspace reports, across all open files.
+fn rows(ws: &FossilWorkspace) -> Vec<CheckRow> {
+    ws.check_rows()
 }
 
-/// The messages [`FossilWorkspace::check_rows`] attributes to ONE file.
+/// The rows [`FossilWorkspace::check_rows`] attributes to ONE file.
 ///
 /// Step (4) below asks a question about the PROGRAM, so it looks at the
 /// program's rows. It is the narrower question and it stays narrow.
@@ -117,16 +117,20 @@ fn messages(ws: &FossilWorkspace) -> Vec<String> {
 /// that. `tests/documents_are_not_programs.rs` is where the fix is measured; a
 /// file the provider catalogue claims is an input, and an input is not drained
 /// as a program.
-fn messages_for(ws: &FossilWorkspace, uri: &str) -> Vec<String> {
+fn rows_for(ws: &FossilWorkspace, uri: &str) -> Vec<CheckRow> {
     ws.check_rows()
         .into_iter()
         .filter(|r| r.uri == uri)
-        .map(|r| r.message)
         .collect()
 }
 
-fn mentions_integer(messages: &[String]) -> bool {
-    messages.iter().any(|m| m.contains("expects Integer"))
+/// The shape demands an integer where the program writes a string.
+fn expects_integer(row: &CheckRow) -> bool {
+    row.code == "type/property-mismatch" && row.detail.data["expected"] == "Integer"
+}
+
+fn mentions_integer(rows: &[CheckRow]) -> bool {
+    rows.iter().any(expects_integer)
 }
 
 #[test]
@@ -139,7 +143,7 @@ fn opening_and_editing_the_document_re_checks_the_program_that_names_it() {
 
     // (1) Nobody registered the document. The program is checked against no
     //     output contract.
-    let before = messages(&ws);
+    let before = rows(&ws);
     assert!(
         !mentions_integer(&before),
         "with no document registered there is no contract to violate; got {before:?}"
@@ -149,7 +153,7 @@ fn opening_and_editing_the_document_re_checks_the_program_that_names_it() {
     //     program's `io.shex(\"person.shex\")` resolves to — and the check that
     //     missed re-runs. Nothing touched the program.
     let document = ws.open_file_native("person.shex".to_string(), DEMANDS_INTEGER.to_string());
-    let with_document = messages(&ws);
+    let with_document = rows(&ws);
     assert!(
         mentions_integer(&with_document),
         "registering the document must invalidate the check that missed it, and \
@@ -161,28 +165,28 @@ fn opening_and_editing_the_document_re_checks_the_program_that_names_it() {
     //     diagnostic derived from it changes with it.
     ws.update_file_native(document, DEMANDS_STRING.to_string())
         .expect("update_file_native");
-    let after_edit = messages(&ws);
+    let after_edit = rows(&ws);
     assert!(
         !mentions_integer(&after_edit),
         "editing the document must re-check every program that reads it; got \
          {after_edit:?}"
     );
-    let program_after_edit = messages_for(&ws, "prog.fossil");
+    let program_after_edit = rows_for(&ws, "prog.fossil");
 
     // (4) And the converse: editing the PROGRAM does not move the shape it is
     //     checked against. The edit changes the `@subject` template and nothing
     //     the contract touches, so the program's own diagnostics must be
-    //     unchanged — see `messages_for` for why this is the program's rows and
+    //     unchanged — see `rows_for` for why this is the program's rows and
     //     not the workspace's.
     ws.update_file_native(program, PROGRAM.replace("u/{users.id}", "v/{users.id}"))
         .expect("update_file_native");
     assert_eq!(
-        messages_for(&ws, "prog.fossil"),
+        rows_for(&ws, "prog.fossil"),
         program_after_edit,
         "a program edit re-checks the program against the SAME document"
     );
     assert!(
-        !mentions_integer(&messages(&ws)),
+        !mentions_integer(&rows(&ws)),
         "and the document it is checked against is still the edited one"
     );
 }
@@ -200,7 +204,7 @@ fn a_document_opened_after_the_program_is_still_found_by_it() {
         .expect("descriptor");
 
     assert!(
-        mentions_integer(&messages(&ws)),
+        mentions_integer(&rows(&ws)),
         "the document is resolved relative to the program that names it"
     );
 }
@@ -238,7 +242,7 @@ ex:Person {
     let row = ws
         .check_rows()
         .into_iter()
-        .find(|r| r.message.contains("expects Integer"))
+        .find(expects_integer)
         .expect("the shape demands an integer where the program writes a string");
     assert_eq!(
         row.uri, "prog.fossil",
@@ -265,4 +269,53 @@ ex:Person {
         "and the caret is on the predicate, not on the line: {:#?}",
         entry.range
     );
+}
+
+/// **A row is the problem, not a sentence about it.** The code, the title and
+/// the data are fields; `help` is its own field and the message carries no
+/// `help:` line; the did-you-mean is a range and a replacement a host can apply.
+/// Read through `serde_json`, which is what `check()` hands JavaScript.
+#[test]
+fn a_row_carries_the_code_the_data_and_the_repair() {
+    let mut ws = FossilWorkspace::new();
+    ws.register_inferred_descriptor_native(USERS_DESCRIPTOR)
+        .expect("the descriptor JSON is well-formed");
+    let program = PROGRAM.replace("users.name", "users.nmae");
+    ws.open_file_native("prog.fossil".to_string(), program.clone());
+    ws.open_file_native("person.shex".to_string(), DEMANDS_STRING.to_string());
+
+    let row = ws
+        .check_rows()
+        .into_iter()
+        .find(|r| r.code == "name/unknown-field")
+        .expect("`nmae` is not a column of users.csv");
+    let wire = serde_json::to_value(&row).expect("a row serialises");
+
+    assert_eq!(wire["code"], "name/unknown-field");
+    assert_eq!(wire["title"], "Not a field of this row");
+    assert_eq!(wire["data"]["field"], "nmae");
+    assert_eq!(wire["help"], "did you mean `name`?");
+    assert!(
+        !row.message.contains("help:"),
+        "the message is the problem and nothing else: {:?}",
+        row.message
+    );
+    assert!(
+        wire.get("suggestion").is_none(),
+        "an absent repair is absent, not null"
+    );
+
+    let line = program
+        .lines()
+        .position(|l| l.contains("nmae"))
+        .expect("the fixture misspells it");
+    let column = program
+        .lines()
+        .nth(line)
+        .and_then(|l| l.find("nmae"))
+        .expect("on that line");
+    assert_eq!(wire["didYouMean"]["replacement"], "name");
+    assert_eq!(wire["didYouMean"]["range"]["start"]["line"], line);
+    assert_eq!(wire["didYouMean"]["range"]["start"]["character"], column);
+    assert_eq!(wire["didYouMean"]["range"]["end"]["character"], column + 4);
 }

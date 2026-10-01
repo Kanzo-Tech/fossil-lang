@@ -923,6 +923,21 @@ catalogue! {
 /// each. A code is never reused, and a test holds that no live code is here.
 pub const RETIRED: &[(&str, &str)] = &[];
 
+/// The published documentation, and the error index within it — `DOCS` and
+/// `INDEX` in `@fossil-lang/types`' `error.ts`, held equal by a test below.
+const DOCS: &str = "https://kanzo-tech.github.io/fossil-lang";
+const INDEX: &str = "docs/errors";
+
+impl Problem {
+    /// The published page that explains this code — `helpUrl(code)` in
+    /// `@fossil-lang/types`. What an LSP `codeDescription.href` points at; a
+    /// host serving its own copy of the site builds the link with `helpUrl`.
+    #[must_use]
+    pub fn help_url(&self) -> String {
+        format!("{DOCS}/{INDEX}/{}", self.code())
+    }
+}
+
 /// A compile diagnostic carried by a run failure — what
 /// [`Problem::DoesNotCompile`] relates. The span is **file-absolute**.
 ///
@@ -1315,6 +1330,33 @@ mod tests {
         assert_eq!(
             wire["cause"],
             serde_json::json!({ "name": "AuthError", "detail": "no" })
+        );
+    }
+
+    /// `help_url` and TypeScript's `helpUrl` are two spellings of one link; the
+    /// constants are read out of `error.ts` rather than restated here.
+    #[test]
+    fn the_help_url_is_the_one_typescript_builds() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packages/types/src/error.ts"
+        );
+        let ts = std::fs::read_to_string(path).expect("packages/types/src/error.ts is readable");
+        let constant = |name: &str| {
+            ts.lines()
+                .find_map(|l| l.strip_prefix(&format!("const {name} = '")))
+                .and_then(|rest| rest.strip_suffix("';"))
+                .unwrap_or_else(|| panic!("error.ts declares `const {name} = '…';`"))
+                .to_string()
+        };
+        assert_eq!(constant("DOCS"), DOCS);
+        assert_eq!(constant("INDEX"), INDEX);
+        assert_eq!(
+            Problem::Busy {
+                call: "check".into()
+            }
+            .help_url(),
+            "https://kanzo-tech.github.io/fossil-lang/docs/errors/api/busy"
         );
     }
 

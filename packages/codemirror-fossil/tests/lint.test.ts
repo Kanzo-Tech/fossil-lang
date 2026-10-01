@@ -4,6 +4,7 @@
  * every keystroke between a check being requested and its answer arriving.
  */
 import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
 
 import { toDiagnostics, type CheckRowLike } from '../src/lint.js';
@@ -94,6 +95,30 @@ describe('toDiagnostics', () => {
       URI,
     );
     expect(d!.to).toBeGreaterThan(d!.from);
+  });
+
+  it('puts help under the message, the way `fossil check` prints it', () => {
+    const [d] = toDiagnostics(state(), [row({ help: 'did you mean `name`?' })], URI);
+    expect(d!.message).toBe('unknown column `nmae`\nhelp: did you mean `name`?');
+    expect(d!.actions).toBeUndefined();
+  });
+
+  it('offers the did-you-mean as an action that applies the replacement', () => {
+    const view = new EditorView({ state: state() });
+    const range = { start: { line: 3, character: 14 }, end: { line: 3, character: 18 } };
+    const [d] = toDiagnostics(view.state, [row({ didYouMean: { range, replacement: 'name' } })], URI);
+    const [action] = d!.actions ?? [];
+    expect(action!.name).toBe('Replace with `name`');
+    action!.apply(view, d!.from, d!.to);
+    expect(view.state.doc.line(4).text).toBe('  name = User.name');
+  });
+
+  it('offers the suggestion as an action that replaces the diagnostic range', () => {
+    const view = new EditorView({ state: state() });
+    const [d] = toDiagnostics(view.state, [row({ suggestion: 'nickname' })], URI);
+    const [action] = d!.actions ?? [];
+    action!.apply(view, d!.from, d!.to);
+    expect(view.state.doc.line(4).text).toBe('  name = User.nickname');
   });
 
   it('does not widen past the end of an empty document', () => {

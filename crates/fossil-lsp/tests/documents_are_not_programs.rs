@@ -175,16 +175,12 @@ fn a_shape_document_open_in_the_editor_is_not_parsed_as_fossil() {
     // against: `nickname` is a property no predicate in the `ShExJ` ends in, and
     // only a checker that decoded the document can say so.
     let in_program = published_for(&t, &prog_uri);
-    let messages: Vec<&str> = in_program
-        .iter()
-        .filter_map(|d| d.get("message").and_then(serde_json::Value::as_str))
-        .collect();
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("declares no `nickname`")),
+        in_program.iter().any(|d| {
+            d["code"] == "name/unknown-property" && d["data"]["data"]["property"] == "nickname"
+        }),
         "the program is still checked against the document it names; got \
-         {messages:#?}"
+         {in_program:#?}"
     );
 }
 

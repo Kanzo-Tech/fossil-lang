@@ -26,9 +26,9 @@ built to WebAssembly behind a browser editor.
 | a name, away from any dot | the whole catalogue | same | every row, spelled in full, because there is no receiver to narrow by |
 | hover, anywhere in a property | two type blocks | same | the type of what you wrote and where it came from, and the type the shape demands of that predicate |
 | go to definition | four positions | same | the shape document at the shape, the document at the predicate, a mapping, or the `:=` binding that introduced a name |
-| quick fix, on an unknown column | Replace with… | — | the nearest field of that row, swapped into exactly the span that was wrong |
-| quick fix, on a disjunctive shape | Split mapping… | — | one mapping per ShEx `OneOf` disjunct, as the checker already generated it |
-| diagnostics as you type | on every edit | same | the diagnostics of [when it does not compile](/docs/book/diagnostics), at the same spans, with `help:` folded onto the message |
+| quick fix, on an unknown column | Replace with… | same | the nearest field of that row, swapped into exactly the span that was wrong |
+| quick fix, on a disjunctive shape | Split mapping… | same | one mapping per ShEx `OneOf` disjunct, as the checker already generated it |
+| diagnostics as you type | on every edit | same | the diagnostics of [when it does not compile](/docs/book/diagnostics), at the same spans, each with its code — natively a link to the code's page, with `help` in the diagnostic's `data`; in the browser `help:` under the message |
 
 Natively it also advertises document symbols and semantic tokens. No code action fires on a clean file: both
 quick fixes hang off a diagnostic you can already see. And hover's second block appears only when the
@@ -72,8 +72,9 @@ sequenceDiagram
 The second is the browser's, and it is not the protocol. A page that already calls the checker
 in-process should not have to stand up an LSP client, an id table and a second copy of every buffer
 to ask what type is under a cursor — so check, hover, completion and definition are plain methods on
-the wasm workspace, and a browser editor calls them. Code actions and semantic tokens are not among
-them: those come from `fossil-lsp` alone. Two rules fall out of
+the wasm workspace, and a browser editor calls them. Semantic tokens are not among them: those come
+from `fossil-lsp` alone. Nor are code actions, and they need not be: a checked row carries both repairs
+as data — `didYouMean` and `suggestion` — and `@fossil-lang/codemirror-fossil` makes each an action. Two rules fall out of
 that and both are enforced rather than asserted: those three methods take a *shared* borrow, because
 none of them mutates and an editor asks at three different rates; and every one of them owes the
 caller's current text, because they answer about the last edit that was pushed.

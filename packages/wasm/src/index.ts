@@ -66,17 +66,9 @@ export interface ProviderInfo {
   kind: 'schema' | 'data' | 'both';
 }
 
-/** Diagnostic row returned by {@link FossilWorkspace.check} and
- *  {@link FossilWorkspace.diagnosticsFor} — mirrors `fossil-wasm`'s
- *  `CheckRow` JSON shape (the LSP `Diagnostic` projected through
- *  `fossil_ide::LineIndex` for UTF-16 ranges).
- */
-export interface CheckRow {
-  uri: string;
-  range: LspRange;
-  severity: number;
-  message: string;
-}
+/** The rows {@link FossilWorkspace.check} and {@link FossilWorkspace.diagnosticsFor} return —
+ *  defined in `@fossil-lang/types`, beside the `Code` and `ProblemData` that type them. */
+export type { CheckRow, CheckRelated } from '@fossil-lang/types';
 
 /** An LSP range: zero-based lines, `character` in UTF-16 code units — the units
  *  a JavaScript string is indexed in, so no byte arithmetic converts it. (The

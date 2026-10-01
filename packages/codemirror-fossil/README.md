@@ -6,7 +6,7 @@ answer `@fossil-lang/wasm` already had:
 | half | what drives it | what you see |
 |---|---|---|
 | highlighting | `tokenize()` + `tokenKinds()` | the compiler's own lexer, coloured by the host's own theme |
-| diagnostics | `check()` → `@codemirror/lint` | squiggles, with the checker's messages verbatim |
+| diagnostics | `check()` → `@codemirror/lint` | squiggles, with the checker's messages and help verbatim, and its two quick fixes — did-you-mean and split-mapping — as actions |
 | hover | `hover()` → `hoverTooltip` | the type of what you wrote AND the type the target shape demands of it |
 | completion | `completions()` → `@codemirror/autocomplete` | the receiver's members, spelled bare — `trim`, not `str.trim` |
 | go to definition | `gotoDefinition()` → a keymap | `F12`, `Alt-.`, Mod-click; a target in the shape document goes to the host |
@@ -78,9 +78,6 @@ lexer itself — on the side that knows.
   no path to them. This is why `Ident`
   carries no tag: the lexer cannot tell a type from a binding from a column, and
   guessing would only have to be undone by the overlay that can.
-- **Code actions.** `fossil-ide` has two quick fixes and both hang off a
-  diagnostic. `@codemirror/lint`'s `Diagnostic.actions` is where they go, and they
-  need the structured diagnostic that the `CheckRow` wire form flattens.
 - **Indentation.** Fossil is INDENT/DEDENT. An `indentService` needs the parser's
   view of block openers, not the lexer's.
 

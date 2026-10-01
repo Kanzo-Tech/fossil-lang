@@ -64,7 +64,10 @@ describe('openProgram', () => {
       program.registerDescriptor(DESCRIPTOR);
       const rows = await program.check(PROGRAM);
       // The shape arrived: `name` is checked against its datatype, which only a read shape knows.
-      expect(rows.some((r) => r.message.includes('expects Integer'))).toBe(true);
+      const mismatch = rows.find((r) => r.code === 'type/property-mismatch');
+      expect(mismatch?.code === 'type/property-mismatch' && mismatch.data.expected).toBe('Integer');
+      expect(mismatch?.title).toBe('A property of the wrong type');
+      expect(mismatch?.message).not.toContain('help:');
       expect(rows.every((r) => r.uri === 'prog.fossil')).toBe(true);
       // Nothing new is missing, so a second check reads nothing.
       await program.check(PROGRAM);

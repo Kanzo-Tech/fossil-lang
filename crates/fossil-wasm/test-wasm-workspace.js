@@ -59,7 +59,7 @@ function main() {
     const diags1 = ws.check();
     assert.ok(Array.isArray(diags1), 'check returns an array');
     console.log(`check() -> ${diags1.length} rows`);
-    // Every row carries the CheckRow shape — { uri, range, severity, message }.
+    // Every row carries the CheckRow shape — { uri, range, severity, code, message, title, data, … }.
     // That is a diagnostics panel's shape, NOT the LSP wire: the worker
     // publishes lsp_types::Diagnostic, which has no `uri` field.
     for (const d of diags1) {
@@ -68,6 +68,9 @@ function main() {
         assert.ok(typeof d.range.start.line === 'number', 'row.range.start.line is a number');
         assert.ok(typeof d.severity === 'number', 'row.severity is a number');
         assert.ok(typeof d.message === 'string', 'row.message is a string');
+        assert.ok(typeof d.code === 'string' && d.code.includes('/'), 'row.code is area/kind');
+        assert.ok(typeof d.title === 'string', 'row.title is a string');
+        assert.ok(d.data !== null && typeof d.data === 'object' && !(d.data instanceof Map), 'row.data is a plain object');
     }
 
     // ----- multi-file isolation + diagnostics_for -----

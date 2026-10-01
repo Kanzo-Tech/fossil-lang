@@ -7,7 +7,8 @@
  * - **Highlighting**, from `tokenize()` + `tokenKinds()` — the compiler's own
  *   lexer, so no editor reimplements the grammar in TypeScript and drifts.
  * - **Diagnostics**, from `check()` — `CheckRow`s with UTF-16 spans, projected
- *   onto `@codemirror/lint`.
+ *   onto `@codemirror/lint`, with `fossil-ide`'s two quick fixes — the row's
+ *   `didYouMean` and `suggestion` — as the diagnostic's actions.
  * - **Hover**, from `hover()` — the type of what you wrote AND the type the
  *   target shape demands of it, which is the pair that makes hovering worth
  *   anything in a mapping language.
@@ -67,10 +68,6 @@
  * knows a type from a binding from a column; `tokenize()` does not, which is why
  * `Ident` carries no tag in `tags.ts`. The legend is on the main thread but the
  * tokens themselves come only from the native `fossil-lsp`.
- *
- * **Code actions.** `fossil-ide` has two quick fixes and both hang off a
- * diagnostic. `@codemirror/lint`'s `Diagnostic.actions` is the place they go, and
- * it needs the structured diagnostic the `CheckRow` wire form flattens.
  *
  * **Indentation.** Fossil is INDENT/DEDENT (`grammar.bnf`), so an `indentService`
  * would be genuinely useful and genuinely non-trivial — it needs the parser's view

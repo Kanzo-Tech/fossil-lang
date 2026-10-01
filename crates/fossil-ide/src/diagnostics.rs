@@ -32,8 +32,8 @@
 
 use fossil_base::{Db, Diagnostic, Severity, SourceFile, Span};
 use lsp_types::{
-    Diagnostic as LspDiagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location,
-    NumberOrString, Range, Uri,
+    CodeDescription, Diagnostic as LspDiagnostic, DiagnosticRelatedInformation, DiagnosticSeverity,
+    Location, NumberOrString, Range, Uri,
 };
 
 use crate::line_index::LineIndex;
@@ -109,11 +109,12 @@ pub fn lsp_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<LspDiagnostic> {
 
 /// One [`fossil_base::Diagnostic`] as LSP sees it.
 ///
-/// Byte spans become UTF-16 ranges; the code is the problem's; `help` and
-/// `suggestion_source` are folded into the message as `help:` lines. The structured carriers (`did_you_mean`,
-/// `suggestion_source`) have no place on the wire and are not sent — a host that
-/// needs them for a code action re-drains [`diagnostics()`], which is what both
-/// do.
+/// Byte spans become UTF-16 ranges. `message` is the problem rendered and
+/// nothing else; `code` is its code, `codeDescription.href` the code's page
+/// ([`fossil_base::Problem::help_url`]), and `data` the rest of it —
+/// [`DiagnosticData`]. A code action still reads `did_you_mean` and
+/// `suggestion_source` off the re-drained [`diagnostics()`], so the copy in
+/// `data` is for a client that has no drain.
 ///
 /// # The labels are `relatedInformation`, and it takes a URI per entry
 ///
@@ -133,6 +134,7 @@ pub fn lsp_diagnostic(
     index: &LineIndex,
     d: &Diagnostic,
 ) -> LspDiagnostic {
+    use std::str::FromStr as _;
     let related: Vec<DiagnosticRelatedInformation> = related_locations(db, file, d)
         .into_iter()
         .filter_map(|r| {
@@ -149,12 +151,66 @@ pub fn lsp_diagnostic(
         range: span_to_range(index, d.span),
         severity: Some(severity(d.severity)),
         code: Some(NumberOrString::String(d.problem.code().into())),
-        message: [d.help.as_deref(), d.suggestion_source.as_deref()]
-            .into_iter()
-            .flatten()
-            .fold(d.message(), |m, h| format!("{m}\nhelp: {h}")),
+        code_description: Uri::from_str(&d.problem.help_url())
+            .ok()
+            .map(|href| CodeDescription { href }),
+        message: d.message(),
         related_information: (!related.is_empty()).then_some(related),
+        data: serde_json::to_value(DiagnosticData::of(index, d)).ok(),
         ..LspDiagnostic::default()
+    }
+}
+
+/// What a diagnostic says beside its code and its message: LSP's `data`, and
+/// the same fields on `fossil-wasm`'s `CheckRow`.
+///
+/// Serialized camelCase, every optional absent rather than `null`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticData {
+    /// Fixed per code — [`fossil_base::Problem::title`].
+    pub title: &'static str,
+    /// The problem's `data`: the values its message interpolates, typed per
+    /// code by `ProblemData` in `@fossil-lang/types`.
+    pub data: serde_json::Value,
+    /// What to do about it, in prose — [`Diagnostic::help`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+    /// A replacement for a misspelt name — [`Diagnostic::did_you_mean`], its
+    /// span as a UTF-16 range in the diagnostic's own file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub did_you_mean: Option<Replacement>,
+    /// Fossil source that repairs it — [`Diagnostic::suggestion_source`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
+}
+
+/// Replace the text at `range` with `replacement`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Replacement {
+    pub range: Range,
+    pub replacement: String,
+}
+
+impl DiagnosticData {
+    /// `d`'s structured half, its ranges measured against `index` — the line
+    /// index of the file `d` is reported in.
+    #[must_use]
+    pub fn of(index: &LineIndex, d: &Diagnostic) -> Self {
+        let data = serde_json::to_value(&d.problem)
+            .ok()
+            .and_then(|mut wire| wire.get_mut("data").map(serde_json::Value::take))
+            .unwrap_or_default();
+        Self {
+            title: d.problem.title(),
+            data,
+            help: d.help.clone(),
+            did_you_mean: d.did_you_mean.as_ref().map(|m| Replacement {
+                range: span_to_range(index, m.wrong_span),
+                replacement: m.replacement.clone(),
+            }),
+            suggestion: d.suggestion_source.clone(),
+        }
     }
 }
 
