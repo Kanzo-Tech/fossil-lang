@@ -1,0 +1,209 @@
+---
+title: Every wait ends, every failure is seen
+description: "PROPOSAL, not accepted — three guarantees across fossil, kanzo-ui and keasy: every wait ends within a bound, every failure reaches the screen whole and by one path, and every failure path is forced by a test that looks at what the user sees."
+direction:
+  summary: "A failure anywhere between the bucket and the screen ends, within seconds, in one view that names it by its code — and a test forces it there."
+---
+
+<Callout title="Proposal — written 2026-10-01 for the owner's review, and nothing on it is built">
+Every sentence in the present tense describes the trees at fossil `cedb3aec`, kanzo-ui `d96c6fd` and
+keasy `8343a3f`; everything about deadlines, leases and guards is what is proposed. The first step of
+[the migration](#the-migration-repository-by-repository) is deleting this callout.
+</Callout>
+
+[One error, from Rust to the screen](/docs/design/errors) gave a failure a shape: a code, typed
+`data`, a page. That page answers *what* a failure says. It does not answer whether the failure
+**arrives**. The owner, after watching `/jobs/<missing>/discover` spin forever on a tree that had
+every code in place: *siento que este tema de errores está todavía muy a medias… me gustaría que
+todo fuese mucho más robusto.*
+
+The test this page adds, runnable against the product: **break one thing — the bucket, the API, a
+worker, the model — and within seconds the screen shows one view naming what broke, by its code.**
+Not a spinner, not an empty list, not "Page not found", not a JSON body.
+
+## What happens today
+
+Counted on 2026-10-01 by reading every wait and every `catch` in the three trees (the three audit
+reports, with file and line per case, are in `keasy/audits/2026-10-01/`):
+
+| Repository | A wait with no end (G1) | A failure not seen, or not by one path (G2) | A failure path no test forces (G3) |
+| --- | --- | --- | --- |
+| fossil | 10 | 15 | 21 |
+| kanzo-ui (`auth/server`, `bff-auth`, `ui/editor`, `ui/table` not yet read) | 7 | 12 | 15 |
+| keasy, web and server | 15 | 27 | 38 — and no end-to-end test at all |
+
+Five shapes cover nearly all of them.
+
+1. **No deadline anywhere.** Not one timeout in fossil or kanzo-ui. A host promise that never settles
+   hangs `mount`, `open`, `runJob` and `introspect`; `open()` does not even take a signal; a DuckDB
+   worker that fails to load is swallowed by duckdb-wasm's `onError`, which clears its pending
+   requests without rejecting them, so `engine()` never settles and every chart and graph on the page
+   loads forever; keasy's server calls Entra, Azure and STS with no request timeout; an AI stream
+   that goes quiet without closing is never cut.
+2. **A rejection memoized for the page's life.** `engine()`, the three wasm `init`s and keasy's
+   `openProgram` cache their promise with `??=`. One transient failure — a dropped wasm download —
+   poisons the tab until it is reloaded.
+3. **A job that never ends.** Close the tab mid-run and the job is `running` forever: nothing reports
+   it, the server never sweeps it, refuses to delete it (`still_running`), and the job list polls it
+   every two seconds indefinitely.
+4. **A failure disguised as something else.** Sixteen keasy screens ignore a query's `error`: a 403
+   or a 500 renders as `notFound()` or as the empty state ("No jobs"). No chart implements Mosaic's
+   `queryError`, so a failing chart is blank. The auth callback renders a raw JSON body.
+5. **The code lost on the way.** fossil hands kanzo-ui a `FossilError`; kanzo-ui hands keasy a
+   string — `onFailure(message: string)` in the graph, `error: string` in `useAi`, `"anonymous"` in
+   auth. Past the library, keasy cannot choose what to show by code, because there is no code left.
+
+## G1 — every wait ends
+
+**Bound the network, not the work.** A wait on something outside the process — a host promise, a
+fetch, a socket, a model's next chunk — has a deadline, set where the wait is made, on by default.
+Work inside the process — a query plan, a run's operators — has no deadline, because a legitimate run
+can take minutes; it has a **signal**, and the person has a Stop. The line is drawn so that the only
+thing that can wait forever is the person's own patience, and they can end it.
+
+1. **Every async function that crosses a package boundary takes `{ signal }`** and passes it down to
+   every wait it makes. `open`, `mount`, `introspect`, `runJob`, `openProgram`, `engine()` gain one;
+   `Engine.query`'s stays and becomes required in the type a host implements, so that an engine that
+   drops it fails to compile.
+2. **Every outside wait races a deadline**: `AbortSignal.any([signal, AbortSignal.timeout(ms)])`, in
+   one helper per repository, not one per call site. The figures, each the slowest honest answer
+   rather than a guess at the fastest:
+
+   | Wait | Deadline | Where |
+   | --- | --- | --- |
+   | A `Host` promise — credentials, connections | 30 s | `@fossil-lang/storage`, and `js.rs` on the Rust side |
+   | An object-store request (connect / whole request) | 5 s / 30 s, two retries | `fossil-storage`'s builders — the figures keasy's server already uses |
+   | Fetching a `.wasm` or the DuckDB worker | 60 s | the three wasm loaders, `@kanzo-tech/mosaic` |
+   | DuckDB booting (`instantiate`, `LOAD httpfs`) | 60 s | `@kanzo-tech/mosaic` |
+   | Any API request from the browser | 30 s | keasy's api client — streams excepted |
+   | A stream's next chunk | 30 s idle | keasy's SSE reader, `@kanzo-tech/ai`, the server's provider stream |
+   | Entra, Azure, STS, Valkey | 5 s connect / 30 s request | keasy's server and web |
+
+3. **A deadline that fires is coded by who did not answer, never as a bare "timeout".** The person
+   needs to know *what* is down. The host going quiet is `storage/host-silent` (new); the bucket is
+   `storage/unreachable` (exists); kanzo-ui's engine is `engine/unavailable`; the model is keasy's
+   `llm_silent`. Each carries `{ after }` in milliseconds.
+4. **A rejection is never memoized.** A cached promise is cleared when it rejects, so the next call
+   tries again. `scope[KEY] ??= boot()` and the three `init`s are the sites; the rule is the guard
+   below, not a helper — four sites do not earn one.
+5. **duckdb-wasm's swallowed worker error is ours to catch.** Its `onError` must be wrapped to reject
+   what it would otherwise clear, and `instantiate` raced against the boot deadline anyway — the
+   deadline is the backstop for every other way a worker can stay silent.
+
+**What would reverse it.** A legitimate outside wait that routinely exceeds its deadline — a host
+whose credential vending takes 40 s under load. Then the figure moves, in the table above, with the
+measurement beside it; the rule that there *is* a figure does not.
+
+## G2 — every failure is seen, whole, by one path
+
+1. **A library passes the thrown value, never its message.** The graph's `onFailure`, `useAi`'s
+   `error` and the auth provider's failure all carry the `unknown` that was thrown — a `FossilError`
+   arrives at keasy as a `FossilError`, with its code, `data` and causes. kanzo-ui does not depend on
+   fossil's types to do this: it passes what it got, and the host's `toProblem` narrows it.
+2. **kanzo-ui's own failures carry a code in the same grammar.** No WebGL, a lost context, an engine
+   that will not boot, a silent stream: `graph/no-webgl`, `graph/context-lost`, `engine/unavailable`,
+   `ai/silent`. They are `Error`s with a `code` field, so one host registry keys fossil's codes,
+   kanzo-ui's and keasy's server's alike. kanzo-ui owns that short list; it is not fossil's
+   catalogue and does not join it.
+3. **Every Mosaic client implements `queryError`**, and a chart that failed renders the failure in its
+   own frame and calls the host's `onFailure`. A blank chart is never a failed chart.
+4. **In keasy, a query's failure is rendered where its data would have been, by `ProblemView`.** The
+   way to make that impossible to forget is structural rather than a review rule: **`useSuspenseQuery`
+   only**, with an error boundary rendering `ProblemView` around every route group and every panel
+   that may fail alone. A query that fails throws to the nearest boundary; there is no `data = []`
+   default for a failure to hide behind, and no `isError` to forget. Today 18 files call `useQuery`
+   and one route group has an `error.tsx`.
+5. **`notFound()` only for a `not_found` code.** Everything else throws to the boundary.
+6. **A poll stops on failure.** `refetchInterval` returns `false` once the query is in error, so a
+   dead API is not asked every two seconds and old data is not shown as current.
+7. **No swallowing.** No empty `catch`, no `.catch(() => {})`, no `let _ = …await` — except where a
+   comment on the line says why losing the failure is correct (the four editor features whose failure
+   the linter already shows; a cancellation; the cleanup after a failure that is already being
+   reported, whose own failure is attached as the original's `cause` rather than replacing it).
+8. **The auth callback redirects to a page that renders `ProblemView`**, with the `AuthError`'s code
+   in the URL, instead of returning JSON.
+
+**What would reverse it.** For 4: a screen whose partial data is worth showing beside its failure —
+a list where nine rows loaded and the tenth did not. Then that screen reads `error` itself, and the
+guard names it as the exception, with the reason. For 2: a second consumer of kanzo-ui that wants
+failures in its own vocabulary — then the codes become `data` on one kanzo-ui error type rather than
+a list a host must know.
+
+## A job always reaches an end
+
+A run lives in the browser, so a closed tab is a normal event, not an exception. The server cannot
+learn of it from the tab; it must learn of it from silence.
+
+1. **A lease.** While a job is `running`, the runner sends a heartbeat every 15 s; the server stores
+   `heartbeat_at`.
+2. **A sweep on read, not a scheduler.** Any query that reads jobs first marks every `running` job
+   whose heartbeat is older than 60 s — and every `pending` job older than the same — as `failed`,
+   with the problem `job_abandoned`. No background task, no cron: the next person to look is who ends
+   it, which is the only moment anyone can notice.
+3. **A terminal job can be deleted**, so an abandoned one is not stuck in the list.
+4. **A completion that fails to report is retried** until the lease would have expired, after which
+   the sweep owns it. `run-job.ts`'s `.catch(() => {})` on the failure report goes.
+
+**What would reverse it.** Runs that leave the browser — a worker on the server. Then the runner is a
+process the server can supervise, and the lease becomes its liveness check rather than a guess.
+
+## G3 — every failure is forced, and what the person sees is asserted
+
+1. **Unit tests at the edge that raises it.** Every case in the three audits gets a test in its own
+   package that makes the failure happen — a host whose promise never settles, a worker that 404s, a
+   query that throws, a stream that stops — and asserts the code that comes out, and that it comes
+   out within the deadline (with fake timers, so the suite is not slower for it).
+2. **An end-to-end suite in keasy**, Playwright against the compose stack, one test per scenario in
+   the audits. Every test breaks one thing and asserts **one `ProblemView` with the expected code
+   within N seconds**: `ProblemView` renders `data-code`, and one helper, `expectProblem(page, code)`,
+   is the only assertion the suite needs. Faults the browser sees are injected with `page.route`;
+   faults the server sees (Azure or STS that accept and never answer, Valkey down) by a compose
+   profile with a silent TCP listener and `docker compose stop`.
+3. The suite runs only on the main keasy checkout, because Keycloak accepts only `:3000`.
+
+## The guards
+
+Each guard is a test beside the source it scans, in the house form: what it holds, why, and what it
+cannot prove.
+
+| Guard | Repositories | Cannot prove |
+| --- | --- | --- |
+| No empty `catch`, `.catch(() => {})` or `let _ = … .await` without a reason comment on the line | all three | that the reason is true |
+| No `??=` assigning a promise | all three | a memoization spelled another way |
+| Every `await host.` and every `fetch(` goes through the deadline helper | fossil, keasy | that the figure is right |
+| Every object-store builder sets client options | fossil | the figures themselves |
+| Every Mosaic client class has `queryError` | kanzo-ui | that it renders well |
+| No `onFailure`/`error` typed `string` on a public surface | kanzo-ui | a failure reaching the host another way |
+| No `useQuery(`; every route group has an `error.tsx` | keasy | a boundary that renders something other than `ProblemView` |
+| `notFound()` only inside a `not_found` branch | keasy | — |
+| Every scenario in the audit tables has an e2e test, by name | keasy | that the test forces the failure it names |
+
+## The migration, repository by repository
+
+Each step is one branch and one merge, green.
+
+1. **Accept the page.** The callout goes.
+2. **fossil.** `signal` through `open`, `mount`, `introspect`, `runJob`, `openProgram`; the deadline
+   helper on every host wait and wasm fetch; `storage/host-silent`; object-store client options;
+   rejections no longer memoized; the cleanup-replaces-cause sites fixed; the guards; a test per G3
+   case. *Breaking:* `Engine.query`'s `signal` is required.
+3. **kanzo-ui.** duckdb-wasm's `onError` wrapped and the boot raced; `engine()` retries after a
+   failure; `queryError` on every chart client; `onFailure(error: unknown)`, `useAi`'s `error: unknown`,
+   the auth provider's failure surfaced rather than collapsed to `"anonymous"`; the four codes; the AI
+   idle deadline; the guards; the unread modules audited first. *Breaking:* the three failure
+   signatures.
+4. **keasy.** Picks up 2 and 3. `useSuspenseQuery` and boundaries; `notFound()` narrowed; polls stop
+   on failure; the deadline on the api client, the SSE reader and every server client; the lease and
+   the sweep; the auth error page; the guards.
+5. **The e2e suite**, last, because it asserts what 2 to 4 build — and first in spirit: each scenario
+   is written failing before its fix lands, where the fix's repository allows it.
+
+## Open for the owner
+
+1. **The deadlines in the G1 table** are a first cut. Thirty seconds for a host promise is generous
+   for a credential vend and short for nothing else on the list.
+2. **`useSuspenseQuery` everywhere** is the strongest of these and the largest edit: 18 files, and a
+   boundary per panel. The alternative is a guard that every `useQuery` result's `error` is read —
+   weaker, because reading it is not rendering it.
+3. **keasy's server codes are `snake_case` and fossil's are `area/kind`.** One registry keys both
+   today. Whether keasy's move to the grammar is part of this batch or its own is open.
