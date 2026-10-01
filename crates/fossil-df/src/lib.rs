@@ -197,18 +197,42 @@ pub async fn execute_graph<'db>(
     }
 
     // Phase 2: edges join the in-memory vertex tables (no Parquet re-read).
-    let mut edges = Vec::new();
-    let mut edge_types = Vec::new();
+    //
+    // An edge table is keyed `(src_type, label, dst_type)`, and it is one table
+    // however many mappings write it — the same rule as a vertex type above. Two
+    // `Comment` mappings that both write `hasCreator` each contribute rows to
+    // ONE `Comment_hasCreator_Person`; grouped here and merged in
+    // `finalize_edge`, they used to be two entries under one name, and the
+    // writer looks a table up by that name, so one mapping's rows were written
+    // twice and the other's not at all.
+    let mut edge_groups: Vec<(GraphEdge, Vec<PreparedEdge>)> = Vec::new();
     for &mapping in &mappings {
-        // Marked per `execute_edges` call and not per table: the whole call's
-        // memory is already spent by the time it returns, so a mark inside the
-        // loop over its results would bill all of it to the first table.
         let produced = execute_edges(ctx, db, mapping, descriptor, anchor).await?;
-        probe.mark(&format!("collect {} edge table(s)", produced.len()));
-        for (table, edge_type) in produced {
-            edges.push(table);
-            edge_types.push(edge_type);
+        probe.mark(&format!("resolve {} edge relation(s)", produced.len()));
+        for (prepared, edge_type) in produced {
+            let key = |e: &GraphEdge| (e.source.clone(), e.label.clone(), e.destination.clone());
+            match edge_groups
+                .iter_mut()
+                .find(|(t, _)| key(t) == key(&edge_type))
+            {
+                Some((_, group)) => group.push(prepared),
+                None => edge_groups.push((edge_type, vec![prepared])),
+            }
         }
+    }
+    let mut edges = Vec::with_capacity(edge_groups.len());
+    let mut edge_types = Vec::with_capacity(edge_groups.len());
+    for (edge_type, group) in edge_groups {
+        edges.push(finalize_edge(&edge_type, group).await?);
+        probe.mark(&format!(
+            "collect edge {}",
+            fossil_sinks::manifest::edge_table_name(
+                &edge_type.source,
+                &edge_type.label,
+                &edge_type.destination
+            )
+        ));
+        edge_types.push(edge_type);
     }
     probe.finish();
 
@@ -381,40 +405,117 @@ async fn prepare_vertex_ops<'db>(
 }
 
 /// Finalise one vertex type from the mappings that emit it: UNION their
-/// projections, dedup by `subject` when the shape is single-valued, sort by
-/// `subject` for a deterministic dense id, `collect()`, prepend `dense_id`, and
-/// register the table once under its type name.
+/// projections, merge the rows of each `subject` when the shape is
+/// single-valued, sort by `subject` for a deterministic dense id, `collect()`,
+/// prepend `dense_id`, and register the table once under its type name.
 ///
-/// Returns the materialised [`VertexTable`] plus the [`NodeType`] it contributes
-/// to the graph-schema — the group's first member carries the canonical schema
-/// (all mappings of one type share the same shape).
+/// # The mappings of one type need not write the same properties
+///
+/// A shape's OPTIONAL properties may be written by one mapping and left out by
+/// another — `People` writes a person's `email`, and the mapping that joins
+/// people to `person_knows_person` for `knows` has no reason to. So the table's
+/// properties are the union of what the group writes, in the order they first
+/// appear; a mapping that does not write one contributes a typed null under its
+/// name, and the projections are aligned by name before the `UNION ALL`. The
+/// [`NodeType`] carries the same union, where it used to carry the first
+/// mapping's list and the `UNION` refused two lists of different lengths.
+///
+/// And a subject two mappings both mint is ONE vertex whose value for each
+/// property is the one somebody wrote: `first_value(… IGNORE NULLS)` per
+/// column, grouped by `subject`. Picking one whole ROW per subject, as
+/// `DISTINCT ON` did, would keep the `knows` mapping's row and its null `email`
+/// as often as the `People` row that has it.
 async fn finalize_vertex(
     ctx: &SessionContext,
     group: Vec<PreparedVertex>,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
-    let mut group = group.into_iter();
-    let PreparedVertex {
-        node,
-        dedup,
-        projected,
-    } = group.next().expect("a type group is never empty");
+    use datafusion::common::ScalarValue;
+    use datafusion::functions_aggregate::expr_fn::first_value;
+    use datafusion::logical_expr::{ExprFunctionExt as _, expr::NullTreatment};
 
-    let mut df = projected;
-    for next in group {
-        df = df.union(next.projected)?; // UNION ALL — dedup (if any) happens below
+    let first = group.first().expect("a type group is never empty");
+    let dedup = first.dedup;
+    let mut node = first.node.clone();
+    for other in &group[1..] {
+        for p in &other.node.properties {
+            if !node.properties.iter().any(|q| q.name == p.name) {
+                node.properties.push(p.clone());
+            }
+        }
     }
+
+    // `subject`, every property of the union, then the layout placeholders —
+    // the column order `vertex_projection` gives a single mapping.
+    let mut columns: Vec<(String, DataType)> = Vec::new();
+    let names = std::iter::once("subject".to_string())
+        .chain(node.properties.iter().map(|p| p.name.clone()))
+        .chain(["x", "y", "cluster_id"].map(String::from));
+    for name in names {
+        let ty = group
+            .iter()
+            .find_map(|g| {
+                g.projected
+                    .schema()
+                    .field_with_unqualified_name(&name)
+                    .ok()
+                    .map(|f| f.data_type().clone())
+            })
+            .unwrap_or(DataType::Null);
+        columns.push((name, ty));
+    }
+
+    let mut df: Option<DataFrame> = None;
+    for part in group {
+        let schema = part.projected.schema().clone();
+        let aligned = part.projected.select(
+            columns
+                .iter()
+                .map(|(name, ty)| {
+                    if schema.field_with_unqualified_name(name).is_ok() {
+                        Ok(DfExpr::Column(Column::new_unqualified(name.as_str())))
+                    } else {
+                        Ok(lit(ScalarValue::try_from(ty)?).alias(name.as_str()))
+                    }
+                })
+                .collect::<datafusion::error::Result<Vec<_>>>()?,
+        )?;
+        // UNION ALL — the merge (if any) happens below.
+        df = Some(match df {
+            None => aligned,
+            Some(df) => df.union(aligned)?,
+        });
+    }
+    let df = df.expect("a type group is never empty");
 
     let by_subject = vec![col("subject").sort(true, false)];
     let sorted = if dedup {
-        // One vertex per subject IRI across all source mappings. `subject` now
-        // exists (post-projection), so dedup on the column, not the raw IRI expr.
-        let keep: Vec<DfExpr> = df
-            .schema()
-            .fields()
+        // Each merged column under a positional name, renamed after. Aliased
+        // straight to its input's own name, the plan was refused with
+        // «duplicate unqualified field name `customer`» over the `group-by`
+        // program, whose rows already come out of an aggregate keyed on that
+        // column.
+        let merged: Vec<DfExpr> = columns[1..]
             .iter()
-            .map(|f| DfExpr::Column(Column::new_unqualified(f.name().as_str())))
+            .enumerate()
+            .map(|(i, (name, _))| {
+                first_value(
+                    DfExpr::Column(Column::new_unqualified(name.as_str())),
+                    vec![],
+                )
+                .null_treatment(NullTreatment::IgnoreNulls)
+                .build()
+                .map(|e| e.alias(format!("__merged_{i}")))
+            })
+            .collect::<datafusion::error::Result<_>>()?;
+        let renamed: Vec<DfExpr> = std::iter::once(col("subject"))
+            .chain(columns[1..].iter().enumerate().map(|(i, (name, _))| {
+                DfExpr::Column(Column::new_unqualified(format!("__merged_{i}")))
+                    .alias(name.as_str())
+            }))
             .collect();
-        df.distinct_on(vec![col("subject")], keep, Some(by_subject))?
+        df.aggregate(vec![col("subject")], merged)?
+            .select(renamed)?
+            .sort(by_subject)?
     } else {
         df.sort(by_subject)?
     };
@@ -509,8 +610,17 @@ fn register_batches(
     Ok(())
 }
 
-/// Resolve every [`Op::EmitEdge`] of one mapping into its adjacency data
-/// ([`EdgeTable`]) plus the [`EdgeType`](GraphEdge) it contributes to the
+/// One mapping's contribution to an edge table before the tables are merged:
+/// its resolved `(src_dense, dst_dense)` pairs, not yet collected, and how many
+/// of its rows named an endpoint no vertex carries. Several of these with the
+/// same `(src_type, label, dst_type)` are one table — see [`finalize_edge`].
+struct PreparedEdge {
+    resolved: DataFrame,
+    dropped: u64,
+}
+
+/// Resolve every [`Op::EmitEdge`] of one mapping into its resolved pairs
+/// ([`PreparedEdge`]) plus the [`EdgeType`](GraphEdge) it contributes to the
 /// schema. Reads the mapping's source once and joins it against the registered
 /// vertex tables.
 async fn execute_edges<'db>(
@@ -519,7 +629,7 @@ async fn execute_edges<'db>(
     mapping: MappingLoc<'db>,
     descriptor: &OutputDescriptorKind,
     anchor: SourceAnchor<'_>,
-) -> datafusion::error::Result<Vec<(EdgeTable, GraphEdge)>> {
+) -> datafusion::error::Result<Vec<(PreparedEdge, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
     let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
@@ -539,10 +649,9 @@ async fn execute_edges<'db>(
         } = op
         {
             let rows = plan_relation(ctx, ops, *input, anchor).await?;
-            let table = execute_edge(
+            let prepared = execute_edge(
                 ctx,
                 rows,
-                edge_type,
                 src_type,
                 dst_type,
                 src_id,
@@ -561,17 +670,18 @@ async fn execute_edges<'db>(
                     Cardinality::Multi
                 },
             };
-            out.push((table, edge_type));
+            out.push((prepared, edge_type));
         }
     }
     Ok(out)
 }
 
-/// Materialise one edge type. Projects the edge op's input relation (`rows`) to
-/// `src_iri`/`dst_iri`, joins both against the registered vertex tables to
-/// resolve endpoint IRIs to type-local dense ids, then sorts the `(src_dense,
-/// dst_dense)` pairs. The write renumbers both into the global `dense_id` and
-/// sorts again, so this order is the executor's, not the corpus's.
+/// Resolve one mapping's edge. Projects the edge op's input relation (`rows`) to
+/// `src_iri`/`dst_iri` and joins both against the registered vertex tables to
+/// resolve endpoint IRIs to type-local dense ids. The pairs stay lazy:
+/// [`finalize_edge`] merges every mapping's pairs for the table, dedups and
+/// sorts them. The write renumbers both into the global `dense_id` and sorts
+/// again, so that order is the executor's, not the corpus's.
 ///
 /// # The join is inner, and the discard is counted
 ///
@@ -592,17 +702,15 @@ async fn execute_edges<'db>(
 /// and nothing else, so THIS is where an edge becomes CSR/CSC. What still reads
 /// the pair afterwards is the layout pass and then `crate::write()`, which
 /// renumbers both ends into the global `dense_id`.
-#[allow(clippy::too_many_arguments)] // the edge spec is a flat tuple, not worth a struct here
 async fn execute_edge(
     ctx: &SessionContext,
     rows: DataFrame,
-    label: &str,
     src_type: &str,
     dst_type: &str,
     src_id: &Expr<'_>,
     dst_id: &Expr<'_>,
     single_valued: bool,
-) -> datafusion::error::Result<EdgeTable> {
+) -> datafusion::error::Result<PreparedEdge> {
     let edge_src = rows.select(vec![
         render(src_id).alias("src_iri"),
         render(dst_id).alias("dst_iri"),
@@ -675,38 +783,8 @@ async fn execute_edge(
         )?
         .select(vec![col("src_dense"), col("dst_dense")])?;
 
-    // **An edge set is a set**, and until here it was whatever the input
-    // relation's row count happened to be. A mapping whose source is a JOIN
-    // repeats its subject once per matching row, so every OTHER edge the
-    // mapping writes is repeated with it: a six-type program producing `Person`
-    // from `People.join(Interests, …)` wrote `Person_isLocatedIn_Place` **1,256
-    // times for 50 distinct pairs** — 1,206 duplicates in a `{1,1}` edge.
-    //
-    // Nothing caught it and nothing could: every corpus check then asked
-    // whether the stored relation was self-consistent, and a duplicate is *in*
-    // the relation. The only visible trace was an `edge_count` too large, which is
-    // the same shape as a corpus that legitimately has more edges.
-    //
-    // `EmitVertex` has carried `dedup: true` for exactly this reason since the
-    // first join landed. This is that decision applied where it was missing,
-    // and [`Cardinality::Single`]'s own doc — *"a materializer dedups by key"* —
-    // is the sentence it makes true.
-    //
-    // **It is unconditional, and the reason is the schema rather than the
-    // cardinality**: an edge table carries `src` and `dst` and nothing else, so two identical rows are not two edges a reader could tell
-    // apart — they are one edge stored twice. There is nowhere for a multiplicity
-    // to live. The day an edge carries a property, this becomes a decision with
-    // two answers and the `Multi` arm is the one that changes.
+    // The pairs this mapping offered, before the dedup in [`finalize_edge`].
     let matched = resolved.clone().count().await? as u64;
-    let resolved = resolved.distinct()?;
-
-    let batches = resolved
-        .sort(vec![
-            col("src_dense").sort(true, false),
-            col("dst_dense").sort(true, false),
-        ])?
-        .collect()
-        .await?;
 
     // `saturating_sub` because the subtraction is only exact while a subject
     // identifies at most one vertex: a type materialised without dedup can hold
@@ -715,17 +793,69 @@ async fn execute_edge(
     // (`packages/corpus/guards/guards.mjs`), which is the guard that catches it.
     //
     // **Against `matched` and not against what was written**, because the two
-    // stopped being the same number when the dedup above landed. `dropped` says
-    // *an endpoint named a subject no vertex carries*, which is a defect in the
-    // program or the data; a row removed as a duplicate is neither, and folding
-    // the two together would report a clean six-type program as dropping 96% of
-    // its edges.
+    // stopped being the same number when the dedup in [`finalize_edge`] landed.
+    // `dropped` says *an endpoint named a subject no vertex carries*, which is a
+    // defect in the program or the data; a row removed as a duplicate is
+    // neither, and folding the two together would report a clean six-type
+    // program as dropping 96% of its edges.
     let dropped = candidates.saturating_sub(matched);
 
+    Ok(PreparedEdge { resolved, dropped })
+}
+
+/// Merge every mapping's pairs for one edge table into the table: `UNION ALL`,
+/// then the set, then the order.
+///
+/// **An edge set is a set**, and until the dedup it was whatever the input
+/// relation's row count happened to be. A mapping whose source is a JOIN
+/// repeats its subject once per matching row, so every OTHER edge the mapping
+/// writes is repeated with it: a six-type program producing `Person` from
+/// `People.join(Interests, …)` wrote `Person_isLocatedIn_Place` **1,256 times
+/// for 50 distinct pairs** — 1,206 duplicates in a `{1,1}` edge. Two mappings
+/// of one type writing the same edge are the same case one level up: their
+/// pairs overlap wherever their rows mint the same subject.
+///
+/// Nothing caught it and nothing could: every corpus check then asked whether
+/// the stored relation was self-consistent, and a duplicate is *in* the
+/// relation. `EmitVertex` has carried `dedup: true` for exactly this reason
+/// since the first join landed, and [`Cardinality::Single`]'s own doc — *"a
+/// materializer dedups by key"* — is the sentence this makes true.
+///
+/// **It is unconditional, and the reason is the schema rather than the
+/// cardinality**: an edge table carries `src` and `dst` and nothing else, so two
+/// identical rows are not two edges a reader could tell apart — they are one
+/// edge stored twice. There is nowhere for a multiplicity to live. The day an
+/// edge carries a property, this becomes a decision with two answers and the
+/// `Multi` arm is the one that changes.
+async fn finalize_edge(
+    edge: &GraphEdge,
+    group: Vec<PreparedEdge>,
+) -> datafusion::error::Result<EdgeTable> {
+    let mut dropped = 0;
+    let mut merged: Option<DataFrame> = None;
+    for part in group {
+        dropped += part.dropped;
+        merged = Some(match merged {
+            None => part.resolved,
+            Some(df) => df.union(part.resolved)?,
+        });
+    }
+    let merged = merged.ok_or_else(|| {
+        DataFusionError::Internal(format!("edge `{}` has no contributing mapping", edge.label))
+    })?;
+    let batches = merged
+        .distinct()?
+        .sort(vec![
+            col("src_dense").sort(true, false),
+            col("dst_dense").sort(true, false),
+        ])?
+        .collect()
+        .await?;
+
     Ok(EdgeTable {
-        label: label.to_string(),
-        src_type: src_type.to_string(),
-        dst_type: dst_type.to_string(),
+        label: edge.label.clone(),
+        src_type: edge.source.clone(),
+        dst_type: edge.destination.clone(),
         batches,
         dropped,
     })
@@ -794,7 +924,9 @@ pub(crate) async fn read_source(
 ) -> datafusion::error::Result<DataFrame> {
     match format {
         SourceFormat::Csv { delimiter } => {
-            ctx.read_csv(uri, csv_options(delimiter.as_deref())).await
+            let options = csv_options(delimiter.as_deref());
+            let schema = csv_schema(ctx, uri, &options).await?;
+            ctx.read_csv(uri, options.schema(&schema)).await
         }
         SourceFormat::Json => read_json_source(ctx, uri).await,
         SourceFormat::Parquet => ctx.read_parquet(uri, ParquetReadOptions::default()).await,
@@ -808,6 +940,92 @@ pub(crate) async fn read_source(
             })
         }
     }
+}
+
+/// The columns of a CSV source, under the names the checker typed it with.
+///
+/// A header may name one column twice — LDBC's `person_knows_person` is
+/// `Person.id|Person.id|creationDate` — and `DataFusion`'s own inference
+/// cannot carry it: it merges the per-file schemas with `Schema::try_merge`,
+/// which folds two fields of one name into one, and the read then fails on the
+/// first row with `incorrect number of fields`. So the schema is inferred here,
+/// per file and before any merge, through the same `CsvFormat` the read uses;
+/// every file's names are made unique by [`unique_column_names`]; and the read
+/// below takes the result and does not infer a second time.
+async fn csv_schema(
+    ctx: &SessionContext,
+    uri: &str,
+    options: &CsvReadOptions<'_>,
+) -> datafusion::error::Result<Schema> {
+    use datafusion::datasource::file_format::csv::CsvFormat;
+    use datafusion::datasource::file_format::options::ReadOptions as _;
+    use datafusion::datasource::listing::ListingTableUrl;
+    use futures::{StreamExt as _, TryStreamExt as _};
+    use object_store::ObjectStoreExt as _;
+
+    let table = ListingTableUrl::parse(uri)?;
+    let state = ctx.state();
+    let listing = options.to_listing_options(&ctx.copied_config(), ctx.copied_table_options());
+    let format = (listing.format.as_ref() as &dyn std::any::Any)
+        .downcast_ref::<CsvFormat>()
+        .ok_or_else(|| DataFusionError::Internal("CSV options without a CSV format".into()))?;
+    let store = ctx.runtime_env().object_store(&table)?;
+    let objects: Vec<object_store::ObjectMeta> = table
+        .list_all_files(&state, store.as_ref(), &listing.file_extension)
+        .await?
+        .try_collect()
+        .await?;
+    let mut remaining = options.schema_infer_max_records;
+    let mut schemas = Vec::with_capacity(objects.len());
+    for object in objects {
+        let bytes = store
+            .get(&object.location)
+            .await
+            .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?
+            .into_stream()
+            .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))
+            .boxed();
+        let chunks = format.read_to_delimited_chunks_from_stream(bytes).await;
+        let (schema, read) = format
+            .infer_schema_from_stream(&state, remaining, chunks)
+            .await?;
+        let names = unique_column_names(schema.fields().iter().map(|f| f.name().as_str()));
+        schemas.push(Schema::new(
+            schema
+                .fields()
+                .iter()
+                .zip(names)
+                .map(|(f, name)| f.as_ref().clone().with_name(name))
+                .collect::<Vec<_>>(),
+        ));
+        remaining = remaining.saturating_sub(read);
+        if remaining == 0 {
+            break;
+        }
+    }
+    Ok(Schema::try_merge(schemas)?)
+}
+
+/// A header's names made unique by `DuckDB`'s rule, because `DuckDB` is the
+/// engine that DESCRIBES a source (`fossil-introspect`, `@fossil-lang/introspect`)
+/// and the checker types a program against what it describes: a name already
+/// taken — compared without case — becomes `name_1`, then `name_2`, and a
+/// generated name that is itself taken grows another suffix. `a|a|a_1|b|a` is
+/// `a, a_1, a_1_1, b, a_2`, which is what `read_csv_auto` answers (`DuckDB`
+/// 1.5).
+fn unique_column_names<'a>(names: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut taken: HashMap<String, usize> = HashMap::new();
+    names
+        .map(|name| {
+            let mut name = name.to_string();
+            while let Some(count) = taken.get_mut(&name.to_lowercase()) {
+                *count += 1;
+                name = format!("{name}_{count}");
+            }
+            taken.insert(name.to_lowercase(), 0);
+            name
+        })
+        .collect()
 }
 
 /// Read `io.json`, whichever of the two JSON shapes the file is.
@@ -1650,4 +1868,29 @@ fn cast_target(sql_type: &str) -> Option<datafusion::arrow::datatypes::DataType>
 fn unsupported_call(func: &str, why: &str) -> DfExpr {
     DfExpr::Literal(datafusion::scalar::ScalarValue::Utf8(None), None)
         .alias(format!("__fossil_unsupported__{func}__{why}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unique_column_names;
+
+    #[test]
+    fn a_repeated_header_is_named_as_duckdb_names_it() {
+        // `read_csv_auto` (DuckDB 1.5) over `a|a|a_1|b|a` and `Id|id|ID_1|x`:
+        // the comparison ignores case, and a generated name that is itself
+        // taken grows another suffix.
+        let names = |h: &[&str]| unique_column_names(h.iter().copied());
+        assert_eq!(
+            names(&["a", "a", "a_1", "b", "a"]),
+            ["a", "a_1", "a_1_1", "b", "a_2"]
+        );
+        assert_eq!(
+            names(&["Id", "id", "ID_1", "x"]),
+            ["Id", "id_1", "ID_1_1", "x"]
+        );
+        assert_eq!(
+            names(&["Person.id", "Person.id", "creationDate"]),
+            ["Person.id", "Person.id_1", "creationDate"]
+        );
+    }
 }

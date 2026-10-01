@@ -310,12 +310,12 @@ reachable from a fixture has a page*.
 Nothing below is invented: each code is one or more of the sites counted above, merged where they
 are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no code; its variant goes.
 
-**Compile — 68 codes** (plus `internal/bug`, below):
+**Compile — 71 codes** (plus `internal/bug`, below):
 
 | Area | Codes |
 | --- | --- |
-| `syntax` (12) | `expected-token`, `unexpected-token`, `unknown-character`, `retired-spelling`, `malformed-rename`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee` |
-| `name` (7) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `unknown-parameter`, `unknown-source` |
+| `syntax` (14) | `expected-token`, `unexpected-token`, `unknown-character`, `retired-spelling`, `malformed-rename`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee`, `needless-quotes`, `hole-in-member-name` |
+| `name` (8) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `unknown-parameter`, `unknown-source`, `dotted-column` |
 | `argument` (6) | `arity`, `duplicate`, `skipped-parameter`, `positional-after-named`, `named-on-edge`, `alias-in-value-call` |
 | `type` (7) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch` |
 | `shape` (9) | `no-document`, `name-collision`, `missing-required-property`, `unsupported-disjunction`, `cyclic-reference`, `unresolved-reference`, `binding-arity`, `rename-unknown-type`, `rename-unknown-predicate` |

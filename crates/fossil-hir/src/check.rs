@@ -1050,7 +1050,10 @@ fn repair_for<'db>(
             .iter()
             .filter(|f| f.ty == expected && f.name != written)
             .map(|f| {
-                binding.map_or_else(|| format!("`{}`", f.name), |b| format!("`{b}.{}`", f.name))
+                binding.map_or_else(
+                    || format!("`{}`", fossil_syntax::name::spell(&f.name)),
+                    |b| format!("`{}`", crate::display::column_ref(b, &f.name)),
+                )
             })
             .collect();
         // Two named and the rest counted. Naming ten columns is not a
@@ -1431,7 +1434,7 @@ impl<'db> Expr<'db> {
                         Severity::Error,
                         Problem::RowNotInScope {
                             binding: binding.to_string(),
-                            column: column.to_string(),
+                            column: fossil_syntax::name::spell(column).into_owned(),
                             scope: self.relation.to_string(),
                             rows: row_scope.bindings().map(ToString::to_string).collect(),
                         },
@@ -1623,9 +1626,12 @@ impl<'db> Expr<'db> {
         let mut d = Diagnostic::new(
             Severity::Error,
             Problem::UnknownField {
-                field: column.to_string(),
+                field: fossil_syntax::name::spell(column).into_owned(),
                 relation: relation.clone(),
-                fields: candidates.iter().map(ToString::to_string).collect(),
+                fields: candidates
+                    .iter()
+                    .map(|c| fossil_syntax::name::spell(c).into_owned())
+                    .collect(),
             },
             span,
         )
@@ -1638,11 +1644,21 @@ impl<'db> Expr<'db> {
         if let Some(at) = def_map(db, self.file).lookup_source_span(db, &relation) {
             d = d.with_label(
                 at,
-                format!("`{relation}` has the fields {}", candidates.join(", ")),
+                format!(
+                    "`{relation}` has the fields {}",
+                    candidates
+                        .iter()
+                        .map(|c| fossil_syntax::name::spell(c))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
                 SpanFrame::FileAbsolute,
             );
         }
         if let Some(s) = did_you_mean(column, candidates.iter().copied()) {
+            // Said and offered in the spelling the parser accepts: a column
+            // called `Person.id` is `"Person.id"` after the dot.
+            let s = fossil_syntax::name::spell(s).into_owned();
             d = d.with_help(format!("did you mean `{s}`?"));
             // The quick-fix replaces `span` with `s`, so it is only offered
             // when `span` IS the name. Falling back to the right-hand side

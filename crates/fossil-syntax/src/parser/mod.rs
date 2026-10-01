@@ -249,6 +249,19 @@ impl Parser {
         None
     }
 
+    /// The byte range of the current non-trivia token. `None` at EOF.
+    pub(crate) fn current_range(&self) -> Option<std::ops::Range<usize>> {
+        self.peek(0).map(|t| t.range.clone())
+    }
+
+    /// Where the last token emitted into the tree ends; `0` before the first.
+    pub(crate) fn prev_end(&self) -> usize {
+        self.pos
+            .checked_sub(1)
+            .and_then(|i| self.tokens.get(i))
+            .map_or(0, |t| t.range.end)
+    }
+
     /// Lookahead at `offset` non-trivia tokens past `pos`. Returns `None` at EOF.
     pub(crate) fn peek_kind(&self, offset: usize) -> Option<SyntaxKind> {
         self.peek(offset).map(|t| t.kind)

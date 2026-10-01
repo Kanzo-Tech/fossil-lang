@@ -1,0 +1,43 @@
+── type bindings ──
+Place ← relationship.shex = https://ldbc.example/voc#Place
+Tag ← relationship.shex = https://ldbc.example/voc#Tag
+Person ← relationship.shex = https://ldbc.example/voc#Person
+
+── source bindings ──
+PlaceRow := io.csv(data/place.csv)
+TagRow := io.csv(data/tag.csv)
+PersonRow := io.csv(data/person.csv)
+KnowsRow := io.csv(data/person_knows_person.csv)
+InterestRow := io.csv(data/person_hasInterest_tag.csv)
+Friends from PersonRow.join(KnowsRow, on = PersonRow.id == KnowsRow."Person.id")
+Interested from PersonRow.join(InterestRow, on = PersonRow.id == InterestRow."Person.id")
+
+── mappings ──
+Places: 2 written, 2 lowered
+    @subject
+    name
+Tags: 2 written, 2 lowered
+    @subject
+    name
+People: 3 written, 3 lowered
+    @subject
+    firstName
+    isLocatedIn
+Friends: 4 written, 4 lowered
+    @subject
+    firstName
+    isLocatedIn
+    knows
+Interested: 4 written, 4 lowered
+    @subject
+    firstName
+    isLocatedIn
+    hasInterest
+
+── run ──
+vertex Place (https://ldbc.example/voc#Place) × 2 — dense_id, subject, x, y, cluster_id, name
+vertex Tag (https://ldbc.example/voc#Tag) × 2 — dense_id, subject, x, y, cluster_id, name
+vertex Person (https://ldbc.example/voc#Person) × 4 — dense_id, subject, x, y, cluster_id, firstName
+edge Person_isLocatedIn_Place × 4
+edge Person_knows_Person × 3
+edge Person_hasInterest_Tag × 4

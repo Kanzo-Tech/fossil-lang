@@ -260,7 +260,14 @@ fn classify(tok: &SyntaxToken, names: &FileNames) -> Option<(u32, u32)> {
         K::COMMENT => ty::COMMENT,
         // A string with a hole is carved into a run of tokens, so every part
         // of it has to be named here or the literal loses its colour halfway
-        // through.
+        // through. A STRING after a member's `.` is not a literal: it is a
+        // quoted member, `Knows."Person.id"`, coloured as the bare one is.
+        K::STRING
+            if tok.parent().is_some_and(|p| p.kind() == K::POSTFIX_EXPR)
+                && follows_sibling(tok, K::DOT) =>
+        {
+            ty::PROPERTY
+        }
         K::STRING | K::STRING_OPEN | K::STRING_TEXT | K::STRING_CLOSE => ty::STRING,
         K::INTEGER | K::FLOAT => ty::NUMBER,
 
@@ -695,6 +702,21 @@ Orders : Order from Adults
         for p in ["age", "email", "name"] {
             assert_eq!(kind_of(&all, p).0, "property", "`{p}`: {all:?}");
         }
+    }
+
+    /// A quoted member, `Knows."Person.id"`, is a field's name and is coloured
+    /// as the bare one is; a string anywhere else stays a string.
+    #[test]
+    fn a_quoted_member_is_a_property_and_a_string_literal_is_not() {
+        let all = spans(
+            "K := io.csv(\"k.csv\")\nF : Person from K\n    @subject = \"u/{K.id}\"\n    \
+             note = K.\"Person.id\" == \"Person.id\" ? \"a\" : \"b\"\n",
+        );
+        assert_eq!(
+            kinds_of(&all, "\"Person.id\""),
+            vec!["property", "string"],
+            "{all:?}"
+        );
     }
 
     /// `io` is a namespace the catalogue owns; `str` names a type.

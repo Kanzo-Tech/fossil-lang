@@ -107,6 +107,10 @@ export interface CompletionRow {
   label: string;
   kind: string;
   detail: string;
+  /** What picking the row writes: the label's one spelling — the label itself,
+   *  or `"Person.id"` for a column whose name is not an identifier. Never
+   *  empty. */
+  insert: string;
 }
 
 /** One place {@link FossilWorkspace.gotoDefinition} found a definition.

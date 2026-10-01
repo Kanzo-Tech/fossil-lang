@@ -44,6 +44,8 @@ export interface CompletionRowLike {
    *  when the compiler set none. */
   kind: string;
   detail: string;
+  /** What a pick writes — the label, or its quoted spelling (`"Person.id"`). */
+  insert: string;
 }
 
 /** What {@link fossilCompletion} calls. Takes the text for the same reason
@@ -95,11 +97,16 @@ const CM_TYPE: Readonly<Record<string, string>> = {
   type_parameter: 'type',
 };
 
-/** One compiler row as a CodeMirror option. */
+/** One compiler row as a CodeMirror option.
+ *
+ *  CodeMirror filters on `label` and inserts it, so `label` is what the author
+ *  types — the spelling, `"Person.id"` — and the column's own name is what the
+ *  list shows. */
 export function toCompletion(row: CompletionRowLike): Completion {
   const type = CM_TYPE[row.kind];
   return {
-    label: row.label,
+    label: row.insert,
+    ...(row.insert === row.label ? {} : { displayLabel: row.label }),
     ...(type === undefined ? {} : { type }),
     ...(row.detail === '' ? {} : { detail: row.detail }),
   };
@@ -116,7 +123,9 @@ export function toCompletion(row: CompletionRowLike): Completion {
  */
 export function fossilCompletionSource(source: CompletionRowSource) {
   return async (context: CompletionContext): Promise<CompletionResult | null> => {
-    const word = context.matchBefore(/[\w.]*/);
+    // A member may be quoted (`KnowsRow."Person.i`), and the quoted part is
+    // the word too: its dots are the name's, not receivers.
+    const word = context.matchBefore(/[\w.]*(?:"[^"\n]*)?/);
     // Typing fires only inside a word or just after a dot; Ctrl-Space fires
     // anywhere, and the compiler answers an empty receiver with the whole
     // catalogue, which is what an explicit request is for.
@@ -136,7 +145,8 @@ export function fossilCompletionSource(source: CompletionRowSource) {
     // to narrow: what it offers are MEMBERS, so only the segment after the last
     // dot is being replaced.
     const typed = context.state.sliceDoc(word?.from ?? context.pos, context.pos);
-    const dot = typed.lastIndexOf('.');
+    const quote = typed.indexOf('"');
+    const dot = (quote === -1 ? typed : typed.slice(0, quote)).lastIndexOf('.');
     const from = (word?.from ?? context.pos) + (dot === -1 ? 0 : dot + 1);
     return { from, options: rows.map(toCompletion) };
   };

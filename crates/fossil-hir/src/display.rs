@@ -57,6 +57,14 @@ pub const fn op_text(op: BinOp) -> &'static str {
     }
 }
 
+/// A qualified column reference as the author writes it: `User.name`, and
+/// `Knows."Person.id"` for a column an identifier cannot name
+/// (`fossil_syntax::name::spell`, the one spelling each name has).
+#[must_use]
+pub fn column_ref(binding: &str, column: &str) -> String {
+    format!("{binding}.{}", fossil_syntax::name::spell(column))
+}
+
 /// A lowered expression, back in surface syntax.
 ///
 /// Nested binary and ternary operands are parenthesised unconditionally. The
@@ -89,9 +97,7 @@ fn write_expr(out: &mut String, expr: &HirExpr) {
         }
         HirExpr::NullLit => out.push_str("null"),
         HirExpr::FieldRef(name) => out.push_str(name),
-        HirExpr::ColumnRef { binding, column } => {
-            let _ = write!(out, "{binding}.{column}");
-        }
+        HirExpr::ColumnRef { binding, column } => out.push_str(&column_ref(binding, column)),
         // The literal runs of an interpolation are already inside quotes, and a
         // `StringLit` reaching here is a whole expression, so it needs its own.
         HirExpr::StringLit(s) => {

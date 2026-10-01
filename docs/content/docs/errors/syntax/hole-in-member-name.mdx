@@ -1,0 +1,32 @@
+---
+title: A hole in a member's name
+description: "`syntax/hole-in-member-name` — a quoted member with an interpolation hole in it."
+---
+
+A quoted member is a column's name, and a name is a constant. A string after the dot that carries
+a `{…}` hole is refused:
+
+```fossil
+People : Person from PersonRow
+    @subject = "https://example.org/person/{PersonRow.id}"
+    name     = PersonRow."name_{PersonRow.lang}"
+```
+
+```text
+syntax/hole-in-member-name
+  × a quoted member names a column, and a name is a constant: it cannot interpolate
+  help: write the column's name as it is, `Row."Person.id"`, and a literal `{` as `{{`
+```
+
+## Why fossil refuses it
+
+A reference to a column is resolved while checking, against the columns the source declares. A name
+computed from a row would be a column chosen per row, which no checker can type and no query plan can
+read.
+
+## How to repair it
+
+- **Write the name out**: `PersonRow."name_en"`.
+- **A `{` that is part of the name** is written `{{`, as in every other string.
+- **Choosing between columns per row** is a conditional over the columns:
+  `PersonRow.lang == "en" ? PersonRow.name_en : PersonRow.name_es`.
