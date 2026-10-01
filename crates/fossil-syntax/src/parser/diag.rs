@@ -125,7 +125,8 @@ pub mod retired {
     /// There is no `TEMPLATE`: `${`, a backtick and `\$` are not tokens.
     pub const BACKTICK: &str = "a backtick opens nothing: it was a second spelling of the quoted \
          string, differing only in the delimiter and in `${` for the hole. Write \
-         `\"…{expr}…\"` — one spelling, and the hole is an ordinary expression.";
+         `\"…{expr}…\"` — one spelling, and the hole is an ordinary expression. A column whose \
+         name is not an identifier is quoted the same way after the dot: `Row.\"Person.id\"`.";
 
     /// There is no `PIPE`: `|>` is not a token.
     pub const PIPELINE: &str = "`|>` was a second spelling of the member call and it is retired: \

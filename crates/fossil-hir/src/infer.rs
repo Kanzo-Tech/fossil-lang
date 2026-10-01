@@ -550,9 +550,10 @@ fn column_of<'db>(
             db,
             pipe,
             format!(
-                "`{verb}` in `{}` names `{binding}.{column}`, and `{}` carries no row called \
+                "`{verb}` in `{}` names `{}`, and `{}` carries no row called \
                  `{binding}`. It draws on: {}",
                 pipe.name,
+                crate::display::column_ref(binding, column),
                 pipe.name,
                 scope
                     .bindings()
@@ -571,9 +572,10 @@ fn column_of<'db>(
                 db,
                 pipe,
                 format!(
-                    "`{verb}` in `{}` names `{binding}.{column}`, which `{binding}` does not \
+                    "`{verb}` in `{}` names `{}`, which `{binding}` does not \
                      have. It has: {}",
                     pipe.name,
+                    crate::display::column_ref(binding, column),
                     column_list(&fields),
                 ),
             )
@@ -849,9 +851,10 @@ fn check_join_condition<'db>(
                     db,
                     pipe,
                     format!(
-                        "`join` in `{}` names `{binding}.{column}`, and `{binding}` is neither \
-                         side of this join",
+                        "`join` in `{}` names `{}`, and `{binding}` is neither side of this \
+                         join",
                         pipe.name,
+                        crate::display::column_ref(binding, column),
                     ),
                     &format!(
                         "The left side has {}; the right side has {}.",
@@ -962,7 +965,7 @@ fn column_list(fields: &[RecordField<'_>]) -> String {
     }
     fields
         .iter()
-        .map(|f| format!("`{}`", f.name))
+        .map(|f| format!("`{}`", fossil_syntax::name::spell(&f.name)))
         .collect::<Vec<_>>()
         .join(", ")
 }

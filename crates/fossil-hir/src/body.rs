@@ -344,11 +344,14 @@ fn reference_spans(prop_node: &SyntaxNode) -> Vec<RefSpan> {
                 {
                     return None;
                 }
-                let name = own_ident(&n)?;
+                // The member is an `IDENT` or a quoted name (`Knows."Person.id"`),
+                // and the span is its token either way: that token is what a
+                // did-you-mean edit replaces.
+                let name = fossil_syntax::name::member_token(&n)?;
                 let base = own_ident(&n.children().next()?)?;
                 Some(RefSpan {
                     binding: Some(smol_str::SmolStr::from(base.text())),
-                    name: smol_str::SmolStr::from(name.text()),
+                    name: fossil_syntax::name::token_name(&name),
                     span: at(&name),
                 })
             }

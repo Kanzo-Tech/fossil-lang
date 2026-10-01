@@ -144,6 +144,9 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         // A string with a hole is carved into a run of tokens, so every part
         // of it has to be named here or the literal loses its colour halfway
         // through — which is what happened when the carve landed.
+        // A STRING after a `.` is a quoted member, `Knows."Person.id"`: a
+        // field's name, coloured as the bare one is.
+        K::STRING if is_field_name(tok) => Some(ty::PROPERTY),
         K::STRING | K::STRING_OPEN | K::STRING_TEXT | K::STRING_CLOSE => Some(ty::STRING),
         K::INTEGER | K::FLOAT => Some(ty::NUMBER),
         // `K::ABS_IRI => NAMESPACE` was here, and `K::TEMPLATE` shared the

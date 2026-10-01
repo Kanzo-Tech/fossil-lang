@@ -90,6 +90,10 @@ pub struct CompletionRow {
     /// The signature, the shape property's IRI, the source field's type —
     /// whatever `fossil-ide` wrote beside the label. `""` when it wrote none.
     pub detail: String,
+    /// The text a pick writes, which is the label's one spelling: the label
+    /// itself, or `"Person.id"` for a column whose name is not an identifier
+    /// (`fossil_syntax::name`). Never empty and never absent.
+    pub insert: String,
 }
 
 /// One place a definition is.
@@ -193,6 +197,7 @@ impl FossilWorkspace {
         fossil_ide::completions(db, &files, file, line, character)
             .into_iter()
             .map(|item| CompletionRow {
+                insert: item.insert_text.unwrap_or_else(|| item.label.clone()),
                 label: item.label,
                 kind: kind_name(item.kind).to_string(),
                 detail: item.detail.unwrap_or_default(),

@@ -502,7 +502,7 @@ impl WasmWorkspace {
         to_value("the hover", &ws.hover_row(*handle, line, character))
     }
 
-    /// The completion candidates at a position: `{ label, kind, detail }` rows,
+    /// The completion candidates at a position: `{ label, kind, detail, insert }` rows,
     /// already narrowed by the receiver — `str.` offers string members and no
     /// reader, a property key position offers the target shape's predicates and
     /// no catalogue row.

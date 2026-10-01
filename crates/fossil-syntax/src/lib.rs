@@ -22,6 +22,7 @@ pub mod ast;
 pub mod indent;
 pub mod kind;
 pub mod lexer;
+pub mod name;
 pub mod parser;
 
 pub use kind::{FossilLang, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};

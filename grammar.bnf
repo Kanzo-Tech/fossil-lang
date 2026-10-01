@@ -452,8 +452,45 @@ UnaryExpr           := MINUS UnaryExpr
    skeletons between mappings, which needed the marker and could match where
    it must not. *)
 PostfixExpr         := PrimaryExpr (PostfixOp)*
-PostfixOp           := DOT IDENT
+PostfixOp           := DOT Member
                      | LPAREN ArgList? RPAREN
+
+(* A member is a name, and the data chooses most of the names a program
+   writes after a dot: a column is called whatever its header says. LDBC's
+   relationship files head theirs `Person.id|Tag.id`, an export writes
+   `Order Date`, a header can be `from`. None lexes as one IDENT, so a member
+   may also be a STRING — its VALUE is the name:
+
+       KnowsRow."Person.id"        Row."Order Date"        Row."from"
+
+   It is the SQL standard's delimited identifier, which is what `DataFusion`
+   and `DuckDB` (the two engines under fossil) write, and `jq`'s `."a.b"`.
+
+   ONE SPELLING PER NAME. A name that lexes as one IDENT is written bare, and
+   quoting it is an error that names the bare form: `Row."name"` would be a
+   second way to write `Row.name`, and SQL's two spellings survive there only
+   because they differ in case-folding, which fossil does not do. Every reader
+   that prints a name back — a suggestion, a completion, a quick-fix — prints
+   the one spelling, so what a diagnostic proposes is what this rule accepts.
+
+   The STRING carries no hole: a name is a constant, and `Row."a{x}"` is
+   refused. `{{` is a literal `{`, as in every other string.
+
+   It is not a backtick, though Kotlin, Scala, Spark SQL, MySQL and BigQuery
+   spell it so. The backtick was a second spelling of the string and is
+   retired (see TEMPLATE above); bringing the byte back for a third meaning
+   would cost a token, and `"…"` already means «the text between the quotes»
+   — which is exactly what a delimited identifier is.
+
+   It is not a rename either. The compiler does not mint `Person_id` from
+   `Person.id`: a generated name is a name nobody wrote, and the numeric-suffix
+   scheme that does it is the one FSharp.Data paid for (see `@rename`). The one
+   suffix that remains is the data's, not the compiler's: a header that names
+   one column twice (`Person.id|Person.id`) is described with its second
+   occurrence as `Person.id_1`, which is `DuckDB`'s rule for the engine that
+   describes a source, and the executor reads the file under the same names. *)
+Member              := IDENT
+                     | STRING
 
 ArgList             := Arg (COMMA Arg)*
 Arg                 := NamedArg | AliasArg | Expression

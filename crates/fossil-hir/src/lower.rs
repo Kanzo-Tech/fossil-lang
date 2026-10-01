@@ -1131,24 +1131,14 @@ fn is_call(node: &fossil_syntax::SyntaxNode) -> bool {
             .any(|t| t.kind() == SyntaxKind::LPAREN)
 }
 
-/// The member a `POSTFIX_EXPR` member-access names — `where` in `User.where`.
-/// `None` for a call node and for anything that is not member access.
+/// The member a `POSTFIX_EXPR` member-access names — `where` in `User.where`,
+/// `Person.id` in `Knows."Person.id"`. `None` for a call node and for anything
+/// that is not member access. `fossil_syntax::name` reads it, quoted or bare.
 fn member_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
-    use fossil_syntax::SyntaxKind;
-    if node.kind() != SyntaxKind::POSTFIX_EXPR || is_call(node) {
+    if is_call(node) {
         return None;
     }
-    let toks: Vec<_> = node
-        .children_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-        .filter(|t| t.kind() == SyntaxKind::DOT || t.kind() == SyntaxKind::IDENT)
-        .collect();
-    match toks.as_slice() {
-        [d, i] if d.kind() == SyntaxKind::DOT && i.kind() == SyntaxKind::IDENT => {
-            Some(SmolStr::from(i.text()))
-        }
-        _ => None,
-    }
+    fossil_syntax::name::member_name(node)
 }
 
 /// The arguments of one stage, matched to the parameters the row declares.
@@ -2651,16 +2641,40 @@ fn lower_postfix(
         // call's callee: both are `IDENT DOT IDENT`. The parenthesis separates
         // those two, and the stdlib catalogue separates this from the case
         // below: `str` is a namespace, `orders` is not.
-        if let Some(dotted) = dotted_name(node) {
-            let mut parts = dotted.split('.');
-            if let (Some(head), Some(column), None) = (parts.next(), parts.next(), parts.next())
-                && !crate::stdlib::stdlib().is_catalogued_head(head)
-            {
-                return Some(HirExpr::ColumnRef {
-                    binding: SmolStr::from(head),
-                    column: SmolStr::from(column),
-                });
-            }
+        //
+        // The two halves are read apart, never re-split from a dotted string:
+        // a column may be called `Person.id` (`Knows."Person.id"`), and
+        // splitting `Knows.Person.id` on its dots would find three segments.
+        if let Some(column) = member_name(node)
+            && let Some(head) = node.children().next().as_ref().and_then(bare_name)
+            && !crate::stdlib::stdlib().is_catalogued_head(&head)
+        {
+            return Some(HirExpr::ColumnRef {
+                binding: head,
+                column,
+            });
+        }
+
+        // `Knows.Person.id` — a dotted run under a row binding. A row has no
+        // nested members, so the only reading with an answer is a column whose
+        // NAME has a dot in it, and that column is written quoted. Saying «names
+        // a function» here would send the author looking for a call.
+        if let Some(dotted) = dotted_name(node)
+            && let Some((head, column)) = dotted.split_once('.')
+            && column.contains('.')
+            && !crate::stdlib::stdlib().is_catalogued_head(head)
+        {
+            Diagnostic::new(
+                Severity::Error,
+                format!(
+                    "`{source}` reads a member of a column, and a row's columns have none. A \
+                     column whose name has a dot in it is written quoted: `{}`.",
+                    crate::display::column_ref(head, column)
+                ),
+                span,
+            )
+            .accumulate(db);
+            return None;
         }
 
         // `name = str.slug` — a function named but never applied. v0.1 has

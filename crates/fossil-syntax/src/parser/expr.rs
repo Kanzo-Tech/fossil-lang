@@ -56,7 +56,7 @@
 
 use crate::kind::SyntaxKind;
 
-use super::diag::retired;
+use super::diag::{ParseDiagnostic, retired};
 use super::{Parser, RetiredRun};
 
 /// Left-binding-power below which the Pratt loop will bail out (the caller's
@@ -199,7 +199,8 @@ fn parse_unary_or_primary(p: &mut Parser) {
     }
 }
 
-/// L8 postfix: primary followed by `.IDENT` member access or `(args)` call.
+/// L8 postfix: primary followed by `.IDENT` / `."name"` member access or
+/// `(args)` call.
 /// Left-associative by virtue of the iterative loop on `cp`.
 ///
 /// `.` is the ONLY access operator in the grammar and it means «member of»;
@@ -221,13 +222,42 @@ fn parse_postfix(p: &mut Parser) {
                 // reading the grammar leaves a `.` (its disambiguation rule 2,
                 // which asked whether an expression preceded the dot, went with
                 // the FieldRef that made it a question).
-                if p.peek_kind(1) != Some(SyntaxKind::IDENT) {
-                    break;
+                //
+                // The member is an `IDENT` or, for a name the data chose and an
+                // identifier cannot hold, a STRING: `Knows."Person.id"`
+                // (grammar.bnf, `PostfixOp`; `crate::name` decides which).
+                match p.peek_kind(1) {
+                    Some(SyntaxKind::IDENT) => {
+                        p.start_at(cp, SyntaxKind::POSTFIX_EXPR);
+                        p.bump(); // DOT
+                        p.expect(SyntaxKind::IDENT);
+                        p.finish();
+                    }
+                    Some(SyntaxKind::STRING) => {
+                        p.start_at(cp, SyntaxKind::POSTFIX_EXPR);
+                        p.bump(); // DOT
+                        p.skip_trivia();
+                        refuse_needless_quotes(p);
+                        p.bump(); // STRING
+                        p.finish();
+                    }
+                    Some(SyntaxKind::STRING_OPEN) => {
+                        p.start_at(cp, SyntaxKind::POSTFIX_EXPR);
+                        p.bump(); // DOT
+                        p.skip_trivia();
+                        let start = p.current_token_span_start();
+                        p.start(SyntaxKind::ERROR);
+                        parse_interpolated_string(p);
+                        p.finish();
+                        let end = p.prev_end();
+                        p.push_diagnostic(ParseDiagnostic::Malformed {
+                            message: HOLE_IN_MEMBER_NAME.to_string(),
+                            span: span_of(start, end),
+                        });
+                        p.finish();
+                    }
+                    _ => break,
                 }
-                p.start_at(cp, SyntaxKind::POSTFIX_EXPR);
-                p.bump(); // DOT
-                p.expect(SyntaxKind::IDENT);
-                p.finish();
             }
             Some(SyntaxKind::LPAREN) => {
                 p.start_at(cp, SyntaxKind::POSTFIX_EXPR);
@@ -242,6 +272,43 @@ fn parse_postfix(p: &mut Parser) {
             _ => break,
         }
     }
+}
+
+/// A quoted member is a NAME, so it cannot depend on the row.
+const HOLE_IN_MEMBER_NAME: &str = "a quoted member names a column, and a name is a constant: it \
+     cannot have a `{…}` hole. Write the column's name as it is, `Row.\"Person.id\"`, and a \
+     literal `{` as `{{`.";
+
+/// Refuse `Row."name"` — quotes around a name that is already an identifier.
+/// The tree is built as written: this is one diagnostic, not a recovery.
+///
+/// Each name has ONE spelling (`crate::name`). `SQL` admits both `t.a` and
+/// `t."a"` and then has to explain that they differ in case-folding; fossil
+/// folds nothing, so the second spelling would mean exactly the first and be
+/// a second way to write it.
+fn refuse_needless_quotes(p: &mut Parser) {
+    let (Some(text), Some(range)) = (p.current_text(), p.current_range()) else {
+        return;
+    };
+    let name = crate::name::string_value(text);
+    if !crate::name::is_bare(&name) {
+        return;
+    }
+    let message = format!(
+        "`{text}` is an identifier, so it is written bare: `.{name}`. Quotes are for a name an \
+         identifier cannot hold, like `Row.\"Person.id\"`, and each name has one spelling."
+    );
+    p.push_diagnostic(ParseDiagnostic::Malformed {
+        message,
+        span: span_of(range.start, range.end),
+    });
+}
+
+fn span_of(start: usize, end: usize) -> fossil_base::Span {
+    fossil_base::Span::new(
+        u32::try_from(start).unwrap_or(u32::MAX),
+        u32::try_from(end).unwrap_or(u32::MAX),
+    )
 }
 
 /// `ArgList := Arg (COMMA Arg)*`, as specified.
@@ -482,6 +549,58 @@ mod tests {
     /// for shape assertions.
     fn child_kinds(n: &SyntaxNode) -> Vec<SyntaxKind> {
         n.children().map(|c| c.kind()).collect()
+    }
+
+    fn expr_diagnostics(src: &str) -> (SyntaxNode, Vec<String>) {
+        let tokens = lex_with_indents(src);
+        let mut p = Parser::new(tokens);
+        p.start(SyntaxKind::EXPR);
+        parse_expression(&mut p, 0);
+        p.finish();
+        let messages = p
+            .diagnostics
+            .iter()
+            .cloned()
+            .map(|d| d.to_diagnostic().message)
+            .collect();
+        (SyntaxNode::new_root(p.builder.finish()), messages)
+    }
+
+    #[test]
+    fn a_quoted_member_is_a_member_access_whose_name_is_the_strings_value() {
+        let (root, messages) = expr_diagnostics(r#"Knows."Person.id""#);
+        assert!(messages.is_empty(), "{messages:?}");
+        let postfix = root.first_child().expect("one expression");
+        assert_eq!(postfix.kind(), SyntaxKind::POSTFIX_EXPR);
+        assert_eq!(
+            crate::name::member_name(&postfix).as_deref(),
+            Some("Person.id")
+        );
+        // It chains like any member: the value path reaches through it.
+        let (root, messages) = expr_diagnostics(r#"Row."first name".trim()"#);
+        assert!(messages.is_empty(), "{messages:?}");
+        assert_eq!(
+            root.first_child().map(|n| n.kind()),
+            Some(SyntaxKind::POSTFIX_EXPR)
+        );
+    }
+
+    #[test]
+    fn quotes_around_an_identifier_are_refused_and_name_the_bare_spelling() {
+        let (_, messages) = expr_diagnostics(r#"Row."name""#);
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(messages[0].contains("`.name`"), "{}", messages[0]);
+        // A reserved word cannot be written bare, so quoting it is the spelling.
+        let (_, messages) = expr_diagnostics(r#"Row."from""#);
+        assert!(messages.is_empty(), "{messages:?}");
+    }
+
+    #[test]
+    fn a_quoted_member_with_a_hole_is_refused() {
+        let (root, messages) = expr_diagnostics(r#"Row."a{Row.b}""#);
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(messages[0].contains("constant"), "{}", messages[0]);
+        assert!(root.descendants().any(|n| n.kind() == SyntaxKind::ERROR));
     }
 
     /// `|>` is refused BY NAME, not as an unexpected token.
