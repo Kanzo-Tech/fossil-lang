@@ -98,6 +98,17 @@ describe('open', () => {
     await expect(open(CORPUS, {} as never)).rejects.toThrow(fossil('api/invalid-argument', { argument: 'engine' }));
   });
 
+  it('refuses a location carrying a query or a fragment, before the engine sees anything', async () => {
+    const asked: string[] = [];
+    const untouched = { query: async (sql: string) => void asked.push(sql) } as unknown as Engine;
+    for (const location of ['https://acct.blob.core.windows.net/c?sv=x&sig=y', `${CORPUS}#frag`]) {
+      await expect(open(location, { engine: untouched })).rejects.toThrow(
+        fossil('corpus/not-a-location', { location }),
+      );
+    }
+    expect(asked).toEqual([]);
+  });
+
   it('shares a catalog between two opens, and the last to close detaches it', async () => {
     const first = await open(CORPUS, { engine });
     const again = await open(CORPUS, { engine });

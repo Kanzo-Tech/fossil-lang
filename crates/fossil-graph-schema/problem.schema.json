@@ -3118,6 +3118,34 @@
       }
     },
     {
+      "title": "Not a corpus location",
+      "description": "A corpus location carrying a query or a fragment. A corpus is a prefix and every file is named under it; a query string — a signature among them — addresses one object and does not survive the join. Signed storage is reached by opening a job under the host that vends it.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "corpus/not-a-location"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "location"
+          ],
+          "properties": {
+            "location": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
       "title": "Not a table of this corpus",
       "description": "A table the corpus does not have.",
       "type": "object",

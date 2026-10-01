@@ -861,6 +861,17 @@ catalogue! {
     #[error("the corpus declares {table} twice")]
     DuplicateTable { table: String },
 
+    /// A corpus location carrying a query or a fragment. A corpus is a prefix
+    /// and every file is named under it; a query string — a signature among
+    /// them — addresses one object and does not survive the join. Signed
+    /// storage is reached by opening a job under the host that vends it.
+    "corpus/not-a-location", "Not a corpus location",
+    #[error(
+        "{location} carries a query or a fragment, and a corpus location is a prefix: signed \
+         storage is opened as a job, under the host that vends its credential"
+    )]
+    NotALocation { location: String },
+
     /// A table the corpus does not have.
     "corpus/unknown-table", "Not a table of this corpus",
     #[error("{table} is not a table of this corpus — its tables are {}", .tables.join(", "))]
