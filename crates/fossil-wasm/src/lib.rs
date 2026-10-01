@@ -21,12 +21,13 @@
 //! | [`WasmWorkspace::hover`]       | `{ markdown, range } \| null`        | `textDocument/hover`       |
 //! | [`WasmWorkspace::completions`] | `Array<{ label, kind, detail }>`     | `textDocument/completion`  |
 //! | [`WasmWorkspace::goto_definition`] | `Array<{ uri, range }>`          | `textDocument/definition`  |
+//! | [`WasmWorkspace::semantic_tokens`] | `Array<{ range, kind, modifiers }>` | `textDocument/semanticTokens/full` |
 //!
-//! The last three are the [`ide`] module: the `fossil-ide` answers the native
+//! The last four are the [`ide`] module: the `fossil-ide` answers the native
 //! LSP serves, as ordinary method calls, because a tab that already
 //! calls `check()` in-process should not have to stand up an LSP client to ask
 //! what type is under a cursor. That module's header is the whole argument,
-//! including why all three take a SHARED borrow and what a caller owes in
+//! including why all four take a SHARED borrow and what a caller owes in
 //! return.
 //!
 //! ## Architecture
@@ -61,9 +62,9 @@ pub mod tokenize;
 mod wasm_system;
 mod workspace;
 
-pub use crate::ide::{CompletionRow, DefinitionRow, HoverRow};
+pub use crate::ide::{CompletionRow, DefinitionRow, HoverRow, SemanticTokenRow};
 pub use crate::tokenize::{TokenRow, token_kinds_native, tokenize_native};
-// The #[wasm_bindgen] `tokenize` and `semantic_legend` functions are exposed
+// The #[wasm_bindgen] `tokenize` and `tokenKinds` functions are exposed
 // to JS by virtue of their attribute. The `tokenize` module is `pub` so the
 // `#[wasm_bindgen]` items are reachable (the unreachable_pub lint would
 // otherwise flag them — they ARE reachable, just via wasm-bindgen-generated
@@ -468,15 +469,15 @@ impl WasmWorkspace {
 
     // ----- The main-thread IDE surface (see the `ide` module) -----
     //
-    // All three take `&FileHandle` — wasm-bindgen CONSUMES an exported struct
+    // All four take `&FileHandle` — wasm-bindgen CONSUMES an exported struct
     // passed by value, so a by-value handle is good for exactly one call and
     // the second throws "null pointer passed to rust" (the note on
     // `FileHandle` has the whole defect). Hover fires on mouse-move, so this
     // is the surface where that bug would be found again in one second rather
     // than in one keystroke.
     //
-    // And all three take a SHARED borrow, because none of them mutates. That
-    // is what lets an editor ask at three different rates against one
+    // And all four take a SHARED borrow, because none of them mutates. That
+    // is what lets an editor ask at four different rates against one
     // workspace without the coalescing `update_file` needs.
 
     /// What is under the cursor: `{ markdown, range }`, or `null` when the
@@ -554,6 +555,23 @@ impl WasmWorkspace {
             "the definitions",
             &ws.definition_rows(*handle, line, character),
         )
+    }
+
+    /// Every classified span of the file: `{ range, kind, modifiers }` rows in
+    /// source order, `kind` and `modifiers` by legend NAME. An editor lays these
+    /// over its lexical highlighting — see [`ide::SemanticTokenRow`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error if the workspace is busy, or if the result fails to
+    /// serialize to `JsValue`. An unknown handle is an empty array.
+    #[wasm_bindgen(js_name = semanticTokens)]
+    pub fn semantic_tokens(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
+        let ws = self
+            .inner
+            .try_borrow()
+            .map_err(|_| busy("semanticTokens"))?;
+        to_value("the semantic tokens", &ws.semantic_token_rows(*handle))
     }
 
     // ----- Register a host-introspected descriptor -----
