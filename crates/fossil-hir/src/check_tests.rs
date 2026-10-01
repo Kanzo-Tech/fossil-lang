@@ -2029,9 +2029,8 @@ fn two_pipelines_that_name_each_other_are_a_cycle() {
 /// the check was a depth of 32.
 #[test]
 fn a_long_chain_of_distinct_pipelines_is_not_a_cycle() {
-    let mut src = String::from("P0 := io.csv(\"x.csv\")\n");
-    for i in 1..=40 {
-        src.push_str(&format!("P{i} := P{}.where(P{}.active)\n", i - 1, i - 1));
-    }
+    let src: String = std::iter::once("P0 := io.csv(\"x.csv\")\n".to_string())
+        .chain((1..=40).map(|i| format!("P{i} := P{}.where(P{}.active)\n", i - 1, i - 1)))
+        .collect();
     assert_eq!(pipeline_codes(&src, "P40"), Vec::<&str>::new());
 }
