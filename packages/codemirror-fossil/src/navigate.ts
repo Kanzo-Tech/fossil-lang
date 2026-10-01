@@ -81,6 +81,7 @@ export function gotoDefinitionAt(
     try {
       rows = await source(view.state.doc.toString(), line, character);
     } catch {
+      // A refused jump is "nothing here" to the host; the linter is where a refusal is shown.
       options.onNavigate(null);
       return;
     }
