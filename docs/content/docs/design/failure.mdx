@@ -44,7 +44,7 @@ Five shapes cover nearly all of them.
    or a 500 renders as `notFound()` or as the empty state ("No jobs"). No chart implements Mosaic's
    `queryError`, so a failing chart is blank. The auth callback renders a raw JSON body.
 5. **The code lost on the way.** fossil hands kanzo-ui a `FossilError`; kanzo-ui hands keasy a
-   string — `onFailure(message: string)` in the graph, `error: string` in `useAi`, `"anonymous"` in
+   string — `onFailure(message: string)` in the graph, `error: string` in `useAiStream`, `"anonymous"` in
    auth. Past the library, keasy cannot choose what to show by code, because there is no code left.
 
 ## G1 — every wait ends
@@ -71,6 +71,7 @@ thing that can wait forever is the person's own patience, and they can end it.
    | An object-store request (connect / whole request) | 5 s / 30 s, two retries | `fossil-storage`'s builders — the figures keasy's server already uses |
    | Fetching a `.wasm` or the DuckDB worker | 60 s | the three wasm loaders, `@kanzo-tech/mosaic` |
    | DuckDB booting (`instantiate`, `LOAD httpfs`) | 60 s | `@kanzo-tech/mosaic` |
+   | cosmos.gl creating its GPU device (`ready`) | 10 s | `@kanzo-tech/graph` |
    | Any API request from the browser | 30 s | keasy's api client — streams excepted |
    | A stream's next chunk | 30 s idle | keasy's SSE reader, `@kanzo-tech/ai`, the server's provider stream |
    | Entra, Azure, STS | 5 s connect / 10 s request | keasy's server |
@@ -94,13 +95,14 @@ measurement beside it; the rule that there *is* a figure does not.
 
 ## G2 — every failure is seen, whole, by one path
 
-1. **A library passes the thrown value, never its message.** The graph's `onFailure`, `useAi`'s
+1. **A library passes the thrown value, never its message.** The graph's `onFailure`, `useAiStream`'s
    `error` and the auth provider's failure all carry the `unknown` that was thrown — a `FossilError`
    arrives at keasy as a `FossilError`, with its code, `data` and causes. kanzo-ui does not depend on
    fossil's types to do this: it passes what it got, and the host's `toProblem` narrows it.
 2. **kanzo-ui's own failures carry a code in the same grammar.** No WebGL, a lost context, an engine
-   that will not boot, a silent stream: `graph/no-webgl`, `graph/context-lost`, `engine/unavailable`,
-   `ai/silent`. They are `Error`s with a `code` field, so one host registry keys fossil's codes,
+   that will not boot, a silent stream, a session store or IdP that is down: `graph/no-webgl`,
+   `graph/context-lost`, `engine/unavailable`, `ai/silent`, `session/unavailable`, `idp/unreachable`,
+   and the few beside them. They are `Error`s with a `code` field, so one host registry keys fossil's codes,
    kanzo-ui's and keasy's server's alike. kanzo-ui owns that short list; it is not fossil's
    catalogue and does not join it.
 3. **Every Mosaic client implements `queryError`**, and a chart that failed renders the failure in its
@@ -190,7 +192,7 @@ Each step is one branch and one merge, green.
    rejections no longer memoized; the cleanup-replaces-cause sites fixed; the guards; a test per G3
    case. *Breaking:* `Engine.query`'s `signal` is required.
 3. **kanzo-ui.** duckdb-wasm's `onError` wrapped and the boot raced; `engine()` retries after a
-   failure; `queryError` on every chart client; `onFailure(error: unknown)`, `useAi`'s `error: unknown`,
+   failure; `queryError` on every chart client; `onFailure(error: unknown)`, `useAiStream`'s `error: unknown`,
    the auth provider's failure surfaced rather than collapsed to `"anonymous"`; the four codes; the AI
    idle deadline; the guards; the unread modules audited first. *Breaking:* the three failure
    signatures.
