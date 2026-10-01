@@ -143,7 +143,8 @@ sets the roles keep apart.
 Add or change a code in `crates/fossil-graph-schema/src/problem.rs`, re-bless its
 schema (`FOSSIL_BLESS=1 cargo test -p fossil-graph-schema --test problem_schema`), run
 `cargo xtask problem`, and commit both: the third generator reads that derived file and
-writes `packages/types/src/problem.gen.ts` — `Code`, `CODES`, `ProblemData`, `TITLES`.
+writes `packages/types/src/problem.gen.ts` — `Code`, `CODES`, `ProblemData`, `TITLES`, and `DETAILS`,
+each `#[error]` translated into the TypeScript that renders it.
 `cargo xtask problem --check` fails without writing, and
 `crates/xtask/tests/problem_generated.rs` is the same check as a test, so it has no CI
 step for the reason `catalogue --check` has none.
