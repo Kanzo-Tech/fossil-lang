@@ -2,8 +2,7 @@
  * Node-side smoke test for @fossil-lang/wasm.
  *
  * Boots the wasm-bindgen --target web module in a Node Vitest run, then
- * exercises the JS-side public surface (tokenize, semanticLegend,
- * FossilWorkspace class). The cargo-test suite already covers the
+ * exercises the JS-side public surface (tokenize, FossilWorkspace class). The cargo-test suite already covers the
  * Rust side (tokenize_native); this suite covers the JsValue → TS-shape
  * serialization boundary the Rust tests can't reach.
  */
@@ -13,7 +12,6 @@ import { readFile } from 'node:fs/promises';
 import {
   initFossilWasm,
   tokenize,
-  semanticLegend,
   FossilWorkspace,
 } from '../src/index.js';
 import type { TokenRow } from '@fossil-lang/types';
@@ -62,19 +60,6 @@ describe('@fossil-lang/wasm — tokenize', () => {
     for (let i = 1; i < rows.length; i++) {
       expect(rows[i - 1]!.end).toBeLessThanOrEqual(rows[i]!.start);
     }
-  });
-});
-
-describe('@fossil-lang/wasm — semanticLegend', () => {
-  it('returns tokenTypes + tokenModifiers arrays', () => {
-    const legend = semanticLegend();
-    expect(Array.isArray(legend.tokenTypes)).toBe(true);
-    expect(Array.isArray(legend.tokenModifiers)).toBe(true);
-    // The server ships 10 tokenTypes (keyword, namespace, type, function,
-    // property, string, number, operator, comment, variable). We assert
-    // non-emptiness rather than the exact count so additive legend changes
-    // don't break this test — appending is compatible, reordering is not.
-    expect(legend.tokenTypes.length).toBeGreaterThan(0);
   });
 });
 

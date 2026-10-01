@@ -10,7 +10,7 @@ let _initPromise: Promise<unknown> | null = null;
 
 /**
  * Boot the fossil-wasm module. MUST be awaited before calling any of
- * {@link tokenize}, {@link semanticLegend}, or instantiating
+ * {@link tokenize}, {@link tokenKinds}, or instantiating
  * {@link FossilWorkspace}. Memoised — subsequent calls return the same promise.
  *
  * **Called with nothing, the module finds its own `.wasm`.** The glue resolves

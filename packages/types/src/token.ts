@@ -31,15 +31,3 @@ export interface TokenRow {
  * backwards-compatible case: an unknown kind styles as plain text.
  */
 export type TokenKindLegend = readonly string[];
-
-/**
- * LSP `SemanticTokensLegend` shape (matches `fossil-wasm::semantic_legend()`
- * return). Identifies the token-type + token-modifier names used in the
- * accompanying semantic-tokens encoded data stream.
- */
-export interface SemanticTokensLegend {
-  /** Token-type names (e.g., `"keyword"`, `"variable"`, `"property"`). */
-  tokenTypes: string[];
-  /** Token-modifier names (e.g., `"declaration"`, `"readonly"`). */
-  tokenModifiers: string[];
-}

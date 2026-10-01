@@ -6,13 +6,12 @@
  * - {@link initFossilWasm} — boots the module; its `.wasm` is a bundler asset (memoised).
  * - {@link tokenize} — calls the Rust lexer, returns TokenRow[].
  * - {@link tokenKinds} — the legend for TokenRow.kind: variant names by index.
- * - {@link semanticLegend} — returns the LSP SemanticTokensLegend.
  * - {@link openProgram} — one program open for an editor: the workspace, the push-before-ask
  *   discipline and the document resolution a host would otherwise write, shaped to spread into
  *   `@fossil-lang/codemirror-fossil`'s `fossil()`. What a host with one editor calls.
  * - {@link FossilWorkspace} — Workspace API class: open / update / close,
  *   `check`, the three position queries (`hover`, `completions`,
- *   `gotoDefinition`) an editor draws its IDE surface from, and the documents
+ *   `gotoDefinition`) and `semanticTokens` an editor draws its IDE surface from, and the documents
  *   and sources a program reads (`missingDocuments`, `registerDocument`,
  *   `sources`) that a host resolves through its `Host`.
  *
@@ -37,7 +36,6 @@ export type { InitInput } from './load.js';
 export {
   tokenize,
   tokenKinds,
-  semanticLegend,
   FossilWorkspace,
   refs,
   providers,
@@ -128,6 +126,23 @@ export interface DefinitionRow {
   range: LspRange;
 }
 
+/** One classified span from {@link FossilWorkspace.semanticTokens} — what the
+ *  compiler knows about a stretch of the program that the lexer cannot: that
+ *  `Person` is a shape, `users` a binding being declared, `@warehouse` a
+ *  connection inside a string.
+ *
+ *  `kind` is the semantic-token type by legend NAME (`"type"`, `"namespace"`,
+ *  `"function"`, `"property"`, `"parameter"`, `"variable"`, `"keyword"`,
+ *  `"string"`, `"number"`, `"operator"`, `"comment"`); `modifiers` likewise
+ *  (`"declaration"`), empty when there are none. Names and not indices, for the
+ *  reason {@link CompletionRow.kind} is one. Rows are in source order and never
+ *  overlap; a range may cross a line. */
+export interface SemanticTokenRow {
+  range: LspRange;
+  kind: string;
+  modifiers: string[];
+}
+
 // `StdlibClass` and `FossilWorkspace.classification()` lived here — one row per
 // stdlib function carrying `"pure_sql"` or `"native_udf_only"`, so an editor
 // could render the native-only functions as disabled. The Rust side deleted the
@@ -204,7 +219,6 @@ export interface InferredDescriptorJson {
 // for `@fossil-lang/types` (still works; this is convenience).
 export type {
   TokenRow,
-  SemanticTokensLegend,
   Host,
   MissingDocument,
   UnreadDocument,

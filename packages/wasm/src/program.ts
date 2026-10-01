@@ -18,8 +18,8 @@
  *    missing.
  *
  * The result is shaped for `@fossil-lang/codemirror-fossil`'s `fossil()`: `tokenize`,
- * `tokenKinds`, `uri`, `check`, `hover`, `complete` and `definition` are exactly its option
- * names, so a host spreads it and adds what is its own to decide:
+ * `tokenKinds`, `semanticTokens`, `uri`, `check`, `hover`, `complete` and `definition` are exactly
+ * its option names, so a host spreads it and adds what is its own to decide:
  *
  * ```ts
  * const program = await openProgram('job.fossil', { host, text });
@@ -41,6 +41,7 @@ import type {
   DefinitionRow,
   HoverRow,
   InferredDescriptorJson,
+  SemanticTokenRow,
 } from './index.js';
 import { initFossilWasm, type InitInput } from './load.js';
 
@@ -65,6 +66,9 @@ export interface FossilProgram {
   readonly tokenize: typeof tokenize;
   /** The legend for a token's `kind`. */
   readonly tokenKinds: typeof tokenKinds;
+  /** What the compiler knows about each name and reference — shapes, declarations, connections —
+   *  laid over {@link tokenize}'s lexical highlighting. */
+  semanticTokens(text: string): SemanticTokenRow[];
   /**
    * Push the text, read every document it names that the workspace lacks, and check. No debounce:
    * `fossil()`'s linter waits out its own delay AND waits for this to return before it schedules
@@ -126,6 +130,10 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
     async check(next) {
       await settle(next);
       return workspace.check();
+    },
+    semanticTokens(next) {
+      sync(next);
+      return workspace.semanticTokens(handle);
     },
     hover(next, line, character) {
       sync(next);

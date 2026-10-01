@@ -8,7 +8,6 @@ JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Prov
   package and the host's bundler emits it as an asset; the host copies nothing.
 - `tokenize(text)` — calls the Rust lexer, returns `TokenRow[]`. The Rust lexer
   is the only lexer: no host reimplements one and drifts from the grammar.
-- `semanticLegend()` — returns the LSP semantic-tokens legend.
 - `FossilWorkspace` — the Workspace API class for LSP + compile. `fossil-lsp`
   itself is native-only (stdio over crossbeam), so the browser gets this
   equivalent dispatch surface over the same `fossil-ide` functions.
