@@ -79,7 +79,7 @@
 export { fossilHighlighting, buildDecorations } from './highlight.js';
 export type { TokenSource, HighlightOptions } from './highlight.js';
 
-export { fossilLinter, toDiagnostics } from './lint.js';
+export { fossilLinter, problemMessage, toDiagnostics } from './lint.js';
 export type { CheckRowLike, CheckSource, LinterOptions } from './lint.js';
 
 export { fossilHover, renderMarkdown } from './hover.js';

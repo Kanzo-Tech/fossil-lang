@@ -114,3 +114,36 @@ describe('openProgram', () => {
     }
   });
 });
+
+describe('openProgram, when a document cannot be read', () => {
+  const MISSING = PROGRAM.replace('@vocab/person.shex', '@vocab/gone.shex');
+
+  it('answers a row carrying the document’s problem, beside the checker’s rows', async () => {
+    const { host } = recordingHost(SHAPE);
+    const program = await openProgram('prog.fossil', { host, text: MISSING });
+    try {
+      const rows = await program.check(MISSING);
+      expect(rows[0]).toMatchObject({
+        uri: 'prog.fossil',
+        problem: { code: 'storage/unreachable', data: { locator: expect.stringContaining('gone.shex') } },
+      });
+    } finally {
+      program.close();
+    }
+  });
+
+  it('answers storage/host-silent once the host has been quiet for 30 s, instead of never painting', async () => {
+    const { host } = recordingHost(SHAPE);
+    const program = await openProgram('prog.fossil', { host, text: MISSING });
+    vi.useFakeTimers();
+    try {
+      host.connections = () => new Promise(() => {});
+      const outcome = program.check(MISSING).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await outcome).toMatchObject({ code: 'storage/host-silent' });
+    } finally {
+      vi.useRealTimers();
+      program.close();
+    }
+  });
+});

@@ -31,6 +31,8 @@
 // package entry lets a `sideEffects:false` bundler duplicate it, splitting
 // `init()`'s wasm instance from the one the functions use (the crash the
 // codemirror tokenizer hit on the main thread). This entry only re-exports.
+import type { Problem } from '@fossil-lang/types';
+
 export { initFossilWasm } from './load.js';
 export type { InitInput } from './load.js';
 
@@ -76,6 +78,12 @@ export interface CheckRow {
   range: LspRange;
   severity: number;
   message: string;
+  /**
+   * Set on a row that is a failure rather than the checker's finding — a document the program names
+   * that could not be read, from `openProgram`'s `check` — carrying the whole problem: its code, its
+   * data and the storage failure that is its cause.
+   */
+  problem?: Problem;
 }
 
 /** An LSP range: zero-based lines, `character` in UTF-16 code units — the units

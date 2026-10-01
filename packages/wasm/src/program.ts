@@ -32,7 +32,7 @@
  * check rather than poisoning it.
  */
 import { resolveDocuments } from '@fossil-lang/storage';
-import type { Host, ProgramSource } from '@fossil-lang/types';
+import { until, type Host, type ProgramSource, type UnreadDocument } from '@fossil-lang/types';
 
 import { FossilWorkspace, tokenize, tokenKinds } from './client.js';
 import type {
@@ -52,6 +52,8 @@ export interface OpenProgramOptions {
   text?: string;
   /** The module's `.wasm`, for a host with no bundler — see {@link initFossilWasm}. */
   wasm?: InitInput;
+  /** Stops the open — the boot and the first read of the documents — rejecting with its reason. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -69,6 +71,10 @@ export interface FossilProgram {
    * Push the text, read every document it names that the workspace lacks, and check. No debounce:
    * `fossil()`'s linter waits out its own delay AND waits for this to return before it schedules
    * again, which is what an LSP client does with `didChange`.
+   *
+   * A document that could not be read is a row of its own at the top of the program, carrying its
+   * problem — `storage/host-silent`, `storage/unreachable`, … — beside the checker's rows, which
+   * see it only as missing.
    */
   check(text: string): Promise<CheckRow[]>;
   /** The type under the cursor, and the type the target shape demands of it — or `null`. */
@@ -100,8 +106,8 @@ export interface FossilProgram {
  * in the same tab costs a workspace and nothing else.
  */
 export async function openProgram(uri: string, options: OpenProgramOptions): Promise<FossilProgram> {
-  const { host, text = '', wasm } = options;
-  await initFossilWasm(wasm);
+  const { host, text = '', wasm, signal } = options;
+  await until(initFossilWasm(wasm), signal);
 
   const workspace = new FossilWorkspace();
   const handle = workspace.openFile(uri, text);
@@ -112,12 +118,19 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
     workspace.updateFile(handle, next);
     pushed = next;
   };
-  const settle = async (next: string): Promise<void> => {
+  // What the last read of the documents could not read; every settle reads what is missing again.
+  let unread: readonly UnreadDocument[] = [];
+  const settle = async (next: string, stop?: AbortSignal): Promise<void> => {
     sync(next);
-    await resolveDocuments(workspace.workspace(handle), host);
+    ({ unread } = await resolveDocuments(workspace.workspace(handle), host, { signal: stop }));
   };
 
-  await settle(text);
+  try {
+    await settle(text, signal);
+  } catch (cause) {
+    workspace.free();
+    throw cause;
+  }
 
   return {
     uri,
@@ -125,7 +138,15 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
     tokenKinds,
     async check(next) {
       await settle(next);
-      return workspace.check();
+      const rows = workspace.check();
+      const failed: CheckRow[] = unread.map((d) => ({
+        uri,
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+        severity: 1,
+        message: `${d.key}: ${d.problem.detail}`,
+        problem: d.problem,
+      }));
+      return [...failed, ...rows];
     },
     hover(next, line, character) {
       sync(next);

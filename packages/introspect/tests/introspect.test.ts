@@ -185,10 +185,10 @@ describe("introspect", () => {
         : [{ column_name: "total", column_type: "DOUBLE" }],
     );
 
-    const descriptors = await introspect([users, orders], io);
+    const { descriptors } = await introspect([users, orders], io);
 
     expect(credentials).toHaveBeenCalledTimes(1);
-    expect(credentials).toHaveBeenCalledWith({ connection: "w" }, "read");
+    expect(credentials).toHaveBeenCalledWith({ connection: "w" }, "read", { signal: expect.any(AbortSignal) });
     expect(sql[0]).toMatch(/^CREATE OR REPLACE SECRET fossil_read_[0-9a-f]{16} \(TYPE s3, /);
     expect(describes(sql)).toEqual([
       `DESCRIBE SELECT * FROM read_csv_auto('${W}users.csv')`,
@@ -211,7 +211,7 @@ describe("introspect", () => {
 
   it("describes a public source with no connection as it is, asking the host nothing", async () => {
     const { io, credentials, sql } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }]);
-    const descriptors = await introspect(
+    const { descriptors } = await introspect(
       [{ binding: "p", key: "https://x.test/p.csv", locator: "https://x.test/p.csv", format: "csv" }],
       io,
     );
@@ -238,7 +238,7 @@ describe("introspect", () => {
   it("does not describe a materialised source, and asks the host nothing for none", async () => {
     const query = vi.fn(async () => []);
     const { io, credentials, sql } = fakeIO(query);
-    const descriptors = await introspect(
+    const { descriptors } = await introspect(
       [{ binding: "g", key: "@w/g.ttl", locator: `${W}g.ttl`, connection: "w", format: "rdf" }],
       io,
     );
@@ -250,19 +250,18 @@ describe("introspect", () => {
   it("asks the host for a freshness token per source", async () => {
     const freshness = vi.fn((source: ProgramSource) => `etag-for-${source.key}`);
     const { io } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }], { freshness });
-    const descriptors = await introspect([users], io);
+    const { descriptors } = await introspect([users], io);
     expect(freshness).toHaveBeenCalledWith(users);
     expect(descriptors[0]?.freshness_token).toBe("etag-for-@w/users.csv");
   });
 
-  it("is best-effort: an unvended, unaddressable or unreadable source is reported and skipped", async () => {
-    const onWarn = vi.fn();
+  it("is best-effort: an unvended, unaddressable or unreadable source is answered with its problem and skipped", async () => {
     const { io, sql } = fakeIO(
       async (text) => {
         if (text.includes("orders")) throw new Error("CORS / unreachable");
         return [{ column_name: "total", column_type: "INT" }];
       },
-      { onWarn },
+      {},
       (scope) => ("connection" in scope && scope.connection === "gone" ? [] : [credential(W)]),
     );
     const parquet: ProgramSource = {
@@ -275,9 +274,14 @@ describe("introspect", () => {
     const unvended: ProgramSource = { ...users, binding: "u", connection: "gone" };
     const bare: ProgramSource = { binding: "b", key: "b.csv", locator: "b.csv", format: "csv" };
 
-    const descriptors = await introspect([unvended, orders, parquet, bare], io);
+    const { descriptors, undescribed } = await introspect([unvended, orders, parquet, bare], io);
 
-    expect(onWarn).toHaveBeenCalledTimes(3);
+    expect(undescribed.map((u) => [u.source.binding, u.problem.code])).toEqual([
+      ["u", "storage/no-credential"],
+      [orders.binding, "engine/failed"],
+      ["b", "storage/no-route"],
+    ]);
+    expect(undescribed[1]!.problem.cause).toEqual({ name: "Error", detail: "CORS / unreachable" });
     expect(descriptors).toEqual([
       {
         uri: "@w/e.parquet",
@@ -287,5 +291,36 @@ describe("introspect", () => {
     ]);
     expect(sql.at(-1)).toMatch(/^DROP SECRET IF EXISTS /);
   });
-});
 
+  it("answers a host that never vends as storage/host-silent after 30 s, not a stall", async () => {
+    vi.useFakeTimers();
+    try {
+      const { io } = fakeIO(async () => [], {
+        host: { connections: async () => ({}), credentials: () => new Promise(() => {}) },
+      });
+      const outcome = introspect([users], io);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const { undescribed } = await outcome;
+      expect(undescribed.map((u) => u.problem.code)).toEqual(["storage/host-silent"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops a DESCRIBE that hangs when the caller does, and still gives the credential back", async () => {
+    const stop = new AbortController();
+    const { io, sql } = fakeIO(() => new Promise(() => {}), { signal: stop.signal });
+    io.engine = {
+      ...io.engine,
+      query: (text, options) =>
+        text.startsWith("DESCRIBE")
+          ? new Promise((_, reject) => {
+              options.signal.addEventListener("abort", () => reject(options.signal.reason));
+              stop.abort(new DOMException("stopped", "AbortError"));
+            })
+          : (sql.push(text), Promise.resolve(tableOf(text.includes("duckdb_extensions()") ? [{ loaded: true }] : []))),
+    };
+    await expect(introspect([users], io)).rejects.toMatchObject({ name: "AbortError" });
+    expect(sql.at(-1)).toMatch(/^DROP SECRET IF EXISTS /);
+  });
+});

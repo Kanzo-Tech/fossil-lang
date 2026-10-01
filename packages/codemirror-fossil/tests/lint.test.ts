@@ -3,10 +3,13 @@
  * the row and the document disagree, because that is not an edge case — it is
  * every keystroke between a check being requested and its answer arriving.
  */
+import { forEachDiagnostic, forceLinting } from '@codemirror/lint';
 import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import { FossilError, TITLES, helpUrl, type Problem } from '@fossil-lang/types';
 import { describe, expect, it } from 'vitest';
 
-import { toDiagnostics, type CheckRowLike } from '../src/lint.js';
+import { fossilLinter, toDiagnostics, type CheckRowLike, type CheckSource } from '../src/lint.js';
 
 const URI = 'hello.fossil';
 
@@ -105,5 +108,35 @@ describe('toDiagnostics', () => {
     );
     expect(d!.from).toBe(0);
     expect(d!.to).toBe(0);
+  });
+});
+
+describe('a failure, as a diagnostic', () => {
+  const unread: Problem = {
+    code: 'storage/host-silent',
+    data: { scope: 'its connections', after: 30_000 },
+    title: TITLES['storage/host-silent'],
+    detail: 'the host did not answer its connections within 30000 ms',
+    severity: 'error',
+  };
+
+  it('shows a row’s problem by its title, its code and its page', () => {
+    const [d] = toDiagnostics(state(), [row({ problem: unread })], URI);
+    expect(d!.message.split('\n')[0]).toContain('[storage/host-silent]');
+    expect(d!.message).toContain(helpUrl('storage/host-silent'));
+  });
+
+  it('shows a refused check by its code, and one fossil did not raise as internal/bug', async () => {
+    const lint = async (source: CheckSource): Promise<string[]> => {
+      const view = new EditorView({ state: EditorState.create({ doc: DOC, extensions: fossilLinter(source, { uri: URI, delay: 0 }) }) });
+      forceLinting(view);
+      await new Promise((settle) => setTimeout(settle, 50));
+      const messages: string[] = [];
+      forEachDiagnostic(view.state, (d) => messages.push(d.message));
+      view.destroy();
+      return messages;
+    };
+    expect((await lint(() => Promise.reject(FossilError.from(unread))))[0]).toContain('[storage/host-silent]');
+    expect((await lint(() => Promise.reject(new TypeError('worker died'))))[0]).toContain('[internal/bug]');
   });
 });

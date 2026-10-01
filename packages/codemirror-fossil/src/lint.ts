@@ -20,7 +20,7 @@
  */
 import { linter, type Diagnostic } from '@codemirror/lint';
 import type { EditorState, Extension } from '@codemirror/state';
-import { isFossilError } from '@fossil-lang/types';
+import { FossilError, helpUrl, isFossilError, type Problem } from '@fossil-lang/types';
 
 import { rangeOf, type Position } from './positions.js';
 
@@ -40,6 +40,17 @@ export interface CheckRowLike {
   severity: number;
   message: string;
   related?: { uri: string; range: { start: Position; end: Position }; message: string }[];
+  /** A row that is a failure — a document that could not be read — carries its whole problem. */
+  problem?: Problem;
+}
+
+/**
+ * A problem as a diagnostic's text: its title, its code and the page that explains it, its detail,
+ * its help. The code is what a person types into a search, so it is on the first line.
+ */
+export function problemMessage(problem: Problem): string {
+  const help = problem.help === undefined ? '' : `\nhelp: ${problem.help}`;
+  return `${problem.title} [${problem.code}]: ${problem.detail}${help}\nsee ${helpUrl(problem.code)}`;
 }
 
 // The clamping this module used to do itself is `positions.ts`'s now, because
@@ -72,7 +83,7 @@ export function toDiagnostics(
       to,
       severity: SEVERITY[row.severity] ?? 'error',
       source: 'fossil',
-      message: row.message + related,
+      message: (row.problem === undefined ? row.message : problemMessage(row.problem)) + related,
     });
   }
   return out;
@@ -127,17 +138,20 @@ export function fossilLinter(source: CheckSource, options: LinterOptions): Exten
         rows = await source(text);
       } catch (cause) {
         // A refused check is a diagnostic in its own right, and a silent one is
-        // how "the editor stopped underlining things" becomes a mystery. The
-        // wasm surface's own busy error says what to do in its `help`; show it.
+        // how "the editor stopped underlining things" becomes a mystery. It is
+        // shown by its code, and a failure fossil did not raise is `internal/bug`.
+        const failure = isFossilError(cause)
+          ? cause
+          : FossilError.of('internal/bug', { what: 'the check failed outside fossil' }, 'internal error: the check failed outside fossil', {
+              cause,
+            });
         return [
           {
             from: 0,
             to: Math.min(1, view.state.doc.length),
             severity: 'error' as const,
             source: 'fossil',
-            message: isFossilError(cause)
-              ? `fossil check failed: ${cause.message}${cause.help === undefined ? '' : `\nhelp: ${cause.help}`}`
-              : `fossil check failed: ${String(cause)}`,
+            message: problemMessage(failure.problem),
           },
         ];
       }

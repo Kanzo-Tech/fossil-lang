@@ -245,7 +245,7 @@ const empty: Table = { numRows: 0, schema: { fields: [] }, getChild: () => null 
 /** The DESCRIBE `introspect` sends for each source, in order. */
 async function describesOf(sources: ProgramSource[]): Promise<string[]> {
   const seen: string[] = [];
-  await introspect(sources, {
+  const { undescribed } = await introspect(sources, {
     host: {
       connections: async () => ({}),
       credentials: async () => [],
@@ -258,10 +258,8 @@ async function describesOf(sources: ProgramSource[]): Promise<string[]> {
         return empty;
       },
     },
-    onWarn: (message, err) => {
-      throw new Error(`${message}: ${String(err)}`);
-    },
   });
+  expect(undescribed).toEqual([]);
   return seen;
 }
 

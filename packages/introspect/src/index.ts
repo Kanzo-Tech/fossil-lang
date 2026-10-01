@@ -25,7 +25,15 @@
  */
 
 import { mount, type Mount } from "@fossil-lang/storage";
-import { FossilError, type Engine, type Host, type ProgramSource } from "@fossil-lang/types";
+import {
+  FossilError,
+  attachCause,
+  isFossilError,
+  type Engine,
+  type Host,
+  type Problem,
+  type ProgramSource,
+} from "@fossil-lang/types";
 
 import {
   NATIVE_READERS,
@@ -219,41 +227,49 @@ export interface IntrospectIO {
    * every compile.
    */
   freshness?(source: ProgramSource): Promise<string> | string;
-  /** Per-source failure sink; defaults to `console.warn`. */
-  onWarn?(message: string, err: unknown): void;
+  /** Stops it: the credential requests and every DESCRIBE, rejecting with the signal's reason. */
+  signal?: AbortSignal;
 }
 
-function defaultWarn(message: string, err: unknown): void {
-  // eslint-disable-next-line no-console
-  console.warn(message, err);
+/** A source introspection could not describe, and why. */
+export interface UndescribedSource {
+  source: ProgramSource;
+  problem: Problem;
 }
 
 /**
  * Describe every native source and return the descriptors, in `sources` order. The host is asked
  * once per connection named, and the credential it vends is given back when this returns.
  *
- * Best-effort: a source the host vends nothing for, or one DuckDB cannot read, is reported
- * through `onWarn` and skipped, never thrown — the editor degrades to no field completion for that
- * source. A source with no connection is read as it is only when it is a public `http(s)` URL. The
- * host registers the returned descriptors with the checker.
+ * Best-effort: a source the host vends nothing for, or one DuckDB cannot read, is skipped, never
+ * thrown, and answered in `undescribed` with its problem — the editor degrades to no field
+ * completion for that source, and the host shows why. A source with no connection is read as it is
+ * only when it is a public `http(s)` URL. The host registers the returned descriptors with the
+ * checker.
+ *
+ * @throws {FossilError} only what giving the credentials back raised; an abort rejects with the
+ *   signal's reason.
  */
 export async function introspect(
   sources: readonly ProgramSource[],
   io: IntrospectIO,
-): Promise<InferredDescriptor[]> {
-  const warn = io.onWarn ?? defaultWarn;
+): Promise<{ descriptors: InferredDescriptor[]; undescribed: UndescribedSource[] }> {
+  const { signal } = io;
   const native = sources.filter(isNative);
-  if (native.length === 0) return [];
+  const undescribed: UndescribedSource[] = [];
+  if (native.length === 0) return { descriptors: [], undescribed };
 
   const mounts = new Map<string, Promise<Mount>>();
   const mountOf = (connection: string): Promise<Mount> => {
     let pending = mounts.get(connection);
     if (pending === undefined) {
-      pending = mount(io.engine, io.host, { connection }, "read");
+      pending = mount(io.engine, io.host, { connection }, "read", { signal });
       mounts.set(connection, pending);
     }
     return pending;
   };
+  let outcome: InferredDescriptor[] | undefined;
+  let failure: unknown;
   try {
     const described = await Promise.all(
       native.map(async (source) => {
@@ -269,9 +285,9 @@ export async function introspect(
               `${source.locator} names no connection and is not a public URL`,
             );
           }
-          const described = await io.engine.query(
-            describeSql(name, source.format, source.option),
-          );
+          const described = await io.engine.query(describeSql(name, source.format, source.option), {
+            signal: signal ?? new AbortController().signal,
+          });
           const names = described.getChild("column_name");
           const types = described.getChild("column_type");
           const rows: DescribeRow[] = Array.from({ length: described.numRows }, (_, i) => ({
@@ -280,18 +296,31 @@ export async function introspect(
           }));
           return buildDescriptor(source.key, rows, await io.freshness?.(source));
         } catch (err) {
-          warn(
-            `[introspect] source \`${source.binding}\` (\`${source.key}\`) failed`,
-            err,
-          );
+          signal?.throwIfAborted();
+          const problem = isFossilError(err)
+            ? err.problem
+            : FossilError.of("engine/failed", {}, `the query engine could not describe ${source.key}`, {
+                cause: err,
+              }).problem;
+          undescribed.push({ source, problem });
           return undefined;
         }
       }),
     );
-    return described.filter((d): d is InferredDescriptor => d !== undefined);
-  } finally {
-    await Promise.all(
-      [...mounts.values()].map(async (pending) => (await pending.catch(() => undefined))?.close()),
-    );
+    outcome = described.filter((d): d is InferredDescriptor => d !== undefined);
+    undescribed.sort((a, b) => sources.indexOf(a.source) - sources.indexOf(b.source));
+  } catch (cause) {
+    failure = cause;
   }
+  const closed = await Promise.allSettled(
+    // A mount that failed is already a source's problem above, so there is nothing of it to close.
+    [...mounts.values()].map(async (pending) => (await pending.catch(() => undefined))?.close()),
+  );
+  const cleanup = closed.filter((c) => c.status === "rejected").map((c) => c.reason as unknown);
+  if (failure !== undefined) {
+    for (const c of cleanup) attachCause(failure, c);
+    throw failure;
+  }
+  if (cleanup.length > 0) throw cleanup[0];
+  return { descriptors: outcome!, undescribed };
 }
