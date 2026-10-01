@@ -16,6 +16,7 @@ import {
   type Host,
   type HostCall,
   type Problem,
+  type Related,
   type UnreadDocument,
 } from '@fossil-lang/types';
 
@@ -108,8 +109,8 @@ async function execute(program: string, job: Job, signal: AbortSignal | undefine
 
 /**
  * `document/unread`, every document's problem kept. One is the cause. Several are an
- * `AggregateError` of their `FossilError`s, and each is a `related` entry on the wire, where a
- * problem carries one cause.
+ * `AggregateError` of their `FossilError`s, and each is a `related` entry — its code, data and
+ * detail — on the wire, where a problem carries one cause.
  */
 function unreadable(unread: readonly UnreadDocument[]): FossilError<'document/unread'> {
   const documents = unread.map((d) => d.key);
@@ -120,11 +121,17 @@ function unreadable(unread: readonly UnreadDocument[]): FossilError<'document/un
       unread.map((d) => FossilError.from(d.problem)),
       `${unread.length} documents could not be read`,
     ),
-    related: unread.map((d) => ({
-      severity: 'error' as const,
-      detail: `${d.key}: ${d.problem.detail}`,
-      ...(d.problem.help === undefined ? {} : { help: d.problem.help }),
-    })),
+    related: unread.map(
+      ({ problem }) =>
+        ({
+          code: problem.code,
+          data: problem.data,
+          title: problem.title,
+          detail: problem.detail,
+          severity: problem.severity,
+          ...(problem.help === undefined ? {} : { help: problem.help }),
+        }) as Related,
+    ),
   });
 }
 

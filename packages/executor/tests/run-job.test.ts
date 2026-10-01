@@ -304,6 +304,6 @@ describe('runJob, when stopped or when several documents fail', () => {
     expect(e).toMatchObject({ code: 'document/unread', data: { documents: [expect.any(String), expect.any(String)] } });
     const cause = (e as Error).cause as AggregateError;
     expect(cause.errors.map((x: { code: string }) => x.code)).toEqual(['storage/unreachable', 'storage/unreachable']);
-    expect(job.completed?.problem?.related).toHaveLength(2);
+    expect(job.completed?.problem?.related?.map((r) => r.code)).toEqual(['storage/unreachable', 'storage/unreachable']);
   });
 });
