@@ -1,15 +1,9 @@
 ---
 title: Every wait ends, every failure is seen
-description: "PROPOSAL, not accepted — three guarantees across fossil, kanzo-ui and keasy: every wait ends within a bound, every failure reaches the screen whole and by one path, and every failure path is forced by a test that looks at what the user sees."
+description: "Three guarantees across fossil, kanzo-ui and keasy: every wait ends within a bound, every failure reaches the screen whole and by one path, and every failure path is forced by a test that looks at what the user sees."
 direction:
   summary: "A failure anywhere between the bucket and the screen ends, within seconds, in one view that names it by its code — and a test forces it there."
 ---
-
-<Callout title="Proposal — written 2026-10-01 for the owner's review, and nothing on it is built">
-Every sentence in the present tense describes the trees at fossil `cedb3aec`, kanzo-ui `d96c6fd` and
-keasy `8343a3f`; everything about deadlines, leases and guards is what is proposed. The first step of
-[the migration](#the-migration-repository-by-repository) is deleting this callout.
-</Callout>
 
 [One error, from Rust to the screen](/docs/design/errors) gave a failure a shape: a code, typed
 `data`, a page. That page answers *what* a failure says. It does not answer whether the failure
@@ -82,7 +76,7 @@ thing that can wait forever is the person's own patience, and they can end it.
 3. **A deadline that fires is coded by who did not answer, never as a bare "timeout".** The person
    needs to know *what* is down. The host going quiet is `storage/host-silent` (new); the bucket is
    `storage/unreachable` (exists); kanzo-ui's engine is `engine/unavailable`; the model is keasy's
-   `llm_silent`. Each carries `{ after }` in milliseconds.
+   `llm/silent`. Each carries `{ after }` in milliseconds.
 4. **A rejection is never memoized.** A cached promise is cleared when it rejects, so the next call
    tries again. `scope[KEY] ??= boot()` and the three `init`s are the sites; the rule is the guard
    below, not a helper — four sites do not earn one.
@@ -108,12 +102,14 @@ measurement beside it; the rule that there *is* a figure does not.
 3. **Every Mosaic client implements `queryError`**, and a chart that failed renders the failure in its
    own frame and calls the host's `onFailure`. A blank chart is never a failed chart.
 4. **In keasy, a query's failure is rendered where its data would have been, by `ProblemView`.** The
-   way to make that impossible to forget is structural rather than a review rule: **`useSuspenseQuery`
-   only**, with an error boundary rendering `ProblemView` around every route group and every panel
-   that may fail alone. A query that fails throws to the nearest boundary; there is no `data = []`
-   default for a failure to hide behind, and no `isError` to forget. Today 18 files call `useQuery`
-   and one route group has an `error.tsx`.
-5. **`notFound()` only for a `not_found` code.** Everything else throws to the boundary.
+   way to make that impossible to forget is structural rather than a review rule, and it is
+   TanStack Query's own pattern for the App Router: **`useSuspenseQuery` only**, under a
+   `QueryErrorResetBoundary` and an error boundary that renders `ProblemView` around every route
+   group and every panel that may fail alone, with the boundary's retry resetting the query. A query
+   that fails throws to the nearest boundary; there is no `data = []` default for a failure to hide
+   behind, and no `isError` to forget. Today 18 files call `useQuery` and one route group has an
+   `error.tsx`.
+5. **`notFound()` only for a `job/not-found`-shaped code.** Everything else throws to the boundary.
 6. **A poll stops on failure.** `refetchInterval` returns `false` once the query is in error, so a
    dead API is not asked every two seconds and old data is not shown as current.
 7. **No swallowing.** No empty `catch`, no `.catch(() => {})`, no `let _ = …await` — except where a
@@ -138,7 +134,7 @@ learn of it from the tab; it must learn of it from silence.
    `heartbeat_at`.
 2. **A sweep on read, not a scheduler.** Any query that reads jobs first marks every `running` job
    whose heartbeat is older than 60 s — and every `pending` job older than the same — as `failed`,
-   with the problem `job_abandoned`. No background task, no cron: the next person to look is who ends
+   with the problem `job/abandoned`. No background task, no cron: the next person to look is who ends
    it, which is the only moment anyone can notice.
 3. **A terminal job can be deleted**, so an abandoned one is not stuck in the list.
 4. **A completion that fails to report is retried** until the lease would have expired, after which
@@ -175,14 +171,14 @@ cannot prove.
 | Every Mosaic client class has `queryError` | kanzo-ui | that it renders well |
 | No `onFailure`/`error` typed `string` on a public surface | kanzo-ui | a failure reaching the host another way |
 | No `useQuery(`; every route group has an `error.tsx` | keasy | a boundary that renders something other than `ProblemView` |
-| `notFound()` only inside a `not_found` branch | keasy | — |
+| `notFound()` only inside a not-found branch | keasy | — |
 | Every scenario in the audit tables has an e2e test, by name | keasy | that the test forces the failure it names |
 
 ## The migration, repository by repository
 
 Each step is one branch and one merge, green.
 
-1. **Accept the page.** The callout goes.
+1. **Accept the page.** Done on 2026-10-01.
 2. **fossil.** `signal` through `open`, `mount`, `introspect`, `runJob`, `openProgram`; the deadline
    helper on every host wait and wasm fetch; `storage/host-silent`; object-store client options;
    rejections no longer memoized; the cleanup-replaces-cause sites fixed; the guards; a test per G3
@@ -192,18 +188,26 @@ Each step is one branch and one merge, green.
    the auth provider's failure surfaced rather than collapsed to `"anonymous"`; the four codes; the AI
    idle deadline; the guards; the unread modules audited first. *Breaking:* the three failure
    signatures.
-4. **keasy.** Picks up 2 and 3. `useSuspenseQuery` and boundaries; `notFound()` narrowed; polls stop
+4. **keasy.** Its server's codes move to `area/kind` — `still_running` becomes `job/still-running` —
+   and the parts that need no library change land first; it picks up 2 and 3 as they are published. `useSuspenseQuery` and boundaries; `notFound()` narrowed; polls stop
    on failure; the deadline on the api client, the SSE reader and every server client; the lease and
    the sweep; the auth error page; the guards.
 5. **The e2e suite**, last, because it asserts what 2 to 4 build — and first in spirit: each scenario
    is written failing before its fix lands, where the fix's repository allows it.
 
-## Open for the owner
+## The decisions, and what would reverse each
 
-1. **The deadlines in the G1 table** are a first cut. Thirty seconds for a host promise is generous
-   for a credential vend and short for nothing else on the list.
-2. **`useSuspenseQuery` everywhere** is the strongest of these and the largest edit: 18 files, and a
-   boundary per panel. The alternative is a guard that every `useQuery` result's `error` is read —
-   weaker, because reading it is not rendering it.
-3. **keasy's server codes are `snake_case` and fossil's are `area/kind`.** One registry keys both
-   today. Whether keasy's move to the grammar is part of this batch or its own is open.
+The owner accepted this page on 2026-10-01 and settled the three questions it had left open.
+
+1. **The deadlines are the ones in the G1 table**, fixed figures rather than options a host sets — an
+   option per wait would be surface nobody has asked for. *What would reverse it:* a host that
+   measurably needs a different figure for the same wait, which would make the figure the host's
+   knowledge and not the library's.
+2. **`useSuspenseQuery` only, with boundaries** — the reference-grade answer, chosen over a guard that
+   every `useQuery`'s `error` is read, because reading an error is not rendering it. *What would
+   reverse it:* the exception named under G2 — partial data worth showing beside its failure —
+   becoming common rather than rare.
+3. **keasy's server codes move to `area/kind` in this batch**, so the codes this page introduces are
+   born in the one grammar and one registry keys all three sources. keasy's API has no consumer
+   outside keasy. *What would reverse it:* nothing foreseeable — two grammars for one registry is a
+   cost with no benefit.
