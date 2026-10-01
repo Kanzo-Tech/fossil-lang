@@ -1,5 +1,17 @@
 /**
- * Syntax highlighting for Fossil, driven by the compiler's own lexer.
+ * Syntax highlighting for Fossil, driven by the compiler's own lexer and, when
+ * the host wires it, the compiler's semantic tokens laid over it.
+ *
+ * ## Two layers, the rust-analyzer-over-TextMate arrangement
+ *
+ * The lexical pass (`tokenize()`) needs no workspace and is always there: it is
+ * the baseline, and it is the whole of the highlighting for a host that passes
+ * no `semanticTokens`. The semantic pass names what the lexer cannot — a shape
+ * from a binding from a column, a declaration from a use, the `@connection` of a
+ * reference inside its string — and wins where it speaks. Where it repeats what
+ * the lexer already said (a keyword, a string) the lexer's finer tag stays; see
+ * `LEXICAL_KINDS`. If the semantic call throws, the lexical layer is painted
+ * alone and nothing else changes.
  *
  * ## Why a `ViewPlugin` and not a `StreamLanguage`
  *
@@ -47,15 +59,30 @@ import {
 import type { TokenRow } from '@fossil-lang/types';
 
 import { byteToUtf16Mapper } from './offsets.js';
-import { tagFor } from './tags.js';
+import { offsetOf, type Range } from './positions.js';
+import { LEXICAL_KINDS, semanticTagFor, tagFor } from './tags.js';
 
-/** The two wasm entry points this plugin needs. Injected rather than imported so
+/** The `SemanticTokenRow` shape, restated structurally so this module imports no
+ *  runtime. `@fossil-lang/wasm` is the definition. */
+export interface SemanticTokenRowLike {
+  range: Range;
+  kind: string;
+  modifiers: readonly string[];
+}
+
+/** What the semantic pass calls: the program's semantic tokens for `text`, in
+ *  source order. Synchronous, because a decoration set is. */
+export type SemanticTokenSource = (text: string) => readonly SemanticTokenRowLike[];
+
+/** The wasm entry points this plugin needs. Injected rather than imported so
  *  the package does not decide when the module is initialised — see `index.ts`. */
 export interface TokenSource {
   /** `@fossil-lang/wasm`'s `tokenize`. */
   tokenize: (text: string) => TokenRow[];
   /** `@fossil-lang/wasm`'s `tokenKinds` — the legend that makes `kind` readable. */
   tokenKinds: () => readonly string[];
+  /** `openProgram(...).semanticTokens`. Omit for lexical highlighting only. */
+  semanticTokens?: SemanticTokenSource;
 }
 
 /** Options for {@link fossilHighlighting}. */
@@ -66,6 +93,13 @@ export interface HighlightOptions {
 }
 
 const DEFAULT_MAX_LENGTH = 200_000;
+
+/** One decoration to place: a range and the class the active style gives it. */
+interface Mark {
+  from: number;
+  to: number;
+  cls: string;
+}
 
 /**
  * The decoration pass. Exported for the tests, which assert over ranges rather
@@ -80,6 +114,14 @@ export function buildDecorations(
   const text = view.state.doc.toString();
   if (text.length === 0 || text.length > maxLength) return builder.finish();
 
+  const lexical = lexicalMarks(view, source, text);
+  for (const mark of overlay(lexical, semanticMarks(view, source, text))) {
+    builder.add(mark.from, mark.to, Decoration.mark({ class: mark.cls }));
+  }
+  return builder.finish();
+}
+
+function lexicalMarks(view: EditorView, source: TokenSource, text: string): Mark[] {
   let rows: TokenRow[];
   let legend: readonly string[];
   try {
@@ -89,10 +131,11 @@ export function buildDecorations(
     // The module is not initialised yet, or the host tore it down. A highlighter
     // that throws takes the editor's whole update cycle with it; one that returns
     // no decorations leaves plain text and repaints on the next change.
-    return builder.finish();
+    return [];
   }
 
   const toUnits = byteToUtf16Mapper(text);
+  const marks: Mark[] = [];
   for (const row of rows) {
     const tag = tagFor(legend, row.kind);
     if (tag === null) continue;
@@ -103,9 +146,69 @@ export function buildDecorations(
     // `RangeSetBuilder` requires strictly sorted, non-empty ranges. The lexer
     // emits both in order, but a zero-width token would still be a runtime throw.
     if (to <= from) continue;
-    builder.add(from, to, Decoration.mark({ class: cls }));
+    marks.push({ from, to, cls });
   }
-  return builder.finish();
+  return marks;
+}
+
+/** A semantic mark, and whether it may only fill a gap the lexer left. */
+interface SemanticMark extends Mark {
+  fillsOnly: boolean;
+}
+
+function semanticMarks(view: EditorView, source: TokenSource, text: string): SemanticMark[] {
+  if (!source.semanticTokens) return [];
+  let rows: readonly SemanticTokenRowLike[];
+  try {
+    rows = source.semanticTokens(text);
+  } catch {
+    // Busy or not booted: the lexical layer is the answer until the next change.
+    return [];
+  }
+
+  const marks: SemanticMark[] = [];
+  let last = 0;
+  for (const row of rows) {
+    const tag = semanticTagFor(row.kind, row.modifiers);
+    if (tag === null) continue;
+    const cls = highlightingFor(view.state, [tag]);
+    if (!cls) continue;
+    const from = offsetOf(view.state, row.range.start);
+    const to = offsetOf(view.state, row.range.end);
+    if (to <= from || from < last) continue;
+    marks.push({ from, to, cls, fillsOnly: LEXICAL_KINDS.has(row.kind) });
+    last = to;
+  }
+  return marks;
+}
+
+/**
+ * `top` painted over `base`: every lexical mark loses the stretches a semantic
+ * mark covers — so a string keeps its colour on either side of the connection
+ * carved out of it — except that a mark which only fills is dropped wherever the
+ * lexer already painted. Both inputs are sorted and non-overlapping, and so is
+ * the result.
+ */
+function overlay(base: Mark[], top: SemanticMark[]): Mark[] {
+  let b = 0;
+  const kept = top.filter((t) => {
+    if (!t.fillsOnly) return true;
+    while (b < base.length && base[b]!.to <= t.from) b++;
+    return b === base.length || base[b]!.from >= t.to;
+  });
+
+  const out: Mark[] = [...kept];
+  let k = 0;
+  for (const mark of base) {
+    while (k < kept.length && kept[k]!.to <= mark.from) k++;
+    let cursor = mark.from;
+    for (let i = k; i < kept.length && kept[i]!.from < mark.to; i++) {
+      if (kept[i]!.from > cursor) out.push({ from: cursor, to: kept[i]!.from, cls: mark.cls });
+      cursor = Math.max(cursor, kept[i]!.to);
+    }
+    if (cursor < mark.to) out.push({ from: cursor, to: mark.to, cls: mark.cls });
+  }
+  return out.sort((x, y) => x.from - y.from);
 }
 
 /**
@@ -113,7 +216,9 @@ export function buildDecorations(
  *
  * Recomputes on a document change and on a viewport change — the latter because
  * `highlightingFor` reads a facet, and a host that swaps its `HighlightStyle` (a
- * light/dark toggle, say) dispatches a reconfigure rather than a doc change.
+ * light/dark toggle, say) dispatches a reconfigure rather than a doc change. A
+ * viewport change re-asks `semanticTokens` for the same text, which the program
+ * answers without pushing it again.
  */
 export function fossilHighlighting(
   source: TokenSource,

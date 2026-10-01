@@ -5,7 +5,7 @@ answer `@fossil-lang/wasm` already had:
 
 | half | what drives it | what you see |
 |---|---|---|
-| highlighting | `tokenize()` + `tokenKinds()` | the compiler's own lexer, coloured by the host's own theme |
+| highlighting | `tokenize()` + `tokenKinds()`, then `semanticTokens()` over it | the compiler's own lexer, coloured by the host's own theme; shapes, declarations and `@connections` told apart where the program is open |
 | diagnostics | `check()` → `@codemirror/lint` | squiggles, with the checker's messages verbatim |
 | hover | `hover()` → `hoverTooltip` | the type of what you wrote AND the type the target shape demands of it |
 | completion | `completions()` → `@codemirror/autocomplete` | the receiver's members, spelled bare — `trim`, not `str.trim` |
@@ -33,7 +33,7 @@ const extensions = fossil({ ...program, onNavigate: (target) => console.log(targ
 ```
 
 `openProgram` answers with exactly this package's option names — `tokenize`, `tokenKinds`,
-`uri`, `check`, `hover`, `complete`, `definition` — over one workspace, so the host writes
+`semanticTokens`, `uri`, `check`, `hover`, `complete`, `definition` — over one workspace, so the host writes
 the one thing that is its own to decide: where a definition in another file goes.
 
 **Every source takes the text, and that repetition is the design.** The workspace answers
@@ -71,13 +71,29 @@ once. The guard is `token_kinds_legend_indexes_by_kind` in
 `crates/fossil-wasm/tests/tokenize.rs`, which compares the legend against the
 lexer itself — on the side that knows.
 
+## Two layers of colour
+
+`tokenize()` paints first and needs no workspace. `semanticTokens()` — the same
+`fossil-ide` answer the language server sends, as absolute rows with the legend's
+names — is laid over it, the way rust-analyzer's tokens sit over a TextMate grammar:
+
+| semantic kind | tag |
+|---|---|
+| `type` | `tags.typeName` |
+| `function` | `tags.function(tags.variableName)` |
+| `property` | `tags.propertyName` |
+| `parameter` | `tags.attributeName` |
+| `variable` | `tags.variableName` |
+| `namespace` | `tags.namespace` — `io`, and the `@connection` carved out of a reference |
+| `keyword` | `tags.keyword` — only where the lexer painted nothing (`type`, `as`) |
+| `declaration` modifier | `tags.definition(…)` around the kind's tag |
+
+The semantic layer wins where it names something the lexer cannot; where it repeats
+what the lexer already said (strings, numbers, operators, `and`), the lexer's finer tag
+stays. Without `semanticTokens`, or if it throws, the lexical layer is the whole answer.
+
 ## What it does not do
 
-- **Semantic highlighting.** `semanticLegend()` is on the main thread but the
-  tokens are not — only the native `fossil-lsp` serves them, and the browser has
-  no path to them. This is why `Ident`
-  carries no tag: the lexer cannot tell a type from a binding from a column, and
-  guessing would only have to be undone by the overlay that can.
 - **Code actions.** `fossil-ide` has two quick fixes and both hang off a
   diagnostic. `@codemirror/lint`'s `Diagnostic.actions` is where they go, and they
   need the structured diagnostic that the `CheckRow` wire form flattens.

@@ -12,7 +12,7 @@
 import { tags } from '@lezer/highlight';
 import { describe, expect, it } from 'vitest';
 
-import { TAG_BY_NAME, tagFor } from '../src/tags.js';
+import { LEXICAL_KINDS, TAG_BY_NAME, semanticTagFor, tagFor } from '../src/tags.js';
 
 /** A legend shaped like the one `tokenKinds()` returns. */
 const LEGEND = ['Whitespace', 'Newline', 'Comment', 'KwFrom', 'Ident', 'String'];
@@ -51,5 +51,36 @@ describe('tagFor', () => {
 
   it('treats a known kind with no mapping as plain text', () => {
     expect(tagFor(['SomethingNew'], 0)).toBeNull();
+  });
+});
+
+describe('AtAttr', () => {
+  it('is a special name, not a faint annotation', () => {
+    expect(TAG_BY_NAME['AtAttr']).toBe(tags.special(tags.variableName));
+  });
+});
+
+describe('semanticTagFor', () => {
+  it('maps each kind the compiler names to its tag', () => {
+    expect(semanticTagFor('type', [])).toBe(tags.typeName);
+    expect(semanticTagFor('function', [])).toBe(tags.function(tags.variableName));
+    expect(semanticTagFor('property', [])).toBe(tags.propertyName);
+    expect(semanticTagFor('parameter', [])).toBe(tags.attributeName);
+    expect(semanticTagFor('variable', [])).toBe(tags.variableName);
+    expect(semanticTagFor('namespace', [])).toBe(tags.namespace);
+    expect(semanticTagFor('keyword', [])).toBe(tags.keyword);
+  });
+
+  it('wraps a declaration in tags.definition', () => {
+    expect(semanticTagFor('variable', ['declaration'])).toBe(tags.definition(tags.variableName));
+    expect(semanticTagFor('type', ['declaration'])).toBe(tags.definition(tags.typeName));
+  });
+
+  it('leaves what the lexer names finer to the lexer', () => {
+    for (const kind of ['string', 'number', 'operator', 'comment', 'somethingNew']) {
+      expect(semanticTagFor(kind, [])).toBeNull();
+    }
+    expect(LEXICAL_KINDS.has('keyword')).toBe(true);
+    expect(LEXICAL_KINDS.has('type')).toBe(false);
   });
 });
