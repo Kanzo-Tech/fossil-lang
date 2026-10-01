@@ -337,10 +337,11 @@ pub fn check_identities(db: &dyn fossil_base::Db, file: SourceFile) -> usize {
 
         fossil_base::Diagnostic::new(
             fossil_base::Severity::Error,
-            format!(
-                "`{}` and `{}` mint two identities for {type_name}",
-                first.mapping_name, later.mapping_name
-            ),
+            fossil_base::Problem::ConflictingIdentity {
+                first: first.mapping_name.to_string(),
+                second: later.mapping_name.to_string(),
+                shape: type_name.to_string(),
+            },
             absolute(later),
         )
         .file_absolute()
@@ -444,7 +445,7 @@ mod tests {
     fn conflicts(db: &fossil_base::FossilDb, file: SourceFile) -> Vec<&fossil_base::Diagnostic> {
         check_identities::accumulated::<fossil_base::Diagnostic>(db, file)
             .into_iter()
-            .filter(|d| d.message.contains("mint two identities"))
+            .filter(|d| d.problem.code() == "identity/conflicting")
             .collect()
     }
 
@@ -530,7 +531,12 @@ Imported : Person from Legacy
              is ignored and the result is two entities where there was one"
         );
         assert_eq!(
-            d.message, "`Users` and `Imported` mint two identities for Person",
+            d.problem,
+            fossil_base::Problem::ConflictingIdentity {
+                first: "Users".into(),
+                second: "Imported".into(),
+                shape: "Person".into(),
+            },
             "the message names BOTH mappings and the type as the program spells it"
         );
 
@@ -591,7 +597,7 @@ Imported : Person from Legacy
         let (db, file) = db_with_document(&three, "person.shex", PERSON_DOCUMENT);
         assert_eq!(check_identities(&db, file), 2, "two later, two reports");
         let diags = conflicts(&db, file);
-        let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+        let messages: Vec<String> = diags.iter().map(|d| d.message()).collect();
         assert_eq!(
             messages,
             vec![

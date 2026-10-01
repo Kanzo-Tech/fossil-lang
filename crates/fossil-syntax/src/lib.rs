@@ -8,8 +8,8 @@
 //! Everything the grammar retired is REFUSED BY NAME rather than accepted or
 //! dropped, and there are SIX: `prefix ex: <…>`, the CURIE `ex:Person`, the
 //! `<…>` absolute IRI, a leading `.`, the backtick, and `|>`. See
-//! [`parser::diag::retired`] — the wording is written down once because
-//! `tests/parse_corpus.rs` reads it, and it reads all six.
+//! [`parser::diag::retired`], where each is written down once as a
+//! `syntax/retired-spelling` and what replaces it.
 //!
 //! Public API contract — this signature is locked:
 //!
@@ -176,20 +176,25 @@ Users : ex:Person from User
         let file =
             fossil_base::SourceFile::new(&db, RETIRED.to_string(), "retired.fossil".to_string());
         let _cst = parse(&db, file);
-        let messages: Vec<String> = parse::accumulated::<fossil_base::Diagnostic>(&db, file)
-            .iter()
-            .map(|d| d.message.clone())
-            .collect();
-        for needle in [
-            "no vocabulary",          // `prefix ex: <…>`
-            "bare",                   // `ex:Person`
-            "absolute IRI",           // `<http://xmlns.com/foaf/0.1/name>`
-            "qualified",              // `.email`
-            "backtick opens nothing", // the backtick
+        let problems: Vec<fossil_base::Problem> =
+            parse::accumulated::<fossil_base::Diagnostic>(&db, file)
+                .iter()
+                .map(|d| d.problem.clone())
+                .collect();
+        for form in [
+            &parser::diag::retired::PREFIX_DECL,  // `prefix ex: <…>`
+            &parser::diag::retired::CURIE,        // `ex:Person`
+            &parser::diag::retired::ABSOLUTE_IRI, // `<http://xmlns.com/foaf/0.1/name>`
+            &parser::diag::retired::LEADING_DOT,  // `.email`
+            &parser::diag::retired::BACKTICK,     // the backtick
         ] {
+            let want = fossil_base::Problem::RetiredSpelling {
+                spelling: form.spelling.to_string(),
+                replacement: form.replacement.to_string(),
+            };
             assert!(
-                messages.iter().any(|m| m.contains(needle)),
-                "no diagnostic mentioning {needle:?}; got {messages:#?}",
+                problems.contains(&want),
+                "no diagnostic refusing {form:?}; got {problems:#?}",
             );
         }
     }

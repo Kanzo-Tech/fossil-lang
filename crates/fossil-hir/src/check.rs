@@ -32,13 +32,11 @@
 //!
 //! # No silent coercion
 //!
-//! Every type mismatch emits a [`Diagnostic`] via [`delay_span_bug`] AND
+//! Every type mismatch emits a [`Diagnostic`] via [`fossil_base::raise`] AND
 //! produces an [`ErrorGuaranteed`]. `typecheck_mapping` returns `Err` when the
 //! body has even one type error.
 
-use fossil_base::{
-    Diagnostic, ErrorGuaranteed, Severity, SourceFile, Span, SpanFrame, delay_span_bug,
-};
+use fossil_base::{Diagnostic, ErrorGuaranteed, Problem, Severity, SourceFile, Span, SpanFrame};
 use salsa::Accumulator;
 use smol_str::SmolStr;
 
@@ -204,7 +202,7 @@ pub fn typecheck_mapping<'db>(
 /// what it would take to remove it.
 ///
 /// **The did-you-mean the `Undeclared` arm carried is not lost** — it moved to
-/// `crate::lower::unbound_shape_message`, which is where a misspelt shape name
+/// `crate::lower::unbound_shape_problem`, which is where a misspelt shape name
 /// is reported now. Its candidates changed with it, and correctly: that arm
 /// suggested over the shape IRIs a DOCUMENT declares, and what a header can
 /// misspell is a local NAME the program bound.
@@ -227,13 +225,14 @@ fn surface_target_shape_error<'db>(
     // squiggle lands on the mapping's first byte — a plausible place and the
     // wrong one. The commonest case is a misspelt shape name (`ex:Persn`).
     let span = mapping_header_span(db, mapping);
-    let message = match e {
-        TargetShapeError::NoDocument => "this program names no shape document, so it cannot \
-             write a property: a property key is the last segment of a predicate IRI that a \
-             shape declares. Bring one in with `type { … } := io.shex(\"shop.shex\")`."
-            .to_string(),
+    let problem = match e {
+        TargetShapeError::NoDocument => Problem::NoDocument { binding: None },
     };
-    let _eg = delay_span_bug(db, span, message);
+    let _eg = fossil_base::raise(
+        db,
+        Diagnostic::new(Severity::Error, problem, span)
+            .with_help("bring one in with `type { … } := io.shex(\"shop.shex\")`"),
+    );
 }
 
 /// Render the "split into N mappings" suggestion for a value disjunction:
@@ -478,24 +477,18 @@ impl Checker<'_> {
         let db = self.expr.db;
         let candidates: Vec<&str> = self.predicates.iter().map(|(n, _)| n.as_str()).collect();
         let suggestion = did_you_mean(name.as_str(), candidates.iter().copied());
-        let msg = suggestion.map_or_else(
-            || {
-                if candidates.is_empty() {
-                    format!("the target shape declares no predicate, so there is no `{name}`")
-                } else {
-                    format!(
-                        "the target shape declares no `{name}` — it declares {}",
-                        candidates
-                            .iter()
-                            .map(|c| format!("`{c}`"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                }
+        let mut d = Diagnostic::new(
+            Severity::Error,
+            Problem::UnknownProperty {
+                property: name.to_string(),
+                declared: candidates.iter().map(ToString::to_string).collect(),
             },
-            |s| format!("the target shape declares no `{name}` — did you mean `{s}`?"),
+            self.expr.span_of(expr_id),
         );
-        let eg = delay_span_bug(db, self.expr.span_of(expr_id), msg);
+        if let Some(s) = suggestion {
+            d = d.with_help(format!("did you mean `{s}`?"));
+        }
+        let eg = fossil_base::raise(db, d);
         self.expr.record_error(eg);
         None
     }
@@ -545,7 +538,12 @@ impl Checker<'_> {
             let alias = crate::shapes::suggested_alias(second);
             let mut d = Diagnostic::new(
                 Severity::Error,
-                format!("two predicates of {type_name} are both called `{name}`"),
+                Problem::NameCollision {
+                    shape: type_name.to_string(),
+                    name: name.to_string(),
+                    first: first.to_string(),
+                    second: second.to_string(),
+                },
                 bound_at.unwrap_or(header_span),
             );
             if bound_at.is_some() {
@@ -653,7 +651,11 @@ impl Checker<'_> {
         for ((short, iri), (_, at)) in missing.iter().zip(declared_at) {
             let mut d = Diagnostic::new(
                 Severity::Error,
-                format!("`{mapping_name}` never writes `{short}`, and {type_name} requires it"),
+                Problem::MissingRequiredProperty {
+                    mapping: mapping_name.to_string(),
+                    property: short.to_string(),
+                    shape: type_name.to_string(),
+                },
                 header_span,
             )
             .with_label(
@@ -694,6 +696,7 @@ impl Checker<'_> {
         // Clone the data we need so we don't hold a borrow of `self` across the
         // mutable `record_error` calls.
         let rejections = shape.rejections.clone();
+        let document = shape.document.to_string();
         let renames = self.renames.clone();
         let base_name = self.mapping_name();
         let source_name = source_binding_name(self.expr.db, self.mapping);
@@ -735,39 +738,50 @@ impl Checker<'_> {
                         &renames,
                     );
                     let n = disjuncts.len();
-                    let msg = format!(
-                        "a value disjunction is not supported in v0.1 ({n} \
-                         branches in shape `{shape_iri}`); help: split into {n} \
-                         separate mappings (one per branch). The \
-                         split-into-mappings suggestion is provided \
-                         programmatically (see `Diagnostic.suggestion_source`)."
-                    );
-                    // Structured suggestion carrier (Blocker #3) — NOT a
-                    // Markdown delimiter. Accumulate directly (informational;
-                    // no ErrorGuaranteed).
-                    Diagnostic::new(Severity::Error, msg, header_span)
-                        .with_suggestion_source(suggestion)
-                        .accumulate(db);
+                    // Structured suggestion carrier — NOT a Markdown
+                    // delimiter. Accumulate directly (informational; no
+                    // ErrorGuaranteed).
+                    Diagnostic::new(
+                        Severity::Error,
+                        Problem::UnsupportedDisjunction {
+                            shape: shape_iri.to_string(),
+                            branches: n as u64,
+                        },
+                        header_span,
+                    )
+                    .with_suggestion_source(suggestion)
+                    .accumulate(db);
                 }
                 Rejection::CyclicRef { path } => {
-                    let eg = delay_span_bug(
+                    let eg = fossil_base::report(
                         db,
                         header_span,
-                        format!("cyclic shape graph not supported: {}", path.join(" -> ")),
+                        Problem::CyclicReference {
+                            path: path.iter().map(ToString::to_string).collect(),
+                        },
                     );
                     self.expr.record_error(eg);
                 }
                 Rejection::UnresolvedRef { label, in_shape } => {
-                    let eg = delay_span_bug(
+                    let eg = fossil_base::report(
                         db,
                         header_span,
-                        format!("unresolved shape ref `{label}` in shape `{in_shape}`"),
+                        Problem::UnresolvedReference {
+                            reference: label.to_string(),
+                            shape: in_shape.to_string(),
+                        },
                     );
                     self.expr.record_error(eg);
                 }
                 Rejection::Malformed(m) => {
-                    let eg =
-                        delay_span_bug(db, header_span, format!("malformed shape document: {m}"));
+                    let eg = fossil_base::report(
+                        db,
+                        header_span,
+                        Problem::Unparseable {
+                            document: document.clone(),
+                            reason: Some(m.to_string()),
+                        },
+                    );
                     self.expr.record_error(eg);
                 }
             }
@@ -941,7 +955,11 @@ pub fn compatible<'db>(
     let frame = cx.frame();
     let mut d = Diagnostic::new(
         Severity::Error,
-        format!("`{property}` expects {expected_display}, and this is {actual_display}"),
+        Problem::PropertyMismatch {
+            property: property.to_string(),
+            expected: expected_display.clone(),
+            actual: actual_display.clone(),
+        },
         source_span,
     )
     // The expression said back rather than quoted from the file: `expr_text`
@@ -1289,11 +1307,11 @@ impl<'db> Expr<'db> {
     /// Raise a built [`Diagnostic`], in the frame this checker's spans are in.
     ///
     /// THE emission point, and it is one so that the frame is decided once.
-    /// `delay_span_bug` at each call site defaults to
+    /// `fossil_base::report` at each call site defaults to
     /// `SpanFrame::MappingRelative` — correct for a body and silently wrong for
     /// a pipeline, whose span is already file-absolute.
     ///
-    /// [`Self::error`] is this over a bare message. The split is for the
+    /// [`Self::error`] is this over a bare problem. The split is for the
     /// emitters that attach a label or a `help:` — they need the builder, and
     /// routing them around this would put the frame decision back at the call
     /// site, which is the bug the paragraph above records.
@@ -1308,14 +1326,14 @@ impl<'db> Expr<'db> {
         eg
     }
 
-    /// [`Self::raise`] over a message and a span, with no label.
-    fn error(&mut self, span: Span, message: impl Into<String>) -> ErrorGuaranteed {
-        self.raise(Diagnostic::new(Severity::Error, message, span))
+    /// [`Self::raise`] over a problem and a span, with no label.
+    fn error(&mut self, span: Span, problem: Problem) -> ErrorGuaranteed {
+        self.raise(Diagnostic::new(Severity::Error, problem, span))
     }
 
     /// [`Self::error`] at the span of an expression.
-    fn error_at(&mut self, expr_id: ExprId, message: impl Into<String>) -> ErrorGuaranteed {
-        self.error(self.span_of(expr_id), message)
+    fn error_at(&mut self, expr_id: ExprId, problem: Problem) -> ErrorGuaranteed {
+        self.error(self.span_of(expr_id), problem)
     }
 
     const fn record_error(&mut self, eg: ErrorGuaranteed) {
@@ -1409,15 +1427,18 @@ impl<'db> Expr<'db> {
                     return None;
                 };
                 if !row_scope.has(binding) {
-                    let source_name = self.relation.clone();
-                    self.error_at(
-                        expr_id,
-                        format!(
-                            "`{binding}.{column}` reads a row this mapping does not \
-                             have; it maps `{source_name}`. Name that row, or bring \
-                             `{binding}` in."
-                        ),
-                    );
+                    let d = Diagnostic::new(
+                        Severity::Error,
+                        Problem::RowNotInScope {
+                            binding: binding.to_string(),
+                            column: column.to_string(),
+                            scope: self.relation.to_string(),
+                            rows: row_scope.bindings().map(ToString::to_string).collect(),
+                        },
+                        self.span_of(expr_id),
+                    )
+                    .with_help(format!("name that row, or bring `{binding}` in"));
+                    self.raise(d);
                     return None;
                 }
                 let ty = self.lookup_column(expr_id, binding, column)?;
@@ -1534,7 +1555,9 @@ impl<'db> Expr<'db> {
         let TyKind::Record(rec) = row.kind(db) else {
             let eg = self.error_at(
                 expr_id,
-                format!("internal: source row is not a Record for field `{name}`"),
+                Problem::Bug {
+                    what: format!("the source row is not a Record for field `{name}`"),
+                },
             );
             return Some(Ty::new(db, TyKind::Error(eg)));
         };
@@ -1599,7 +1622,11 @@ impl<'db> Expr<'db> {
         let relation = binding.unwrap_or(self.relation.as_str()).to_string();
         let mut d = Diagnostic::new(
             Severity::Error,
-            format!("`{column}` is not a field of `{relation}`"),
+            Problem::UnknownField {
+                field: column.to_string(),
+                relation: relation.clone(),
+                fields: candidates.iter().map(ToString::to_string).collect(),
+            },
             span,
         )
         .with_label(span, "here", frame);
@@ -1662,7 +1689,9 @@ impl<'db> Expr<'db> {
         let TyKind::Record(rec) = row.kind(db) else {
             let eg = self.error_at(
                 expr_id,
-                format!("internal: the row `{binding}` contributes is not a Record"),
+                Problem::Bug {
+                    what: format!("the row `{binding}` contributes is not a Record"),
+                },
             );
             return Some(Ty::new(db, TyKind::Error(eg)));
         };
@@ -1726,16 +1755,21 @@ impl<'db> Expr<'db> {
         }
 
         let file = self.file;
-        let Some(shape_iri) = crate::def_map::def_map(db, file).lookup_type(db, target.as_str())
-        else {
-            self.error_at(
-                expr_id,
-                format!(
-                    "`{target}` names no shape, so there is no identity to build. A `type {{ … }} \
-                     := io.shex(…)` binding introduces the name, and the Nth name takes the Nth \
-                     shape the document declares."
-                ),
+        let dm = crate::def_map::def_map(db, file);
+        let Some(shape_iri) = dm.lookup_type(db, target.as_str()) else {
+            let d = Diagnostic::new(
+                Severity::Error,
+                Problem::UnknownShape {
+                    shape: target.to_string(),
+                    declared: dm.types(db).iter().map(|t| t.name.to_string()).collect(),
+                },
+                self.span_of(expr_id),
+            )
+            .with_help(
+                "so there is no identity to build. A `type { … } := io.shex(…)` binding \
+                 introduces the name, and the Nth name takes the Nth shape the document declares",
             );
+            self.raise(d);
             return unresolved();
         };
 
@@ -1745,30 +1779,35 @@ impl<'db> Expr<'db> {
         let Some(template) =
             crate::identity::subject_templates(db, file).for_shape(db, shape_iri.as_str())
         else {
-            self.error_at(
-                expr_id,
-                format!(
-                    "no mapping in this program writes a `{target}`, so `{target}(…)` has no \
-                     identity template to build from. An edge may POINT at a type nothing here \
-                     emits — RDF is open-world — but it is built from the `@subject` of the \
-                     mapping that does emit it."
-                ),
+            let d = Diagnostic::new(
+                Severity::Error,
+                Problem::EdgeWithoutTemplate {
+                    target: target.to_string(),
+                },
+                self.span_of(expr_id),
+            )
+            .with_help(
+                "an edge may POINT at a type nothing here emits — RDF is open-world — but it is \
+                 built from the `@subject` of the mapping that does emit it",
             );
+            self.raise(d);
             return unresolved();
         };
 
         let arity = template.arity();
         if args.len() != arity {
-            let declared = template.mapping_name;
-            self.error_at(
-                expr_id,
-                format!(
-                    "`{target}` is built from {arity} value(s) and this passes {}. Its identity \
-                     is declared by `{declared}`, whose `@subject` has {arity} hole(s); the Nth \
-                     value fills the Nth hole, in order.",
-                    args.len()
-                ),
-            );
+            let d = Diagnostic::new(
+                Severity::Error,
+                Problem::EdgeArity {
+                    target: target.to_string(),
+                    takes: arity as u64,
+                    given: args.len() as u64,
+                    mapping: template.mapping_name.to_string(),
+                },
+                self.span_of(expr_id),
+            )
+            .with_help("the Nth value fills the Nth hole of the `@subject`, in order");
+            self.raise(d);
         }
         Ty::reference(db, std::iter::once(SmolStr::from(shape_iri.as_str())))
     }
@@ -1794,20 +1833,15 @@ impl<'db> Expr<'db> {
             // wrong is the whole difference between this and a string compare:
             // an unknown receiver and an unknown member are different mistakes
             // and used to produce the same sentence.
-            let msg = match func.split_once('.') {
+            let (unknown_namespace, suggestion) = match func.split_once('.') {
                 Some((head, member)) if !reg.is_catalogued_head(head) => {
                     let heads = crate::didyoumean::did_you_mean(
                         head,
                         reg.iter().filter_map(|e| e.name.split('.').next()),
                     );
-                    heads.map_or_else(
-                        || {
-                            format!(
-                                "`{head}` is not a namespace or a type fossil knows, so it has \
-                                 no member `{member}`"
-                            )
-                        },
-                        |s| format!("`{head}` has no members — did you mean `{s}.{member}`?"),
+                    (
+                        Some(head.to_string()),
+                        heads.map(|s| format!("{s}.{member}")),
                     )
                 }
                 Some((head, member)) => {
@@ -1817,18 +1851,23 @@ impl<'db> Expr<'db> {
                     // not the catalogue's.
                     let (recv, _) = crate::stdlib::split_receiver(func.as_str());
                     let siblings = reg.members_of(recv).map(|e| e.member.as_str());
-                    crate::didyoumean::did_you_mean(member, siblings).map_or_else(
-                        || format!("`{head}` has no member `{member}`"),
-                        |s| {
-                            format!(
-                                "`{head}` has no member `{member}` — did you mean `{head}.{s}`?"
-                            )
-                        },
-                    )
+                    let near = crate::didyoumean::did_you_mean(member, siblings);
+                    (None, near.map(|s| format!("{head}.{s}")))
                 }
-                None => format!("unknown function `{func}`"),
+                None => (None, None),
             };
-            let eg = self.error_at(expr_id, msg);
+            let mut d = Diagnostic::new(
+                Severity::Error,
+                Problem::UnknownFunction {
+                    function: func.to_string(),
+                    unknown_namespace,
+                },
+                self.span_of(expr_id),
+            );
+            if let Some(s) = suggestion {
+                d = d.with_help(format!("did you mean `{s}`?"));
+            }
+            let eg = self.raise(d);
             return Ty::new(db, TyKind::Error(eg));
         };
 
@@ -1851,21 +1890,14 @@ impl<'db> Expr<'db> {
             .filter(|p| p.arity != crate::stdlib::Arity::Optional)
             .count();
         if args.len() < required || args.len() > params.len() {
-            let takes = if required == params.len() {
-                format!(
-                    "{required} argument{}",
-                    if required == 1 { "" } else { "s" }
-                )
-            } else {
-                format!("{required} to {} arguments", params.len())
-            };
             let eg = self.error_at(
                 expr_id,
-                format!(
-                    "`{func}` takes {takes}, but {} {} given",
-                    args.len(),
-                    if args.len() == 1 { "was" } else { "were" },
-                ),
+                Problem::Arity {
+                    function: func.to_string(),
+                    min: required as u64,
+                    max: params.len() as u64,
+                    given: args.len() as u64,
+                },
             );
             return Ty::new(db, TyKind::Error(eg));
         }
@@ -1903,22 +1935,13 @@ impl<'db> Expr<'db> {
                 // for `x.trim()` would name a position the author never wrote.
                 let is_receiver =
                     i == 0 && matches!(entry.recv, crate::stdlib::Receiver::Scalar(_));
-                let msg = if is_receiver {
-                    format!(
-                        "`{}` is a member of {}, and this is {}",
-                        entry.member,
-                        render_ty_kind(db, expected.kind(db)),
-                        render_ty_kind(db, actual.kind(db)),
-                    )
-                } else {
-                    format!(
-                        "argument {} of `{func}` expects {}, but this is {}",
-                        i + 1,
-                        render_ty_kind(db, expected.kind(db)),
-                        render_ty_kind(db, actual.kind(db)),
-                    )
+                let problem = Problem::ArgumentMismatch {
+                    function: func.to_string(),
+                    position: (!is_receiver).then_some(i as u64 + 1),
+                    expected: render_ty_kind(db, expected.kind(db)),
+                    actual: render_ty_kind(db, actual.kind(db)),
                 };
-                let eg = self.error_at(expr_id, msg);
+                let eg = self.error_at(expr_id, problem);
                 return Ty::new(db, TyKind::Error(eg));
             }
         }
@@ -1938,7 +1961,9 @@ impl<'db> Expr<'db> {
                     db,
                     TyKind::Error(self.error_at(
                         expr_id,
-                        format!("`{func}` gives back a relation, which is not a value"),
+                        Problem::RelationAsValue {
+                            function: func.to_string(),
+                        },
                     )),
                 )
             },
@@ -1999,11 +2024,10 @@ impl<'db> Expr<'db> {
                     if !subtypes(db, ty, bool_ty) {
                         let eg = self.error_at(
                             expr_id,
-                            format!(
-                                "the {side} side of `{}` must be Bool, but it is {}",
-                                op_text(op),
-                                render_ty_kind(db, ty.kind(db)),
-                            ),
+                            Problem::ExpectedBool {
+                                operand: format!("the {side} side of `{}`", op_text(op)),
+                                actual: render_ty_kind(db, ty.kind(db)),
+                            },
                         );
                         return Some(Ty::new(db, TyKind::Error(eg)));
                     }
@@ -2032,12 +2056,11 @@ impl<'db> Expr<'db> {
                 {
                     let eg = self.error_at(
                         expr_id,
-                        format!(
-                            "cannot compare {} with {} using `{}`",
-                            render_ty_kind(db, l.kind(db)),
-                            render_ty_kind(db, r.kind(db)),
-                            op_text(op),
-                        ),
+                        Problem::Incomparable {
+                            left: render_ty_kind(db, l.kind(db)),
+                            right: render_ty_kind(db, r.kind(db)),
+                            operator: op_text(op).to_string(),
+                        },
                     );
                     return Some(Ty::new(db, TyKind::Error(eg)));
                 }
@@ -2088,21 +2111,20 @@ impl<'db> Expr<'db> {
                 // is, and one idea does not get two spellings — so the message
                 // names the row rather than only refusing.
                 kind => {
-                    let hint = if matches!(kind, TyKind::Primitive(Primitive::String))
+                    let mut d = Diagnostic::new(
+                        Severity::Error,
+                        Problem::ExpectedNumber {
+                            operand: format!("the {side} side of `{}`", op_text(op)),
+                            actual: render_ty_kind(db, kind),
+                        },
+                        self.span_of(expr_id),
+                    );
+                    if matches!(kind, TyKind::Primitive(Primitive::String))
                         && matches!(op, BinOp::Add)
                     {
-                        ". Two strings are joined with `str.concat`, not `+`"
-                    } else {
-                        ""
-                    };
-                    let eg = self.error_at(
-                        expr_id,
-                        format!(
-                            "the {side} side of `{}` must be a number, but it is {}{hint}",
-                            op_text(op),
-                            render_ty_kind(db, kind),
-                        ),
-                    );
+                        d = d.with_help("two strings are joined with `str.concat`, not `+`");
+                    }
+                    let eg = self.raise(d);
                     poisoned = Some(eg);
                 }
             }
@@ -2159,18 +2181,13 @@ impl<'db> Expr<'db> {
             ),
         };
         if !ok {
-            let wanted = match op {
-                UnOp::Not => "Bool",
-                UnOp::Neg => "a number",
+            let operand = format!("the operand of `{}`", un_op_text(op));
+            let actual = render_ty_kind(db, ty.kind(db));
+            let problem = match op {
+                UnOp::Not => Problem::ExpectedBool { operand, actual },
+                UnOp::Neg => Problem::ExpectedNumber { operand, actual },
             };
-            let eg = self.error_at(
-                expr_id,
-                format!(
-                    "`{}` needs {wanted}, but it is given {}",
-                    un_op_text(op),
-                    render_ty_kind(db, ty.kind(db)),
-                ),
-            );
+            let eg = self.error_at(expr_id, problem);
             return Some(Ty::new(db, TyKind::Error(eg)));
         }
         Some(ty)
@@ -2202,10 +2219,10 @@ impl<'db> Expr<'db> {
             if !subtypes(db, c, bool_ty) {
                 let eg = self.error_at(
                     expr_id,
-                    format!(
-                        "the condition of `? :` must be Bool, but it is {}",
-                        render_ty_kind(db, c.kind(db)),
-                    ),
+                    Problem::ExpectedBool {
+                        operand: "the condition of `? :`".to_string(),
+                        actual: render_ty_kind(db, c.kind(db)),
+                    },
                 );
                 return Some(Ty::new(db, TyKind::Error(eg)));
             }
@@ -2228,19 +2245,16 @@ impl<'db> Expr<'db> {
                 } else if subtypes(db, o, t) {
                     Some(t)
                 } else {
-                    // The literal wrapped across two source lines without a
-                    // trailing `\`, so the indentation of the continuation went
-                    // out on the wire: the rendered message carried thirty
-                    // spaces between the full stop and «Both».
-                    let eg = self.error_at(
-                        expr_id,
-                        format!(
-                            "the branches of `? :` have different types: {} and {}. \
-                             Both branches must have the same type — fossil does not coerce.",
-                            render_ty_kind(db, t.kind(db)),
-                            render_ty_kind(db, o.kind(db)),
-                        ),
-                    );
+                    let d = Diagnostic::new(
+                        Severity::Error,
+                        Problem::BranchMismatch {
+                            then: render_ty_kind(db, t.kind(db)),
+                            otherwise: render_ty_kind(db, o.kind(db)),
+                        },
+                        self.span_of(expr_id),
+                    )
+                    .with_help("both branches must have the same type — fossil does not coerce");
+                    let eg = self.raise(d);
                     Some(Ty::new(db, TyKind::Error(eg)))
                 }
             }

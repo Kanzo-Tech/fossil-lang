@@ -1,3 +1,5 @@
+type/property-mismatch
+
   × `total` expects Float, and this is String
    ╭─[program.fossil:7:16]
  6 │     @subject = "https://shop.example/order/{Purchase.id}"
@@ -7,6 +9,8 @@
    ╰────
   help: `Purchase.amount` is Float. If `reference` really holds the value,
         `parse.float(Purchase.reference)` converts it.
+type/property-mismatch
+
   × `total` expects Float, and this is String
    ╭─[shape.shex:5:3]
  4 │ shop:Order {

@@ -148,16 +148,18 @@ Thing : Thing from filtered
     // than on the ops. A loop over `ops` looking for `examples/users.csv` is
     // what stood here, and it ran zero times against the empty vec the
     // assertion above had just demanded — a guard that reads as a guard and
-    // proves nothing. The message is the only observable that distinguishes
+    // proves nothing. The problem is the only observable that distinguishes
     // «poisoned because the source did not resolve» from «poisoned because the
     // body failed to type-check», and the two would both satisfy every
     // assertion above.
     let diags = lower_to_mir_pg::accumulated::<Diagnostic>(&db, mapping);
-    let refusal = "`Rows` is not a declared source binding";
     assert!(
-        diags.iter().any(|d| d.message.contains(refusal)),
+        diags.iter().any(|d| matches!(
+            &d.problem,
+            fossil_base::Problem::UnknownSource { binding, bound_to: None } if binding == "Rows"
+        )),
         "the refusal names the binding that did not resolve, got: {:?}",
-        diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        diags.iter().map(|d| &d.problem).collect::<Vec<_>>(),
     );
 }
 

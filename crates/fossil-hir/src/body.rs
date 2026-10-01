@@ -415,7 +415,7 @@ fn mapping_name(mapping_node: &SyntaxNode) -> String {
 /// All three used to be unchecked, and the first one was the expensive silence:
 /// a mapping with no identity lowered to vertices whose subject was the empty
 /// string, which dedups every row of the mapping into one blank node. That was
-/// caught downstream in `fossil-mir` as a `delay_span_bug` — an internal-error
+/// caught downstream in `fossil-mir` as an internal error — the compiler's
 /// spelling for something the author wrote and can fix.
 fn check_identity(
     db: &dyn fossil_base::Db,
@@ -423,39 +423,39 @@ fn check_identity(
     subjects: &[(usize, fossil_base::Span)],
     body_node: &SyntaxNode,
 ) {
+    use fossil_base::Problem;
     use salsa::Accumulator as _;
-    let emit = |span: fossil_base::Span, message: String| {
-        fossil_base::Diagnostic::new(fossil_base::Severity::Error, message, span).accumulate(db);
+    let emit = |span: fossil_base::Span, problem: Problem, help: &str| {
+        fossil_base::Diagnostic::new(fossil_base::Severity::Error, problem, span)
+            .with_help(help)
+            .accumulate(db);
     };
+    let mapping = || name.to_string();
     let Some(&(index, first_span)) = subjects.first() else {
         let r = body_node.text_range();
         emit(
             fossil_base::Span::new(r.start().into(), r.end().into()),
-            format!(
-                "`{name}` declares no `@subject`, so the rows it writes have no identity. The \
-                 first line of a mapping body is `@subject = <expr>`."
-            ),
+            Problem::MissingSubject { mapping: mapping() },
+            "the first line of a mapping body is `@subject = <expr>`",
         );
         return;
     };
     if let Some(&(_, second_span)) = subjects.get(1) {
         emit(
             second_span,
-            format!(
-                "`{name}` declares `@subject` twice, and a type has one identity. Every mapping \
-                 that produces this type writes the same one, so that an edge naming the type \
-                 reaches the same node whichever mapping emitted it."
-            ),
+            Problem::DuplicateSubject { mapping: mapping() },
+            "every mapping that produces this type writes the same one, so that an edge naming \
+             the type reaches the same node whichever mapping emitted it",
         );
     }
     if index != 0 {
         emit(
             first_span,
-            format!(
-                "`@subject` is the first line of a mapping body, and in `{name}` it is line \
-                 {}. The identity comes before what it identifies.",
-                index + 1
-            ),
+            Problem::SubjectNotFirst {
+                mapping: mapping(),
+                line: index as u64 + 1,
+            },
+            "the identity comes before what it identifies",
         );
     }
 }

@@ -16,7 +16,7 @@
 //! - [`HirExpr::FieldRef`] is just the name of a column of the one row in scope.
 //! - [`HirExpr::StringLit`] holds the literal text without surrounding quotes.
 
-use fossil_base::{Diagnostic, Severity, SourceFile, Span};
+use fossil_base::{Diagnostic, Problem, Severity, SourceFile, Span};
 use salsa::Accumulator;
 use smol_str::SmolStr;
 
@@ -556,7 +556,7 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
 /// that has the nodes.
 ///
 /// `crate::def_map::def_map` reads the same attributes and cannot report on
-/// them: it is signatures-only and runs where `delay_span_bug` is not valid, so
+/// them: it is signatures-only and runs where `fossil_base::report` is not valid, so
 /// it silently keeps the renames that match a bound name and drops the rest.
 /// «Drops the rest» is the failure this function exists to stop — a `@rename`
 /// that renames nothing is a line the author wrote to fix a collision, which
@@ -617,31 +617,18 @@ fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_s
         if !members.contains(&r.type_name) {
             let suggestion =
                 crate::didyoumean::did_you_mean(&r.type_name, members.iter().map(SmolStr::as_str));
-            let tail = suggestion.map_or_else(
-                || {
-                    if members.is_empty() {
-                        String::new()
-                    } else {
-                        format!(
-                            " — this binding introduces {}",
-                            members
-                                .iter()
-                                .map(|m| format!("`{m}`"))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )
-                    }
-                },
-                |s| format!(" — did you mean `{s}`?"),
+            let help = suggestion.map_or_else(
+                || "a rename renames a predicate OF one bound type".to_string(),
+                |s| format!("did you mean `{s}`?"),
             );
             diagnose(
                 db,
                 node,
-                format!(
-                    "`@rename` names `{}`, which this `type` binding does not introduce{tail}. A \
-                     rename renames a predicate OF one bound type.",
-                    r.type_name
-                ),
+                Problem::RenameUnknownType {
+                    shape: r.type_name.to_string(),
+                    introduced: members.iter().map(ToString::to_string).collect(),
+                },
+                Some(help),
             );
             continue;
         }
@@ -677,13 +664,15 @@ fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_s
             .map(|c| c.predicate.as_str())
             .collect();
         let suggestion = crate::didyoumean::did_you_mean(&r.predicate, declared.iter().copied());
-        let tail = suggestion.map_or_else(
+        let full_iri = "the predicate is a FULL IRI, because two predicates that collide differ \
+                        only before their last segment";
+        let help = suggestion.map_or_else(
             || {
                 if declared.is_empty() {
-                    " — it declares none".to_string()
+                    format!("it declares none; {full_iri}")
                 } else {
                     format!(
-                        " — it declares {}",
+                        "it declares {}; {full_iri}",
                         declared
                             .iter()
                             .map(|d| format!("`{d}`"))
@@ -692,17 +681,17 @@ fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_s
                     )
                 }
             },
-            |s| format!(" — did you mean `{s}`?"),
+            |s| format!("did you mean `{s}`?"),
         );
         diagnose(
             db,
             node,
-            format!(
-                "`{}` declares no predicate `{}`, so this rename never fires{tail}. The \
-                 predicate is a FULL IRI, because two predicates that collide differ only \
-                 before their last segment.",
-                r.type_name, r.predicate
-            ),
+            Problem::RenameUnknownPredicate {
+                shape: r.type_name.to_string(),
+                predicate: r.predicate.to_string(),
+                declared: declared.iter().map(ToString::to_string).collect(),
+            },
+            Some(help),
         );
     }
 }
@@ -754,7 +743,10 @@ fn check_provider(
             diagnose_item(
                 db,
                 node,
-                crate::refusals::unknown_constructor(&constructor, table),
+                Problem::UnknownProvider {
+                    constructor: constructor.to_string(),
+                },
+                Some(crate::refusals::unknown_constructor(table)),
             );
         }
         return;
@@ -763,7 +755,11 @@ fn check_provider(
         diagnose_item(
             db,
             node,
-            crate::refusals::decline_capability(row, wanted, table),
+            Problem::WrongCapability {
+                constructor: row.constructor(),
+                capability: crate::refusals::capability(wanted).to_string(),
+            },
+            Some(crate::refusals::decline_capability(row, wanted, table)),
         );
         return;
     }
@@ -771,7 +767,15 @@ fn check_provider(
         && let Some(uri) = uri
         && !row.accepts(&uri)
     {
-        diagnose_item(db, node, crate::refusals::decline_extension(row, &uri));
+        diagnose_item(
+            db,
+            node,
+            Problem::WrongExtension {
+                constructor: row.constructor(),
+                document: uri.to_string(),
+            },
+            Some(crate::refusals::decline_extension(row, &uri)),
+        );
     }
     check_reader_option(db, node, &constructor);
 }
@@ -811,11 +815,12 @@ fn check_reader_option(
             emit_item(
                 db,
                 arg.span,
-                format!(
-                    "`{}` in `{constructor}` is written `{} = \"<one character>\"`, and this \
-                     is not a string.",
-                    arg.name, arg.name
-                ),
+                Problem::InvalidReaderOption {
+                    option: arg.name.to_string(),
+                    constructor: constructor.to_string(),
+                    value: None,
+                },
+                None,
             );
             return;
         };
@@ -823,16 +828,15 @@ fn check_reader_option(
             emit_item(
                 db,
                 arg.span,
-                format!(
-                    "`{}` in `{constructor}` is one ASCII character, and `\"{value}\"` is {}. \
-                     Both readers a corpus is written through take a single BYTE, so a wider \
-                     one would mean something different to each.",
-                    arg.name,
-                    if value.is_empty() {
-                        "empty".to_owned()
-                    } else {
-                        format!("{} bytes", value.len())
-                    }
+                Problem::InvalidReaderOption {
+                    option: arg.name.to_string(),
+                    constructor: constructor.to_string(),
+                    value: Some(value.to_string()),
+                },
+                Some(
+                    "both readers a corpus is written through take a single BYTE, so a wider one \
+                 would mean something different to each"
+                        .to_string(),
                 ),
             );
         }
@@ -852,9 +856,15 @@ fn check_reader_option(
             emit_item(
                 db,
                 Span::new(t.text_range().start().into(), t.text_range().end().into()),
-                format!(
-                    "`{constructor}` has no `{name}`. `{owner}` does — a reader option belongs \
-                     to the row that reads, and this one would be read by nothing."
+                Problem::ForeignReaderOption {
+                    option: name.to_string(),
+                    constructor: constructor.to_string(),
+                    owner: owner.to_string(),
+                },
+                Some(
+                    "a reader option belongs to the row that reads, and this one would be read by \
+                 nothing"
+                        .to_string(),
                 ),
             );
         }
@@ -917,12 +927,12 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
         emit_item(
             db,
             arg.span,
-            "`schema =` names a document, and a document is named by the provider \
-             that reads it: write `schema = io.shex(\"…\")` or \
-             `schema = io.shacl(\"…\")`, never a bare path — the row that reads a \
-             document is the one the program names, not the one its extension \
-             happens to match"
-                .to_string(),
+            Problem::BareDocumentPath {
+                document: arg.document.map_or_else(|| "schema".to_string(), |d| d.to_string()),
+            },
+            Some("write `schema = io.shex(\"…\")` or `schema = io.shacl(\"…\")`: the row that reads \
+             a document is the one the program names, not the one its extension happens to match"
+                .to_string()),
         );
         return;
     };
@@ -930,15 +940,23 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
         emit_item(
             db,
             arg.span,
-            crate::refusals::unknown_constructor(&constructor, table),
+            Problem::UnknownProvider {
+                constructor: constructor.to_string(),
+            },
+            Some(crate::refusals::unknown_constructor(table)),
         );
         return;
     };
-    if !row.provides(fossil_base::Capability::ReadTypes) {
+    let types = fossil_base::Capability::ReadTypes;
+    if !row.provides(types) {
         emit_item(
             db,
             arg.span,
-            crate::refusals::decline_capability(row, fossil_base::Capability::ReadTypes, table),
+            Problem::WrongCapability {
+                constructor: row.constructor(),
+                capability: crate::refusals::capability(types).to_string(),
+            },
+            Some(crate::refusals::decline_capability(row, types, table)),
         );
         return;
     }
@@ -948,7 +966,11 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
         emit_item(
             db,
             arg.span,
-            crate::refusals::decline_extension(row, &document),
+            Problem::WrongExtension {
+                constructor: row.constructor(),
+                document: document.to_string(),
+            },
+            Some(crate::refusals::decline_extension(row, &document)),
         );
     }
 }
@@ -1251,13 +1273,12 @@ fn bind_stage_args<'a>(
                     diagnose(
                         db,
                         stage,
-                        format!(
-                            "`{}` in `{pipe}` needs `{} = <{}>`. e.g. `{}`.",
-                            row.member,
-                            param.name,
-                            describe(param.ty),
-                            example_call(row, base)
-                        ),
+                        Problem::StageArity {
+                            verb: row.member.to_string(),
+                            pipeline: pipe.to_string(),
+                            missing: Some(format!("`{} = <{}>`", param.name, describe(param.ty))),
+                        },
+                        Some(format!("e.g. `{}`", example_call(row, base))),
                     );
                     return None;
                 }
@@ -1280,12 +1301,12 @@ fn bind_stage_args<'a>(
             diagnose(
                 db,
                 stage,
-                format!(
-                    "`{}` in `{pipe}` needs {} and this call gives none. e.g. `{}`.",
-                    row.member,
-                    describe_position(param),
-                    example_call(row, base)
-                ),
+                Problem::StageArity {
+                    verb: row.member.to_string(),
+                    pipeline: pipe.to_string(),
+                    missing: Some(describe_position(param)),
+                },
+                Some(format!("e.g. `{}`", example_call(row, base))),
             );
             return None;
         }
@@ -1296,12 +1317,16 @@ fn bind_stage_args<'a>(
         diagnose(
             db,
             &extra,
-            format!(
-                "`{}` in `{pipe}` takes {}, and this call gives more. e.g. `{}`.",
-                row.member,
+            Problem::StageArity {
+                verb: row.member.to_string(),
+                pipeline: pipe.to_string(),
+                missing: None,
+            },
+            Some(format!(
+                "it takes {}. e.g. `{}`",
                 describe_arity(params),
                 example_call(row, base)
-            ),
+            )),
         );
         return None;
     }
@@ -1337,11 +1362,12 @@ impl BoundArgs<'_> {
                 diagnose(
                     db,
                     node,
-                    format!(
-                        "`{}` in `{pipe}` takes qualified column references and this is not one. \
-                         e.g. `{base}.id`.",
-                        param.name
-                    ),
+                    Problem::InvalidStageArgument {
+                        parameter: param.name.to_string(),
+                        pipeline: pipe.to_string(),
+                        expected: "a qualified column reference".to_string(),
+                    },
+                    Some(format!("e.g. `{base}.id`")),
                 );
                 return None;
             };
@@ -1375,10 +1401,13 @@ impl BoundArgs<'_> {
                 diagnose(
                     db,
                     &value,
-                    format!(
-                        "`{name}` in `{pipe}` is not an aggregation. It has to be a call over the \
-                         group — e.g. `{name} = math.sum({base}.amount)`."
-                    ),
+                    Problem::NotAnAggregate {
+                        name: name.to_string(),
+                        pipeline: pipe.to_string(),
+                        function: None,
+                        aggregates: crate::stdlib::aggregate_names(),
+                    },
+                    Some(format!("e.g. `{name} = math.sum({base}.amount)`")),
                 );
                 return None;
             };
@@ -1389,11 +1418,20 @@ impl BoundArgs<'_> {
                 diagnose(
                     db,
                     &value,
-                    format!(
-                        "`{func}` is not an aggregate, so it cannot be the `{name}` of a \
-                         `group_by` in `{pipe}`. The aggregates are: {}.",
-                        crate::stdlib::aggregate_names().join(", ")
-                    ),
+                    Problem::NotAnAggregate {
+                        name: name.to_string(),
+                        pipeline: pipe.to_string(),
+                        function: Some(func.to_string()),
+                        aggregates: crate::stdlib::aggregate_names(),
+                    },
+                    Some(format!(
+                        "the aggregates are: {}",
+                        crate::stdlib::aggregate_names()
+                            .iter()
+                            .map(|a| format!("`{a}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )),
                 );
                 return None;
             };
@@ -1401,10 +1439,12 @@ impl BoundArgs<'_> {
                 diagnose(
                     db,
                     &value,
-                    format!(
-                        "`{func}` aggregates ONE qualified column of the group, and `{name}` in \
-                         `{pipe}` gives it something else. e.g. `{base}.amount`."
-                    ),
+                    Problem::InvalidStageArgument {
+                        parameter: name.to_string(),
+                        pipeline: pipe.to_string(),
+                        expected: format!("one qualified column of the group for `{func}`"),
+                    },
+                    Some(format!("e.g. `{base}.amount`")),
                 );
                 return None;
             };
@@ -1436,10 +1476,12 @@ impl BoundArgs<'_> {
             diagnose(
                 db,
                 node,
-                format!(
-                    "`{}` in `{pipe}` is not the name of a source binding.",
-                    param.name
-                ),
+                Problem::InvalidStageArgument {
+                    parameter: param.name.to_string(),
+                    pipeline: pipe.to_string(),
+                    expected: "the name of a source binding".to_string(),
+                },
+                None,
             );
             return None;
         };
@@ -1556,10 +1598,11 @@ fn lower_source_stage(
         diagnose(
             db,
             stage,
-            format!(
-                "`{verb}` is not a relation verb. The catalogue has `{}`.",
-                relation_verbs()
-            ),
+            Problem::UnknownVerb {
+                verb: verb.to_string(),
+                verbs: relation_verbs(),
+            },
+            None,
         );
         return None;
     };
@@ -1598,10 +1641,11 @@ fn lower_source_stage(
                 diagnose(
                     db,
                     stage,
-                    format!(
-                        "`union` in `{pipe}` gives its result the one name `{pipe}`, so the \
-                         alias `{alias}` would name a row the verb does not produce."
-                    ),
+                    Problem::UnionAlias {
+                        pipeline: pipe.to_string(),
+                        alias: alias.to_string(),
+                    },
+                    None,
                 );
                 return None;
             }
@@ -1620,11 +1664,12 @@ fn lower_source_stage(
             diagnose(
                 db,
                 stage,
-                format!(
-                    "`{verb}` is a relation verb the catalogue declares and the lowering does \
-                     not implement yet, so `{pipe}` cannot compile. Implemented today: `{}`.",
-                    lowered_verbs()
-                ),
+                Problem::UnimplementedVerb {
+                    verb: verb.to_string(),
+                    pipeline: pipe.to_string(),
+                    implemented: lowered_verbs(),
+                },
+                None,
             );
             None
         }
@@ -1632,7 +1677,11 @@ fn lower_source_stage(
             diagnose(
                 db,
                 stage,
-                format!("`{verb}` constructs a source and is not a stage of `{pipe}`."),
+                Problem::SourceAsStage {
+                    verb: verb.to_string(),
+                    pipeline: pipe.to_string(),
+                },
+                None,
             );
             None
         }
@@ -1645,11 +1694,11 @@ fn lower_source_stage(
 /// second copy the arms were, and it is the copy that goes stale: the message
 /// this replaced named `where`, `select` and `join` in prose beside a count it
 /// read from the table.
-fn relation_verbs() -> String {
+fn relation_verbs() -> Vec<String> {
     verb_names(|_| true)
 }
 
-fn lowered_verbs() -> String {
+fn lowered_verbs() -> Vec<String> {
     verb_names(|op| {
         matches!(
             op,
@@ -1663,15 +1712,15 @@ fn lowered_verbs() -> String {
     })
 }
 
-fn verb_names(f: impl Fn(crate::stdlib::PlanOp) -> bool) -> String {
+fn verb_names(f: impl Fn(crate::stdlib::PlanOp) -> bool) -> Vec<String> {
     use crate::stdlib::{LoweringKind, Receiver, stdlib};
-    let mut names: Vec<&str> = stdlib()
+    let mut names: Vec<String> = stdlib()
         .members_of(Receiver::Relation)
         .filter(|e| matches!(&e.lowering, LoweringKind::Op(op) if f(*op)))
-        .map(|e| e.member.as_str())
+        .map(|e| e.member.to_string())
         .collect();
     names.sort_unstable();
-    names.join("`, `")
+    names
 }
 
 /// Is the thing left of the dot a VALUE, as opposed to a NAME?
@@ -1748,14 +1797,29 @@ fn bare_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
 /// rowan has reset the offsets to zero. Anything reached from [`lower_to_hir`]
 /// walks the whole-file CST and its offsets are already file-absolute:
 /// [`diagnose_item`].
-fn diagnose(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode, message: String) {
+fn diagnose(
+    db: &dyn fossil_base::Db,
+    node: &fossil_syntax::SyntaxNode,
+    problem: Problem,
+    help: Option<String>,
+) {
     let range = node.text_range();
-    Diagnostic::new(
-        Severity::Error,
-        message,
-        Span::new(range.start().into(), range.end().into()),
+    with_help(
+        Diagnostic::new(
+            Severity::Error,
+            problem,
+            Span::new(range.start().into(), range.end().into()),
+        ),
+        help,
     )
     .accumulate(db);
+}
+
+fn with_help(d: Diagnostic, help: Option<String>) -> Diagnostic {
+    match help {
+        Some(help) => d.with_help(help),
+        None => d,
+    }
 }
 
 /// Report a TOP-LEVEL item, whose span is file-absolute.
@@ -1772,19 +1836,25 @@ fn diagnose(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode, message:
 /// [`lower_property_public`] over a re-rooted mapping node whose offsets rowan
 /// resets to zero. Different frame, different emitter, and not in this
 /// module.
-fn diagnose_item(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode, message: String) {
+fn diagnose_item(
+    db: &dyn fossil_base::Db,
+    node: &fossil_syntax::SyntaxNode,
+    problem: Problem,
+    help: Option<String>,
+) {
     let range = node.text_range();
     emit_item(
         db,
         Span::new(range.start().into(), range.end().into()),
-        message,
+        problem,
+        help,
     );
 }
 
 /// [`diagnose_item`] for a span that is not a whole node — an argument inside a
 /// call, whose extent the scanner that read it measured.
-fn emit_item(db: &dyn fossil_base::Db, span: Span, message: String) {
-    Diagnostic::new(Severity::Error, message, span)
+fn emit_item(db: &dyn fossil_base::Db, span: Span, problem: Problem, help: Option<String>) {
+    with_help(Diagnostic::new(Severity::Error, problem, span), help)
         .file_absolute()
         .accumulate(db);
 }
@@ -1824,10 +1894,9 @@ fn decline_mapping(
         db,
         Diagnostic::new(
             Severity::Error,
-            format!(
-                "this is not a mapping header — {why} — so nothing is produced from it. \
-                 A mapping is `Name : Shape from <source>`."
-            ),
+            Problem::InvalidMappingHeader {
+                reason: why.to_string(),
+            },
             Span::new(range.start().into(), range.end().into()),
         )
         // Reached from `lower_to_hir`, which walks the WHOLE-FILE CST, so the
@@ -1940,7 +2009,8 @@ fn lower_mapping_node<'db>(
         // file offset. Left in the default `SpanFrame::MappingRelative` frame,
         // `spans::rebase_to_file` would shift it by the mapping's own start —
         // zero for the first mapping in a file, and wrong for every one after.
-        diagnose_item(db, &shape_expr, unbound_shape_message(db, dm, &shape_name));
+        let (problem, help) = unbound_shape_problem(db, dm, &shape_name);
+        diagnose_item(db, &shape_expr, problem, help);
         SmolStr::default()
     });
 
@@ -1974,42 +2044,45 @@ fn lower_mapping_node<'db>(
 /// This is the mirror of [`crate::infer`]'s treatment of a source binding that
 /// bound no shape (`lookup_source_shape_error`), which has always reported by
 /// cause. The two sides of the same table now behave the same way.
-fn unbound_shape_message(
+fn unbound_shape_problem(
     db: &dyn fossil_base::Db,
     dm: crate::def_map::DefMap<'_>,
     shape_name: &SmolStr,
-) -> String {
+) -> (Problem, Option<String>) {
     use crate::def_map::ShapeBindError;
 
     if let Some(err) = dm.lookup_type_error(db, shape_name.as_str()) {
         return match err {
-            ShapeBindError::NoSchema => format!(
-                "`{shape_name}` is declared and bound nothing: its `type` binding names \
-                 no document. Give it one — `type {{ {shape_name} }} := io.shex(\"shop.shex\")`."
+            ShapeBindError::NoSchema => (
+                Problem::NoDocument {
+                    binding: Some(shape_name.to_string()),
+                },
+                Some(format!(
+                    "give it one — `type {{ {shape_name} }} := io.shex(\"shop.shex\")`"
+                )),
             ),
-            ShapeBindError::Unreadable { path, cause } => format!(
-                "`{shape_name}` is declared and bound nothing: its document `{path}` \
-                 could not be read ({cause}), so this mapping is checked against nothing"
+            ShapeBindError::Document(problem) => (
+                problem,
+                Some(format!(
+                    "`{shape_name}` is declared and bound nothing, so this mapping is checked \
+                     against nothing"
+                )),
             ),
-            ShapeBindError::Unparseable { path, cause } => format!(
-                "`{shape_name}` is declared and bound nothing: its document `{path}` \
-                 could not be read as a shape document ({cause}), so this mapping is \
-                 checked against nothing"
-            ),
+            // The number is this NAME's position — `named` is the binding's
+            // total, and reading it here told every surplus name the last one's
+            // number.
             ShapeBindError::Arity {
                 declared,
                 named,
                 position,
-            } => format!(
-                // "no {named}th shape" printed «no 3th shape». English ordinals
-                // are irregular for 1, 2 and 3, and a suffix table for one
-                // message is a second way to write a number down; the sentence
-                // does not need an ordinal at all. The number it wants is this
-                // NAME's position — `named` is the binding's total, and reading
-                // it here told every surplus name the last one's number.
-                "`{shape_name}` is declared and bound nothing: the binding names {named} \
-                 shape(s) and the document declares {declared}. Names bind by POSITION, \
-                 so there is no shape {position} for it to take."
+            } => (
+                Problem::BindingArity {
+                    name: shape_name.to_string(),
+                    named: named as u64,
+                    declared: declared as u64,
+                    position: position as u64,
+                },
+                None,
             ),
         };
     }
@@ -2030,17 +2103,20 @@ fn unbound_shape_message(
             || {
                 if declared.is_empty() {
                     "this program declares no `type { … } := io.shex(…)` binding, so it has \
-                     no shape names at all."
+                     no shape names at all"
                         .to_string()
                 } else {
-                    format!("the names it binds are {}.", declared.join(", "))
+                    format!("the names it binds are {}", declared.join(", "))
                 }
             },
             |s| format!("did you mean `{s}`?"),
         );
-    format!(
-        "`{shape_name}` is not a shape this program declares, so this mapping is \
-         checked against nothing: {known}"
+    (
+        Problem::UnknownShape {
+            shape: shape_name.to_string(),
+            declared: declared.iter().map(ToString::to_string).collect(),
+        },
+        Some(known),
     )
 }
 
@@ -2114,11 +2190,7 @@ fn lower_property(
         .children()
         .find(|c| c.kind() == SyntaxKind::PROPERTY_LHS)
     else {
-        diagnose(
-            db,
-            node,
-            "this property has no name on its left, so it is not written".to_string(),
-        );
+        diagnose(db, node, Problem::InvalidPropertyName { name: None }, None);
         return None;
     };
     // Use `descendants_with_tokens` so nested IDENT/SHAPE_SEP tokens are still
@@ -2148,10 +2220,14 @@ fn lower_property(
                 diagnose(
                     db,
                     &lhs_node,
-                    format!(
-                        "`{name}` is not something a mapping body declares. The only one is \
-                         `@subject = <expr>`, the mapping's identity; `@rename` goes above a \
-                         `type` binding, not in a body."
+                    Problem::MisplacedAttribute {
+                        attribute: name.to_string(),
+                        place: "in a mapping body".to_string(),
+                    },
+                    Some(
+                        "the only one is `@subject = <expr>`, the mapping's identity; `@rename` \
+                         goes above a `type` binding"
+                            .to_string(),
                     ),
                 );
                 return None;
@@ -2169,23 +2245,17 @@ fn lower_property(
             diagnose(
                 db,
                 &lhs_node,
-                format!(
-                    "`{}` is not a property name. A property is named by a bare name — the last \
-                     segment of a predicate IRI the shape declares — and this one is not \
-                     written.",
-                    lhs_node.text().to_string().trim()
-                ),
+                Problem::InvalidPropertyName {
+                    name: Some(lhs_node.text().to_string().trim().to_string()),
+                },
+                None,
             );
             return None;
         }
     };
 
     let Some(expr_node) = node.children().find(|c| c.kind() == SyntaxKind::EXPR) else {
-        diagnose(
-            db,
-            node,
-            "this property has no value, so it is not written".to_string(),
-        );
+        diagnose(db, node, Problem::MissingValue {}, None);
         return None;
     };
     // `lower_expr` reports its own refusals — every arm that returns `None`
@@ -2227,11 +2297,7 @@ fn lower_expr(
     types: &[SmolStr],
 ) -> Option<HirExpr> {
     let Some(inner) = expr_node.children().next() else {
-        diagnose(
-            db,
-            expr_node,
-            "there is no expression here, so this property is not written".to_string(),
-        );
+        diagnose(db, expr_node, Problem::MissingValue {}, None);
         return None;
     };
     lower_expr_inner(db, &inner, types)
@@ -2350,7 +2416,11 @@ fn lower_expr_inner(
                     Err(e) => {
                         Diagnostic::new(
                             Severity::Error,
-                            format!("`{}` is not an integer fossil can carry: {e}", n.text()),
+                            Problem::NumberOutOfRange {
+                                literal: n.text().to_string(),
+                                kind: "Integer".to_string(),
+                                reason: e.to_string(),
+                            },
                             span,
                         )
                         .accumulate(db);
@@ -2371,7 +2441,11 @@ fn lower_expr_inner(
                     Err(e) => {
                         Diagnostic::new(
                             Severity::Error,
-                            format!("`{}` is not a float fossil can carry: {e}", f.text()),
+                            Problem::NumberOutOfRange {
+                                literal: f.text().to_string(),
+                                kind: "Float".to_string(),
+                                reason: e.to_string(),
+                            },
                             span,
                         )
                         .accumulate(db);
@@ -2415,11 +2489,9 @@ fn lower_expr_inner(
                 let text = inner.text().to_string();
                 Diagnostic::new(
                     Severity::Error,
-                    format!(
-                        "`{}` is a literal fossil cannot lower yet, so this property will \
-                         not be written to the corpus.",
-                        text.trim()
-                    ),
+                    Problem::UnsupportedExpression {
+                        expression: text.trim().to_string(),
+                    },
                     span,
                 )
                 .accumulate(db);
@@ -2433,14 +2505,15 @@ fn lower_expr_inner(
             let source = source.trim();
             Diagnostic::new(
                 Severity::Error,
-                format!(
-                    "`{source}` is not an expression fossil can lower yet, so this property \
-                     will not be written to the corpus. A property value may be a template, \
-                     a field reference, a string literal or a call. \
-                     (parsed as {other:?})"
-                ),
+                Problem::UnsupportedExpression {
+                    expression: source.to_string(),
+                },
                 span,
             )
+            .with_help(format!(
+                "a property value may be a template, a field reference, a string literal or a \
+                 call (parsed as {other:?})"
+            ))
             .accumulate(db);
             None
         }
@@ -2504,11 +2577,9 @@ fn lower_ternary(
         let source = node.text().to_string();
         Diagnostic::new(
             Severity::Error,
-            format!(
-                "`{}` is not a complete conditional: it needs a condition, a `?` branch \
-                 and a `:` branch.",
-                source.trim()
-            ),
+            Problem::IncompleteConditional {
+                expression: source.trim().to_string(),
+            },
             span,
         )
         .accumulate(db);
@@ -2595,14 +2666,13 @@ fn lower_binary(
         other => {
             Diagnostic::new(
                 Severity::Error,
-                format!(
-                    "`{source}` uses `{}`, which the parser reads as an operator and the \
-                     lowering has no case for ({other:?}). This is a compiler gap, not a \
-                     mistake in the program.",
-                    op_token.text()
-                ),
+                Problem::UnsupportedExpression { expression: source },
                 span,
             )
+            .with_help(format!(
+                "`{}` has no lowering ({other:?}); a compiler gap, not a mistake in the program",
+                op_token.text()
+            ))
             .accumulate(db);
             return None;
         }
@@ -2668,12 +2738,12 @@ fn lower_postfix(
         // this is an error, not a value that quietly becomes text.
         Diagnostic::new(
             Severity::Error,
-            format!(
-                "`{source}` names a function but does not call it. Fossil has no function \
-                 values: write `{source}(...)` with its arguments."
-            ),
+            Problem::UncalledFunction {
+                function: source.to_string(),
+            },
             span,
         )
+        .with_help(format!("write `{source}(...)` with its arguments"))
         .accumulate(db);
         return None;
     }
@@ -2719,10 +2789,10 @@ fn lower_postfix(
             [] => {
                 Diagnostic::new(
                     Severity::Error,
-                    format!(
-                        "`{source}` calls `{member}` on a value, and nothing in the catalogue \
-                         has a member called `{member}`."
-                    ),
+                    Problem::UnknownFunction {
+                        function: member.to_string(),
+                        unknown_namespace: None,
+                    },
                     span,
                 )
                 .accumulate(db);
@@ -2731,19 +2801,16 @@ fn lower_postfix(
             many => {
                 Diagnostic::new(
                     Severity::Error,
-                    format!(
-                        "`{member}` is a member of {} different receivers ({}), and fossil \
-                         cannot tell which one this is. Write the type path instead, e.g. \
-                         `{}(…)`.",
-                        many.len(),
-                        many.iter()
-                            .map(|e| format!("`{}`", e.name))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        many[0].name,
-                    ),
+                    Problem::AmbiguousMember {
+                        member: member.to_string(),
+                        receivers: many.iter().map(|e| e.name.to_string()).collect(),
+                    },
                     span,
                 )
+                .with_help(format!(
+                    "write the type path instead, e.g. `{}(…)`",
+                    many[0].name
+                ))
                 .accumulate(db);
                 return None;
             }
@@ -2753,12 +2820,10 @@ fn lower_postfix(
     let Some(func) = dotted_name(&callee) else {
         Diagnostic::new(
             Severity::Error,
-            format!(
-                "`{source}` calls something that is not a stdlib function name. Only a \
-                 catalogued name may be called, e.g. `str.trim(User.name)`."
-            ),
+            Problem::InvalidCallee { callee: source },
             span,
         )
+        .with_help("e.g. `str.trim(User.name)`")
         .accumulate(db);
         return None;
     };
@@ -2828,12 +2893,15 @@ fn place_args(
 ) -> Option<Vec<HirExpr>> {
     use fossil_syntax::SyntaxKind;
 
-    let emit = |node: &fossil_syntax::SyntaxNode, message: String| {
+    let emit = |node: &fossil_syntax::SyntaxNode, problem: Problem, help: Option<String>| {
         let r = node.text_range();
-        Diagnostic::new(
-            Severity::Error,
-            message,
-            Span::new(r.start().into(), r.end().into()),
+        with_help(
+            Diagnostic::new(
+                Severity::Error,
+                problem,
+                Span::new(r.start().into(), r.end().into()),
+            ),
+            help,
         )
         .accumulate(db);
     };
@@ -2868,12 +2936,11 @@ fn place_args(
                 let Some(sig) = sig else {
                     emit(
                         &arg,
-                        format!(
-                            "`{}` names an argument of `{func}`, which has no named parameters \
-                             to match it against. An edge's arguments fill the target's identity \
-                             template in the order they are written.",
-                            arg.text().to_string().trim()
-                        ),
+                        Problem::NamedOnEdge {
+                            argument: arg.text().to_string().trim().to_string(),
+                            target: func.to_string(),
+                        },
+                        None,
                     );
                     return None;
                 };
@@ -2881,41 +2948,39 @@ fn place_args(
                     let available: Vec<&str> = sig.params.iter().map(|p| p.name.as_str()).collect();
                     let suggestion =
                         crate::didyoumean::did_you_mean(&name, available.iter().copied());
-                    let list = available
-                        .iter()
-                        .map(|n| format!("`{n}`"))
-                        .collect::<Vec<_>>()
-                        .join(", ");
                     emit(
                         &arg,
-                        suggestion.map_or_else(
-                            || {
-                                format!(
-                                    "`{func}` has no parameter called `{name}`. It takes {list}."
-                                )
-                            },
-                            |s| {
-                                format!(
-                                    "`{func}` has no parameter called `{name}` — did you mean \
-                                     `{s}`? It takes {list}."
-                                )
-                            },
-                        ),
+                        Problem::UnknownParameter {
+                            function: func.to_string(),
+                            parameter: name.clone(),
+                            parameters: available.iter().map(ToString::to_string).collect(),
+                        },
+                        suggestion.map(|s| format!("did you mean `{s}`?")),
                     );
                     return None;
                 };
                 if at < offset {
                     emit(
                         &arg,
-                        format!(
-                            "`{name}` is the receiver of `{func}` — the value to the left of the \
-                             dot — so naming it here would give it twice."
-                        ),
+                        Problem::DuplicateArgument {
+                            function: func.to_string(),
+                            parameter: name,
+                            receiver: true,
+                        },
+                        None,
                     );
                     return None;
                 }
                 if slots.get(at).is_some_and(Option::is_some) {
-                    emit(&arg, format!("`{func}` is given `{name}` twice."));
+                    emit(
+                        &arg,
+                        Problem::DuplicateArgument {
+                            function: func.to_string(),
+                            parameter: name,
+                            receiver: false,
+                        },
+                        None,
+                    );
                     return None;
                 }
                 let inner = arg
@@ -2929,11 +2994,11 @@ fn place_args(
             SyntaxKind::ALIAS_ARG => {
                 emit(
                     &arg,
-                    format!(
-                        "`{}` is a source alias, and `{func}` takes values. The alias belongs to \
-                         a join over rows.",
-                        arg.text().to_string().trim()
-                    ),
+                    Problem::AliasInValueCall {
+                        alias: arg.text().to_string().trim().to_string(),
+                        function: func.to_string(),
+                    },
+                    None,
                 );
                 return None;
             }
@@ -2941,11 +3006,14 @@ fn place_args(
                 if let Some(named) = &first_named {
                     emit(
                         &arg,
-                        format!(
-                            "`{}` is positional and follows `{named} = …`. Once an argument is \
-                             named, the ones after it are too — otherwise which position this \
-                             fills depends on where the named one landed.",
-                            arg.text().to_string().trim()
+                        Problem::PositionalAfterNamed {
+                            argument: arg.text().to_string().trim().to_string(),
+                            named: named.clone(),
+                        },
+                        Some(
+                            "otherwise which position this fills depends on where the named one \
+                             landed"
+                                .to_string(),
                         ),
                     );
                     return None;
@@ -2975,11 +3043,11 @@ fn place_args(
                 .map_or_else(|| at.to_string(), |p| p.name.to_string());
             emit(
                 &list,
-                format!(
-                    "`{func}` is given nothing for `{name}`, and something after it. A \
-                     parameter cannot be skipped: name the ones you are giving, or give them \
-                     all in order."
-                ),
+                Problem::SkippedParameter {
+                    function: func.to_string(),
+                    parameter: name,
+                },
+                Some("name the ones you are giving, or give them all in order".to_string()),
             );
             return None;
         }
@@ -3184,7 +3252,9 @@ prop https://example.org/name - 1 1
         let props = crate::body::body(&db, m).properties(&db);
         let diags = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, m);
         assert!(
-            diags.iter().any(|d| d.message.contains("expected ASSIGN")),
+            diags
+                .iter()
+                .any(|d| d.message().contains("expected ASSIGN")),
             "`@subject` takes `=`, not `(`, got: {props:#?} / {diags:#?}"
         );
     }
@@ -3200,7 +3270,7 @@ prop https://example.org/name - 1 1
             let _ = crate::body::body(&db, m);
             crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, m)
                 .iter()
-                .map(|d| d.message.clone())
+                .map(|d| d.message())
                 .collect::<Vec<_>>()
         };
         assert!(
@@ -3244,7 +3314,7 @@ prop https://example.org/name - 1 1
         );
         let diags = crate::body::body::accumulated::<Diagnostic>(&db, mapping);
         assert!(
-            diags.iter().any(|d| d.message.contains("@sensitive")),
+            diags.iter().any(|d| d.message().contains("@sensitive")),
             "the diagnostic must name the attribute, got {diags:?}"
         );
     }
@@ -3299,7 +3369,7 @@ User : Person from users
         assert!(
             diagnostics.is_empty(),
             "a call the lowering understands must raise nothing, got: {:?}",
-            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
 
         let props = crate::body::body(&db, mloc).properties(&db);
@@ -3349,7 +3419,7 @@ User : Person from users
         assert!(
             diagnostics.is_empty(),
             "a comparison the lowering understands must raise nothing, got: {:?}",
-            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
         let props = crate::body::body(&db, mloc).properties(&db);
         assert_eq!(props.len(), 2);
@@ -3396,7 +3466,7 @@ User : Person from users
         assert!(
             diagnostics.is_empty(),
             "`(users.age >= 18)` must lower without a word, got: {:?}",
-            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
         let props = crate::body::body(&db, mloc).properties(&db);
         assert_eq!(props.len(), 2);
@@ -3455,9 +3525,9 @@ User : Person from users
         let d = &diagnostics[0];
         assert_eq!(d.severity, fossil_base::Severity::Error);
         assert!(
-            d.message.contains(".id"),
+            d.message().contains(".id"),
             "the diagnostic must quote what the user wrote, got: {}",
-            d.message,
+            d.message(),
         );
         assert!(
             d.span.end > d.span.start,
@@ -3497,7 +3567,7 @@ User : Person from users
         assert!(
             diagnostics.is_empty(),
             "arithmetic must lower without a word, got: {:?}",
-            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
         let props = crate::body::body(&db, mloc).properties(&db);
         assert_eq!(props.len(), 2, "the arithmetic property survives lowering");
@@ -3529,8 +3599,8 @@ User : Person from users
     // the property-key lowering is gone with the token — `<` and `>` have one
     // reading each — so the message it asserted on («not by an absolute IRI …
     // write `name = …`») is not emitted from this crate at all. The parser
-    // refuses the form where it is written, which is where the span is, and
-    // `fossil_syntax::parser::diag::ABSOLUTE_IRI` is the message now.
+    // refuses the form where it is written, which is where the span is, as a
+    // `syntax/retired-spelling` built from `fossil_syntax::parser::diag::retired::ABSOLUTE_IRI`.
 
     /// A name that is not catalogued is a type error, not a lowering hole: the
     /// HIR carries the call, and the checker is what refuses it.
@@ -3569,11 +3639,10 @@ User : Person from users
         let diags =
             crate::check::typecheck_mapping::accumulated::<fossil_base::Diagnostic>(&db, mloc);
         assert!(
-            diags.iter().any(|d| d.message.contains("`str`")
-                && d.message.contains("`slugg`")
-                && d.message.contains("did you mean `str.slug`")),
+            diags.iter().any(|d| d.message().contains("`str.slugg`")
+                && d.help.as_deref() == Some("did you mean `str.slug`?")),
             "the checker must name the function and suggest one, got: {:?}",
-            diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
     }
 
@@ -3610,9 +3679,9 @@ User : Persn from users
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains("did you mean `Person`?")),
+                .any(|d| d.help.as_deref() == Some("did you mean `Person`?")),
             "a name one edit from a bound one must suggest it, got: {:?}",
-            diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
     }
 
@@ -3680,9 +3749,9 @@ Good : Person from Users
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains("this is not a mapping header")),
+                .any(|d| d.message().contains("this is not a mapping header")),
             "and the decline is reported, once, where it happened: {:?}",
-            diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
     }
 
@@ -3805,7 +3874,7 @@ Sales := Adults.join(Person, on = User.person_id == Person.id).where(User.total 
         assert!(
             diags.is_empty(),
             "the three verbs raise nothing, got: {:?}",
-            diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
 
         let pipes = hir.source_pipes(&db);
@@ -3876,7 +3945,7 @@ Tree := Node.join(Node as Other, on = Node.parent == Other.id)
         assert!(
             diags.is_empty(),
             "a self-join raises nothing, got: {:?}",
-            diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
 
         let pipes = hir.source_pipes(&db);
@@ -3913,7 +3982,7 @@ Both := User.join(Person, on = User.person_id == Person.id)
         assert!(
             diags.is_empty(),
             "a shared column name is no longer an error, got: {:?}",
-            diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
         assert_eq!(hir.source_pipes(&db).len(), 1, "the join must lower");
     }
@@ -3935,7 +4004,7 @@ Sales := Order.join(Person)
             hir.source_pipes(&db),
         );
         let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
-        let msg = diags.first().map(|d| d.message.clone()).unwrap_or_default();
+        let msg = diags.first().map(|d| d.message()).unwrap_or_default();
         assert!(
             msg.contains("on = <predicate>"),
             "the diagnostic must show the form that works, got {msg:?}"
@@ -3955,7 +4024,7 @@ Odd := User.regroup(User.age)
         let hir = lower_to_hir(&db, file);
         assert!(hir.source_pipes(&db).is_empty());
         let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
-        let msg = diags.first().map(|d| d.message.clone()).unwrap_or_default();
+        let msg = diags.first().map(|d| d.message()).unwrap_or_default();
         assert!(
             msg.contains("regroup") && msg.contains("where"),
             "the diagnostic must name the verb and the ones that exist, got {msg:?}"

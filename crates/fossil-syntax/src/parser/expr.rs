@@ -129,7 +129,7 @@ pub(crate) fn parse_expression(p: &mut Parser, min_bp: Bp) {
             && p.current_text() == Some("|")
             && p.peek_kind(1) == Some(SyntaxKind::GT)
         {
-            p.retire(retired::PIPELINE, RetiredRun::Count(2));
+            p.retire(&retired::PIPELINE, RetiredRun::Count(2));
             break;
         }
 
@@ -358,7 +358,7 @@ fn parse_primary(p: &mut Parser) {
             } else {
                 RetiredRun::Count(1)
             };
-            p.retire(retired::LEADING_DOT, run);
+            p.retire(&retired::LEADING_DOT, run);
         }
         // `ex:name` — the CURIE, and a `:` that is not a mapping header or a
         // ternary is an error now. The whitespace check is
@@ -371,7 +371,7 @@ fn parse_primary(p: &mut Parser) {
                 && p.peek_kind(1) == Some(SyntaxKind::SHAPE_SEP)
                 && p.peek_kind(2) == Some(SyntaxKind::IDENT) =>
         {
-            p.retire(retired::CURIE, RetiredRun::Count(3));
+            p.retire(&retired::CURIE, RetiredRun::Count(3));
         }
         Some(SyntaxKind::IDENT) => {
             p.start(SyntaxKind::LITERAL_EXPR);
@@ -386,7 +386,7 @@ fn parse_primary(p: &mut Parser) {
         // `a` already parsed, and `parse_primary` is only ever entered where an
         // operand is due. A `<` in operand position was always the IRI.
         Some(SyntaxKind::LT) => {
-            p.retire(retired::ABSOLUTE_IRI, RetiredRun::Line);
+            p.retire(&retired::ABSOLUTE_IRI, RetiredRun::Line);
         }
         Some(SyntaxKind::LPAREN) => {
             p.start(SyntaxKind::PAREN_EXPR);
@@ -501,17 +501,18 @@ mod tests {
             .diagnostics
             .iter()
             .filter_map(|d| match d {
-                crate::parser::diag::ParseDiagnostic::RetiredSpelling { message, span } => {
-                    Some((message.clone(), *span))
+                crate::parser::diag::ParseDiagnostic::RetiredSpelling { form, span } => {
+                    Some((*form, *span))
                 }
                 _ => None,
             })
             .collect();
         assert_eq!(retired.len(), 1, "exactly one refusal, got {retired:?}");
-        let (message, span) = &retired[0];
+        let (form, span) = &retired[0];
+        assert_eq!(*form, &crate::parser::diag::retired::PIPELINE);
         assert!(
-            message.contains("a.f("),
-            "the message must name what replaces `|>`: {message}"
+            form.replacement.contains("a.f("),
+            "the refusal must name what replaces `|>`: {form:?}"
         );
         // The span underlines the two bytes of `|>` and nothing else.
         assert_eq!((span.start, span.end), (2, 4), "span over `|>`");

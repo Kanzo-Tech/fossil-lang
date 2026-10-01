@@ -178,10 +178,12 @@ pub fn lower_to_mir_pg<'db>(
     let Some(id) = lower_iri_property(m, body, db, iri_span_line) else {
         return poisoned(
             db,
-            fossil_base::delay_span_bug(
+            fossil_base::report(
                 db,
                 span,
-                "mapping has no usable `iri = ...` property, so its vertices have no subject",
+                fossil_base::Problem::MissingSubject {
+                    mapping: m.name.to_string(),
+                },
             ),
         );
     };
@@ -777,17 +779,12 @@ fn resolve_source<'db>(
         delimiter,
     } = call;
     let Some(uri) = uri else {
-        return Err(fossil_base::delay_span_bug(
+        return Err(fossil_base::report(
             db,
             span,
-            match constructor.as_deref() {
-                Some(c) => format!(
-                    "`{binding}` is not a source: it is bound to `{c}`, which is not an \
-                     `io.*(\"...\")` call, so there is no file to read. A mapping's `from` \
-                     must name a binding declared as `{binding} := io.csv(\"...\")` (or \
-                     io.json / io.parquet / io.rdf)."
-                ),
-                None => format!("`{binding}` is not a declared source binding"),
+            fossil_base::Problem::UnknownSource {
+                binding: binding.to_string(),
+                bound_to: constructor.map(|c| c.to_string()),
             },
         ));
     };
@@ -809,19 +806,23 @@ fn resolve_source<'db>(
                     name: SmolStr::new(name),
                 },
                 None => {
-                    return Err(fossil_base::delay_span_bug(
+                    return Err(fossil_base::report(
                         db,
                         span,
-                        format!("`{c}` is not a source constructor; expected `io.*`"),
+                        fossil_base::Problem::UnknownProvider {
+                            constructor: c.to_string(),
+                        },
                     ));
                 }
             },
         },
         None => {
-            return Err(fossil_base::delay_span_bug(
+            return Err(fossil_base::report(
                 db,
                 span,
-                format!("source `{binding}` has a URI but no constructor to read it with"),
+                fossil_base::Problem::BareDocumentPath {
+                    document: uri.to_string(),
+                },
             ));
         }
     };

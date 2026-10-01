@@ -1,63 +1,55 @@
-//! **What the compiler says when a program names a provider it cannot use.**
+//! **What the compiler adds when a program names a provider it cannot use.**
 //!
-//! Three sentences, and they are the whole of the provider's user-facing prose:
-//! a constructor no host installs, a capability the row does not declare, an
-//! extension the row does not accept.
+//! Three refusals — a constructor no host installs, a capability the row does
+//! not declare, an extension the row does not accept. The refusal itself is a
+//! [`fossil_base::Problem`] (`provider/unknown`, `provider/wrong-capability`,
+//! `provider/wrong-extension`); what lives here is the `help:` line under it,
+//! which names the alternatives, because a reader who guessed `io.linkml` needs
+//! the list more than the refusal.
 //!
 //! # Why they are not on `Provider`
 //!
-//! They were — `fossil_base::Provider::decline_capability` and
-//! `decline_extension`, with `Capability::describe`/`noun` supplying the verb
-//! phrase and the bare noun. The argument for putting them there was that a row
-//! should word its own refusal. The argument against is that
-//! `crates/fossil-base/src/providers.rs` opened by saying *«nothing here decides
-//! anything about a program»* while its own tests asserted English Fossil
-//! compiler errors, and `fossil-base` is the trait-and-db substrate: the
+//! `crates/fossil-base/src/providers.rs` says *«nothing here decides anything
+//! about a program»*, and `fossil-base` is the trait-and-db substrate: the
 //! catalogue is data a `System` serves, the wording of a refusal is a
-//! diagnostic, and a diagnostic belongs to the checker that raises it.
-//!
-//! The row still owns every *decision* — [`fossil_base::Provider::provides`] and
+//! diagnostic, and a diagnostic belongs to the checker that raises it. The row
+//! still owns every *decision* — [`fossil_base::Provider::provides`] and
 //! [`fossil_base::Provider::accepts`] are the predicates, and nothing here calls
-//! anything else. What moved is only the sentence.
+//! anything else.
 //!
-//! # One sentence per refusal, not three
+//! # One help per refusal, whichever path raised it
 //!
-//! `unknown_constructor` replaces three spellings of one message that had
-//! drifted apart in three crates:
-//!
-//! ```text
-//! fossil-hir/src/lower.rs   `io.linkml` is not a provider this host installs — it has `io.csv`, …
-//! fossil-hir/src/shapes.rs  `io.linkml` is not a provider — this host installs `io.csv`, …
-//! (native CLI) host.rs      `io.linkml` is not a provider this host installs
-//! ```
-//!
-//! The third one dropped the list, so the `fossil run` path told an author their
-//! constructor was wrong and not what the alternatives were, while `fossil check`
-//! on the same file told them both.
+//! `fossil check` (this crate) and `fossil run` (`fossil-df`'s descriptor) both
+//! call these, so the two paths cannot drift apart again — they once did, and
+//! the `run` one dropped the list.
 
 use fossil_base::{Capability, Provider};
 
-/// **A constructor no installed row answers to.** Names what was written and
-/// then the whole table, because a reader who guessed `io.linkml` needs the list
-/// more than the refusal.
+/// The capability as the `provider/wrong-capability` problem words it: `"read
+/// rows"` / `"read types"`.
 #[must_use]
-pub fn unknown_constructor(constructor: &str, installed: &[&'static Provider]) -> String {
+pub const fn capability(wanted: Capability) -> &'static str {
+    match wanted {
+        Capability::ReadRows => "read rows",
+        Capability::ReadTypes => "read types",
+    }
+}
+
+/// **A constructor no installed row answers to**: the whole table.
+#[must_use]
+pub fn unknown_constructor(installed: &[&'static Provider]) -> String {
     let rows: Vec<String> = installed
         .iter()
         .map(|p| format!("`{}`", p.constructor()))
         .collect();
-    format!(
-        "`{constructor}` is not a provider this host installs — it has {}",
-        rows.join(", ")
-    )
+    format!("this host installs {}", rows.join(", "))
 }
 
-/// **A capability the row does not declare**, naming both — the row and what was
-/// asked of it.
+/// **A capability the row does not declare**: what the row does, and then the
+/// rows that DO have the capability rather than leaving the reader to guess.
 ///
-/// `type { P } := io.csv("users.csv")` → «`io.csv` reads rows, not types».
-/// `installed` is the whole table, so the message can end by naming the rows
-/// that DO have the capability rather than leaving the reader to guess.
+/// `type { P } := io.csv("users.csv")` → «`io.csv` reads rows; `io.shex`,
+/// `io.shacl` read types».
 #[must_use]
 pub fn decline_capability(
     row: &Provider,
@@ -77,20 +69,14 @@ pub fn decline_capability(
         .collect();
     let tail = match able.as_slice() {
         [] => String::new(),
-        [one] => format!(" — {one} {}", describe(wanted)),
-        many => format!(" — {} read {}", many.join(", "), noun(wanted)),
+        [one] => format!("; {one} {}", describe(wanted)),
+        many => format!("; {} read {}", many.join(", "), noun(wanted)),
     };
-    format!(
-        "`{}` {}, not {}{}",
-        row.constructor(),
-        has,
-        noun(wanted),
-        tail
-    )
+    format!("`{}` {has}{tail}", row.constructor())
 }
 
-/// **An extension the row does not accept**, naming both — the constructor and
-/// the extension.
+/// **An extension the row does not accept**: the extensions it does, and the
+/// one it was given.
 ///
 /// `io.shex("catalogue.ttl")` → «`io.shex` reads `.shex`, `.shexj` or `.shexc`
 /// documents, and `catalogue.ttl` is `.ttl`».
@@ -114,7 +100,7 @@ pub fn decline_extension(row: &Provider, uri: &str) -> String {
     )
 }
 
-/// The verb phrase a diagnostic uses: "reads rows" / "reads types".
+/// The verb phrase: "reads rows" / "reads types".
 const fn describe(capability: Capability) -> &'static str {
     match capability {
         Capability::ReadRows => "reads rows",
@@ -122,7 +108,7 @@ const fn describe(capability: Capability) -> &'static str {
     }
 }
 
-/// The bare noun, for the second half of "…, not types".
+/// The bare noun, for "… read types".
 const fn noun(capability: Capability) -> &'static str {
     match capability {
         Capability::ReadRows => "rows",
@@ -168,34 +154,32 @@ mod tests {
     /// `fossil_descriptors_output::PROVIDERS`, which this crate may not name.
     static TABLE: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF, &SHEX, &SHACL];
 
-    /// The message names BOTH — the row and what was asked of it — and then
-    /// says who could.
+    /// The help says what the row does, and then who could.
     #[test]
     fn asking_for_a_capability_a_row_lacks_names_both() {
         assert_eq!(
             decline_capability(&CSV, Capability::ReadTypes, TABLE),
-            "`io.csv` reads rows, not types — `io.shex`, `io.shacl` read types"
+            "`io.csv` reads rows; `io.shex`, `io.shacl` read types"
         );
         assert_eq!(
             decline_capability(&SHEX, Capability::ReadRows, TABLE),
-            "`io.shex` reads types, not rows — `io.csv`, `io.json`, `io.parquet`, \
-             `io.rdf` read rows"
+            "`io.shex` reads types; `io.csv`, `io.json`, `io.parquet`, `io.rdf` read rows"
         );
         // One candidate takes the singular, because a message that reads like a
         // typo is a message a reader distrusts.
         assert_eq!(
             decline_capability(&CSV, Capability::ReadTypes, &[&CSV, &SHEX]),
-            "`io.csv` reads rows, not types — `io.shex` reads types"
+            "`io.csv` reads rows; `io.shex` reads types"
         );
     }
 
     /// A host that installs no row with the capability says nothing about who
-    /// could, rather than trailing off after an em dash.
+    /// could.
     #[test]
     fn a_host_with_no_candidate_names_none() {
         assert_eq!(
             decline_capability(&CSV, Capability::ReadTypes, DATA),
-            "`io.csv` reads rows, not types"
+            "`io.csv` reads rows"
         );
     }
 
@@ -217,19 +201,18 @@ mod tests {
         );
     }
 
-    /// **One sentence, whichever path raised it.** The three call sites used to
+    /// **The installed list, whichever path raised it.** The call sites used to
     /// word this differently, and the `fossil run` one dropped the list.
     #[test]
     fn an_unknown_constructor_always_carries_the_installed_list() {
         assert_eq!(
-            unknown_constructor("io.linkml", DATA),
-            "`io.linkml` is not a provider this host installs — it has `io.csv`, \
-             `io.json`, `io.parquet`, `io.rdf`"
+            unknown_constructor(DATA),
+            "this host installs `io.csv`, `io.json`, `io.parquet`, `io.rdf`"
         );
         assert_eq!(
-            unknown_constructor("io.linkml", TABLE),
-            "`io.linkml` is not a provider this host installs — it has `io.csv`, \
-             `io.json`, `io.parquet`, `io.rdf`, `io.shex`, `io.shacl`"
+            unknown_constructor(TABLE),
+            "this host installs `io.csv`, `io.json`, `io.parquet`, `io.rdf`, `io.shex`, \
+             `io.shacl`"
         );
     }
 }

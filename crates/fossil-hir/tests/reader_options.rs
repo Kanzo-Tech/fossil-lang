@@ -55,7 +55,7 @@ fn diagnostics(binding: &str) -> Vec<String> {
     let _ = lower_to_hir(&db, file);
     lower_to_hir::accumulated::<Diagnostic>(&db, file)
         .iter()
-        .map(|d| d.message.clone())
+        .map(|d| d.message())
         .collect()
 }
 

@@ -322,7 +322,7 @@ mod tests {
 
     /// Type-level proof that `TyKind::Error(ErrorGuaranteed)` exists as a
     /// variant. `ErrorGuaranteed` cannot be constructed outside `fossil-base`
-    /// (only via `delay_span_bug` / `bug` from inside a tracked query that
+    /// (only via `report` / `bug` from inside a tracked query that
     /// has a `Diagnostic` sink), so we cannot build one here; the function
     /// body merely needs to match the variant. If `Ty::Error` is renamed or
     /// dropped this function stops compiling.

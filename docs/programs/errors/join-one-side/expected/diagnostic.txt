@@ -1,3 +1,5 @@
+pipeline/join-one-side
+
   × `join` in `Orders` equates `Purchase.id` with `Purchase.user_id`, and both are columns of the
   │ left side
     ╭─[program.fossil:11:1]

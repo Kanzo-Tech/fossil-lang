@@ -147,8 +147,12 @@ fn intern(db: &FossilDb, dir: &Path) -> SourceFile {
     file
 }
 
+fn expects_integer(p: &fossil_base::Problem) -> bool {
+    matches!(p, fossil_base::Problem::PropertyMismatch { expected, .. } if expected == "Integer")
+}
+
 /// Every mapping's diagnostics, drained the way `check` drains them.
-fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<String> {
+fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<fossil_base::Problem> {
     let def_map = fossil_hir::def_map::def_map(db, file);
     let mut out = Vec::new();
     for mapping in def_map.mappings(db) {
@@ -156,7 +160,7 @@ fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<String> {
         out.extend(
             fossil_mir::lower_to_mir_pg::accumulated::<Diagnostic>(db, *mapping)
                 .into_iter()
-                .map(|d| d.message.clone()),
+                .map(|d| d.problem.clone()),
         );
     }
     out
@@ -217,7 +221,7 @@ fn editing_the_document_rechecks_the_program_and_the_diagnostic_changes() {
 
     let before = diagnostics(&db, file);
     assert!(
-        before.iter().any(|m| m.contains("expects Integer")),
+        before.iter().any(expects_integer),
         "the shape demands an integer and the mapping writes a string, so \
          the backward check must say so; got {before:?}"
     );
@@ -233,7 +237,7 @@ fn editing_the_document_rechecks_the_program_and_the_diagnostic_changes() {
         "editing the document must re-execute the decode"
     );
     assert!(
-        !after.iter().any(|m| m.contains("expects Integer")),
+        !after.iter().any(expects_integer),
         "and the checker must have re-run against the edited document; \
          got {after:?}"
     );

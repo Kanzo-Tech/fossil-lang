@@ -1,3 +1,5 @@
+identity/conflicting
+
   × `Users` and `Imported` mint two identities for Person
     ╭─[program.fossil:7:16]
   6 │ Users : Person from User

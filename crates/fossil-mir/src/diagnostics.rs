@@ -49,7 +49,7 @@
 
 use std::collections::HashSet;
 
-use fossil_base::{Db, Diagnostic, Severity, SourceFile, Span, SpanFrame};
+use fossil_base::{Db, Diagnostic, Problem, Severity, SourceFile, Span, SpanFrame};
 
 /// Every diagnostic `file` produces, spans file-absolute, no duplicates.
 ///
@@ -147,9 +147,9 @@ fn per_mapping(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
 /// — comes out once per mapping. It is not a per-mapping fact and there is no
 /// mapping to attribute it to.
 ///
-/// The key is `(severity, message, span)`, and each part is load-bearing. Two
-/// diagnostics with one message at two spans are two mistakes and both survive
-/// — which is why this is not a `message`-only dedup. Two with one message at
+/// The key is `(severity, problem, span)`, and each part is load-bearing. Two
+/// diagnostics with one problem at two spans are two mistakes and both survive
+/// — which is why this is not a `problem`-only dedup. Two with one problem at
 /// ONE span are one statement about one range of bytes, and printing it twice
 /// is noise by construction, whichever query emitted it.
 ///
@@ -158,6 +158,6 @@ fn per_mapping(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
 /// file-level ones, carried along by `lower_to_mir_pg::accumulated`, and there
 /// is nothing at that point marking which is which.
 fn dedup(diagnostics: &mut Vec<Diagnostic>) {
-    let mut seen: HashSet<(Severity, String, Span)> = HashSet::new();
-    diagnostics.retain(|d| seen.insert((d.severity, d.message.clone(), d.span)));
+    let mut seen: HashSet<(Severity, Problem, Span)> = HashSet::new();
+    diagnostics.retain(|d| seen.insert((d.severity, d.problem.clone(), d.span)));
 }

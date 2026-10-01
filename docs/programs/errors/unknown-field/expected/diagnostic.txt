@@ -1,3 +1,5 @@
+name/unknown-field
+
   × `nmae` is not a field of `User`
    ╭─[program.fossil:3:1]
  2 │ 

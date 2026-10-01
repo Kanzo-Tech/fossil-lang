@@ -129,18 +129,11 @@ pub(crate) fn check(path: &Path) -> CheckOutcome {
     }
 }
 
-/// Every diagnostic message a check of `path` produces.
-pub(crate) fn messages(path: &Path) -> Vec<String> {
-    check(path)
-        .diagnostics
-        .into_iter()
-        .map(|d| d.message)
-        .collect()
-}
-
-/// A diagnostic in the shape miette renders: its labels and an optional `help`.
+/// A diagnostic in the shape miette renders: its code, labels and an optional
+/// `help`.
 #[derive(Debug)]
 struct Rendered {
+    code: &'static str,
     message: String,
     src: NamedSource<String>,
     labels: Vec<LabeledSpan>,
@@ -156,6 +149,10 @@ impl std::fmt::Display for Rendered {
 impl std::error::Error for Rendered {}
 
 impl miette::Diagnostic for Rendered {
+    fn code(&self) -> Option<Box<dyn std::fmt::Display + '_>> {
+        Some(Box::new(self.code))
+    }
+
     fn source_code(&self) -> Option<&dyn miette::SourceCode> {
         Some(&self.src)
     }
@@ -175,9 +172,9 @@ impl miette::Diagnostic for Rendered {
 /// string: miette graphical, unicode, no colour, width 100.
 ///
 /// The `NamedSource` carries the program's FILE NAME and not its path — an
-/// artefact with an absolute path in it only holds on one machine. The `help:`
-/// line is the diagnostic's own prose, else its structured suggestion, else an
-/// inline «did you mean» clause lifted out of the message.
+/// artefact with an absolute path in it only holds on one machine. The header
+/// carries the problem's code; the `help:` line is the diagnostic's own prose,
+/// else its structured suggestion.
 ///
 /// # The severity is not in the artefact
 ///
@@ -205,15 +202,7 @@ pub(crate) fn render_diagnostics(
         )
     };
     for d in diagnostics {
-        let help = d
-            .help
-            .clone()
-            .or_else(|| d.suggestion_source.clone())
-            .or_else(|| {
-                d.message
-                    .find("did you mean")
-                    .map(|i| d.message[i..].to_string())
-            });
+        let help = d.help.clone().or_else(|| d.suggestion_source.clone());
         let labels = if d.labels.is_empty() {
             vec![at(d.span, "here")]
         } else {
@@ -224,7 +213,8 @@ pub(crate) fn render_diagnostics(
                 .collect()
         };
         let rendered = Rendered {
-            message: d.message.clone(),
+            code: d.problem.code(),
+            message: d.message(),
             src: named.clone(),
             labels,
             help,
@@ -247,7 +237,8 @@ pub(crate) fn render_diagnostics(
                 continue;
             }
             let rendered = Rendered {
-                message: d.message.clone(),
+                code: d.problem.code(),
+                message: d.message(),
                 src: NamedSource::new(name, text.clone()),
                 labels: in_this,
                 // The `help:` rode on the program's snippet; one repair said

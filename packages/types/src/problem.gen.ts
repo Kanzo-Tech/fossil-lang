@@ -7,17 +7,82 @@
 
 /** A code fossil can report: `area/kind`. Stable once released — never reworded, never reused. */
 export type Code =
-  | 'run/over-budget'
-  | 'run/does-not-compile'
-  | 'run/destination-uncovered'
+  | 'syntax/expected-token'
+  | 'syntax/unexpected-token'
+  | 'syntax/unknown-character'
+  | 'syntax/retired-spelling'
+  | 'syntax/malformed-rename'
+  | 'syntax/misplaced-attribute'
+  | 'syntax/invalid-mapping-header'
+  | 'syntax/invalid-property-name'
+  | 'syntax/missing-value'
+  | 'syntax/number-out-of-range'
+  | 'syntax/incomplete-conditional'
+  | 'syntax/uncalled-function'
+  | 'syntax/invalid-callee'
+  | 'name/unknown-shape'
+  | 'name/unknown-property'
+  | 'name/unknown-field'
+  | 'name/row-not-in-scope'
+  | 'name/unknown-function'
+  | 'name/ambiguous-member'
+  | 'name/unknown-parameter'
+  | 'name/unknown-source'
+  | 'argument/arity'
+  | 'argument/duplicate'
+  | 'argument/skipped-parameter'
+  | 'argument/positional-after-named'
+  | 'argument/named-on-edge'
+  | 'argument/alias-in-value-call'
+  | 'type/property-mismatch'
+  | 'type/argument-mismatch'
+  | 'type/relation-as-value'
+  | 'type/expected-bool'
+  | 'type/expected-number'
+  | 'type/incomparable'
+  | 'type/branch-mismatch'
+  | 'shape/no-document'
+  | 'shape/name-collision'
+  | 'shape/missing-required-property'
+  | 'shape/unsupported-disjunction'
+  | 'shape/cyclic-reference'
+  | 'shape/unresolved-reference'
+  | 'shape/binding-arity'
+  | 'shape/rename-unknown-type'
+  | 'shape/rename-unknown-predicate'
   | 'shape/more-than-one-output'
-  | 'provider/bare-document-path'
   | 'document/not-registered'
   | 'document/unparseable'
   | 'document/unread'
   | 'provider/unknown'
   | 'provider/wrong-capability'
   | 'provider/wrong-extension'
+  | 'provider/bare-document-path'
+  | 'provider/invalid-reader-option'
+  | 'provider/foreign-reader-option'
+  | 'identity/missing-subject'
+  | 'identity/duplicate-subject'
+  | 'identity/subject-not-first'
+  | 'identity/conflicting'
+  | 'identity/edge-without-template'
+  | 'identity/edge-arity'
+  | 'pipeline/unknown-verb'
+  | 'pipeline/unimplemented-verb'
+  | 'pipeline/source-as-stage'
+  | 'pipeline/stage-arity'
+  | 'pipeline/invalid-stage-argument'
+  | 'pipeline/not-an-aggregate'
+  | 'pipeline/union-alias'
+  | 'pipeline/cycle'
+  | 'pipeline/unknown-columns'
+  | 'pipeline/union-mismatch'
+  | 'pipeline/join-not-equality'
+  | 'pipeline/join-key-not-column'
+  | 'pipeline/join-one-side'
+  | 'unsupported/expression'
+  | 'run/over-budget'
+  | 'run/does-not-compile'
+  | 'run/destination-uncovered'
   | 'source/not-utf8'
   | 'source/unparseable'
   | 'engine/failed'
@@ -49,17 +114,82 @@ export type Code =
 
 /** Every live code, in the catalogue's order. */
 export const CODES: readonly Code[] = [
-  'run/over-budget',
-  'run/does-not-compile',
-  'run/destination-uncovered',
+  'syntax/expected-token',
+  'syntax/unexpected-token',
+  'syntax/unknown-character',
+  'syntax/retired-spelling',
+  'syntax/malformed-rename',
+  'syntax/misplaced-attribute',
+  'syntax/invalid-mapping-header',
+  'syntax/invalid-property-name',
+  'syntax/missing-value',
+  'syntax/number-out-of-range',
+  'syntax/incomplete-conditional',
+  'syntax/uncalled-function',
+  'syntax/invalid-callee',
+  'name/unknown-shape',
+  'name/unknown-property',
+  'name/unknown-field',
+  'name/row-not-in-scope',
+  'name/unknown-function',
+  'name/ambiguous-member',
+  'name/unknown-parameter',
+  'name/unknown-source',
+  'argument/arity',
+  'argument/duplicate',
+  'argument/skipped-parameter',
+  'argument/positional-after-named',
+  'argument/named-on-edge',
+  'argument/alias-in-value-call',
+  'type/property-mismatch',
+  'type/argument-mismatch',
+  'type/relation-as-value',
+  'type/expected-bool',
+  'type/expected-number',
+  'type/incomparable',
+  'type/branch-mismatch',
+  'shape/no-document',
+  'shape/name-collision',
+  'shape/missing-required-property',
+  'shape/unsupported-disjunction',
+  'shape/cyclic-reference',
+  'shape/unresolved-reference',
+  'shape/binding-arity',
+  'shape/rename-unknown-type',
+  'shape/rename-unknown-predicate',
   'shape/more-than-one-output',
-  'provider/bare-document-path',
   'document/not-registered',
   'document/unparseable',
   'document/unread',
   'provider/unknown',
   'provider/wrong-capability',
   'provider/wrong-extension',
+  'provider/bare-document-path',
+  'provider/invalid-reader-option',
+  'provider/foreign-reader-option',
+  'identity/missing-subject',
+  'identity/duplicate-subject',
+  'identity/subject-not-first',
+  'identity/conflicting',
+  'identity/edge-without-template',
+  'identity/edge-arity',
+  'pipeline/unknown-verb',
+  'pipeline/unimplemented-verb',
+  'pipeline/source-as-stage',
+  'pipeline/stage-arity',
+  'pipeline/invalid-stage-argument',
+  'pipeline/not-an-aggregate',
+  'pipeline/union-alias',
+  'pipeline/cycle',
+  'pipeline/unknown-columns',
+  'pipeline/union-mismatch',
+  'pipeline/join-not-equality',
+  'pipeline/join-key-not-column',
+  'pipeline/join-one-side',
+  'unsupported/expression',
+  'run/over-budget',
+  'run/does-not-compile',
+  'run/destination-uncovered',
   'source/not-utf8',
   'source/unparseable',
   'engine/failed',
@@ -93,23 +223,307 @@ export const CODES: readonly Code[] = [
 /** What each code carries as `data`. */
 export interface ProblemData {
   /**
-   * An operator asked for more memory than the run's budget had left. Raised while the graph executes, before any byte of the corpus is written. Sizes are bytes.
+   * The parser wanted one token and found another. Both are token kinds.
    */
-  'run/over-budget': {
-    budget: number;
-    consumer: string;
-    requested: number;
-    reserved: number;
+  'syntax/expected-token': {
+    expected: string;
+    found: string;
   };
   /**
-   * A run over a program that does not compile. The failure's `related` carries the program's diagnostics.
+   * A token the parser skipped while recovering from an earlier mistake.
    */
-  'run/does-not-compile': Record<string, never>;
+  'syntax/unexpected-token': Record<string, never>;
   /**
-   * The destination a run writes under is not a prefix any store covers.
+   * A character no token of the language starts with.
    */
-  'run/destination-uncovered': {
-    destination: string;
+  'syntax/unknown-character': {
+    character: string;
+  };
+  /**
+   * A spelling the language had and retired, recognised on purpose so the message can name what replaces it.
+   */
+  'syntax/retired-spelling': {
+    replacement: string;
+    spelling: string;
+  };
+  /**
+   * A `@rename` written incompletely; `missing` is the part it lacks.
+   */
+  'syntax/malformed-rename': {
+    missing: string;
+  };
+  /**
+   * An attribute written where it does not belong.
+   */
+  'syntax/misplaced-attribute': {
+    attribute: string;
+    place: string;
+  };
+  /**
+   * A mapping whose header cannot be read; nothing is produced from it.
+   */
+  'syntax/invalid-mapping-header': {
+    reason: string;
+  };
+  /**
+   * A property whose left-hand side is not a bare name; `name` is absent when there is nothing on the left at all.
+   */
+  'syntax/invalid-property-name': {
+    name?: string | null;
+  };
+  /**
+   * A property with nothing on its right-hand side.
+   */
+  'syntax/missing-value': Record<string, never>;
+  /**
+   * A number literal that does not fit the type it is read as.
+   */
+  'syntax/number-out-of-range': {
+    kind: string;
+    literal: string;
+    reason: string;
+  };
+  /**
+   * A `? :` missing one of its three parts.
+   */
+  'syntax/incomplete-conditional': {
+    expression: string;
+  };
+  /**
+   * A function named where a value belongs and never called.
+   */
+  'syntax/uncalled-function': {
+    function: string;
+  };
+  /**
+   * A call whose callee is not a name.
+   */
+  'syntax/invalid-callee': {
+    callee: string;
+  };
+  /**
+   * A shape name no `type { … } := …` binding introduces. `declared` is the names the program does bind.
+   */
+  'name/unknown-shape': {
+    declared: string[];
+    shape: string;
+  };
+  /**
+   * A property key the target shape does not declare.
+   */
+  'name/unknown-property': {
+    declared: string[];
+    property: string;
+  };
+  /**
+   * A column a row does not have. `fields` is what it does have.
+   */
+  'name/unknown-field': {
+    field: string;
+    fields: string[];
+    relation: string;
+  };
+  /**
+   * A qualified reference to a row that is not in scope where it is written — a mapping's, a pipeline stage's or a join's. `rows` is what is in scope.
+   */
+  'name/row-not-in-scope': {
+    binding: string;
+    column: string;
+    rows: string[];
+    scope: string;
+  };
+  /**
+   * A call to a name the catalogue does not have. `unknown_namespace` is set when the part before the dot is itself unknown.
+   */
+  'name/unknown-function': {
+    function: string;
+    unknown_namespace?: string | null;
+  };
+  /**
+   * A member call on a value whose member several receivers have.
+   */
+  'name/ambiguous-member': {
+    member: string;
+    receivers: string[];
+  };
+  /**
+   * A named argument no parameter of the function has.
+   */
+  'name/unknown-parameter': {
+    function: string;
+    parameter: string;
+    parameters: string[];
+  };
+  /**
+   * A `from` that names no source binding. `bound_to` is the constructor the name is bound to instead, when it is bound at all.
+   */
+  'name/unknown-source': {
+    binding: string;
+    bound_to?: string | null;
+  };
+  /**
+   * A call given fewer arguments than it requires or more than it takes.
+   */
+  'argument/arity': {
+    function: string;
+    given: number;
+    max: number;
+    min: number;
+  };
+  /**
+   * A parameter given twice — named twice, or named when the receiver already fills it.
+   */
+  'argument/duplicate': {
+    function: string;
+    parameter: string;
+    receiver: boolean;
+  };
+  /**
+   * A parameter left empty with a later one given.
+   */
+  'argument/skipped-parameter': {
+    function: string;
+    parameter: string;
+  };
+  /**
+   * A positional argument after a named one.
+   */
+  'argument/positional-after-named': {
+    argument: string;
+    named: string;
+  };
+  /**
+   * A named argument to an edge, whose arguments are positional.
+   */
+  'argument/named-on-edge': {
+    argument: string;
+    target: string;
+  };
+  /**
+   * A source alias given to a call that takes values.
+   */
+  'argument/alias-in-value-call': {
+    alias: string;
+    function: string;
+  };
+  /**
+   * A property written with a value of a type its shape does not allow.
+   */
+  'type/property-mismatch': {
+    actual: string;
+    expected: string;
+    property: string;
+  };
+  /**
+   * An argument of a type its parameter does not take. `position` is 1-based, and absent for the receiver of a member call.
+   */
+  'type/argument-mismatch': {
+    actual: string;
+    expected: string;
+    function: string;
+    position?: number | null;
+  };
+  /**
+   * A relation written where a value belongs.
+   */
+  'type/relation-as-value': {
+    function: string;
+  };
+  /**
+   * A value that has to be Bool and is not. `operand` says which.
+   */
+  'type/expected-bool': {
+    actual: string;
+    operand: string;
+  };
+  /**
+   * A value that has to be a number and is not. `operand` says which.
+   */
+  'type/expected-number': {
+    actual: string;
+    operand: string;
+  };
+  /**
+   * A comparison between two types that do not compare.
+   */
+  'type/incomparable': {
+    left: string;
+    operator: string;
+    right: string;
+  };
+  /**
+   * A `? :` whose branches have different types; fossil does not coerce.
+   */
+  'type/branch-mismatch': {
+    otherwise: string;
+    then: string;
+  };
+  /**
+   * No shape document where one is needed. `binding` is the binding that names none; absent when the program names none at all.
+   */
+  'shape/no-document': {
+    binding?: string | null;
+  };
+  /**
+   * Two predicates of one shape whose short names coincide, which makes both unwritable. `first` and `second` are their IRIs.
+   */
+  'shape/name-collision': {
+    first: string;
+    name: string;
+    second: string;
+    shape: string;
+  };
+  /**
+   * A predicate the shape requires and the mapping never writes.
+   */
+  'shape/missing-required-property': {
+    mapping: string;
+    property: string;
+    shape: string;
+  };
+  /**
+   * A value disjunction in a shape, which one mapping cannot write.
+   */
+  'shape/unsupported-disjunction': {
+    branches: number;
+    shape: string;
+  };
+  /**
+   * A shape graph that refers back to itself.
+   */
+  'shape/cyclic-reference': {
+    path: string[];
+  };
+  /**
+   * A shape reference the document does not resolve.
+   */
+  'shape/unresolved-reference': {
+    reference: string;
+    shape: string;
+  };
+  /**
+   * A binding that names more shapes than its document declares; names bind by position, and `position` is the surplus name's.
+   */
+  'shape/binding-arity': {
+    declared: number;
+    name: string;
+    named: number;
+    position: number;
+  };
+  /**
+   * A `@rename` naming a type its binding does not introduce.
+   */
+  'shape/rename-unknown-type': {
+    introduced: string[];
+    shape: string;
+  };
+  /**
+   * A `@rename` naming a predicate its shape does not declare.
+   */
+  'shape/rename-unknown-predicate': {
+    declared: string[];
+    predicate: string;
+    shape: string;
   };
   /**
    * A program whose sources declare two different output shapes; one program writes one.
@@ -119,22 +533,17 @@ export interface ProblemData {
     second: string;
   };
   /**
-   * A shape document written as a bare path, with no provider to read it. Also a compile code; the executor reaches it for the output shape.
-   */
-  'provider/bare-document-path': {
-    document: string;
-  };
-  /**
-   * A document the program names that the host never registered.
+   * A document the program names that nothing is registered under.
    */
   'document/not-registered': {
     document: string;
   };
   /**
-   * A registered document its provider could not decode.
+   * A registered document its provider could not decode. `reason` is the decoder's own account, when it gave one.
    */
   'document/unparseable': {
     document: string;
+    reason?: string | null;
   };
   /**
    * Documents a run needed that the host could not read.
@@ -161,6 +570,196 @@ export interface ProblemData {
   'provider/wrong-extension': {
     constructor: string;
     document: string;
+  };
+  /**
+   * A document written as a bare path, with no provider to read it.
+   */
+  'provider/bare-document-path': {
+    document: string;
+  };
+  /**
+   * A reader option whose value no reader can be given: not a string (`value` absent), or not one ASCII character.
+   */
+  'provider/invalid-reader-option': {
+    constructor: string;
+    option: string;
+    value?: string | null;
+  };
+  /**
+   * A reader option the provider does not have; `owner` is the one that does.
+   */
+  'provider/foreign-reader-option': {
+    constructor: string;
+    option: string;
+    owner: string;
+  };
+  /**
+   * A mapping with no `@subject`.
+   */
+  'identity/missing-subject': {
+    mapping: string;
+  };
+  /**
+   * A mapping with two `@subject` lines.
+   */
+  'identity/duplicate-subject': {
+    mapping: string;
+  };
+  /**
+   * A `@subject` that is not the first line of its body. `line` is 1-based, within the body.
+   */
+  'identity/subject-not-first': {
+    line: number;
+    mapping: string;
+  };
+  /**
+   * Two mappings producing one type with two different `@subject` forms.
+   */
+  'identity/conflicting': {
+    first: string;
+    second: string;
+    shape: string;
+  };
+  /**
+   * An edge to a type no mapping writes, so there is no identity to build.
+   */
+  'identity/edge-without-template': {
+    target: string;
+  };
+  /**
+   * An edge given a number of values its identity template has no holes for. `mapping` is the one whose `@subject` declares the template.
+   */
+  'identity/edge-arity': {
+    given: number;
+    mapping: string;
+    takes: number;
+    target: string;
+  };
+  /**
+   * A stage whose verb the catalogue does not have.
+   */
+  'pipeline/unknown-verb': {
+    verb: string;
+    verbs: string[];
+  };
+  /**
+   * A verb the catalogue declares and the lowering does not implement yet.
+   */
+  'pipeline/unimplemented-verb': {
+    implemented: string[];
+    pipeline: string;
+    verb: string;
+  };
+  /**
+   * A source constructor written as a stage of a pipeline.
+   */
+  'pipeline/source-as-stage': {
+    pipeline: string;
+    verb: string;
+  };
+  /**
+   * A stage missing a position it needs (`missing`), or given more than it takes (`missing` absent).
+   */
+  'pipeline/stage-arity': {
+    missing?: string | null;
+    pipeline: string;
+    verb: string;
+  };
+  /**
+   * A stage argument of the wrong kind — a value where a column or a binding name belongs.
+   */
+  'pipeline/invalid-stage-argument': {
+    expected: string;
+    parameter: string;
+    pipeline: string;
+  };
+  /**
+   * A `group_by` output that is not an aggregate call. `function` is the call written, when it is a call; `aggregates` are the ones there are.
+   */
+  'pipeline/not-an-aggregate': {
+    aggregates: string[];
+    function?: string | null;
+    name: string;
+    pipeline: string;
+  };
+  /**
+   * An alias on a `union`, whose result has the pipeline's one name.
+   */
+  'pipeline/union-alias': {
+    alias: string;
+    pipeline: string;
+  };
+  /**
+   * A pipeline that derives from itself.
+   */
+  'pipeline/cycle': {
+    pipeline: string;
+  };
+  /**
+   * A `join` whose other side declares no schema, so its condition cannot be checked.
+   */
+  'pipeline/unknown-columns': {
+    bindings: string[];
+    pipeline: string;
+  };
+  /**
+   * A `union` whose two sides carry different rows. Each column is `name: Type`; `column` is the 1-based first that differs, absent when the counts do.
+   */
+  'pipeline/union-mismatch': {
+    column?: number | null;
+    left: string[];
+    pipeline: string;
+    right: string[];
+  };
+  /**
+   * A `join` condition that is not an equality, or a conjunction of them.
+   */
+  'pipeline/join-not-equality': {
+    condition: string;
+    pipeline: string;
+  };
+  /**
+   * A `join` key that is not a column reference.
+   */
+  'pipeline/join-key-not-column': {
+    left: string;
+    operand: string;
+    pipeline: string;
+    right: string;
+  };
+  /**
+   * A `join` equality whose two columns are on the same side.
+   */
+  'pipeline/join-one-side': {
+    left: string;
+    pipeline: string;
+    right: string;
+    side: string;
+  };
+  /**
+   * An expression or literal the parser reads and the lowering has no case for — a gap in the compiler, not a mistake in the program.
+   */
+  'unsupported/expression': {
+    expression: string;
+  };
+  /**
+   * An operator asked for more memory than the run's budget had left. Raised while the graph executes, before any byte of the corpus is written. Sizes are bytes.
+   */
+  'run/over-budget': {
+    budget: number;
+    consumer: string;
+    requested: number;
+    reserved: number;
+  };
+  /**
+   * A run over a program that does not compile. The failure's `related` carries the program's diagnostics.
+   */
+  'run/does-not-compile': Record<string, never>;
+  /**
+   * The destination a run writes under is not a prefix any store covers.
+   */
+  'run/destination-uncovered': {
+    destination: string;
   };
   /**
    * A source's bytes are not UTF-8 text.
@@ -343,17 +942,82 @@ export interface ProblemData {
 
 /** Each code's title — fixed per code (RFC 9457 `title`); may be reworded in any release. */
 export const TITLES: { readonly [C in Code]: string } = {
-  'run/over-budget': 'The run needs more memory than its budget',
-  'run/does-not-compile': 'The program does not compile',
-  'run/destination-uncovered': 'No store covers the destination',
+  'syntax/expected-token': 'Expected another token',
+  'syntax/unexpected-token': 'Unexpected token',
+  'syntax/unknown-character': 'No token starts with this character',
+  'syntax/retired-spelling': 'A retired spelling',
+  'syntax/malformed-rename': 'A malformed rename',
+  'syntax/misplaced-attribute': 'An attribute in the wrong place',
+  'syntax/invalid-mapping-header': 'Not a mapping header',
+  'syntax/invalid-property-name': 'Not a property name',
+  'syntax/missing-value': 'A property with no value',
+  'syntax/number-out-of-range': 'A number fossil cannot carry',
+  'syntax/incomplete-conditional': 'An incomplete conditional',
+  'syntax/uncalled-function': 'A function named and not called',
+  'syntax/invalid-callee': 'Not a function name',
+  'name/unknown-shape': 'Not a shape this program declares',
+  'name/unknown-property': 'Not a property the shape declares',
+  'name/unknown-field': 'Not a field of this row',
+  'name/row-not-in-scope': 'A row that is not in scope',
+  'name/unknown-function': 'Not a function fossil knows',
+  'name/ambiguous-member': 'A member of more than one receiver',
+  'name/unknown-parameter': 'Not a parameter of this function',
+  'name/unknown-source': 'Not a source binding',
+  'argument/arity': 'The wrong number of arguments',
+  'argument/duplicate': 'An argument given twice',
+  'argument/skipped-parameter': 'A parameter skipped',
+  'argument/positional-after-named': 'A positional argument after a named one',
+  'argument/named-on-edge': 'A named argument to an edge',
+  'argument/alias-in-value-call': 'A source alias in a value call',
+  'type/property-mismatch': 'A property of the wrong type',
+  'type/argument-mismatch': 'An argument of the wrong type',
+  'type/relation-as-value': 'A relation where a value belongs',
+  'type/expected-bool': 'Not a Bool',
+  'type/expected-number': 'Not a number',
+  'type/incomparable': 'Values that cannot be compared',
+  'type/branch-mismatch': 'Branches of different types',
+  'shape/no-document': 'No shape document',
+  'shape/name-collision': 'Two predicates share a name',
+  'shape/missing-required-property': 'A required property is never written',
+  'shape/unsupported-disjunction': 'A value disjunction',
+  'shape/cyclic-reference': 'A cyclic shape reference',
+  'shape/unresolved-reference': 'An unresolved shape reference',
+  'shape/binding-arity': 'More names than shapes',
+  'shape/rename-unknown-type': 'A rename of a type the binding does not introduce',
+  'shape/rename-unknown-predicate': 'A rename of a predicate the shape does not declare',
   'shape/more-than-one-output': 'More than one output shape',
-  'provider/bare-document-path': 'A document path with no provider',
   'document/not-registered': 'A document is not registered',
   'document/unparseable': 'A document does not parse',
   'document/unread': 'Documents could not be read',
   'provider/unknown': 'Not a provider this host installs',
   'provider/wrong-capability': 'The provider cannot do this',
   'provider/wrong-extension': 'The provider does not read this extension',
+  'provider/bare-document-path': 'A document path with no provider',
+  'provider/invalid-reader-option': 'A reader option fossil cannot pass on',
+  'provider/foreign-reader-option': 'A reader option of another provider',
+  'identity/missing-subject': 'A mapping with no identity',
+  'identity/duplicate-subject': 'Two identities in one mapping',
+  'identity/subject-not-first': 'The identity is not first',
+  'identity/conflicting': 'Two identities for one type',
+  'identity/edge-without-template': 'An edge to a type nothing writes',
+  'identity/edge-arity': 'An edge given the wrong number of values',
+  'pipeline/unknown-verb': 'Not a relation verb',
+  'pipeline/unimplemented-verb': 'A verb with no lowering yet',
+  'pipeline/source-as-stage': 'A source constructor used as a stage',
+  'pipeline/stage-arity': 'A stage given the wrong arguments',
+  'pipeline/invalid-stage-argument': 'A stage argument of the wrong kind',
+  'pipeline/not-an-aggregate': 'Not an aggregation',
+  'pipeline/union-alias': 'An alias on a union',
+  'pipeline/cycle': 'A pipeline that derives from itself',
+  'pipeline/unknown-columns': 'A join over a source with no schema',
+  'pipeline/union-mismatch': 'Union sides with different rows',
+  'pipeline/join-not-equality': 'A join condition that is not an equality',
+  'pipeline/join-key-not-column': 'A join key that is not a column',
+  'pipeline/join-one-side': 'A join condition on one side only',
+  'unsupported/expression': 'An expression fossil cannot lower yet',
+  'run/over-budget': 'The run needs more memory than its budget',
+  'run/does-not-compile': 'The program does not compile',
+  'run/destination-uncovered': 'No store covers the destination',
   'source/not-utf8': 'A source is not UTF-8',
   'source/unparseable': 'A source does not parse',
   'engine/failed': 'The query engine failed',

@@ -157,7 +157,12 @@ fn redact_paths(msg: &str) -> String {
 /// declines to — and without the `help:` line the two snapshots are identical.
 fn render_diagnostic(out: &mut String, diag: &Diagnostic) {
     use std::fmt::Write as _;
-    let _ = writeln!(out, "{:?}: {}", diag.severity, redact_paths(&diag.message));
+    let _ = writeln!(
+        out,
+        "{:?}: {}",
+        diag.severity,
+        redact_paths(&diag.message())
+    );
     let _ = writeln!(out, "  at {}..{}", diag.span.start, diag.span.end);
     for label in &diag.labels {
         let _ = writeln!(
@@ -261,10 +266,10 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
     } else {
         // Stable ordering: by span then message.
         all_diags.sort_by(|a, b| {
-            (a.span.start, a.span.end, a.message.as_str()).cmp(&(
+            (a.span.start, a.span.end, a.message().as_str()).cmp(&(
                 b.span.start,
                 b.span.end,
-                b.message.as_str(),
+                b.message().as_str(),
             ))
         });
         for diag in &all_diags {
@@ -798,7 +803,7 @@ fn the_recommended_rename_parses_and_repairs_the_collision() {
     let mapping = def_map(&db, file).mappings(&db)[0];
     let before: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, mapping)
         .into_iter()
-        .map(|d| d.message.clone())
+        .map(Diagnostic::message)
         .collect();
     assert!(
         before.iter().any(|m| m.contains("both called `name`")),
@@ -829,7 +834,7 @@ fn the_recommended_rename_parses_and_repairs_the_collision() {
     );
     let after: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db2, mappings[0])
         .into_iter()
-        .map(|d| d.message.clone())
+        .map(Diagnostic::message)
         .collect();
     assert!(
         !after.iter().any(|m| m.contains("both called `name`")),
@@ -851,7 +856,7 @@ fn the_recommended_rename_parses_and_repairs_the_collision() {
     let m3 = def_map(&db3, file3).mappings(&db3)[0];
     let diags: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db3, m3)
         .into_iter()
-        .map(|d| d.message.clone())
+        .map(Diagnostic::message)
         .collect();
     assert!(
         !diags.iter().any(|m| m.contains(&alias)),

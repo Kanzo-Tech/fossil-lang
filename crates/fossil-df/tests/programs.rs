@@ -231,7 +231,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use census::ProgramCensus;
-use fossil_base::Severity;
+use fossil_base::{Problem, Severity};
 
 /// How many programs the conformance set has, and how many of them are meant to
 /// be rejected. Pinned rather than counted, because the set moving is a decision
@@ -532,7 +532,7 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
         }
         if !program.must_fail && !errors.is_empty() {
             for d in &errors {
-                findings.push(format!("  CHECK {}", d.message));
+                findings.push(format!("  CHECK {}", d.message()));
             }
         }
         if !program.must_fail && outcome.mappings == 0 {
@@ -570,7 +570,7 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
                 Some(d) => findings.push(format!(
                     "  DROPPED `{mapping}.{key}` is not written to the corpus, and the \
                      compiler said so: {}",
-                    d.message,
+                    d.message(),
                 )),
                 None => findings.push(format!(
                     "  SILENT-DROP `{mapping}` wrote `{key}` and the lowering threw it away \
@@ -739,7 +739,10 @@ fn an_unparseable_file_reports_its_parse_error() {
             .diagnostics
             .iter()
             .any(|d| d.severity == Severity::Error
-                && d.message.to_lowercase().contains("unexpected")),
+                && matches!(
+                    d.problem,
+                    Problem::UnexpectedToken {} | Problem::UnknownCharacter { .. }
+                )),
         "garbage is not a program; got {:?}",
         outcome.diagnostics
     );
@@ -766,7 +769,10 @@ fn a_parse_error_in_a_file_with_a_mapping_is_reported_once() {
     let occurrences = outcome
         .diagnostics
         .iter()
-        .filter(|d| d.message.contains("expected ASSIGN, found IDENT"))
+        .filter(|d| {
+            matches!(&d.problem,
+            Problem::ExpectedToken { expected, found } if expected == "ASSIGN" && found == "IDENT")
+        })
         .count();
     assert_eq!(
         occurrences, 1,

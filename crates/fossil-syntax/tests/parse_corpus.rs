@@ -10,8 +10,9 @@
 //! `|>` was the last retired spelling still written here, and it is gone too:
 //! the token left the lexer, so `a |> f()` now arrives as an unlexable `|` and
 //! a `GT` and the parser answers `retired::PIPELINE`.
-//! `no_fixture_spells_a_retired_form` reads `retired::PIPELINE` along with the
-//! other five, so the operator cannot come back through a regenerated snapshot.
+//! `no_fixture_spells_a_retired_form` refuses every `syntax/retired-spelling`,
+//! that one included, so the operator cannot come back through a regenerated
+//! snapshot.
 //! Bucket 1 keeps its name because it keeps its subject: a pipeline is a chain,
 //! and the chain is spelled `User.filter(…)`, chained, with the dot every other
 //! postfix form already used.
@@ -242,7 +243,7 @@ fixture_test!(
 //     because it was written before the precedence table did, and it was
 //     never renamed; the parser correctly does NOT emit an error here.
 
-use fossil_base::Diagnostic;
+use fossil_base::{Diagnostic, Problem};
 use salsa::Accumulator;
 
 #[test]
@@ -304,26 +305,6 @@ fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
 /// renaming the trait surface.
 const fn assert_accumulator_bound<A: Accumulator>() {}
 
-/// The six retired spellings, read out of the parser rather than written down
-/// again here. `diag::retired` is «the one place they are written down» and this
-/// is the reader that keeps it so: a message that drifts at a call site drifts
-/// out of this list too, and the guard below stops proving anything.
-const fn retired_messages() -> [&'static str; 6] {
-    use fossil_syntax::parser::diag::retired;
-
-    [
-        retired::PREFIX_DECL,
-        retired::CURIE,
-        retired::ABSOLUTE_IRI,
-        retired::LEADING_DOT,
-        retired::BACKTICK,
-        // `|>`. It was excluded while bucket 1 still wrote it; bucket 1 writes
-        // the member call now, so the last spelling this list did not read is
-        // read here.
-        retired::PIPELINE,
-    ]
-}
-
 /// Parse `src` and assert it produces no `RetiredSpelling` diagnostic. `origin`
 /// names it in the failure — a path, or a path and a line for a fenced block.
 fn assert_no_retired_spelling(src: &str, origin: &str) {
@@ -333,10 +314,10 @@ fn assert_no_retired_spelling(src: &str, origin: &str) {
     let _cst = parse(&db, file);
     for d in parse::accumulated::<Diagnostic>(&db, file) {
         assert!(
-            !retired_messages().iter().any(|m| d.message == *m),
+            !matches!(d.problem, Problem::RetiredSpelling { .. }),
             "{origin}: this still spells a form grammar.bnf retired — \
              rewrite it, do not snapshot the refusal.\n  {}",
-            d.message,
+            d.message(),
         );
     }
 }

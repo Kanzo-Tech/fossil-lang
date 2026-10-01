@@ -1,11 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Problem",
-  "description": "**One failure fossil can report**, identified by its code.\n\nSerialized as `{ \"code\": \"area/kind\", \"data\": { … } }`: the code is the serde tag, and `data` is always an object. `Display` is the message for a person, rendered from the data; nothing should parse it — a value a host needs is a field.",
+  "description": "**One mistake fossil can report**, identified by its code.\n\nSerialized as `{ \"code\": \"area/kind\", \"data\": { … } }`: the code is the serde tag, and `data` is always an object. `Display` is the message for a person, rendered from the data; nothing should parse it — a value a host needs is a field.",
   "oneOf": [
     {
-      "title": "The run needs more memory than its budget",
-      "description": "An operator asked for more memory than the run's budget had left. Raised while the graph executes, before any byte of the corpus is written. Sizes are bytes.",
+      "title": "Expected another token",
+      "description": "The parser wanted one token and found another. Both are token kinds.",
       "type": "object",
       "required": [
         "code",
@@ -15,32 +15,694 @@
         "code": {
           "type": "string",
           "enum": [
-            "run/over-budget"
+            "syntax/expected-token"
           ]
         },
         "data": {
           "type": "object",
           "required": [
-            "budget",
-            "consumer",
-            "requested",
-            "reserved"
+            "expected",
+            "found"
           ],
           "properties": {
-            "budget": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
-            "consumer": {
+            "expected": {
               "type": "string"
             },
-            "requested": {
+            "found": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Unexpected token",
+      "description": "A token the parser skipped while recovering from an earlier mistake.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/unexpected-token"
+          ]
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "title": "No token starts with this character",
+      "description": "A character no token of the language starts with.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/unknown-character"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "character"
+          ],
+          "properties": {
+            "character": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A retired spelling",
+      "description": "A spelling the language had and retired, recognised on purpose so the message can name what replaces it.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/retired-spelling"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "replacement",
+            "spelling"
+          ],
+          "properties": {
+            "replacement": {
+              "type": "string"
+            },
+            "spelling": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A malformed rename",
+      "description": "A `@rename` written incompletely; `missing` is the part it lacks.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/malformed-rename"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "missing"
+          ],
+          "properties": {
+            "missing": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "An attribute in the wrong place",
+      "description": "An attribute written where it does not belong.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/misplaced-attribute"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "attribute",
+            "place"
+          ],
+          "properties": {
+            "attribute": {
+              "type": "string"
+            },
+            "place": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a mapping header",
+      "description": "A mapping whose header cannot be read; nothing is produced from it.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/invalid-mapping-header"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "reason"
+          ],
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a property name",
+      "description": "A property whose left-hand side is not a bare name; `name` is absent when there is nothing on the left at all.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/invalid-property-name"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A property with no value",
+      "description": "A property with nothing on its right-hand side.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/missing-value"
+          ]
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "title": "A number fossil cannot carry",
+      "description": "A number literal that does not fit the type it is read as.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/number-out-of-range"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "kind",
+            "literal",
+            "reason"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "literal": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "An incomplete conditional",
+      "description": "A `? :` missing one of its three parts.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/incomplete-conditional"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "expression"
+          ],
+          "properties": {
+            "expression": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A function named and not called",
+      "description": "A function named where a value belongs and never called.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/uncalled-function"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "function"
+          ],
+          "properties": {
+            "function": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a function name",
+      "description": "A call whose callee is not a name.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "syntax/invalid-callee"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "callee"
+          ],
+          "properties": {
+            "callee": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a shape this program declares",
+      "description": "A shape name no `type { … } := …` binding introduces. `declared` is the names the program does bind.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "name/unknown-shape"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "declared",
+            "shape"
+          ],
+          "properties": {
+            "declared": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "shape": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a property the shape declares",
+      "description": "A property key the target shape does not declare.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "name/unknown-property"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "declared",
+            "property"
+          ],
+          "properties": {
+            "declared": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "property": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a field of this row",
+      "description": "A column a row does not have. `fields` is what it does have.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "name/unknown-field"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "field",
+            "fields",
+            "relation"
+          ],
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "relation": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A row that is not in scope",
+      "description": "A qualified reference to a row that is not in scope where it is written — a mapping's, a pipeline stage's or a join's. `rows` is what is in scope.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "name/row-not-in-scope"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "binding",
+            "column",
+            "rows",
+            "scope"
+          ],
+          "properties": {
+            "binding": {
+              "type": "string"
+            },
+            "column": {
+              "type": "string"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "scope": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a function fossil knows",
+      "description": "A call to a name the catalogue does not have. `unknown_namespace` is set when the part before the dot is itself unknown.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "name/unknown-function"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "function"
+          ],
+          "properties": {
+            "function": {
+              "type": "string"
+            },
+            "unknown_namespace": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A member of more than one receiver",
+      "description": "A member call on a value whose member several receivers have.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "name/ambiguous-member"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "member",
+            "receivers"
+          ],
+          "properties": {
+            "member": {
+              "type": "string"
+            },
+            "receivers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a parameter of this function",
+      "description": "A named argument no parameter of the function has.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "name/unknown-parameter"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "function",
+            "parameter",
+            "parameters"
+          ],
+          "properties": {
+            "function": {
+              "type": "string"
+            },
+            "parameter": {
+              "type": "string"
+            },
+            "parameters": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a source binding",
+      "description": "A `from` that names no source binding. `bound_to` is the constructor the name is bound to instead, when it is bound at all.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "name/unknown-source"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "binding"
+          ],
+          "properties": {
+            "binding": {
+              "type": "string"
+            },
+            "bound_to": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The wrong number of arguments",
+      "description": "A call given fewer arguments than it requires or more than it takes.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "argument/arity"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "function",
+            "given",
+            "max",
+            "min"
+          ],
+          "properties": {
+            "function": {
+              "type": "string"
+            },
+            "given": {
               "type": "integer",
               "format": "uint64",
               "minimum": 0.0
             },
-            "reserved": {
+            "max": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "min": {
               "type": "integer",
               "format": "uint64",
               "minimum": 0.0
@@ -50,8 +712,8 @@
       }
     },
     {
-      "title": "The program does not compile",
-      "description": "A run over a program that does not compile. The failure's `related` carries the program's diagnostics.",
+      "title": "An argument given twice",
+      "description": "A parameter given twice — named twice, or named when the receiver already fills it.",
       "type": "object",
       "required": [
         "code",
@@ -61,36 +723,713 @@
         "code": {
           "type": "string",
           "enum": [
-            "run/does-not-compile"
-          ]
-        },
-        "data": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "title": "No store covers the destination",
-      "description": "The destination a run writes under is not a prefix any store covers.",
-      "type": "object",
-      "required": [
-        "code",
-        "data"
-      ],
-      "properties": {
-        "code": {
-          "type": "string",
-          "enum": [
-            "run/destination-uncovered"
+            "argument/duplicate"
           ]
         },
         "data": {
           "type": "object",
           "required": [
-            "destination"
+            "function",
+            "parameter",
+            "receiver"
           ],
           "properties": {
-            "destination": {
+            "function": {
+              "type": "string"
+            },
+            "parameter": {
+              "type": "string"
+            },
+            "receiver": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A parameter skipped",
+      "description": "A parameter left empty with a later one given.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "argument/skipped-parameter"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "function",
+            "parameter"
+          ],
+          "properties": {
+            "function": {
+              "type": "string"
+            },
+            "parameter": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A positional argument after a named one",
+      "description": "A positional argument after a named one.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "argument/positional-after-named"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "argument",
+            "named"
+          ],
+          "properties": {
+            "argument": {
+              "type": "string"
+            },
+            "named": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A named argument to an edge",
+      "description": "A named argument to an edge, whose arguments are positional.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "argument/named-on-edge"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "argument",
+            "target"
+          ],
+          "properties": {
+            "argument": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A source alias in a value call",
+      "description": "A source alias given to a call that takes values.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "argument/alias-in-value-call"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "alias",
+            "function"
+          ],
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "function": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A property of the wrong type",
+      "description": "A property written with a value of a type its shape does not allow.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "type/property-mismatch"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "actual",
+            "expected",
+            "property"
+          ],
+          "properties": {
+            "actual": {
+              "type": "string"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "property": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "An argument of the wrong type",
+      "description": "An argument of a type its parameter does not take. `position` is 1-based, and absent for the receiver of a member call.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "type/argument-mismatch"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "actual",
+            "expected",
+            "function"
+          ],
+          "properties": {
+            "actual": {
+              "type": "string"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "function": {
+              "type": "string"
+            },
+            "position": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A relation where a value belongs",
+      "description": "A relation written where a value belongs.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "type/relation-as-value"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "function"
+          ],
+          "properties": {
+            "function": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a Bool",
+      "description": "A value that has to be Bool and is not. `operand` says which.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "type/expected-bool"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "actual",
+            "operand"
+          ],
+          "properties": {
+            "actual": {
+              "type": "string"
+            },
+            "operand": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a number",
+      "description": "A value that has to be a number and is not. `operand` says which.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "type/expected-number"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "actual",
+            "operand"
+          ],
+          "properties": {
+            "actual": {
+              "type": "string"
+            },
+            "operand": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Values that cannot be compared",
+      "description": "A comparison between two types that do not compare.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "type/incomparable"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "left",
+            "operator",
+            "right"
+          ],
+          "properties": {
+            "left": {
+              "type": "string"
+            },
+            "operator": {
+              "type": "string"
+            },
+            "right": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Branches of different types",
+      "description": "A `? :` whose branches have different types; fossil does not coerce.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "type/branch-mismatch"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "otherwise",
+            "then"
+          ],
+          "properties": {
+            "otherwise": {
+              "type": "string"
+            },
+            "then": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "No shape document",
+      "description": "No shape document where one is needed. `binding` is the binding that names none; absent when the program names none at all.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "shape/no-document"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Two predicates share a name",
+      "description": "Two predicates of one shape whose short names coincide, which makes both unwritable. `first` and `second` are their IRIs.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "shape/name-collision"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "first",
+            "name",
+            "second",
+            "shape"
+          ],
+          "properties": {
+            "first": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "second": {
+              "type": "string"
+            },
+            "shape": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A required property is never written",
+      "description": "A predicate the shape requires and the mapping never writes.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "shape/missing-required-property"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "mapping",
+            "property",
+            "shape"
+          ],
+          "properties": {
+            "mapping": {
+              "type": "string"
+            },
+            "property": {
+              "type": "string"
+            },
+            "shape": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A value disjunction",
+      "description": "A value disjunction in a shape, which one mapping cannot write.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "shape/unsupported-disjunction"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "branches",
+            "shape"
+          ],
+          "properties": {
+            "branches": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "shape": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A cyclic shape reference",
+      "description": "A shape graph that refers back to itself.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "shape/cyclic-reference"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "An unresolved shape reference",
+      "description": "A shape reference the document does not resolve.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "shape/unresolved-reference"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "reference",
+            "shape"
+          ],
+          "properties": {
+            "reference": {
+              "type": "string"
+            },
+            "shape": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "More names than shapes",
+      "description": "A binding that names more shapes than its document declares; names bind by position, and `position` is the surplus name's.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "shape/binding-arity"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "declared",
+            "name",
+            "named",
+            "position"
+          ],
+          "properties": {
+            "declared": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "name": {
+              "type": "string"
+            },
+            "named": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "position": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A rename of a type the binding does not introduce",
+      "description": "A `@rename` naming a type its binding does not introduce.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "shape/rename-unknown-type"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "introduced",
+            "shape"
+          ],
+          "properties": {
+            "introduced": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "shape": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A rename of a predicate the shape does not declare",
+      "description": "A `@rename` naming a predicate its shape does not declare.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "shape/rename-unknown-predicate"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "declared",
+            "predicate",
+            "shape"
+          ],
+          "properties": {
+            "declared": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "predicate": {
+              "type": "string"
+            },
+            "shape": {
               "type": "string"
             }
           }
@@ -130,36 +1469,8 @@
       }
     },
     {
-      "title": "A document path with no provider",
-      "description": "A shape document written as a bare path, with no provider to read it. Also a compile code; the executor reaches it for the output shape.",
-      "type": "object",
-      "required": [
-        "code",
-        "data"
-      ],
-      "properties": {
-        "code": {
-          "type": "string",
-          "enum": [
-            "provider/bare-document-path"
-          ]
-        },
-        "data": {
-          "type": "object",
-          "required": [
-            "document"
-          ],
-          "properties": {
-            "document": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
-    {
       "title": "A document is not registered",
-      "description": "A document the program names that the host never registered.",
+      "description": "A document the program names that nothing is registered under.",
       "type": "object",
       "required": [
         "code",
@@ -187,7 +1498,7 @@
     },
     {
       "title": "A document does not parse",
-      "description": "A registered document its provider could not decode.",
+      "description": "A registered document its provider could not decode. `reason` is the decoder's own account, when it gave one.",
       "type": "object",
       "required": [
         "code",
@@ -208,6 +1519,12 @@
           "properties": {
             "document": {
               "type": "string"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         }
@@ -330,6 +1647,910 @@
               "type": "string"
             },
             "document": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A document path with no provider",
+      "description": "A document written as a bare path, with no provider to read it.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "provider/bare-document-path"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "document"
+          ],
+          "properties": {
+            "document": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A reader option fossil cannot pass on",
+      "description": "A reader option whose value no reader can be given: not a string (`value` absent), or not one ASCII character.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "provider/invalid-reader-option"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "constructor",
+            "option"
+          ],
+          "properties": {
+            "constructor": {
+              "type": "string"
+            },
+            "option": {
+              "type": "string"
+            },
+            "value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A reader option of another provider",
+      "description": "A reader option the provider does not have; `owner` is the one that does.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "provider/foreign-reader-option"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "constructor",
+            "option",
+            "owner"
+          ],
+          "properties": {
+            "constructor": {
+              "type": "string"
+            },
+            "option": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A mapping with no identity",
+      "description": "A mapping with no `@subject`.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "identity/missing-subject"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "mapping"
+          ],
+          "properties": {
+            "mapping": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Two identities in one mapping",
+      "description": "A mapping with two `@subject` lines.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "identity/duplicate-subject"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "mapping"
+          ],
+          "properties": {
+            "mapping": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The identity is not first",
+      "description": "A `@subject` that is not the first line of its body. `line` is 1-based, within the body.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "identity/subject-not-first"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "line",
+            "mapping"
+          ],
+          "properties": {
+            "line": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "mapping": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Two identities for one type",
+      "description": "Two mappings producing one type with two different `@subject` forms.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "identity/conflicting"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "first",
+            "second",
+            "shape"
+          ],
+          "properties": {
+            "first": {
+              "type": "string"
+            },
+            "second": {
+              "type": "string"
+            },
+            "shape": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "An edge to a type nothing writes",
+      "description": "An edge to a type no mapping writes, so there is no identity to build.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "identity/edge-without-template"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "target"
+          ],
+          "properties": {
+            "target": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "An edge given the wrong number of values",
+      "description": "An edge given a number of values its identity template has no holes for. `mapping` is the one whose `@subject` declares the template.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "identity/edge-arity"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "given",
+            "mapping",
+            "takes",
+            "target"
+          ],
+          "properties": {
+            "given": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "mapping": {
+              "type": "string"
+            },
+            "takes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "target": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not a relation verb",
+      "description": "A stage whose verb the catalogue does not have.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/unknown-verb"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "verb",
+            "verbs"
+          ],
+          "properties": {
+            "verb": {
+              "type": "string"
+            },
+            "verbs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A verb with no lowering yet",
+      "description": "A verb the catalogue declares and the lowering does not implement yet.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/unimplemented-verb"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "implemented",
+            "pipeline",
+            "verb"
+          ],
+          "properties": {
+            "implemented": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pipeline": {
+              "type": "string"
+            },
+            "verb": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A source constructor used as a stage",
+      "description": "A source constructor written as a stage of a pipeline.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/source-as-stage"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "pipeline",
+            "verb"
+          ],
+          "properties": {
+            "pipeline": {
+              "type": "string"
+            },
+            "verb": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A stage given the wrong arguments",
+      "description": "A stage missing a position it needs (`missing`), or given more than it takes (`missing` absent).",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/stage-arity"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "pipeline",
+            "verb"
+          ],
+          "properties": {
+            "missing": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pipeline": {
+              "type": "string"
+            },
+            "verb": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A stage argument of the wrong kind",
+      "description": "A stage argument of the wrong kind — a value where a column or a binding name belongs.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/invalid-stage-argument"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "expected",
+            "parameter",
+            "pipeline"
+          ],
+          "properties": {
+            "expected": {
+              "type": "string"
+            },
+            "parameter": {
+              "type": "string"
+            },
+            "pipeline": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Not an aggregation",
+      "description": "A `group_by` output that is not an aggregate call. `function` is the call written, when it is a call; `aggregates` are the ones there are.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/not-an-aggregate"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "aggregates",
+            "name",
+            "pipeline"
+          ],
+          "properties": {
+            "aggregates": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "function": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "pipeline": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "An alias on a union",
+      "description": "An alias on a `union`, whose result has the pipeline's one name.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/union-alias"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "alias",
+            "pipeline"
+          ],
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "pipeline": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A pipeline that derives from itself",
+      "description": "A pipeline that derives from itself.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/cycle"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "pipeline"
+          ],
+          "properties": {
+            "pipeline": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A join over a source with no schema",
+      "description": "A `join` whose other side declares no schema, so its condition cannot be checked.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/unknown-columns"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "bindings",
+            "pipeline"
+          ],
+          "properties": {
+            "bindings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pipeline": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Union sides with different rows",
+      "description": "A `union` whose two sides carry different rows. Each column is `name: Type`; `column` is the 1-based first that differs, absent when the counts do.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/union-mismatch"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "left",
+            "pipeline",
+            "right"
+          ],
+          "properties": {
+            "column": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "left": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pipeline": {
+              "type": "string"
+            },
+            "right": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A join condition that is not an equality",
+      "description": "A `join` condition that is not an equality, or a conjunction of them.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/join-not-equality"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "condition",
+            "pipeline"
+          ],
+          "properties": {
+            "condition": {
+              "type": "string"
+            },
+            "pipeline": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A join key that is not a column",
+      "description": "A `join` key that is not a column reference.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/join-key-not-column"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "left",
+            "operand",
+            "pipeline",
+            "right"
+          ],
+          "properties": {
+            "left": {
+              "type": "string"
+            },
+            "operand": {
+              "type": "string"
+            },
+            "pipeline": {
+              "type": "string"
+            },
+            "right": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "A join condition on one side only",
+      "description": "A `join` equality whose two columns are on the same side.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "pipeline/join-one-side"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "left",
+            "pipeline",
+            "right",
+            "side"
+          ],
+          "properties": {
+            "left": {
+              "type": "string"
+            },
+            "pipeline": {
+              "type": "string"
+            },
+            "right": {
+              "type": "string"
+            },
+            "side": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "An expression fossil cannot lower yet",
+      "description": "An expression or literal the parser reads and the lowering has no case for — a gap in the compiler, not a mistake in the program.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "unsupported/expression"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "expression"
+          ],
+          "properties": {
+            "expression": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The run needs more memory than its budget",
+      "description": "An operator asked for more memory than the run's budget had left. Raised while the graph executes, before any byte of the corpus is written. Sizes are bytes.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "run/over-budget"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "budget",
+            "consumer",
+            "requested",
+            "reserved"
+          ],
+          "properties": {
+            "budget": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "consumer": {
+              "type": "string"
+            },
+            "requested": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "reserved": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "The program does not compile",
+      "description": "A run over a program that does not compile. The failure's `related` carries the program's diagnostics.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "run/does-not-compile"
+          ]
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "title": "No store covers the destination",
+      "description": "The destination a run writes under is not a prefix any store covers.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "run/destination-uncovered"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "destination"
+          ],
+          "properties": {
+            "destination": {
               "type": "string"
             }
           }

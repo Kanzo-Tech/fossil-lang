@@ -32,8 +32,8 @@
 
 use fossil_base::{Db, Diagnostic, Severity, SourceFile, Span};
 use lsp_types::{
-    Diagnostic as LspDiagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range,
-    Uri,
+    Diagnostic as LspDiagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location,
+    NumberOrString, Range, Uri,
 };
 
 use crate::line_index::LineIndex;
@@ -109,8 +109,8 @@ pub fn lsp_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<LspDiagnostic> {
 
 /// One [`fossil_base::Diagnostic`] as LSP sees it.
 ///
-/// Byte spans become UTF-16 ranges; `suggestion_source` is folded into the
-/// message as a `help:` line. The structured carriers (`did_you_mean`,
+/// Byte spans become UTF-16 ranges; the code is the problem's; `help` and
+/// `suggestion_source` are folded into the message as `help:` lines. The structured carriers (`did_you_mean`,
 /// `suggestion_source`) have no place on the wire and are not sent — a host that
 /// needs them for a code action re-drains [`diagnostics()`], which is what both
 /// do.
@@ -148,10 +148,11 @@ pub fn lsp_diagnostic(
     LspDiagnostic {
         range: span_to_range(index, d.span),
         severity: Some(severity(d.severity)),
-        message: d.suggestion_source.as_ref().map_or_else(
-            || d.message.clone(),
-            |s| format!("{}\nhelp: {s}", d.message),
-        ),
+        code: Some(NumberOrString::String(d.problem.code().into())),
+        message: [d.help.as_deref(), d.suggestion_source.as_deref()]
+            .into_iter()
+            .flatten()
+            .fold(d.message(), |m, h| format!("{m}\nhelp: {h}")),
         related_information: (!related.is_empty()).then_some(related),
         ..LspDiagnostic::default()
     }

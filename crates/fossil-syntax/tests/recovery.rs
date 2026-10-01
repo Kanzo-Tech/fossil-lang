@@ -41,17 +41,17 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Diagnostic, FossilDb, SourceFile, System};
+use fossil_base::{Diagnostic, FossilDb, Problem, SourceFile, System};
 use fossil_syntax::parse;
 
 /// Parse `input` on a worker thread; panic with "parser hung — regression"
 /// if it doesn't finish within `timeout`. On success returns the wall-clock
-/// duration + the accumulated diagnostic messages.
+/// duration + the accumulated diagnostics' problems.
 ///
 /// We cannot return the `Cst<'db>` itself, nor the `&Diagnostic`s, because the
-/// db lives on the worker thread and drops when it exits — so the messages are
-/// copied out as owned `String`s.
-fn parse_with_timeout(input: &'static str, timeout: Duration) -> (Duration, Vec<String>) {
+/// db lives on the worker thread and drops when it exits — so the problems are
+/// copied out.
+fn parse_with_timeout(input: &'static str, timeout: Duration) -> (Duration, Vec<Problem>) {
     let (tx, rx) = mpsc::channel();
     let input_owned = input.to_string();
     thread::spawn(move || {
@@ -61,9 +61,9 @@ fn parse_with_timeout(input: &'static str, timeout: Duration) -> (Duration, Vec<
         let file = SourceFile::new(&db, input_owned, "regression.fossil".to_string());
         let _cst = parse(&db, file);
         let diags: Vec<&Diagnostic> = parse::accumulated::<Diagnostic>(&db, file);
-        let messages: Vec<String> = diags.iter().map(|d| d.message.clone()).collect();
+        let problems: Vec<Problem> = diags.iter().map(|d| d.problem.clone()).collect();
         let elapsed = start.elapsed();
-        let _ = tx.send((elapsed, messages));
+        let _ = tx.send((elapsed, problems));
     });
     rx.recv_timeout(timeout).unwrap_or_else(|_| {
         panic!("parser hung — regression: parse did not return within {timeout:?}")
@@ -89,7 +89,9 @@ fn parse_reports_the_bare_unlexable_byte() {
     let (elapsed, diags) = parse_with_timeout("#", HANG_DETECTION_BUDGET);
     assert_eq!(
         diags,
-        vec!["unexpected character `#` — no token starts with it"],
+        vec![Problem::UnknownCharacter {
+            character: "#".to_string()
+        }],
         "parse(\"#\") must produce exactly one diagnostic, naming the byte",
     );
     assert!(
@@ -116,7 +118,9 @@ fn parse_terminates_on_unlexable_then_valid_item() {
     let input = "# stray comment\nusers := io.csv(\"users.csv\")\n";
     let (elapsed, diags) = parse_with_timeout(input, HANG_DETECTION_BUDGET);
     assert!(
-        diags.iter().any(|m| m.contains('#')),
+        diags
+            .iter()
+            .any(|p| matches!(p, Problem::UnknownCharacter { character } if character == "#")),
         "expected a diagnostic naming the stray `#`; got {diags:?}",
     );
     assert!(
@@ -151,7 +155,9 @@ fn parse_reports_every_unlexable_byte() {
             "input {input:?}: expected {want} diagnostic(s), got {diags:?}",
         );
         assert!(
-            diags.iter().all(|m| m.starts_with("unexpected character")),
+            diags
+                .iter()
+                .all(|p| matches!(p, Problem::UnknownCharacter { .. })),
             "input {input:?}: every diagnostic must name its character; got {diags:?}",
         );
         assert!(
@@ -180,7 +186,9 @@ fn parse_reports_an_unlexable_byte_between_two_good_items() {
     let (elapsed, diags) = parse_with_timeout(input, HANG_DETECTION_BUDGET);
     assert_eq!(
         diags,
-        vec!["unexpected character `#` — no token starts with it"],
+        vec![Problem::UnknownCharacter {
+            character: "#".to_string()
+        }],
         "the byte between two good items must be reported, and only it",
     );
     assert!(

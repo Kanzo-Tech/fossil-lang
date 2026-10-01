@@ -1,3 +1,5 @@
+shape/missing-required-property
+
   × `People` never writes `email`, and Person requires it
    ╭─[program.fossil:5:1]
  4 │ 
@@ -7,6 +9,8 @@
  6 │     @subject = "https://shop.example/user/{User.email}"
    ╰────
   help: add `email = ` to the body. `phone` is optional and may stay out.
+shape/missing-required-property
+
   × `People` never writes `email`, and Person requires it
    ╭─[shape.shex:5:3]
  4 │ shop:Person {

@@ -159,7 +159,7 @@ fn quick_fix(
 /// reconstructed by `fossil-lsp` when it publishes; here we only need the link.
 fn lsp_diagnostic_stub(diag: &Diagnostic) -> LspDiagnostic {
     LspDiagnostic {
-        message: diag.message.clone(),
+        message: diag.message(),
         ..Default::default()
     }
 }
@@ -223,7 +223,7 @@ const fn spans_overlap(a: Span, b: Span) -> bool {
 mod tests {
     use super::*;
     use fossil_base::test_support::NativeSystem;
-    use fossil_base::{Severity, System};
+    use fossil_base::{Problem, Severity, System};
     use std::sync::Arc;
 
     fn db() -> fossil_base::FossilDb {
@@ -251,7 +251,11 @@ mod tests {
         let span = Span::new(typo_start, typo_start + 4);
         let diag = Diagnostic::new(
             Severity::Error,
-            "unknown column `naem` — did you mean `name`?",
+            Problem::UnknownField {
+                field: "naem".into(),
+                relation: "users".into(),
+                fields: vec!["name".into()],
+            },
             span,
         )
         .with_did_you_mean(span, "name");
@@ -274,7 +278,10 @@ mod tests {
         let snippet = "Contact1 : ex:Contact from c\n    ex:email = .email\n";
         let diag = Diagnostic::new(
             Severity::Error,
-            "target shape ex:Contact uses ShEx OneOf",
+            Problem::UnsupportedDisjunction {
+                shape: "ex:Contact".into(),
+                branches: 2,
+            },
             Span::new(0, u32::try_from(src.len()).unwrap()),
         )
         .with_suggestion_source(snippet);
@@ -297,7 +304,8 @@ mod tests {
         let src = "User : ex:Person from users\n    ex:n = .naem\n";
         let f = file(&db, src);
         let span = Span::new(38, 42);
-        let diag = Diagnostic::new(Severity::Error, "x", span).with_did_you_mean(span, "name");
+        let diag = Diagnostic::new(Severity::Error, Problem::Bug { what: "x".into() }, span)
+            .with_did_you_mean(span, "name");
         // A range over just line 0 (bytes 0..27) does not intersect the typo.
         let idx = line_index(&db, f);
         let r = byte_span_to_range(&idx, Span::new(0, 5));
