@@ -8,10 +8,13 @@ A host implements `Host` from `@fossil-lang/types` — `connections()` and
 `@fossil-lang/corpus`, `@fossil-lang/introspect`, `@fossil-lang/executor` or `openProgram`. They
 come here; a host seldom does.
 
+Each call is handed `{ signal }`, which aborts when fossil stops waiting. A host has 30 s to
+answer; one that does not is `storage/host-silent`, from this package and from the Rust half alike.
+
 | door | for | how |
 | --- | --- | --- |
-| `mount(engine, host, scope, access)` | SQL through the page's engine | `CREATE OR REPLACE SECRET … SCOPE '<prefix>'` per S3 prefix, renewed at `expires − 5 min` under the same name, shared by every mount of the prefix and dropped by the last; an Azure file is lent by name to its SAS URL (no Azure extension in DuckDB-WASM, so no glob) |
-| `read(host, targets)` | bytes | an `object_store` GET per file, one `credentials` call per connection |
+| `mount(engine, host, scope, access, { signal })` | SQL through the page's engine | `CREATE OR REPLACE SECRET … SCOPE '<prefix>'` per S3 prefix, renewed at `expires − 5 min` under the same name, shared by every mount of the prefix and dropped by the last; an Azure file is lent by name to its SAS URL (no Azure extension in DuckDB-WASM, so no glob) |
+| `read(host, targets, { signal })` | bytes | an `object_store` GET per file, one `credentials` call per connection |
 | `resolveDocuments(workspace, host)` | the documents a program names | `read`, until nothing new is missing |
 
 The engine must have `httpfs` loaded; `mount` says so when it has not. The translation from a

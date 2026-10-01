@@ -26,14 +26,16 @@ composed on both sides; making it one is a separate step.
 ```ts
 import { introspect } from "@fossil-lang/introspect";
 
-const descriptors = await introspect(workspace.sources(handle), {
+const { descriptors, undescribed } = await introspect(workspace.sources(handle), {
   host,     // Host: vends a read credential per connection
   engine,   // Engine: DuckDB with httpfs, where the DESCRIBE runs
+  signal,   // optional: stops it
 });
-// host then registers each descriptor with the checker.
+// host then registers each descriptor with the checker, and shows each
+// `undescribed[i].problem` — the source it could not describe, by its code.
 ```
 
 Best-effort: a source the host vends nothing for, or one DuckDB cannot read, is
-reported through `onWarn` and skipped — the editor degrades gracefully rather
-than hard-failing. A materialised source (`io.rdf`) takes its schema from its
+skipped and answered in `undescribed` with its problem — the editor degrades
+gracefully rather than hard-failing. A materialised source (`io.rdf`) takes its schema from its
 shape and is not described.

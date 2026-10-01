@@ -3,7 +3,8 @@
  *
  * Public API (one of the @fossil-lang/* packages; `git ls-files packages` is
  * the list):
- * - {@link initFossilWasm} — boots the module; its `.wasm` is a bundler asset (memoised).
+ * - {@link initFossilWasm} — boots the module; its `.wasm` is a bundler asset. A failed boot is
+ *   forgotten, so the next call tries again.
  * - {@link tokenize} — calls the Rust lexer, returns TokenRow[].
  * - {@link tokenKinds} — the legend for TokenRow.kind: variant names by index.
  * - {@link semanticLegend} — returns the LSP SemanticTokensLegend.

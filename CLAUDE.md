@@ -220,12 +220,13 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            one view layer, in kanzo-ui
   executor/                the datafusion-wasm executor — the one writer of a corpus. A run
                            answers `{ dest, dropped }`; what it wrote is `<dest>fossil.json`
-  types/                   Host — `connections()` + `credentials(scope, access)` — the one host
-                           contract, and StorageCredential (Iceberg REST's, verbatim); the
-                           Engine. And its one runtime export: `FossilError` + `isFossilError`,
-                           over `problem.gen.ts` (the codes, their data and titles, generated) —
-                           the error every package throws, the same object the wasm crates
-                           build in Rust
+  types/                   Host — `connections()` + `credentials(scope, access)`, each handed
+                           `{ signal }` — the one host contract, and StorageCredential (Iceberg
+                           REST's, verbatim); the Engine. And two runtime halves: `FossilError`
+                           + `isFossilError` over `problem.gen.ts` (the codes, their data and
+                           titles, generated) — the error every package throws, the same object
+                           the wasm crates build in Rust — and `within`, the one deadline every
+                           host wait and module boot goes through (`/docs/design/failure`)
   storage/                 how every package reaches storage from a vended credential, over
                            `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
                            expires−5min, refcounted per prefix; Azure lent file by file),

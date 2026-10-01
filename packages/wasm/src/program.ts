@@ -102,8 +102,8 @@ export interface FossilProgram {
 /**
  * Boot the module, open `uri` in a fresh workspace, and read the documents its text names.
  *
- * One call and the answer goes straight into `fossil()`. The boot is memoised, so a second program
- * in the same tab costs a workspace and nothing else.
+ * One call and the answer goes straight into `fossil()`. A boot that succeeded is kept, so a second
+ * program in the same tab costs a workspace and nothing else.
  */
 export async function openProgram(uri: string, options: OpenProgramOptions): Promise<FossilProgram> {
   const { host, text = '', wasm, signal } = options;
