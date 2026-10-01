@@ -16,11 +16,11 @@ shop:Person {
 }
 ```
 
-Every mapping that produces the shape is refused on its header, with the labels the decoder was
-walking when it came back round:
+Every mapping that produces the shape is refused on its header, with the loop itself — from the label
+the decoder met again, round, and back to it, in that order:
 
 ```text
-cyclic shape graph not supported: https://shop.example/voc#contact
+cyclic shape graph not supported: https://shop.example/voc#contact -> https://shop.example/voc#contact
 ```
 
 ## Why fossil refuses it

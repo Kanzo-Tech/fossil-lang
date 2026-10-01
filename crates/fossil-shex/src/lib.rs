@@ -64,7 +64,7 @@
 
 pub mod spans;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use fossil_graph_schema::{
     GraphSchema, Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Renames,
@@ -597,7 +597,7 @@ fn lower_shape_decl(
 
     let label_table = build_label_table(shape);
 
-    let mut visited: HashSet<String> = HashSet::new();
+    let mut visited: Vec<String> = Vec::new();
     let mut constraints: Vec<ResolvedConstraint> = Vec::new();
 
     if let Some(wrapper) = &shape.expression {
@@ -666,7 +666,7 @@ fn walk_triple_expr(
     shape_iri: &IriS,
     prefixmap: &PrefixMap,
     label_table: &HashMap<String, TripleExpr>,
-    visited: &mut HashSet<String>,
+    visited: &mut Vec<String>,
     out: &mut Vec<ResolvedConstraint>,
     errors: &mut Vec<ShExLoweringError>,
 ) {
@@ -717,12 +717,16 @@ fn walk_triple_expr(
         }
         TripleExpr::Ref(label) => {
             let key = label_to_string(label);
-            if !visited.insert(key.clone()) {
-                errors.push(ShExLoweringError::CyclicShapeRef {
-                    path: visited.iter().cloned().collect(),
-                });
+            // `visited` is the path of labels being resolved, in order, so the
+            // cycle reported is the loop itself — from the label met again,
+            // round, and back to it — the same every time.
+            if let Some(start) = visited.iter().position(|l| *l == key) {
+                let mut path = visited[start..].to_vec();
+                path.push(key);
+                errors.push(ShExLoweringError::CyclicShapeRef { path });
                 return;
             }
+            visited.push(key.clone());
             match label_table.get(&key) {
                 Some(target) => {
                     walk_triple_expr(
@@ -742,7 +746,7 @@ fn walk_triple_expr(
                     });
                 }
             }
-            visited.remove(&key);
+            visited.pop();
         }
     }
 }
@@ -1198,6 +1202,31 @@ shop:Order {
             "expected CyclicShapeRef, got {:?}",
             desc.lowering_errors()
         );
+    }
+
+    /// The labels of a cycle come in the cycle's own order, the same on every
+    /// run. They came out of a `HashSet`, so the message changed from one run
+    /// to the next.
+    #[test]
+    fn a_cycle_is_reported_in_its_own_order() {
+        for _ in 0..16 {
+            let desc = ShExDescriptor::from_schema(cyclic_schema()).expect("schema accepted");
+            let paths: Vec<&Vec<String>> = desc
+                .lowering_errors()
+                .iter()
+                .filter_map(|e| match e {
+                    ShExLoweringError::CyclicShapeRef { path } => Some(path),
+                    _ => None,
+                })
+                .collect();
+            // The walk meets `tA` inline first, so `tB` is the first label it
+            // resolves by reference, and the loop closes on it.
+            let (a, b) = ("http://example.org/tA", "http://example.org/tB");
+            assert_eq!(
+                paths.first().map(|p| p.as_slice()),
+                Some(&[b, a, b].map(String::from)[..])
+            );
+        }
     }
 
     // -----------------------------------------------------------------------
