@@ -14,7 +14,7 @@ let _initPromise: Promise<unknown> | null = null;
 /**
  * Boot the fossil-df-wasm executor module. MUST be awaited before constructing
  * {@link FossilExecutor}. A boot that succeeded is kept; one that failed is
- * not, so the next call tries again — `storage/unreachable` for a module that could not be
+ * not, so the next call tries again — `module/unreachable` for a module that could not be
  * fetched within 60 s, `internal/bug` for one that would not instantiate.
  *
  * Called with nothing, the glue resolves `new URL('fossil_df_wasm_bg.wasm',

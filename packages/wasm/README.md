@@ -4,8 +4,8 @@ JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Prov
 
 - `openProgram(uri, { host, text })` — one program open for an editor, and the
   call a host with an editor makes. See below.
-- `initFossilWasm()` — boots the module, within 60 s; a boot that failed is
-  forgotten, so the next call tries again. Its `.wasm` ships in this
+- `initFossilWasm()` — boots the module, within 60 s (`module/unreachable` when it
+  cannot be fetched); a boot that failed is forgotten, so the next call tries again. Its `.wasm` ships in this
   package and the host's bundler emits it as an asset; the host copies nothing.
 - `tokenize(text)` — calls the Rust lexer, returns `TokenRow[]`. The Rust lexer
   is the only lexer: no host reimplements one and drifts from the grammar.

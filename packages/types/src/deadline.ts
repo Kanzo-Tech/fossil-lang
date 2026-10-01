@@ -56,15 +56,17 @@ export function until<T>(answer: Promise<T>, signal: AbortSignal | undefined): P
 /**
  * Boot a wasm module through `init`, within {@link MODULE_MS}, and fail as a {@link FossilError}:
  * the module that would not compile is `internal/bug`, and one that could not be fetched — refused,
- * dropped or silent — is `storage/unreachable`, the browser's own error kept as the cause.
+ * missing or silent — is `module/unreachable`, with `after` when the deadline ended the wait and the
+ * browser's own error kept as the cause.
  *
  * It memoizes nothing. A loader that caches the promise clears it when it rejects, so the next call
  * tries again rather than answering a dropped download for the life of the page.
  */
 export async function boot<T>(module: string, init: () => Promise<T>): Promise<T> {
+  let silent: DOMException | undefined;
   try {
     return await within(MODULE_MS, () => init(), {
-      silent: (after) => new DOMException(`${module} did not load within ${after} ms`, 'TimeoutError'),
+      silent: (after) => (silent = new DOMException(`${module} did not load within ${after} ms`, 'TimeoutError')),
     });
   } catch (cause) {
     const name = cause instanceof Error ? cause.name : '';
@@ -73,6 +75,12 @@ export async function boot<T>(module: string, init: () => Promise<T>): Promise<T
         cause,
       });
     }
-    throw FossilError.of('storage/unreachable', { locator: module }, `${module} could not be loaded`, { cause });
+    const timedOut = silent !== undefined && cause === silent;
+    throw FossilError.of(
+      'module/unreachable',
+      timedOut ? { locator: module, after: MODULE_MS } : { locator: module },
+      timedOut ? `${module} did not load within ${MODULE_MS} ms` : `${module} could not be loaded`,
+      { cause },
+    );
   }
 }

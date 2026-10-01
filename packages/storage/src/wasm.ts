@@ -19,7 +19,7 @@ let booted: Promise<unknown> | null = null;
  *
  * A boot that succeeded is kept; one that failed is not, so the next call tries again.
  *
- * @throws {FossilError} `storage/unreachable` when the module could not be fetched within 60 s,
+ * @throws {FossilError} `module/unreachable` when the module could not be fetched within 60 s,
  *   `internal/bug` when it would not instantiate.
  */
 export function initStorage(wasm?: InitInput): Promise<unknown> {

@@ -59,11 +59,11 @@ describe('boot', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('is storage/unreachable for a module that could not be fetched, the browser’s error its cause', async () => {
+  it('is module/unreachable for a module that could not be fetched, the browser’s error its cause', async () => {
     const dropped = new TypeError('Failed to fetch');
     const e = await boot('m_bg.wasm', () => Promise.reject(dropped)).catch((x: unknown) => x);
-    expect(isFossilError(e, 'storage/unreachable')).toBe(true);
-    expect((e as FossilError<'storage/unreachable'>).data.locator).toBe('m_bg.wasm');
+    expect(isFossilError(e, 'module/unreachable')).toBe(true);
+    expect((e as FossilError<'module/unreachable'>).data).toEqual({ locator: 'm_bg.wasm' });
     expect((e as Error).cause).toBe(dropped);
   });
 
@@ -74,11 +74,12 @@ describe('boot', () => {
     expect((e as Error).cause).toBe(broken);
   });
 
-  it('gives up on a module that never arrives after 60 s, as storage/unreachable', async () => {
+  it('gives up on a module that never arrives after 60 s, as module/unreachable with after', async () => {
     const outcome = boot('m_bg.wasm', never).catch((x: unknown) => x);
     await vi.advanceTimersByTimeAsync(MODULE_MS);
     const e = await outcome;
-    expect(isFossilError(e, 'storage/unreachable')).toBe(true);
+    expect(isFossilError(e, 'module/unreachable')).toBe(true);
+    expect((e as FossilError<'module/unreachable'>).data).toEqual({ locator: 'm_bg.wasm', after: MODULE_MS });
     expect(((e as Error).cause as Error).name).toBe('TimeoutError');
   });
 });

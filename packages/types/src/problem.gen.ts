@@ -34,6 +34,7 @@ export type Code =
   | 'storage/no-httpfs'
   | 'storage/host-refused'
   | 'storage/host-silent'
+  | 'module/unreachable'
   | 'corpus/unreadable'
   | 'corpus/not-json'
   | 'corpus/unsupported-format'
@@ -78,6 +79,7 @@ export const CODES: readonly Code[] = [
   'storage/no-httpfs',
   'storage/host-refused',
   'storage/host-silent',
+  'module/unreachable',
   'corpus/unreadable',
   'corpus/not-json',
   'corpus/unsupported-format',
@@ -268,6 +270,13 @@ export interface ProblemData {
     scope: string;
   };
   /**
+   * A wasm module that could not be fetched — refused, missing, or not there within the boot deadline; `after` is that deadline, in milliseconds, when it is what ended the wait. The browser's error is the cause.
+   */
+  'module/unreachable': {
+    after?: number | null;
+    locator: string;
+  };
+  /**
    * A corpus whose manifest could not be read; the reader's error is the cause.
    */
   'corpus/unreadable': {
@@ -387,6 +396,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'storage/no-httpfs': 'The engine cannot read remote storage',
   'storage/host-refused': 'The host refused',
   'storage/host-silent': 'The host did not answer',
+  'module/unreachable': 'A module could not be loaded',
   'corpus/unreadable': 'The corpus could not be read',
   'corpus/not-json': 'The manifest is not JSON',
   'corpus/unsupported-format': 'The corpus format is not supported',

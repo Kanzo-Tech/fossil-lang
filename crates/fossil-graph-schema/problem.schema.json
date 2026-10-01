@@ -815,6 +815,42 @@
       }
     },
     {
+      "title": "A module could not be loaded",
+      "description": "A wasm module that could not be fetched — refused, missing, or not there within the boot deadline; `after` is that deadline, in milliseconds, when it is what ended the wait. The browser's error is the cause.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "module/unreachable"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "locator"
+          ],
+          "properties": {
+            "after": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "locator": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
       "title": "The corpus could not be read",
       "description": "A corpus whose manifest could not be read; the reader's error is the cause.",
       "type": "object",

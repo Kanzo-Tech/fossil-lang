@@ -240,6 +240,14 @@ catalogue! {
     #[error("the host did not answer {scope} within {after} ms")]
     HostSilent { scope: String, after: u64 },
 
+    /// A wasm module that could not be fetched — refused, missing, or not
+    /// there within the boot deadline; `after` is that deadline, in
+    /// milliseconds, when it is what ended the wait. The browser's error is
+    /// the cause.
+    "module/unreachable", "A module could not be loaded",
+    #[error("{locator} could not be loaded")]
+    ModuleUnreachable { locator: String, after: Option<u64> },
+
     /// A corpus whose manifest could not be read; the reader's error is the cause.
     "corpus/unreadable", "The corpus could not be read",
     #[error("{path} could not be read")]
