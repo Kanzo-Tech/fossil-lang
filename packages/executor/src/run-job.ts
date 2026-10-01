@@ -82,7 +82,7 @@ export async function runJob(
     if (signal?.aborted && e === signal.reason) throw e;
     const failure = isFossilError(e)
       ? e
-      : FossilError.of('internal/bug', { what: 'the run failed outside fossil' }, 'internal error: the run failed outside fossil', {
+      : FossilError.of('internal/bug', { what: 'the run failed outside fossil' }, {
           cause: e,
         });
     try {
@@ -115,8 +115,8 @@ async function execute(program: string, job: Job, signal: AbortSignal | undefine
 function unreadable(unread: readonly UnreadDocument[]): FossilError<'document/unread'> {
   const documents = unread.map((d) => d.key);
   const detail = `${documents.length} document(s) could not be read: ${documents.join(', ')}`;
-  if (unread.length === 1) return FossilError.of('document/unread', { documents }, detail, { cause: unread[0]!.problem });
-  return FossilError.of('document/unread', { documents }, detail, {
+  if (unread.length === 1) return FossilError.of('document/unread', { documents }, { cause: unread[0]!.problem });
+  return FossilError.of('document/unread', { documents }, {
     cause: new AggregateError(
       unread.map((d) => FossilError.from(d.problem)),
       `${unread.length} documents could not be read`,
@@ -143,13 +143,13 @@ async function complete(job: Job, payload: CompletePayload): Promise<void> {
     try {
       await within(HOST_MS, (signal) => job.complete(payload, { signal }), {
         silent: (after) =>
-          FossilError.of('storage/host-silent', { scope, after }, `the host did not answer ${scope} within ${after} ms`),
+          FossilError.of('storage/host-silent', { scope, after }),
       });
       return;
     } catch (cause) {
       if (Date.now() + pause >= deadline) {
         if (isFossilError(cause, 'storage/host-silent')) throw cause;
-        throw FossilError.of('storage/host-refused', { scope }, `the host refused ${scope}`, { cause });
+        throw FossilError.of('storage/host-refused', { scope }, { cause });
       }
       await new Promise((resolve) => setTimeout(resolve, pause));
     }

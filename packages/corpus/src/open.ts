@@ -78,7 +78,7 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
     throw FossilError.of(
       'api/invalid-argument',
       { argument: 'engine', expected: 'an Engine' },
-      "open() needs an engine: { engine } for a corpus at a URL, { engine, host } for a job's",
+      { help: "open() needs { engine } for a corpus at a URL, and { engine, host } for a job's" },
     );
   }
 
@@ -95,7 +95,6 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
       const ambiguous = FossilError.of(
         'storage/ambiguous-prefix',
         { scope: `job ${source}`, count: mounted.prefixes.length },
-        `job ${source} vends ${mounted.prefixes.length} prefixes, and a corpus lives under one`,
       );
       try {
         await release();
@@ -113,7 +112,6 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
       throw FossilError.of(
         'corpus/not-a-location',
         { location: source },
-        `${source} carries a query or a fragment, and a corpus location is a prefix: signed storage is opened as a job, under the host that vends its credential`,
       );
     }
     const base = source.endsWith('/') ? source : `${source}/`;
@@ -127,7 +125,7 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
   try {
     const [where] = await names([ENTRY_POINT]);
     const unreadable = (cause?: unknown) =>
-      FossilError.of('corpus/unreadable', { path: where! }, `${where} could not be read`, cause === undefined ? {} : { cause });
+      FossilError.of('corpus/unreadable', { path: where! }, cause === undefined ? {} : { cause });
     let answer: Awaited<ReturnType<Engine['query']>>;
     try {
       answer = await engine.query(`SELECT content FROM read_text(${lit(where!)})`, {
@@ -144,7 +142,7 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
     const tables = new Map<string, VertexTable | EdgeTable>();
     for (const table of [...manifest.vertex_tables, ...manifest.edge_tables]) {
       if (tables.has(table.name)) {
-        throw FossilError.of('corpus/duplicate-table', { table: table.name }, `${where} declares ${table.name} twice`);
+        throw FossilError.of('corpus/duplicate-table', { table: table.name });
       }
       tables.set(table.name, table);
     }

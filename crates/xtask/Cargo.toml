@@ -27,6 +27,9 @@ serde_json = { workspace = true }
 # receiver rule from `fossil_hir` instead of leaving `is_namespace_head` to
 # restate it.
 fossil-hir = { path = "../fossil-hir" }
+# `tests/problem_generated.rs` renders each code's detail with `Problem`'s own
+# `Display` and holds the translated `DETAILS` to it.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 # `tests/engine_reach.rs` reads `deny.toml` — the file that IS the engine-ring
 # policy — rather than a second copy of its list, so it needs a TOML parser.
 # Declared here and not in `[workspace.dependencies]` for the reason

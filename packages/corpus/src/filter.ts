@@ -108,7 +108,6 @@ export function bind(filter: Filter, columns: Columns): Bound {
         throw FossilError.of(
           'corpus/no-position',
           { table: columns.table },
-          `${columns.table} declares no position, so it has no box to filter by`,
         );
       }
       const [x0, y0, x1, y1] = node.bbox;
@@ -116,7 +115,6 @@ export function bind(filter: Filter, columns: Columns): Bound {
         throw FossilError.of(
           'api/invalid-argument',
           { argument: 'bbox', expected: '[x0, y0, x1, y1] with x0 ≤ x1 and y0 ≤ y1' },
-          `bbox ${JSON.stringify(node.bbox)} is not [x0, y0, x1, y1] with x0 ≤ x1 and y0 ≤ y1`,
         );
       }
       const sides = [
@@ -138,15 +136,13 @@ function literalFor(column: string, kind: Kind, value: Literal): void {
     throw FossilError.of(
       'api/invalid-argument',
       { argument: 'filter', expected: `a finite literal for ${column}` },
-      `${String(value)} is not a literal (${column}): a NaN matches no comparison, and an infinity ` +
-        'is not a value a column holds',
+      { help: 'a NaN matches no comparison, and an infinity is not a value a column holds' },
     );
   }
   if (kind !== 'other' && typeof value !== 'number' && typeof value !== 'bigint') {
     throw FossilError.of(
       'corpus/filter-type-mismatch',
       { column, holds: 'numbers', value: JSON.stringify(value) },
-      `${column} holds numbers, and the filter compares it with ${JSON.stringify(value)}`,
     );
   }
 }
@@ -197,6 +193,5 @@ export function unknownColumn(
   return FossilError.of(
     'corpus/unknown-column',
     { table, column, columns },
-    `${table} does not declare ${column} — its columns are ${columns.join(', ')}`,
   );
 }

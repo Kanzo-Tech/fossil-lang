@@ -282,7 +282,6 @@ export async function introspect(
             throw FossilError.of(
               "storage/no-route",
               { locator: source.locator },
-              `${source.locator} names no connection and is not a public URL`,
             );
           }
           const described = await io.engine.query(describeSql(name, source.format, source.option), {
@@ -299,7 +298,7 @@ export async function introspect(
           signal?.throwIfAborted();
           const problem = isFossilError(err)
             ? err.problem
-            : FossilError.of("engine/failed", {}, `the query engine could not describe ${source.key}`, {
+            : FossilError.of("engine/failed", {}, {
                 cause: err,
               }).problem;
           undescribed.push({ source, problem });

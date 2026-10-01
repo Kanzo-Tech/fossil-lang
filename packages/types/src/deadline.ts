@@ -71,7 +71,7 @@ export async function boot<T>(module: string, init: () => Promise<T>): Promise<T
   } catch (cause) {
     const name = cause instanceof Error ? cause.name : '';
     if (name === 'CompileError' || name === 'LinkError' || name === 'RuntimeError') {
-      throw FossilError.of('internal/bug', { what: `${module} did not instantiate` }, `internal error: ${module} did not instantiate`, {
+      throw FossilError.of('internal/bug', { what: `${module} did not instantiate` }, {
         cause,
       });
     }
@@ -79,7 +79,6 @@ export async function boot<T>(module: string, init: () => Promise<T>): Promise<T
     throw FossilError.of(
       'module/unreachable',
       timedOut ? { locator: module, after: MODULE_MS } : { locator: module },
-      timedOut ? `${module} did not load within ${MODULE_MS} ms` : `${module} could not be loaded`,
       { cause },
     );
   }

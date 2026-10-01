@@ -48,7 +48,7 @@ function guarded<T>(what: string, call: () => T): T {
 }
 
 function bug(what: string, cause: unknown): FossilError<'internal/bug'> {
-  return FossilError.of('internal/bug', { what }, `internal error: ${what}`, { cause });
+  return FossilError.of('internal/bug', { what }, { cause });
 }
 
 export async function storageRead(host: Host, targets: readonly unknown[]): Promise<unknown> {

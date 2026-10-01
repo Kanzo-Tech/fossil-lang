@@ -181,7 +181,7 @@ export function fossilLinter(source: CheckSource, options: LinterOptions): Exten
         // shown by its code, and a failure fossil did not raise is `internal/bug`.
         const failure = isFossilError(cause)
           ? cause
-          : FossilError.of('internal/bug', { what: 'the check failed outside fossil' }, 'internal error: the check failed outside fossil', {
+          : FossilError.of('internal/bug', { what: 'the check failed outside fossil' }, {
               cause,
             });
         return [

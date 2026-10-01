@@ -84,14 +84,13 @@ export function parseManifest(text: string, where: string): Manifest {
   try {
     json = JSON.parse(text);
   } catch (cause) {
-    throw FossilError.of('corpus/not-json', { path: where }, `${where} is not JSON`, { cause });
+    throw FossilError.of('corpus/not-json', { path: where }, { cause });
   }
   const format = (json as { format?: unknown } | null)?.format;
   if (format !== FOSSIL_FORMAT) {
     throw FossilError.of(
       'corpus/unsupported-format',
       { path: where, format: typeof format === 'string' ? format : String(JSON.stringify(format)) },
-      `${where} declares format ${JSON.stringify(format)}; this reader reads ${FOSSIL_FORMAT} and nothing else`,
     );
   }
   return json as Manifest;

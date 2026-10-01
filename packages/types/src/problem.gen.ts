@@ -1028,3 +1028,176 @@ export const TITLES: { readonly [C in Code]: string } = {
   'api/unknown-handle': 'The handle names nothing',
   'internal/bug': 'An internal error',
 };
+
+/** A code whose detail is rendered from its data — the ones TypeScript may raise. */
+export type DetailedCode =
+  | 'syntax/expected-token'
+  | 'syntax/unexpected-token'
+  | 'syntax/unknown-character'
+  | 'syntax/retired-spelling'
+  | 'syntax/malformed-rename'
+  | 'syntax/misplaced-attribute'
+  | 'syntax/invalid-mapping-header'
+  | 'syntax/number-out-of-range'
+  | 'syntax/incomplete-conditional'
+  | 'syntax/uncalled-function'
+  | 'syntax/invalid-callee'
+  | 'name/unknown-shape'
+  | 'name/unknown-field'
+  | 'argument/skipped-parameter'
+  | 'argument/positional-after-named'
+  | 'argument/named-on-edge'
+  | 'argument/alias-in-value-call'
+  | 'type/property-mismatch'
+  | 'type/relation-as-value'
+  | 'type/expected-bool'
+  | 'type/expected-number'
+  | 'type/incomparable'
+  | 'type/branch-mismatch'
+  | 'shape/name-collision'
+  | 'shape/missing-required-property'
+  | 'shape/unsupported-disjunction'
+  | 'shape/cyclic-reference'
+  | 'shape/unresolved-reference'
+  | 'shape/binding-arity'
+  | 'shape/rename-unknown-type'
+  | 'shape/rename-unknown-predicate'
+  | 'shape/more-than-one-output'
+  | 'document/not-registered'
+  | 'document/unread'
+  | 'provider/unknown'
+  | 'provider/wrong-capability'
+  | 'provider/wrong-extension'
+  | 'provider/bare-document-path'
+  | 'provider/foreign-reader-option'
+  | 'identity/missing-subject'
+  | 'identity/duplicate-subject'
+  | 'identity/subject-not-first'
+  | 'identity/conflicting'
+  | 'identity/edge-without-template'
+  | 'identity/edge-arity'
+  | 'pipeline/invalid-stage-argument'
+  | 'pipeline/union-alias'
+  | 'pipeline/cycle'
+  | 'pipeline/join-not-equality'
+  | 'pipeline/join-key-not-column'
+  | 'pipeline/join-one-side'
+  | 'unsupported/expression'
+  | 'run/does-not-compile'
+  | 'run/destination-uncovered'
+  | 'source/not-utf8'
+  | 'source/unparseable'
+  | 'engine/failed'
+  | 'write/failed'
+  | 'layout/too-large'
+  | 'storage/no-credential'
+  | 'storage/ambiguous-prefix'
+  | 'storage/outside-prefix'
+  | 'storage/malformed-credential'
+  | 'storage/no-route'
+  | 'storage/unreachable'
+  | 'storage/no-httpfs'
+  | 'storage/host-refused'
+  | 'storage/host-silent'
+  | 'module/unreachable'
+  | 'corpus/unreadable'
+  | 'corpus/not-json'
+  | 'corpus/unsupported-format'
+  | 'corpus/duplicate-table'
+  | 'corpus/not-a-location'
+  | 'corpus/unknown-table'
+  | 'corpus/unknown-column'
+  | 'corpus/empty-projection'
+  | 'corpus/no-position'
+  | 'corpus/filter-type-mismatch'
+  | 'api/invalid-argument'
+  | 'api/busy'
+  | 'api/unknown-handle'
+  | 'internal/bug';
+
+/** Each detailed code's detail, from its data — the variant's `#[error]`, translated. */
+export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => string } = {
+  'syntax/expected-token': (d) => `expected ${d.expected}, found ${d.found}`,
+  'syntax/unexpected-token': (_) => `unexpected token`,
+  'syntax/unknown-character': (d) => `unexpected character \`${d.character}\` — no token starts with it`,
+  'syntax/retired-spelling': (d) => `\`${d.spelling}\` is retired: write \`${d.replacement}\``,
+  'syntax/malformed-rename': (d) => `this \`@rename\` has no ${d.missing}: a rename is \`@rename(Type, "<predicate IRI>" as <name>)\``,
+  'syntax/misplaced-attribute': (d) => `\`${d.attribute}\` does not belong ${d.place}`,
+  'syntax/invalid-mapping-header': (d) => `this is not a mapping header — ${d.reason} — so nothing is produced from it. A mapping is \`Name : Shape from <source>\``,
+  'syntax/number-out-of-range': (d) => `\`${d.literal}\` does not fit in ${d.kind}: ${d.reason}`,
+  'syntax/incomplete-conditional': (d) => `\`${d.expression}\` is not a complete conditional: it needs a condition, a \`?\` branch and a \`:\` branch`,
+  'syntax/uncalled-function': (d) => `\`${d.function}\` names a function but does not call it; fossil has no function values`,
+  'syntax/invalid-callee': (d) => `\`${d.callee}\` calls something that is not a function name; only a catalogued name may be called`,
+  'name/unknown-shape': (d) => `\`${d.shape}\` is not a shape this program declares`,
+  'name/unknown-field': (d) => `\`${d.field}\` is not a field of \`${d.relation}\``,
+  'argument/skipped-parameter': (d) => `\`${d.function}\` is given nothing for \`${d.parameter}\`, and something after it; a parameter cannot be skipped`,
+  'argument/positional-after-named': (d) => `\`${d.argument}\` is positional and follows \`${d.named} = …\`; once an argument is named, the ones after it are too`,
+  'argument/named-on-edge': (d) => `\`${d.argument}\` names an argument of \`${d.target}\`, and an edge's arguments fill its identity template in the order they are written`,
+  'argument/alias-in-value-call': (d) => `\`${d.alias}\` is a source alias, and \`${d.function}\` takes values; an alias belongs to a join over rows`,
+  'type/property-mismatch': (d) => `\`${d.property}\` expects ${d.expected}, and this is ${d.actual}`,
+  'type/relation-as-value': (d) => `\`${d.function}\` gives back a relation, which is not a value`,
+  'type/expected-bool': (d) => `${d.operand} must be Bool, and it is ${d.actual}`,
+  'type/expected-number': (d) => `${d.operand} must be a number, and it is ${d.actual}`,
+  'type/incomparable': (d) => `cannot compare ${d.left} with ${d.right} using \`${d.operator}\``,
+  'type/branch-mismatch': (d) => `the branches of \`? :\` have different types: ${d.then} and ${d.otherwise}`,
+  'shape/name-collision': (d) => `two predicates of ${d.shape} are both called \`${d.name}\``,
+  'shape/missing-required-property': (d) => `\`${d.mapping}\` never writes \`${d.property}\`, and ${d.shape} requires it`,
+  'shape/unsupported-disjunction': (d) => `a value disjunction is not supported: shape \`${d.shape}\` has ${d.branches} branches`,
+  'shape/cyclic-reference': (d) => `cyclic shape graph not supported: ${d.path.join(' -> ')}`,
+  'shape/unresolved-reference': (d) => `unresolved shape reference \`${d.reference}\` in shape \`${d.shape}\``,
+  'shape/binding-arity': (d) => `the binding names ${d.named} shape(s) and the document declares ${d.declared}, so \`${d.name}\`, at position ${d.position}, binds nothing`,
+  'shape/rename-unknown-type': (d) => `\`@rename\` names \`${d.shape}\`, which this \`type\` binding does not introduce`,
+  'shape/rename-unknown-predicate': (d) => `\`${d.shape}\` declares no predicate \`${d.predicate}\`, so this rename never fires`,
+  'shape/more-than-one-output': (d) => `a program may declare only one output shape; found \`${d.first}\` and \`${d.second}\``,
+  'document/not-registered': (d) => `the document \`${d.document}\` is not registered`,
+  'document/unread': (d) => `${d.documents.length} document(s) could not be read: ${d.documents.join(', ')}`,
+  'provider/unknown': (d) => `\`${d.constructor}\` is not a provider this host installs`,
+  'provider/wrong-capability': (d) => `\`${d.constructor}\` does not ${d.capability}`,
+  'provider/wrong-extension': (d) => `\`${d.constructor}\` does not read \`${d.document}\``,
+  'provider/bare-document-path': (d) => `\`${d.document}\` is named by no provider`,
+  'provider/foreign-reader-option': (d) => `\`${d.constructor}\` has no \`${d.option}\`; \`${d.owner}\` does`,
+  'identity/missing-subject': (d) => `\`${d.mapping}\` declares no \`@subject\`, so the rows it writes have no identity`,
+  'identity/duplicate-subject': (d) => `\`${d.mapping}\` declares \`@subject\` twice, and a type has one identity`,
+  'identity/subject-not-first': (d) => `\`@subject\` is the first line of a mapping body, and in \`${d.mapping}\` it is line ${d.line}`,
+  'identity/conflicting': (d) => `\`${d.first}\` and \`${d.second}\` mint two identities for ${d.shape}`,
+  'identity/edge-without-template': (d) => `no mapping in this program writes a \`${d.target}\`, so \`${d.target}(…)\` has no identity template to build from`,
+  'identity/edge-arity': (d) => `\`${d.target}\` is built from ${d.takes} value(s) and this passes ${d.given}; its identity is declared by \`${d.mapping}\``,
+  'pipeline/invalid-stage-argument': (d) => `\`${d.parameter}\` in \`${d.pipeline}\` takes ${d.expected}, and this is not one`,
+  'pipeline/union-alias': (d) => `\`union\` in \`${d.pipeline}\` gives its result the one name \`${d.pipeline}\`, so the alias \`${d.alias}\` would name a row it does not produce`,
+  'pipeline/cycle': (d) => `the source pipeline \`${d.pipeline}\` derives from itself, directly or through the pipelines it names`,
+  'pipeline/join-not-equality': (d) => `\`join\` in \`${d.pipeline}\` relates its two sides by equality, and \`${d.condition}\` is not one`,
+  'pipeline/join-key-not-column': (d) => `\`join\` in \`${d.pipeline}\` equates \`${d.left}\` with \`${d.right}\`, and \`${d.operand}\` is not a column reference`,
+  'pipeline/join-one-side': (d) => `\`join\` in \`${d.pipeline}\` equates \`${d.left}\` with \`${d.right}\`, and both are columns of the ${d.side} side`,
+  'unsupported/expression': (d) => `\`${d.expression}\` is not an expression fossil can lower yet, so this property is not written`,
+  'run/does-not-compile': (_) => `the program does not compile; nothing was run`,
+  'run/destination-uncovered': (d) => `no store covers the destination ${d.destination}`,
+  'source/not-utf8': (d) => `the source \`${d.locator}\` is not UTF-8`,
+  'source/unparseable': (d) => `the source \`${d.locator}\` does not parse`,
+  'engine/failed': (_) => `the query engine failed`,
+  'write/failed': (d) => `\`${d.path}\` could not be written`,
+  'layout/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
+  'storage/no-credential': (d) => `the host vended no ${d.access} credential for ${d.scope}`,
+  'storage/ambiguous-prefix': (d) => `${d.scope} vends ${d.count} prefixes, and one was expected`,
+  'storage/outside-prefix': (d) => `${d.locator} lies outside ${d.prefix}`,
+  'storage/malformed-credential': (d) => `the credential for ${d.prefix} is malformed: \`${d.key}\` ${d.reason}`,
+  'storage/no-route': (d) => `${d.locator} has no route: fossil reads s3://bucket/… and abfss://container@account.dfs.core.windows.net/… through a vended credential, and http(s) without one`,
+  'storage/unreachable': (d) => `${d.locator} could not be reached`,
+  'storage/no-httpfs': (_) => `the engine cannot read remote storage: its httpfs extension is not loaded`,
+  'storage/host-refused': (d) => `the host refused ${d.scope}`,
+  'storage/host-silent': (d) => `the host did not answer ${d.scope} within ${d.after} ms`,
+  'module/unreachable': (d) => `${d.locator} could not be loaded`,
+  'corpus/unreadable': (d) => `${d.path} could not be read`,
+  'corpus/not-json': (d) => `${d.path} is not JSON`,
+  'corpus/unsupported-format': (d) => `${d.path} declares format ${d.format}, and this reader reads fossil/1 only`,
+  'corpus/duplicate-table': (d) => `the corpus declares ${d.table} twice`,
+  'corpus/not-a-location': (d) => `${d.location} carries a query or a fragment, and a corpus location is a prefix: signed storage is opened as a job, under the host that vends its credential`,
+  'corpus/unknown-table': (d) => `${d.table} is not a table of this corpus — its tables are ${d.tables.join(', ')}`,
+  'corpus/unknown-column': (d) => `${d.table} does not declare ${d.column} — its columns are ${d.columns.join(', ')}`,
+  'corpus/empty-projection': (d) => `the projection names no column of ${d.table}`,
+  'corpus/no-position': (d) => `${d.table} declares no position, so it has no box to filter by`,
+  'corpus/filter-type-mismatch': (d) => `${d.column} holds ${d.holds}, and the filter compares it with ${d.value}`,
+  'api/invalid-argument': (d) => `\`${d.argument}\` is not ${d.expected}`,
+  'api/busy': (d) => `\`${d.call}\` was called while another call is running`,
+  'api/unknown-handle': (_) => `the handle names nothing: it was dropped, or never issued`,
+  'internal/bug': (d) => `internal error: ${d.what}`,
+};

@@ -11,7 +11,7 @@ a JSON file that is not a fossil manifest at all, ends here:
 ```
 
 ```text
-https://data.example/graphs/people/fossil.json declares format "fossil/2"; this reader reads fossil/1 and nothing else
+https://data.example/graphs/people/fossil.json declares format fossil/2, and this reader reads fossil/1 only
 ```
 
 A host sees `data: { path, format }`. `format` is the declared string, or the JSON of whatever was

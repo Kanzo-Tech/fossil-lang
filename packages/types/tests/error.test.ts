@@ -40,7 +40,7 @@ describe('FossilError.from', () => {
 describe('FossilError.of', () => {
   it('fills the title from the catalogue and keeps a foreign cause whole', () => {
     const engine = new TypeError('Parser Error');
-    const e = FossilError.of('engine/failed', {}, 'the query engine failed', { cause: engine, help: 'retry' });
+    const e = FossilError.of('engine/failed', {}, { cause: engine, help: 'retry' });
     expect(e.title).toBe(TITLES['engine/failed']);
     expect(e.help).toBe('retry');
     expect(e.cause).toBe(engine);
@@ -48,8 +48,8 @@ describe('FossilError.of', () => {
   });
 
   it('puts a FossilError cause on the wire as its problem', () => {
-    const inner = FossilError.of('corpus/unreadable', { path: 'x/fossil.json' }, 'x/fossil.json could not be read');
-    const outer = FossilError.of('document/unread', { documents: ['a'] }, '1 document(s) could not be read: a', { cause: inner });
+    const inner = FossilError.of('corpus/unreadable', { path: 'x/fossil.json' });
+    const outer = FossilError.of('document/unread', { documents: ['a'] }, { cause: inner });
     expect(outer.cause).toBe(inner);
     expect(outer.problem.cause).toBe(inner.problem);
   });
@@ -86,5 +86,16 @@ describe('the catalogue', () => {
   it('links a code to its page', () => {
     expect(helpUrl('run/over-budget')).toBe('https://kanzo-tech.github.io/fossil-lang/docs/errors/run/over-budget');
     expect(helpUrl('api/busy', 'http://localhost:3000/')).toBe('http://localhost:3000/docs/errors/api/busy');
+  });
+});
+
+describe('FossilError.of, its detail', () => {
+  it('renders the detail from the data, as the Rust #[error] does', () => {
+    expect(FossilError.of('storage/host-refused', { scope: 'its connections' }).message).toBe(
+      'the host refused its connections',
+    );
+    expect(FossilError.of('corpus/duplicate-table', { table: 'Person' }).message).toBe(
+      'the corpus declares Person twice',
+    );
   });
 });

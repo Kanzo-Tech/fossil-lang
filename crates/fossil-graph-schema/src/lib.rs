@@ -55,7 +55,7 @@ pub mod problem;
 pub mod shapes;
 pub mod span;
 
-pub use problem::{CODES, Failure, Foreign, Problem, RETIRED, Related, Severity};
+pub use problem::{CODES, Failure, Foreign, Problem, RETIRED, Related, Severity, TEMPLATES};
 pub use shapes::{
     Occurs, OutputShapes, PropertyConstraint, Rejection, Renames, Shape, local_name, short_name,
 };

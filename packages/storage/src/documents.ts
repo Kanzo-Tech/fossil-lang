@@ -61,7 +61,7 @@ async function connections(host: Host, signal: AbortSignal | undefined): Promise
     });
   } catch (cause) {
     if (isFossilError(cause, 'storage/host-silent') || signal?.aborted) throw cause;
-    throw FossilError.of('storage/host-refused', { scope }, `the host refused ${scope}`, { cause });
+    throw FossilError.of('storage/host-refused', { scope }, { cause });
   }
 }
 
@@ -70,6 +70,5 @@ export function silent(scope: string, after: number): FossilError<'storage/host-
   return FossilError.of(
     'storage/host-silent',
     { scope, after },
-    `the host did not answer ${scope} within ${after} ms`,
   );
 }

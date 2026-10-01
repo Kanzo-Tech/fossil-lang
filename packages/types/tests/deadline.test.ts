@@ -87,7 +87,7 @@ describe('boot', () => {
 describe('attachCause', () => {
   it('appends the cleanup failure at the end of the chain, replacing nothing', () => {
     const engine = new Error('engine said no');
-    const failure = FossilError.of('engine/failed', {}, 'the query engine failed', { cause: engine });
+    const failure = FossilError.of('engine/failed', {}, { cause: engine });
     const cleanup = new Error('DROP SECRET failed');
     expect(attachCause(failure, cleanup)).toBe(failure);
     expect(failure.cause).toBe(engine);
@@ -95,8 +95,8 @@ describe('attachCause', () => {
   });
 
   it('carries it into the problem when the last error is a FossilError', () => {
-    const inner = FossilError.of('storage/no-credential', { scope: 'job j', access: 'read' }, 'none');
-    const outer = FossilError.of('corpus/unreadable', { path: 'fossil.json' }, 'unreadable', { cause: inner });
+    const inner = FossilError.of('storage/no-credential', { scope: 'job j', access: 'read' });
+    const outer = FossilError.of('corpus/unreadable', { path: 'fossil.json' }, { cause: inner });
     attachCause(outer, new Error('release failed'));
     expect(inner.cause).toEqual(new Error('release failed'));
     const wire = outer.problem.cause;

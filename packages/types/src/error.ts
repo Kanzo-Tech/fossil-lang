@@ -11,9 +11,9 @@
  * reads `message` for anything but showing it.
  */
 
-import { CODES, TITLES, type Code, type ProblemData } from './problem.gen.js';
+import { CODES, DETAILS, TITLES, type Code, type DetailedCode, type ProblemData } from './problem.gen.js';
 
-export { CODES, TITLES, type Code, type ProblemData } from './problem.gen.js';
+export { CODES, DETAILS, TITLES, type Code, type DetailedCode, type ProblemData } from './problem.gen.js';
 
 /** How bad a problem is. */
 export type Severity = 'error' | 'warning' | 'info';
@@ -130,15 +130,13 @@ export class FossilError<C extends Code = Code> extends Error {
   }
 
   /**
-   * Raise a code from TypeScript: the problem is built with the code's {@link TITLES | title}, and a
-   * cause that is not a problem stays the error's own `cause`, whole.
+   * Raise a code from TypeScript: the problem is built with the code's {@link TITLES | title} and
+   * the detail its {@link DETAILS | data renders} — the variant's `#[error]` in Rust, translated by
+   * the generator, so a detail reads the same whichever side raised it. A cause that is not a problem
+   * stays the error's own `cause`, whole.
    */
-  static of<C extends Code>(
-    code: C,
-    data: ProblemData[C],
-    detail: string,
-    occurrence: Occurrence = {},
-  ): FossilError<C> {
+  static of<C extends DetailedCode>(code: C, data: ProblemData[C], occurrence: Occurrence = {}): FossilError<C> {
+    const detail = (DETAILS[code] as (data: ProblemData[C]) => string)(data);
     const { help, related, cause } = occurrence;
     const wire = cause === undefined ? undefined : toWire(cause);
     const problem = {

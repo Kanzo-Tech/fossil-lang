@@ -275,6 +275,12 @@ macro_rules! catalogue {
 
         /// Every live code, in declaration order.
         pub const CODES: &[&str] = &[$($code),*];
+
+        /// Each code's `#[error]` as written — the format string and its
+        /// arguments, as source text. `problem.schema.json` carries it as
+        /// `x-detail`, and `cargo xtask problem` turns the ones it can read
+        /// into the TypeScript that renders the same detail from the same data.
+        pub const TEMPLATES: &[(&str, &str)] = &[$(($code, stringify!($($message)*))),*];
     };
 }
 

@@ -14,7 +14,7 @@ export async function query(engine: Engine, statement: string, signal?: AbortSig
     return await engine.query(statement, { signal: signal ?? new AbortController().signal });
   } catch (cause) {
     signal?.throwIfAborted();
-    throw FossilError.of('engine/failed', {}, 'the query engine failed', { cause });
+    throw FossilError.of('engine/failed', {}, { cause });
   }
 }
 

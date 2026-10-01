@@ -70,7 +70,6 @@ export function scanOf(engine: Engine, relation: (table: string) => string, tabl
       throw FossilError.of(
         'corpus/unknown-table',
         { table: params.table, tables: names },
-        `${params.table} is not a table of this corpus — its tables are ${names.join(', ')}`,
       );
     }
     const declared = new Set(table.properties.map((p) => p.name));
@@ -80,7 +79,6 @@ export function scanOf(engine: Engine, relation: (table: string) => string, tabl
         throw FossilError.of(
           'corpus/empty-projection',
           { table: table.name },
-          `select names no column of ${table.name}`,
         );
       }
       for (const column of select) {
@@ -106,7 +104,6 @@ export function scanOf(engine: Engine, relation: (table: string) => string, tabl
             throw FossilError.of(
               'api/invalid-argument',
               { argument: 'tasks', expected: `tasks of ${table.name}` },
-              `a task of ${t.table} was handed to a scan of ${table.name}`,
             );
           }
         }
@@ -129,6 +126,5 @@ export function notACount(limit: number): FossilError<'api/invalid-argument'> {
   return FossilError.of(
     'api/invalid-argument',
     { argument: 'limit', expected: 'a count of rows' },
-    `limit ${limit} is not a count of rows`,
   );
 }

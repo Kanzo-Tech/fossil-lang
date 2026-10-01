@@ -120,7 +120,6 @@ export async function mount(
       throw FossilError.of(
         'storage/outside-prefix',
         { locator, prefix },
-        `${locator} lies outside what the host vended for ${describe(scope)} (${prefix})`,
       );
     }
     const entry = table.get(`${access}\u0000${credential.prefix}`)!;
@@ -186,7 +185,7 @@ async function release(engine: Engine, table: Map<string, Held>, keys: readonly 
     }
   }
   if (failures.length > 0) {
-    throw FossilError.of('engine/failed', {}, 'the query engine failed to give a credential back', {
+    throw FossilError.of('engine/failed', {}, {
       cause: failures.length === 1 ? failures[0] : new AggregateError(failures, `${failures.length} releases failed`),
     });
   }
@@ -199,7 +198,7 @@ async function install(engine: Engine, entry: Held): Promise<void> {
     try {
       await engine.query(sql, { signal: unstoppable() });
     } catch (cause) {
-      throw FossilError.of('engine/failed', {}, 'the query engine refused a storage secret', { cause });
+      throw FossilError.of('engine/failed', {}, { cause });
     }
   }
   if (entry.lent.size > 0) {
@@ -235,7 +234,7 @@ async function renew(engine: Engine, host: Host, entry: Held): Promise<void> {
     // Nobody is waiting on a renewal, so its failure is kept where the next read finds it.
     entry.failure = isFossilError(cause)
       ? cause
-      : FossilError.of('internal/bug', { what: `renewing ${prefix} failed outside fossil` }, `internal error: renewing ${prefix} failed outside fossil`, {
+      : FossilError.of('internal/bug', { what: `renewing ${prefix} failed outside fossil` }, {
           cause,
         });
   }
@@ -249,13 +248,12 @@ async function requireHttpfs(engine: Engine): Promise<void> {
       signal: unstoppable(),
     });
   } catch (cause) {
-    throw FossilError.of('engine/failed', {}, 'the query engine failed', { cause });
+    throw FossilError.of('engine/failed', {}, { cause });
   }
   if (answer.numRows === 0 || answer.getChild('loaded')?.get(0) !== true) {
     throw FossilError.of(
       'storage/no-httpfs',
       {},
-      'the engine cannot read remote storage: its httpfs extension is not loaded',
       { help: "fossil reads s3:// through a scoped secret, and the host's engine loads httpfs before handing it over" },
     );
   }
@@ -276,7 +274,7 @@ async function vended(
     });
   } catch (cause) {
     if (isFossilError(cause, 'storage/host-silent') || signal?.aborted) throw cause;
-    throw FossilError.of('storage/host-refused', { scope: said }, `the host refused ${said}`, { cause });
+    throw FossilError.of('storage/host-refused', { scope: said }, { cause });
   }
 }
 
@@ -285,7 +283,6 @@ function noCredential(scope: Scope, access: Access): FossilError<'storage/no-cre
   return FossilError.of(
     'storage/no-credential',
     { scope: said, access },
-    `the host vended no ${access} credential for ${said}`,
   );
 }
 
