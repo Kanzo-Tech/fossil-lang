@@ -60,6 +60,25 @@ source that is not on disk — a CSV on `s3://`, or behind an `https://` — whi
 fetch on its message loop, so there a run refuses things your editor does not, and
 [in your editor](/docs/book/editor) measures it.
 
+## A name that is not an identifier
+
+The header decides what a column is called, and a header does not ask the grammar first. LDBC's
+relationship files name each column after the entity it points at — `Person.id|Tag.id` — and
+`person_knows_person` names the same one twice:
+
+<Program src="relationship/relationship.fossil" region="sources" title="relationship.fossil" />
+
+Neither header lexes as an identifier, so after the dot the name is written as a string, and the
+text between the quotes is the name. A header that repeats a column gives the repeat a suffix,
+`Person.id_1`, which is what the source was described with:
+
+<Program src="relationship/relationship.fossil" region="relationship" title="relationship.fossil" />
+
+Each name has one spelling. `Row."name"` is refused and the message names `Row.name`; a misspelled
+column is corrected in the quoted form when the field it means is quoted (``did you mean
+`"Person.id"`?``), and completion after `KnowsRow.` inserts the quotes for you. A reserved word is a
+name like any other once it is quoted: a column called `from` is `Row."from"`.
+
 ## Fields, not rows
 
 A binding gives you the shape of a row, not the rows themselves. There is no way to ask a program what
