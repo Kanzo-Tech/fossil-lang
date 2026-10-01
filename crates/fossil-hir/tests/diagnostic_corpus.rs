@@ -552,6 +552,38 @@ fn did_you_mean_unrelated_no_suggestion() {
 /// puts a shape name in scope is a `type { … } := io.shex("…")` binding over a
 /// registered document. The claim is unchanged: whatever the renderer writes,
 /// the parser and the lowering take it back, every line of it.
+/// A branch whose predicates the decoder could not name gets a line telling the
+/// author to fill it in, and that line is a fossil comment: it was `# TODO:`,
+/// which the lexer refuses, so applying the quick fix left a file that did not
+/// parse.
+#[test]
+fn a_split_branch_with_no_predicate_still_parses() {
+    let suggestion = render_split_suggestion(
+        "Contact",
+        "Contact",
+        "users",
+        "\"https://example.org/u/{users.id}\"",
+        &[vec!["http://example.org/email".to_string()], vec![]],
+        &[],
+    );
+    let full = format!(
+        "type {{ Contact }} := io.shex(\"contact.shex\")\nusers := io.csv(\"users.csv\")\n{suggestion}"
+    );
+    let db = new_db();
+    let file = SourceFile::new(&db, full.clone(), "split.fossil".to_string());
+    fossil_syntax::parse(&db, file);
+    let errors = fossil_syntax::parse::accumulated::<Diagnostic>(&db, file);
+    assert!(
+        errors.is_empty(),
+        "the split did not parse: {errors:?}\n{full}"
+    );
+    assert_eq!(
+        def_map(&db, file).mappings(&db).len(),
+        2,
+        "one mapping per branch:\n{full}"
+    );
+}
+
 #[test]
 fn the_generated_split_suggestion_compiles() {
     // 1. Render the split-into-N-mappings suggestion through the same function

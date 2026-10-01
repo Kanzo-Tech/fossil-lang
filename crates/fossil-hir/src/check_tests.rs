@@ -1217,7 +1217,7 @@ fn the_split_suggestion_is_one_mapping_per_branch() {
 fn a_branch_with_no_named_predicate_says_so() {
     let rendered =
         crate::check::render_split_suggestion("C", "C", "users", "\"t\"", &[Vec::new()], &[]);
-    assert!(rendered.contains("# TODO"), "got {rendered:?}");
+    assert!(rendered.contains("// TODO"), "got {rendered:?}");
 }
 
 // ── Query-level inversions + contract ──────────────────────────────────────

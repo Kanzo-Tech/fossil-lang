@@ -308,7 +308,7 @@ pub fn render_split_suggestion(
             // A branch whose predicates the decoder could not name — a nested
             // disjunction, or a reference it did not resolve. The mapping is
             // still the right shape; the user has to fill the body in.
-            out.push_str("    # TODO: this branch names no predicate — split it by hand\n");
+            out.push_str("    // TODO: this branch names no predicate — split it by hand\n");
         }
         for predicate in branch {
             // The name a body may actually write — [`fossil_graph_schema::short_name`],
