@@ -1,0 +1,37 @@
+---
+title: A module could not be loaded
+description: "`module/unreachable` — one of fossil's WebAssembly modules could not be fetched: refused, missing, or not there within 60 seconds."
+---
+
+fossil's compiler, executor and storage each run as a WebAssembly module that the page fetches before
+the first call needs it. This one did not arrive: the request failed, the file was not where the
+bundler said it would be, or nothing came within 60 seconds.
+
+```text
+fossil_df_wasm_bg.wasm could not be loaded
+```
+
+A host sees `data: { locator }` — the module's file — and `after`, the deadline in milliseconds,
+when the wait was ended by it rather than by an error. The browser's own error is the cause. It is
+thrown by `initFossilWasm`, `initFossilExecutor` and `initStorage`, and by every door that boots one
+of them first: `openProgram`, `mount`, `read`.
+
+## Why fossil refuses it
+
+Nothing fossil does can start without its module, and the failure is the network's or the
+deployment's, not the program's. It has its own code because the person needs to know *what* is down:
+a store that will not answer is [`storage/unreachable`](/docs/errors/storage/unreachable), and a
+module that will not load is a different repair.
+
+**A failed load is not remembered.** The next call fetches the module again, so a dropped download
+costs one failure, not the rest of the page's life. A module that arrives and will not instantiate is
+[`internal/bug`](/docs/errors/internal/bug): a corrupted or mismatched build, not the network.
+
+## How to repair it
+
+- **Try again.** A transient failure — a dropped connection, a slow CDN — clears on the next call.
+- **Read `cause`.** A 404 means the bundler did not emit the `.wasm` beside the module's JavaScript,
+  or the server does not serve it; the glue finds it through `new URL(…, import.meta.url)`.
+- **`after` is set** — the file is reachable but slow: check its size on the wire and whether the
+  server compresses it.
+- **In Node**, which cannot fetch `file://`, pass the module's bytes to the `init` function.

@@ -1,0 +1,39 @@
+---
+title: The host did not answer
+description: "`storage/host-silent` — fossil asked the host for credentials or its connections, and no answer came within 30 seconds."
+---
+
+fossil asked the host for something only the host can give — credentials for a scope, its map of
+connections, or a job's completion — and the host's promise did not settle within 30 seconds. fossil
+stops waiting, aborts the `signal` it handed the call, and reports who did not answer:
+
+```text
+the host did not answer job 3 within 30000 ms
+```
+
+A host sees `data: { scope, after }`: `scope` names the request as [`storage/host-refused`](/docs/errors/storage/host-refused)
+does — `job <id>`, `connection <name>`, `its connections`, or `the completion of job <id>` — and
+`after` is the deadline in milliseconds. It is thrown by `mount` (so `open(job, …)` and
+introspection), by `resolveDocuments` and by `openProgram`'s `check`; a storage read and a run answer
+it from the Rust side, as each affected file's `problem` or as the run's failure. `runJob` raises it
+for a completion that stayed silent through every retry.
+
+## Why fossil refuses it
+
+**Every wait on something outside the process ends** ([every wait ends, every failure is
+seen](/docs/design/failure)). A host promise that never settles — a fetch to a backend that hangs, a
+404 the host never turns into a rejection — used to leave `mount`, `open`, a run and the editor
+waiting forever, with a spinner and no error. Thirty seconds is the slowest honest answer for vending
+a credential; past it fossil says so, by who did not answer, rather than as a bare timeout.
+
+The figure is fixed, not an option a host sets.
+
+## How to repair it
+
+- **Find the request in the host.** `scope` says which call went quiet: the backend that vends
+  credentials, the one that lists connections, or the one that records a job's completion.
+- **Turn a failure into a rejection.** A host that catches its own error and never resolves or rejects
+  is silent; one that rejects is [`storage/host-refused`](/docs/errors/storage/host-refused), with its
+  error as the cause.
+- **Pass `signal` to the host's `fetch`.** Every `Host` call is handed `{ signal }`; a host that passes
+  it on stops the request fossil has stopped waiting for.

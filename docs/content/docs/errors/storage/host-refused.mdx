@@ -13,7 +13,9 @@ the host refused job 3
 
 A host sees `data: { scope }` and its own error as `cause`. `scope` is `job <id>` or
 `connection <name>` for a credentials request, and names the connections request otherwise —
-`connections` from `resolveDocuments` in `@fossil-lang/storage`, `its connections` from the Rust side.
+`its connections` from `resolveDocuments` in `@fossil-lang/storage` and from the Rust side alike, and
+`the completion of job <id>` for a completion `runJob` could not report. A host that does not answer at
+all is [`storage/host-silent`](/docs/errors/storage/host-silent).
 It is thrown by `mount` (so `open(job, …)` and introspection), by `resolveDocuments`, and by a run;
 a storage read answers it as each affected file's `problem`.
 
@@ -34,5 +36,5 @@ or that what it resolved to is not a list of `StorageCredential`.
 - **Read `cause`.** When it is the host's own error, the repair is the host's: authorise the scope, or
   fix whatever made the request fail.
 - **When the cause is a `TypeError`**, make the host match `@fossil-lang/types`' `Host`:
-  `connections()` resolves to `{ [name]: baseUrl }`, and `credentials(scope, access)` resolves to
-  `StorageCredential[]`, each `{ prefix, config }`.
+  `connections({ signal })` resolves to `{ [name]: baseUrl }`, and `credentials(scope, access, { signal })`
+  resolves to `StorageCredential[]`, each `{ prefix, config }`.

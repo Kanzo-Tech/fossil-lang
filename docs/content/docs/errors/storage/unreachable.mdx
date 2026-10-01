@@ -26,6 +26,9 @@ its in-memory store, for the same reason a real store would.
 does not reclassify them into codes of its own: it says which locator it could not reach, and hands
 over the store's answer whole. Branch on the code; read the cause to find out what the store said.
 
+In a browser, `object_store` sets no timeout of its own, so fossil gives each request 30 seconds and
+reports one that took longer as this code, its cause saying the store did not answer.
+
 A failure is one file's, never the batch's: a storage read answers every target in order, so one
 unreachable file does not hide whether its neighbours were read.
 
