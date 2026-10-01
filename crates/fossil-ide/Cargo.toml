@@ -35,6 +35,9 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # WASM-clean, so fossil-ide stays WASM-clean. The cross-file symbol
 # infrastructure used to be `fossil-ide-db` and is now the `symbol_index` /
 # `workspace` modules here.
+# `split_alias` — the one rule that tells `@connection/` from the path, which
+# the semantic tokens carve out of a reference's string literal.
+fossil-locator = { path = "../fossil-locator" }
 rowan = { workspace = true }
 salsa = { workspace = true }
 smol_str = { workspace = true }
