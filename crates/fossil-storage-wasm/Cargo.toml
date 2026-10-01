@@ -26,6 +26,9 @@ wasm-bindgen-futures = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 serde = { workspace = true }
 js-sys = { workspace = true }
+# A panic is still a `RuntimeError: unreachable` — it is not a value that can be
+# built as it happens — but with the hook its message and trace reach the console.
+console_error_panic_hook = { workspace = true }
 # `object_store` signs with `chrono::Utc::now()`, which falls through to std's
 # `SystemTime::now()` — a panic on wasm32 — unless `wasmbind` is on.
 chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }

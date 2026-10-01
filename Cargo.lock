@@ -2078,6 +2078,7 @@ name = "fossil-storage-wasm"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "console_error_panic_hook",
  "fossil-graph-schema",
  "fossil-storage",
  "getrandom 0.2.17",

@@ -19,6 +19,14 @@ use fossil_storage::{Access, Grant, JsHost, Scope, Storage, StorageCredential};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 
+/// Install the panic hook when the module boots, so a panic's message and trace
+/// reach the console beside the `RuntimeError` that `@fossil-lang/storage`
+/// reports as `internal/bug`.
+#[wasm_bindgen(start)]
+pub fn start() {
+    console_error_panic_hook::set_once();
+}
+
 fn grant(credential: JsValue) -> Result<Grant, Failure> {
     let credential: StorageCredential = serde_wasm_bindgen::from_value(credential)
         .map_err(|e| invalid_argument("credential", "a StorageCredential", Some(e.into())))?;
