@@ -2428,7 +2428,10 @@ fn lower_expr_inner(
             if let Some(n) = toks.iter().find(|t| t.kind() == SyntaxKind::INTEGER) {
                 let range = inner.text_range();
                 let span = Span::new(range.start().into(), range.end().into());
-                return match n.text().parse::<i64>() {
+                // `1_000` is one INTEGER token (grammar.bnf, INTEGER: underscores
+                // separate digits) and `i64::from_str` does not read them, as
+                // `f64::from_str` does not for a FLOAT below.
+                return match n.text().replace('_', "").parse::<i64>() {
                     Ok(v) => Some(HirExpr::IntLit(v)),
                     Err(e) => {
                         Diagnostic::new(
@@ -3165,6 +3168,29 @@ prop https://example.org/name - 1 1
                 binding: "users".into(),
                 column: "name".into()
             }
+        );
+    }
+
+    /// `1_000` is an Integer as grammar.bnf spells one, and it was refused as
+    /// `syntax/number-out-of-range` because the underscore reached `i64`'s parser.
+    #[test]
+    fn an_integer_with_underscores_is_its_digits() {
+        let (db, file) = lower_src(
+            "type { Person } := io.shex(\"personas.shex\")\n\nusers := io.csv(\"u.csv\")\n\nUser : Person from users\n    age = 1_000\n    total = 1_000.5\n",
+        );
+        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
+        let body = crate::body::body(&db, mapping);
+        let values: Vec<_> = body
+            .properties(&db)
+            .iter()
+            .map(|p| p.value.clone())
+            .collect();
+        assert_eq!(
+            values,
+            [
+                HirExpr::IntLit(1000),
+                HirExpr::FloatLit(FloatBits::new(1000.5))
+            ]
         );
     }
 
