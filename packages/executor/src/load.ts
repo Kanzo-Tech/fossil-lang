@@ -5,13 +5,17 @@
 import init from '../pkg/fossil_df_wasm.js';
 import type { InitInput } from '../pkg/fossil_df_wasm.js';
 
+import { boot } from '@fossil-lang/types';
+
 export type { InitInput };
 
 let _initPromise: Promise<unknown> | null = null;
 
 /**
  * Boot the fossil-df-wasm executor module. MUST be awaited before constructing
- * {@link FossilExecutor}. Memoised — subsequent calls return the same promise.
+ * {@link FossilExecutor}. A boot that succeeded is kept; one that failed is
+ * not, so the next call tries again — `storage/unreachable` for a module that could not be
+ * fetched within 60 s, `internal/bug` for one that would not instantiate.
  *
  * Called with nothing, the glue resolves `new URL('fossil_df_wasm_bg.wasm',
  * import.meta.url)` and the host's bundler emits that file as an asset. `wasm`
@@ -23,8 +27,13 @@ let _initPromise: Promise<unknown> | null = null;
  * what the light `@fossil-lang/wasm` module is for).
  */
 export function initFossilExecutor(wasm?: InitInput): Promise<unknown> {
-  if (!_initPromise) {
-    _initPromise = init(wasm === undefined ? undefined : { module_or_path: wasm });
+  if (_initPromise === null) {
+    // The object form: the positional one still works but logs a deprecation warning.
+    const pending = boot('fossil_df_wasm_bg.wasm', () => init(wasm === undefined ? undefined : { module_or_path: wasm }));
+    _initPromise = pending;
+    pending.catch(() => {
+      if (_initPromise === pending) _initPromise = null; // forgotten, so the next call boots again
+    });
   }
   return _initPromise;
 }

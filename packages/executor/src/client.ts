@@ -64,9 +64,12 @@ export class FossilExecutor implements DocumentWorkspace {
    * Rejects with a `FossilError`. One that needed more memory than the executor's budget is
    * `isFossilError(e, 'run/over-budget')`, with the consumer and the bytes in `e.data`; that is
    * decided while the graph executes, so nothing has been written.
+   *
+   * `signal` stops the run, rejecting with its reason. `fossil.json` is written last, so a stopped
+   * run leaves no corpus — only the files it had written under the prefix by then.
    */
-  run(host: Host, job: string): Promise<RunReport> {
-    return this.#raw.run(host, job) as Promise<RunReport>;
+  run(host: Host, job: string, signal?: AbortSignal): Promise<RunReport> {
+    return this.#raw.run(host, job, signal) as Promise<RunReport>;
   }
 
   /**

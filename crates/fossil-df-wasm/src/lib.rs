@@ -147,11 +147,37 @@ impl FossilExecutor {
     /// write under, the storage failure when it vends none, or the run's own
     /// failure — `run/over-budget` when it needed more memory than the
     /// executor's budget, which is raised before anything is written.
+    ///
+    /// `signal`, an `AbortSignal`, stops the run: it rejects with the signal's
+    /// reason and the run is dropped where it stands. `fossil.json` is written
+    /// last, so a stopped run leaves no corpus — only the files it had already
+    /// written under the prefix.
     // The shared borrow is held across the run on purpose: it is what makes a
     // `registerDocument` issued mid-run fail instead of changing the program
     // under it.
     #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
-    pub async fn run(&self, host: JsValue, job: String) -> Result<JsValue, JsValue> {
+    pub async fn run(
+        &self,
+        host: JsValue,
+        job: String,
+        signal: Option<js_sys::Object>,
+    ) -> Result<JsValue, JsValue> {
+        let Some(signal) = signal else {
+            return self.run_until(host, job).await;
+        };
+        let stopped = stopped(&signal)?;
+        let run = std::pin::pin!(self.run_until(host, job));
+        match futures::future::select(run, stopped).await {
+            futures::future::Either::Left((done, _)) => done,
+            futures::future::Either::Right(_) => {
+                Err(js_sys::Reflect::get(&signal, &JsValue::from_str("reason"))
+                    .unwrap_or(JsValue::UNDEFINED))
+            }
+        }
+    }
+
+    #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
+    async fn run_until(&self, host: JsValue, job: String) -> Result<JsValue, JsValue> {
         let mut storage = Storage::new(Arc::new(JsHost::new(host)));
         let scope = Scope::Job(job);
         let dest = match storage.grant(scope.clone(), Access::Write).await {
@@ -253,6 +279,34 @@ impl FossilExecutor {
         set(&result, "report", &report_value(&report)?)?;
         Ok(result.into())
     }
+}
+
+/// A future that resolves when `signal` aborts — at once if it already has.
+fn stopped(signal: &js_sys::Object) -> Result<wasm_bindgen_futures::JsFuture, Failure> {
+    let aborted = js_sys::Reflect::get(signal, &JsValue::from_str("aborted"))
+        .map_err(|e| invalid_argument("signal", "an AbortSignal", Some(e)))?;
+    let listen: js_sys::Function =
+        js_sys::Reflect::get(signal, &JsValue::from_str("addEventListener"))
+            .ok()
+            .and_then(|f| f.dyn_into().ok())
+            .ok_or_else(|| invalid_argument("signal", "an AbortSignal", None))?;
+    let once = js_sys::Object::new();
+    js_sys::Reflect::set(&once, &JsValue::from_str("once"), &JsValue::TRUE)
+        .map_err(|e| bug("setting `once` on a fresh object", e))?;
+    let mut failed = None;
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        if aborted.is_truthy() {
+            failed = resolve.call0(&JsValue::UNDEFINED).err();
+            return;
+        }
+        failed = listen
+            .call3(signal, &JsValue::from_str("abort"), &resolve, &once)
+            .err();
+    });
+    if let Some(e) = failed {
+        return Err(invalid_argument("signal", "an AbortSignal", Some(e)));
+    }
+    Ok(wasm_bindgen_futures::JsFuture::from(promise))
 }
 
 /// An in-memory store that answered with an error, as the storage failure a
