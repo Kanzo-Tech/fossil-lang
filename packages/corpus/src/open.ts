@@ -2,8 +2,8 @@
  * The door: `fossil.json` read once, one view per table, and `close`.
  */
 
-import { mount } from '@fossil-lang/storage';
-import { FossilError, type Engine, type Host } from '@fossil-lang/types';
+import { mount, type Mount } from '@fossil-lang/storage';
+import { FossilError, attachCause, type Engine, type Host } from '@fossil-lang/types';
 
 import type { Corpus, SqlCorpus, SqlResult } from './corpus.js';
 import { parseManifest, type EdgeTable, type VertexTable } from './manifest.js';
@@ -38,6 +38,12 @@ export interface OpenOptions {
    * host's and so are the files — it is the host writing the decision down.
    */
   sql?: 'withheld' | 'allowed';
+  /**
+   * Stops the open: it rejects with the signal's reason, and what it had made — a mount, a catalog —
+   * is given back. It reaches the host's credential request and every statement the open runs; the
+   * corpus that comes back does not keep it.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -61,12 +67,13 @@ const holders = new WeakMap<object, Map<string, number>>();
  *   `corpus/duplicate-table` when it names one table twice; `corpus/not-a-location` for a URL
  *   carrying a query or a fragment; `storage/ambiguous-prefix` for a job
  *   vended more than one prefix; `api/invalid-argument` when no `engine` is given; `engine/failed`
- *   when the engine refuses a view.
+ *   when the engine refuses a view; for a job, what `mount` throws — `storage/host-silent` for a host
+ *   that does not answer within 30 s among them.
  */
 export function open(source: string, options: OpenOptions & { sql: 'allowed' }): Promise<SqlCorpus>;
 export function open(source: string, options: OpenOptions): Promise<Corpus>;
 export async function open(source: string, options: OpenOptions): Promise<Corpus> {
-  const { engine, host } = options;
+  const { engine, host, signal } = options;
   if (typeof engine?.query !== 'function') {
     throw FossilError.of(
       'api/invalid-argument',
@@ -79,19 +86,26 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
   // under the host's credential — an Azure file one by one — and a URL's are named as they are.
   let names: (paths: readonly string[]) => Promise<string[]>;
   let release = async (): Promise<void> => {};
+  let storage: Mount | undefined;
   if (host !== undefined) {
-    const storage = await mount(engine, host, { job: source }, 'read');
-    release = () => storage.close();
-    if (storage.prefixes.length !== 1) {
-      await release();
-      throw FossilError.of(
+    const mounted = await mount(engine, host, { job: source }, 'read', { signal });
+    storage = mounted;
+    release = () => mounted.close();
+    if (mounted.prefixes.length !== 1) {
+      const ambiguous = FossilError.of(
         'storage/ambiguous-prefix',
-        { scope: `job ${source}`, count: storage.prefixes.length },
-        `job ${source} vends ${storage.prefixes.length} prefixes, and a corpus lives under one`,
+        { scope: `job ${source}`, count: mounted.prefixes.length },
+        `job ${source} vends ${mounted.prefixes.length} prefixes, and a corpus lives under one`,
       );
+      try {
+        await release();
+      } catch (cleanup) {
+        throw attachCause(ambiguous, cleanup);
+      }
+      throw ambiguous;
     }
-    const prefix = storage.prefixes[0]!;
-    names = (paths) => storage.files(paths.map((path) => `${prefix}${path}`));
+    const prefix = mounted.prefixes[0]!;
+    names = (paths) => mounted.files(paths.map((path) => `${prefix}${path}`));
   } else {
     // A corpus is a prefix and its files are named under it, so a query — a signature among them —
     // would end up in the middle of every path. Signed storage is a job under its host.
@@ -116,8 +130,11 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
       FossilError.of('corpus/unreadable', { path: where! }, `${where} could not be read`, cause === undefined ? {} : { cause });
     let answer: Awaited<ReturnType<Engine['query']>>;
     try {
-      answer = await engine.query(`SELECT content FROM read_text(${lit(where!)})`);
+      answer = await engine.query(`SELECT content FROM read_text(${lit(where!)})`, {
+        signal: signal ?? new AbortController().signal,
+      });
     } catch (cause) {
+      signal?.throwIfAborted();
       throw unreadable(cause);
     }
     if (answer.numRows === 0) throw unreadable();
@@ -136,43 +153,74 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
     const relation = (table: string): string => `${ident(catalog)}.${ident(table)}`;
     held.set(catalog, (held.get(catalog) ?? 0) + 1);
     counted = true;
-    await query(engine, `ATTACH IF NOT EXISTS ':memory:' AS ${ident(catalog)}`);
+    await query(engine, `ATTACH IF NOT EXISTS ':memory:' AS ${ident(catalog)}`, signal);
     let at = 0;
     for (const name of tables.keys()) {
-      await query(engine, `CREATE OR REPLACE VIEW ${relation(name)} AS SELECT * FROM read_parquet(${lit(files[at++]!)})`);
+      await query(
+        engine,
+        `CREATE OR REPLACE VIEW ${relation(name)} AS SELECT * FROM read_parquet(${lit(files[at++]!)})`,
+        signal,
+      );
     }
 
+    // A credential whose renewal failed past expiry makes every read a 403; the read reports the
+    // storage failure instead, which names what to fix.
+    const live = (): void => {
+      if (storage?.failure !== undefined) throw storage.failure;
+    };
     let closed = false;
     const corpus: Corpus = {
       url: catalog,
       manifest,
-      scan: scanOf(engine, relation, tables),
+      scan: scanOf(engine, relation, tables, live),
       async close() {
         if (closed) return;
         closed = true;
-        const left = (held.get(catalog) ?? 1) - 1;
-        if (left > 0) held.set(catalog, left);
-        else {
-          held.delete(catalog);
-          await engine.query(`DETACH DATABASE IF EXISTS ${ident(catalog)}`);
-        }
-        await release();
+        await detached(release);
       },
     };
     if (options.sql !== 'allowed') return corpus;
-    const widened: SqlCorpus = { ...corpus, sql: (statement, o) => sql(engine, statement, o) };
+    const widened: SqlCorpus = {
+      ...corpus,
+      sql: (statement, o) => {
+        live();
+        return sql(engine, statement, o);
+      },
+    };
     return widened;
   } catch (cause) {
-    if (counted) {
-      const left = (held.get(catalog) ?? 1) - 1;
-      if (left > 0) held.set(catalog, left);
-      else {
-        held.delete(catalog);
-        await engine.query(`DETACH DATABASE IF EXISTS ${ident(catalog)}`).catch(() => undefined);
+    try {
+      if (counted) await detached(release);
+      else await release();
+    } catch (cleanup) {
+      throw attachCause(cause, cleanup);
+    }
+    throw cause;
+  }
+
+  /**
+   * Give this open's hold on the catalog back — the last holder detaches it — and then `after`, which
+   * runs whether or not the detach did. Two failures are one: the detach's, the release's attached.
+   */
+  async function detached(after: () => Promise<void>): Promise<void> {
+    const left = (held.get(catalog) ?? 1) - 1;
+    let failure: unknown;
+    if (left > 0) held.set(catalog, left);
+    else {
+      held.delete(catalog);
+      try {
+        await query(engine, `DETACH DATABASE IF EXISTS ${ident(catalog)}`);
+      } catch (cause) {
+        failure = cause;
       }
     }
-    await release();
-    throw cause;
+    try {
+      await after();
+    } catch (cause) {
+      if (failure === undefined) throw cause;
+      attachCause(failure, cause);
+    }
+    if (failure !== undefined) throw failure;
   }
 }
 

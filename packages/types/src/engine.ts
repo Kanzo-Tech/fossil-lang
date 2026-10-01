@@ -29,8 +29,13 @@ export interface Engine {
    * **Columns, because a reader draws columns.** apache-arrow's `Table` is a {@link Table}
    * structurally, so a host hands back what DuckDB-WASM already produced and nothing turns columns
    * into objects and back.
+   *
+   * **fossil always passes one.** A statement fossil runs for a caller carries the caller's signal,
+   * and one it runs for itself — a cleanup, a renewal — carries one that never aborts. TypeScript
+   * accepts an implementation that declares fewer parameters, so an engine that ignores the signal
+   * still compiles; it is the engine a Stop cannot reach.
    */
-  query(sql: string, options?: { readonly signal?: AbortSignal }): Promise<Table>;
+  query(sql: string, options: { readonly signal: AbortSignal }): Promise<Table>;
   /**
    * Make each URL readable under its name. The same URL again is a no-op and a new URL
    * replaces the lease behind the name — DuckDB-WASM's `registerFileURL` refuses a second URL

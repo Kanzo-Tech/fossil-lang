@@ -60,11 +60,13 @@ impl JsHost {
                 let host = host.clone();
                 spawn_local(async move {
                     match request {
+                        // A send fails only when the asker stopped waiting, and then
+                        // nobody is left to tell.
                         Request::Connections(reply) => {
-                            let _ = reply.send(connections(&host).await);
+                            let _ = reply.send(connections(&host).await); // the asker is gone
                         }
                         Request::Credentials(scope, access, reply) => {
-                            let _ = reply.send(credentials(&host, &scope, access).await);
+                            let _ = reply.send(credentials(&host, &scope, access).await); // the asker is gone
                         }
                     }
                 });
@@ -110,10 +112,31 @@ fn method(host: &JsValue, name: &str) -> Result<Function, Foreign> {
         .ok_or_else(|| Foreign::named("TypeError", format!("the host has no `{name}`")))
 }
 
-// These three run on the page's event loop, which is the point: the host never
+// These run on the page's event loop, which is the point: the host never
 // leaves it.
+
+/// What a host call is handed — `@fossil-lang/types`' `HostCall`: a signal
+/// that aborts when fossil stops waiting, and the controller that aborts it.
+fn call() -> Result<(JsValue, JsValue), Foreign> {
+    let global = js_sys::global();
+    let controller = Reflect::get(&global, &JsValue::from_str("AbortController"))
+        .ok()
+        .and_then(|c| c.dyn_into::<Function>().ok())
+        .and_then(|c| Reflect::construct(&c, &js_sys::Array::new()).ok())
+        .ok_or_else(|| Foreign::named("TypeError", "this runtime has no AbortController"))?;
+    let signal =
+        Reflect::get(&controller, &JsValue::from_str("signal")).map_err(|e| foreign(&e))?;
+    let options = js_sys::Object::new();
+    Reflect::set(&options, &JsValue::from_str("signal"), &signal).map_err(|e| foreign(&e))?;
+    Ok((options.into(), controller))
+}
+
 #[allow(clippy::future_not_send)]
-async fn settle(returned: Result<JsValue, JsValue>, name: &str) -> Result<JsValue, HostError> {
+async fn settle(
+    returned: Result<JsValue, JsValue>,
+    controller: &JsValue,
+    name: &str,
+) -> Result<JsValue, HostError> {
     let promise: Promise = returned.map_err(|e| foreign(&e))?.dyn_into().map_err(|_| {
         Foreign::named(
             "TypeError",
@@ -122,14 +145,21 @@ async fn settle(returned: Result<JsValue, JsValue>, name: &str) -> Result<JsValu
     })?;
     match select(JsFuture::from(promise), elapse(HOST_MS)).await {
         Either::Left((answer, _)) => Ok(answer.map_err(|e| foreign(&e))?),
-        Either::Right(((), _)) => Err(HostError::Silent { after: HOST_MS }),
+        Either::Right(((), _)) => {
+            // Tell the host to stop: its late answer is no longer read either way.
+            if let Ok(abort) = method(controller, "abort") {
+                abort.call0(controller).map_err(|e| foreign(&e))?;
+            }
+            Err(HostError::Silent { after: HOST_MS })
+        }
     }
 }
 
 #[allow(clippy::future_not_send)]
 async fn connections(host: &JsValue) -> Result<HashMap<String, String>, HostError> {
-    let returned = method(host, "connections")?.call0(host);
-    let map = settle(returned, "connections").await?;
+    let (options, controller) = call()?;
+    let returned = method(host, "connections")?.call1(host, &options);
+    let map = settle(returned, &controller, "connections").await?;
     Ok(serde_wasm_bindgen::from_value(map).map_err(|e| shape(&e))?)
 }
 
@@ -141,8 +171,9 @@ async fn credentials(
 ) -> Result<Vec<StorageCredential>, HostError> {
     let scope = serde_wasm_bindgen::to_value(scope).map_err(|e| shape(&e))?;
     let access = serde_wasm_bindgen::to_value(&access).map_err(|e| shape(&e))?;
-    let returned = method(host, "credentials")?.call2(host, &scope, &access);
-    let vended = settle(returned, "credentials").await?;
+    let (options, controller) = call()?;
+    let returned = method(host, "credentials")?.call3(host, &scope, &access, &options);
+    let vended = settle(returned, &controller, "credentials").await?;
     Ok(serde_wasm_bindgen::from_value(vended).map_err(|e| shape(&e))?)
 }
 

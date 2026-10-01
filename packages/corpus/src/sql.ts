@@ -6,11 +6,12 @@ type Answer = Awaited<ReturnType<Engine['query']>>;
 
 /**
  * Run `statement` on the host's engine. An engine that refuses is `engine/failed`, its own error kept
- * whole as the cause; an abort rejects with the signal's reason, as it always has.
+ * whole as the cause; an abort rejects with the signal's reason, as it always has. Without a signal
+ * the statement carries one nothing aborts — a cleanup the caller's Stop must not interrupt.
  */
 export async function query(engine: Engine, statement: string, signal?: AbortSignal): Promise<Answer> {
   try {
-    return await (signal === undefined ? engine.query(statement) : engine.query(statement, { signal }));
+    return await engine.query(statement, { signal: signal ?? new AbortController().signal });
   } catch (cause) {
     signal?.throwIfAborted();
     throw FossilError.of('engine/failed', {}, 'the query engine failed', { cause });

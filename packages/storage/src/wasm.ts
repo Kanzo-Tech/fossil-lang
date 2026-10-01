@@ -3,24 +3,60 @@
 import init, {
   storageGrant,
   storageName,
-  storageRead,
+  storageRead as rawRead,
   type InitInput,
 } from '../pkg/fossil_storage_wasm.js';
-import type { Access, StorageCredential } from '@fossil-lang/types';
+import { FossilError, boot, isFossilError, type Access, type Host, type StorageCredential } from '@fossil-lang/types';
 
 export type { InitInput };
-export { storageRead };
 
 let booted: Promise<unknown> | null = null;
 
 /**
- * Boot the `fossil-storage` module, memoised. Every door awaits it with nothing, and the glue finds
- * its `.wasm` through `new URL(…, import.meta.url)`, which a bundler emits as an asset; a host with
- * no bundler (Node) calls it first with the bytes.
+ * Boot the `fossil-storage` module. Every door awaits it with nothing, and the glue finds its
+ * `.wasm` through `new URL(…, import.meta.url)`, which a bundler emits as an asset; a host with no
+ * bundler (Node) calls it first with the bytes.
+ *
+ * A boot that succeeded is kept; one that failed is not, so the next call tries again.
+ *
+ * @throws {FossilError} `storage/unreachable` when the module could not be fetched within 60 s,
+ *   `internal/bug` when it would not instantiate.
  */
 export function initStorage(wasm?: InitInput): Promise<unknown> {
-  booted ??= init(wasm === undefined ? undefined : { module_or_path: wasm });
+  if (booted === null) {
+    const pending = boot('fossil_storage_wasm_bg.wasm', () =>
+      init(wasm === undefined ? undefined : { module_or_path: wasm }),
+    );
+    booted = pending;
+    pending.catch(() => {
+      if (booted === pending) booted = null; // forgotten, so the next call boots again
+    });
+  }
   return booted;
+}
+
+/**
+ * `call`, with a failure fossil did not raise — a panic is a `RuntimeError: unreachable`, and the
+ * panic hook has printed its message — reported as `internal/bug`, the original kept as its cause.
+ */
+function guarded<T>(what: string, call: () => T): T {
+  try {
+    return call();
+  } catch (cause) {
+    throw isFossilError(cause) ? cause : bug(what, cause);
+  }
+}
+
+function bug(what: string, cause: unknown): FossilError<'internal/bug'> {
+  return FossilError.of('internal/bug', { what }, `internal error: ${what}`, { cause });
+}
+
+export async function storageRead(host: Host, targets: readonly unknown[]): Promise<unknown> {
+  try {
+    return await rawRead(host, targets);
+  } catch (cause) {
+    throw isFossilError(cause) ? cause : bug('fossil-storage failed reading', cause);
+  }
 }
 
 export interface GrantPlan {
@@ -31,12 +67,13 @@ export interface GrantPlan {
 }
 
 export const plan = (credential: StorageCredential, access: Access): GrantPlan =>
-  storageGrant(credential, access) as GrantPlan;
+  guarded('fossil-storage failed planning a grant', () => storageGrant(credential, access) as GrantPlan);
 
 export const nameOf = (
   credential: StorageCredential,
   locator: string,
-): { name: string; lend: string | null } => storageName(credential, locator);
+): { name: string; lend: string | null } =>
+  guarded('fossil-storage failed naming a locator', () => storageName(credential, locator));
 
 /** The credential whose prefix is the longest one covering `locator`. */
 export function covering(

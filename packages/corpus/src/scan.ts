@@ -51,7 +51,8 @@ export interface Scan {
    * **One batch per task, in the order given**, each one `SELECT` over the table's view.
    *
    * @throws {FossilError} `api/invalid-argument` for a task of another table, `engine/failed` when the
-   *   engine refuses the statement. An abort rejects with the signal's reason, whether or not the
+   *   engine refuses the statement, the storage failure of a job's credential that expired and could
+   *   not be renewed. An abort rejects with the signal's reason, whether or not the
    *   engine stopped the statement.
    */
   read(tasks: readonly ScanTask[], options?: { readonly signal?: AbortSignal }): Promise<readonly Batch[]>;
@@ -60,7 +61,8 @@ export interface Scan {
 /** Every table the manifest declares, by name. */
 export type Tables = ReadonlyMap<string, VertexTable | EdgeTable>;
 
-export function scanOf(engine: Engine, relation: (table: string) => string, tables: Tables) {
+/** `live` throws why the corpus can no longer be read — a credential that expired — before a read. */
+export function scanOf(engine: Engine, relation: (table: string) => string, tables: Tables, live: () => void) {
   return (params: ScanParams): Scan => {
     const table = tables.get(params.table);
     if (table === undefined) {
@@ -109,6 +111,7 @@ export function scanOf(engine: Engine, relation: (table: string) => string, tabl
           }
         }
         const { signal } = options;
+        live();
         const out: Batch[] = [];
         for (let i = 0; i < tasks.length; i += 1) {
           signal?.throwIfAborted();

@@ -1,4 +1,12 @@
-import { FossilError, type DocumentWorkspace, type Host, type UnreadDocument } from '@fossil-lang/types';
+import {
+  FossilError,
+  HOST_MS,
+  isFossilError,
+  within,
+  type DocumentWorkspace,
+  type Host,
+  type UnreadDocument,
+} from '@fossil-lang/types';
 
 import { read } from './objects.js';
 
@@ -9,15 +17,21 @@ import { read } from './objects.js';
  * The one IO loop over {@link Host}. Fossil says what is missing, where it lives and which
  * connection it goes through; this reads and registers. Each document is attempted once, so one
  * that cannot be read ends the loop instead of repeating it.
+ *
+ * `signal` stops it, rejecting with the signal's reason.
+ *
+ * @throws {FossilError} `storage/host-refused` when the host refuses its connections,
+ *   `storage/host-silent` when it does not answer within 30 s.
  */
 export async function resolveDocuments(
   workspace: DocumentWorkspace,
   host: Host,
+  { signal }: { signal?: AbortSignal } = {},
 ): Promise<{ registered: number; unread: UnreadDocument[] }> {
   const attempted = new Set<string>();
   const unread: UnreadDocument[] = [];
   let registered = 0;
-  workspace.setConnections(await connections(host));
+  workspace.setConnections(await connections(host, signal));
   const decoder = new TextDecoder();
 
   for (;;) {
@@ -25,7 +39,7 @@ export async function resolveDocuments(
     if (pending.length === 0) return { registered, unread };
     for (const d of pending) attempted.add(d.key);
 
-    const results = await read(host, pending);
+    const results = await read(host, pending, { signal });
     for (const [i, d] of pending.entries()) {
       const result = results[i]!;
       if (result.ok) {
@@ -38,10 +52,24 @@ export async function resolveDocuments(
   }
 }
 
-async function connections(host: Host): Promise<Record<string, string>> {
+async function connections(host: Host, signal: AbortSignal | undefined): Promise<Record<string, string>> {
+  const scope = 'its connections';
   try {
-    return await host.connections();
+    return await within(HOST_MS, (bounded) => host.connections({ signal: bounded }), {
+      signal,
+      silent: (after) => silent(scope, after),
+    });
   } catch (cause) {
-    throw FossilError.of('storage/host-refused', { scope: 'connections' }, 'the host refused connections', { cause });
+    if (isFossilError(cause, 'storage/host-silent') || signal?.aborted) throw cause;
+    throw FossilError.of('storage/host-refused', { scope }, `the host refused ${scope}`, { cause });
   }
+}
+
+/** A host that did not answer about `scope` within `after` ms. */
+export function silent(scope: string, after: number): FossilError<'storage/host-silent'> {
+  return FossilError.of(
+    'storage/host-silent',
+    { scope, after },
+    `the host did not answer ${scope} within ${after} ms`,
+  );
 }

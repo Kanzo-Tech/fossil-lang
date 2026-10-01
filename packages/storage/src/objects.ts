@@ -1,4 +1,4 @@
-import type { Host, Problem } from '@fossil-lang/types';
+import { until, type Host, type Problem } from '@fossil-lang/types';
 
 import { initStorage, storageRead } from './wasm.js';
 
@@ -16,9 +16,17 @@ export type ReadResult = { ok: true; bytes: Uint8Array } | { ok: false; problem:
  *
  * One `credentials` call per connection named, not per file. A target with no connection is read
  * as it is only when it is a public `http(s)` URL — there is nothing to vend for it. A failure is
- * the target's own answer and never the batch's.
+ * the target's own answer and never the batch's — `storage/host-silent` among them, for a host that
+ * did not answer within 30 s.
+ *
+ * `signal` abandons the read: it rejects with the signal's reason.
  */
-export async function read(host: Host, targets: readonly Target[]): Promise<ReadResult[]> {
-  await initStorage();
-  return (await storageRead(host, targets)) as ReadResult[];
+export async function read(
+  host: Host,
+  targets: readonly Target[],
+  { signal }: { signal?: AbortSignal } = {},
+): Promise<ReadResult[]> {
+  await until(initStorage(), signal);
+  signal?.throwIfAborted();
+  return (await until(storageRead(host, targets), signal)) as ReadResult[];
 }

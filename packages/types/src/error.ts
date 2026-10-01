@@ -172,6 +172,22 @@ export function isFossilError(e: unknown, code?: Code): boolean {
   return name === 'FossilError' && typeof has === 'string' && codes.has(has) && (code === undefined || has === code);
 }
 
+/**
+ * `error`, with `failure` — what the cleanup after it raised — appended at the end of its chain of
+ * causes, so neither replaces the other: the failure being reported stays the one thrown, and the
+ * cleanup's is still there to read. A {@link FossilError} on the chain carries it into `problem` too.
+ *
+ * It is the one place an error is changed after it was built, and only an error about to be thrown.
+ */
+export function attachCause<E>(error: E, failure: unknown): E {
+  let last: unknown = error;
+  while (last instanceof Error && last.cause !== undefined) last = last.cause;
+  if (!(last instanceof Error)) return error;
+  Object.defineProperty(last, 'cause', { value: failure, writable: true, configurable: true });
+  if (isFossilError(last)) (last.problem as ProblemBase).cause = toWire(failure);
+  return error;
+}
+
 /** The published documentation. */
 const DOCS = 'https://kanzo-tech.github.io/fossil-lang';
 /** The error index within it: a page per code, the code as its route. */

@@ -30,8 +30,18 @@ export type Scope = { connection: string } | { job: string };
  */
 export interface Host {
   /** Connection name → canonical prefix, as `@name/…` expands against it. */
-  connections(): Promise<Record<string, string>>;
-  credentials(scope: Scope, access: Access): Promise<StorageCredential[]>;
+  connections(options: HostCall): Promise<Record<string, string>>;
+  credentials(scope: Scope, access: Access, options: HostCall): Promise<StorageCredential[]>;
+}
+
+/**
+ * What every {@link Host} call is handed: a signal that aborts when fossil stops waiting — the
+ * caller's Stop, or the 30 s a host has to answer (`HOST_MS`). A host that passes it to its `fetch`
+ * stops the request too; one that ignores it is simply no longer waited for, and a host that never
+ * answers is `storage/host-silent`.
+ */
+export interface HostCall {
+  readonly signal: AbortSignal;
 }
 
 /** A document a program names and the workspace does not hold yet —

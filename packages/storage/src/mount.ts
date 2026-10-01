@@ -1,5 +1,18 @@
-import { FossilError, type Access, type Engine, type Host, type Scope, type StorageCredential } from '@fossil-lang/types';
+import {
+  FossilError,
+  HOST_MS,
+  attachCause,
+  isFossilError,
+  until,
+  within,
+  type Access,
+  type Engine,
+  type Host,
+  type Scope,
+  type StorageCredential,
+} from '@fossil-lang/types';
 
+import { silent } from './documents.js';
 import { covering, initStorage, nameOf, plan } from './wasm.js';
 
 /** A scope made readable through the engine, until {@link Mount.close}. */
@@ -10,7 +23,16 @@ export interface Mount {
   name(locator: string): string;
   /** {@link name} for each locator, each made readable first — an Azure file is lent. */
   files(locators: readonly string[]): Promise<string[]>;
-  /** Give the credentials back: the last holder of a prefix drops its secret and its leases. */
+  /**
+   * Why a credential of this mount stopped working: its renewal failed until it expired. Set, it is
+   * what {@link name} and {@link files} throw, and what a reader reports in place of the engine's
+   * 403 — the storage failure, with the host's own error as its cause.
+   */
+  readonly failure: FossilError | undefined;
+  /**
+   * Give the credentials back: the last holder of a prefix drops its secret and its leases. Every
+   * prefix is released even when one fails, and the failures are thrown after, as one.
+   */
   close(): Promise<void>;
 }
 
@@ -28,6 +50,8 @@ interface Held {
   /** Locator → the name it is lent under, for a store the engine is lent file by file. */
   readonly lent: Map<string, string>;
   timer?: ReturnType<typeof setTimeout>;
+  /** Why the credential stopped working, once its renewal failed past expiry. */
+  failure?: FossilError;
 }
 
 const held = new WeakMap<Engine, Map<string, Held>>();
@@ -42,17 +66,23 @@ const httpfs = new WeakSet<Engine>();
  * file by file, because DuckDB-WASM has no Azure extension: no glob there, and the readers never
  * glob — a manifest enumerates.
  *
- * @throws {FossilError} `storage/host-refused` when the host rejects the request, `storage/no-credential`
- *   when it vends nothing for the scope, `storage/no-httpfs` when the engine has no `httpfs`.
+ * `signal` stops it, rejecting with the signal's reason. The statements that install a credential are
+ * not interrupted — another mount may be waiting on the same one — only the wait for them.
+ *
+ * @throws {FossilError} `storage/host-refused` when the host rejects the request, `storage/host-silent`
+ *   when it does not answer within 30 s, `storage/no-credential` when it vends nothing for the scope,
+ *   `storage/no-httpfs` when the engine has no `httpfs`, `engine/failed` when the engine refuses a
+ *   secret.
  */
 export async function mount(
   engine: Engine,
   host: Host,
   scope: Scope,
   access: Access,
+  { signal }: { signal?: AbortSignal } = {},
 ): Promise<Mount> {
-  await initStorage();
-  const credentials = await vended(host, scope, access);
+  await until(initStorage(), signal);
+  const credentials = await vended(host, scope, access, signal);
   if (credentials.length === 0) throw noCredential(scope, access);
   const table = held.get(engine) ?? new Map<string, Held>();
   held.set(engine, table);
@@ -69,10 +99,14 @@ export async function mount(
         table.set(key, (entry = fresh));
       }
       keys.push(key);
-      await entry.ready;
+      await until(entry.ready, signal);
     }
   } catch (cause) {
-    await release(engine, table, keys);
+    try {
+      await release(engine, table, keys);
+    } catch (cleanup) {
+      throw attachCause(cause, cleanup);
+    }
     throw cause;
   }
 
@@ -89,12 +123,17 @@ export async function mount(
         `${locator} lies outside what the host vended for ${describe(scope)} (${prefix})`,
       );
     }
-    return table.get(`${access}\u0000${credential.prefix}`)!;
+    const entry = table.get(`${access}\u0000${credential.prefix}`)!;
+    if (entry.failure !== undefined) throw entry.failure;
+    return entry;
   };
   let closed = false;
 
   return {
     prefixes: credentials.map((c) => c.prefix),
+    get failure() {
+      return keys.map((key) => table.get(key)?.failure).find((f) => f !== undefined);
+    },
     name: (locator) => nameOf(entryFor(locator).credential, locator).name,
     async files(locators) {
       const leases: Record<string, string> = {};
@@ -118,15 +157,38 @@ export async function mount(
   };
 }
 
+/** A signal nothing aborts: what a statement fossil runs for itself — a cleanup, a renewal — carries. */
+const unstoppable = (): AbortSignal => new AbortController().signal;
+
 async function release(engine: Engine, table: Map<string, Held>, keys: readonly string[]): Promise<void> {
+  const failures: unknown[] = [];
   for (const key of keys) {
     const entry = table.get(key);
     if (entry === undefined || --entry.holders > 0) continue;
     table.delete(key);
     clearTimeout(entry.timer);
+    // An install still in flight would put the secret back after the uninstall; one that failed
+    // has already been reported to whoever was waiting on it.
+    await entry.ready.then(
+      () => undefined,
+      () => undefined,
+    );
     const { uninstall } = plan(entry.credential, entry.access);
-    if (uninstall !== null) await engine.query(uninstall);
-    if (entry.lent.size > 0) await engine.drop([...entry.lent.values()]);
+    try {
+      if (uninstall !== null) await engine.query(uninstall, { signal: unstoppable() });
+    } catch (cause) {
+      failures.push(cause);
+    }
+    try {
+      if (entry.lent.size > 0) await engine.drop([...entry.lent.values()]);
+    } catch (cause) {
+      failures.push(cause);
+    }
+  }
+  if (failures.length > 0) {
+    throw FossilError.of('engine/failed', {}, 'the query engine failed to give a credential back', {
+      cause: failures.length === 1 ? failures[0] : new AggregateError(failures, `${failures.length} releases failed`),
+    });
   }
 }
 
@@ -134,7 +196,11 @@ async function install(engine: Engine, entry: Held): Promise<void> {
   const { install: sql } = plan(entry.credential, entry.access);
   if (sql !== null) {
     await requireHttpfs(engine);
-    await engine.query(sql);
+    try {
+      await engine.query(sql, { signal: unstoppable() });
+    } catch (cause) {
+      throw FossilError.of('engine/failed', {}, 'the query engine refused a storage secret', { cause });
+    }
   }
   if (entry.lent.size > 0) {
     const leases: Record<string, string> = {};
@@ -154,7 +220,7 @@ async function renew(engine: Engine, host: Host, entry: Held): Promise<void> {
   if (entry.holders === 0) return;
   const { prefix } = entry.credential;
   try {
-    const fresh = (await vended(host, entry.scope, entry.access)).find((c) => c.prefix === prefix);
+    const fresh = (await vended(host, entry.scope, entry.access, undefined)).find((c) => c.prefix === prefix);
     if (fresh === undefined) throw noCredential(entry.scope, entry.access);
     if (entry.holders === 0) return;
     entry.credential = fresh;
@@ -166,16 +232,25 @@ async function renew(engine: Engine, host: Host, entry: Held): Promise<void> {
       schedule(engine, host, entry, RETRY_MS);
       return;
     }
-    // eslint-disable-next-line no-console
-    console.error(`[fossil/storage] ${prefix} expired and could not be renewed`, cause);
+    // Nobody is waiting on a renewal, so its failure is kept where the next read finds it.
+    entry.failure = isFossilError(cause)
+      ? cause
+      : FossilError.of('internal/bug', { what: `renewing ${prefix} failed outside fossil` }, `internal error: renewing ${prefix} failed outside fossil`, {
+          cause,
+        });
   }
 }
 
 async function requireHttpfs(engine: Engine): Promise<void> {
   if (httpfs.has(engine)) return;
-  const answer = await engine.query(
-    "SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'httpfs'",
-  );
+  let answer: Awaited<ReturnType<Engine['query']>>;
+  try {
+    answer = await engine.query("SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'httpfs'", {
+      signal: unstoppable(),
+    });
+  } catch (cause) {
+    throw FossilError.of('engine/failed', {}, 'the query engine failed', { cause });
+  }
   if (answer.numRows === 0 || answer.getChild('loaded')?.get(0) !== true) {
     throw FossilError.of(
       'storage/no-httpfs',
@@ -187,11 +262,20 @@ async function requireHttpfs(engine: Engine): Promise<void> {
   httpfs.add(engine);
 }
 
-async function vended(host: Host, scope: Scope, access: Access): Promise<StorageCredential[]> {
+async function vended(
+  host: Host,
+  scope: Scope,
+  access: Access,
+  signal: AbortSignal | undefined,
+): Promise<StorageCredential[]> {
+  const said = describe(scope);
   try {
-    return await host.credentials(scope, access);
+    return await within(HOST_MS, (bounded) => host.credentials(scope, access, { signal: bounded }), {
+      signal,
+      silent: (after) => silent(said, after),
+    });
   } catch (cause) {
-    const said = describe(scope);
+    if (isFossilError(cause, 'storage/host-silent') || signal?.aborted) throw cause;
     throw FossilError.of('storage/host-refused', { scope: said }, `the host refused ${said}`, { cause });
   }
 }
