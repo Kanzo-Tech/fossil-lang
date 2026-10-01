@@ -44,7 +44,7 @@ What else is lost on the way, each one a place where structure existed and was f
   a source that would not route, a DataFusion error, every variant of `WriteError` and `LayoutError` —
   enter `Failed` through `format!` or `.to_string()`.
 - `StorageError` (`crates/fossil-storage/src/credential.rs, StorageError`) is a seven-variant enum
-  with typed fields, and is `.to_string()`'d at every boundary it crosses.
+  with typed fields, and was `.to_string()`'d at every boundary it crossed (it converts to a `Failure` now).
 - A host's own typed rejection from `credentials` is reduced to its `message` before it is wrapped.
 - `open` builds `did not read: ${cause.message}` and drops the `cause`.
 - A program that does not compile fails at `run` as `execute_graph: Error during planning: the
@@ -186,8 +186,8 @@ Float ``). The title is a constant of the variant.
 **A foreign error is a cause, never a code.** DataFusion, `object_store`, DuckDB and a host's own
 rejection have their own vocabularies, and fossil does not classify them. The layer that meets one
 wraps it in the fossil failure it *means* — `engine/failed`, `storage/unreachable`,
-`storage/host-refused` — and keeps the original as `cause`, whole. That is what `open` and `JsHost` do
-wrong today: they keep the text and drop the object.
+`storage/host-refused` — and keeps the original as `cause`, whole. That is what `open` and `JsHost` did
+wrong at `8d6114a3`: they kept the text and dropped the object. Both keep the cause now.
 
 **What would reverse it.** A catalogue large enough that one enum in one file is the bottleneck of
 every change — at which point the catalogue becomes a data file with a generator, as
@@ -337,7 +337,7 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 | `layout` (2) | `dangling-endpoint`, `too-large` | `LayoutError`; its other variants are `internal/bug` |
 | `storage` (8) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` |
 | `corpus` (10) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `not-a-location`, `unknown-table`, `unknown-column`, `empty-projection`, `no-position`, `filter-type-mismatch` | `open`, `parseManifest`, `scan`, the filter binder |
-| `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy_error` and the executor's borrow, `WorkspaceError` |
+| `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy` and the executor's borrow, the workspace's `unknown_handle` |
 
 **`internal/bug` — 1 code** for everything that is fossil's fault and not the caller's: the
 `internal compiler error` sites, a serializer that failed on a value fossil built, a Reflect `set` on a

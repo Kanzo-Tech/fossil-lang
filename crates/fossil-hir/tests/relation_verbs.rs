@@ -16,7 +16,7 @@
 //!
 //! # What this file does NOT prove
 //!
-//! - **That the eight unlowered verbs should stay unlowered.** The gap is
+//! - **That the six unlowered verbs should stay unlowered.** The gap is
 //!   deliberate — the catalogue already carries their signatures, so the day one
 //!   gains a lowering its arguments are checked by the code that checks
 //!   `str.trim`'s. This pins the message, not the gap.
@@ -108,7 +108,7 @@ fn a_catalogued_verb_with_no_lowering_says_which_of_the_two_things_is_true() {
 #[test]
 fn the_message_lists_the_implemented_verbs_from_the_registry() {
     let m = one_about("derived := pedidos.sort(pedidos.id)", "implemented today");
-    // Alphabetical because `verb_names` sorts, and all five because the filter
+    // Alphabetical because `verb_names` sorts, and all six because the filter
     // is over the table rather than over a literal. It read `join`, `select`,
     // `where` until `distinct` and `union` gained lowerings, and then `group_by`
     // arrived and moved it again — which is the whole reason the list is
