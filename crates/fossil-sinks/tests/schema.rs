@@ -2,7 +2,8 @@
 //! them.
 //!
 //! The file is what a reader outside Rust checks `fossil.json` against —
-//! `@fossil-lang/corpus` generates its types from it — so it is checked in, and
+//! `@fossil-lang/corpus` writes its types by hand and holds them against it in
+//! `tests/manifest.test.ts` — so it is checked in, and
 //! this test fails when it is stale. `FOSSIL_BLESS=1 cargo test -p
 //! fossil-sinks --test schema` rewrites it.
 
