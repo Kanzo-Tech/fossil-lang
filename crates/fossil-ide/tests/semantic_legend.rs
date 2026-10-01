@@ -30,6 +30,9 @@
 //!    that outgrew the legend renders as something a reviewer can see rather
 //!    than as a neighbouring type.
 //!
+//! The modifiers are held the same way: `mod md` against the legend's
+//! `token_modifiers` and `legend_modifier_name`, its values bit indices.
+//!
 //! Names are compared case- and underscore-insensitively, because the three
 //! tables spell one concept in three conventions — `ENUM_MEMBER`, `enumMember`,
 //! `enum_member` — and demanding one spelling would fail an honest addition.
@@ -45,9 +48,8 @@
 //!   through `legend_type_name` — so this guard is what makes that snapshot
 //!   readable as evidence rather than as a second unverified table.
 //! - **That the legend is the right legend.** Nothing here has an opinion on
-//!   whether Fossil should emit a `namespace` type at all. Two of the ten have
-//!   no fixture and cannot get one; that is recorded in
-//!   `tests/semantic_tokens.rs` and stays a comment.
+//!   whether Fossil should emit a `namespace` type at all; that every type
+//!   is reachable is `tests/semantic_tokens.rs`'s fixture.
 //! - **That the client agrees.** The legend is a wire contract with an editor
 //!   this repository does not contain.
 //! - **That a name-shaped match arm is the whole of `legend_type_name`.** It is
@@ -58,7 +60,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fossil_ide::{legend_type_name, semantic_legend};
+use fossil_ide::{legend_modifier_name, legend_type_name, semantic_legend};
 
 /// The source the constants are scraped from, relative to the crate root.
 const SEMANTIC_REL: &str = "src/semantic.rs";
@@ -80,21 +82,30 @@ fn semantic_source() -> String {
 /// was: a guard that silently finds nothing and passes is the failure this file
 /// exists to avoid.
 fn ty_constants(src: &str) -> Vec<(String, u32)> {
-    let start = src.find("mod ty {").unwrap_or_else(|| {
+    module_constants(src, "ty")
+}
+
+/// The same for `mod md`, the modifier bit indices.
+fn md_constants(src: &str) -> Vec<(String, u32)> {
+    module_constants(src, "md")
+}
+
+fn module_constants(src: &str, module: &str) -> Vec<(String, u32)> {
+    let start = src.find(&format!("mod {module} {{")).unwrap_or_else(|| {
         panic!(
-            "the legend guard cannot find `mod ty {{` in {SEMANTIC_REL}; the module \
-             was renamed and this guard must be rewritten with it"
+            "the legend guard cannot find `mod {module} {{` in {SEMANTIC_REL}; the \
+             module was renamed and this guard must be rewritten with it"
         )
     });
     let body = &src[start..];
     let end = body.find("\n}").unwrap_or_else(|| {
-        panic!("`mod ty` in {SEMANTIC_REL} has no closing brace at column 0");
+        panic!("`mod {module}` in {SEMANTIC_REL} has no closing brace at column 0");
     });
     let out = parse_consts(&body[..end]);
     assert!(
         !out.is_empty(),
-        "the legend guard read no constants out of `mod ty` in {SEMANTIC_REL}; \
-         the module changed shape and this guard is asserting nothing"
+        "the legend guard read no constants out of `mod {module}` in \
+         {SEMANTIC_REL}; the module changed shape and this guard is asserting nothing"
     );
     out
 }
@@ -216,6 +227,46 @@ fn an_index_past_the_legend_is_not_a_legend_name() {
              {name} in the snapshot instead of as the bug it is"
         );
     }
+}
+
+#[test]
+fn every_modifier_bit_names_the_legend_entry_it_indexes() {
+    let consts = md_constants(&semantic_source());
+    let legend = semantic_legend();
+    assert_eq!(
+        legend.token_modifiers.len(),
+        consts.len(),
+        "`mod md` declares {} modifier bits and the legend carries {}",
+        consts.len(),
+        legend.token_modifiers.len(),
+    );
+    let mut seen = vec![false; consts.len()];
+    for (name, bit) in &consts {
+        let slot = usize::try_from(*bit).expect("bit fits a usize");
+        assert!(
+            slot < consts.len() && !seen[slot],
+            "`md::{name}` = {bit} is past the legend or shares a bit"
+        );
+        seen[slot] = true;
+        let entry = legend.token_modifiers[slot].as_str();
+        assert_eq!(
+            normalise(entry),
+            normalise(name),
+            "`md::{name} = {bit}` but the legend's modifier {bit} is `{entry}`"
+        );
+        assert_eq!(
+            normalise(legend_modifier_name(*bit)),
+            normalise(name),
+            "`legend_modifier_name({bit})` disagrees with `md::{name}`"
+        );
+    }
+    let past = u32::try_from(consts.len()).expect("few modifiers");
+    assert!(
+        consts
+            .iter()
+            .all(|(name, _)| normalise(legend_modifier_name(past)) != normalise(name)),
+        "one past the last modifier must not render as a real one"
+    );
 }
 
 // ------------------------------------------- the failure modes, each proved

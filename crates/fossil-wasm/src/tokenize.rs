@@ -8,9 +8,6 @@
 //! - [`tokenize`] — `#[wasm_bindgen]` `JS`-facing wrapper. Serialises
 //!   `Vec<TokenRow>` to `JsValue` via `serde_wasm_bindgen`. Throws `internal/bug` on
 //!   serialisation failure (extremely rare — the rows are plain numbers).
-//! - [`semantic_legend`] — re-exports `fossil-ide`'s semantic-token legend
-//!   over the `wasm-bindgen` boundary, so a host can map LSP `semanticTokens`
-//!   responses to highlight categories.
 //! - [`token_kinds`] — the legend for [`TokenRow::kind`]: every variant NAME,
 //!   indexed by the discriminant a row carries.
 //!
@@ -99,25 +96,6 @@ pub fn tokenize_native(text: &str) -> Vec<TokenRow> {
 pub fn tokenize(text: &str) -> Result<JsValue, JsValue> {
     let rows = tokenize_native(text);
     crate::to_value("the tokens", &rows)
-}
-
-/// `JS`-facing re-export of the semantic-token legend.
-///
-/// Returns `{ tokenTypes: string[], tokenModifiers: string[] }` — the exact
-/// LSP `SemanticTokensLegend` shape, which is what turns the indices in a
-/// `semanticTokens/full` response into names a host can style.
-///
-/// Delegates to [`fossil_ide::semantic_legend`], the one definition — a second
-/// legend here would desynchronise the indices the native LSP already emits.
-///
-/// # Errors
-///
-/// Returns a JS error only if `serde_wasm_bindgen` fails (impossible in
-/// practice for the legend shape).
-#[wasm_bindgen]
-pub fn semantic_legend() -> Result<JsValue, JsValue> {
-    let legend = fossil_ide::semantic_legend();
-    crate::to_value("the legend", &legend)
 }
 
 /// Every `fossil_syntax::lexer::Token` variant, in discriminant order.
@@ -231,8 +209,8 @@ pub fn token_kinds_native() -> Vec<&'static str> {
 /// discriminant down, which is the only version of this contract that survives
 /// a reorder of the lexer.
 ///
-/// This is the same move [`semantic_legend`] makes for LSP semantic tokens: the
-/// indices are meaningless without the legend, so ship the legend.
+/// Semantic tokens make the same move one step further: `semanticTokens()`
+/// sends the legend's names themselves, so no index crosses at all.
 ///
 /// A kind past the end of the array is a variant appended by a newer compiler
 /// than the host was built against. That is BACKWARDS-COMPATIBLE by

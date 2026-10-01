@@ -65,7 +65,10 @@ pub use position::{
     position_to_offset, token_at_position,
 };
 pub use related::{Related, related_locations};
-pub use semantic::{decode_tokens, legend_type_name, semantic_legend, semantic_tokens};
+pub use semantic::{
+    SemanticSpan, decode_tokens, legend_modifier_name, legend_type_name, modifier_names,
+    semantic_legend, semantic_spans, semantic_tokens,
+};
 pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};
 pub use workspace::WorkspaceIndex;
 
