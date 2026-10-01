@@ -1,0 +1,44 @@
+---
+title: Not a relation verb
+description: "`pipeline/unknown-verb` — a stage of a pipeline names a verb the catalogue does not have for a relation."
+---
+
+A pipeline is a relation followed by verbs, each reached through the dot: `User.where(…)`,
+`Purchase.join(…)`. The name after the dot has to be one of the verbs the catalogue declares for a
+relation, and this one is not:
+
+```fossil
+Slugs := User.slugify(User.name)
+```
+
+```text
+`slugify` is not a relation verb; the catalogue has `count`, `distinct`, `drop`, `flatten`,
+`group_by`, `join`, `map`, `select`, `sort`, `take`, `union`, `where`
+```
+
+The list is every member of `seq/` in the catalogue, sorted, read from the table when the message
+is built — so it is the whole answer to "what can follow a relation's dot", including the six verbs
+that are declared and not yet lowered.
+
+## Why fossil refuses it
+
+A stage is looked up as a member of a relation, and nothing else: the lowering asks the catalogue
+for a `seq/` row with this name and builds the stage out of that row's signature. A string function
+like `str.trim`, or a source constructor like `io.csv`, is a member of a different receiver, so
+`User.trim(…)` and `User.csv(…)` land here too. There is no fallback that guesses — a verb is the
+operator a stage becomes, and a name with no row has no operator to become.
+
+This is a different answer from [a verb with no lowering
+yet](/docs/errors/pipeline/unimplemented-verb): that one is in the catalogue and is refused for
+what fossil lacks, this one is refused for what the program wrote. The verbs, and what each takes,
+are on [relations](/docs/book/relations).
+
+## How to repair it
+
+- **A misspelling.** Pick the verb from the list in the message — `User.filter(…)` is
+  `User.where(…)`, `distinct_by` does not exist and `distinct()` takes nothing.
+- **A scalar function written as a stage.** A function of a value goes in the expression that
+  uses it — `User.where(str.lower(User.email) == "a@b.c")`, or in a mapping body — not after the
+  relation's dot.
+- **A source written as a stage.** A source is its own binding: `Other := io.csv("other.csv")`,
+  then `User.join(Other, on = …)`.

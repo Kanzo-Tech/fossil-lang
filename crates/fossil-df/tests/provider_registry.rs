@@ -24,6 +24,8 @@
 
 use std::path::{Path, PathBuf};
 
+use fossil_base::{Diagnostic, Problem};
+
 #[path = "support/native.rs"]
 mod native;
 mod support;
@@ -36,15 +38,32 @@ fn programs_dir() -> PathBuf {
         .expect("docs/programs is on disk")
 }
 
-/// Every diagnostic message a check of `path` produces.
-fn messages(path: &Path) -> Vec<String> {
-    native::messages(path)
+/// Every diagnostic a check of `path` produces.
+fn diagnostics_of(path: &Path) -> Vec<Diagnostic> {
+    native::check(path).diagnostics
 }
 
 /// A program (and its neighbours) written into a tempdir, checked.
-fn check_program(files: &[(&str, &str)]) -> Vec<String> {
+fn check_program(files: &[(&str, &str)]) -> Vec<Diagnostic> {
     let dir = native::write_dir(files);
-    messages(&dir.path().join(files[0].0))
+    diagnostics_of(&dir.path().join(files[0].0))
+}
+
+/// A `WrongCapability` refusal of `constructor`, whose help names who can.
+fn refuses_capability(d: &Diagnostic, constructor: &str, capability: &str, who: &str) -> bool {
+    matches!(&d.problem, Problem::WrongCapability { constructor: c, capability: w }
+        if c == constructor && w == capability)
+        && d.help.as_deref().is_some_and(|h| h.contains(who))
+}
+
+const fn is_provider_refusal(p: &Problem) -> bool {
+    matches!(
+        p,
+        Problem::UnknownProvider { .. }
+            | Problem::WrongCapability { .. }
+            | Problem::BareDocumentPath { .. }
+            | Problem::NoDocument { .. }
+    )
 }
 
 /// The registry as a host lists it to a connector UI.
@@ -119,18 +138,12 @@ fn the_wire_contract_finally_reports_a_schema_provider() {
 #[test]
 fn catalogue_resolves_its_shacl_document() {
     let path = programs_dir().join("catalogue/catalogue.fossil");
-    let diagnostics = messages(&path);
-    for evidence in [
-        "names no shape document",
-        "nothing here reads",
-        "is not a provider",
-        "reads rows, not types",
-    ] {
-        assert!(
-            !diagnostics.iter().any(|m| m.contains(evidence)),
-            "the SHACL document must resolve; got {diagnostics:?}"
-        );
-    }
+    let diagnostics = diagnostics_of(&path);
+    assert!(
+        !diagnostics.iter().any(|d| is_provider_refusal(&d.problem)
+            || matches!(d.problem, Problem::NotRegistered { .. })),
+        "the SHACL document must resolve; got {diagnostics:?}"
+    );
 }
 
 /// Not vacuous: the shape really carries the two predicates the program writes,
@@ -167,9 +180,12 @@ fn a_type_binding_on_a_data_provider_names_both() {
         ("users.csv", USERS_CSV),
     ]);
     assert!(
-        diagnostics
-            .iter()
-            .any(|m| m == "`io.csv` reads rows, not types — `io.shex`, `io.shacl` read types"),
+        diagnostics.iter().any(|d| refuses_capability(
+            d,
+            "io.csv",
+            "read types",
+            "`io.shex`, `io.shacl` read types"
+        )),
         "got {diagnostics:?}"
     );
 }
@@ -190,8 +206,11 @@ fn a_source_binding_on_a_schema_provider_names_both() {
         ("person.shex", PERSON_SHEXC),
     ]);
     assert!(
-        diagnostics.iter().any(|m| m.starts_with(
-            "`io.shex` reads types, not rows — `io.csv`, `io.json`, `io.parquet`, `io.rdf`"
+        diagnostics.iter().any(|d| refuses_capability(
+            d,
+            "io.shex",
+            "read rows",
+            "`io.csv`, `io.json`, `io.parquet`, `io.rdf`"
         )),
         "got {diagnostics:?}"
     );
@@ -212,9 +231,12 @@ fn a_shape_document_the_named_row_does_not_read_names_both() {
         ("users.csv", USERS_CSV),
     ]);
     assert!(
-        diagnostics.iter().any(|m| m
-            == "`io.shex` reads `.shex`, `.shexj` or `.shexc` documents, and \
-                `person.ttl` is `.ttl`"),
+        diagnostics.iter().any(|d| matches!(&d.problem,
+            Problem::WrongExtension { constructor, document }
+                if constructor == "io.shex" && document == "person.ttl")
+            && d.help
+                .as_deref()
+                .is_some_and(|h| h.contains("`.shex`, `.shexj` or `.shexc`"))),
         "got {diagnostics:?}"
     );
 }
@@ -235,9 +257,9 @@ fn an_unknown_constructor_is_reported_with_the_installed_set() {
         ("users.csv", USERS_CSV),
     ]);
     assert!(
-        diagnostics
-            .iter()
-            .any(|m| m.starts_with("`io.linkml` is not a provider this host installs")),
+        diagnostics.iter().any(|d| matches!(&d.problem,
+            Problem::UnknownProvider { constructor } if constructor == "io.linkml")
+            && d.help.as_deref().is_some_and(|h| h.contains("`io.csv`"))),
         "got {diagnostics:?}"
     );
 }
@@ -262,7 +284,9 @@ fn a_derived_binding_is_not_diagnosed_as_a_provider() {
         ("users.csv", USERS_CSV),
     ]);
     assert!(
-        !diagnostics.iter().any(|m| m.contains("is not a provider")),
+        !diagnostics
+            .iter()
+            .any(|d| matches!(d.problem, Problem::UnknownProvider { .. })),
         "got {diagnostics:?}"
     );
 }
@@ -286,16 +310,10 @@ fn a_schema_argument_naming_a_provider_resolves_its_shapes() {
         ("person.shex", PERSON_SHEXC),
         ("g.ttl", ""),
     ]);
-    for evidence in [
-        "named by no provider",
-        "is not a provider",
-        "reads rows, not types",
-    ] {
-        assert!(
-            !diagnostics.iter().any(|m| m.contains(evidence)),
-            "the argument names `io.shex` and it reads types; got {diagnostics:?}"
-        );
-    }
+    assert!(
+        !diagnostics.iter().any(|d| is_provider_refusal(&d.problem)),
+        "the argument names `io.shex` and it reads types; got {diagnostics:?}"
+    );
 }
 
 /// A bare path is an error that says what to write. It is not a fallback to the
@@ -315,12 +333,11 @@ fn a_bare_schema_path_is_an_error_that_says_what_to_write() {
         ("g.ttl", ""),
     ]);
     assert!(
-        diagnostics.iter().any(|m| m
-            == "`schema =` names a document, and a document is named by the provider \
-                that reads it: write `schema = io.shex(\"…\")` or \
-                `schema = io.shacl(\"…\")`, never a bare path — the row that reads a \
-                document is the one the program names, not the one its extension \
-                happens to match"),
+        diagnostics.iter().any(|d| matches!(&d.problem,
+            Problem::BareDocumentPath { document } if document == "person.shex")
+            && d.help
+                .as_deref()
+                .is_some_and(|h| h.contains("schema = io.shex("))),
         "got {diagnostics:?}"
     );
 }
@@ -342,9 +359,12 @@ fn a_schema_argument_on_a_data_provider_names_both() {
         ("g.ttl", ""),
     ]);
     assert!(
-        diagnostics
-            .iter()
-            .any(|m| m == "`io.csv` reads rows, not types — `io.shex`, `io.shacl` read types"),
+        diagnostics.iter().any(|d| refuses_capability(
+            d,
+            "io.csv",
+            "read types",
+            "`io.shex`, `io.shacl` read types"
+        )),
         "got {diagnostics:?}"
     );
 }
@@ -379,7 +399,7 @@ fn a_binding_diagnostic_is_reported_once_not_once_per_mapping() {
     ]);
     let hits = diagnostics
         .iter()
-        .filter(|m| m.starts_with("`io.csv` reads rows, not types"))
+        .filter(|d| refuses_capability(d, "io.csv", "read types", "read types"))
         .count();
     assert_eq!(hits, 1, "three mappings, one mistake; got {diagnostics:?}");
 }
@@ -397,7 +417,7 @@ fn a_file_with_no_mapping_still_reports_its_bindings() {
     assert!(
         diagnostics
             .iter()
-            .any(|m| m.starts_with("`io.csv` reads rows, not types")),
+            .any(|d| matches!(d.problem, Problem::WrongCapability { .. })),
         "got {diagnostics:?}"
     );
 }

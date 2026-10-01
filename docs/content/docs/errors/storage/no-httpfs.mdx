@@ -1,0 +1,36 @@
+---
+title: The engine cannot read remote storage
+description: "`storage/no-httpfs` — the DuckDB engine a host handed over does not have its `httpfs` extension loaded, so an S3 secret cannot be installed in it."
+---
+
+A host gives `@fossil-lang/corpus` and `@fossil-lang/storage` its own DuckDB engine, and fossil makes
+an S3 prefix readable in it by installing a secret scoped to that prefix. That needs DuckDB's `httpfs`
+extension, and the engine did not have it loaded:
+
+```text
+the engine cannot read remote storage: its httpfs extension is not loaded
+```
+
+A host sees a `FossilError` with empty `data` and the help *fossil reads s3:// through a scoped
+secret, and the host's engine loads httpfs before handing it over*. It is thrown by `mount` — so by
+`open(job, { engine, host })`, and by introspection for a source under a connection — the first time
+a given engine is asked to install an S3 secret. fossil checks with
+`SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'httpfs'`, and remembers an engine
+that passed.
+
+## Why fossil refuses it
+
+The engine is the host's. fossil does not load extensions into it, and without `httpfs` the
+`CREATE OR REPLACE SECRET … SCOPE '<prefix>'` statement it issues would fail with DuckDB's own error,
+or the reads after it would. Checking first turns that into one named failure that says what the host
+has to do ([storage is reached by a vended credential](/docs/design/three-hosts)).
+
+An Azure prefix does not need it: DuckDB-WASM has no Azure extension, so each Azure file is lent to
+the engine under a scheme-less name instead, and no secret is installed.
+
+## How to repair it
+
+- **Load `httpfs` in the engine before handing it over** (`LOAD httpfs`, after installing it where the
+  build requires that).
+- If the engine is shared, load it once at start-up: fossil checks each engine only until it has seen
+  the extension loaded.

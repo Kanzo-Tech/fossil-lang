@@ -1,0 +1,35 @@
+---
+title: A member of more than one receiver
+description: "`name/ambiguous-member` — a member call on a value names a member that several receivers in the catalogue have, and fossil cannot tell which one is meant."
+---
+
+A function on a type can be reached two ways: `str.trim(x)` by the type, and `x.trim()` by the value.
+[They are one catalogue row](/docs/book/expressions#two-paths-to-the-same-function). On the value
+path, though, the member is resolved by its name alone, because the receiver's type is not yet known
+where the call is lowered. If two receivers both had a member spelled the same way, the name would
+name two rows:
+
+```text
+`<member>` is a member of 2 receivers (`<a>.<member>`, `<b>.<member>`), and fossil cannot tell which one this is
+help: write the type path instead, e.g. `<a>.<member>(…)`
+```
+
+**No program can raise this today.** No member in the catalogue is spelled the same on two receivers,
+so the value path always finds one row or none (none is
+[`name/unknown-function`](/docs/errors/name/unknown-function)). The refusal is written for the day a
+row is added that shares a spelling with another.
+
+## Why fossil refuses it
+
+The alternative to refusing is guessing, and a guess here picks an implementation: the two rows
+would have different signatures and different lowerings, and the wrong one could type-check and
+write a plausible value. The type path cannot be ambiguous — `str.trim` names its receiver — so it is
+always available as the unambiguous spelling, and the refusal can say exactly what to write instead.
+The value path is tried first because the type path cannot express a receiver that is itself an
+expression; resolving it fully by type is what this error is waiting on.
+
+## How to repair it
+
+Write the call by the type path the `help` gives: `str.trim(User.name)` rather than
+`User.name.trim()`. Any of the listed receivers can be used, choosing the one that matches the
+value's type.

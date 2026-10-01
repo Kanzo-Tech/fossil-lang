@@ -27,15 +27,20 @@ export interface Foreign {
 }
 
 /**
- * A compile diagnostic a failure carries — what `run/does-not-compile` relates. `span` is
- * file-absolute bytes.
+ * A compile diagnostic a failure carries — what `run/does-not-compile` relates: a problem, and
+ * where in the program. `span` is file-absolute bytes.
  */
-export interface Related {
-  severity: Severity;
-  detail: string;
-  help?: string;
-  span?: { start: number; end: number };
-}
+export type Related<C extends Code = Code> = {
+  [K in C]: {
+    code: K;
+    data: ProblemData[K];
+    title: string;
+    detail: string;
+    severity: Severity;
+    help?: string;
+    span?: { start: number; end: number };
+  };
+}[C];
 
 /** The fields every problem has, whatever its code. */
 export interface ProblemBase {
@@ -188,7 +193,8 @@ export function attachCause<E>(error: E, failure: unknown): E {
   return error;
 }
 
-/** The published documentation. */
+/** The published documentation. `fossil_graph_schema::Problem::help_url` builds the same link, and
+ *  a test there reads these two constants. */
 const DOCS = 'https://kanzo-tech.github.io/fossil-lang';
 /** The error index within it: a page per code, the code as its route. */
 const INDEX = 'docs/errors';

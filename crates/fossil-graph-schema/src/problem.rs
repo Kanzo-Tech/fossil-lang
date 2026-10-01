@@ -1,11 +1,14 @@
-//! **What went wrong, as a value** — the catalogue of every failure fossil
-//! reports to a host, and the [`Failure`] that carries one.
+//! **What went wrong, as a value** — the catalogue of every mistake fossil
+//! reports, compile diagnostics and run failures alike, and the [`Failure`]
+//! that carries one out of a run.
 //!
 //! A code is `area/kind` and is the serde tag of [`Problem`], so the code and
 //! the data cannot disagree and the message is rendered from the data by the
 //! variant's one `#[error]`. The reasoning, the stability rule and the whole
 //! catalogue are `/docs/design/errors`; this module holds the codes that have
-//! an emitter today.
+//! an emitter today. A compile diagnostic carries one as
+//! `fossil_base::Diagnostic::problem`; the same mistake found by `check` and
+//! again by `run` is one code.
 //!
 //! `problem.schema.json` beside this crate's manifest is `Problem`'s derived
 //! JSON Schema, held by `tests/problem_schema.rs`, and it is what the
@@ -35,6 +38,193 @@ fn mib(bytes: &u64) -> f64 {
     *bytes as f64 / f64::from(1_u32 << 20)
 }
 
+/// `` `a`, `b` `` — or `none` for an empty list.
+fn code_list(items: &[String]) -> String {
+    if items.is_empty() {
+        return "none".to_string();
+    }
+    items
+        .iter()
+        .map(|i| format!("`{i}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn property_name(name: Option<&str>) -> String {
+    name.map_or_else(
+        || "this property has no name on its left, so it is not written".to_string(),
+        |n| {
+            format!(
+                "`{n}` is not a property name: a property is named by a bare name, the last \
+                 segment of a predicate IRI the shape declares"
+            )
+        },
+    )
+}
+
+fn unknown_property(property: &str, declared: &[String]) -> String {
+    if declared.is_empty() {
+        format!("the target shape declares no predicate, so there is no `{property}`")
+    } else {
+        format!(
+            "the target shape declares no `{property}` — it declares {}",
+            code_list(declared)
+        )
+    }
+}
+
+fn unknown_function(function: &str, unknown_namespace: Option<&str>) -> String {
+    unknown_namespace.map_or_else(
+        || format!("`{function}` is not a function fossil knows"),
+        |ns| {
+            format!(
+                "`{ns}` is not a namespace or a type fossil knows, so `{function}` names nothing"
+            )
+        },
+    )
+}
+
+fn unknown_source(binding: &str, bound_to: Option<&str>) -> String {
+    bound_to.map_or_else(
+        || format!("`{binding}` is not a declared source binding"),
+        |c| {
+            format!(
+                "`{binding}` is not a source: it is bound to `{c}`, which is not an `io.*(\"…\")` \
+                 call, so there is no file to read"
+            )
+        },
+    )
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn arity(function: &str, min: &u64, max: &u64, given: &u64) -> String {
+    let takes = if min == max {
+        format!("{min} argument{}", if *min == 1 { "" } else { "s" })
+    } else {
+        format!("{min} to {max} arguments")
+    };
+    let verb = if *given == 1 { "was" } else { "were" };
+    format!("`{function}` takes {takes}, and {given} {verb} given")
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn duplicate(function: &str, parameter: &str, receiver: &bool) -> String {
+    if *receiver {
+        format!(
+            "`{parameter}` is the receiver of `{function}` — the value to the left of the dot — \
+             so naming it here gives it twice"
+        )
+    } else {
+        format!("`{function}` is given `{parameter}` twice")
+    }
+}
+
+fn argument_mismatch(
+    function: &str,
+    position: Option<&u64>,
+    expected: &str,
+    actual: &str,
+) -> String {
+    position.map_or_else(
+        || {
+            let member = function.rsplit('.').next().unwrap_or(function);
+            format!("`{member}` is a member of {expected}, and this is {actual}")
+        },
+        |n| format!("argument {n} of `{function}` expects {expected}, and this is {actual}"),
+    )
+}
+
+fn no_document(binding: Option<&str>) -> String {
+    binding.map_or_else(
+        || {
+            "this program names no shape document, so it cannot write a property: a property \
+             key is the last segment of a predicate IRI that a shape declares"
+                .to_string()
+        },
+        |b| format!("`{b}` names no shape document, so it binds no shape"),
+    )
+}
+
+fn unparseable(document: &str, reason: Option<&str>) -> String {
+    reason.map_or_else(
+        || format!("the document `{document}` does not parse"),
+        |r| format!("the document `{document}` does not parse: {r}"),
+    )
+}
+
+fn invalid_reader_option(option: &str, constructor: &str, value: Option<&str>) -> String {
+    match value {
+        None => format!(
+            "`{option}` in `{constructor}` is written `{option} = \"<one character>\"`, and \
+             this is not a string"
+        ),
+        Some("") => {
+            format!("`{option}` in `{constructor}` is one ASCII character, and this is empty")
+        }
+        Some(v) => format!(
+            "`{option}` in `{constructor}` is one ASCII character, and `\"{v}\"` is {} bytes",
+            v.len()
+        ),
+    }
+}
+
+fn stage_arity(verb: &str, pipeline: &str, missing: Option<&str>) -> String {
+    missing.map_or_else(
+        || format!("`{verb}` in `{pipeline}` is given more arguments than it takes"),
+        |m| format!("`{verb}` in `{pipeline}` needs {m}, and this call gives none"),
+    )
+}
+
+fn not_an_aggregate(name: &str, pipeline: &str, function: Option<&str>) -> String {
+    function.map_or_else(
+        || {
+            format!(
+                "`{name}` in `{pipeline}` is not an aggregation: it has to be a call over the \
+                 group"
+            )
+        },
+        |f| {
+            format!(
+                "`{f}` is not an aggregate, so it cannot be the `{name}` of a `group_by` in \
+                 `{pipeline}`"
+            )
+        },
+    )
+}
+
+fn union_mismatch(
+    pipeline: &str,
+    left: &[String],
+    right: &[String],
+    column: Option<&u64>,
+) -> String {
+    let at = |side: &[String], i: u64| {
+        usize::try_from(i)
+            .ok()
+            .and_then(|i| i.checked_sub(1))
+            .and_then(|i| side.get(i))
+            .map_or_else(|| "missing".to_string(), |c| format!("`{c}`"))
+    };
+    column.map_or_else(
+        || {
+            format!(
+                "`union` in `{pipeline}` needs both sides to carry the same row: the left has \
+                 {}, the right has {}",
+                code_list(left),
+                code_list(right)
+            )
+        },
+        |&i| {
+            format!(
+                "`union` in `{pipeline}` pairs its sides column by column, and column {i} is {} \
+                 on the left and {} on the right",
+                at(left, i),
+                at(right, i)
+            )
+        },
+    )
+}
+
 /// Every variant states its code and its title once; the macro emits the
 /// enum, [`Problem::code`], [`Problem::title`] and [`CODES`] from that one
 /// statement, so none of the four can list a code the others do not.
@@ -43,15 +233,15 @@ macro_rules! catalogue {
         $(#[doc = $doc:literal])*
         $code:literal, $title:literal,
         #[error($($message:tt)*)]
-        $variant:ident { $($field:ident : $ty:ty),* $(,)? }
+        $variant:ident { $($(#[$fattr:meta])* $field:ident : $ty:ty),* $(,)? }
     ),* $(,)?) => {
-        /// **One failure fossil can report**, identified by its code.
+        /// **One mistake fossil can report**, identified by its code.
         ///
         /// Serialized as `{ "code": "area/kind", "data": { … } }`: the code is
         /// the serde tag, and `data` is always an object. `Display` is the
         /// message for a person, rendered from the data; nothing should parse
         /// it — a value a host needs is a field.
-        #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize, JsonSchema)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error, Serialize, Deserialize, JsonSchema)]
         #[serde(tag = "code", content = "data")]
         pub enum Problem {
             $(
@@ -59,7 +249,7 @@ macro_rules! catalogue {
                 #[serde(rename = $code)]
                 #[schemars(title = $title)]
                 #[error($($message)*)]
-                $variant { $($field: $ty),* },
+                $variant { $($(#[$fattr])* $field: $ty),* },
             )*
         }
 
@@ -89,6 +279,464 @@ macro_rules! catalogue {
 }
 
 catalogue! {
+    // ── syntax ──────────────────────────────────────────────────────────
+
+    /// The parser wanted one token and found another. Both are token kinds.
+    "syntax/expected-token", "Expected another token",
+    #[error("expected {expected}, found {found}")]
+    ExpectedToken { expected: String, found: String },
+
+    /// A token the parser skipped while recovering from an earlier mistake.
+    "syntax/unexpected-token", "Unexpected token",
+    #[error("unexpected token")]
+    UnexpectedToken {},
+
+    /// A character no token of the language starts with.
+    "syntax/unknown-character", "No token starts with this character",
+    #[error("unexpected character `{character}` — no token starts with it")]
+    UnknownCharacter { character: String },
+
+    /// A spelling the language had and retired, recognised on purpose so the
+    /// message can name what replaces it.
+    "syntax/retired-spelling", "A retired spelling",
+    #[error("`{spelling}` is retired: write `{replacement}`")]
+    RetiredSpelling { spelling: String, replacement: String },
+
+    /// A `@rename` written incompletely; `missing` is the part it lacks.
+    "syntax/malformed-rename", "A malformed rename",
+    #[error(
+        "this `@rename` has no {missing}: a rename is \
+         `@rename(Type, \"<predicate IRI>\" as <name>)`"
+    )]
+    MalformedRename { missing: String },
+
+    /// An attribute written where it does not belong.
+    "syntax/misplaced-attribute", "An attribute in the wrong place",
+    #[error("`{attribute}` does not belong {place}")]
+    MisplacedAttribute { attribute: String, place: String },
+
+    /// A mapping whose header cannot be read; nothing is produced from it.
+    "syntax/invalid-mapping-header", "Not a mapping header",
+    #[error(
+        "this is not a mapping header — {reason} — so nothing is produced from it. A mapping is \
+         `Name : Shape from <source>`"
+    )]
+    InvalidMappingHeader { reason: String },
+
+    /// A property whose left-hand side is not a bare name; `name` is absent
+    /// when there is nothing on the left at all.
+    "syntax/invalid-property-name", "Not a property name",
+    #[error("{}", property_name(.name.as_deref()))]
+    InvalidPropertyName { name: Option<String> },
+
+    /// A property with nothing on its right-hand side.
+    "syntax/missing-value", "A property with no value",
+    #[error("this property has no value, so it is not written")]
+    MissingValue {},
+
+    /// A number literal that does not fit the type it is read as.
+    "syntax/number-out-of-range", "A number fossil cannot carry",
+    #[error("`{literal}` does not fit in {kind}: {reason}")]
+    NumberOutOfRange { literal: String, kind: String, reason: String },
+
+    /// A `? :` missing one of its three parts.
+    "syntax/incomplete-conditional", "An incomplete conditional",
+    #[error(
+        "`{expression}` is not a complete conditional: it needs a condition, a `?` branch and \
+         a `:` branch"
+    )]
+    IncompleteConditional { expression: String },
+
+    /// A function named where a value belongs and never called.
+    "syntax/uncalled-function", "A function named and not called",
+    #[error("`{function}` names a function but does not call it; fossil has no function values")]
+    UncalledFunction { function: String },
+
+    /// A call whose callee is not a name.
+    "syntax/invalid-callee", "Not a function name",
+    #[error("`{callee}` calls something that is not a function name; only a catalogued name may be called")]
+    InvalidCallee { callee: String },
+
+    // ── name ────────────────────────────────────────────────────────────
+
+    /// A shape name no `type { … } := …` binding introduces. `declared` is
+    /// the names the program does bind.
+    "name/unknown-shape", "Not a shape this program declares",
+    #[error("`{shape}` is not a shape this program declares")]
+    UnknownShape { shape: String, declared: Vec<String> },
+
+    /// A property key the target shape does not declare.
+    "name/unknown-property", "Not a property the shape declares",
+    #[error("{}", unknown_property(.property, .declared))]
+    UnknownProperty { property: String, declared: Vec<String> },
+
+    /// A column a row does not have. `fields` is what it does have.
+    "name/unknown-field", "Not a field of this row",
+    #[error("`{field}` is not a field of `{relation}`")]
+    UnknownField { field: String, relation: String, fields: Vec<String> },
+
+    /// A qualified reference to a row that is not in scope where it is
+    /// written — a mapping's, a pipeline stage's or a join's. `rows` is what
+    /// is in scope.
+    "name/row-not-in-scope", "A row that is not in scope",
+    #[error("`{binding}.{column}` reads a row `{scope}` does not have — it has {}", code_list(.rows))]
+    RowNotInScope { binding: String, column: String, scope: String, rows: Vec<String> },
+
+    /// A call to a name the catalogue does not have. `unknown_namespace` is
+    /// set when the part before the dot is itself unknown.
+    "name/unknown-function", "Not a function fossil knows",
+    #[error("{}", unknown_function(.function, .unknown_namespace.as_deref()))]
+    UnknownFunction { function: String, unknown_namespace: Option<String> },
+
+    /// A member call on a value whose member several receivers have.
+    "name/ambiguous-member", "A member of more than one receiver",
+    #[error(
+        "`{member}` is a member of {} receivers ({}), and fossil cannot tell which one this is",
+        .receivers.len(), code_list(.receivers)
+    )]
+    AmbiguousMember { member: String, receivers: Vec<String> },
+
+    /// A named argument no parameter of the function has.
+    "name/unknown-parameter", "Not a parameter of this function",
+    #[error("`{function}` has no parameter called `{parameter}` — it takes {}", code_list(.parameters))]
+    UnknownParameter { function: String, parameter: String, parameters: Vec<String> },
+
+    /// A `from` that names no source binding. `bound_to` is the constructor
+    /// the name is bound to instead, when it is bound at all.
+    "name/unknown-source", "Not a source binding",
+    #[error("{}", unknown_source(.binding, .bound_to.as_deref()))]
+    UnknownSource { binding: String, bound_to: Option<String> },
+
+    // ── argument ────────────────────────────────────────────────────────
+
+    /// A call given fewer arguments than it requires or more than it takes.
+    "argument/arity", "The wrong number of arguments",
+    #[error("{}", arity(.function, .min, .max, .given))]
+    Arity { function: String, min: u64, max: u64, given: u64 },
+
+    /// A parameter given twice — named twice, or named when the receiver
+    /// already fills it.
+    "argument/duplicate", "An argument given twice",
+    #[error("{}", duplicate(.function, .parameter, .receiver))]
+    DuplicateArgument { function: String, parameter: String, receiver: bool },
+
+    /// A parameter left empty with a later one given.
+    "argument/skipped-parameter", "A parameter skipped",
+    #[error(
+        "`{function}` is given nothing for `{parameter}`, and something after it; a parameter \
+         cannot be skipped"
+    )]
+    SkippedParameter { function: String, parameter: String },
+
+    /// A positional argument after a named one.
+    "argument/positional-after-named", "A positional argument after a named one",
+    #[error(
+        "`{argument}` is positional and follows `{named} = …`; once an argument is named, the \
+         ones after it are too"
+    )]
+    PositionalAfterNamed { argument: String, named: String },
+
+    /// A named argument to an edge, whose arguments are positional.
+    "argument/named-on-edge", "A named argument to an edge",
+    #[error(
+        "`{argument}` names an argument of `{target}`, and an edge's arguments fill its \
+         identity template in the order they are written"
+    )]
+    NamedOnEdge { argument: String, target: String },
+
+    /// A source alias given to a call that takes values.
+    "argument/alias-in-value-call", "A source alias in a value call",
+    #[error("`{alias}` is a source alias, and `{function}` takes values; an alias belongs to a join over rows")]
+    AliasInValueCall { alias: String, function: String },
+
+    // ── type ────────────────────────────────────────────────────────────
+
+    /// A property written with a value of a type its shape does not allow.
+    "type/property-mismatch", "A property of the wrong type",
+    #[error("`{property}` expects {expected}, and this is {actual}")]
+    PropertyMismatch { property: String, expected: String, actual: String },
+
+    /// An argument of a type its parameter does not take. `position` is
+    /// 1-based, and absent for the receiver of a member call.
+    "type/argument-mismatch", "An argument of the wrong type",
+    #[error("{}", argument_mismatch(.function, .position.as_ref(), .expected, .actual))]
+    ArgumentMismatch { function: String, position: Option<u64>, expected: String, actual: String },
+
+    /// A relation written where a value belongs.
+    "type/relation-as-value", "A relation where a value belongs",
+    #[error("`{function}` gives back a relation, which is not a value")]
+    RelationAsValue { function: String },
+
+    /// A value that has to be Bool and is not. `operand` says which.
+    "type/expected-bool", "Not a Bool",
+    #[error("{operand} must be Bool, and it is {actual}")]
+    ExpectedBool { operand: String, actual: String },
+
+    /// A value that has to be a number and is not. `operand` says which.
+    "type/expected-number", "Not a number",
+    #[error("{operand} must be a number, and it is {actual}")]
+    ExpectedNumber { operand: String, actual: String },
+
+    /// A comparison between two types that do not compare.
+    "type/incomparable", "Values that cannot be compared",
+    #[error("cannot compare {left} with {right} using `{operator}`")]
+    Incomparable { left: String, right: String, operator: String },
+
+    /// A `? :` whose branches have different types; fossil does not coerce.
+    "type/branch-mismatch", "Branches of different types",
+    #[error("the branches of `? :` have different types: {then} and {otherwise}")]
+    BranchMismatch { then: String, otherwise: String },
+
+    // ── shape ───────────────────────────────────────────────────────────
+
+    /// No shape document where one is needed. `binding` is the binding that
+    /// names none; absent when the program names none at all.
+    "shape/no-document", "No shape document",
+    #[error("{}", no_document(.binding.as_deref()))]
+    NoDocument { binding: Option<String> },
+
+    /// Two predicates of one shape whose short names coincide, which makes
+    /// both unwritable. `first` and `second` are their IRIs.
+    "shape/name-collision", "Two predicates share a name",
+    #[error("two predicates of {shape} are both called `{name}`")]
+    NameCollision { shape: String, name: String, first: String, second: String },
+
+    /// A predicate the shape requires and the mapping never writes.
+    "shape/missing-required-property", "A required property is never written",
+    #[error("`{mapping}` never writes `{property}`, and {shape} requires it")]
+    MissingRequiredProperty { mapping: String, property: String, shape: String },
+
+    /// A value disjunction in a shape, which one mapping cannot write.
+    "shape/unsupported-disjunction", "A value disjunction",
+    #[error("a value disjunction is not supported: shape `{shape}` has {branches} branches")]
+    UnsupportedDisjunction { shape: String, branches: u64 },
+
+    /// A shape graph that refers back to itself.
+    "shape/cyclic-reference", "A cyclic shape reference",
+    #[error("cyclic shape graph not supported: {}", .path.join(" -> "))]
+    CyclicReference { path: Vec<String> },
+
+    /// A shape reference the document does not resolve.
+    "shape/unresolved-reference", "An unresolved shape reference",
+    #[error("unresolved shape reference `{reference}` in shape `{shape}`")]
+    UnresolvedReference { reference: String, shape: String },
+
+    /// A binding that names more shapes than its document declares; names
+    /// bind by position, and `position` is the surplus name's.
+    "shape/binding-arity", "More names than shapes",
+    #[error(
+        "the binding names {named} shape(s) and the document declares {declared}, so `{name}`, \
+         at position {position}, binds nothing"
+    )]
+    BindingArity { name: String, named: u64, declared: u64, position: u64 },
+
+    /// A `@rename` naming a type its binding does not introduce.
+    "shape/rename-unknown-type", "A rename of a type the binding does not introduce",
+    #[error("`@rename` names `{shape}`, which this `type` binding does not introduce")]
+    RenameUnknownType { shape: String, introduced: Vec<String> },
+
+    /// A `@rename` naming a predicate its shape does not declare.
+    "shape/rename-unknown-predicate", "A rename of a predicate the shape does not declare",
+    #[error("`{shape}` declares no predicate `{predicate}`, so this rename never fires")]
+    RenameUnknownPredicate { shape: String, predicate: String, declared: Vec<String> },
+
+    /// A program whose sources declare two different output shapes; one
+    /// program writes one.
+    "shape/more-than-one-output", "More than one output shape",
+    #[error("a program may declare only one output shape; found `{first}` and `{second}`")]
+    MoreThanOneOutput { first: String, second: String },
+
+    // ── document ────────────────────────────────────────────────────────
+
+    /// A document the program names that nothing is registered under.
+    "document/not-registered", "A document is not registered",
+    #[error("the document `{document}` is not registered")]
+    NotRegistered { document: String },
+
+    /// A registered document its provider could not decode. `reason` is the
+    /// decoder's own account, when it gave one.
+    "document/unparseable", "A document does not parse",
+    #[error("{}", unparseable(.document, .reason.as_deref()))]
+    Unparseable { document: String, reason: Option<String> },
+
+    /// Documents a run needed that the host could not read.
+    "document/unread", "Documents could not be read",
+    #[error("{} document(s) could not be read: {}", .documents.len(), .documents.join(", "))]
+    Unread { documents: Vec<String> },
+
+    // ── provider ────────────────────────────────────────────────────────
+
+    /// A constructor no installed provider answers to.
+    "provider/unknown", "Not a provider this host installs",
+    #[error("`{constructor}` is not a provider this host installs")]
+    UnknownProvider { constructor: String },
+
+    /// A provider asked for something it does not do — types of a row reader.
+    "provider/wrong-capability", "The provider cannot do this",
+    #[error("`{constructor}` does not {capability}")]
+    WrongCapability { constructor: String, capability: String },
+
+    /// A document whose extension the provider does not read.
+    "provider/wrong-extension", "The provider does not read this extension",
+    #[error("`{constructor}` does not read `{document}`")]
+    WrongExtension { constructor: String, document: String },
+
+    /// A document written as a bare path, with no provider to read it.
+    "provider/bare-document-path", "A document path with no provider",
+    #[error("`{document}` is named by no provider")]
+    BareDocumentPath { document: String },
+
+    /// A reader option whose value no reader can be given: not a string
+    /// (`value` absent), or not one ASCII character.
+    "provider/invalid-reader-option", "A reader option fossil cannot pass on",
+    #[error("{}", invalid_reader_option(.option, .constructor, .value.as_deref()))]
+    InvalidReaderOption { option: String, constructor: String, value: Option<String> },
+
+    /// A reader option the provider does not have; `owner` is the one that does.
+    "provider/foreign-reader-option", "A reader option of another provider",
+    #[error("`{constructor}` has no `{option}`; `{owner}` does")]
+    ForeignReaderOption { option: String, constructor: String, owner: String },
+
+    // ── identity ────────────────────────────────────────────────────────
+
+    /// A mapping with no `@subject`.
+    "identity/missing-subject", "A mapping with no identity",
+    #[error("`{mapping}` declares no `@subject`, so the rows it writes have no identity")]
+    MissingSubject { mapping: String },
+
+    /// A mapping with two `@subject` lines.
+    "identity/duplicate-subject", "Two identities in one mapping",
+    #[error("`{mapping}` declares `@subject` twice, and a type has one identity")]
+    DuplicateSubject { mapping: String },
+
+    /// A `@subject` that is not the first line of its body. `line` is
+    /// 1-based, within the body.
+    "identity/subject-not-first", "The identity is not first",
+    #[error("`@subject` is the first line of a mapping body, and in `{mapping}` it is line {line}")]
+    SubjectNotFirst { mapping: String, line: u64 },
+
+    /// Two mappings producing one type with two different `@subject` forms.
+    "identity/conflicting", "Two identities for one type",
+    #[error("`{first}` and `{second}` mint two identities for {shape}")]
+    ConflictingIdentity { first: String, second: String, shape: String },
+
+    /// An edge to a type no mapping writes, so there is no identity to build.
+    "identity/edge-without-template", "An edge to a type nothing writes",
+    #[error(
+        "no mapping in this program writes a `{target}`, so `{target}(…)` has no identity \
+         template to build from"
+    )]
+    EdgeWithoutTemplate { target: String },
+
+    /// An edge given a number of values its identity template has no holes
+    /// for. `mapping` is the one whose `@subject` declares the template.
+    "identity/edge-arity", "An edge given the wrong number of values",
+    #[error(
+        "`{target}` is built from {takes} value(s) and this passes {given}; its identity is \
+         declared by `{mapping}`"
+    )]
+    EdgeArity { target: String, takes: u64, given: u64, mapping: String },
+
+    // ── pipeline ────────────────────────────────────────────────────────
+
+    /// A stage whose verb the catalogue does not have.
+    "pipeline/unknown-verb", "Not a relation verb",
+    #[error("`{verb}` is not a relation verb; the catalogue has {}", code_list(.verbs))]
+    UnknownVerb { verb: String, verbs: Vec<String> },
+
+    /// A verb the catalogue declares and the lowering does not implement yet.
+    "pipeline/unimplemented-verb", "A verb with no lowering yet",
+    #[error(
+        "`{verb}` is a relation verb the lowering does not implement yet, so `{pipeline}` \
+         cannot compile; implemented today: {}",
+        code_list(.implemented)
+    )]
+    UnimplementedVerb { verb: String, pipeline: String, implemented: Vec<String> },
+
+    /// A source constructor written as a stage of a pipeline.
+    "pipeline/source-as-stage", "A source constructor used as a stage",
+    #[error("`{verb}` constructs a source and is not a stage of `{pipeline}`")]
+    SourceAsStage { verb: String, pipeline: String },
+
+    /// A stage missing a position it needs (`missing`), or given more than
+    /// it takes (`missing` absent).
+    "pipeline/stage-arity", "A stage given the wrong arguments",
+    #[error("{}", stage_arity(.verb, .pipeline, .missing.as_deref()))]
+    StageArity { verb: String, pipeline: String, missing: Option<String> },
+
+    /// A stage argument of the wrong kind — a value where a column or a
+    /// binding name belongs.
+    "pipeline/invalid-stage-argument", "A stage argument of the wrong kind",
+    #[error("`{parameter}` in `{pipeline}` takes {expected}, and this is not one")]
+    InvalidStageArgument { parameter: String, pipeline: String, expected: String },
+
+    /// A `group_by` output that is not an aggregate call. `function` is the
+    /// call written, when it is a call; `aggregates` are the ones there are.
+    "pipeline/not-an-aggregate", "Not an aggregation",
+    #[error("{}", not_an_aggregate(.name, .pipeline, .function.as_deref()))]
+    NotAnAggregate { name: String, pipeline: String, function: Option<String>, aggregates: Vec<String> },
+
+    /// An alias on a `union`, whose result has the pipeline's one name.
+    "pipeline/union-alias", "An alias on a union",
+    #[error(
+        "`union` in `{pipeline}` gives its result the one name `{pipeline}`, so the alias \
+         `{alias}` would name a row it does not produce"
+    )]
+    UnionAlias { pipeline: String, alias: String },
+
+    /// A pipeline that derives from itself.
+    "pipeline/cycle", "A pipeline that derives from itself",
+    #[error(
+        "the source pipeline `{pipeline}` derives from itself, directly or through the \
+         pipelines it names"
+    )]
+    PipelineCycle { pipeline: String },
+
+    /// A `join` whose other side declares no schema, so its condition cannot
+    /// be checked.
+    "pipeline/unknown-columns", "A join over a source with no schema",
+    #[error(
+        "`join` in `{pipeline}` joins {}, whose columns are unknown: it declares no schema, so \
+         there is nothing to check the condition against",
+        code_list(.bindings)
+    )]
+    SchemalessJoin { pipeline: String, bindings: Vec<String> },
+
+    /// A `union` whose two sides carry different rows. Each column is
+    /// `name: Type`; `column` is the 1-based first that differs, absent when
+    /// the counts do.
+    "pipeline/union-mismatch", "Union sides with different rows",
+    #[error("{}", union_mismatch(.pipeline, .left, .right, .column.as_ref()))]
+    UnionMismatch { pipeline: String, left: Vec<String>, right: Vec<String>, column: Option<u64> },
+
+    /// A `join` condition that is not an equality, or a conjunction of them.
+    "pipeline/join-not-equality", "A join condition that is not an equality",
+    #[error("`join` in `{pipeline}` relates its two sides by equality, and `{condition}` is not one")]
+    JoinNotEquality { pipeline: String, condition: String },
+
+    /// A `join` key that is not a column reference.
+    "pipeline/join-key-not-column", "A join key that is not a column",
+    #[error(
+        "`join` in `{pipeline}` equates `{left}` with `{right}`, and `{operand}` is not a column \
+         reference"
+    )]
+    JoinKeyNotColumn { pipeline: String, left: String, right: String, operand: String },
+
+    /// A `join` equality whose two columns are on the same side.
+    "pipeline/join-one-side", "A join condition on one side only",
+    #[error("`join` in `{pipeline}` equates `{left}` with `{right}`, and both are columns of the {side} side")]
+    JoinOneSide { pipeline: String, left: String, right: String, side: String },
+
+    // ── unsupported ─────────────────────────────────────────────────────
+
+    /// An expression or literal the parser reads and the lowering has no case
+    /// for — a gap in the compiler, not a mistake in the program.
+    "unsupported/expression", "An expression fossil cannot lower yet",
+    #[error("`{expression}` is not an expression fossil can lower yet, so this property is not written")]
+    UnsupportedExpression { expression: String },
+
+    // ── run ─────────────────────────────────────────────────────────────
+
     /// An operator asked for more memory than the run's budget had left.
     /// Raised while the graph executes, before any byte of the corpus is
     /// written. Sizes are bytes.
@@ -111,47 +759,7 @@ catalogue! {
     #[error("no store covers the destination {destination}")]
     DestinationUncovered { destination: String },
 
-    /// A program whose sources declare two different output shapes; one
-    /// program writes one.
-    "shape/more-than-one-output", "More than one output shape",
-    #[error("a program may declare only one output shape; found `{first}` and `{second}`")]
-    MoreThanOneOutput { first: String, second: String },
-
-    /// A shape document written as a bare path, with no provider to read it.
-    /// Also a compile code; the executor reaches it for the output shape.
-    "provider/bare-document-path", "A document path with no provider",
-    #[error("the shape document `{document}` is named by no provider")]
-    BareDocumentPath { document: String },
-
-    /// A document the program names that the host never registered.
-    "document/not-registered", "A document is not registered",
-    #[error("the document `{document}` is not registered")]
-    NotRegistered { document: String },
-
-    /// A registered document its provider could not decode.
-    "document/unparseable", "A document does not parse",
-    #[error("the document `{document}` does not parse")]
-    Unparseable { document: String },
-
-    /// Documents a run needed that the host could not read.
-    "document/unread", "Documents could not be read",
-    #[error("{} document(s) could not be read: {}", .documents.len(), .documents.join(", "))]
-    Unread { documents: Vec<String> },
-
-    /// A constructor no installed provider answers to.
-    "provider/unknown", "Not a provider this host installs",
-    #[error("`{constructor}` is not a provider this host installs")]
-    UnknownProvider { constructor: String },
-
-    /// A provider asked for something it does not do — types of a row reader.
-    "provider/wrong-capability", "The provider cannot do this",
-    #[error("`{constructor}` does not {capability}")]
-    WrongCapability { constructor: String, capability: String },
-
-    /// A document whose extension the provider does not read.
-    "provider/wrong-extension", "The provider does not read this extension",
-    #[error("`{constructor}` does not read `{document}`")]
-    WrongExtension { constructor: String, document: String },
+    // ── source, engine, write, layout, storage, corpus, api ─────────────
 
     /// A source's bytes are not UTF-8 text.
     "source/not-utf8", "A source is not UTF-8",
@@ -246,7 +854,12 @@ catalogue! {
     /// the cause.
     "module/unreachable", "A module could not be loaded",
     #[error("{locator} could not be loaded")]
-    ModuleUnreachable { locator: String, after: Option<u64> },
+    ModuleUnreachable {
+        locator: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "u64")]
+        after: Option<u64>,
+    },
 
     /// A corpus whose manifest could not be read; the reader's error is the cause.
     "corpus/unreadable", "The corpus could not be read",
@@ -330,31 +943,76 @@ catalogue! {
 /// each. A code is never reused, and a test holds that no live code is here.
 pub const RETIRED: &[(&str, &str)] = &[];
 
+/// The published documentation, and the error index within it — `DOCS` and
+/// `INDEX` in `@fossil-lang/types`' `error.ts`, held equal by a test below.
+const DOCS: &str = "https://kanzo-tech.github.io/fossil-lang";
+const INDEX: &str = "docs/errors";
+
+impl Problem {
+    /// The published page that explains this code — `helpUrl(code)` in
+    /// `@fossil-lang/types`. What an LSP `codeDescription.href` points at; a
+    /// host serving its own copy of the site builds the link with `helpUrl`.
+    #[must_use]
+    pub fn help_url(&self) -> String {
+        format!("{DOCS}/{INDEX}/{}", self.code())
+    }
+}
+
 /// A compile diagnostic carried by a run failure — what
 /// [`Problem::DoesNotCompile`] relates. The span is **file-absolute**.
 ///
 /// `fossil_base::Diagnostic` cannot be named here: that crate depends on this
-/// one and is the salsa accumulator. Step 5 of `/docs/design/errors` gives
-/// this a `problem` as it gives one to `Diagnostic`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// one and is the salsa accumulator. This is its positional part reduced to
+/// the span, and the same [`Problem`].
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Related {
     pub severity: Severity,
-    pub detail: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Problem,
     pub help: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span: Option<Span>,
 }
 
 impl fmt::Display for Related {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.detail)
+        fmt::Display::fmt(&self.problem, f)
     }
 }
 
 impl Error for Related {}
 
+/// `{ code, data, title, detail, severity, help?, span? }` — a problem, as
+/// [`Failure`] writes one, plus where.
+impl Serialize for Related {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            #[serde(flatten)]
+            problem: &'a Problem,
+            title: &'static str,
+            detail: String,
+            severity: Severity,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            help: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            span: Option<Span>,
+        }
+        Wire {
+            problem: &self.problem,
+            title: self.problem.title(),
+            detail: self.problem.to_string(),
+            severity: self.severity,
+            help: self.help.as_deref(),
+            span: self.span,
+        }
+        .serialize(serializer)
+    }
+}
+
 impl miette::Diagnostic for Related {
+    fn code<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        Some(Box::new(self.problem.code()))
+    }
+
     fn severity(&self) -> Option<miette::Severity> {
         Some(match self.severity {
             Severity::Error => miette::Severity::Error,
@@ -589,6 +1247,21 @@ mod tests {
             },
             Problem::NoHttpfs {},
             Problem::Bug { what: "x".into() },
+            Problem::UnknownField {
+                field: "nmae".into(),
+                relation: "User".into(),
+                fields: vec!["name".into()],
+            },
+            Problem::Unparseable {
+                document: "shop.shex".into(),
+                reason: None,
+            },
+            Problem::ArgumentMismatch {
+                function: "str.trim".into(),
+                position: None,
+                expected: "String".into(),
+                actual: "Integer".into(),
+            },
         ]
     }
 
@@ -605,6 +1278,23 @@ mod tests {
         };
         code.split_once('/')
             .is_some_and(|(area, kind)| word(area) && word(kind))
+    }
+
+    #[test]
+    fn an_optional_field_with_no_value_is_absent_not_null() {
+        let quiet = Problem::ModuleUnreachable {
+            locator: "m_bg.wasm".into(),
+            after: None,
+        };
+        let wire = serde_json::to_value(&quiet).expect("serializes");
+        assert_eq!(wire["data"], serde_json::json!({ "locator": "m_bg.wasm" }));
+        assert_eq!(serde_json::from_value::<Problem>(wire).expect("reads back"), quiet);
+        let late = Problem::ModuleUnreachable {
+            locator: "m_bg.wasm".into(),
+            after: Some(60_000),
+        };
+        let wire = serde_json::to_value(&late).expect("serializes");
+        assert_eq!(wire["data"]["after"], 60_000);
     }
 
     #[test]
@@ -677,6 +1367,33 @@ mod tests {
         assert_eq!(
             wire["cause"],
             serde_json::json!({ "name": "AuthError", "detail": "no" })
+        );
+    }
+
+    /// `help_url` and TypeScript's `helpUrl` are two spellings of one link; the
+    /// constants are read out of `error.ts` rather than restated here.
+    #[test]
+    fn the_help_url_is_the_one_typescript_builds() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packages/types/src/error.ts"
+        );
+        let ts = std::fs::read_to_string(path).expect("packages/types/src/error.ts is readable");
+        let constant = |name: &str| {
+            ts.lines()
+                .find_map(|l| l.strip_prefix(&format!("const {name} = '")))
+                .and_then(|rest| rest.strip_suffix("';"))
+                .unwrap_or_else(|| panic!("error.ts declares `const {name} = '…';`"))
+                .to_string()
+        };
+        assert_eq!(constant("DOCS"), DOCS);
+        assert_eq!(constant("INDEX"), INDEX);
+        assert_eq!(
+            Problem::Busy {
+                call: "check".into()
+            }
+            .help_url(),
+            "https://kanzo-tech.github.io/fossil-lang/docs/errors/api/busy"
         );
     }
 

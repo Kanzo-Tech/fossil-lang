@@ -415,7 +415,7 @@ fn qualifier(head: &SyntaxToken) -> Option<String> {
 /// every keystroke inside the body the user is typing in; the row comes from
 /// [`fossil_hir::infer::source_row_inferred`], the side-effect-free sibling of
 /// the checker's `resolve_source_scope`. That choice is load-bearing and not a
-/// preference: `resolve_source_scope` can reach `delay_span_bug`, and a
+/// preference: `resolve_source_scope` can reach `fossil_base::report`, and a
 /// `salsa` accumulator OUTSIDE a tracked function **panics** by construction
 /// (`salsa::accumulator`: *«cannot accumulate values outside of an active
 /// tracked function»*). Completion is not inside one.

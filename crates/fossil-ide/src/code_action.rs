@@ -73,10 +73,11 @@ pub fn code_actions(
         if !spans_overlap(diag.span, sel) {
             continue;
         }
-        if let Some(a) = did_you_mean_action(&index, &uri, diag) {
+        let resolves = || crate::lsp_diagnostic(db, file, &index, diag);
+        if let Some(a) = did_you_mean_action(&index, &uri, diag, resolves) {
             actions.push(a);
         }
-        if let Some(a) = split_mapping_action(&index, &uri, diag) {
+        if let Some(a) = split_mapping_action(&index, &uri, diag, resolves) {
             actions.push(a);
         }
     }
@@ -86,7 +87,12 @@ pub fn code_actions(
 /// Action 1: did-you-mean rename quick-fix. Reads the structured
 /// `fossil_base::DidYouMean` candidate and replaces its `wrong_span` with the
 /// `replacement` — no message parsing.
-fn did_you_mean_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Option<CodeAction> {
+fn did_you_mean_action(
+    index: &LineIndex,
+    uri: &Uri,
+    diag: &Diagnostic,
+    resolves: impl FnOnce() -> LspDiagnostic,
+) -> Option<CodeAction> {
     let dym = diag.did_you_mean.as_ref()?;
     let edit = TextEdit::new(
         byte_span_to_range(index, dym.wrong_span),
@@ -96,7 +102,7 @@ fn did_you_mean_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Optio
         format!("Replace with `{}`", dym.replacement),
         uri.clone(),
         vec![edit],
-        diag,
+        resolves(),
         true,
     ))
 }
@@ -111,20 +117,26 @@ fn did_you_mean_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Optio
 /// Action 2: split-mapping. Reads the pre-generated split snippet from
 /// [`fossil_base::Diagnostic::suggestion_source`] (never regenerated) and
 /// replaces the offending mapping's span with it.
-fn split_mapping_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Option<CodeAction> {
+fn split_mapping_action(
+    index: &LineIndex,
+    uri: &Uri,
+    diag: &Diagnostic,
+    resolves: impl FnOnce() -> LspDiagnostic,
+) -> Option<CodeAction> {
     let snippet = diag.suggestion_source.as_ref()?;
     let edit = TextEdit::new(byte_span_to_range(index, diag.span), snippet.clone());
     Some(quick_fix(
         "Split mapping into one per ShEx OneOf disjunct".to_string(),
         uri.clone(),
         vec![edit],
-        diag,
+        resolves(),
         true,
     ))
 }
 
-/// Build a `quick fix` [`CodeAction`] resolving `diag` with one document's
-/// worth of [`TextEdit`]s.
+/// Build a `quick fix` [`CodeAction`] resolving `resolves` — the diagnostic as
+/// it was published, so a client matches the two by value — with one
+/// document's worth of [`TextEdit`]s.
 //
 // `mutable_key_type`: clippy flags `HashMap<Uri, _>` because `lsp_types::Uri`
 // wraps `fluent_uri::Uri` whose `Hash` clippy cannot prove is interior-
@@ -136,7 +148,7 @@ fn quick_fix(
     title: String,
     uri: Uri,
     edits: Vec<TextEdit>,
-    diag: &Diagnostic,
+    resolves: LspDiagnostic,
     is_preferred: bool,
 ) -> CodeAction {
     let mut changes = HashMap::new();
@@ -144,22 +156,12 @@ fn quick_fix(
     CodeAction {
         title,
         kind: Some(CodeActionKind::QUICKFIX),
-        diagnostics: Some(vec![lsp_diagnostic_stub(diag)]),
+        diagnostics: Some(vec![resolves]),
         edit: Some(WorkspaceEdit {
             changes: Some(changes),
             ..Default::default()
         }),
         is_preferred: Some(is_preferred),
-        ..Default::default()
-    }
-}
-
-/// A minimal `lsp_types::Diagnostic` echo (range + message) so the client can
-/// associate the action with the diagnostic it resolves. The full diagnostic is
-/// reconstructed by `fossil-lsp` when it publishes; here we only need the link.
-fn lsp_diagnostic_stub(diag: &Diagnostic) -> LspDiagnostic {
-    LspDiagnostic {
-        message: diag.message.clone(),
         ..Default::default()
     }
 }
@@ -223,7 +225,7 @@ const fn spans_overlap(a: Span, b: Span) -> bool {
 mod tests {
     use super::*;
     use fossil_base::test_support::NativeSystem;
-    use fossil_base::{Severity, System};
+    use fossil_base::{Problem, Severity, System};
     use std::sync::Arc;
 
     fn db() -> fossil_base::FossilDb {
@@ -251,7 +253,11 @@ mod tests {
         let span = Span::new(typo_start, typo_start + 4);
         let diag = Diagnostic::new(
             Severity::Error,
-            "unknown column `naem` — did you mean `name`?",
+            Problem::UnknownField {
+                field: "naem".into(),
+                relation: "users".into(),
+                fields: vec!["name".into()],
+            },
             span,
         )
         .with_did_you_mean(span, "name");
@@ -274,7 +280,10 @@ mod tests {
         let snippet = "Contact1 : ex:Contact from c\n    ex:email = .email\n";
         let diag = Diagnostic::new(
             Severity::Error,
-            "target shape ex:Contact uses ShEx OneOf",
+            Problem::UnsupportedDisjunction {
+                shape: "ex:Contact".into(),
+                branches: 2,
+            },
             Span::new(0, u32::try_from(src.len()).unwrap()),
         )
         .with_suggestion_source(snippet);
@@ -297,7 +306,8 @@ mod tests {
         let src = "User : ex:Person from users\n    ex:n = .naem\n";
         let f = file(&db, src);
         let span = Span::new(38, 42);
-        let diag = Diagnostic::new(Severity::Error, "x", span).with_did_you_mean(span, "name");
+        let diag = Diagnostic::new(Severity::Error, Problem::Bug { what: "x".into() }, span)
+            .with_did_you_mean(span, "name");
         // A range over just line 0 (bytes 0..27) does not intersect the typo.
         let idx = line_index(&db, f);
         let r = byte_span_to_range(&idx, Span::new(0, 5));

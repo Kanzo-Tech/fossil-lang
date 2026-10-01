@@ -1,0 +1,45 @@
+---
+title: Not a function name
+description: "`syntax/invalid-callee` — a call whose callee is not a name: something other than a catalogued function is followed by parentheses."
+---
+
+Parentheses after something call it, and what comes before them has to be a function's name —
+`str.trim`, `parse.float`, a member such as `.trim` on a value, or a type name for an edge. Here the
+thing being called is a string:
+
+```fossil
+User : Person from Users
+    @subject = "https://example.org/user/{Users.id}"
+    name = "x"(Users.name)
+```
+
+```text
+syntax/invalid-callee
+  × `"x"(Users.name)` calls something that is not a function name; only a catalogued name may be
+    called
+  help: e.g. `str.trim(User.name)`
+```
+
+The callee can be any expression the parser builds, so this is reported for a literal, a
+parenthesised expression, or the result of another call — `str.trim(Users.name)(1)` calls the
+string `str.trim` returns. The message quotes the whole call.
+
+## Why fossil refuses it
+
+A call in fossil is a lookup, not an evaluation. The callee is resolved by name against the
+catalogue of functions the standard library provides, and the catalogue is keyed by those dotted
+names, so a callee that is not a name cannot be looked up. There is nothing else it could be: fossil
+has no function values, so no expression evaluates to something callable
+([the dot](/docs/design/the-dot#why-you-declare-no-functions-of-your-own)). A call on a value is
+still possible — `Users.name.trim()` — because there the name is `trim` and the value is its
+receiver.
+
+## How to repair it
+
+- **Name the function** and pass the value as an argument: `str.trim(Users.name)`, as the `help`
+  shows.
+- **Chain calls through the dot**, not by juxtaposition: `Users.name.trim().lower()` applies `trim`
+  and then `lower`.
+- **Stray parentheses** after a value — a leftover from editing — can simply be deleted.
+
+[The standard library](/docs/book/stdlib) lists every name that may be called.

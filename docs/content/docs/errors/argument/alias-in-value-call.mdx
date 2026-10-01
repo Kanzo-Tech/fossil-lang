@@ -1,0 +1,32 @@
+---
+title: A source alias in a value call
+description: "`argument/alias-in-value-call` — an `X as Y` alias is passed to a function or an edge, which take values."
+---
+
+`X as Y` is an alias for a source binding, and it has one use: the right side of a `join`, where it
+lets a self-join tell its two copies apart — `Node.join(Node as Other, on = Node.parent == Other.id)`.
+A function that takes values, or an edge, has no use for it:
+
+```fossil
+    label = str.trim(Node as Other)
+```
+
+```text
+`Node as Other` is a source alias, and `str.trim` takes values; an alias belongs to a join over rows
+```
+
+## Why fossil refuses it
+
+The grammar accepts `X as Y` wherever an argument goes, so the parser cannot rule it out. In the
+catalogue, the alias belongs to one kind of parameter: the binding position of a `join`, where it is
+part of that position rather than a value. A function's parameters take values and an edge's take
+the values of an identity; neither has a row to alias, so the argument means nothing and is refused
+where the call is lowered rather than dropped. See [a join does not
+flatten](/docs/book/relations#a-join-does-not-flatten) for what the alias is for.
+
+## How to repair it
+
+- **A value was meant.** Pass a column of the row: `str.trim(Other.label)`, after the join that
+  introduced `Other`.
+- **A self-join was meant.** Move the alias into a `join` in a pipeline or the mapping header, then
+  read the aliased row's columns with `Other.column`.

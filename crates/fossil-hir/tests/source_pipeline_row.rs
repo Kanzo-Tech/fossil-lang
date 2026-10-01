@@ -115,7 +115,7 @@ fn row_of(db: &FossilDb, file: SourceFile) -> Result<Vec<String>, Vec<String>> {
         }
         Err(_) => Err(typecheck_mapping::accumulated::<Diagnostic>(db, mapping)
             .iter()
-            .map(|d| d.message.clone())
+            .map(|d| d.message())
             .collect()),
     }
 }
@@ -357,7 +357,7 @@ fn distinct_keeps_the_row_and_takes_no_arguments() {
     let errs = row_of(&db, file).expect_err("a column list must refuse");
     assert!(
         errs.iter()
-            .any(|m| m.contains("`distinct` in `ventas` takes no arguments")),
+            .any(|m| m.contains("`distinct` in `ventas` is given more arguments than it takes")),
         "the refusal says the verb takes nothing, got {errs:?}"
     );
 }

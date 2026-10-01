@@ -94,6 +94,8 @@
 //!    because the language has no juxtaposition. Everywhere else `as` is an
 //!    ordinary identifier and lexes as one.
 
+use fossil_base::Problem;
+
 use crate::kind::SyntaxKind;
 
 use super::diag::retired;
@@ -164,7 +166,7 @@ pub(crate) fn parse_program(p: &mut Parser) {
                     if p.current_text() == Some("prefix")
                         && p.peek_kind(2) == Some(SyntaxKind::SHAPE_SEP) =>
                 {
-                    p.retire(retired::PREFIX_DECL, RetiredRun::Line);
+                    p.retire(&retired::PREFIX_DECL, RetiredRun::Line);
                 }
                 // Always make progress on a token we don't know what to do
                 // with at the program level — `bump_as_error` emits a single
@@ -288,6 +290,10 @@ fn parse_type_def(p: &mut Parser) {
     } else {
         malformed(
             p,
+            Problem::MisplacedAttribute {
+                attribute: "@rename".to_string(),
+                place: "anywhere but above a `type` binding".to_string(),
+            },
             "`@rename` renames a predicate of ONE type binding, so a `type { … } := …` has to \
              follow it. It goes in the program and not in the `.shex` because the vocabulary may \
              not be yours.",
@@ -325,16 +331,18 @@ fn parse_type_def(p: &mut Parser) {
     p.finish();
 }
 
-/// Push a [`ParseDiagnostic::Malformed`] at the current token.
+/// Push a [`ParseDiagnostic::Malformed`] carrying `problem`, with `help`, at
+/// the current token.
 ///
 /// Zero-width at the token's start, which is what `Parser::expect` does for the
 /// same reason: the offending token is not consumed, so underlining it would
 /// claim a form this parser has not decided to take.
-fn malformed(p: &mut Parser, message: &str) {
+fn malformed(p: &mut Parser, problem: Problem, help: &str) {
     let at = p.current_token_span_start();
     let at = u32::try_from(at).unwrap_or(u32::MAX);
     p.push_diagnostic(crate::parser::diag::ParseDiagnostic::Malformed {
-        message: message.to_string(),
+        problem,
+        help: Some(help.to_string()),
         span: fossil_base::Span::new(at, at),
     });
 }
@@ -372,12 +380,13 @@ fn parse_rename_attr(p: &mut Parser) {
         let found = p.current_text().unwrap_or("@").to_string();
         malformed(
             p,
-            &format!(
-                "`{found}` is not what goes above a `type` binding: the only attribute in this \
-                 position is `@rename`. `@subject` is the first line of a MAPPING BODY — it \
-                 assigns the identity of the rows a mapping writes, and above a type binding \
-                 there are no rows yet."
-            ),
+            Problem::MisplacedAttribute {
+                attribute: found,
+                place: "above a `type` binding".to_string(),
+            },
+            "the only attribute in this position is `@rename`. `@subject` is the first line of \
+             a MAPPING BODY — it assigns the identity of the rows a mapping writes, and above a \
+             type binding there are no rows yet.",
         );
     }
     p.bump(); // AT_ATTR
@@ -403,8 +412,11 @@ fn parse_rename_attr(p: &mut Parser) {
     if renames == 0 {
         malformed(
             p,
-            "`@rename` needs at least one `\"<predicate IRI>\" as <name>`: it names the type \
-             whose predicate is being renamed, and then what to call it.",
+            Problem::MalformedRename {
+                missing: "`\"<predicate IRI>\" as <name>`".to_string(),
+            },
+            "`@rename` needs at least one: it names the type whose predicate is being renamed, \
+             and then what to call it.",
         );
     }
     recover::expect_or_recover(p, SyntaxKind::RPAREN, TOP_LEVEL_ANCHORS);
@@ -448,8 +460,10 @@ fn parse_rename(p: &mut Parser) {
     } else {
         malformed(
             p,
-            "a rename is `\"<predicate IRI>\" as <name>` — the `as` is what separates the \
-             predicate from the name you want to write instead.",
+            Problem::MalformedRename {
+                missing: "`as`".to_string(),
+            },
+            "the `as` is what separates the predicate from the name you want to write instead.",
         );
     }
     recover::expect_or_recover(p, SyntaxKind::IDENT, RENAME_ANCHORS);
@@ -560,7 +574,7 @@ fn parse_shape_expr(p: &mut Parser) -> ShapeOutcome {
         && p.peek_kind(1) == Some(SyntaxKind::SHAPE_SEP)
         && p.peek_kind(2) == Some(SyntaxKind::IDENT)
     {
-        p.retire(retired::CURIE, RetiredRun::Count(3));
+        p.retire(&retired::CURIE, RetiredRun::Count(3));
         p.finish();
         // Three tokens, not the line: `from Adults` after a CURIE shape is
         // still there and still means what it says.
@@ -571,7 +585,7 @@ fn parse_shape_expr(p: &mut Parser) -> ShapeOutcome {
     // operator and its operands, and then a COMMENT that runs to the line break
     // because `//` opens one. The whole line goes.
     if p.current() == Some(SyntaxKind::LT) {
-        p.retire(retired::ABSOLUTE_IRI, RetiredRun::Line);
+        p.retire(&retired::ABSOLUTE_IRI, RetiredRun::Line);
         p.finish();
         return ShapeOutcome::LineConsumed;
     }
@@ -680,7 +694,7 @@ fn parse_property(p: &mut Parser) {
     // one's value, which is how a single dead key used to cost two.
     if p.current() == Some(SyntaxKind::LT) {
         p.start(SyntaxKind::PROPERTY_LHS);
-        p.retire(retired::ABSOLUTE_IRI, RetiredRun::Line);
+        p.retire(&retired::ABSOLUTE_IRI, RetiredRun::Line);
         p.finish();
         p.finish();
         return;
@@ -718,7 +732,7 @@ fn parse_property_lhs(p: &mut Parser) {
             if p.peek_kind(1) == Some(SyntaxKind::SHAPE_SEP)
                 && p.peek_kind(2) == Some(SyntaxKind::IDENT) =>
         {
-            p.retire(retired::CURIE, RetiredRun::Count(3));
+            p.retire(&retired::CURIE, RetiredRun::Count(3));
         }
         _ => recover::expect_or_recover(p, SyntaxKind::IDENT, MAPPING_BODY_ANCHORS),
     }
@@ -745,9 +759,11 @@ mod disambiguation {
     use crate::SyntaxKind;
     use crate::indent::lex_with_indents;
     use crate::kind::SyntaxNode;
+    use fossil_base::Problem;
     use rowan::GreenNode;
 
     use super::super::Parser;
+    use super::super::diag::retired::{self, Retired};
 
     fn parse_str(src: &str) -> SyntaxNode {
         let tokens = lex_with_indents(src);
@@ -757,36 +773,45 @@ mod disambiguation {
         SyntaxNode::new_root(green)
     }
 
-    /// The diagnostics one parse produces, rendered.
-    fn messages(src: &str) -> Vec<String> {
+    /// The problems one parse reports.
+    fn messages(src: &str) -> Vec<Problem> {
         let tokens = lex_with_indents(src);
         let mut p = Parser::new(tokens);
         super::parse_program(&mut p);
         p.diagnostics
             .iter()
             .cloned()
-            .map(|d| d.to_diagnostic().message)
+            .map(|d| d.to_diagnostic().problem)
             .collect()
     }
 
-    /// The `(start, end)` byte span of the one diagnostic whose message
-    /// contains `needle`. Panics unless exactly one does — a retired spelling
-    /// that reports twice is as wrong as one that reports never.
-    fn span_of(src: &str, needle: &str) -> (u32, u32) {
+    /// The problem `form` is refused with.
+    fn refusal(form: &Retired) -> Problem {
+        Problem::RetiredSpelling {
+            spelling: form.spelling.to_string(),
+            replacement: form.replacement.to_string(),
+        }
+    }
+
+    /// The `(start, end)` byte span of the one diagnostic refusing `form`.
+    /// Panics unless exactly one does — a retired spelling that reports twice
+    /// is as wrong as one that reports never.
+    fn span_of(src: &str, form: &Retired) -> (u32, u32) {
         let tokens = lex_with_indents(src);
         let mut p = Parser::new(tokens);
         super::parse_program(&mut p);
+        let want = refusal(form);
         let hits: Vec<_> = p
             .diagnostics
             .iter()
             .cloned()
             .map(super::super::diag::ParseDiagnostic::to_diagnostic)
-            .filter(|d| d.message.contains(needle))
+            .filter(|d| d.problem == want)
             .collect();
         assert_eq!(
             hits.len(),
             1,
-            "expected exactly one diagnostic containing {needle:?} for {src:?}",
+            "expected exactly one diagnostic refusing {form:?} for {src:?}",
         );
         (hits[0].span.start, hits[0].span.end)
     }
@@ -858,12 +883,15 @@ mod disambiguation {
     fn a_leading_dot_is_refused_and_names_the_qualified_form() {
         let src = "Users : Person from User\n    x = .name\n";
         assert!(
-            messages(src).iter().any(|m| m.contains("qualified")),
+            messages(src).contains(&refusal(&retired::LEADING_DOT)),
             "a leading `.` must be refused by name, got {:?}",
             messages(src),
         );
         // And the span covers the reference, not the byte that opens it.
-        assert_eq!(underlined(src, span_of(src, "qualified")), ".name");
+        assert_eq!(
+            underlined(src, span_of(src, &retired::LEADING_DOT)),
+            ".name"
+        );
     }
 
     #[test]
@@ -890,7 +918,7 @@ mod disambiguation {
     fn the_vocabulary_declaration_is_refused_over_its_whole_line() {
         let src = "prefix ex: <https://example.org/>\n";
         assert_eq!(
-            underlined(src, span_of(src, "no vocabulary")),
+            underlined(src, span_of(src, &retired::PREFIX_DECL)),
             "prefix ex: <https://example.org/>",
         );
     }
@@ -898,13 +926,13 @@ mod disambiguation {
     #[test]
     fn a_curie_in_a_shape_is_refused_over_all_three_tokens() {
         let src = "Users : ex:Person from User\n    name = User.name\n";
-        assert_eq!(underlined(src, span_of(src, "bare")), "ex:Person");
+        assert_eq!(underlined(src, span_of(src, &retired::CURIE)), "ex:Person");
     }
 
     #[test]
     fn a_curie_in_a_property_key_is_refused_over_all_three_tokens() {
         let src = "Users : Person from User\n    ex:name = User.name\n";
-        assert_eq!(underlined(src, span_of(src, "bare")), "ex:name");
+        assert_eq!(underlined(src, span_of(src, &retired::CURIE)), "ex:name");
     }
 
     // ── The absolute IRI takes its whole line, and here is why ────────
@@ -926,7 +954,7 @@ mod disambiguation {
     fn an_absolute_iri_property_key_is_refused_over_its_whole_line() {
         let src = "Users : Person from User\n    <http://xmlns.com/foaf/0.1/name> = User.name\n";
         assert_eq!(
-            underlined(src, span_of(src, "absolute IRI")),
+            underlined(src, span_of(src, &retired::ABSOLUTE_IRI)),
             "<http://xmlns.com/foaf/0.1/name> = User.name",
         );
     }
@@ -935,7 +963,7 @@ mod disambiguation {
     fn an_absolute_iri_shape_is_refused_over_its_whole_line() {
         let src = "Users : <https://example.org/Person> from User\n    name = User.name\n";
         assert_eq!(
-            underlined(src, span_of(src, "absolute IRI")),
+            underlined(src, span_of(src, &retired::ABSOLUTE_IRI)),
             "<https://example.org/Person> from User",
         );
     }
@@ -948,7 +976,7 @@ mod disambiguation {
     fn an_absolute_iri_with_no_scheme_slashes_also_takes_its_line() {
         let src = "Users : Person from User\n    <name> = User.name\n";
         assert_eq!(
-            underlined(src, span_of(src, "absolute IRI")),
+            underlined(src, span_of(src, &retired::ABSOLUTE_IRI)),
             "<name> = User.name",
         );
     }
@@ -961,11 +989,8 @@ mod disambiguation {
         // author wrote a string, in the spelling that lost.
         let src = "Users : Person from User\n    @subject = `u/${User.id}`\n";
         let msgs = messages(src);
-        assert!(
-            msgs.iter().any(|m| m.contains("backtick opens nothing")),
-            "got {msgs:?}",
-        );
-        assert_eq!(underlined(src, span_of(src, "backtick opens nothing")), "`");
+        assert!(msgs.contains(&refusal(&retired::BACKTICK)), "got {msgs:?}",);
+        assert_eq!(underlined(src, span_of(src, &retired::BACKTICK)), "`");
     }
 
     /// An unterminated `<…>` must not eat the rest of the FILE. The run stops
@@ -974,7 +999,7 @@ mod disambiguation {
     fn an_unterminated_absolute_iri_stops_at_the_line_break() {
         let src = "Users : <https://example.org/Person from User\n    name = User.name\n";
         assert_eq!(
-            underlined(src, span_of(src, "absolute IRI")),
+            underlined(src, span_of(src, &retired::ABSOLUTE_IRI)),
             "<https://example.org/Person from User",
         );
         // The body below it survives — one line lost, not the file.
@@ -1127,9 +1152,11 @@ mod disambiguation {
         let src = "@subject = \"x\"\ntype { Person } := io.shex(\"m.shex\")\n";
         let msgs = messages(src);
         assert!(
-            msgs.iter()
-                .any(|m| m.contains("@rename") && m.contains("MAPPING BODY")),
-            "expected a message naming both positions, got {msgs:?}",
+            msgs.contains(&Problem::MisplacedAttribute {
+                attribute: "@subject".to_string(),
+                place: "above a `type` binding".to_string(),
+            }),
+            "expected `@subject` refused above a `type` binding, got {msgs:?}",
         );
     }
 
@@ -1140,8 +1167,11 @@ mod disambiguation {
         let src = "@rename(Person, \"http://a/name\" as a_name)\nUser := io.csv(\"u.csv\")\n";
         let msgs = messages(src);
         assert!(
-            msgs.iter().any(|m| m.contains("has to follow it")),
-            "expected the missing-binding message, got {msgs:?}",
+            msgs.contains(&Problem::MisplacedAttribute {
+                attribute: "@rename".to_string(),
+                place: "anywhere but above a `type` binding".to_string(),
+            }),
+            "expected the missing-binding refusal, got {msgs:?}",
         );
     }
 

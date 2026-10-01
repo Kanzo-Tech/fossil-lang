@@ -44,7 +44,7 @@ What else is lost on the way, each one a place where structure existed and was f
   a source that would not route, a DataFusion error, every variant of `WriteError` and `LayoutError` —
   enter `Failed` through `format!` or `.to_string()`.
 - `StorageError` (`crates/fossil-storage/src/credential.rs, StorageError`) is a seven-variant enum
-  with typed fields, and is `.to_string()`'d at every boundary it crosses.
+  with typed fields, and was `.to_string()`'d at every boundary it crossed (it converts to a `Failure` now).
 - A host's own typed rejection from `credentials` is reduced to its `message` before it is wrapped.
 - `open` builds `did not read: ${cause.message}` and drops the `cause`.
 - A program that does not compile fails at `run` as `execute_graph: Error during planning: the
@@ -53,10 +53,11 @@ What else is lost on the way, each one a place where structure existed and was f
 **Compile diagnostics are the better half, and still have no identity.** `Diagnostic`
 (`crates/fossil-base/src/diagnostic.rs, Diagnostic`) is structured — severity, span and frame, labels,
 `help`, `suggestion_source`, `did_you_mean` — and reaches JavaScript as data, not as a throw: `check()`
-answers `CheckRow[]` (`crates/fossil-wasm/src/lib.rs, CheckRow`). But a `CheckRow` is
-`{ uri, range, severity, message, related }`: `help` is appended to `message` as a `\nhelp:` line,
-`did_you_mean` and `suggestion_source` are dropped, and there is no code.
-`packages/types/src/diagnostic.ts, Diagnostic` declares `code?` and `source?` and nothing fills them.
+answers `CheckRow[]` (`crates/fossil-wasm/src/lib.rs, CheckRow`). But a `CheckRow` at `8d6114a3` was
+`{ uri, range, severity, message, related }`: `help` was appended to `message` as a `\nhelp:` line,
+`did_you_mean` and `suggestion_source` were dropped, and there was no code.
+The `Diagnostic` that `packages/types/src/diagnostic.ts` declared had `code?` and `source?`, and nothing
+filled them.
 Measured over the emitters: **about 126 distinct message templates, every one `Severity::Error`**,
 five that set labels, one that sets `suggestion_source`, one that sets the structured `did_you_mean` —
 and seven more that offer a *did you mean* only inside the message text.
@@ -185,8 +186,8 @@ Float ``). The title is a constant of the variant.
 **A foreign error is a cause, never a code.** DataFusion, `object_store`, DuckDB and a host's own
 rejection have their own vocabularies, and fossil does not classify them. The layer that meets one
 wraps it in the fossil failure it *means* — `engine/failed`, `storage/unreachable`,
-`storage/host-refused` — and keeps the original as `cause`, whole. That is what `open` and `JsHost` do
-wrong today: they keep the text and drop the object.
+`storage/host-refused` — and keeps the original as `cause`, whole. That is what `open` and `JsHost` did
+wrong at `8d6114a3`: they kept the text and dropped the object. Both keep the cause now.
 
 **What would reverse it.** A catalogue large enough that one enum in one file is the bottleneck of
 every change — at which point the catalogue becomes a data file with a generator, as
@@ -203,16 +204,21 @@ interface ProblemBase {
   detail: string;             // for a person; never parsed (RFC 9457 `detail`)
   severity: 'error' | 'warning' | 'info';
   help?: string;
-  related?: Problem[];        // miette `related`, LSP `relatedInformation`
+  related?: Related[];        // miette `related`; run/does-not-compile's diagnostics
   cause?: Problem | Foreign;  // ES2022 `cause`, serialized
 }
 interface Foreign { name: string; detail: string }  // a cause fossil did not raise
+interface Related { code; data; title; detail; severity; help?; span? }  // a problem, file-absolute
 type Problem = { [C in Code]: ProblemBase & { code: C; data: ProblemData[C] } }[Code];
 ```
 
-A compile diagnostic is the same object plus where: `uri`, `range`, `labels`, and the two structured
-repairs, `didYouMean` and `suggestion`. `CheckRow` becomes that, which is also what `lsp_diagnostic`
-fills an LSP `Diagnostic` from — `code`, and `codeDescription.href` pointing at the code's page.
+A compile diagnostic is the same problem plus where. `CheckRow` carries `code`, `title`, `data`
+(typed by `code`, as `Problem`'s is) and `help` beside where — `uri`, `range`, the labels as `related`
+— and the two structured repairs, `didYouMean` (a range and a replacement) and `suggestion` (fossil
+source). It keeps the LSP's spelling of the rest, because it is the LSP diagnostic `lsp_diagnostic`
+renders plus a `uri`: `message` is the detail, `severity` the LSP integer. The LSP diagnostic carries
+`code`, `codeDescription.href` pointing at the code's page, and the rest — `title`, `data`, `help`,
+`didYouMean`, `suggestion` — as its `data`, the field LSP leaves to the server.
 
 **It has no `type` URL on the wire, and that is the one departure from RFC 9457.** The published site
 lives under a prefix a deployment chooses, so a URL baked into every error would be wrong for someone.
@@ -270,7 +276,7 @@ in the contract reads it.
 that file `xtask` writes `problem.gen.ts` into `@fossil-lang/types` — `Code`, `CODES`, `ProblemData`, and each
 code's title — and a test fails when the checked-in file is stale. This departs from the manifest's
 precedent, where the TypeScript is written by hand and `packages/corpus/tests/manifest.test.ts` holds it
-to the schema: that is right for a dozen interfaces and wrong for a hundred and eight arms, where the hand is
+to the schema: that is right for a dozen interfaces and wrong for a hundred and five arms, where the hand is
 the drift. **What would reverse it:** the generator costing more to keep than the union does to write —
 a schema dialect it cannot read, say.
 
@@ -283,9 +289,9 @@ Every code has a page in an `errors/` section of this site, under the code as it
 index. A page has the title as its heading, what the mistake is, why fossil refuses it, and how to
 repair it, and **where one exists it transcludes the failing program and its blessed rendering** with
 `<Program>`, the way this site already shows every program. The six directories under
-`docs/programs/errors/` — `colliding-name`, `join-one-side`, `missing-property`, `two-identities`,
-`unknown-field` and `wrong-type` — are the first six of those pages, already written and already
-compiled in CI; they are renamed to their codes.
+`docs/programs/errors/` are the first six of those pages, compiled in CI and named by their codes:
+`identity/conflicting`, `name/unknown-field`, `pipeline/join-one-side`,
+`shape/missing-required-property`, `shape/name-collision` and `type/property-mismatch`.
 
 `content.test.ts` gains one suite: every code in `problem.schema.json` has a page, every page under
 `errors/` names a live code, and a page's heading is the code's title. A retired code has neither a
@@ -301,7 +307,7 @@ reachable from a fixture has a page*.
 Nothing below is invented: each code is one or more of the sites counted above, merged where they
 are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no code; its variant goes.
 
-**Compile — 74 codes** (plus `internal/bug`, below):
+**Compile — 71 codes** (plus `internal/bug`, below):
 
 | Area | Codes |
 | --- | --- |
@@ -310,35 +316,35 @@ are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no cod
 | `argument` (6) | `arity`, `duplicate`, `skipped-parameter`, `positional-after-named`, `named-on-edge`, `alias-in-value-call` |
 | `type` (7) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch` |
 | `shape` (9) | `no-document`, `name-collision`, `missing-required-property`, `unsupported-disjunction`, `cyclic-reference`, `unresolved-reference`, `binding-arity`, `rename-unknown-type`, `rename-unknown-predicate` |
-| `document` (3) | `not-named`, `not-found`, `unparseable` |
+| `document` (2) | `not-registered`, `unparseable` |
 | `provider` (6) | `unknown`, `wrong-capability`, `wrong-extension`, `invalid-reader-option`, `foreign-reader-option`, `bare-document-path` |
 | `identity` (6) | `missing-subject`, `duplicate-subject`, `subject-not-first`, `conflicting`, `edge-without-template`, `edge-arity` |
-| `pipeline` (14) | `unknown-verb`, `unimplemented-verb`, `source-as-stage`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-foreign-binding`, `join-one-side` |
-| `unsupported` (2) | `literal`, `expression` — a gap in the compiler, not a mistake in the program |
+| `pipeline` (13) | `unknown-verb`, `unimplemented-verb`, `source-as-stage`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-one-side` |
+| `unsupported` (1) | `expression` — a gap in the compiler, not a mistake in the program |
 
-**Run, storage, corpus and the API — 34 codes.** The executor's descriptor errors reuse the compile
-codes above (`provider/unknown`, `provider/wrong-capability`, `document/unparseable`, …), because they
-are the same mistake found late:
+**Run, storage, corpus and the API — 33 codes.** The executor's descriptor errors reuse the compile
+codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-registered`,
+`document/unparseable`, …), because they are the same mistake found late:
 
 | Area | Codes | From |
 | --- | --- | --- |
 | `run` (3) | `over-budget`, `does-not-compile`, `destination-uncovered` | `RunError`, `refuse_if_poisoned`, the destination check |
 | `shape` (+1) | `more-than-one-output` | the executor's descriptor |
-| `document` (+2) | `not-registered`, `unread` | the executor's registry, `runJob`'s unread list |
+| `document` (+1) | `unread` | `runJob`'s unread list |
 | `source` (2) | `not-utf8`, `unparseable` | the RDF sources a run decodes |
 | `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the corpus's `ATTACH`, `scan` and `sql` |
 | `write` (2) | `failed`, `unknown-type` | `WriteError` |
 | `layout` (2) | `dangling-endpoint`, `too-large` | `LayoutError`; its other variants are `internal/bug` |
 | `storage` (8) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` |
 | `corpus` (10) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `not-a-location`, `unknown-table`, `unknown-column`, `empty-projection`, `no-position`, `filter-type-mismatch` | `open`, `parseManifest`, `scan`, the filter binder |
-| `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy_error` and the executor's borrow, `WorkspaceError` |
+| `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy` and the executor's borrow, the workspace's `unknown_handle` |
 
 **`internal/bug` — 1 code** for everything that is fossil's fault and not the caller's: the
 `internal compiler error` sites, a serializer that failed on a value fossil built, a Reflect `set` on a
 fresh object. Nobody branches on it; a host shows it and reports it. A panic stays a
 `WebAssembly.RuntimeError` — it is not a value that can be built at the moment it happens.
 
-**109 codes**, 108 of them a mistake someone other than fossil can repair.
+**105 codes**, 104 of them a mistake someone other than fossil can repair.
 
 ## The screen: kanzo-ui's `Diagnostic`, and the product decides the words
 
@@ -435,8 +441,16 @@ The owner accepted this page on 2026-10-01 and settled the four questions it had
    the shape cannot carry as `data`, which would say the shape is fossil's and not general.
 3. **The catalogue ships at the grain derived above.** The codes-to-pages suite is the pressure: a
    code whose page cannot say something different from its neighbour's is merged into it when the
-   pages are written, not before. *What would reverse it:* the pages for an area coming out as
-   near-copies — then the area is cut too fine, and the merge is the edit.
+   pages are written, not before. Four were merged when step 5 gave every compile emitter its code,
+   none of them released, so none is in `RETIRED`: `document/not-found` into `document/not-registered`
+   (a document nothing registered under its key is one mistake, at `check` or at `run`),
+   `document/not-named` into `provider/bare-document-path` (a document named by a bare path, with no
+   provider to read it),
+   `pipeline/join-foreign-binding` into `name/row-not-in-scope` (a join naming a row that is not one
+   of its two sides is a row out of scope), and `unsupported/literal` into `unsupported/expression`
+   (a literal the compiler cannot lower is an expression it cannot lower). *What would reverse it:*
+   the pages for an area coming out as near-copies — then the area is cut too fine, and the merge is
+   the edit.
 4. **`FossilError` lives in `@fossil-lang/types`**, its first runtime export; every raising package
    already depends on it, and a package of its own would be a second place to look. *What would
    reverse it:* `types` growing runtime code that is not about the contract, at which point it is no

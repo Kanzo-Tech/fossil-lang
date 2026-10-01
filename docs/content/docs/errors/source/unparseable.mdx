@@ -1,0 +1,39 @@
+---
+title: A source does not parse
+description: "`source/unparseable` — an RDF source is UTF-8 text, and it does not decode as Turtle into the rows its shape asks for."
+---
+
+A program reads an RDF graph with `io.rdf`, the bytes are text, and decoding them failed:
+
+```text
+the source `https://data.example.com/people.ttl` does not parse
+```
+
+`data.locator` names the source, and the cause carries the decoder's reason — a Turtle syntax error
+with its position, for instance. The message stays short on purpose: the reason belongs to the
+parser, and it is kept whole as the cause rather than flattened into the sentence.
+
+Like [`source/not-utf8`](/docs/errors/source/not-utf8), this is raised for RDF sources only; a CSV,
+JSON or Parquet file that will not read fails inside the engine, as
+[`engine/failed`](/docs/errors/engine/failed).
+
+## Why fossil refuses it
+
+fossil decodes an RDF source itself: it parses the Turtle, selects the subjects whose `rdf:type` is
+the shape's, and pivots their predicates into one row per subject, which the run then scans like any
+table. Anything that stops that pivot stops the source, and the run fails with the source named
+rather than continuing over a partial graph. Besides a syntax error, two things reach this code
+through the same step:
+
+- **A literal with an RDF 1.2 base direction** — an `rdf:dirLangString`. A pivoted column carries a
+  lexical form and has nowhere to keep the direction, so fossil refuses rather than dropping it; the
+  reasoning is on [discarded](/docs/design/discarded#the-surface).
+- **A failure building the table** from the decoded rows.
+
+## How to repair it
+
+- **Read the cause.** It is the parser's message, with the line and column where Turtle stopped.
+- **Check that the file is Turtle.** `io.rdf` decodes Turtle; an RDF/XML or JSON-LD file under a
+  `.ttl` name does not parse.
+- **Remove the base direction** from directional literals, keeping the language tag, if the cause
+  names one.

@@ -49,7 +49,7 @@
 //! invalidation. (When the host wants to invalidate, it bumps the source
 //! file's text via `set_text`, which Salsa already tracks.)
 
-use fossil_base::{Span, delay_span_bug};
+use fossil_base::{Diagnostic, Problem, Severity, Span, bug, report};
 use fossil_descriptors_input::InferredDescriptor;
 use smol_str::SmolStr;
 
@@ -63,7 +63,7 @@ use crate::ty::{Record, RecordField, Rows, Ty, TyKind};
 ///
 /// Side-effect-free: no diagnostics, no filesystem reads — the
 /// descriptor-branch of [`resolve_source_scope`] without the type-check's
-/// `delay_span_bug` emission. For IDE features (completion, hover) that want
+/// diagnostic emission. For IDE features (completion, hover) that want
 /// the source schema OUTSIDE a tracked query. Returns `None` when no descriptor
 /// is registered for the mapping's source URI — the host did not pre-introspect.
 #[must_use]
@@ -121,7 +121,7 @@ fn field_from_inferred<'db>(
 /// The scope a mapping's `from` clause puts in the body — see [`Rows`].
 ///
 /// Plain-Rust helper (NOT `#[salsa::tracked]`) — called from within the
-/// `typecheck_mapping` tracked query so its `delay_span_bug` emits are valid.
+/// `typecheck_mapping` tracked query so its diagnostic emits are valid.
 ///
 /// Reads `def_map(db, file)` only (NEVER walks the FILE CST from
 /// `mapping_cst_node`) — see the module docs for the Serious #6 rationale.
@@ -189,10 +189,9 @@ pub fn resolve_binding_scope<'db>(
             return Err(pipe_error(
                 db,
                 pipe,
-                format!(
-                    "the source pipeline `{source_name}` derives from itself, directly or \
-                     through the pipelines it names"
-                ),
+                Problem::PipelineCycle {
+                    pipeline: source_name.to_string(),
+                },
             ));
         }
         // A base with no descriptor has no row, and a pipeline over it has none
@@ -258,14 +257,11 @@ fn resolve_leaf_row<'db>(
             schema_path.as_str(),
         ) {
             Ok(d) => d,
-            Err(e) => {
-                let _eg = delay_span_bug(
+            Err(problem) => {
+                let _eg = fossil_base::raise(
                     db,
-                    Span::new(0, 0),
-                    format!(
-                        "the shape document `{schema_path}` for source \
-                         `{source_name}` gave nothing to type against: {e}"
-                    ),
+                    Diagnostic::new(Severity::Error, problem, Span::new(0, 0))
+                        .with_help(format!("`{source_name}` has no row to type against")),
                 );
                 return Ok(None);
             }
@@ -275,12 +271,12 @@ fn resolve_leaf_row<'db>(
         // and there is no message that would help one, so it is reported as
         // what it is.
         let Some(shape) = document.lookup(shape_iri.as_str()) else {
-            let _eg = delay_span_bug(
+            let _eg = bug(
                 db,
                 Span::new(0, 0),
                 format!(
-                    "internal: `{schema_path}` bound `{source_name}` to shape \
-                     `{shape_iri}` and no longer declares it"
+                    "`{schema_path}` bound `{source_name}` to shape `{shape_iri}` and no longer \
+                     declares it"
                 ),
             );
             return Ok(None);
@@ -295,28 +291,23 @@ fn resolve_leaf_row<'db>(
     // so "matches no shape" is not among the causes any more: the name is a
     // free local label and selects nothing.
     if let Some(err) = dm.lookup_source_shape_error(db, source_name) {
-        let message = match err {
-            ShapeBindError::NoSchema => format!(
-                "destructuring source `{source_name}` has no `schema = \"…\"`, \
-                 so there is no document to take shapes from"
-            ),
-            ShapeBindError::Unreadable { path, cause } => {
-                format!("cannot read shape document `{path}` for `{source_name}`: {cause}")
-            }
-            ShapeBindError::Unparseable { path, cause } => {
-                format!("shape document `{path}` for `{source_name}` failed to parse: {cause}")
-            }
-            // `position` is not read: this sentence names the source binding
-            // rather than a number, so the surplus member's index has nothing
-            // to say in it.
+        let problem = match err {
+            ShapeBindError::NoSchema => Problem::NoDocument {
+                binding: Some(source_name.to_string()),
+            },
+            ShapeBindError::Document(problem) => problem,
             ShapeBindError::Arity {
-                declared, named, ..
-            } => format!(
-                "the binding names {named} shape(s) and the document declares {declared}; \
-                 names bind by position, so `{source_name}` has no shape to bind"
-            ),
+                declared,
+                named,
+                position,
+            } => Problem::BindingArity {
+                name: source_name.to_string(),
+                named: named as u64,
+                declared: declared as u64,
+                position: position as u64,
+            },
         };
-        let _eg = delay_span_bug(db, Span::new(0, 0), message);
+        let _eg = report(db, Span::new(0, 0), problem);
         return Ok(None);
     }
 
@@ -406,7 +397,7 @@ fn apply_source_op<'db>(
             let mut kept: Vec<(SmolStr, Vec<RecordField<'db>>)> =
                 scope.bindings().map(|b| (b.clone(), Vec::new())).collect();
             for col in cols {
-                let f = column_of(db, pipe, &scope, col, "select")?;
+                let f = column_of(db, pipe, &scope, col)?;
                 if let Some((_, out)) = kept.iter_mut().find(|(b, _)| b == &col.binding) {
                     out.push(f);
                 }
@@ -431,16 +422,10 @@ fn apply_source_op<'db>(
                 return Err(pipe_error(
                     db,
                     pipe,
-                    format!(
-                        "`join` in `{}` joins `{}`, whose columns are unknown — it declares \
-                         no schema, so there is nothing to check the condition against",
-                        pipe.name,
-                        right
-                            .bindings()
-                            .map(SmolStr::as_str)
-                            .collect::<Vec<_>>()
-                            .join("`, `"),
-                    ),
+                    Problem::SchemalessJoin {
+                        pipeline: pipe.name.to_string(),
+                        bindings: right.bindings().map(ToString::to_string).collect(),
+                    },
                 ));
             };
 
@@ -475,7 +460,7 @@ fn apply_source_op<'db>(
         // COLUMN of a known binding are different mistakes.
         HirSourceOp::GroupBy { keys, aggs } => {
             for col in keys.iter().chain(aggs.iter().map(|a| &a.column)) {
-                column_of(db, pipe, &scope, col, "group_by")?;
+                column_of(db, pipe, &scope, col)?;
             }
             Ok(grouped_scope(db, pipe, &scope, keys, aggs))
         }
@@ -498,13 +483,12 @@ fn apply_source_op<'db>(
                 return Err(pipe_error(
                     db,
                     pipe,
-                    format!(
-                        "`union` in `{}` needs both sides to carry the same row. The left has \
-                         {}; the right has {}.",
-                        pipe.name,
-                        column_list(&left_fields),
-                        column_list(&right_fields),
-                    ),
+                    Problem::UnionMismatch {
+                        pipeline: pipe.name.to_string(),
+                        left: column_list(db, &left_fields),
+                        right: column_list(db, &right_fields),
+                        column: None,
+                    },
                 ));
             }
             for (i, (l, r)) in left_fields.iter().zip(right_fields.iter()).enumerate() {
@@ -512,16 +496,12 @@ fn apply_source_op<'db>(
                     return Err(pipe_error(
                         db,
                         pipe,
-                        format!(
-                            "`union` in `{}` pairs its sides column by column, and column {} is \
-                             `{}` ({}) on the left and `{}` ({}) on the right.",
-                            pipe.name,
-                            i + 1,
-                            l.name,
-                            crate::ty::display::render_ty_kind(db, l.ty.kind(db)),
-                            r.name,
-                            crate::ty::display::render_ty_kind(db, r.ty.kind(db)),
-                        ),
+                        Problem::UnionMismatch {
+                            pipeline: pipe.name.to_string(),
+                            left: column_list(db, &left_fields),
+                            right: column_list(db, &right_fields),
+                            column: Some(i as u64 + 1),
+                        },
                     ));
                 }
             }
@@ -535,31 +515,25 @@ fn apply_source_op<'db>(
 ///
 /// Two refusals and not one: an unknown BINDING and an unknown COLUMN of a
 /// known binding are different mistakes, and a single "its input does not have
-/// it" cannot say which. `verb` is the word the message opens with, because
-/// `select` and `group_by` ask this same question of the same scope.
+/// it" cannot say which. `select` and `group_by` ask this same question of the
+/// same scope.
 fn column_of<'db>(
     db: &'db dyn fossil_base::Db,
     pipe: &crate::lower::HirSourcePipe,
     scope: &Rows<'db>,
     col: &crate::lower::SelectedColumn,
-    verb: &str,
 ) -> Result<RecordField<'db>, fossil_base::ErrorGuaranteed> {
     let (binding, column) = (&col.binding, &col.column);
     let Some(fields) = scope.fields_of(db, binding) else {
         return Err(pipe_error(
             db,
             pipe,
-            format!(
-                "`{verb}` in `{}` names `{binding}.{column}`, and `{}` carries no row called \
-                 `{binding}`. It draws on: {}",
-                pipe.name,
-                pipe.name,
-                scope
-                    .bindings()
-                    .map(|b| format!("`{b}`"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
+            Problem::RowNotInScope {
+                binding: binding.to_string(),
+                column: column.to_string(),
+                scope: pipe.name.to_string(),
+                rows: scope.bindings().map(ToString::to_string).collect(),
+            },
         ));
     };
     fields
@@ -570,12 +544,11 @@ fn column_of<'db>(
             pipe_error(
                 db,
                 pipe,
-                format!(
-                    "`{verb}` in `{}` names `{binding}.{column}`, which `{binding}` does not \
-                     have. It has: {}",
-                    pipe.name,
-                    column_list(&fields),
-                ),
+                Problem::UnknownField {
+                    field: column.to_string(),
+                    relation: binding.to_string(),
+                    fields: fields.iter().map(|f| f.name.to_string()).collect(),
+                },
             )
         })
 }
@@ -719,12 +692,14 @@ fn typecheck_stage<'db>(
     {
         let d = fossil_base::Diagnostic::new(
             fossil_base::Severity::Error,
-            format!(
-                "`{}` in `{}` needs a condition, and this is {}",
-                crate::stdlib::split_receiver(verb).1,
-                pipe.name,
-                crate::ty::display::render_ty_kind(db, ty.kind(db)),
-            ),
+            Problem::ExpectedBool {
+                operand: format!(
+                    "the condition of `{}` in `{}`",
+                    crate::stdlib::split_receiver(verb).1,
+                    pipe.name
+                ),
+                actual: crate::ty::display::render_ty_kind(db, ty.kind(db)),
+            },
             at,
         )
         .file_absolute();
@@ -814,11 +789,10 @@ fn check_join_condition<'db>(
             return Err(join_error(
                 db,
                 pipe,
-                format!(
-                    "`join` in `{}` relates its two sides by equality, and `{}` is not one",
-                    pipe.name,
-                    expr_text(conjunct),
-                ),
+                Problem::JoinNotEquality {
+                    pipeline: pipe.name.to_string(),
+                    condition: expr_text(conjunct),
+                },
                 "`on` takes an equality between one column of each side — `on = A.k == B.k` — or \
                  several of them joined by `and`. Anything else leaves no key to plan against, and \
                  what it would run as is a nested loop over the product of the two relations.",
@@ -831,13 +805,12 @@ fn check_join_condition<'db>(
                 return Err(join_error(
                     db,
                     pipe,
-                    format!(
-                        "`join` in `{}` equates `{}` with `{}`, and `{}` is not a column reference",
-                        pipe.name,
-                        expr_text(lhs),
-                        expr_text(rhs),
-                        expr_text(operand),
-                    ),
+                    Problem::JoinKeyNotColumn {
+                        pipeline: pipe.name.to_string(),
+                        left: expr_text(lhs),
+                        right: expr_text(rhs),
+                        operand: expr_text(operand),
+                    },
                     "A join key is a column of one of the two sides, written `Binding.column`, and \
                      not a literal or anything computed from a column. There is nowhere to compute \
                      one first — `map` takes no function and the language has no `extend` — so a \
@@ -848,11 +821,16 @@ fn check_join_condition<'db>(
                 return Err(join_error(
                     db,
                     pipe,
-                    format!(
-                        "`join` in `{}` names `{binding}.{column}`, and `{binding}` is neither \
-                         side of this join",
-                        pipe.name,
-                    ),
+                    Problem::RowNotInScope {
+                        binding: binding.to_string(),
+                        column: column.to_string(),
+                        scope: format!("this join in `{}`", pipe.name),
+                        rows: left
+                            .bindings()
+                            .chain(right.bindings())
+                            .map(ToString::to_string)
+                            .collect(),
+                    },
                     &format!(
                         "The left side has {}; the right side has {}.",
                         binding_list(left),
@@ -872,13 +850,12 @@ fn check_join_condition<'db>(
             return Err(join_error(
                 db,
                 pipe,
-                format!(
-                    "`join` in `{}` equates `{}` with `{}`, and both are columns of the {named} \
-                     side",
-                    pipe.name,
-                    expr_text(lhs),
-                    expr_text(rhs),
-                ),
+                Problem::JoinOneSide {
+                    pipeline: pipe.name.to_string(),
+                    left: expr_text(lhs),
+                    right: expr_text(rhs),
+                    side: named.to_string(),
+                },
                 &format!(
                     "A condition that never names {} holds or fails for whole relations rather \
                      than for a pairing, so every row of one side pairs with every row of the \
@@ -947,32 +924,35 @@ fn binding_list(rows: &Rows<'_>) -> String {
 fn join_error(
     db: &dyn fossil_base::Db,
     pipe: &crate::lower::HirSourcePipe,
-    message: String,
+    problem: Problem,
     help: &str,
 ) -> fossil_base::ErrorGuaranteed {
-    let d = fossil_base::Diagnostic::new(fossil_base::Severity::Error, message, pipe.span)
+    let d = Diagnostic::new(Severity::Error, problem, pipe.span)
         .with_help(help)
         .file_absolute();
     fossil_base::raise(db, d)
 }
 
-fn column_list(fields: &[RecordField<'_>]) -> String {
-    if fields.is_empty() {
-        return "no columns at all".to_string();
-    }
+/// A union side's columns, each `name: Type`.
+fn column_list(db: &dyn fossil_base::Db, fields: &[RecordField<'_>]) -> Vec<String> {
     fields
         .iter()
-        .map(|f| format!("`{}`", f.name))
-        .collect::<Vec<_>>()
-        .join(", ")
+        .map(|f| {
+            format!(
+                "{}: {}",
+                f.name,
+                crate::ty::display::render_ty_kind(db, f.ty.kind(db))
+            )
+        })
+        .collect()
 }
 
 fn pipe_error(
     db: &dyn fossil_base::Db,
     pipe: &crate::lower::HirSourcePipe,
-    message: String,
+    problem: Problem,
 ) -> fossil_base::ErrorGuaranteed {
-    delay_span_bug(db, pipe.span, message)
+    report(db, pipe.span, problem)
 }
 
 /// Build a `Record` [`Ty`] from a decoded [`Shape`] — the COMPILE-TIME source

@@ -1,0 +1,44 @@
+---
+title: No token starts with this character
+description: "`syntax/unknown-character` — a character in the source that no token of the language begins with."
+---
+
+The lexer reached a character that no token of fossil starts with, and the message quotes it. The
+most common case is a comment written in another language's syntax:
+
+```fossil
+# the users table
+Users := io.csv("users.csv")
+```
+
+```text
+syntax/unknown-character
+  × unexpected character `#` — no token starts with it
+```
+
+`#`, `$` outside a string and `\` are examples. Each such character is reported on its own: `#$#` is
+three characters and three diagnostics. The rest of the line is then parsed as ordinary code, so the
+words of a `#` comment can bring their own [`syntax/unexpected-token`](/docs/errors/syntax/unexpected-token)
+reports with them.
+
+## Why fossil refuses it
+
+A character that starts no token cannot be part of a program. It used to be dropped silently: the
+lexer discarded what it could not match, so a file containing only `#` lexed to nothing and looked
+clean to every tool while the author was looking straight at the character. The lexer now keeps the
+character as an error token, and the parser reports it by name — the character is often the only
+thing on the line, so a generic "unexpected token" would point at it without saying what it is.
+
+`#` in particular is not available: `@` marks the language's own slots, and `#` was ruled out partly
+because it is a comment character in Turtle and SPARQL and the fragment separator in many RDF
+vocabularies ([identity](/docs/design/identity)).
+
+## How to repair it
+
+- **A comment** is `//`, running to the end of the line. Replace `#` with `//`.
+- **Inside a string** any character is allowed, so a `$` or `\` that belongs to a value goes between
+  `"` quotes.
+- **A backtick** is not this error: it gets
+  [`syntax/retired-spelling`](/docs/errors/syntax/retired-spelling), because it once opened a string.
+- **Anything else** is likely a typo or pasted text; delete it. [The grammar](/docs/book/grammar)
+  lists every token the language has.

@@ -71,7 +71,9 @@ describe('FossilWorkspace documents and sources', () => {
       expect(fetched).toHaveLength(1);
       expect(fetched[0]).toBe('http://minio.example/vocab/shapes/person.shex');
       expect(ws.missingDocuments(handle)).toEqual([]);
-      expect(ws.check().some((r) => r.message.includes('expects Integer'))).toBe(true);
+      expect(
+        ws.check().some((r) => r.code === 'type/property-mismatch' && r.data.expected === 'Integer'),
+      ).toBe(true);
     } finally {
       ws.free();
     }

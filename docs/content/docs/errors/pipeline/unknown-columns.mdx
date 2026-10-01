@@ -1,0 +1,45 @@
+---
+title: A join over a source with no schema
+description: "`pipeline/unknown-columns` — a `join`'s left side has known columns and its right side has none, so the condition cannot be checked."
+---
+
+fossil knows a source's columns because the host reads the file before it compiles — the header of
+a CSV, the keys of a JSON file, a Parquet file's own schema. When a `join`'s left side was read and
+its right side was not, the condition names columns on a side nobody can see:
+
+```fossil
+User     := io.csv("data/users.csv")
+Purchase := io.csv("s3://lake/orders.csv")
+//
+Orders := User.join(Purchase, on = User.id == Purchase.user_id)
+```
+
+```text
+`join` in `Orders` joins `Purchase`, whose columns are unknown: it declares no schema, so there
+is nothing to check the condition against
+```
+
+The bindings named are the right side's — one, or several when the right side is itself a join.
+
+## Why fossil refuses it
+
+A join is checked twice: once that `on` is a `Bool` over columns that exist under the bindings
+that qualify them, and once that it relates the two sides. With a schema on the left, the first
+check means something, and a condition half of whose columns cannot be looked up would pass it by
+not being checked — `Purchase.usr_id` would compile and fail later, in the middle of a run.
+
+When **neither** side has a schema the join is not refused: that is every program whose sources the
+host has not read, and the shape of the condition — equalities, one column from each side — is
+still checked, because it is a question about bindings and operators, not about columns.
+
+A source arrives without a schema when the host did not read it. The executor reads each source it
+is handed before it compiles; the editor declines to fetch one that is not on disk, such as a file on
+`s3://` or behind `https://` — [what you read](/docs/book/what-you-read#what-this-gets-you)
+describes the gap.
+
+## How to repair it
+
+- **Make the right side readable where you check.** A source the host can read — in the editor,
+  a file on disk — has a schema, and the join is then checked normally.
+- **Check the binding name.** If the right side was meant to be a source the program already reads,
+  join that binding instead.

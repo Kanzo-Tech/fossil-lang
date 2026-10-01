@@ -1,0 +1,41 @@
+---
+title: The provider cannot do this
+description: "`provider/wrong-capability` — a provider is used where a binding needs rows and it reads types, or the other way round."
+---
+
+Every provider declares what it reads: rows (`io.csv`, `io.json`, `io.parquet`, `io.rdf`) or types
+(`io.shex`, `io.shacl`). Where a binding is written decides which one it asks for, and this provider
+does not do it:
+
+```fossil
+type { Person } := io.csv("data/users.csv")
+```
+
+```text
+`io.csv` does not read types
+help: `io.csv` reads rows; `io.shex`, `io.shacl` read types
+```
+
+The `help` names both sides: what the provider does, and who does what was asked. The other
+direction reads the same way — `User := io.shex("shop.shex")` is told
+`` `io.shex` does not read rows ``, with the row readers listed.
+
+## Why fossil refuses it
+
+The position asks the question. A source binding, `User := …`, asks for rows; a
+`type { … } := …` binding and a `schema =` argument ask for types. A CSV file has no shapes to bind
+and a shape document has no rows to map, so either mismatch would leave a binding with nothing in
+it — a type checked against nothing, or a mapping reading from nothing. The provider's row declares
+its capabilities and the checker only asks; the wording of the refusal is shared by `check` and
+`run`, so the two cannot drift. See [type providers](/docs/design/type-providers) and
+[naming what you read](/docs/book/what-you-read).
+
+A host with no reader at all for a capability does not ask, and so never reports this.
+
+## How to repair it
+
+- **The wrong provider for the file.** A shape document is read with `io.shex` or `io.shacl`; a data
+  file with the row reader for its format.
+- **The right file in the wrong place.** A shape document that describes your output goes in a
+  `type { … }` binding; one that describes an RDF input goes in that source's
+  `schema = io.shex(…)`. Data goes in a source binding, `User := io.csv(…)`.

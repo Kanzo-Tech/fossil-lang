@@ -1,0 +1,31 @@
+---
+title: A relation where a value belongs
+description: "`type/relation-as-value` — a property is written from a call that gives back rows, not one value per row."
+---
+
+A property is assigned the result of a call whose return type is a relation — a set of rows — rather
+than a value. A property holds one value per row of the mapping, and a relation is not one:
+
+```fossil
+    people = io.csv("data/users.csv")
+    // `io.csv` gives back a relation, which is not a value
+```
+
+The catalogue rows that return a relation are the providers in `io`, which create one, and the verbs
+of the algebra — `where`, `join`, `select` and the rest — which hand on the one they were given.
+
+## Why fossil refuses it
+
+Under the [typing rules](/docs/design/typing#calls) the type of a call is its signature's return
+type, and a relation and a scalar are different types. A verb written as a mapping's source or as a
+binding is lifted out of the expression by the lowering and checked where the pipeline is, so a
+relation that still reaches a property's value is one written where a value belongs. There is no
+column the engine could produce from it, so the call is poisoned and the property is not written.
+
+## How to repair it
+
+- **The rows are a source.** Bind them — `User := io.csv("data/users.csv")` — and write the property
+  from a column: `name = User.name`.
+- **The rows should feed this mapping.** Put the pipeline after `from` in the mapping header, or bind
+  it as a derived relation (`Adults := User.where(User.age >= 18)`) and map from that. See
+  [relations](/docs/book/relations).

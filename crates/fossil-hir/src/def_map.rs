@@ -68,12 +68,10 @@ pub struct SourceLoc<'db> {
 pub enum ShapeBindError {
     /// The constructor carries no `schema = …`, so there is no document.
     NoSchema,
-    /// The document is named and is not there — nothing is registered at the
-    /// path the program wrote.
-    Unreadable { path: SmolStr, cause: SmolStr },
-    /// The document is there and cannot be read as a shape document: no
-    /// installed decoder claims it, or one ran and rejected it.
-    Unparseable { path: SmolStr, cause: SmolStr },
+    /// The document is named and could not be read as one — nothing is
+    /// registered at the path, the provider refused it, or its decoder rejected
+    /// it. The problem is `crate::shapes::decoded_document`'s, kept typed.
+    Document(fossil_base::Problem),
     /// The binding names more shapes than the document declares. Binding is
     /// POSITIONAL, so this is the check that model gives
     /// away free: the Nth name wants an Nth shape and there is none.
@@ -490,7 +488,7 @@ impl<'db> DefMap<'db> {
     /// A shape NO binding introduced falls back to the first document, and that
     /// is deliberate: it is the misspelt-shape case, where every document is
     /// equally wrong. What the author needs is the list of names the program
-    /// bound, and `crate::lower::unbound_shape_message` is what carries it, with
+    /// bound, and `crate::lower::unbound_shape_problem` is what carries it, with
     /// a did-you-mean over them.
     #[must_use]
     pub fn shape_binding_for(
@@ -584,7 +582,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 // does not introduce belongs to nobody and is dropped HERE —
                 // `crate::lower` reports it, over the same nodes, with a real
                 // span. This query stays diagnostic-free (it is signatures-only
-                // and runs outside a frame where `delay_span_bug` is valid).
+                // and runs outside a frame where `fossil_base::report` is valid).
                 let renames = parse_renames(&item);
                 for (name, (shape_iri, shape_error)) in members.into_iter().zip(bound) {
                     let mine = renames
@@ -1189,20 +1187,7 @@ fn resolve_member_shape_iris(
     };
     let document = match crate::shapes::decoded_document(db, file, constructor, schema_path) {
         Ok(d) => d,
-        Err(crate::shapes::DocumentError::Unregistered) => {
-            return all(&ShapeBindError::Unreadable {
-                path: SmolStr::from(schema_path),
-                cause: SmolStr::from(crate::shapes::DocumentError::Unregistered.to_string()),
-            });
-        }
-        // "we have it and cannot read it as a shape document" covers both a
-        // document no decoder claims and one a decoder rejected.
-        Err(e) => {
-            return all(&ShapeBindError::Unparseable {
-                path: SmolStr::from(schema_path),
-                cause: SmolStr::from(e.to_string()),
-            });
-        }
+        Err(problem) => return all(&ShapeBindError::Document(problem)),
     };
 
     // POSITIONAL: the Nth name binds the Nth shape the document declares. The
@@ -1502,7 +1487,9 @@ b := io.parquet(\"b.parquet\")
         assert!(
             matches!(
                 dm.lookup_source_shape_error(&db, "a"),
-                Some(ShapeBindError::Unparseable { .. })
+                Some(ShapeBindError::Document(
+                    fossil_base::Problem::BareDocumentPath { .. }
+                ))
             ),
             "no provider named ⇒ no row ⇒ no shapes, and it says which"
         );
@@ -1565,7 +1552,9 @@ b := io.parquet(\"b.parquet\")
 
         assert!(matches!(
             dm.lookup_source_shape_error(&db, "a"),
-            Some(ShapeBindError::Unreadable { .. })
+            Some(ShapeBindError::Document(
+                fossil_base::Problem::NotRegistered { .. }
+            ))
         ));
     }
 
@@ -1578,16 +1567,18 @@ b := io.parquet(\"b.parquet\")
         let (db, file) = db_with_document(src, "broken.shex", "!malformed no shapes here\n");
         let dm = def_map(&db, file);
 
-        let Some(ShapeBindError::Unparseable { path, cause }) =
-            dm.lookup_source_shape_error(&db, "a")
+        let Some(ShapeBindError::Document(fossil_base::Problem::Unparseable {
+            document,
+            reason: Some(reason),
+        })) = dm.lookup_source_shape_error(&db, "a")
         else {
             panic!(
                 "expected Unparseable, got {:?}",
                 dm.lookup_source_shape_error(&db, "a")
             );
         };
-        assert_eq!(path, "broken.shex");
-        assert!(cause.contains("no shapes here"), "got {cause}");
+        assert_eq!(document, "broken.shex");
+        assert!(reason.contains("no shapes here"), "got {reason}");
     }
 
     /// And a constructor with no `schema =` has no document at all — a third

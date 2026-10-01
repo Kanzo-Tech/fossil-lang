@@ -1,0 +1,40 @@
+---
+title: The program does not compile
+description: "`run/does-not-compile` — a run was asked of a program with errors; nothing ran, and the program's diagnostics ride the failure."
+---
+
+A run was started on a program that `check` would reject. Nothing is read and nothing is written;
+the run fails with one problem whose message is short:
+
+```text
+the program does not compile; nothing was run
+```
+
+The reasons are not in that sentence. They are the program's diagnostics, carried as the failure's
+`related` list — each one a full problem of its own, with its own code, `detail`, `help` and a
+file-absolute `span`. A host reads them from `FossilError.related` (or `problem.related` on the plain
+data a job completes with); `data` is empty.
+
+```ts
+if (isFossilError(e, 'run/does-not-compile')) {
+  for (const d of e.related ?? []) console.log(d.code, d.detail, d.span);
+}
+```
+
+## Why fossil refuses it
+
+When lowering cannot resolve something the graph needs — a source binding that names nothing, a
+mapping with no usable `@subject` — the lowered graph is marked poisoned and carries no operations.
+Executing it would either panic or quietly produce an empty corpus, and neither tells the author
+what is wrong. So the executor refuses a poisoned graph, and answers with the diagnostics the
+compiler already recorded: the same mistakes, with the same codes, that `check` and the editor show.
+A run used to answer a sentence telling the host to see diagnostics it had no way to reach; carrying
+them is what makes this failure actionable. See [diagnostics](/docs/book/diagnostics) for how to
+read one.
+
+## How to repair it
+
+- **Fix the related diagnostics**, in order. Each links to its own page in this index, and the first
+  error is usually the cause of the ones after it.
+- **Check before you run.** The editor and `check` report the same diagnostics without reading a
+  byte of data, so a program that is clean there will not fail with this code.

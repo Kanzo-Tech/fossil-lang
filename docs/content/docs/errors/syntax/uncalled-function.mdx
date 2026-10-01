@@ -1,0 +1,42 @@
+---
+title: A function named and not called
+description: "`syntax/uncalled-function` — a function from the catalogue written where a value belongs, without the parentheses that call it."
+---
+
+A catalogued function is written where a value is expected, but it is never called. There are no
+parentheses after it, so the expression names the function itself rather than its result:
+
+```fossil
+User : Person from Users
+    @subject = "https://example.org/user/{Users.id}"
+    name = str.trim
+```
+
+```text
+syntax/uncalled-function
+  × `str.trim` names a function but does not call it; fossil has no function values
+  help: write `str.trim(...)` with its arguments
+```
+
+A dotted name with no call is read as a column reference — `Users.name` — when it has two parts and
+the left one is not a catalogue namespace such as `str`, `math` or `parse`. Anything else that is
+dotted and not called arrives here: `str.trim`, and also a name with three or more parts such as
+`Users.name.trim`, which is the member call missing its `()`.
+
+## Why fossil refuses it
+
+fossil has no function values. A function cannot be stored in a property, passed as an argument or
+applied later, because partial application is not in the grammar and you declare no functions of
+your own ([the dot](/docs/design/the-dot#why-you-declare-no-functions-of-your-own)). Everything
+callable has a signature with a known lowering, and that is what keeps *if it compiles, it runs* true
+of the whole language. So a bare function name has no meaning as a value, and fossil refuses it
+rather than letting it quietly become text or nothing.
+
+## How to repair it
+
+- **Call it**, as the `help` says: `name = str.trim(Users.name)`.
+- **Or reach it through the value**: `name = Users.name.trim()`. That is the same catalogue entry,
+  with the receiver to the left of the dot ([values and expressions](/docs/book/expressions#two-paths-to-the-same-function)).
+- **You meant a column**: write it qualified by its row, `Users.name`, with exactly one dot.
+
+[The standard library](/docs/book/stdlib) lists every function and its arguments.

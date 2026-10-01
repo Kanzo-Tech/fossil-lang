@@ -46,7 +46,7 @@ use fossil_graph_schema::Span;
 /// whitespace, by the shape's `{`, a `;` or a `|`. That is what keeps
 /// `shop:buyer @shop:Person` from answering for the predicate `shop:Person`:
 /// a value reference sits after `@`, never at the head of a constraint. The
-/// corpus has that exact pair in `errors/unknown-field/shop.shex`.
+/// corpus has that exact pair in `errors/name/unknown-field/shop.shex`.
 #[must_use]
 pub fn predicate_span(src: &str, shape: &str, predicate: &str) -> Option<Span> {
     let body = shape_body(src, shape)?;
@@ -167,7 +167,7 @@ shop:Order {
     }
 
     /// Two predicates whose LOCAL names collide are two IRIs and therefore two
-    /// spellings, so each finds its own line. This is `errors/colliding-name`,
+    /// spellings, so each finds its own line. This is `errors/shape/name-collision`,
     /// and it is why the lookup takes the qualified spelling and not the local
     /// name.
     #[test]

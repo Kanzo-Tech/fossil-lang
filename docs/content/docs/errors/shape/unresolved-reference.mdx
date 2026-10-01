@@ -1,0 +1,43 @@
+---
+title: An unresolved shape reference
+description: "`shape/unresolved-reference` — the shape document includes a labelled triple expression, `&label`, that it never declares."
+---
+
+ShEx lets a shape include a group of constraints by label: `&label` stands for the triple expression
+declared as `$label ( … )` somewhere in the same document. When no declaration carries the label,
+the inclusion points at nothing:
+
+```turtle
+shop:Person {
+  shop:name xsd:string ;
+  &shop:contact
+}
+```
+
+Every mapping that produces `Person` is refused on its header, naming the label and the shape that
+includes it:
+
+```text
+unresolved shape reference `https://shop.example/voc#contact` in shape `https://shop.example/voc#Person`
+```
+
+## Why fossil refuses it
+
+The ShEx decoder builds each shape's constraint table by resolving every inclusion in place, before
+any mapping is checked. An inclusion left unresolved would leave out the predicates it stood for, so
+the table would be smaller than the author wrote: a mapping writing those predicates would get
+"unknown property" errors that blame the mapping, and one omitting a required one would pass. So the
+missing label is the error, reported where the shape is used. The predicates that did resolve are
+still read. See [inference from shapes](/docs/design/shapes).
+
+The label is looked up in the same document only. A shape document is read as one file, and the
+decoder fetches nothing else — there is [no network at compile time](/docs/design/type-providers).
+
+## How to repair it
+
+- **Declare the group.** Add `$shop:contact ( … )` to one of the shapes, with the constraints the
+  inclusion was meant to bring in.
+- **Fix the label.** If the group is declared under another name, the label in `&…` is a typo;
+  compare the two IRIs, prefixes expanded.
+- **Inline it.** If the group is used once, write its constraints into the shape and drop the
+  `&label`.

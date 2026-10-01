@@ -1,0 +1,38 @@
+---
+title: No store covers the destination
+description: "`run/destination-uncovered` — the prefix a run was told to write under is not one any registered store covers."
+---
+
+A run writes its corpus under a destination prefix, `fossil.json` at its root, and the storage the
+run was handed has no store that covers that prefix. The run refuses before it reads anything:
+
+```text
+no store covers the destination s3://elsewhere/run-2/
+```
+
+`data.destination` is the prefix as it was given.
+
+The check is in the executor itself: the destination must end in `/`, and the storage must cover
+`<destination>fossil.json`. A destination without the trailing slash fails it as well, even when a
+store covers the bucket.
+
+## Why fossil refuses it
+
+The output has nowhere to go. Running anyway would spend the whole execution and fail at the first
+`put` — or, worse, report success for a run that wrote nothing. Checking the destination first costs
+nothing and fails before any source is read. It is the same rule fossil applies to reading: every
+byte goes through a store the host granted, never an ambient filesystem, and a prefix with no store
+over it is not something fossil can write to. The host's part in that is on
+[three hosts](/docs/design/three-hosts).
+
+## How to repair it
+
+The two browser entry points choose a covered destination themselves: `run(host, job)` writes under
+the one prefix the host vends `write` on for the job, and `runInMemory(sources, dest)` adds the
+trailing slash and puts an in-memory store at `dest`. So this code comes from calling the executor
+directly with a destination of your own.
+
+- **Write under a prefix you were granted.** Grant write access for the job first, and pass the
+  prefix that grant returned.
+- **End the destination with `/`.** A corpus is a prefix, not a file: `s3://lake/out/`, not
+  `s3://lake/out`.

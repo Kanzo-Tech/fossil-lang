@@ -35,7 +35,7 @@
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Diagnostic, FossilDb, Severity, SourceFile, Span, System};
+use fossil_base::{Diagnostic, FossilDb, Problem, Severity, SourceFile, Span, System};
 use fossil_ide::code_actions;
 use lsp_types::{CodeAction, Position, Range, TextEdit};
 
@@ -115,7 +115,11 @@ fn did_you_mean_action_replaces_typo_with_suggestion() {
     let span = Span::new(start, start + 4);
     let diag = Diagnostic::new(
         Severity::Error,
-        "unknown column `naem` — did you mean `name`?",
+        Problem::UnknownField {
+            field: "naem".into(),
+            relation: "users".into(),
+            fields: vec!["name".into()],
+        },
         span,
     )
     .with_did_you_mean(span, "name");
@@ -182,8 +186,10 @@ Contact : Contact from contacts
     // The production emitter attaches this snippet to the diagnostic verbatim.
     let diag = Diagnostic::new(
         Severity::Error,
-        "a value disjunction is not supported in v0.1 (2 branches in shape \
-         `http://example.org/Contact`); help: split into 2 separate mappings",
+        Problem::UnsupportedDisjunction {
+            shape: "http://example.org/Contact".into(),
+            branches: 2,
+        },
         Span::new(mapping_start, mapping_end),
     )
     .with_suggestion_source(suggestion.clone());

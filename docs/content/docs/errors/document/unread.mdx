@@ -1,0 +1,47 @@
+---
+title: Documents could not be read
+description: "`document/unread` — a run needed shape documents the host could not read, so the job failed before anything ran."
+---
+
+Before a job runs, the executor reads every document the program names through the host, and
+registers each one. When any of those reads fails, the job fails there, listing every document that
+stayed unread by its key:
+
+```text
+1 document(s) could not be read: s3://shop/shapes/graph.shex
+```
+
+The `data` is that list, `{ documents: [...] }`. The first unread document's own failure rides as
+the `cause` — usually a `storage/*` problem such as `storage/unreachable`, which names the locator
+and is where the real reason is:
+
+```ts
+if (isFossilError(e, 'document/unread')) {
+  console.log(e.data.documents, e.cause);
+}
+```
+
+This is raised by `runJob` in `@fossil-lang/executor`, in TypeScript, not by the compiler.
+
+## Why fossil refuses it
+
+A run has to use the documents the program was checked against: the output shape decides how the
+graph's edges are classified, and a program run without it would write a different graph or none.
+So documents are resolved first and all at once — the host is asked for each missing one, each is
+attempted once, and a document a registered one names is fetched in turn. If any stayed unread
+there is nothing to gain by starting: the job completes as `failed` with this problem and nothing is
+written. Every unread document is in the one failure, so one look names every file to fix.
+
+It is not [`document/not-registered`](/docs/errors/document/not-registered). That is the compiler
+finding nothing under a key; this is the host failing to read the bytes, found before the compiler
+ever looks.
+
+## How to repair it
+
+- **Read the cause.** It is the read that failed, with its own code: a store that could not be
+  reached, a missing credential, a path outside the prefix a connection covers.
+- **Check the reference.** A relative path is resolved against the program's directory, and an
+  `@conn/…` reference against the connection map the host serves — the key in the list is what
+  fossil asked for.
+- **Check the host.** Every read goes through the credential the host vends for its connection; a
+  host that refuses or vends none fails every document behind that connection.

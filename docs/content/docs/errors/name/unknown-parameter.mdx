@@ -1,0 +1,39 @@
+---
+title: Not a parameter of this function
+description: "`name/unknown-parameter` — a named argument uses a name that none of the function's parameters has."
+---
+
+A named argument is `name = value`, and the name is the parameter's own, as
+[the standard library](/docs/book/stdlib) prints it. `str.slice` takes `(text: String, start: Integer)`,
+so `start = 2` reaches the second position and any other name reaches nothing:
+
+```fossil
+    code = str.slice(Row.code, begin = 2)
+```
+
+```text
+`str.slice` has no parameter called `begin` — it takes `text`, `start`
+help: did you mean `start`?
+```
+
+The `help` is there only when one of the parameters is close to what was written; the full list of
+parameters is always in the message.
+
+## Why fossil refuses it
+
+Every parameter carries its name, and [the name is load-bearing](/docs/book/stdlib#how-to-read-a-row):
+it is the only thing a named argument can use to find its position. The arguments are placed into
+positional slots where the call is lowered, the last place that holds both the signature and the
+source text, so the message can quote what was written and list what was available. Nothing after
+that point knows that names exist. An unmatched name therefore has no slot, and dropping it would
+turn the call into one with fewer arguments than were written — reported, if at all, as an arity
+error about a call the author did not write.
+
+## How to repair it
+
+- **The name is misspelt, or borrowed from another language.** Use the parameter's own name — in
+  `str.replace(x, needle = "a", replacement = "b")`, `from =` and `to =` are errors.
+- **The argument is not needed.** Some rows have fewer parameters than a reader expects: `str.slice`
+  has no `end`, and `math.round` no `digits`. Remove it.
+- **Pass it by position.** Positional arguments need no names; the order is the one the standard
+  library prints.

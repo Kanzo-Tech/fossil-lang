@@ -1,0 +1,33 @@
+---
+title: Not a number
+description: "`type/expected-number` — an operand of arithmetic or of unary minus is not an Integer or a Float."
+---
+
+An operand of `+`, `-`, `*`, `/`, `%` or of a leading `-` is not a number. The message names the
+side and the type it found. The case that reaches this page most often is the first one anybody
+writes:
+
+```fossil
+    full_name = User.first + " " + User.last
+    // the left side of `+` must be a number, and it is String
+    // help: two strings are joined with `str.concat`, not `+`
+```
+
+## Why fossil refuses it
+
+Arithmetic takes two numbers and gives the wider of them — `Integer` when both are, `Float` as soon
+as either is — and `/` is always `Float` ([typing](/docs/design/typing#arithmetic-comparison-boolean)).
+A `String` has no place in that rule. `+` is not string concatenation: `str.concat` is, and one idea
+does not get two spellings in fossil. Unary `-` keeps its operand's numeric type, so it too needs an
+`Integer` or a `Float`.
+
+An operand the checker cannot type leaves the result unknown rather than guessed; only an operand of
+a known, wrong type is refused.
+
+## How to repair it
+
+- **You meant to join strings.** Use `str.concat`, which takes exactly two strings — nest it for
+  more, or use an interpolated string: `"{User.first} {User.last}"`.
+- **The column is a number stored as text.** Convert it with `parse.integer`, `parse.float` or
+  `parse.decimal` before the arithmetic.
+- **The wrong column was named.** Use the numeric field the source declares.

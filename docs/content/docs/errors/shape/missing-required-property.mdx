@@ -1,0 +1,41 @@
+---
+title: A required property is never written
+description: "`shape/missing-required-property` — the shape requires a predicate and the mapping that produces it has no line writing it."
+---
+
+The shape declares a predicate with a minimum count of one or more, and the mapping that produces
+the shape has no line for it. Here `Person` requires exactly one `email`, and `People` writes only
+`name`:
+
+<Program src="errors/shape/missing-required-property/shape.shex" title="shape.shex" />
+
+<Program src="errors/shape/missing-required-property/program.fossil" title="program.fossil" />
+
+<Program src="errors/shape/missing-required-property/expected/diagnostic.txt" title="fossil check" />
+
+One error per missing predicate, on the mapping header, with a second label under the line of the
+document that requires it and the count it requires — *exactly one*, *1 or more*, *between 2 and 4*.
+
+## Why fossil refuses it
+
+A shape that says `shop:email xsd:string ;` is a promise the corpus makes to its readers: every
+`Person` node has an email. A mapping that never writes one produces nodes that do not conform to the
+shape they claim, and a validator run afterwards would say so — after the mapping has gone over
+every row. fossil reads the shape as a type, so it can say it before anything runs.
+
+This is the backward half of the check. Checking each line the body has cannot catch a line it does
+not have, so the shape's required predicates are walked as well, and each one the body never names
+is reported. The names compared are the names a body writes, `@rename` included: a predicate renamed
+and written under its new name counts as written. Cardinality is carried at full resolution for this
+reason — see [inference from shapes](/docs/design/shapes) and [typing](/docs/design/types).
+
+## How to repair it
+
+- **Write it.** The `help` names the line to start, `email = `, and lists the predicates that are
+  optional, so you know which other omissions are fine: here `email = User.email`, and `phone` may
+  stay out.
+- **The value is not always there in the source.** Filter out the rows that lack it in a derived
+  binding (`Reachable := User.where(User.email != null)`) and map `from Reachable` — a node without
+  the property would still break the promise.
+- **The shape is wrong.** If the predicate really is optional, mark it `?` or `*` in the document;
+  the mapping is then correct as written.

@@ -1,0 +1,37 @@
+---
+title: The manifest is not JSON
+description: "`corpus/not-json` — the file at the corpus's `fossil.json` was read, and its text does not parse as JSON."
+---
+
+`open` read `fossil.json` and handed its text to `JSON.parse`, which refused it. One way to get here
+is a directory written by an older writer, whose index was YAML:
+
+```text
+name: graph
+version: gar/v1
+```
+
+```text
+https://data.example/graphs/people/fossil.json is not JSON
+```
+
+A host sees `data: { path }`, the locator that was read, and the parser's `SyntaxError` as `cause`.
+It is thrown by `parseManifest` in `@fossil-lang/corpus`, which `open` calls once, before any view is
+created.
+
+## Why fossil refuses it
+
+The manifest is the one file a reader opens before any Parquet, and it is a JSON document by
+definition ([/docs/format](/docs/format)). A reader that tried to make sense of anything else — sniff
+YAML, skip a prefix, accept an HTML page — would be a second format with no specification. Text that
+does not parse says nothing about which tables exist, so there is nothing to open.
+
+This is distinct from [`corpus/unsupported-format`](/docs/errors/corpus/unsupported-format): there the
+file is JSON and names a format this reader does not read; here it is not a manifest at all.
+
+## How to repair it
+
+- **Rewrite the corpus with the current writer** if it predates `fossil.json`; an old index is not
+  converted.
+- **Look at what the location actually serves.** A server that answers a missing file with an HTML
+  page and a success status puts that page here; `cause` quotes where the parse failed.

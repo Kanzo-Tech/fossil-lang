@@ -1,0 +1,37 @@
+---
+title: A join key that is not a column
+description: "`pipeline/join-key-not-column` — one side of an equality in a `join`'s `on` is a literal or a computed value, not a column."
+---
+
+Each equality in a join's `on` pairs a column of one side with a column of the other. Here one
+operand is a literal, or a value computed from a column:
+
+```fossil
+Linked := Left.join(Right, on = str.trim(Left.k) == Right.k)
+```
+
+```text
+`join` in `Linked` equates `str.trim(Left.k)` with `Right.k`, and `str.trim(Left.k)` is not a column
+reference
+```
+
+The message quotes both operands and then the one that is not a column. `on = Left.k == "x"` is
+refused the same way, with `"x"` as the operand.
+
+## Why fossil refuses it
+
+A computed key is an arbitrary expression on one side of the `==`, and admitting one is admitting
+the [theta join](/docs/errors/pipeline/join-not-equality) again wearing an equals sign — nothing left
+for the planner to hash on. A literal is not a key at all: it holds or fails for a whole side, not
+for a pairing of rows.
+
+This is the one join refusal with no workaround inside the language today, and the `help` says so:
+there is nowhere to compute a key first. `map` takes no function — the grammar has no lambda — and
+there is no `extend`. See [relations](/docs/book/relations#join).
+
+## How to repair it
+
+- **A literal.** It is a filter, not a key: join on the real key and narrow with `where`, before or
+  after — `Left.where(Left.k == "x")`.
+- **A computed key.** Prepare it in the source, as a column of its own, and join on that column.
+  The `help`: *"a derived key has to be prepared in the source"*.

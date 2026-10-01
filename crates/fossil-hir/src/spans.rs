@@ -496,8 +496,12 @@ Second : B from users
 
         // And the whole-diagnostic path shifts `did_you_mean.wrong_span` too —
         // that one drives a quick-fix edit, so a stale offset corrupts source.
-        let d = fossil_base::Diagnostic::new(fossil_base::Severity::Error, "x", raw)
-            .with_did_you_mean(raw, "name");
+        let d = fossil_base::Diagnostic::new(
+            fossil_base::Severity::Error,
+            fossil_base::Problem::UnexpectedToken {},
+            raw,
+        )
+        .with_did_you_mean(raw, "name");
         let out = rebase_to_file(&db, second, [d]);
         assert_eq!(out[0].span.start, raw.start + base);
         assert_eq!(
@@ -543,9 +547,17 @@ Second : B from users
             &db,
             second,
             [
-                fossil_base::Diagnostic::new(fossil_base::Severity::Error, "file-level", span)
-                    .file_absolute(),
-                fossil_base::Diagnostic::new(fossil_base::Severity::Error, "mapping-level", span),
+                fossil_base::Diagnostic::new(
+                    fossil_base::Severity::Error,
+                    fossil_base::Problem::UnexpectedToken {},
+                    span,
+                )
+                .file_absolute(),
+                fossil_base::Diagnostic::new(
+                    fossil_base::Severity::Error,
+                    fossil_base::Problem::MissingValue {},
+                    span,
+                ),
             ],
         );
         assert_eq!(out[0].span, span, "file-absolute spans are never shifted");

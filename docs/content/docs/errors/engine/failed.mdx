@@ -1,0 +1,44 @@
+---
+title: The query engine failed
+description: "`engine/failed` — the query engine refused or failed a statement fossil sent it; the engine's own error is the cause."
+---
+
+fossil does not execute queries itself. A run executes the program's graph on `DataFusion`, and an
+opened corpus is queried through the DuckDB the host hands over. When that engine fails, fossil
+reports it under one code and keeps the engine's error whole:
+
+```text
+the query engine failed
+```
+
+`data` is empty. Everything specific is in the cause: in JavaScript, `FossilError.cause` is the
+engine's own error — named `DataFusionError` for a run, DuckDB's error for a corpus — and on the
+plain data `problem.cause` is `{ name, detail }`.
+
+```ts
+if (isFossilError(e, 'engine/failed')) console.error(e.cause);
+```
+
+It is raised from these places:
+
+- **A run**, when executing the graph fails for any reason other than the memory budget
+  ([`run/over-budget`](/docs/errors/run/over-budget)) or a program that does not compile
+  ([`run/does-not-compile`](/docs/errors/run/does-not-compile)). A CSV, JSON or Parquet source that
+  cannot be read or parsed fails here; so does `runInMemory` asked to read a source it was not given.
+- **A corpus**, when DuckDB refuses the statements that open it, a `scan`, or a `sql` call.
+
+## Why fossil refuses it
+
+fossil classifies the mistakes it can name — a missing table, a column of the wrong type, a refused
+operator — and gives each its own code. An engine's failure is in the engine's vocabulary, and
+inventing a fossil reason for it would be a guess. So the code says only where the failure happened,
+and the engine's message, which is the real explanation, travels unchanged beside it. See
+[one error, from Rust to the screen](/docs/design/errors) for the cause chain.
+
+## How to repair it
+
+- **Read the cause.** It names the file, the column or the statement the engine choked on.
+- **For a run**, check the sources the cause mentions: that the file exists at that locator, and that
+  it is the format the program binds it as. For `runInMemory`, pass every locator `sources()` lists.
+- **For `sql`**, the statement is yours and reaches DuckDB unparsed; fix it as the cause says. For
+  `scan` or opening, check that the corpus's Parquet files are present and readable.

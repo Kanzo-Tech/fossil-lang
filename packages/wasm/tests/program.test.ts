@@ -64,7 +64,10 @@ describe('openProgram', () => {
       program.registerDescriptor(DESCRIPTOR);
       const rows = await program.check(PROGRAM);
       // The shape arrived: `name` is checked against its datatype, which only a read shape knows.
-      expect(rows.some((r) => r.message.includes('expects Integer'))).toBe(true);
+      const mismatch = rows.find((r) => r.code === 'type/property-mismatch');
+      expect(mismatch?.code === 'type/property-mismatch' && mismatch.data.expected).toBe('Integer');
+      expect(mismatch?.title).toBe('A property of the wrong type');
+      expect(mismatch?.message).not.toContain('help:');
       expect(rows.every((r) => r.uri === 'prog.fossil')).toBe(true);
       // Nothing new is missing, so a second check reads nothing.
       await program.check(PROGRAM);
@@ -118,14 +121,15 @@ describe('openProgram', () => {
 describe('openProgram, when a document cannot be read', () => {
   const MISSING = PROGRAM.replace('@vocab/person.shex', '@vocab/gone.shex');
 
-  it('answers a row carrying the document’s problem, beside the checker’s rows', async () => {
+  it('answers a row under the code of the document’s read, beside the checker’s rows', async () => {
     const { host } = recordingHost(SHAPE);
     const program = await openProgram('prog.fossil', { host, text: MISSING });
     try {
       const rows = await program.check(MISSING);
       expect(rows[0]).toMatchObject({
         uri: 'prog.fossil',
-        problem: { code: 'storage/unreachable', data: { locator: expect.stringContaining('gone.shex') } },
+        code: 'storage/unreachable',
+        data: { locator: expect.stringContaining('gone.shex') },
       });
     } finally {
       program.close();

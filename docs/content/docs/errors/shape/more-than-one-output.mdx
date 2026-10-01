@@ -1,0 +1,39 @@
+---
+title: More than one output shape
+description: "`shape/more-than-one-output` — a program with no `type` binding reads two RDF sources whose `schema =` documents differ, and a run cannot tell which one is the output."
+---
+
+A run has to know which shape document describes the graph it writes. A `type { … }` binding says
+so directly. A program without one falls back to the `schema =` of its RDF sources — a graph read in
+and written back — and when two of them name different documents there is no single answer:
+
+```fossil
+{ Person } := io.rdf("people.ttl", schema = io.shex("people.shex"))
+{ Order }  := io.rdf("orders.ttl", schema = io.shex("orders.shex"))
+```
+
+```text
+a program may declare only one output shape; found `people.shex` and `orders.shex`
+```
+
+The two names in the message are the documents, as the program wrote them. This is a `run` failure:
+`check` does not report it, because nothing at check time has to choose an output contract.
+
+## Why fossil refuses it
+
+The output descriptor is what a run classifies the graph's edges with, and it has to be the
+document the program compiled against. When a program names a `type` binding, that document wins
+and the sources' `schema =` documents only shape the rows read in. Without one, the run takes the
+RDF sources' `schema =` document as the output contract — and with two different ones it would
+either have to pick one, writing a graph checked against half the program, or merge them, which
+fossil does not do. One program writes one shape document's graph, so the second is refused rather
+than merged. The documents are compared as written, so two spellings of one path count as two.
+[Naming what you produce](/docs/book/what-you-produce) shows the binding that settles it.
+
+## How to repair it
+
+- **Declare the output.** Add a `type { … } := io.shex("…")` binding naming the document the
+  program writes. It takes precedence, and the two `schema =` arguments go back to describing only
+  their inputs.
+- **They are one document.** Spell both `schema =` arguments the same way.
+- **They are really two outputs.** Split the program in two, one per output shape.

@@ -16,7 +16,7 @@
 //!
 //! # What this file does NOT prove
 //!
-//! - **That the eight unlowered verbs should stay unlowered.** The gap is
+//! - **That the six unlowered verbs should stay unlowered.** The gap is
 //!   deliberate — the catalogue already carries their signatures, so the day one
 //!   gains a lowering its arguments are checked by the code that checks
 //!   `str.trim`'s. This pins the message, not the gap.
@@ -66,7 +66,12 @@ fn diagnostics(pipe: &str) -> Vec<String> {
     let _ = lower_to_hir(&db, file);
     lower_to_hir::accumulated::<Diagnostic>(&db, file)
         .iter()
-        .map(|d| d.message.clone())
+        .map(|d| {
+            d.help.as_ref().map_or_else(
+                || d.message(),
+                |help| format!("{}\nhelp: {help}", d.message()),
+            )
+        })
         .collect()
 }
 
@@ -88,10 +93,10 @@ fn one_about(pipe: &str, needle: &str) -> String {
 fn a_catalogued_verb_with_no_lowering_says_which_of_the_two_things_is_true() {
     let m = one_about(
         "derived := pedidos.sort(pedidos.id)",
-        "the catalogue declares",
+        "does not implement yet",
     );
     assert!(
-        m.contains("`sort` is a relation verb the catalogue declares"),
+        m.contains("`sort` is a relation verb the lowering does not implement yet"),
         "the verb has to be named, and named as catalogued: {m}"
     );
     assert!(
@@ -102,15 +107,15 @@ fn a_catalogued_verb_with_no_lowering_says_which_of_the_two_things_is_true() {
 
 #[test]
 fn the_message_lists_the_implemented_verbs_from_the_registry() {
-    let m = one_about("derived := pedidos.sort(pedidos.id)", "Implemented today");
-    // Alphabetical because `verb_names` sorts, and all five because the filter
+    let m = one_about("derived := pedidos.sort(pedidos.id)", "implemented today");
+    // Alphabetical because `verb_names` sorts, and all six because the filter
     // is over the table rather than over a literal. It read `join`, `select`,
     // `where` until `distinct` and `union` gained lowerings, and then `group_by`
     // arrived and moved it again — which is the whole reason the list is
     // derived. Six of them is the whole of the direction `design/algebra`
     // declares.
     assert!(
-        m.contains("Implemented today: `distinct`, `group_by`, `join`, `select`, `union`, `where`"),
+        m.contains("implemented today: `distinct`, `group_by`, `join`, `select`, `union`, `where`"),
         "the list must come from the registry, not from a format string: {m}"
     );
 }
@@ -198,7 +203,7 @@ fn a_union_refuses_the_alias_a_join_takes() {
 fn a_group_by_with_nothing_aggregated_is_refused() {
     let m = one_about("derived := pedidos.group_by(pedidos.id)", "group_by");
     assert!(
-        m.contains("needs one or more aggregations and this call gives none"),
+        m.contains("needs one or more aggregations, and this call gives none"),
         "the position is named as the row declares it: {m}"
     );
     assert!(

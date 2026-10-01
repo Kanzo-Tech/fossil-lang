@@ -16,8 +16,8 @@
 //! | [`WasmWorkspace::missing_documents`] | `Array<{ key, locator, connection? }>` | `resolveDocuments` |
 //! | [`WasmWorkspace::register_document`] | `()`                           | `resolveDocuments` |
 //! | [`WasmWorkspace::sources`]     | `Array<ProgramSource>`               | introspection |
-//! | [`WasmWorkspace::check`]       | `Array<{ uri, range, severity, message }>` | a diagnostics panel, workspace-wide |
-//! | [`WasmWorkspace::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | the same rows scoped to one file |
+//! | [`WasmWorkspace::check`]       | `Array<CheckRow>`                    | a diagnostics panel, workspace-wide |
+//! | [`WasmWorkspace::diagnostics_for`] | `Array<CheckRow>`                | the same rows scoped to one file |
 //! | [`WasmWorkspace::hover`]       | `{ markdown, range } \| null`        | `textDocument/hover`       |
 //! | [`WasmWorkspace::completions`] | `Array<{ label, kind, detail }>`     | `textDocument/completion`  |
 //! | [`WasmWorkspace::goto_definition`] | `Array<{ uri, range }>`          | `textDocument/definition`  |
@@ -266,6 +266,20 @@ pub(crate) fn to_value<T: serde::Serialize + ?Sized>(
     serde_wasm_bindgen::to_value(value).map_err(|e| bug(format!("serialising {what}"), e).into())
 }
 
+/// Diagnostic rows as plain JS data, through JSON rather than
+/// [`to_value`]: a row's `data` is a `serde_json::Value`, and
+/// `serde_wasm_bindgen` writes a map as an ES `Map`, which a host reading
+/// `row.data.field` finds nothing on.
+fn rows_to_value(rows: &[CheckRow]) -> Result<JsValue, JsValue> {
+    let text = serde_json::to_string(rows).map_err(|e| {
+        bug(
+            "serialising the check rows",
+            JsValue::from_str(&e.to_string()),
+        )
+    })?;
+    js_sys::JSON::parse(&text).map_err(|e| bug("parsing the check rows", e).into())
+}
+
 /// The failure an unknown or closed handle is.
 const fn unknown_handle() -> Failure {
     Failure::new(Problem::UnknownHandle {})
@@ -344,9 +358,8 @@ impl WasmWorkspace {
     }
 
     /// Every open **program**'s diagnostics as a flat JS array of
-    /// `{ uri, range, severity, message }` rows keyed by file URI — the
-    /// diagnostics panel's view. It is NOT the LSP wire's shape; see
-    /// [`CheckRow`].
+    /// [`CheckRow`]s keyed by file URI — the diagnostics panel's view. It is
+    /// NOT the LSP wire's shape; see [`CheckRow`].
     ///
     /// A buffer the installed provider catalogue claims — a `.shex` being
     /// edited, a `.csv`, a `.parquet` — is an INPUT and is not parsed as fossil.
@@ -355,9 +368,8 @@ impl WasmWorkspace {
     ///
     /// `range` is the UTF-16 LSP range (via `fossil_ide::LineIndex` — the
     /// rust-analyzer model). `severity` is the LSP integer constant
-    /// (1 = error, 2 = warning, 3 = info). `message` carries any
-    /// `suggestion_source` as a `\nhelp: ...` suffix. All three come from
-    /// [`fossil_ide::lsp_diagnostic`], the rendering an editor is shown.
+    /// (1 = error, 2 = warning, 3 = info). `message` is the problem rendered
+    /// and nothing else; `help` is its own field.
     ///
     /// # Errors
     ///
@@ -370,7 +382,7 @@ impl WasmWorkspace {
         // runtime (the `to_value` call panics on native targets — the
         // wasm-bindgen library's deliberate guard).
         let ws = self.inner.try_borrow().map_err(|_| busy("check"))?;
-        to_value("the check rows", &ws.check_rows())
+        rows_to_value(&ws.check_rows())
     }
 
     /// Per-file diagnostic drain: `check()` returns the workspace-wide flat
@@ -390,7 +402,7 @@ impl WasmWorkspace {
         let rows = ws
             .diagnostics_for_rows(*handle)
             .ok_or_else(unknown_handle)?;
-        to_value("the diagnostic rows", &rows)
+        rows_to_value(&rows)
     }
 
     // ----- Documents and sources: fossil resolves, the host reads -----
@@ -874,14 +886,28 @@ pub struct MissingDocumentRow {
 /// often a bare name and not a URI — see [`Self::related`].
 ///
 /// Everything but those keys is projected from the shared rendering, so the
-/// message, the severity and the ranges here cannot disagree with what an editor
-/// is shown.
+/// message, the code, the severity and the ranges here cannot disagree with
+/// what an editor is shown. On the wire:
+///
+/// ```text
+/// { uri, range, severity, code, message, title, data,
+///   help?, didYouMean?: { range, replacement }, suggestion?, related? }
+/// ```
+///
+/// `CheckRow` in `@fossil-lang/types` is this, with `data` typed by `code`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CheckRow {
     pub uri: String,
     pub range: Range,
     pub severity: DiagnosticSeverity,
+    /// The problem's code — `area/kind`, what a host branches on.
+    pub code: &'static str,
+    /// The problem rendered, for a person. Nothing parses it.
     pub message: String,
+    /// `title`, `data`, `help`, `didYouMean` and `suggestion`: LSP's `data`,
+    /// flattened onto the row.
+    #[serde(flatten)]
+    pub detail: fossil_ide::DiagnosticData,
     /// The other places this one diagnostic points at — LSP's
     /// `relatedInformation`, in this array's own shape.
     ///
@@ -909,10 +935,12 @@ pub struct CheckRelated {
 
 /// Project one diagnostic onto the JS-side row shape.
 ///
-/// The range, the severity and the `help:`-suffixed message come from
-/// [`fossil_ide::lsp_diagnostic`] — the same rendering both LSP transports
-/// publish — so this cannot drift from what an editor shows. Only the two keys
-/// are this array's own; [`CheckRow::related`] says why.
+/// The range, the severity and the message come from
+/// [`fossil_ide::lsp_diagnostic`] and the rest from
+/// [`fossil_ide::DiagnosticData::of`], which is what it sends as `data` — the
+/// same rendering both LSP transports publish — so this cannot drift from what
+/// an editor shows.
+/// Only the two keys are this array's own; [`CheckRow::related`] says why.
 fn to_check_row(
     db: &WasmDb,
     file: SourceFile,
@@ -925,7 +953,9 @@ fn to_check_row(
         uri: uri.to_string(),
         range: rendered.range,
         severity: rendered.severity.unwrap_or(DiagnosticSeverity::ERROR),
+        code: d.problem.code(),
         message: rendered.message,
+        detail: fossil_ide::DiagnosticData::of(index, d),
         related: fossil_ide::related_locations(db, file, d)
             .into_iter()
             .map(|r| CheckRelated {

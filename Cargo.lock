@@ -1939,6 +1939,8 @@ dependencies = [
  "lsp-types",
  "rowan",
  "salsa",
+ "serde",
+ "serde_json",
  "smol_str",
 ]
 

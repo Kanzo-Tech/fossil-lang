@@ -47,7 +47,7 @@
 //! anything asks a mapping for its target shape. So a document that cannot
 //! answer fails THERE: the binding takes a
 //! [`ShapeBindError`](crate::def_map::ShapeBindError), `lookup_type` answers
-//! `None`, [`crate::lower`] reports it by cause (`unbound_shape_message`, which
+//! `None`, [`crate::lower`] reports it by cause (`unbound_shape_problem`, which
 //! carries the did-you-mean over the names the program bound) and leaves
 //! `shape_iri` empty — and an empty shape IRI reads here as «no shape clause».
 //! `Undeclared` was doubly unreachable on top of that: a positional binding
@@ -74,10 +74,8 @@
 //! source side, and [`crate::check`] — which runs inside `typecheck_mapping` —
 //! turns it into a diagnostic.
 
-use std::fmt;
-
 use fossil_graph_schema::{
-    Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape, Span,
+    Occurs, OutputShapes, Primitive, Problem, PropertyConstraint, Rejection, Shape, Span,
 };
 use smol_str::SmolStr;
 
@@ -366,50 +364,6 @@ pub enum TargetShapeError {
     NoDocument,
 }
 
-/// Why reading a shape document produced no document.
-///
-/// The path→document half of [`TargetShapeError`], shared with
-/// [`crate::def_map`] (which reports it as a
-/// [`ShapeBindError`](crate::def_map::ShapeBindError)) and [`crate::infer`]
-/// (which reports it as a diagnostic). One reader of the registry, three
-/// callers with three different ways of complaining.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DocumentError {
-    /// Nothing is registered at the resolved path.
-    Unregistered,
-    /// The decode was asked for and produced nothing — an installed row that
-    /// stopped reading types between the check and the call. Not reachable from
-    /// a program: every way a program can get this wrong is a [`Self::Mismatch`]
-    /// with the row's own words in it.
-    Undecodable,
-    /// **The document is named and no provider is.** `schema = "x.shex"` — the
-    /// last position where a document arrived without a row to read it, and the
-    /// only one that ever selected a decoder by extension.
-    Unnamed,
-    /// **The row the program named refused the job**, in the row's own words:
-    /// it does not read types at all (`io.csv`), or it does not accept this
-    /// extension (`io.shex("catalogue.ttl")`). The row checks and the row words
-    /// its own rejection; the core only carries it.
-    Mismatch(SmolStr),
-    /// A decoder ran and rejected the document.
-    Unparseable(SmolStr),
-}
-
-impl fmt::Display for DocumentError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unregistered => f.write_str("no document is registered at that path"),
-            Self::Undecodable => f.write_str("no installed provider reads this document"),
-            Self::Unnamed => f.write_str(
-                "a shape document is named by a provider call — write \
-                 `schema = io.shex(\"…\")` or `schema = io.shacl(\"…\")`",
-            ),
-            Self::Mismatch(message) => f.write_str(message),
-            Self::Unparseable(cause) => write!(f, "the decoder rejected it: {cause}"),
-        }
-    }
-}
-
 /// The decoded document `path` names, read as the language `constructor` names.
 ///
 /// The ONE place `fossil-hir` turns a path a program wrote into a shape
@@ -427,8 +381,13 @@ impl fmt::Display for DocumentError {
 /// questions it answers about itself, and each refusal comes back in the row's
 /// own words: does it read TYPES at all, and does it accept this extension.
 ///
+/// # Errors
+///
+/// The [`Problem`] a caller reports — `provider/*` when the row refuses,
+/// `document/not-registered`, `document/unparseable`.
+///
 /// `constructor` is `None` only for a program that named a document without a
-/// provider, and that is [`DocumentError::Unnamed`] — not a fallback. The
+/// provider, and that is `provider/bare-document-path` — not a fallback. The
 /// `schema =` argument of a source is a provider call like every other position
 /// that names a document, so there is one rule and no corner left in it.
 pub(crate) fn decoded_document(
@@ -436,25 +395,27 @@ pub(crate) fn decoded_document(
     file: fossil_base::SourceFile,
     constructor: Option<&str>,
     path: &str,
-) -> Result<OutputShapes, DocumentError> {
+) -> Result<OutputShapes, Problem> {
     use fossil_base::providers::{Capability, provider};
 
     let table = fossil_base::providers::installed(db);
-    let ctor = constructor.ok_or(DocumentError::Unnamed)?;
-    let row = provider(table, ctor).ok_or_else(|| {
-        DocumentError::Mismatch(SmolStr::from(crate::refusals::unknown_constructor(
-            ctor, table,
-        )))
+    let ctor = constructor.ok_or_else(|| Problem::BareDocumentPath {
+        document: path.to_string(),
+    })?;
+    let row = provider(table, ctor).ok_or_else(|| Problem::UnknownProvider {
+        constructor: ctor.to_string(),
     })?;
     if !row.provides(Capability::ReadTypes) {
-        return Err(DocumentError::Mismatch(SmolStr::from(
-            crate::refusals::decline_capability(row, Capability::ReadTypes, table),
-        )));
+        return Err(Problem::WrongCapability {
+            constructor: row.constructor(),
+            capability: crate::refusals::capability(Capability::ReadTypes).to_string(),
+        });
     }
     if !row.accepts(path) {
-        return Err(DocumentError::Mismatch(SmolStr::from(
-            crate::refusals::decline_extension(row, path),
-        )));
+        return Err(Problem::WrongExtension {
+            constructor: row.constructor(),
+            document: path.to_string(),
+        });
     }
 
     // The key, and the SAME function the hosts register under
@@ -462,10 +423,21 @@ pub(crate) fn decoded_document(
     // «the document nobody registered» and «the document registered under
     // another key» became the same message.
     let key = crate::documents::registry_key(db, file, path);
-    let doc = fossil_base::file_at(db, &key).ok_or(DocumentError::Unregistered)?;
-    let shapes = crate::shape_documents::shape_document(db, doc, row.name)
-        .ok_or(DocumentError::Undecodable)?;
-    malformed_cause(&shapes).map_or(Ok(shapes), |cause| Err(DocumentError::Unparseable(cause)))
+    let doc = fossil_base::file_at(db, &key).ok_or_else(|| Problem::NotRegistered {
+        document: path.to_string(),
+    })?;
+    // An installed row that stopped reading types between the check and the
+    // call: not reachable from a program.
+    let shapes =
+        crate::shape_documents::shape_document(db, doc, row.name).ok_or_else(|| Problem::Bug {
+            what: format!("no installed provider reads `{path}`"),
+        })?;
+    malformed_cause(&shapes).map_or(Ok(shapes), |cause| {
+        Err(Problem::Unparseable {
+            document: path.to_string(),
+            reason: Some(cause.to_string()),
+        })
+    })
 }
 
 /// The message of the document's top-level failure, if it has one.
@@ -503,7 +475,7 @@ pub fn inner_primitive<'db>(db: &'db dyn fossil_base::Db, ty: Ty<'db>) -> Option
 ///
 /// [`TargetShapeError::NoDocument`], and nothing else — see that type. The four
 /// document failures that had variants here are reported at the binding, by
-/// `crate::lower::unbound_shape_message`, and cannot reach this function.
+/// `crate::lower::unbound_shape_problem`, and cannot reach this function.
 pub fn resolve_target_shape<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
@@ -715,12 +687,16 @@ User : Person from users
         let diagnostics =
             crate::lower::lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
         assert!(
-            diagnostics.iter().any(|d| d
-                .message
-                .contains("`Person` is not a shape this program declares")
-                && d.message.contains("no shape names at all")),
+            diagnostics.iter().any(|d| d.problem
+                == fossil_base::Problem::UnknownShape {
+                    shape: "Person".into(),
+                    declared: Vec::new(),
+                }
+                && d.help
+                    .as_deref()
+                    .is_some_and(|h| h.contains("no shape names at all"))),
             "and the program is still told so, got: {:?}",
-            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
         );
     }
 
@@ -780,7 +756,7 @@ User : Person from users
     //
     // The four CAUSES are still covered, by the tests that own them:
     // `def_map`'s `ShapeBindError` tests, and `lower.rs`'s
-    // `unbound_shape_message`, which turns each into a sentence naming the
+    // `unbound_shape_problem`, which turns each into a sentence naming the
     // document and the reason — and, since the `Undeclared` arm was deleted,
     // carries the did-you-mean that arm used to render.
     //
@@ -824,14 +800,14 @@ User : Person from users
                 src_naming("missing.shex"),
                 "person.shex",
                 PERSON_DOCUMENT,
-                "its document `missing.shex` could not be read",
+                "the document `missing.shex` is not registered",
             ),
             (
                 "a document no decoder claims — here by extension",
                 src_naming("person.unknown"),
                 "person.unknown",
                 PERSON_DOCUMENT,
-                "could not be read as a shape document",
+                "`io.shex` does not read `person.unknown`",
             ),
             (
                 "a document the decoder rejected",
@@ -860,14 +836,14 @@ User : Person from users
                 good.replace("io.shex(", "io.csv("),
                 "person.shex",
                 PERSON_DOCUMENT,
-                "could not be read as a shape document",
+                "`io.csv` does not read types",
             ),
             (
                 "a constructor this host does not install",
                 good.replace("io.shex(", "io.nope("),
                 "person.shex",
                 PERSON_DOCUMENT,
-                "could not be read as a shape document",
+                "`io.nope` is not a provider this host installs",
             ),
             (
                 "a bare string where a provider call belongs",
@@ -880,7 +856,7 @@ User : Person from users
                 // which printed the `Result` and not the diagnostic text — so
                 // it guessed the message of the neighbouring case. The cause
                 // is what has to be pinned, and this is the cause.
-                "could not be read as a shape document",
+                "`person.shex` is named by no provider",
             ),
             (
                 "two names and one declared shape — the second binds nothing",
@@ -906,10 +882,10 @@ User : Person from users
             let diagnostics =
                 crate::lower::lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
             assert!(
-                diagnostics.iter().any(|d| d.message.contains(expected)),
+                diagnostics.iter().any(|d| d.message().contains(expected)),
                 "{wrong}: and the failure is reported where it happened, by \
                  cause — expected {expected:?}, got: {:?}",
-                diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+                diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
             );
         }
     }

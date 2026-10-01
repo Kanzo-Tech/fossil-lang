@@ -88,7 +88,7 @@ pub(crate) fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<String> {
         out.extend(
             fossil_mir::lower_to_mir_pg::accumulated::<fossil_base::Diagnostic>(db, *mapping)
                 .into_iter()
-                .map(|d| d.message.clone()),
+                .map(fossil_base::Diagnostic::message),
         );
     }
     out

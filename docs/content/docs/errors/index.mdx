@@ -1,0 +1,23 @@
+---
+title: Error index
+description: Every code fossil reports — a compile diagnostic, a refused run, a corpus that will not open — and a page for each saying what it is, why fossil refuses, and how to repair it.
+---
+
+Everything fossil reports carries a **code**, `area/kind`: `type/property-mismatch`,
+`run/over-budget`, `corpus/unknown-table`. The area names where the mistake is, not which part of
+fossil noticed it, so the same mistake found by `check` and again by `run` has one code. The code is
+also the route of its page here: `type/property-mismatch` is `/docs/errors/type/property-mismatch`.
+
+You reach a page from where the error is shown. An editor running fossil's language server links the
+squiggle to it through the diagnostic's `codeDescription`; in JavaScript, a `FossilError` carries
+`code`, and `helpUrl(code)` from `@fossil-lang/types` builds the link — against the published site, or
+against the `base` a deployment serves its own copy from.
+
+Each page is headed by the code's **title**, which is fixed per code. The message you saw beside it
+is the **detail**: it names the things only that occurrence knows, it may be reworded in any release,
+and nothing should parse it. A value a host needs is in the error's `data`.
+
+A code, once released, never changes meaning and is never reused. The argument for all of this is
+[one error, from Rust to the screen](/docs/design/errors).
+
+<ErrorIndex />

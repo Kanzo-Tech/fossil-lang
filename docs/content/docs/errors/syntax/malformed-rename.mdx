@@ -1,0 +1,53 @@
+---
+title: A malformed rename
+description: "`syntax/malformed-rename` — a `@rename` attribute that is missing one of its parts: the rename itself, or the `as` inside it."
+---
+
+A `@rename` above a type binding has a fixed form — the type, then one or more renames, each a
+predicate IRI in a string, `as`, and the name to write instead — and this one is missing a part.
+The message says which part, and quotes the whole form:
+
+```fossil
+@rename(Person, "http://xmlns.com/foaf/0.1/name" foaf_name)
+type { Person } := io.shex("mixed.shex")
+```
+
+```text
+syntax/malformed-rename
+  × this `@rename` has no `as`: a rename is `@rename(Type, "<predicate IRI>" as <name>)`
+  help: the `as` is what separates the predicate from the name you want to write instead.
+```
+
+The parser reports it in two cases. A rename with no `as` between its string and its name, as
+above; and a `@rename(Person)` that names a type and renames nothing, which reports the missing part
+as `"<predicate IRI>" as <name>` with the help *`@rename` needs at least one: it names the type whose
+predicate is being renamed, and then what to call it.* The label is zero-width, at the token where
+the missing part should begin.
+
+## Why fossil refuses it
+
+A rename is the repair for two predicates whose last IRI segments coincide
+([shape/name-collision](/docs/errors/shape/name-collision)): both short names would be the same
+property key, so fossil refuses to write either and never picks between them itself
+([type providers](/docs/design/type-providers)). The author settles it, in the program rather than in
+the `.shex`, because the vocabulary may not be yours:
+
+<Program src="rename/rename.fossil" region="repair" title="rename.fossil" />
+
+The predicate has to be a full IRI in a string — the colliding predicates differ only *before* their
+last segment, so a short name could identify neither. An empty `@rename(Person)` would be a line
+that looks like the repair and is not one, which is why the grammar requires at least one rename.
+The parser names the production rather than the token it wanted because `expected IDENT, found
+STRING` says much less than the form you were writing.
+
+## How to repair it
+
+- **Missing `as`**: put `as` between the string and the new name —
+  `"http://xmlns.com/foaf/0.1/name" as foaf_name`. `as` is not a reserved word; it is recognised
+  only in this position and in a self-join's alias.
+- **No rename at all**: add one after the type, separated by a comma. More than one is allowed:
+  `@rename(Person, "http://a/name" as a_name, "http://b/name" as b_name)`.
+- **No rename needed**: if nothing collides, delete the attribute.
+
+Once the rename parses, the name it introduces is the property key a mapping writes, as `foaf_name`
+is in the program above.

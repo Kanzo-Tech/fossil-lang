@@ -1,0 +1,31 @@
+---
+title: Branches of different types
+description: "`type/branch-mismatch` — the two branches of a `? :` conditional have different types, and fossil does not coerce one into the other."
+---
+
+The two branches of a conditional have types that neither is a subtype of the other:
+
+```fossil
+    stock = Item.stock > 0 ? "in stock" : 0
+    // the branches of `? :` have different types: String and Integer
+    // help: both branches must have the same type — fossil does not coerce
+```
+
+## Why fossil refuses it
+
+The conditional's type is its branches' type ([typing](/docs/design/typing#the-conditional)), so the
+two must agree. A conditional that gave a `String` on some rows and an `Integer` on others would be
+a column whose type depends on the row, and no shape can check a column like that — the property it
+feeds would be valid for some rows and invalid for others, and nobody would know until the data was
+queried.
+
+The widening of `Integer` into `Float` is the one coercion in the language, and it applies here too:
+`x ? 1 : 2.5` is a `Float`. Nothing else is coerced. When only one branch can be typed, the
+conditional takes that branch's type and nothing is reported.
+
+## How to repair it
+
+- **Make both branches the same type.** Write `"0"` instead of `0`, or a number in both.
+- **Convert one side explicitly.** A standard-library function that returns the other branch's type
+  — a `parse.*` function, for instance — makes the choice visible instead of implicit.
+- **Split it.** If the two branches really are different things, they belong in two properties.

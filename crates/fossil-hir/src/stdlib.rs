@@ -96,7 +96,7 @@ pub fn stdlib() -> &'static FunctionRegistry {
     &STDLIB
 }
 
-/// Every catalogue row that is an aggregate, spelled and sorted, for a message.
+/// Every catalogue row that is an aggregate, sorted, for a message.
 ///
 /// Derived, like `crate::lower::lowered_verbs` and for the same reason: the
 /// list a user is shown and the list the checker admits have to be one list, or
@@ -107,7 +107,7 @@ pub fn aggregate_names() -> Vec<String> {
         .entries
         .values()
         .filter(|e| e.agg_fn().is_some())
-        .map(|e| format!("`{}`", e.name))
+        .map(|e| e.name.to_string())
         .collect();
     names.sort();
     names

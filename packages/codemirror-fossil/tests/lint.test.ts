@@ -6,7 +6,7 @@
 import { forEachDiagnostic, forceLinting } from '@codemirror/lint';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { FossilError, TITLES, helpUrl, type Problem } from '@fossil-lang/types';
+import { FossilError, TITLES, type Problem } from '@fossil-lang/types';
 import { describe, expect, it } from 'vitest';
 
 import { fossilLinter, toDiagnostics, type CheckRowLike, type CheckSource } from '../src/lint.js';
@@ -99,6 +99,30 @@ describe('toDiagnostics', () => {
     expect(d!.to).toBeGreaterThan(d!.from);
   });
 
+  it('puts help under the message, the way `fossil check` prints it', () => {
+    const [d] = toDiagnostics(state(), [row({ help: 'did you mean `name`?' })], URI);
+    expect(d!.message).toBe('unknown column `nmae`\nhelp: did you mean `name`?');
+    expect(d!.actions).toBeUndefined();
+  });
+
+  it('offers the did-you-mean as an action that applies the replacement', () => {
+    const view = new EditorView({ state: state() });
+    const range = { start: { line: 3, character: 14 }, end: { line: 3, character: 18 } };
+    const [d] = toDiagnostics(view.state, [row({ didYouMean: { range, replacement: 'name' } })], URI);
+    const [action] = d!.actions ?? [];
+    expect(action!.name).toBe('Replace with `name`');
+    action!.apply(view, d!.from, d!.to);
+    expect(view.state.doc.line(4).text).toBe('  name = User.name');
+  });
+
+  it('offers the suggestion as an action that replaces the diagnostic range', () => {
+    const view = new EditorView({ state: state() });
+    const [d] = toDiagnostics(view.state, [row({ suggestion: 'nickname' })], URI);
+    const [action] = d!.actions ?? [];
+    action!.apply(view, d!.from, d!.to);
+    expect(view.state.doc.line(4).text).toBe('  name = User.nickname');
+  });
+
   it('does not widen past the end of an empty document', () => {
     const s = state('');
     const [d] = toDiagnostics(
@@ -119,12 +143,6 @@ describe('a failure, as a diagnostic', () => {
     detail: 'the host did not answer its connections within 30000 ms',
     severity: 'error',
   };
-
-  it('shows a row’s problem by its title, its code and its page', () => {
-    const [d] = toDiagnostics(state(), [row({ problem: unread })], URI);
-    expect(d!.message.split('\n')[0]).toContain('[storage/host-silent]');
-    expect(d!.message).toContain(helpUrl('storage/host-silent'));
-  });
 
   it('shows a refused check by its code, and one fossil did not raise as internal/bug', async () => {
     const lint = async (source: CheckSource): Promise<string[]> => {

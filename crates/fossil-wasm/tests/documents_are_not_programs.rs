@@ -47,7 +47,7 @@
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use fossil_wasm::FossilWorkspace;
+use fossil_wasm::{CheckRow, FossilWorkspace};
 
 /// The program of `shape_document.rs`, naming its output document.
 const PROGRAM: &str = "\
@@ -94,11 +94,10 @@ const USERS_DESCRIPTOR: &str = r#"{
   "freshness_token": ""
 }"#;
 
-fn rows_for(ws: &FossilWorkspace, uri: &str) -> Vec<String> {
+fn rows_for(ws: &FossilWorkspace, uri: &str) -> Vec<CheckRow> {
     ws.check_rows()
         .into_iter()
         .filter(|r| r.uri == uri)
-        .map(|r| r.message)
         .collect()
 }
 
@@ -137,7 +136,9 @@ fn a_shape_document_in_the_workspace_is_not_parsed_as_fossil() {
     // Silencing the document must not deregister it.
     let in_program = rows_for(&ws, "prog.fossil");
     assert!(
-        in_program.iter().any(|m| m.contains("expects Integer")),
+        in_program
+            .iter()
+            .any(|r| r.code == "type/property-mismatch" && r.detail.data["expected"] == "Integer"),
         "the program is still checked against the document it names; got \
          {in_program:#?}"
     );

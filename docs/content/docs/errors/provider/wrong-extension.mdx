@@ -1,0 +1,39 @@
+---
+title: The provider does not read this extension
+description: "`provider/wrong-extension` — a shape document's extension is not one the provider the program named reads."
+---
+
+The program names a type reader and a document whose extension that reader does not accept:
+
+```fossil
+type { Person } := io.shex("person.ttl")
+```
+
+```text
+`io.shex` does not read `person.ttl`
+help: `io.shex` reads `.shex`, `.shexj` or `.shexc` documents, and `person.ttl` is `.ttl`
+```
+
+`io.shacl` reads `.ttl` and `.shacl`. A document with no extension at all is refused the same way,
+and the `help` says it has none. The check runs in the positions that name a shape document — a
+`type { … }` binding and a `schema =` argument — at `check` and again at `run`.
+
+## Why fossil refuses it
+
+The row that reads a document is the one the program names, never the one its extension happens to
+match. That was not always so: `io.shex("catalogue.ttl")` used to behave byte for byte like
+`io.shacl("catalogue.ttl")`, because the extension picked the decoder and the name was decorative.
+Now the name picks, and the extension is checked against the extensions the named row declares — so
+a program that says ShEx and points at a Turtle file is told so, instead of being read as something
+it did not say. See [type providers](/docs/design/type-providers).
+
+A data source's extension is **not** checked. Nothing has ever required one: `s3://bucket/export`
+and `@warehouse/daily` are both legal sources, and turning the row readers' extension lists into a
+gate would reject working programs for a rule nothing states.
+
+## How to repair it
+
+- **The provider is wrong.** If the document is SHACL shapes in Turtle, write
+  `io.shacl("person.ttl")`.
+- **The file name is wrong.** A ShEx document saved as `.txt`, or with no extension, is renamed to
+  one of the extensions the `help` lists, and the string in the program follows it.

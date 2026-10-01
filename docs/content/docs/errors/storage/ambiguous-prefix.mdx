@@ -1,0 +1,36 @@
+---
+title: More than one prefix was vended
+description: "`storage/ambiguous-prefix` — a job's credentials covered several prefixes where a reader or a run needs exactly one."
+---
+
+A job is one corpus, and a corpus lives under one prefix. When the host answers a job scope with
+credentials for more than one prefix, fossil does not choose between them:
+
+```text
+job 3 vends 2 prefixes, and a corpus lives under one
+```
+
+A host sees `data: { scope, count }` — `scope` is `job <id>`, `count` the number of prefixes vended.
+There are two emitters. `open(job, { engine, host })` in `@fossil-lang/corpus` mounts `read` on the job
+and throws this, releasing the mount first, when it gets anything but one prefix. A run in the
+executor asks for `write` on the job and throws it with the help *a run writes under exactly one
+prefix*, before it reads a source.
+
+## Why fossil refuses it
+
+Everything in a corpus is named relative to one root: `fossil.json` sits at the prefix, and every
+`path` it lists is taken as written, relative to it — nothing is listed and nothing is computed
+([the corpus](/docs/design/corpus)). A reader with two prefixes has two candidate roots and no rule
+that says which holds `fossil.json`; a writer with two has two places to put the files and the
+manifest that commits them. Picking one would be a guess about the host's storage layout.
+
+A connection is different. Several credentials for one connection are fine: where several cover a
+file, the longest prefix that covers it is used. Only a job, which names one dataset, must be one
+prefix.
+
+## How to repair it
+
+- **Vend exactly one credential for a job scope**, whose `prefix` is the corpus root (for a run, the
+  directory the output is written under).
+- If the host keeps a job's data in more than one place, it is more than one job: give each its own
+  id and open or run them separately.

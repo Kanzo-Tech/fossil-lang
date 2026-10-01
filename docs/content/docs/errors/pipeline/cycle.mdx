@@ -1,0 +1,45 @@
+---
+title: A pipeline that derives from itself
+description: "`pipeline/cycle` — a source pipeline's base, or a relation it joins or unions, leads back to the pipeline itself."
+---
+
+A pipeline's rows are its base's rows put through its verbs, and the base can itself be a pipeline.
+When following those names comes back to where it started, there is no first relation to read:
+
+```fossil
+Active  := Recent.where(Recent.active)
+Recent  := Active.where(Active.year >= 2020)
+```
+
+```text
+the source pipeline `Active` derives from itself, directly or through the pipelines it names
+```
+
+"The pipelines it names" includes the other side of a `join` or a `union`: `A := B.join(A, on = …)`
+is a cycle too.
+
+## Why fossil refuses it
+
+The checker types a pipeline by resolving its base first — the base's row is what the first verb
+receives — and the base of a base, and so on until a binding that reads a file. A cycle has no such
+binding, so the row of every relation in it is defined only in terms of itself, and nothing could be
+read to fill it.
+
+The check is a depth limit, not a graph walk: resolution stops at 32 nested pipelines and reports
+the one it was resolving there. Thirty-two is not a depth anyone reaches writing a mapping, so in
+practice it is a cycle; but it also means a chain of more than thirty-two genuinely distinct
+pipelines would be reported with this message.
+
+## How to repair it
+
+Find the binding that should read a file. One relation in the loop has to start from a source, not
+from another pipeline:
+
+```fossil
+Rows   := io.csv("data/rows.csv")
+Recent := Rows.where(Rows.year >= 2020)
+Active := Recent.where(Rows.active)
+```
+
+Note that `where` renames nothing, so after a filter the columns are still addressed by the binding
+that reads the file — `Rows.active`, not `Recent.active`.

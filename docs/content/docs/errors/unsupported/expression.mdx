@@ -1,0 +1,38 @@
+---
+title: An expression fossil cannot lower yet
+description: "`unsupported/expression` — an expression or literal the parser read and the compiler has no lowering for, so the property is not written."
+---
+
+The parser read something in a property value and the lowering — the step that turns the syntax tree
+into the program fossil checks — has no case for it. The message quotes what was written and says
+the property is not written:
+
+```text
+    doble = .id
+    // `.id` is not an expression fossil can lower yet, so this property is not written
+```
+
+This covers literals too: a literal the lowering does not read is reported here under the same code.
+When it can, the `help` names the kind of node the parser built, so the gap can be found.
+
+## Why fossil refuses it
+
+Because the alternative was silence, and silence happened. The lowering once read a handful of node
+kinds and dropped the rest; the checker said nothing because it never saw the expression, and the
+compiler declared success over a corpus with a property missing. `n = 42` produced no property and
+no diagnostic until it was found. The fallback is now this diagnostic — see
+[the drop is loud](/docs/design/expressions#the-drop-is-loud).
+
+Every expression form in the grammar has a lowering, so what reaches this today is mostly the
+parser's own error node: a spelling the grammar has retired, such as the leading dot above. The
+parser usually reports that spelling as well, with what to write instead.
+
+## How to repair it
+
+- **Read the other diagnostic on the same line first.** A retired spelling is refused by the parser
+  with its replacement — here, the qualified reference `User.id`.
+- **Rewrite it in a form the language has.** A property value may be a string, an interpolated
+  string, a qualified column reference, a call, or an operator expression; see
+  [values and expressions](/docs/book/expressions).
+- **If it is a valid expression**, it is a gap in the compiler, not a mistake in the program, and is
+  worth reporting with the quoted text.

@@ -16,9 +16,17 @@
  * constraint, which is in ANOTHER FILE. CodeMirror's `Diagnostic` has no
  * cross-file concept, so those are folded into the message as `→ uri:line`
  * suffixes rather than dropped. A reader following one gets a location; a reader
- * ignoring it loses nothing.
+ * ignoring it loses nothing. `help` goes under the message as a `help:` line, the
+ * way `fossil check` prints it.
+ *
+ * ## The two repairs are actions
+ *
+ * A row's `didYouMean` and `suggestion` are `fossil-ide`'s two quick fixes as data,
+ * so each becomes a `Diagnostic.actions` entry that applies the edit: replace the
+ * misspelt name, or replace the diagnostic's range with the source `suggestion`
+ * carries.
  */
-import { linter, type Diagnostic } from '@codemirror/lint';
+import { linter, type Action, type Diagnostic } from '@codemirror/lint';
 import type { EditorState, Extension } from '@codemirror/state';
 import { FossilError, helpUrl, isFossilError, type Problem } from '@fossil-lang/types';
 
@@ -32,16 +40,17 @@ const SEVERITY: Readonly<Record<number, Diagnostic['severity']>> = {
   4: 'hint',
 };
 
-/** The `CheckRow` shape, restated structurally so this module imports no runtime.
- *  `@fossil-lang/wasm` is the definition; anything with these fields works. */
+/** The `CheckRow` fields this module reads, restated structurally. `@fossil-lang/types` is
+ *  the definition; anything with these fields works. */
 export interface CheckRowLike {
   uri: string;
   range: { start: Position; end: Position };
   severity: number;
   message: string;
+  help?: string;
+  didYouMean?: { range: { start: Position; end: Position }; replacement: string };
+  suggestion?: string;
   related?: { uri: string; range: { start: Position; end: Position }; message: string }[];
-  /** A row that is a failure — a document that could not be read — carries its whole problem. */
-  problem?: Problem;
 }
 
 /**
@@ -51,6 +60,33 @@ export interface CheckRowLike {
 export function problemMessage(problem: Problem): string {
   const help = problem.help === undefined ? '' : `\nhelp: ${problem.help}`;
   return `${problem.title} [${problem.code}]: ${problem.detail}${help}\nsee ${helpUrl(problem.code)}`;
+}
+
+/** Replace `range` — measured against the text the row was computed from — with `insert`. */
+function replace(name: string, range: CheckRowLike['range'], insert: string): Action {
+  return {
+    name,
+    apply(view) {
+      const { from, to } = rangeOf(view.state, range);
+      view.dispatch({ changes: { from, to, insert } });
+    },
+  };
+}
+
+function actionsOf(row: CheckRowLike): Action[] {
+  const actions: Action[] = [];
+  if (row.didYouMean !== undefined) {
+    const { range, replacement } = row.didYouMean;
+    actions.push(replace(`Replace with \`${replacement}\``, range, replacement));
+  }
+  const { suggestion } = row;
+  if (suggestion !== undefined) {
+    actions.push({
+      name: 'Split mapping into one per ShEx OneOf disjunct',
+      apply: (view, from, to) => view.dispatch({ changes: { from, to, insert: suggestion } }),
+    });
+  }
+  return actions;
 }
 
 // The clamping this module used to do itself is `positions.ts`'s now, because
@@ -75,15 +111,18 @@ export function toDiagnostics(
   for (const row of rows) {
     if (row.uri !== uri) continue;
     const { from, to } = rangeOf(state, row.range);
+    const help = row.help === undefined ? '' : `\nhelp: ${row.help}`;
     const related = (row.related ?? [])
       .map((r) => `\n  → ${r.uri}:${r.range.start.line + 1}: ${r.message}`)
       .join('');
+    const actions = actionsOf(row);
     out.push({
       from,
       to,
       severity: SEVERITY[row.severity] ?? 'error',
       source: 'fossil',
-      message: (row.problem === undefined ? row.message : problemMessage(row.problem)) + related,
+      message: row.message + help + related,
+      ...(actions.length === 0 ? {} : { actions }),
     });
   }
   return out;

@@ -40,7 +40,7 @@
 //!
 //! Six spellings the grammar retired are recognised on purpose rather than
 //! left to fall through the recovery arms, because the parser knows what was
-//! written and what replaces it. Their messages live in [`diag::retired`]:
+//! written and what replaces it. They are written down in [`diag::retired`]:
 //! `prefix ex: <…>`, the CURIE `ex:name`, the `<…>` absolute IRI, a leading `.`,
 //! the backtick and `|>`. A refusal that says `expected IDENT, found SHAPE_SEP`
 //! throws away both halves of that.
@@ -369,7 +369,7 @@ impl Parser {
             // — the byte never reaches a production.
             Some(t) if t.kind == SyntaxKind::ERROR && t.text == "`" => {
                 ParseDiagnostic::RetiredSpelling {
-                    message: diag::retired::BACKTICK.to_string(),
+                    form: &diag::retired::BACKTICK,
                     span,
                 }
             }
@@ -415,7 +415,7 @@ impl Parser {
     /// lexes as `< https :` and then a COMMENT that runs to the line break.
     /// That is why the comment counts toward the span here rather than being
     /// skipped as the trivia it is — the bytes are the form being refused.
-    pub(crate) fn retire(&mut self, message: &str, run: RetiredRun) {
+    pub(crate) fn retire(&mut self, form: &'static diag::retired::Retired, run: RetiredRun) {
         self.skip_trivia();
         let start = self.current_token_span_start();
         let mut end = start;
@@ -445,7 +445,7 @@ impl Parser {
         }
         self.finish();
         self.push_diagnostic(ParseDiagnostic::RetiredSpelling {
-            message: message.to_string(),
+            form,
             span: fossil_base::Span::new(
                 u32::try_from(start).unwrap_or(u32::MAX),
                 u32::try_from(end).unwrap_or(u32::MAX),
@@ -522,14 +522,14 @@ mod tests {
         SyntaxNode::new_root(p.builder.finish())
     }
 
-    fn diagnose_text(input: &str) -> Vec<String> {
+    fn diagnose_text(input: &str) -> Vec<fossil_base::Problem> {
         let tokens = lex_with_indents(input);
         let mut p = Parser::new(tokens);
         p.parse_program();
         p.diagnostics
             .iter()
             .cloned()
-            .map(|d| d.to_diagnostic().message)
+            .map(|d| d.to_diagnostic().problem)
             .collect()
     }
 
@@ -540,7 +540,11 @@ mod tests {
     fn a_prefix_declaration_is_refused_by_name() {
         let msgs = diagnose_text("prefix ex: <https://example.org/>\n");
         assert_eq!(msgs.len(), 1, "one refusal for one retired line: {msgs:?}");
-        assert!(msgs[0].contains("no vocabulary"), "{}", msgs[0]);
+        assert!(
+            matches!(&msgs[0], fossil_base::Problem::RetiredSpelling { spelling, .. } if spelling == "prefix"),
+            "{:?}",
+            msgs[0]
+        );
     }
 
     /// And `prefix` is an ordinary identifier again

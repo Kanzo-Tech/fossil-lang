@@ -71,7 +71,7 @@ fn users_row(db: &dyn fossil_base::Db) -> Ty<'_> {
 }
 
 /// Build a `Checker` over a fixture, with an explicit source row + optional
-/// resolved shape, inside a tracked shim so `delay_span_bug` is valid.
+/// resolved shape, inside a tracked shim so `fossil_base::report` is valid.
 fn build_checker<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
@@ -139,9 +139,16 @@ fn build_checker<'db>(
 fn about_the_body(diags: &[&Diagnostic]) -> Vec<String> {
     diags
         .iter()
-        .map(|d| d.message.clone())
-        .filter(|m| !m.contains("is declared and bound nothing"))
+        .filter(|d| !bound_nothing(d))
+        .map(|d| d.message())
         .collect()
+}
+
+/// The fixture's own complaint: a shape name whose binding bound nothing.
+fn bound_nothing(d: &Diagnostic) -> bool {
+    d.help
+        .as_deref()
+        .is_some_and(|h| h.contains("is declared and bound nothing"))
 }
 
 // ── Literal-subset regression (Phase 2 behaviour preserved) ────────────────
@@ -212,10 +219,7 @@ fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
     let (db, file) = db_with(HELLO);
     let _ = shim(&db, file);
     let raised = shim::accumulated::<Diagnostic>(&db, file);
-    let blame: Vec<&&Diagnostic> = raised
-        .iter()
-        .filter(|d| !d.message.contains("is declared and bound nothing"))
-        .collect();
+    let blame: Vec<&&Diagnostic> = raised.iter().filter(|d| !bound_nothing(d)).collect();
     assert_eq!(
         blame.len(),
         1,
@@ -228,7 +232,8 @@ fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
     // qualified path said `unknown column `x` on `Y`` and this one said
     // `unknown column `x``, which is two statements of one fact.
     assert_eq!(
-        d.message, "`naem` is not a field of `users`",
+        d.message(),
+        "`naem` is not a field of `users`",
         "the refusal names the column and the relation"
     );
     // The repair is a FIELD. It used to be a clause of the message, and the two
@@ -240,9 +245,9 @@ fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
         "the near miss is the `help:`, not part of the sentence"
     );
     assert!(
-        !d.message.contains("did you mean"),
+        !d.message().contains("did you mean"),
         "and it is not in both places: {:?}",
-        d.message
+        d.message()
     );
 }
 
@@ -289,7 +294,7 @@ User : Person from users
     let raised = shim::accumulated::<Diagnostic>(&db, file);
     let d = raised
         .iter()
-        .find(|d| d.message.contains("is not a field of"))
+        .find(|d| d.message().contains("is not a field of"))
         .expect("the column is refused");
 
     // Mapping-relative, so rebase before slicing: `HELLO`'s mapping starts at
@@ -393,8 +398,8 @@ Users : Person from Adults
 fn foreign_row_refusals(diags: &[&Diagnostic]) -> Vec<String> {
     diags
         .iter()
-        .map(|d| d.message.clone())
-        .filter(|m| m.contains("reads a row this mapping does not have"))
+        .filter(|d| d.problem.code() == "name/row-not-in-scope")
+        .map(|d| d.message())
         .collect()
 }
 
@@ -703,15 +708,13 @@ Orders : Order from Purchase
     assert!(refuse(&db, file), "String does not satisfy Float");
 
     let raised = refuse::accumulated::<Diagnostic>(&db, file);
-    let blame: Vec<&&Diagnostic> = raised
-        .iter()
-        .filter(|d| !d.message.contains("is declared and bound nothing"))
-        .collect();
+    let blame: Vec<&&Diagnostic> = raised.iter().filter(|d| !bound_nothing(d)).collect();
     assert_eq!(blame.len(), 1, "one refusal, got {blame:#?}");
     let d = blame[0];
 
     assert_eq!(
-        d.message, "`total` expects Float, and this is String",
+        d.message(),
+        "`total` expects Float, and this is String",
         "the message names the slot that refused the value"
     );
     let texts: Vec<&str> = d.labels.iter().map(|l| l.text.as_str()).collect();
@@ -727,7 +730,7 @@ Orders : Order from Purchase
     // The defect this replaces, stated as the thing that must not come back:
     // a `Span` reaching an author through `{:?}`. Checked over the message AND
     // the labels because either could carry one.
-    for text in std::iter::once(d.message.as_str()).chain(texts) {
+    for text in std::iter::once(d.message().as_str()).chain(texts) {
         assert!(
             !text.contains("Span {"),
             "a debug-printed span reached the author: {text:?}"
@@ -800,7 +803,7 @@ Orders : Order from Purchase
     let raised = refuse::accumulated::<Diagnostic>(&db, file);
     let d = raised
         .iter()
-        .find(|d| d.message.contains("expects Float"))
+        .find(|d| d.message().contains("expects Float"))
         .expect("the value is refused");
 
     let in_document: Vec<&fossil_base::SpanLabel> =
@@ -828,7 +831,7 @@ Orders : Order from Purchase
 
 /// A value of the wrong type gets told what to DO about it, both ways.
 ///
-/// `errors/wrong-type`'s hand-written target asked for these and neither
+/// `errors/type/property-mismatch`'s hand-written target asked for these and neither
 /// existed, so blessing that program deleted the only description of them:
 /// *«`Purchase.amount` is Float. If `reference` really holds the number,
 /// `parse.float(Purchase.reference)` converts it.»*
@@ -899,7 +902,7 @@ Orders : Order from Purchase
     let raised = refuse::accumulated::<Diagnostic>(&db, file);
     let help = raised
         .iter()
-        .find(|d| d.message.contains("expects Float"))
+        .find(|d| d.message().contains("expects Float"))
         .and_then(|d| d.help.clone())
         .expect("the refusal carries a repair");
 
@@ -955,7 +958,7 @@ fn a_wrong_type_with_no_repair_says_nothing() {
     assert!(refuse(&db, file), "Date does not satisfy Bool");
     let d = refuse::accumulated::<Diagnostic>(&db, file)
         .into_iter()
-        .find(|d| d.message.contains("expects Bool"))
+        .find(|d| d.message().contains("expects Bool"))
         .expect("the value is refused");
     assert_eq!(d.help, None, "no repair means no `help:`, not an empty one");
 }
@@ -980,7 +983,7 @@ fn a_wrong_type_with_no_repair_says_nothing() {
 ///
 /// What survives is the guarantee this test was written for — a named document
 /// that cannot answer says WHICH WAY it failed, and says it through the
-/// accumulator — so the expected substrings are `unbound_shape_message`'s,
+/// accumulator — so the expected substrings are `unbound_shape_problem`'s,
 /// which name the document and the reason. The misspelt-shape row is gone with
 /// the CURIE: a bare name that binds nothing is a name nobody declared, which
 /// is a different sentence and the last case below.
@@ -1021,13 +1024,13 @@ fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
             program("missing.shex", "T", "T"),
             "person.shex",
             PERSON_DOCUMENT,
-            "its document `missing.shex` could not be read",
+            "the document `missing.shex` is not registered",
         ),
         (
             program("person.unknown", "T", "T"),
             "person.unknown",
             PERSON_DOCUMENT,
-            "its document `person.unknown` could not be read as a shape document",
+            "`io.shex` does not read `person.unknown`",
         ),
         (
             program("broken.shex", "T", "T"),
@@ -1047,9 +1050,8 @@ fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
             program("person.shex", "T, Second, Third", "Third"),
             "person.shex",
             PERSON_DOCUMENT,
-            "`Third` is declared and bound nothing: the binding names 3 shape(s) \
-             and the document declares 1. Names bind by POSITION, so there is no \
-             shape 3 for it to take.",
+            "the binding names 3 shape(s) and the document declares 1, so `Third`, at \
+             position 3, binds nothing",
         ),
         (
             // The SECOND surplus name of the same binding, and the row that
@@ -1058,9 +1060,8 @@ fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
             program("person.shex", "T, Second, Third", "Second"),
             "person.shex",
             PERSON_DOCUMENT,
-            "`Second` is declared and bound nothing: the binding names 3 shape(s) \
-             and the document declares 1. Names bind by POSITION, so there is no \
-             shape 2 for it to take.",
+            "the binding names 3 shape(s) and the document declares 1, so `Second`, at \
+             position 2, binds nothing",
         ),
     ];
 
@@ -1073,7 +1074,7 @@ fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
         let _ = typecheck_mapping(&db, m);
         let diags = crate::lower::lower_to_hir::accumulated::<Diagnostic>(&db, file);
         assert!(
-            diags.iter().any(|d| d.message.contains(expected)),
+            diags.iter().any(|d| d.message().contains(expected)),
             "expected a diagnostic containing {expected:?}, got {diags:#?}"
         );
     }
@@ -1152,9 +1153,9 @@ fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
          got {suggestion:?}"
     );
     assert!(
-        with_suggestion[0].message.contains("disjunction"),
+        with_suggestion[0].message().contains("disjunction"),
         "message must name the situation, got {:?}",
-        with_suggestion[0].message
+        with_suggestion[0].message()
     );
 }
 
@@ -1326,9 +1327,9 @@ fn comparing_a_string_column_with_an_integer_is_an_error() {
     );
     let diags = shim::accumulated::<fossil_base::Diagnostic>(&db, file);
     assert!(
-        diags.iter().any(|d| d.message.contains("cannot compare")),
+        diags.iter().any(|d| d.message().contains("cannot compare")),
         "the diagnostic must say what it could not compare, got: {:?}",
-        diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
     );
 }
 
@@ -1396,10 +1397,10 @@ fn a_call_takes_its_return_type_and_checks_its_argument() {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("`trim` is a member of String")
-                && d.message.contains("this is Integer")),
+            .any(|d| d.message().contains("`trim` is a member of String")
+                && d.message().contains("this is Integer")),
         "the diagnostic must name the member and both types, got: {:?}",
-        diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
     );
 }
 
@@ -1432,11 +1433,12 @@ fn a_conditional_with_mismatched_branches_is_an_error() {
     );
     let diags = shim::accumulated::<fossil_base::Diagnostic>(&db, file);
     assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("different types") && d.message.contains("does not coerce")),
+        diags.iter().any(|d| d.message().contains("different types")
+            && d.help
+                .as_deref()
+                .is_some_and(|h| h.contains("does not coerce"))),
         "the diagnostic must say both what differs and that fossil will not coerce, got: {:?}",
-        diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
     );
 }
 
@@ -1463,9 +1465,9 @@ fn a_conditional_whose_condition_is_not_bool_is_an_error() {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("condition of `? :` must be Bool")),
+            .any(|d| d.message().contains("condition of `? :` must be Bool")),
         "got: {:?}",
-        diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
     );
 }
 
@@ -1509,7 +1511,7 @@ User : Person from users
     let _ = typecheck_mapping(&db, mapping);
     let messages: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, mapping)
         .into_iter()
-        .map(|d| d.message.clone())
+        .map(Diagnostic::message)
         .collect();
     assert!(
         !messages.iter().any(|m| m.contains("never writes")),
@@ -1580,7 +1582,7 @@ fn diagnostics_of(src: &str) -> Vec<String> {
         .flat_map(|m| {
             typecheck_mapping::accumulated::<Diagnostic>(&db, m)
                 .into_iter()
-                .map(|d| d.message.clone())
+                .map(Diagnostic::message)
                 .collect::<Vec<_>>()
         })
         .collect()
@@ -1682,7 +1684,7 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
         let _ = shim(&db, file);
         shim::accumulated::<Diagnostic>(&db, file)
             .into_iter()
-            .map(|d| d.message.clone())
+            .map(Diagnostic::message)
             .collect()
     }
 
@@ -1709,7 +1711,7 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
     assert!(
         not_a_condition
             .iter()
-            .any(|m| m.contains("needs a condition")),
+            .any(|m| m.contains("the condition of `where`") && m.contains("must be Bool")),
         "a `where` over a String is not a filter: {not_a_condition:#?}"
     );
 }
@@ -1766,7 +1768,7 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
         let _ = shim(&db, file);
         shim::accumulated::<Diagnostic>(&db, file)
             .into_iter()
-            .map(|d| d.message.clone())
+            .map(Diagnostic::message)
             .collect()
     }
 
@@ -1939,7 +1941,7 @@ fn null_compares_with_anything_and_assigns_to_nothing() {
         let _ = shim(&db, file);
         shim::accumulated::<Diagnostic>(&db, file)
             .into_iter()
-            .map(|d| d.message.clone())
+            .map(Diagnostic::message)
             .collect()
     }
 
@@ -1989,7 +1991,7 @@ User : T from users
     let _ = typecheck_mapping(&db, m);
     let diags: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, m)
         .into_iter()
-        .map(|d| d.message.clone())
+        .map(Diagnostic::message)
         .collect();
     assert!(
         diags.iter().any(|d| d.contains("Null")),

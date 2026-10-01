@@ -1,0 +1,35 @@
+---
+title: Not a Bool
+description: "`type/expected-bool` — a value in a place that needs a Bool, such as a condition or an operand of and, or or not, is of another type."
+---
+
+A value sits where only a `Bool` makes sense, and it is of some other type. The message names which
+place it is, and what the value actually is:
+
+```fossil
+    flag = User.active and User.name
+    // the right side of `and` must be Bool, and it is String
+```
+
+Four places ask for a `Bool`: either side of `and` and `or`, the operand of `not`, the condition of
+`? :`, and the condition handed to a verb such as `where`, where the message names the verb and the
+pipeline it belongs to.
+
+## Why fossil refuses it
+
+fossil has no truthiness. The [typing rules](/docs/design/typing#arithmetic-comparison-boolean) give
+`and`, `or` and `not` only `Bool` operands, and [the conditional](/docs/design/typing#the-conditional)
+only a `Bool` condition. A string column used as a condition has no single meaning — is `"false"`
+false? is `""`? — so the checker asks for the question to be written out. For `where`, the
+catalogue's signature declares the parameter a predicate, and that is what the refusal rests on.
+
+A value the checker cannot type is not reported here: an operand with no type yields to the
+operator, which still says the result is `Bool`.
+
+## How to repair it
+
+- **Write the comparison you mean.** `User.status == "active"`, `Row.count > 0` and
+  `Row.celsius != null` are all `Bool`.
+- **The column holds booleans as text.** Compare it with the literal the source uses —
+  `User.active == "true"` — rather than using the string as a condition.
+- **The wrong column was named.** Check the source for the boolean field you meant.

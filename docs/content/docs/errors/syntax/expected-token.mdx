@@ -1,0 +1,49 @@
+---
+title: Expected another token
+description: "`syntax/expected-token` — the parser reached a point where the grammar allows exactly one kind of token, and found a different one."
+---
+
+At some points in a fossil program the grammar leaves no choice: after a property's name comes `=`,
+after a mapping's shape comes `from`, and a call's arguments close with `)`. When the token there
+is something else, the parser says what it wanted and what it found. Here a property is missing its `=`:
+
+```fossil
+User : Person from Users
+    @subject = "https://example.org/user/{Users.id}"
+    name Users.name
+```
+
+```text
+syntax/expected-token
+  × expected ASSIGN, found IDENT
+```
+
+Both halves of the message are **token kinds**, the names `grammar.bnf` gives its terminals, not
+the text you wrote: `ASSIGN` is `=`, `DEFINE` is `:=`, `SHAPE_SEP` is `:`, `KW_FROM` is `from`,
+`IDENT` is any bare name, `LPAREN` and `RPAREN` are `(` and `)`, and `INDENT`, `DEDENT` and `EOF`
+are the start of an indented block, its end, and the end of the file. The label is zero-width and
+sits where the missing token should have started.
+
+## Why fossil refuses it
+
+The grammar is the one place the syntax is stated ([the grammar](/docs/book/grammar)), and a
+program that does not follow it has no meaning fossil could check, let alone run. The parser does not
+stop at the first mistake, though. It records this diagnostic, leaves a marker in the tree, and
+skips ahead to the next point it recognises — the next property, the end of the body, the next
+top-level binding — so the rest of the file is still parsed and checked. That recovery is why one
+missing token can be followed by a [`syntax/unexpected-token`](/docs/errors/syntax/unexpected-token)
+over the tokens it skipped, and sometimes by a name or type error about a line that no longer means
+what you intended. Fix this one first and check again.
+
+## How to repair it
+
+There is no `help` on this diagnostic: the parser knows only the position and the two kinds.
+
+- **Read the expected kind as the token to insert** at the caret. `expected ASSIGN` almost always
+  means a forgotten `=`; `expected KW_FROM` a mapping header with no `from <source>`; `expected
+  RPAREN` an unclosed call.
+- **Check the line above** when the found kind is `INDENT`, `DEDENT` or `EOF`. The parser reached the
+  end of a line or a block while a construct was still open.
+- **Compare with the grammar** when the pair does not suggest a fix. Each production is written out
+  once on [the grammar page](/docs/book/grammar), and the one you are in is the one the expected
+  token belongs to.

@@ -1,0 +1,45 @@
+---
+title: The run needs more memory than its budget
+description: "`run/over-budget` — an operator asked for more memory than the executor's 2 GiB budget had left, so the run stopped before writing anything."
+---
+
+The executor runs every program inside a fixed memory budget, 2 GiB, and an operator of the query
+plan — a sort, an aggregate, a hash join's build side — asked for more than the budget had left. The
+run stops there, while the graph is still executing:
+
+```text
+the run needs more memory than the executor's 2048 MiB budget: ExternalSorter asked for 64.0 MiB
+with 1990.3 MiB already held. Nothing was written.
+```
+
+A host sees it as a `FossilError` whose `code` is `run/over-budget`, and `data` carries the four
+figures, in bytes: `consumer` (the operator that asked), `requested`, `reserved` (what was already
+held) and `budget`.
+
+```ts
+try {
+  await exec.run(host, jobId);
+} catch (e) {
+  if (isFossilError(e, 'run/over-budget')) console.log(e.data.consumer, e.data.requested);
+}
+```
+
+## Why fossil refuses it
+
+The executor is a `wasm32` program: its linear memory ends at 4 GiB and it has no disk, so no
+operator can spill. Without a bound, `DataFusion`'s default pool summed reservations into a 32-bit
+`usize`, the sum wrapped on a large run, and the run died on a WebAssembly trap with its promise
+never settled. The budget turns that into a refusal that names who asked and for how much. It is half
+the address space because the pool sees only what operators reserve — the source bytes, the layout
+pass and the encoded Parquet sit outside it. The refusal comes before the write starts, so a store
+never holds a partial corpus from it. The measurements and the ceiling are on
+[three hosts](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no).
+
+## How to repair it
+
+- **Run over less data.** The budget is fixed, and what spends it first is usually the
+  deduplication of a large vertex type. Split the input and run each part to its own destination.
+- **Read fewer rows into the graph.** A [`where`](/docs/book/relations) upstream of a mapping, or a
+  narrower source, lowers what every operator above it holds.
+- **Look at `consumer`.** It is `DataFusion`'s name for the operator that asked — `ExternalSorter`
+  is a sort — which tells you which part of the plan to make smaller.

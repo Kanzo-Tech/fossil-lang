@@ -68,7 +68,7 @@ fn connections() -> HashMap<String, String> {
 fn violates_contract(ws: &FossilWorkspace) -> bool {
     ws.check_rows()
         .iter()
-        .any(|r| r.message.contains("expects Integer"))
+        .any(|r| r.code == "type/property-mismatch" && r.detail.data["expected"] == "Integer")
 }
 
 #[test]

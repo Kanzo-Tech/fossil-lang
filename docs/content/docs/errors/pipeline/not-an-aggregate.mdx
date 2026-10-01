@@ -1,0 +1,46 @@
+---
+title: Not an aggregation
+description: "`pipeline/not-an-aggregate` — a `group_by` output is not a call to one of the catalogue's aggregate functions."
+---
+
+Every named argument of a `group_by` is a column it produces, and its value has to say how a group
+of rows becomes one value: a call to an aggregate. There are two ways to miss. The value is not a
+call at all:
+
+```fossil
+Spend := Order.group_by(Order.customer, total = Order.amount)
+```
+
+```text
+`total` in `Spend` is not an aggregation: it has to be a call over the group
+```
+
+or it is a call, and the function is not an aggregate:
+
+```fossil
+Spend := Order.group_by(Order.customer, n = str.length(Order.customer))
+```
+
+```text
+`str.length` is not an aggregate, so it cannot be the `n` of a `group_by` in `Spend`
+```
+
+## Why fossil refuses it
+
+After a `group_by` there is one row per group, so a column of the result has to be one value per
+group. `Order.amount` is one value per input row, and `str.length` maps one value to one value —
+neither says which of a group's many amounts to keep. Only an aggregate folds a group into one value,
+and the catalogue decides which functions are aggregates: today `math.avg`, `math.max`, `math.min`
+and `math.sum`. The list is read from the catalogue, so a fifth arriving is read here too.
+
+The aggregations are also what keeps `group_by` from being a second spelling of
+`select(…).distinct()`, which is why a `group_by` with none is [refused for its
+arity](/docs/errors/pipeline/stage-arity).
+
+## How to repair it
+
+- **Not a call.** Wrap the column in the aggregate that means what you want — the `help` shows the
+  form, `e.g. total = math.sum(Order.amount)`.
+- **The wrong function.** Pick one from the `help`, which lists the aggregates.
+- **The column is a key, not an aggregate.** If every row of a group has the same value, make it a
+  key instead: `Order.group_by(Order.customer, Order.region, total = math.sum(Order.amount))`.

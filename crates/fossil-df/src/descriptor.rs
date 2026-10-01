@@ -86,7 +86,7 @@ fn decode(
         Failure::new(Problem::UnknownProvider {
             constructor: ctor.to_string(),
         })
-        .with_help(fossil_hir::refusals::unknown_constructor(ctor, table))
+        .with_help(fossil_hir::refusals::unknown_constructor(table))
     })?;
     if !row.provides(Capability::ReadTypes) {
         return Err(Failure::new(Problem::WrongCapability {
@@ -120,6 +120,7 @@ fn decode(
     let shapes = read(&key, registered.text(db)).map_err(|e| {
         Failure::new(Problem::Unparseable {
             document: document.to_string(),
+            reason: None,
         })
         .caused_by(Foreign::named("Rejection", format!("{e:?}")))
     })?;

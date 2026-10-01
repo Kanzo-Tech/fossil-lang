@@ -1,0 +1,48 @@
+---
+title: A document is not registered
+description: "`document/not-registered` — the program names a shape document and nothing is registered under its key, at check or at run."
+---
+
+The program names a shape document, and when the compiler goes to read it there is nothing under
+that name:
+
+```fossil
+type { Person } := io.shex("shapes/person.shex")
+```
+
+```text
+the document `shapes/person.shex` is not registered
+```
+
+At `check` the error lands on each mapping header that uses `Person`, and the `help` adds that
+`Person` is declared and bound nothing, so the mapping is checked against nothing. At `run` it is
+the failure, with no span. Both are the same mistake and the same code.
+
+## Why fossil refuses it
+
+The compiler never opens a file. A shape document is an input to its database, and the host
+registers it before anything is checked: the host asks which documents the program names and the
+key each goes under, fetches each one however it can — a disk, a signed URL, an open editor buffer —
+and hands the text back under that key. The checker then asks for the same key. A document the
+host could not read stays unregistered, and the checker reports it here, where it has the span the
+host's loop does not.
+
+The key is the reference as written, resolved against the program's directory: `person.shex` beside
+`prog.fossil` is the file next to it. A reference with a scheme (`s3://…`), an absolute path, or a
+`@connection/…` alias is kept as it is. Key and lookup are one function shared by the checker and
+every host, because a key that drifts reads exactly like a document nobody registered — the least
+debuggable failure there is. [Type providers](/docs/design/type-providers) explains why the
+location stays outside the compiler.
+
+Without the document there is no shape, so the mapping is not checked against anything; refusing it
+is better than passing a body nobody looked at.
+
+## How to repair it
+
+- **The path is wrong.** It is relative to the program file, not to where the command ran. Fix the
+  string in the `io.shex(…)` or `schema = io.shex(…)` call.
+- **The file is not where the host looks.** Put it there, or name it through the connection the host
+  reads from (`@conn/…`).
+- **Your host registers documents itself.** Register everything it reports as missing, under the key
+  it reports, before checking or running. In the executor a read that fails ends the job first, as
+  [`document/unread`](/docs/errors/document/unread).

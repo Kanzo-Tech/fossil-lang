@@ -1,0 +1,48 @@
+---
+title: A join condition on one side only
+description: "`pipeline/join-one-side` — an equality in a `join`'s `on` relates two columns of the same side, so it never names the other."
+---
+
+A join condition pairs rows of one side with rows of the other, so each equality needs a column from
+each. This one compares two columns of `Purchase` and never mentions `User`:
+
+<Program src="errors/pipeline/join-one-side/program.fossil" title="program.fossil" />
+
+<Program src="errors/pipeline/join-one-side/expected/diagnostic.txt" title="fossil check" />
+
+The condition is well-typed and names columns that exist, so it passes the first check a join
+condition gets. It fails the second: does it relate these two sides.
+
+## Why fossil refuses it
+
+As the `help` says, a condition that never names `User` holds or fails for whole relations rather
+than for a pairing. Every order pairs with every user, and the condition filters that product: a
+cross join with a `where`, at the size of a corpus times another. That is almost never meant, and
+when it runs it is the hung program the equality rule exists to prevent.
+
+"Side" is decided by bindings, not by relations, and that makes three less obvious cases the same
+mistake:
+
+- **A self-join with its alias unused.** `Node.join(Node as Other, on = Node.k == Node.j)` never
+  names `Other`, which is the one name the alias exists to give.
+- **A chained join.** After `Both := Left.join(Right, …)`, both `Left` and `Right` are the left
+  side of `Both.join(Third, …)`; `on = Left.k == Right.k` never names `Third`. A binding of the left
+  side may key the next join — `on = Right.k == Third.k` is fine.
+- **No schema at all.** The rule needs no column types, so it holds for sources fossil has not read.
+
+The checker is where an author meets this; the engine keeps its own copy as a backstop. [The
+sixth diagnostic](/docs/book/diagnostics#6-a-join-that-names-one-side-twice) walks through this
+program, and [the algebra](/docs/design/algebra#a-side-is-a-set-of-names-because-a-join-composes)
+explains why a side is a set of names.
+
+## How to repair it
+
+One operand of the equality is on the wrong side. Here the order's `user_id` should meet the user's
+own key:
+
+```fossil
+Orders : Order from Purchase.join(User, on = Purchase.user_id == User.id)
+```
+
+If you did mean a filter on one side, it goes in a `where` on that side before the join, and the
+join still needs an equality across.

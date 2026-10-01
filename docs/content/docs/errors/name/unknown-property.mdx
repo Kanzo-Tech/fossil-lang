@@ -1,0 +1,46 @@
+---
+title: Not a property the shape declares
+description: "`name/unknown-property` — a property line's key is not the name of any predicate the target shape declares."
+---
+
+A property key is a bare name: the last segment of a predicate IRI that the target shape declares.
+`shop:Person` declares `shop:email`, `shop:name` and `shop:phone`, so its mappings may write
+`email`, `name` and `phone`, and nothing else:
+
+```fossil
+Users : Person from User
+    @subject = "https://shop.example/user/{User.email}"
+    email    = User.email
+    nmae     = User.name
+```
+
+```text
+the target shape declares no `nmae` — it declares `email`, `name`, `phone`
+help: did you mean `name`?
+```
+
+When the shape declares no predicate at all, the message says so instead of listing an empty set.
+
+## Why fossil refuses it
+
+A key does not name a column or an arbitrary IRI; it names one of the shape's predicates, and
+[the shape is the contract](/docs/design/shapes) the output is validated against. A predicate the
+shape does not declare would either be dropped — a line of the program silently doing nothing — or
+written as a triple the shape does not allow. Neither is a program anyone meant, so the line is
+refused, and the whole list of what the shape does declare is in the message, because that is the
+only list a key can be chosen from.
+
+This mistake usually comes with a second one: the property the line meant to write is now never
+written, and if the shape requires it, [`shape/missing-required-property`](/docs/errors/shape/missing-required-property)
+is reported against the header as well. Fix this one first.
+
+## How to repair it
+
+- **The key is misspelt.** The `help` names the nearest declared predicate.
+- **The predicate is real but missing from the shape.** Add it to the shape document; the mapping
+  is then correct as written.
+- **The key collides with another.** Two predicates of one shape with the same last segment make
+  both unwritable, and that is [`shape/name-collision`](/docs/errors/shape/name-collision), repaired
+  with a rename on the binding, not here.
+
+See [property lines](/docs/book/mappings#property-lines) for how a key reaches its predicate.

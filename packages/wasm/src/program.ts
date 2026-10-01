@@ -72,8 +72,8 @@ export interface FossilProgram {
    * `fossil()`'s linter waits out its own delay AND waits for this to return before it schedules
    * again, which is what an LSP client does with `didChange`.
    *
-   * A document that could not be read is a row of its own at the top of the program, carrying its
-   * problem — `storage/host-silent`, `storage/unreachable`, … — beside the checker's rows, which
+   * A document that could not be read is a row of its own at the top of the program, under the code
+   * of its read — `storage/host-silent`, `storage/unreachable`, … — beside the checker's rows, which
    * see it only as missing.
    */
   check(text: string): Promise<CheckRow[]>;
@@ -139,13 +139,19 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
     async check(next) {
       await settle(next);
       const rows = workspace.check();
-      const failed: CheckRow[] = unread.map((d) => ({
-        uri,
-        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
-        severity: 1,
-        message: `${d.key}: ${d.problem.detail}`,
-        problem: d.problem,
-      }));
+      const failed = unread.map(
+        ({ key, problem }) =>
+          ({
+            uri,
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+            severity: 1,
+            code: problem.code,
+            data: problem.data,
+            title: problem.title,
+            message: `${key}: ${problem.detail}`,
+            ...(problem.help === undefined ? {} : { help: problem.help }),
+          }) as CheckRow,
+      );
       return [...failed, ...rows];
     },
     hover(next, line, character) {

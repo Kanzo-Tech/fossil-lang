@@ -1,0 +1,46 @@
+---
+title: Not a source binding
+description: "`name/unknown-source` — the relation a mapping reads does not come down to a source binding that names a file."
+---
+
+A mapping reads `from` a relation, and every relation comes down, through any pipelines in between,
+to a source binding: a name bound to an `io.*("…")` call that names the file to read. When the base
+of that chain is a name nothing binds, there is no file:
+
+```fossil
+type { Thing } := io.shex("things.shex")
+// no binding gives `Rows`
+Wanted := Rows.where(Rows.kind == "https://example.org/wanted")
+//
+Things : Thing from Wanted
+    @subject = "https://example.org/thing/{Rows.id}"
+    name     = Rows.name
+```
+
+```text
+`Rows` is not a declared source binding
+```
+
+When the name is bound but its right-hand side is a call with no path string as its first argument,
+the message names what it is bound to instead:
+
+```text
+`X` is not a source: it is bound to `<constructor>`, which is not an `io.*("…")` call, so there is no file to read
+```
+
+## Why fossil refuses it
+
+The error is raised where a mapping is lowered into the plan a run executes, while resolving the
+relation the mapping reads to the file underneath it. That lowering used to substitute a default
+file for a binding it could not resolve, so a mapping over a real connection ran against a fixture
+and produced a full, plausible, entirely wrong graph. Now the plan is poisoned instead: it carries no
+operations, so nothing can execute it by accident, and this diagnostic says which binding did not
+resolve. The name reported is the base of the chain, not the derived binding the header wrote, because
+a derived binding is resolved through to its base.
+
+## How to repair it
+
+- **The base binding is missing or misspelt.** Declare it — `Rows := io.csv("data/rows.csv")` — or
+  correct the name in the pipeline.
+- **The binding is not a reader call.** Bind the name to a provider call with the path as its first
+  argument, as a string; [what you read](/docs/book/what-you-read) lists the formats.

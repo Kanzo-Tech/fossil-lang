@@ -1,0 +1,45 @@
+---
+title: An argument of the wrong type
+description: "`type/argument-mismatch` — a standard-library call is given a value whose type its parameter does not take."
+---
+
+A call to a standard-library function is given an argument whose type is not the one the function's
+parameter declares. Every function is a row in the catalogue with a typed signature, and each
+argument is checked against its parameter:
+
+```fossil
+    label = str.concat(User.name, User.age)
+    // argument 2 of `str.concat` expects String, and this is Integer
+```
+
+When the value is the receiver of a member call — the thing to the left of the dot — there is no
+position to name, so the message says what the value is instead:
+
+```fossil
+    code = User.age.trim()
+    // `trim` is a member of String, and this is Integer
+```
+
+`str.trim(User.age)` reports the same sentence: both spellings reach one catalogue row and both put
+the value in its first slot, so calling it "argument 1" would name a position the author of
+`User.age.trim()` never wrote.
+
+## Why fossil refuses it
+
+This is the call rule of [typing](/docs/design/typing#calls): `f(e₁, …, eₙ)` types only when each
+argument's type is a subtype of its parameter's. The only implicit widening is `Integer` into
+`Float`, so `math.round(User.age)` is accepted and `math.round(User.name)` is not. A call that does
+not type is poisoned rather than guessed at — its result is an error type, the property it feeds is
+never written, and nothing downstream is blamed a second time for the same value.
+
+An argument the checker cannot type at all — a column it has no source description for — is not
+reported: fossil does not claim a mistake it cannot see.
+
+## How to repair it
+
+- **The wrong column was passed.** Pass the one of the type the function takes.
+- **The value is right but held in another type.** Convert it first: `parse.integer`,
+  `parse.float`, `parse.decimal`, `parse.date` and `parse.datetime` turn a string into a typed
+  value. See [the standard library](/docs/book/stdlib) for what each function takes.
+- **The wrong function was called.** A member of `str` takes a string; a member of `math` takes a
+  number. Pick the one whose signature matches what you have.

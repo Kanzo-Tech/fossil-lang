@@ -305,7 +305,7 @@ fn program_diagnostics(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<Relate
         .into_iter()
         .map(|d| Related {
             severity: d.severity,
-            detail: d.message,
+            problem: d.problem,
             help: d.help,
             span: Some(d.span),
         })

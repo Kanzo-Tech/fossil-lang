@@ -1,7 +1,7 @@
 //! The editor reports what `fossil check` reports, for the diagnostics that
 //! need a source column's TYPE.
 //!
-//! `fossil check docs/programs/errors/unknown-field/program.fossil` prints
+//! `fossil check docs/programs/errors/name/unknown-field/program.fossil` prints
 //! ``` `nmae` is not a field of `User` ``` and exits 1. Driven over stdio, the
 //! LSP published **zero** diagnostics for the same bytes — measured 2026-08-23,
 //! and it was not a transport fault: [`the_transport_is_not_what_is_missing`]
@@ -84,14 +84,15 @@ fn published_for(name: &str) -> Vec<Value> {
         })
 }
 
-fn messages(diagnostics: &[Value]) -> Vec<&str> {
+/// Whether one of `diagnostics` is `name/unknown-field` for `field` — read off
+/// the code and the problem's data, never the message.
+fn unknown_field(diagnostics: &[Value], field: &str) -> bool {
     diagnostics
         .iter()
-        .filter_map(|d| d.get("message").and_then(Value::as_str))
-        .collect()
+        .any(|d| d["code"] == "name/unknown-field" && d["data"]["data"]["field"] == field)
 }
 
-/// The control. `errors/two-identities` conflicts two `@subject` templates,
+/// The control. `errors/identity/conflicting` conflicts two `@subject` templates,
 /// which is decided from the program alone — no source column's type is
 /// consulted. It has always arrived.
 ///
@@ -100,7 +101,7 @@ fn messages(diagnostics: &[Value]) -> Vec<&str> {
 /// failure message would not say which.
 #[test]
 fn the_transport_is_not_what_is_missing() {
-    let published = published_for("two-identities");
+    let published = published_for("identity/conflicting");
     assert!(
         !published.is_empty(),
         "the identity conflict must reach the editor, or this file is measuring \
@@ -117,14 +118,27 @@ fn the_transport_is_not_what_is_missing() {
 /// do.
 #[test]
 fn a_misspelt_source_field_reaches_the_editor() {
-    let published = published_for("unknown-field");
-    let msgs = messages(&published);
+    let published = published_for("name/unknown-field");
     assert!(
-        msgs.iter().any(|m| m.contains("nmae")),
+        unknown_field(&published, "nmae"),
         "`fossil check` reports ``nmae` is not a field of `User`` for this exact \
          file and exits 1. The editor published {} diagnostic(s), none naming \
-         `nmae`: {msgs:#?}",
-        msgs.len()
+         `nmae`: {published:#?}",
+        published.len()
+    );
+    let d = published
+        .iter()
+        .find(|d| d["code"] == "name/unknown-field")
+        .expect("found above");
+    assert_eq!(
+        d["codeDescription"]["href"],
+        "https://kanzo-tech.github.io/fossil-lang/docs/errors/name/unknown-field"
+    );
+    assert_eq!(d["data"]["title"], "Not a field of this row");
+    assert_eq!(d["data"]["help"], "did you mean `name`?");
+    assert!(
+        !d["message"].as_str().unwrap_or_default().contains("help:"),
+        "the message is the problem and nothing else: {d:#?}"
     );
 }
 
@@ -135,7 +149,7 @@ fn a_misspelt_source_field_reaches_the_editor() {
 /// the range the diagnostic underlines.
 #[test]
 fn the_did_you_mean_is_offered_as_a_code_action() {
-    let path = program_path("unknown-field");
+    let path = program_path("name/unknown-field");
     let uri = program_uri(&path);
     let text = std::fs::read_to_string(&path).expect("read the conformance program");
     // `name     = User.nmae` — the whole line, so the request's range certainly
@@ -229,12 +243,11 @@ Out : Person from Users
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let msgs = messages(&published);
     assert!(
-        !msgs.iter().any(|m| m.contains("nmae")),
+        !unknown_field(&published, "nmae"),
         "an `https://` source was introspected on the message loop. If that is \
          now deliberate, this test is the thing to delete — but the didOpen \
          handler is a blocking read and a network round trip in it stalls every \
-         other buffer. Got: {msgs:#?}"
+         other buffer. Got: {published:#?}"
     );
 }

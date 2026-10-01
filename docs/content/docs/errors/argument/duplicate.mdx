@@ -1,0 +1,44 @@
+---
+title: An argument given twice
+description: "`argument/duplicate` — a call gives one parameter a value twice: by naming it twice, by naming a position already filled, or by naming the receiver of a member call."
+---
+
+Each parameter of a function takes one argument. A call that reaches the same parameter twice is
+refused. The plain case is a name written twice, or a name for a position a positional argument
+already filled:
+
+```fossil
+    name = str.replace(User.name, needle = "a", needle = "b")
+```
+
+```text
+`str.replace` is given `needle` twice
+```
+
+The other case is the value path. In `x.slice(…)` the value to the left of the dot is the first
+parameter, `text`, so naming `text` again inside the parentheses gives it twice:
+
+```fossil
+    code = User.code.slice(text = User.name)
+```
+
+```text
+`text` is the receiver of `str.slice` — the value to the left of the dot — so naming it here gives it twice
+```
+
+## Why fossil refuses it
+
+A call is lowered into a positional argument list, one slot per parameter, and the named arguments
+are placed into their slots before anything checks the types. A second value for an occupied slot
+would have to overwrite the first or be thrown away, and either way the call that runs is not the one
+written. On the value path the receiver already occupies the first slot, so the named arguments are
+placed after it; that is what lets `x.trim(text = y)` be refused as a value given twice rather than
+accepted as a second `text`. See [two paths to the same
+function](/docs/book/expressions#two-paths-to-the-same-function).
+
+## How to repair it
+
+- **The same name twice.** Keep the one you mean; if the second was meant for another parameter,
+  give it that parameter's name.
+- **The receiver named again.** Drop the named argument, or use the type path —
+  `str.slice(User.name, start = 2)` — where every argument is written inside the parentheses.

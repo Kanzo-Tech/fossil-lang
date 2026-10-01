@@ -1,0 +1,43 @@
+---
+title: A reader option fossil cannot pass on
+description: "`provider/invalid-reader-option` — a reader option's value is not a one-character string, so no reader can be given it."
+---
+
+A reader option is a named argument a provider's reader takes — today, `delimiter` on `io.csv`. Its
+value is one ASCII character in a string, and this one is not:
+
+```fossil
+Person := io.csv("data/person.csv", delimiter = "||")
+```
+
+```text
+`delimiter` in `io.csv` is one ASCII character, and `"||"` is 2 bytes
+help: both readers a corpus is written through take a single BYTE, so a wider one would mean
+      something different to each
+```
+
+An empty string is told it is empty. A value that is not a string literal at all —
+`delimiter = 124`, or a name — is told the option is written `delimiter = "<one character>"`, with
+no `help`. The error underlines the value.
+
+## Why fossil refuses it
+
+The option is handed to the reader that runs, and the readers take one byte. DataFusion's CSV
+options take a byte, so `"||"` cannot be passed on as written: one engine would truncate it to `|`
+and another would refuse it, and the same program would read the same file two ways. A multi-byte
+character is one character and more than one byte, so `"→"` is refused too. One byte is the only width
+every reader can promise, and the refusal is at the line the author wrote rather than in an
+execution error with no span.
+
+The value has to be a literal because it is read from the source header while the program is
+checked, before anything runs; there is no value to compute it from.
+
+## How to repair it
+
+- **Use one character.** A pipe-delimited file is `delimiter = "|"`:
+
+<Program src="pipe-delimited/pipe-delimited.fossil" region="source" title="pipe-delimited.fossil" />
+
+- **The file really uses a multi-character separator.** Convert it to a single-byte one before
+  reading it; no reader fossil runs on can split on more than one byte.
+- **Quote the value.** `delimiter = "|"` — a string literal, not a number or a binding name.

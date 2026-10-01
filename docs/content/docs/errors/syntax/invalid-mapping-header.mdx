@@ -1,0 +1,51 @@
+---
+title: Not a mapping header
+description: "`syntax/invalid-mapping-header` — a mapping whose header the compiler cannot read, so the mapping produces nothing."
+---
+
+A mapping header is `Name : Shape from <source>`, and this one lacks a part the compiler needs to
+know what the mapping is. The message gives the reason as a clause and says what follows from it:
+
+```fossil
+type { Person } := io.shex("person.shex")
+Users := io.csv("users.csv")
+//
+People : Person
+    @subject = "https://example.org/person/{Users.id}"
+    name = Users.name
+```
+
+```text
+syntax/invalid-mapping-header
+  × this is not a mapping header — it reads `from` nothing — so nothing is produced from it. A
+    mapping is `Name : Shape from <source>`
+```
+
+The label covers the header line. The reason is one of four: *it reads `from` nothing* — no `from`,
+or a `from` with nothing after it that names a relation — *it names nothing*, *there is no `: Shape`
+after the name*, and *there is no header here*. The first is the one a program written by hand
+reaches; the parser usually reports the same line too, as an
+[`syntax/expected-token`](/docs/errors/syntax/expected-token) (`expected KW_FROM`).
+
+## Why fossil refuses it
+
+The header is what a mapping *is*: its name, the type it produces, and the relation whose rows become
+nodes ([mappings](/docs/book/mappings)). Without the relation there are no rows, so there is nothing
+to produce, and fossil will not invent a source. The case above is the one the compiler once got
+wrong in silence: the parser accepted `A : B from` with nothing after it, the header lowered to
+nothing, the mapping vanished, and the only thing anyone heard about the file came from some other
+line. Worse, the mappings after it were then matched to the wrong headers.
+
+So the header is reported here, once, and the mapping keeps its place. Its body is still checked —
+a missing `@subject` under a broken header is still reported — and a healthy mapping after it still
+lowers from its own header, which a test pins by asserting the neighbour produces a graph.
+
+## How to repair it
+
+There is no `help`; the reason says which part is missing.
+
+- **It reads `from` nothing**: add the relation — `People : Person from Users`. It may be any
+  relation, including one built on the spot, `from Users.where(Users.age >= 18)`.
+- **There is no `: Shape` after the name**: add the type the mapping produces, one of the names a
+  `type { … } := …` binding introduced.
+- **It names nothing**: the header begins with the mapping's own name, `People` above.

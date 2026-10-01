@@ -1,0 +1,44 @@
+---
+title: No shape document
+description: "`shape/no-document` — a binding that should bind shapes names no shape document to take them from."
+---
+
+A binding promises shapes and names no document to take them from. The common case is a
+destructuring source whose provider call has no `schema =` argument:
+
+```fossil
+{ Person, Order } := io.rdf("data/shop.ttl")
+```
+
+Each name between the braces is meant to bind a shape, and with no document there is no shape to
+bind. Every use of `Person` or `Order` reports it:
+
+```text
+`Person` names no shape document, so it binds no shape
+```
+
+The same happens on the output side when a `type { … }` binding's provider call carries no document
+string: the error lands on the mapping header that uses the name, with the help
+`give it one — type { Person } := io.shex("shop.shex")`.
+
+## Why fossil refuses it
+
+Names in a binding take shapes **by position** — the Nth name binds the Nth shape the document
+declares — so the document is the only thing a name can bind to. Without it there is no constraint
+table, and with no constraint table there are no property names: a property key is the last segment
+of a predicate IRI a shape declares, so a program with no document has no way to spell a property at
+all. [Inference from shapes](/docs/design/shapes) argues why the output type is not optional the way
+an annotation is, and [naming what you produce](/docs/book/what-you-produce) shows the binding.
+
+This is not the same mistake as a document that is named and cannot be read. That one is reported
+by its own cause — [`document/not-registered`](/docs/errors/document/not-registered),
+[`document/unparseable`](/docs/errors/document/unparseable) or a `provider/*` refusal — because
+"there is no document" and "the document is broken" have different repairs.
+
+## How to repair it
+
+- **Name the document the shapes come from.** On a source, add the argument as a provider call:
+  `{ Person, Order } := io.rdf("data/shop.ttl", schema = io.shex("shop.shex"))`.
+- **On a `type` binding,** put the document in the call: `type { Person } := io.shex("shop.shex")`.
+- **If the graph has no shapes to split by,** bind it as one source,
+  `Shop := io.rdf("data/shop.ttl")`, instead of destructuring it.

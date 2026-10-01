@@ -53,7 +53,8 @@ pub mod workspace;
 pub use code_action::code_actions;
 pub use completion::completions;
 pub use diagnostics::{
-    byte_range_to_range, diagnostics, file_uri, lsp_diagnostic, lsp_diagnostics, span_to_range,
+    DiagnosticData, Replacement, byte_range_to_range, diagnostics, file_uri, lsp_diagnostic,
+    lsp_diagnostics, span_to_range,
 };
 pub use goto_def::{NavigationTarget, goto_definition};
 pub use hover::{HoverInfo, hover, hover_bidirectional};

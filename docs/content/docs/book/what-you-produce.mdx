@@ -35,7 +35,7 @@ into the graph is the one in the document.
 | --- | --- |
 | as many names as the document declares | the Nth name takes the Nth shape |
 | **fewer** names than shapes | a prefix binds, the rest of the document is ignored, and that is not an error |
-| **more** names than shapes | the surplus binds nothing — *`Extra` is declared and bound nothing: the binding names 2 shape(s) and the document declares 1*, reported at the **use** of the name and silent if you never use it |
+| **more** names than shapes | the surplus binds nothing — *the binding names 2 shape(s) and the document declares 1, so `Extra`, at position 2, binds nothing*, reported at the **use** of the name and silent if you never use it |
 | the same names, after the document is reordered | the program rebinds, quietly |
 
 The last row is the cost, and it is worth knowing the day you go and tidy a document up; shape
@@ -66,7 +66,7 @@ Vocabularies mix, and two of them can perfectly well end in the same word:
 `shop:name` and `foaf:name` both want to be called `name`. fossil does not pick, and it does not
 number them. It stops, and it names both IRIs:
 
-<Program src="errors/colliding-name/expected/diagnostic.txt" title="program.fossil" />
+<Program src="errors/shape/name-collision/expected/diagnostic.txt" title="program.fossil" />
 
 The repair goes above the binding, and it is all constants — an IRI and the word you want instead.
 Both are then writable, and which one you mean is on the page:

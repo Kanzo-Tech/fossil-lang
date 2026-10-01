@@ -36,7 +36,7 @@
 //! `suggestion_source` precedent exactly — structured, not string-parsed.
 //! Defaults to `None`; plain data (wasm-clean).
 
-pub use fossil_graph_schema::{Severity, Span};
+pub use fossil_graph_schema::{Problem, Severity, Span};
 
 /// What a [`Diagnostic`]'s span was measured against.
 ///
@@ -148,7 +148,9 @@ impl SpanLabel {
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub severity: Severity,
-    pub message: String,
+    /// What went wrong — the code and its data. The message a person reads is
+    /// [`Self::message`], rendered from it.
+    pub problem: Problem,
     pub span: Span,
     /// What [`Self::span`] (and `did_you_mean.wrong_span`) were measured
     /// against — see [`SpanFrame`]. Hosts rebase only `MappingRelative` ones.
@@ -215,17 +217,13 @@ impl DidYouMean {
 }
 
 impl Diagnostic {
-    /// Build a [`Diagnostic`] with no attached suggestion source or
-    /// did-you-mean candidate.
-    ///
-    /// Equivalent to the struct literal with `suggestion_source: None` and
-    /// `did_you_mean: None`. Use [`Self::with_suggestion_source`] /
-    /// [`Self::with_did_you_mean`] to attach them fluently.
+    /// Build a [`Diagnostic`] with no labels, help, suggestion source or
+    /// did-you-mean candidate; the builders below attach them.
     #[must_use]
-    pub fn new(severity: Severity, message: impl Into<String>, span: Span) -> Self {
+    pub const fn new(severity: Severity, problem: Problem, span: Span) -> Self {
         Self {
             severity,
-            message: message.into(),
+            problem,
             span,
             frame: SpanFrame::MappingRelative,
             labels: Vec::new(),
@@ -233,6 +231,13 @@ impl Diagnostic {
             suggestion_source: None,
             did_you_mean: None,
         }
+    }
+
+    /// The message for a person — [`Self::problem`] rendered. Nothing should
+    /// parse it: a value a host needs is a field of the problem.
+    #[must_use]
+    pub fn message(&self) -> String {
+        self.problem.to_string()
     }
 
     /// Point at a second place, and say what is there. See [`SpanLabel`] for
@@ -312,9 +317,13 @@ impl Diagnostic {
 mod tests {
     use super::*;
 
+    fn bug() -> Problem {
+        Problem::Bug { what: "x".into() }
+    }
+
     #[test]
     fn diagnostic_default_suggestion_source_is_none() {
-        let d = Diagnostic::new(Severity::Error, "oops", Span::new(0, 4));
+        let d = Diagnostic::new(Severity::Error, bug(), Span::new(0, 4));
         assert!(d.suggestion_source.is_none());
     }
 
@@ -331,7 +340,7 @@ mod tests {
         let snippet = "UserEmail1 : Person from users\n    \
                        @subject = \"https://example.org/u/{users.id}\"\n    \
                        email = users.email\n";
-        let d = Diagnostic::new(Severity::Error, "ShEx OneOf", Span::new(10, 20))
+        let d = Diagnostic::new(Severity::Error, bug(), Span::new(10, 20))
             .with_suggestion_source(snippet);
         assert_eq!(d.suggestion_source.as_deref(), Some(snippet));
     }
@@ -342,7 +351,7 @@ mod tests {
         // This test locks that contract.
         let d = Diagnostic {
             severity: Severity::Warning,
-            message: "ok".into(),
+            problem: bug(),
             span: Span::new(0, 0),
             frame: SpanFrame::default(),
             labels: Vec::new(),
@@ -365,13 +374,21 @@ mod tests {
     /// makes a caret land on a plausible, wrong line.
     #[test]
     fn a_label_keeps_its_own_frame() {
-        let d = Diagnostic::new(Severity::Error, "two identities", Span::new(10, 20))
-            .with_label(
-                Span::new(400, 420),
-                "`Users` mints this one",
-                SpanFrame::FileAbsolute,
-            )
-            .with_help("a type has one identity");
+        let d = Diagnostic::new(
+            Severity::Error,
+            Problem::ConflictingIdentity {
+                first: "Users".into(),
+                second: "Imported".into(),
+                shape: "Person".into(),
+            },
+            Span::new(10, 20),
+        )
+        .with_label(
+            Span::new(400, 420),
+            "`Users` mints this one",
+            SpanFrame::FileAbsolute,
+        )
+        .with_help("a type has one identity");
         assert_eq!(
             d.frame,
             SpanFrame::MappingRelative,
@@ -383,8 +400,23 @@ mod tests {
     }
 
     #[test]
+    fn the_message_is_the_problem_rendered() {
+        let d = Diagnostic::new(
+            Severity::Error,
+            Problem::UnknownField {
+                field: "naem".into(),
+                relation: "User".into(),
+                fields: vec!["name".into()],
+            },
+            Span::new(10, 14),
+        );
+        assert_eq!(d.problem.code(), "name/unknown-field");
+        assert_eq!(d.message(), "`naem` is not a field of `User`");
+    }
+
+    #[test]
     fn diagnostic_default_did_you_mean_is_none() {
-        let d = Diagnostic::new(Severity::Error, "oops", Span::new(0, 4));
+        let d = Diagnostic::new(Severity::Error, bug(), Span::new(0, 4));
         assert!(d.did_you_mean.is_none());
     }
 
@@ -394,7 +426,11 @@ mod tests {
         // no message-string parsing.
         let d = Diagnostic::new(
             Severity::Error,
-            "unknown column `naem` — did you mean `name`?",
+            Problem::UnknownField {
+                field: "naem".into(),
+                relation: "User".into(),
+                fields: vec!["name".into()],
+            },
             Span::new(10, 14),
         )
         .with_did_you_mean(Span::new(10, 14), "name");

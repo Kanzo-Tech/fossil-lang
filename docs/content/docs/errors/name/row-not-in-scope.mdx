@@ -1,0 +1,58 @@
+---
+title: A row that is not in scope
+description: "`name/row-not-in-scope` — a qualified reference names a row that the mapping, pipeline stage or join it is written in does not have."
+---
+
+A qualified reference `Binding.column` says which row the column comes from, and that row has to be
+one of the rows in scope where the reference is written. A mapping over `Adults` has the row `User`
+in scope, because `Adults` is a relation of `User`s — not a row called `Adults`:
+
+```fossil
+User   := io.csv("data/users.csv")
+Adults := User.where(User.age >= 18)
+//
+Users : Person from Adults
+    @subject = "https://shop.example/user/{User.email}"
+    name     = Adults.name
+```
+
+```text
+`Adults.name` reads a row `Adults` does not have — it has `User`
+help: name that row, or bring `Adults` in
+```
+
+A join's `on` is held to the same rule, against the rows of its two sides. A condition naming
+anything else is refused with the sides spelled out:
+
+```fossil
+Paired := Purchase.join(User, on = Purchase.user_id == Customer.id)
+```
+
+```text
+`Customer.id` reads a row this join in `Paired` does not have — it has `Purchase`, `User`
+help: The left side has `Purchase`; the right side has `User`.
+```
+
+And a `select` or `group_by` in a pipeline names its columns against the rows its input carries.
+
+## Why fossil refuses it
+
+**The name after `from` says which rows; the name before a dot says which type.** The two coincide
+only when the relation is a binding that reads a file, so a scope is a set of rows looked up by
+binding, not an equality against the `from` name. That is what lets
+[a join put two rows in scope](/docs/book/relations#a-join-does-not-flatten) instead of one merged
+row: `Purchase.id` and `User.id` are two columns, and every reference says which.
+
+The check is made before the column is resolved, so it needs no schema, and it is a different
+mistake from [`name/unknown-field`](/docs/errors/name/unknown-field) — there the row is in scope and
+the column is wrong; here the row is not there at all. Inside a join condition, a key from a row
+that is neither side would leave nothing to pair the sides on.
+
+## How to repair it
+
+- **The relation's name was used as a row.** Write the binding the rows came from: `User.name` in a
+  mapping over `Adults`. The message lists the rows that are in scope.
+- **The row belongs to another relation.** Bring it in with a `join` in the header or in the
+  pipeline the mapping reads, then qualify with its binding.
+- **A self-join.** Name the second copy with `as` — `Node.join(Node as Other, on = …)` — and use
+  `Other` on that side.

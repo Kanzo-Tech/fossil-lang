@@ -19,7 +19,7 @@
 // `{Row.id}` is fossil's interpolation hole, not a Rust format argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use fossil_base::test_support;
+use fossil_base::{Problem, test_support};
 use fossil_mir::program_diagnostics;
 
 /// One un-narrowed `name` predicate — enough for a mapping to type-check.
@@ -64,12 +64,16 @@ People : Person from Users
 /// zero times and reports a clean file.
 const NO_MAPPING: &str = "@@@ ??? := := :=\n";
 
-fn diagnose(program: &str) -> Vec<String> {
+fn diagnose(program: &str) -> Vec<Problem> {
     let (db, file) = test_support::db_with_document_at("t.fossil", program, "p.shex", SHAPE);
     program_diagnostics(&db, file)
         .into_iter()
-        .map(|d| d.message)
+        .map(|d| d.problem)
         .collect()
+}
+
+fn names_nonesuch(p: &Problem) -> bool {
+    matches!(p, Problem::UnknownProvider { constructor } if constructor == "io.nonesuch")
 }
 
 /// **The parse errors were present and unreachable.** Salsa accumulates over a
@@ -98,7 +102,7 @@ fn a_file_the_parser_recovered_no_mapping_from_still_reports() {
 fn a_binding_that_names_no_provider_is_reported_beside_a_healthy_mapping() {
     let messages = diagnose(BAD_PROVIDER);
     assert!(
-        messages.iter().any(|m| m.contains("nonesuch")),
+        messages.iter().any(names_nonesuch),
         "the binding names a constructor no host installs and nothing said so; got {messages:?}"
     );
 }
@@ -112,7 +116,7 @@ fn two_mappings_minting_two_identities_for_one_type_are_reported() {
     assert!(
         messages
             .iter()
-            .any(|m| m.to_lowercase().contains("identit") || m.contains("@subject")),
+            .any(|p| matches!(p, Problem::ConflictingIdentity { .. })),
         "one type with two identity templates must be reported; got {messages:?}"
     );
 }
@@ -126,7 +130,7 @@ fn two_mappings_minting_two_identities_for_one_type_are_reported() {
 #[test]
 fn a_file_level_mistake_is_reported_once_not_once_per_mapping() {
     let messages = diagnose(BAD_PROVIDER);
-    let about_binding = messages.iter().filter(|m| m.contains("nonesuch")).count();
+    let about_binding = messages.iter().filter(|p| names_nonesuch(p)).count();
     assert_eq!(
         about_binding, 1,
         "one mistake about one binding, reported once; got {messages:?}"
@@ -151,7 +155,7 @@ People : Person from A
     let (db, file) = test_support::db_with_document_at("t.fossil", program, "p.shex", SHAPE);
     let spans: Vec<_> = program_diagnostics(&db, file)
         .into_iter()
-        .filter(|d| d.message.contains("nonesuch"))
+        .filter(|d| names_nonesuch(&d.problem))
         .map(|d| d.span)
         .collect();
     let unique: std::collections::HashSet<_> = spans.iter().collect();
@@ -192,7 +196,7 @@ People : Person from Nowhere
          the file, not at a mapping-relative offset; got {:?}",
         diagnostics
             .iter()
-            .map(|d| (d.span, &d.message))
+            .map(|d| (d.span, d.problem.code()))
             .collect::<Vec<_>>()
     );
 }
@@ -214,7 +218,7 @@ People : Person from Users
     let errors: Vec<_> = program_diagnostics(&db, file)
         .into_iter()
         .filter(|d| d.severity == fossil_base::Severity::Error)
-        .map(|d| d.message)
+        .map(|d| d.problem)
         .collect();
     assert!(errors.is_empty(), "a clean program reported {errors:?}");
 }
@@ -259,12 +263,10 @@ fn four_bytes_of_non_fossil_do_not_reach_an_internal_compiler_error() {
         let (db, file) = test_support::db_with_document_at("t.fossil", source, "p.shex", SHAPE);
         let messages: Vec<_> = program_diagnostics(&db, file)
             .into_iter()
-            .map(|d| d.message)
+            .map(|d| d.problem)
             .collect();
         assert!(
-            !messages
-                .iter()
-                .any(|m| m.contains("internal compiler error")),
+            !messages.iter().any(|p| matches!(p, Problem::Bug { .. })),
             "{source:?} claimed a compiler bug: {messages:#?}"
         );
         assert!(
@@ -322,12 +324,12 @@ Good : Person from Users
     // And the broken one is still reported, in words about the program.
     let messages: Vec<_> = program_diagnostics(&db, file)
         .into_iter()
-        .map(|d| d.message)
+        .map(|d| d.problem)
         .collect();
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("this is not a mapping header")),
+            .any(|p| matches!(p, Problem::InvalidMappingHeader { .. })),
         "got {messages:#?}"
     );
     // The body under a declined header is still checked — `lower_to_mir_pg`
@@ -336,7 +338,7 @@ Good : Person from Users
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("declares no `@subject`")),
+            .any(|p| matches!(p, Problem::MissingSubject { .. })),
         "got {messages:#?}"
     );
 }
