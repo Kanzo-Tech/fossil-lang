@@ -61,7 +61,9 @@ thing that can wait forever is the person's own patience, and they can end it.
    drops it fails to compile.
 2. **Every outside wait races a deadline**: `AbortSignal.any([signal, AbortSignal.timeout(ms)])`, in
    one helper per repository, not one per call site. The figures, each the slowest honest answer
-   rather than a guess at the fastest:
+   rather than a guess at the fastest. **Deadlines nest**: an inner wait must expire before the one
+   around it, or the outer deadline fires first and names the wrong party. A vend makes two calls
+   inside one API request inside one browser request, hence 10 s, 25 s, 30 s:
 
    | Wait | Deadline | Where |
    | --- | --- | --- |
@@ -71,7 +73,9 @@ thing that can wait forever is the person's own patience, and they can end it.
    | DuckDB booting (`instantiate`, `LOAD httpfs`) | 60 s | `@kanzo-tech/mosaic` |
    | Any API request from the browser | 30 s | keasy's api client — streams excepted |
    | A stream's next chunk | 30 s idle | keasy's SSE reader, `@kanzo-tech/ai`, the server's provider stream |
-   | Entra, Azure, STS, Valkey | 5 s connect / 30 s request | keasy's server and web |
+   | Entra, Azure, STS | 5 s connect / 10 s request | keasy's server |
+   | Valkey | 5 s connect and per command | keasy's web |
+   | keasy's API handling one request | 25 s | keasy's server |
 
 3. **A deadline that fires is coded by who did not answer, never as a bare "timeout".** The person
    needs to know *what* is down. The host going quiet is `storage/host-silent` (new); the bucket is
@@ -109,7 +113,9 @@ measurement beside it; the rule that there *is* a figure does not.
    that fails throws to the nearest boundary; there is no `data = []` default for a failure to hide
    behind, and no `isError` to forget. Today 18 files call `useQuery` and one route group has an
    `error.tsx`.
-5. **`notFound()` only for a `job/not-found`-shaped code.** Everything else throws to the boundary.
+5. **No `notFound()` for a failed read.** A not-found answer is a code like any other and renders in
+   `ProblemView`: Next's not-found page carries no code, and "Page not found" is exactly what this
+   page forbids.
 6. **A poll stops on failure.** `refetchInterval` returns `false` once the query is in error, so a
    dead API is not asked every two seconds and old data is not shown as current.
 7. **No swallowing.** No empty `catch`, no `.catch(() => {})`, no `let _ = …await` — except where a
@@ -171,7 +177,7 @@ cannot prove.
 | Every Mosaic client class has `queryError` | kanzo-ui | that it renders well |
 | No `onFailure`/`error` typed `string` on a public surface | kanzo-ui | a failure reaching the host another way |
 | No `useQuery(`; every route group has an `error.tsx` | keasy | a boundary that renders something other than `ProblemView` |
-| `notFound()` only inside a not-found branch | keasy | — |
+| `notFound()` never on a query's failure | keasy | — |
 | Every scenario in the audit tables has an e2e test, by name | keasy | that the test forces the failure it names |
 
 ## The migration, repository by repository
