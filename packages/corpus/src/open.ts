@@ -58,7 +58,8 @@ const holders = new WeakMap<object, Map<string, number>>();
  *
  * @throws {FossilError} before any Parquet is read: `corpus/unreadable` when `fossil.json` does not
  *   read, `corpus/not-json`, `corpus/unsupported-format` for a format other than `fossil/1`,
- *   `corpus/duplicate-table` when it names one table twice; `storage/ambiguous-prefix` for a job
+ *   `corpus/duplicate-table` when it names one table twice; `corpus/not-a-location` for a URL
+ *   carrying a query or a fragment; `storage/ambiguous-prefix` for a job
  *   vended more than one prefix; `api/invalid-argument` when no `engine` is given; `engine/failed`
  *   when the engine refuses a view.
  */
@@ -92,6 +93,15 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
     const prefix = storage.prefixes[0]!;
     names = (paths) => storage.files(paths.map((path) => `${prefix}${path}`));
   } else {
+    // A corpus is a prefix and its files are named under it, so a query — a signature among them —
+    // would end up in the middle of every path. Signed storage is a job under its host.
+    if (/[?#]/.test(source)) {
+      throw FossilError.of(
+        'corpus/not-a-location',
+        { location: source },
+        `${source} carries a query or a fragment, and a corpus location is a prefix: signed storage is opened as a job, under the host that vends its credential`,
+      );
+    }
     const base = source.endsWith('/') ? source : `${source}/`;
     names = async (paths) => paths.map((path) => `${base}${path}`);
   }

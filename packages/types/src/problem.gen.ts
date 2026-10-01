@@ -37,6 +37,7 @@ export type Code =
   | 'corpus/not-json'
   | 'corpus/unsupported-format'
   | 'corpus/duplicate-table'
+  | 'corpus/not-a-location'
   | 'corpus/unknown-table'
   | 'corpus/unknown-column'
   | 'corpus/empty-projection'
@@ -79,6 +80,7 @@ export const CODES: readonly Code[] = [
   'corpus/not-json',
   'corpus/unsupported-format',
   'corpus/duplicate-table',
+  'corpus/not-a-location',
   'corpus/unknown-table',
   'corpus/unknown-column',
   'corpus/empty-projection',
@@ -282,6 +284,12 @@ export interface ProblemData {
     table: string;
   };
   /**
+   * A corpus location carrying a query or a fragment. A corpus is a prefix and every file is named under it; a query string — a signature among them — addresses one object and does not survive the join. Signed storage is reached by opening a job under the host that vends it.
+   */
+  'corpus/not-a-location': {
+    location: string;
+  };
+  /**
    * A table the corpus does not have.
    */
   'corpus/unknown-table': {
@@ -373,6 +381,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'corpus/not-json': 'The manifest is not JSON',
   'corpus/unsupported-format': 'The corpus format is not supported',
   'corpus/duplicate-table': 'A table is declared twice',
+  'corpus/not-a-location': 'Not a corpus location',
   'corpus/unknown-table': 'Not a table of this corpus',
   'corpus/unknown-column': 'Not a column of this table',
   'corpus/empty-projection': 'The projection selects nothing',

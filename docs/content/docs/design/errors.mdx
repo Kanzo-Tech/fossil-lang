@@ -316,7 +316,7 @@ are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no cod
 | `pipeline` (14) | `unknown-verb`, `unimplemented-verb`, `source-as-stage`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-foreign-binding`, `join-one-side` |
 | `unsupported` (2) | `literal`, `expression` — a gap in the compiler, not a mistake in the program |
 
-**Run, storage, corpus and the API — 33 codes.** The executor's descriptor errors reuse the compile
+**Run, storage, corpus and the API — 34 codes.** The executor's descriptor errors reuse the compile
 codes above (`provider/unknown`, `provider/wrong-capability`, `document/unparseable`, …), because they
 are the same mistake found late:
 
@@ -330,7 +330,7 @@ are the same mistake found late:
 | `write` (2) | `failed`, `unknown-type` | `WriteError` |
 | `layout` (2) | `dangling-endpoint`, `too-large` | `LayoutError`; its other variants are `internal/bug` |
 | `storage` (8) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` |
-| `corpus` (9) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `unknown-table`, `unknown-column`, `empty-projection`, `no-position`, `filter-type-mismatch` | `open`, `parseManifest`, `scan`, the filter binder |
+| `corpus` (10) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `not-a-location`, `unknown-table`, `unknown-column`, `empty-projection`, `no-position`, `filter-type-mismatch` | `open`, `parseManifest`, `scan`, the filter binder |
 | `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy_error` and the executor's borrow, `WorkspaceError` |
 
 **`internal/bug` — 1 code** for everything that is fossil's fault and not the caller's: the
@@ -338,7 +338,7 @@ are the same mistake found late:
 fresh object. Nobody branches on it; a host shows it and reports it. A panic stays a
 `WebAssembly.RuntimeError` — it is not a value that can be built at the moment it happens.
 
-**108 codes**, 107 of them a mistake someone other than fossil can repair.
+**109 codes**, 108 of them a mistake someone other than fossil can repair.
 
 ## The screen: kanzo-ui's `Diagnostic`, and the product decides the words
 
