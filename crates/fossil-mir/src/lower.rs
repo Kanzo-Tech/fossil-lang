@@ -570,7 +570,7 @@ fn lower_source_chain<'db>(
         // `.ok().flatten()`: the taint was already raised by the type-check,
         // which poisons the graph before the lowering runs, so here a failed row
         // is the same as an absent one — an untyped source, as before.
-        let row_type = fossil_hir::infer::resolve_binding_row(db, file, binding.as_str(), 0)
+        let row_type = fossil_hir::infer::resolve_binding_row(db, file, binding.as_str(), &[])
             .ok()
             .flatten()
             .unwrap_or_else(|| untyped_row(db));

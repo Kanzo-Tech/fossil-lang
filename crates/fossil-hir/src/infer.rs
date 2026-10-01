@@ -138,14 +138,8 @@ pub fn resolve_source_scope<'db>(
     };
     let source_name = hir_mapping.source_binding.clone();
 
-    resolve_binding_scope(db, file, source_name.as_str(), 0).map(Some)
+    resolve_binding_scope(db, file, source_name.as_str(), &[]).map(Some)
 }
-
-/// A source pipeline that derives from a pipeline that derives from … Thirty-two
-/// is not a limit anyone will meet writing a mapping; it is the depth at which a
-/// CYCLE (`a := b.where(…)`, `b := a.where(…)`) stops being an infinite
-/// loop and becomes a diagnostic.
-const MAX_PIPE_DEPTH: usize = 32;
 
 /// The row type of a source BINDING, by name — [`resolve_binding_scope`]
 /// flattened. `None` when the binding declares no schema.
@@ -153,9 +147,9 @@ pub fn resolve_binding_row<'db>(
     db: &'db dyn fossil_base::Db,
     file: fossil_base::SourceFile,
     source_name: &str,
-    depth: usize,
+    resolving: &[&str],
 ) -> Result<Option<Ty<'db>>, fossil_base::ErrorGuaranteed> {
-    Ok(resolve_binding_scope(db, file, source_name, depth)?.flat(db))
+    Ok(resolve_binding_scope(db, file, source_name, resolving)?.flat(db))
 }
 
 /// The [`Rows`] of a source BINDING, by name.
@@ -167,11 +161,17 @@ pub fn resolve_binding_row<'db>(
 /// name. Every verb but `union` carries, restricts or extends the names its
 /// base already had; `union` replaces them with the pipeline's own, because a
 /// row of its result came from one of two sides and nothing says which.
+///
+/// `resolving` is the pipelines whose rows are being resolved, outermost
+/// first — `&[]` from outside. A pipeline already on it is a CYCLE
+/// (`a := b.where(…)`, `b := a.where(…)`): a diagnostic, not an infinite loop.
+/// A chain of distinct pipelines is as long as the program writes it; it was a
+/// depth of 32, which reported a long legal chain as a cycle.
 pub fn resolve_binding_scope<'db>(
     db: &'db dyn fossil_base::Db,
     file: fossil_base::SourceFile,
     source_name: &str,
-    depth: usize,
+    resolving: &[&str],
 ) -> Result<Rows<'db>, fossil_base::ErrorGuaranteed> {
     let dm = def_map(db, file);
 
@@ -185,7 +185,7 @@ pub fn resolve_binding_scope<'db>(
         .iter()
         .find(|p| p.name.as_str() == source_name)
     {
-        if depth >= MAX_PIPE_DEPTH {
+        if resolving.contains(&source_name) {
             return Err(pipe_error(
                 db,
                 pipe,
@@ -200,9 +200,11 @@ pub fn resolve_binding_scope<'db>(
         // The NAMES survive it, which is the whole reason this returns a scope:
         // `Contact.email` has to resolve against `Reachable := Contact.where(…)`
         // whether or not anybody registered a descriptor for `Contact`.
-        let mut scope = resolve_binding_scope(db, file, pipe.base.as_str(), depth + 1)?;
+        let mut within = resolving.to_vec();
+        within.push(source_name);
+        let mut scope = resolve_binding_scope(db, file, pipe.base.as_str(), &within)?;
         for op in &pipe.ops {
-            scope = apply_source_op(db, file, pipe, op, scope, depth)?;
+            scope = apply_source_op(db, file, pipe, op, scope, &within)?;
         }
         return Ok(scope);
     }
@@ -334,7 +336,7 @@ fn apply_source_op<'db>(
     pipe: &crate::lower::HirSourcePipe,
     op: &crate::lower::HirSourceOp,
     scope: Rows<'db>,
-    depth: usize,
+    resolving: &[&str],
 ) -> Result<Rows<'db>, fossil_base::ErrorGuaranteed> {
     use crate::lower::HirSourceOp;
 
@@ -359,7 +361,7 @@ fn apply_source_op<'db>(
             // `hello.fossil` and every program like it, is where the engine's
             // late refusal used to be the only one there was.
             HirSourceOp::Join { right, alias, on } => {
-                let right = right_scope(db, file, right, alias.as_ref(), depth)?;
+                let right = right_scope(db, file, right, alias.as_ref(), resolving)?;
                 check_join_condition(db, pipe, on, &scope, &right)?;
                 Ok(scope.concat(right))
             }
@@ -417,7 +419,7 @@ fn apply_source_op<'db>(
         // `User.id` land on different entries; only a BARE name — which the
         // surface has no spelling for — would flatten into finding the first.
         HirSourceOp::Join { right, alias, on } => {
-            let right = right_scope(db, file, right, alias.as_ref(), depth)?;
+            let right = right_scope(db, file, right, alias.as_ref(), resolving)?;
             let Some(_) = right.fields(db) else {
                 return Err(pipe_error(
                     db,
@@ -470,7 +472,7 @@ fn apply_source_op<'db>(
         // equal types is not a stricter rule than the backend's, it is the
         // backend's rule stated where a user can be told about it.
         HirSourceOp::Union { right } => {
-            let right = right_scope(db, file, right, None, depth)?;
+            let right = right_scope(db, file, right, None, resolving)?;
             let (Some(left_fields), Some(right_fields)) = (scope.fields(db), right.fields(db))
             else {
                 // The right side declares no schema. Nothing can be compared,
@@ -630,9 +632,9 @@ fn right_scope<'db>(
     file: fossil_base::SourceFile,
     right: &SmolStr,
     alias: Option<&SmolStr>,
-    depth: usize,
+    resolving: &[&str],
 ) -> Result<Rows<'db>, fossil_base::ErrorGuaranteed> {
-    let scope = resolve_binding_scope(db, file, right.as_str(), depth + 1)?;
+    let scope = resolve_binding_scope(db, file, right.as_str(), resolving)?;
     Ok(match alias {
         Some(a) => scope.rename_to(db, a),
         None => scope,
@@ -1095,7 +1097,8 @@ mod tests {
     fn a_derived_relation_carries_the_binding_it_derives_from_and_not_its_own_name() {
         #[salsa::tracked(returns(clone))]
         fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
-            let scope = resolve_binding_scope(db, file, "Reachable", 0).expect("a legal pipeline");
+            let scope =
+                resolve_binding_scope(db, file, "Reachable", &[]).expect("a legal pipeline");
             format!(
                 "{} | Contact={} Reachable={} Nobody={}",
                 render(db, &scope),
@@ -1130,7 +1133,8 @@ mod tests {
     fn a_binding_the_relation_does_not_draw_on_is_not_in_scope() {
         #[salsa::tracked(returns(clone))]
         fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
-            let scope = resolve_binding_scope(db, file, "Reachable", 0).expect("a legal pipeline");
+            let scope =
+                resolve_binding_scope(db, file, "Reachable", &[]).expect("a legal pipeline");
             format!("{} | Other={}", render(db, &scope), scope.has("Other"))
         }
 
@@ -1159,7 +1163,7 @@ mod tests {
     fn a_self_join_puts_both_sides_in_scope_under_two_names() {
         #[salsa::tracked(returns(clone))]
         fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
-            let scope = resolve_binding_scope(db, file, "Pairs", 0).expect("a legal pipeline");
+            let scope = resolve_binding_scope(db, file, "Pairs", &[]).expect("a legal pipeline");
             render(db, &scope)
         }
 
@@ -1183,7 +1187,7 @@ mod tests {
     fn a_qualified_reference_resolves_against_its_own_side_of_a_join() {
         #[salsa::tracked(returns(clone))]
         fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
-            let scope = resolve_binding_scope(db, file, "Both", 0).expect("a legal join");
+            let scope = resolve_binding_scope(db, file, "Both", &[]).expect("a legal join");
             let ty = |binding: &str| {
                 scope
                     .row_of(binding)

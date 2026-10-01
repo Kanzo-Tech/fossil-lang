@@ -25,10 +25,9 @@ receives — and the base of a base, and so on until a binding that reads a file
 binding, so the row of every relation in it is defined only in terms of itself, and nothing could be
 read to fill it.
 
-The check is a depth limit, not a graph walk: resolution stops at 32 nested pipelines and reports
-the one it was resolving there. Thirty-two is not a depth anyone reaches writing a mapping, so in
-practice it is a cycle; but it also means a chain of more than thirty-two genuinely distinct
-pipelines would be reported with this message.
+The check follows the names: a pipeline met again while its own row is still being resolved is the
+cycle, and it is the one reported. A chain of distinct pipelines is as long as the program writes
+it, and is never this error.
 
 ## How to repair it
 

@@ -1679,7 +1679,7 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
         // algebra's own tests use.
         #[salsa::tracked(returns(copy))]
         fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
-            crate::infer::resolve_binding_scope(db, file, "Valid", 0).is_ok()
+            crate::infer::resolve_binding_scope(db, file, "Valid", &[]).is_ok()
         }
         let _ = shim(&db, file);
         shim::accumulated::<Diagnostic>(&db, file)
@@ -1763,7 +1763,7 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
         let file = SourceFile::new(&db, program.to_string(), "join.fossil".to_string());
         #[salsa::tracked(returns(copy))]
         fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
-            crate::infer::resolve_binding_scope(db, file, "Out", 0).is_ok()
+            crate::infer::resolve_binding_scope(db, file, "Out", &[]).is_ok()
         }
         let _ = shim(&db, file);
         shim::accumulated::<Diagnostic>(&db, file)
@@ -1936,7 +1936,7 @@ fn null_compares_with_anything_and_assigns_to_nothing() {
         let file = SourceFile::new(&db, src, "null.fossil".to_string());
         #[salsa::tracked(returns(copy))]
         fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
-            crate::infer::resolve_binding_scope(db, file, "Valid", 0).is_ok()
+            crate::infer::resolve_binding_scope(db, file, "Valid", &[]).is_ok()
         }
         let _ = shim(&db, file);
         shim::accumulated::<Diagnostic>(&db, file)
@@ -1997,4 +1997,41 @@ User : T from users
         diags.iter().any(|d| d.contains("Null")),
         "writing a property from `null` must be refused, naming the type: {diags:#?}"
     );
+}
+
+// ── Pipeline cycles ───────────────────────────────────────────────────────
+
+/// The codes resolving `name`'s scope accumulates, over `src`.
+fn pipeline_codes(src: &str, name: &'static str) -> Vec<&'static str> {
+    #[salsa::tracked(returns(copy))]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile, name: &'static str) -> bool {
+        crate::infer::resolve_binding_scope(db, file, name, &[]).is_ok()
+    }
+    let (db, file) = db_with(src);
+    let _ = shim(&db, file, name);
+    shim::accumulated::<Diagnostic>(&db, file, name)
+        .into_iter()
+        .map(|d| d.problem.code())
+        .collect()
+}
+
+/// Two pipelines that name each other are a cycle, found by the walk itself.
+#[test]
+fn two_pipelines_that_name_each_other_are_a_cycle() {
+    let codes = pipeline_codes(
+        "Active := Recent.where(Recent.active)\nRecent := Active.where(Active.year >= 2020)\n",
+        "Active",
+    );
+    assert_eq!(codes, ["pipeline/cycle"]);
+}
+
+/// A chain of forty distinct pipelines is no cycle. It was reported as one:
+/// the check was a depth of 32.
+#[test]
+fn a_long_chain_of_distinct_pipelines_is_not_a_cycle() {
+    let mut src = String::from("P0 := io.csv(\"x.csv\")\n");
+    for i in 1..=40 {
+        src.push_str(&format!("P{i} := P{}.where(P{}.active)\n", i - 1, i - 1));
+    }
+    assert_eq!(pipeline_codes(&src, "P40"), Vec::<&str>::new());
 }
