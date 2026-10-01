@@ -1,0 +1,42 @@
+---
+title: An internal error
+description: "`internal/bug` — fossil reached a state it should not have; the fault is fossil's, not the program's or the host's."
+---
+
+Every other code in this index is a mistake someone other than fossil can repair: the program, the
+data, the host's storage. This one is fossil's own fault — a path the compiler or the runtime assumed
+was unreachable, reached.
+
+```text
+internal error: the source row is not a Record for field `name`
+```
+
+`data.what` says, in a sentence, what fossil found that it did not expect. When another error
+triggered it — a serializer refusing a value, an Arrow kernel refusing a batch, a JavaScript call
+rejecting — that error is the cause.
+
+It is raised in three kinds of place:
+
+- **The compiler**, as a diagnostic at a position in the program, where the type checker or the
+  lowering finds its own invariants broken.
+- **The run**, for the writer's failures a program's data cannot cause — a table's Parquet that did
+  not encode, `fossil.json` that did not serialise — and for a run's failure that `runJob` receives
+  without a fossil code, which it reports as `the run failed outside fossil` with the original error
+  as the cause.
+- **The boundary to JavaScript**, when a failure fossil built cannot be handed over as an object.
+
+## Why fossil refuses it
+
+Nobody branches on this code, and nobody should: there is nothing in the program to change. It
+exists so that fossil's own faults still arrive as a problem with a code and a page, shown like any
+other, rather than as a stray string — and so that they are never mistaken for the caller's. A Rust
+panic is not one of these: it is not a value at the moment it happens, and stays a
+`WebAssembly.RuntimeError`. See [one error, from Rust to the screen](/docs/design/errors).
+
+## How to repair it
+
+There is nothing to repair in your program. Report it at
+[fossil-lang's issues](https://github.com/Kanzo-Tech/fossil-lang/issues) with the `what` text, the
+cause if there is one, and the smallest program and data that reproduce it. If the diagnostic
+appeared beside others in your program, fixing those may route around it, but the bug is still
+worth reporting.

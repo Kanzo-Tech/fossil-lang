@@ -2,6 +2,7 @@ import { defineDocs, defineConfig } from "fumadocs-mdx/config";
 import { remarkMdxMermaid } from "fumadocs-core/mdx-plugins";
 import { pageSchema } from "fumadocs-core/source/schema";
 import { z } from "zod";
+import { loadFossilGrammar } from "./lib/fossil-grammar";
 
 /**
  * The editorial stance, made a type.
@@ -44,13 +45,24 @@ export const docs = defineDocs({
   },
 });
 
+/**
+ * A ```fossil fence highlights with the grammar `<Program>` uses. `rehypeCode` resolves a fence's
+ * language lazily from the shared highlighter's bundle, and `loadFossilGrammar` is what adds fossil
+ * to that bundle, so it has to have run before any page reaches rehype.
+ */
+function remarkFossilGrammar() {
+  return async () => {
+    await loadFossilGrammar();
+  };
+}
+
 export default defineConfig({
   mdxOptions: {
     // fumadocs ships this one; no third-party plugin is involved. It rewrites a ```mermaid fence
     // into `<Mermaid chart="…" />` and nothing else — the renderer is `components/mermaid.tsx`,
     // which says there why it runs in the browser rather than at build time. It has to be a remark
     // plugin because `rehypeCode` would otherwise have turned the fence into highlighted markup.
-    remarkPlugins: [remarkMdxMermaid],
+    remarkPlugins: [remarkMdxMermaid, remarkFossilGrammar],
     rehypeCodeOptions: {
       themes: { light: "github-light", dark: "github-dark" },
       defaultColor: false,

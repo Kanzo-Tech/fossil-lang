@@ -1,0 +1,38 @@
+---
+title: A table is declared twice
+description: "`corpus/duplicate-table` — the manifest lists two tables with the same `name`, across its vertex and edge tables."
+---
+
+Every table in `fossil.json` — vertex and edge alike — has a `name`, and `open` found two with the
+same one:
+
+```json
+{
+  "format": "fossil/1",
+  "vertex_tables": [{ "name": "Person", "path": "vertex/Person.parquet" }],
+  "edge_tables": [{ "name": "Person", "path": "edge/Person_knows_Person.parquet" }]
+}
+```
+
+```text
+https://data.example/graphs/people/fossil.json declares Person twice
+```
+
+A host sees `data: { table }`. It is thrown by `open` while it indexes the manifest, before it attaches
+anything to the engine.
+
+## Why fossil refuses it
+
+A table's name is its address everywhere after `open`. Each table becomes one view, named after it,
+in the corpus's catalog, and `scan({ table })` finds a table by that name. Vertex and edge tables share
+the one namespace, so two entries with one name could only be one view over one of the two files,
+and a scan meant for the other would read the wrong rows without a word. The writer keeps names unique —
+an edge table's `name` is unique where its `label` repeats across relations — so a duplicate means the
+manifest did not come from it unchanged ([the corpus](/docs/design/corpus)).
+
+## How to repair it
+
+- **Regenerate the corpus** with the fossil writer, if the manifest was edited by hand or merged from
+  two runs.
+- **If another tool writes the manifest**, give every vertex and edge table a distinct `name`; the
+  edge table's `label` is the field that may repeat.

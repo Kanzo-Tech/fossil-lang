@@ -1,0 +1,32 @@
+---
+title: Two identities in one mapping
+description: "`identity/duplicate-subject` — a mapping body writes `@subject` more than once."
+---
+
+A mapping body has a second `@subject` line. The diagnostic points at the second one:
+
+```fossil
+Users : Person from User
+    @subject = "https://shop.example/user/{User.email}"
+    @subject = "https://shop.example/user/{User.id}"
+    name     = User.name
+// `Users` declares `@subject` twice, and a type has one identity
+```
+
+## Why fossil refuses it
+
+A node has one IRI. Two `@subject` lines would either mint two nodes for every row or leave the
+compiler to pick one, and neither is something an author would write on purpose. The rule is part of
+the body's grammar — `MappingBody := SubjectAssign Property+`, exactly one identity — and it is the
+same rule [across mappings](/docs/design/identity#two-obligations-no-other-property-has): every
+mapping that produces a type writes the same one, so that an edge naming the type reaches the same
+node whichever mapping emitted it. A type with two identities inside one mapping would break that
+before a second mapping was even written.
+
+## How to repair it
+
+- **Keep the one that identifies the row** and delete the other.
+- **If both values matter**, the second one is data, not identity: write it as an ordinary property
+  whose name the shape declares.
+- **If you need two kinds of node**, write two mappings, each producing its own type with its own
+  `@subject`.

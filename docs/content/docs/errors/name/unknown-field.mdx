@@ -1,0 +1,39 @@
+---
+title: Not a field of this row
+description: "`name/unknown-field` — a qualified reference names a column the row it qualifies does not have."
+---
+
+Every field reference is qualified — `User.name`, never a bare `name` — and the name before the dot
+is a row in scope. When that row is in scope but has no column of that name, this is the error. The
+shop program, one letter changed:
+
+<Program src="errors/name/unknown-field/program.fossil" title="program.fossil" />
+
+<Program src="errors/name/unknown-field/expected/diagnostic.txt" title="fossil check" />
+
+There are two labels. One is on the misspelt name itself, not on the whole right-hand side. The
+other is on the binding that brought the row into existence, with its fields listed, because that is
+usually not the line being blamed: here `User` reaches the mapping through `Adults`, a pipeline
+written elsewhere.
+
+The same code is raised inside a pipeline, for a column a `select` or `group_by` names that its
+input row does not have.
+
+## Why fossil refuses it
+
+A source binding is [one name with two jobs](/docs/book/what-you-read#one-name-two-jobs): as a type,
+its fields are the columns of the file it reads, and fossil reads that file's schema while checking.
+So `User.nmae` is not an open question to settle at run time; it is a name that is not there. The
+suggestion is drawn from that row's own columns — not from every name in scope, which after a join
+would suggest a column of the other side and produce a reference that does not compile either.
+
+This is [the first diagnostic in the book](/docs/book/diagnostics#1-a-field-that-is-not-in-the-source).
+
+## How to repair it
+
+- **The column is misspelt.** The `help` names the nearest column of that row; in an editor it is
+  also a quick fix that replaces just the name.
+- **The column belongs to the other side of a join.** Qualify it with the row that has it:
+  `Purchase.amount`, not `User.amount`.
+- **The file does not have the column yet.** The label lists what the file does have; the program
+  is checked against the file as it is.

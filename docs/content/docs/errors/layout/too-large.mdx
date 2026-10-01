@@ -1,0 +1,32 @@
+---
+title: The graph has too many vertices
+description: "`layout/too-large` — the graph has more vertices than a 32-bit `dense_id` can number."
+---
+
+Every vertex of a corpus, across every type, gets a `dense_id`, and the ids are gapless: `0..V−1`
+over the whole graph. A `dense_id` is a `u32`, so a graph with 2³² vertices or more cannot be
+numbered:
+
+```text
+the graph has 4294967296 vertices; a `dense_id` is a u32
+```
+
+`data.vertices` is the count the layout pass reached when it ran out of range — the sum across vertex
+types, since the id space is shared. The pass refuses before anything is written.
+
+## Why fossil refuses it
+
+The width is a commitment of the format, not a spelling: the community and Hilbert passes that assign
+the numbering are 32-bit throughout, so a wider column would declare a range nothing in the writer
+can number. And it is not what stops a corpus in practice. Measured, the layout pass exhausts a
+machine about 430 times before the column exhausts its range, and the browser executor's 2 GiB budget
+refuses long before either, as [`run/over-budget`](/docs/errors/run/over-budget). The numbers are on
+[the corpus](/docs/design/corpus#the-width-of-an-address-and-what-actually-runs-out-first).
+
+## How to repair it
+
+- **Split the graph.** Write it as several corpora, each under its own destination, by running the
+  program over parts of its input.
+- **Emit fewer vertices.** A vertex type fed by several sources is unioned and deduplicated by
+  subject; check that each source contributes subjects that belong in the graph, and filter the rest
+  with a `where` upstream of the mapping.

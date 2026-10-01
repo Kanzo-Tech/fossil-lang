@@ -1,0 +1,37 @@
+---
+title: An edge to a type nothing writes
+description: "`identity/edge-without-template` — an edge names a type that no mapping in the program produces, so there is no `@subject` to build its IRI from."
+---
+
+An edge is written by naming the target type and handing it the values its identity needs —
+`buyer = Person(User.email)`. That form builds the target's IRI from the `@subject` of the mapping
+that produces the type. Here no mapping in the program produces `Person`, so there is nothing to
+build from:
+
+```fossil
+type { Person, Order } := io.shex("shop.shex")
+Purchase := io.csv("data/orders.csv")
+//
+Orders : Order from Purchase
+    @subject = "https://shop.example/order/{Purchase.id}"
+    buyer    = Person(Purchase.email)
+// no mapping in this program writes a `Person`, so `Person(…)` has no identity template to build from
+```
+
+## Why fossil refuses it
+
+An edge may point at a node nothing in this corpus emits — RDF is open-world, and an IRI denotes
+whether or not anyone says anything about it ([edges](/docs/book/edges#an-edge-may-dangle)). What it
+cannot do is be built without a template. `Person(…)` is short precisely because a type has one
+identity and the compiler knows it ([identity](/docs/design/identity)); with no mapping producing
+the type, the compiler knows nothing, and inventing an IRI scheme would be a guess at what some other
+program mints.
+
+A name that is not a type at all is a different mistake:
+[`name/unknown-shape`](/docs/errors/name/unknown-shape).
+
+## How to repair it
+
+- **Write the mapping that produces the type.** Its `@subject` becomes the template every edge to
+  that type is built from.
+- **The type was misnamed.** Name the type whose mapping you meant.

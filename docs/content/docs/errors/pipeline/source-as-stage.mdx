@@ -1,0 +1,42 @@
+---
+title: A source constructor used as a stage
+description: "`pipeline/source-as-stage` — a pipeline stage resolves to a catalogue row whose operator constructs a source rather than transforming a relation."
+---
+
+Every catalogue row that a pipeline stage can name carries an operator, and one of the operators is
+`Source` — what `io.csv`, `io.json`, `io.parquet` and `io.rdf` lower to. A source starts a relation;
+it does not transform one, so a stage whose row turns out to be a source has nothing to do with the
+rows it receives, and the message would say so:
+
+```text
+`csv` constructs a source and is not a stage of `Merged`
+```
+
+## When it is reached
+
+Today, by no program. A stage is looked up among the members of a relation — the `seq/` rows — and
+the four source constructors are members of `io`, not of a relation. So `User.csv("other.csv")` is
+answered by [not a relation verb](/docs/errors/pipeline/unknown-verb), and `io.csv("…")` on its own
+is recognised as a namespace call before any stage is looked up at all.
+
+The code exists because the lowering is exhaustive over the operators a row can carry, with no
+wildcard: adding an operator is a compile error until every position that matches on them says what
+it means. A relation row whose operator is `Source` is a combination the catalogue does not hold,
+and this is the answer the lowering gives if it ever does.
+
+## Why fossil refuses it
+
+A pipeline's input is its base — the binding left of the first dot — and every stage after it is a
+function of the rows so far. A source reads a file and owes nothing to any rows, so as a stage it
+would silently throw its input away. [The algebra](/docs/design/algebra) keeps `Source` at the root
+of a plan and nowhere else.
+
+## How to repair it
+
+Bind the source on its own line and use it by name — as the base of a pipeline, or as the other
+side of a `join` or a `union`:
+
+```fossil
+Other  := io.csv("data/other.csv")
+Merged := User.union(Other)
+```

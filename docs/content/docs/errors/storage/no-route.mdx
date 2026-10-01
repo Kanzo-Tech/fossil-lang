@@ -1,0 +1,38 @@
+---
+title: No store routes this locator
+description: "`storage/no-route` — a locator that is neither under a vended `s3://` or `abfss://` prefix nor a public `http(s)` URL, so fossil has no way to reach it."
+---
+
+fossil reaches storage three ways, and a locator that fits none of them has no route. The message
+lists all three:
+
+```text
+p.shex has no route: fossil reads s3://bucket/… and abfss://container@account.dfs.core.windows.net/… through a vended credential, and http(s) without one
+```
+
+A host sees `data: { locator }`. It comes from `fossil-storage` in two situations. A file named with
+no connection is read as it is only when it is a public `http(s)` URL, so a bare path like `p.shex`
+is refused — a storage read answers it as that file's `problem`, and a document read this way
+reaches a run as `document/unread` with this as its cause. And a credential whose `prefix` is not
+`s3://bucket/…` or `abfss://container@account.dfs.core.windows.net/…` — another scheme, an empty
+bucket, an Azure host that is not `*.dfs.core.windows.net` — has no store to build. Introspection
+in `@fossil-lang/introspect` raises the same code for a source with no connection that is not an
+`http(s)` URL, and reports it through `onWarn` rather than throwing.
+
+## Why fossil refuses it
+
+A host never hands fossil a URL it signed; it vends a credential scoped to a prefix, and fossil builds
+the store for it ([storage is reached by a vended credential](/docs/design/three-hosts)). The stores
+fossil knows how to build from an Iceberg credential are S3 and Azure Data Lake. Without a credential
+the only thing it can do is send a plain request, which is safe for a public `http(s)` URL and
+meaningless for a relative path or an unknown scheme: there is no base to resolve it against and no
+authority to ask. Guessing one — the page's origin, a default bucket — would read something other
+than what the program named.
+
+## How to repair it
+
+- **Name the file through a connection.** Write `@name/…` in the program, so the locator expands
+  against the host's `connections()` and is read with the credential vended for that connection.
+- **Use an absolute URL** for a file that is genuinely public: `https://…`.
+- **Vend a prefix fossil can route**: `s3://bucket/path/` or
+  `abfss://container@account.dfs.core.windows.net/path/`.

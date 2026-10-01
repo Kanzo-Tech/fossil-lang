@@ -1,0 +1,38 @@
+---
+title: A rename of a type the binding does not introduce
+description: "`shape/rename-unknown-type` — an `@rename` above a `type` binding names a type that binding does not bind."
+---
+
+An `@rename` sits above a `type { … }` binding and its first argument names one of the types that
+binding introduces. When it names anything else — a typo, or a type bound on another line — the
+rename belongs to nobody:
+
+```fossil
+@rename(Persn, "http://xmlns.com/foaf/0.1/name" as foaf_name)
+type { Person } := io.shex("mixed.shex")
+```
+
+```text
+`@rename` names `Persn`, which this `type` binding does not introduce
+```
+
+The error underlines that rename line, and the `help` is a did-you-mean over the names the binding
+does introduce — here ``did you mean `Person`?`` — or, when none is close, a reminder that a rename
+renames a predicate *of* one bound type.
+
+## Why fossil refuses it
+
+A rename is scoped to the binding it sits on: the grammar puts `@rename` in front of `type`, and the
+type it names has to be one of that line's names. A rename addressed elsewhere is not applied to
+anything, and dropping it silently is the failure this check exists to stop. A `@rename` is usually
+the repair for a [name collision](/docs/errors/shape/name-collision); if it renamed nothing, the
+author would get the collision they thought they had fixed, with no hint that the repair was the
+part that was wrong.
+
+## How to repair it
+
+- **Fix the name.** Use the local name the binding introduces, as the `help` suggests.
+- **Move the rename.** If the type is bound on another `type` line, put the `@rename` above that
+  line — each binding carries its own renames.
+- The rename syntax and why it lives in the program are on
+  [naming what you produce](/docs/book/what-you-produce).

@@ -1,0 +1,51 @@
+---
+title: An attribute in the wrong place
+description: "`syntax/misplaced-attribute` — a known attribute written where it does not belong: `@subject` above a type binding, `@rename` in a mapping body, or a `@rename` with no binding under it."
+---
+
+fossil has two attributes, and position decides which one a line may hold. `@rename` goes above a
+`type { … } := …` binding; `@subject` is the first line of a mapping body. Written anywhere else,
+the attribute is refused, and the message names it and the place:
+
+```fossil
+@subject = "https://example.org/person/{Users.id}"
+type { Person } := io.shex("person.shex")
+```
+
+```text
+syntax/misplaced-attribute
+  × `@subject` does not belong above a `type` binding
+  help: the only attribute in this position is `@rename`. `@subject` is the first line of a
+        MAPPING BODY — it assigns the identity of the rows a mapping writes, and above a type
+        binding there are no rows yet.
+```
+
+There are three places it is reported:
+
+- **Above a type binding**, any attribute but `@rename` — usually `@subject` written outside its
+  mapping, as above.
+- **A `@rename` with nothing under it**: `` `@rename` does not belong anywhere but above a `type`
+  binding ``. The next line has to be the `type { … } := …` whose predicate it renames.
+- **In a mapping body**, any attribute but `@subject`: `` `@rename` does not belong in a mapping
+  body ``, with the help *the only one is `@subject = <expr>`, the mapping's identity; `@rename` goes
+  above a `type` binding*. The property is not written.
+
+## Why fossil refuses it
+
+Both attributes lex as the same token, and the position is what gives each its meaning. A
+`@rename` renames a predicate *of one type binding*, so it means nothing without the binding below it.
+`@subject` assigns the identity of the rows a mapping writes, and the row is introduced by the
+mapping's header — above a type binding, or outside a body, there is no row for it to read
+([mappings](/docs/book/mappings)). The `@` exists to mark the language's own slots apart from the
+property names a shape declares ([identity](/docs/design/identity)), so an attribute in the wrong slot
+is a known name in the wrong place, not an unknown name, and the message says so rather than
+reporting an unexpected token.
+
+## How to repair it
+
+- **`@subject` outside a body**: move it into the mapping it identifies, as the first line under the
+  header — `@subject = "https://example.org/person/{Users.id}"`.
+- **`@rename` with no binding under it**: put it on the line directly above the `type { … } := …`
+  that declares the type it names.
+- **`@rename` inside a body**: move it out, above the type binding. The new name it introduces is
+  then an ordinary property key in the body.

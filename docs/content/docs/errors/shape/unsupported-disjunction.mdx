@@ -1,0 +1,53 @@
+---
+title: A value disjunction
+description: "`shape/unsupported-disjunction` — the shape offers alternative sets of predicates with `|`, and one mapping cannot be checked against either-or."
+---
+
+The shape document has a `OneOf` — in ShExC, triple expressions separated by `|` — so a node of the
+shape carries one set of predicates *or* another:
+
+```turtle
+shop:Contact {
+  shop:name xsd:string ;
+  ( shop:email xsd:string | shop:phone xsd:string )
+}
+```
+
+Each mapping that produces `Contact` is refused on its header:
+
+```text
+a value disjunction is not supported: shape `https://shop.example/voc#Contact` has 2 branches
+```
+
+The diagnostic carries a rewrite: one mapping per branch, each with the original mapping's `from`
+clause and `@subject`, and one line for each predicate the branch names.
+
+```fossil
+Contacts1 : Contact from User
+    @subject = "https://shop.example/contact/{User.id}"
+    email = User.email
+//
+Contacts2 : Contact from User
+    @subject = "https://shop.example/contact/{User.id}"
+    phone = User.phone
+```
+
+## Why fossil refuses it
+
+The checker reads a shape as a constraint table — per predicate, a type and a count — and a
+mapping body is checked line by line against it. A disjunction is not a table: whether `email` is
+required depends on whether `phone` was written, which no single row of it can say. So the ShEx
+decoder stops at the `OneOf`, records the predicates each branch names, and the checker
+turns that into this error and the split. The predicates outside the disjunction are still read, so
+the rest of the body is checked as usual. See [inference from shapes](/docs/design/shapes).
+
+An `OR` between shapes on one predicate's value — `shop:owner @shop:Person OR @shop:Org` — is not
+this: that is one predicate with two possible targets, and it is read as an edge.
+
+## How to repair it
+
+- **Split the mapping.** In the editor the rewrite above is a quick fix, *Split mapping into one per
+  ShEx OneOf disjunct*, which replaces the mapping with it verbatim. Then filter each one's rows to
+  those that have its branch, and add back the lines the split did not copy — `name` here.
+- **Change the shape.** If the alternatives are really independent optional properties, declare
+  them so (`shop:email xsd:string ? ; shop:phone xsd:string ?`) and keep one mapping.

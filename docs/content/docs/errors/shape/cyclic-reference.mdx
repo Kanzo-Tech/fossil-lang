@@ -1,0 +1,48 @@
+---
+title: A cyclic shape reference
+description: "`shape/cyclic-reference` — a labelled triple expression in the shape document includes itself, directly or through another, so its predicates never bottom out."
+---
+
+ShEx lets a shape reuse a group of constraints declared elsewhere: `$label ( … )` names a triple
+expression, and `&label` includes it in place. When the inclusions loop back — a group that includes
+itself, or two that include each other — the document describes a constraint table with no end:
+
+```turtle
+shop:Person {
+  $shop:contact (
+    shop:email xsd:string ;
+    &shop:contact
+  )
+}
+```
+
+Every mapping that produces the shape is refused on its header, with the labels the decoder was
+walking when it came back round:
+
+```text
+cyclic shape graph not supported: https://shop.example/voc#contact
+```
+
+## Why fossil refuses it
+
+fossil reads a shape as a flat table — per predicate, a type and a count — and the ShEx decoder
+builds it by resolving every `&label` in place before any mapping is checked. An unresolved
+reference walked as if it meant nothing would produce false "unknown property" errors, so every one
+is followed. A cycle is where following stops being finite: the decoder keeps the labels it is
+inside, and an inclusion of one of them is reported rather than expanded forever. Only acyclic
+documents are supported. See [inference from shapes](/docs/design/shapes) for what the table has to
+carry.
+
+Constraints the walk did reach before the loop are still in the table, so other errors can follow
+this one — a predicate counted twice may also be reported as a
+[name collision](/docs/errors/shape/name-collision). Repair the cycle first.
+
+## How to repair it
+
+- **Remove the self-inclusion.** A group that includes itself adds nothing it did not already say;
+  delete the `&label` inside it.
+- **Break a mutual inclusion.** When two groups include each other, move the shared constraints
+  into a third group that both include, and drop the back-reference.
+- **If the intent was a recursive structure** — a person whose `knows` points at another person —
+  that is a reference to a *shape* on a predicate's value (`shop:knows @shop:Person`), not an
+  inclusion of a triple expression.

@@ -1,0 +1,47 @@
+---
+title: A property with no value
+description: "`syntax/missing-value` — a property line with nothing on the right of its `=`, so the property is not written."
+---
+
+A property line is `name = <expression>`, and this one reached the compiler with no expression on
+the right. The property is dropped, and the message says so:
+
+```text
+syntax/missing-value
+  × this property has no value, so it is not written
+```
+
+The check sits in the lowering of a property, and of the expression on the right of it: a property
+node with no value node, or a value node with nothing in it. With the current parser, a line that
+stops at `=` does not usually reach it in that state. The parser leaves an error node where the value
+should be and reports [`syntax/unexpected-token`](/docs/errors/syntax/unexpected-token) at the end
+of the line, and the lowering then reports the error node as
+[`unsupported/expression`](/docs/errors/unsupported/expression). Either way the property is not
+written.
+
+```fossil
+User : Person from Users
+    @subject = "https://example.org/user/{Users.id}"
+    name =
+```
+
+## Why fossil refuses it
+
+A property written from nothing is not a property with no value. A source may have no value for a
+column, and `Row.celsius != null` is how a program asks about that; but writing a property is a
+statement that the node has it, and there is nothing here to state
+([values and expressions](/docs/book/expressions)). fossil does not substitute an empty string or a
+null.
+
+The diagnostic itself exists because of the failure it guards: a property the lowering could not
+read used to be dropped and the build stayed green, so the corpus was missing a column nobody was
+told about. Every path in the lowering that drops a property now reports first, and this is the one
+for the value being absent.
+
+## How to repair it
+
+- **Write the value**: `name = Users.name`, or any expression — a literal, a call, a string with
+  holes.
+- **The property is optional and you have nothing to write**: delete the line. A property whose count
+  in the shape allows zero may be left out of the body.
+- **The value is on the next line**: a property is one line; join them.

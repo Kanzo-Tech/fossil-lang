@@ -1,0 +1,44 @@
+---
+title: Two predicates share a name
+description: "`shape/name-collision` — two predicates of one shape end in the same last segment, so neither has a name a mapping can write."
+---
+
+A property key in a mapping body is the last segment of a predicate IRI. When two predicates of one
+shape end in the same segment, they ask for the same key. Here `shop:name` and `foaf:name` both
+want to be called `name`:
+
+<Program src="errors/shape/name-collision/shape.shex" title="shape.shex" />
+
+<Program src="errors/shape/name-collision/program.fossil" title="program.fossil" />
+
+<Program src="errors/shape/name-collision/expected/diagnostic.txt" title="fossil check" />
+
+The error is anchored on the `type` binding that brought the shape in, and the two full IRIs are
+labels on the two lines of the document that declare them. It is reported once per mapping that
+produces the shape, not once for every property that trips on it.
+
+## Why fossil refuses it
+
+Both predicates are unwritable while the collision stands — `name = User.name` would mean one of
+them, and nothing in the program says which. fossil does not pick, and it does not number them
+(`name`, `name2`): a derived name depends on its own label and nothing else, so a small edit to a
+document never renames something a program already writes. That rule, and the F# experience it comes
+from, is [the naming rule](/docs/design/type-providers); automatic disambiguation is
+[discarded](/docs/design/discarded).
+
+The repair lives in the program rather than in the document because the vocabulary may not be
+yours: `foaf:` belongs to somebody else, and a local naming problem must not turn into an edit to a
+document other people share.
+
+## How to repair it
+
+- **Rename one of them above the binding.** The `help` is the line to paste: an `@rename` naming
+  the bound type, the second predicate's full IRI, and an alias taken from its vocabulary
+  (`foaf_name` here). Both keys are then writable:
+
+<Program src="rename/rename.fossil" title="rename.fossil" />
+
+- **The alias is yours to choose.** Any name that collides with nothing works; a rename that names a
+  predicate the shape does not declare is reported as
+  [`shape/rename-unknown-predicate`](/docs/errors/shape/rename-unknown-predicate) rather than
+  silently doing nothing. [Naming what you produce](/docs/book/what-you-produce) walks through it.

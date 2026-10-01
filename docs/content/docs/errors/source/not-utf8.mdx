@@ -1,0 +1,37 @@
+---
+title: A source is not UTF-8
+description: "`source/not-utf8` — an RDF source's bytes are not valid UTF-8, so fossil cannot read them as Turtle."
+---
+
+A program reads an RDF graph with `io.rdf`, and the bytes fetched for it are not UTF-8 text:
+
+```fossil
+{ Person } := io.rdf("people.ttl")
+```
+
+```text
+the source `https://data.example.com/people.ttl` is not UTF-8
+```
+
+`data.locator` is the location fossil resolved and read — after a connection alias such as
+`@bucket/people.ttl` has been resolved — and the cause is the decoder's own error, which says at
+which byte the text stopped being valid.
+
+This code is raised for RDF sources only. CSV, JSON and Parquet sources are read by the query engine,
+and a failure there is [`engine/failed`](/docs/errors/engine/failed).
+
+## Why fossil refuses it
+
+An RDF source is decoded by fossil, not by the engine: the run reads the whole file through the
+store, turns it into text, parses it as Turtle and pivots its subjects into rows. Turtle is defined
+over Unicode text, so bytes that are not UTF-8 have no meaning to give it, and guessing an encoding
+would quietly change IRIs and literals — the values a corpus's identities are made of. Refusing names
+the file, before the engine has run anything. How a source is bound is in
+[what you read](/docs/book/what-you-read).
+
+## How to repair it
+
+- **Re-encode the file as UTF-8.** A Turtle file exported in Latin-1 or UTF-16 is the usual cause;
+  `iconv -f latin1 -t utf-8` converts one.
+- **Check that the locator is the file you meant.** A compressed file, or an HTML error page served
+  in place of the data, is not UTF-8 Turtle either; the locator in the message is what was fetched.

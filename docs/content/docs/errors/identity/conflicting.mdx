@@ -1,0 +1,41 @@
+---
+title: Two identities for one type
+description: "`identity/conflicting` — two mappings produce the same type and mint its identity with different `@subject` forms."
+---
+
+Two mappings produce the same type, and their `@subject` lines build its IRI differently. Here an
+export of current users and a legacy export both produce `Person`, one keyed by email and the other
+by account number:
+
+<Program src="errors/identity/conflicting/program.fossil" title="program.fossil" />
+
+<Program src="errors/identity/conflicting/expected/diagnostic.txt" title="fossil check" />
+
+Both templates are underlined, each labelled with the mapping that wrote it, and the first mapping
+to produce the type is the reference: three disagreeing mappings give two diagnostics, each blamed
+against the first.
+
+What is compared is the identity's form, not its text. The row a column is read from is a name local
+to each mapping, so `{User.email}` and `{Legacy.email}` are the same identity over two sources and
+agree. A different column, as here, or different literal text around the hole, is a different
+identity.
+
+## Why fossil refuses it
+
+A type has one identity, so that an edge naming it is a lookup rather than a guess:
+`buyer = Person(User.email)` means the `Person` whose IRI is built from this email, and that only has
+an answer if `Person` has one template. With two, the same person is two nodes in the graph — found
+by whoever queries it, long after the run succeeded. That is why this is an error and not a warning:
+nobody means it. fossil can check it because it compiles a whole program at once; the reasoning, its
+cost and the system that removed the same check are on [identity](/docs/design/identity).
+
+## How to repair it
+
+- **Agree on one scheme.** Make every mapping that produces the type build its `@subject` from the
+  same column and the same text. If the legacy export also carries the email, use it:
+  `@subject = "https://shop.example/user/{Legacy.email}"`.
+- **Join to get the key.** If one source lacks the column, join it to a relation that has it and
+  build the identity from that.
+- **They are different things.** If the two populations really are named differently, they are two
+  types; give the shape document a second one. Two identity schemes for one type is the restriction
+  fossil accepts knowingly.

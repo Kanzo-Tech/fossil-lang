@@ -1,0 +1,36 @@
+---
+title: A relation names missing vertices
+description: "`layout/dangling-endpoint` — rows of a relation reached the layout pass naming a vertex its type does not have."
+---
+
+The layout pass numbers every vertex of the graph and renumbers each relation's endpoints into that
+numbering. Some rows of one relation name a vertex that does not exist:
+
+```text
+relation `Review_author_Person` has 1 of 3 rows naming a vertex that does not exist
+```
+
+`data` carries `relation`, `before` (the relation's rows) and `dropped` (how many of them name a
+missing vertex). The pass refuses on the first such relation, before any file is written.
+
+## Why fossil refuses it
+
+A relation quietly missing edges reads downstream as a sparser graph, not as a bug. So the pass
+refuses rather than skipping the rows: a corpus that is written has every edge its relations
+carried, and every endpoint is a `dense_id` some vertex has — the property the
+`no-dangling-endpoint` conformance guard reads back from the bytes.
+
+This is not the dangling edge a program usually produces. An edge whose target the program never
+emitted — a review whose author is not in the people file — is resolved by an inner join while the
+graph executes, and dropped there: the run succeeds and counts it in its report's `dropped`, one entry
+per edge table. [An edge may dangle](/docs/book/edges#an-edge-may-dangle) shows that case. Rows that
+reach the layout already resolved to ids, so this code means an id outside its type's table got
+through.
+
+## How to repair it
+
+- **For edges the run drops**, there is nothing to repair here: read `dropped` in the run's report,
+  and join against the relation the mapping reads, as [edges](/docs/book/edges) describes.
+- **If a run fails with this code**, the executor resolved an endpoint to an id its vertex table
+  does not have, which is fossil's fault rather than the program's. Report it, with the program and
+  the counts, as you would an [`internal/bug`](/docs/errors/internal/bug).

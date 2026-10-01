@@ -1,0 +1,38 @@
+---
+title: A reader option of another provider
+description: "`provider/foreign-reader-option` — a source passes a reader option its provider does not have; another provider does, and it would be read by nothing."
+---
+
+A reader option belongs to one provider. `delimiter` is `io.csv`'s; written on any other source, it
+is an argument nothing reads:
+
+```fossil
+Sighting := io.json("data/sightings.json", delimiter = ";")
+```
+
+```text
+`io.json` has no `delimiter`; `io.csv` does
+help: a reader option belongs to the row that reads, and this one would be read by nothing
+```
+
+The error underlines the option's name. The provider that does have the option is looked up in the
+standard library's signatures, so the message names it rather than only saying the name is unknown.
+
+## Why fossil refuses it
+
+An option the reader ignores is worse than no option. The author wrote `delimiter` because they
+believe the file is split by it; on `io.json` nothing would split by it, the program would run, and
+the belief would go unchecked — the shape of defect a silent argument always produces. Once the
+checker has refused it, the lowering can drop the option for every reader but the one that declares
+it, knowing no program reaching it wrote one where it does not belong.
+
+The message names the owner because that is usually the mistake: the option was copied from a CSV
+binding, or the file is really a CSV under another provider. See
+[naming what you read](/docs/book/what-you-read) for the providers and what each reads.
+
+## How to repair it
+
+- **The file is a CSV.** Read it with the provider that has the option:
+  `io.csv("data/sightings.csv", delimiter = ";")`.
+- **The file is what the provider says.** Delete the option; JSON, Parquet and RDF have no
+  delimiter to set.

@@ -1,0 +1,25 @@
+{
+  "title": "Error index",
+  "pages": [
+    "index",
+    "syntax",
+    "name",
+    "argument",
+    "type",
+    "shape",
+    "document",
+    "provider",
+    "identity",
+    "pipeline",
+    "unsupported",
+    "run",
+    "source",
+    "engine",
+    "write",
+    "layout",
+    "storage",
+    "corpus",
+    "api",
+    "internal"
+  ]
+}

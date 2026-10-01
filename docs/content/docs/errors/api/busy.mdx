@@ -1,0 +1,39 @@
+---
+title: Another call is running
+description: "`api/busy` — a call reached a workspace or executor while another call on the same object was still running."
+---
+
+A `FossilWorkspace` or a `FossilExecutor` handles one call at a time where a call changes it. A call
+that arrives while another is still inside the object — typically an async `run` not yet settled, or
+a callback that calls back in — is refused rather than run on top of it:
+
+```text
+`registerDocument` was called while another call is running
+```
+
+A host sees `data: { call }`, the method that was refused, spelled as the binding names it
+(`update_file`, `setConnections`, `run`, …). From the workspace in `@fossil-lang/wasm` it carries the
+help *coalesce edits (an LSP client debounces `didChange` rather than sending one per keystroke) and
+retry — the workspace is still usable*. From the executor in `@fossil-lang/executor` it is raised by
+`setConnections` and `registerDocument` while a `run` or `runInMemory` holds the program.
+
+## Why fossil refuses it
+
+Both objects keep their state behind a `RefCell` and take every call by shared reference, borrowing
+mutably only inside. That is not style. A wasm-bindgen method taking `&mut self` borrows the object
+exclusively, and a second borrow during it panics; on `wasm32` a panic is an abort that never clears
+the borrow flag, so **every later call on that object failed the same way for the life of the module**.
+An editor reached it by typing faster than its debounce. Now the failed borrow is a value, the guard
+is dropped, and the object stays usable. That is why
+[the editor layer](/docs/design/tooling-for-humans) can share one workspace between the checker and
+the position queries instead of scheduling around a hazard.
+
+The executor holds its borrow across a whole run on purpose: a `registerDocument` issued mid-run fails
+instead of changing the program under it.
+
+## How to repair it
+
+- **Wait for the call in flight.** Await a `run` before registering documents or changing
+  connections; serialise calls on one object.
+- **In an editor, coalesce edits** instead of sending one update per keystroke, and retry the refused
+  call. Nothing needs to be rebuilt: the workspace is intact.

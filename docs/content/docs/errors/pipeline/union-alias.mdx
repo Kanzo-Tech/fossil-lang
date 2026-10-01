@@ -1,0 +1,43 @@
+---
+title: An alias on a union
+description: "`pipeline/union-alias` — a `union` is given `X as Y`, and its result answers only to the pipeline's own name."
+---
+
+`X as Y` is how a `join` tells two copies of one relation apart, and the other side of a `union` is
+the same kind of parameter, so the parser accepts the alias there too. A `union` refuses it:
+
+```fossil
+Everyone := Staff.union(Contractor as Temp)
+```
+
+```text
+`union` in `Everyone` gives its result the one name `Everyone`, so the alias `Temp` would name a
+row it does not produce
+```
+
+## Why fossil refuses it
+
+A `join` keeps both sides in scope, each under its binding — that is what the alias is for, and why
+a self-join needs one. A `union` cannot keep either: a row of its result came from one of the two
+sides with nothing in the data to say which, so the result is one row under one name, the
+pipeline's. `Everyone.email` is how a body reads it, and `Staff.email` and `Contractor.email` are
+refused alike.
+
+An alias here would name a row that does not exist after the union. Accepting it and dropping it
+would be worse — the program would read as if `Temp` meant something, and it would not. [The
+algebra](/docs/design/algebra#a-union-answers-to-the-pipeline-and-to-neither-side) explains why the
+pipeline's name is the only one a union answers to.
+
+## How to repair it
+
+Drop the alias, and address the result by the pipeline's name:
+
+```fossil
+Everyone := Staff.union(Contractor)
+//
+People : Person from Everyone
+    @subject = "https://shop.example/person/{Everyone.email}"
+    name     = Everyone.name
+```
+
+If the alias was there to name a filtered copy, bind that copy on its own line and union the name.

@@ -1,0 +1,35 @@
+---
+title: The handle names nothing
+description: "`api/unknown-handle` — a workspace call was given a file handle that was closed, or never issued by this workspace."
+---
+
+`FossilWorkspace.open_file` answers a `FileHandle`, and the calls about one file — `update_file`,
+`close_file`, `diagnostics_for`, `missingDocuments`, `sources` — take it back. A handle that was
+already closed, or that this workspace never issued, names nothing:
+
+```ts
+const h = ws.open_file('a.fossil', text);
+ws.close_file(h);
+ws.close_file(h);
+// FossilError api/unknown-handle
+// the handle names nothing: it was dropped, or never issued
+```
+
+A host sees a `FossilError` with empty `data`; the handle is the one it just passed.
+
+## Why fossil refuses it
+
+Closing is strict in signal, after `ty_wasm`'s workspace: closing or updating a handle that is not
+open is an error, so a host that has lost track of its files hears about it at the call that shows it
+instead of editing nothing in silence. An update to a closed handle in particular would otherwise be
+an edit the user made that no diagnostic ever reflects.
+
+Closing does not delete the text from the compiler: the file leaves the workspace's open set but
+stays registered under its path, because an open `.shex` is the document every program naming it
+reads and there is no disk to fall back to. The handle is what dies.
+
+## How to repair it
+
+- **Open the file again** with `open_file` and use the new handle; a closed handle is never reused.
+- **Keep one handle per open file** on the host side, and drop it from that map when `close_file`
+  returns. A second close of the same file is the most common way here.

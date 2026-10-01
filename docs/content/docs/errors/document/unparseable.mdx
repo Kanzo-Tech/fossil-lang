@@ -1,0 +1,44 @@
+---
+title: A document does not parse
+description: "`document/unparseable` — a registered shape document is there, and the provider the program named could not decode it."
+---
+
+The document was found and read, and the provider that reads it — `io.shex` or `io.shacl` — could
+not decode it. Here the shape is never closed:
+
+```turtle
+PREFIX shop: <https://shop.example/voc#>
+shop:Person {
+  shop:name xsd:string ;
+```
+
+```text
+the document `shape.shex` does not parse: Parsing error: Parse error on line …
+```
+
+What follows the colon is the decoder's own account, passed through as it gave it — for ShEx that is
+rudof's parser, with the line and column it stopped at. At `check` the error lands on each mapping
+header that uses a type the binding introduces, and the `help` adds that the type is declared and
+bound nothing, so the mapping is checked against nothing. At `run` the same code is the failure, and
+the decoder's rejection rides as its `cause` instead of in the message.
+
+## Why fossil refuses it
+
+A document that does not decode declares no shapes, so the names its binding introduces bind
+nothing, and every mapping that produces them would be checked against an empty table. fossil
+reports it by its cause rather than as a name that matched nothing: the binding is right, the file
+is there, and the repair is in the document. That is why this code is separate from
+[`document/not-registered`](/docs/errors/document/not-registered), whose repair is a path, and from
+the `provider/*` refusals, whose repair is the call.
+
+A document that parses but carries a construct fossil does not support is not this either: a
+disjunction, a cyclic inclusion and an unresolved label each have their own code, and the shapes
+around them are still read.
+
+## How to repair it
+
+- **Fix the syntax** at the line and column the decoder names, in the document rather than the
+  program.
+- **Check what the host registered.** The decoder sees the text the host handed over under the
+  document's key, not the file on disk: an editor checks the open buffer, unsaved edits included,
+  and a host that fetches from a URL registers whatever came back.

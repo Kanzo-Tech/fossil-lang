@@ -1,0 +1,44 @@
+---
+title: An incomplete conditional
+description: "`syntax/incomplete-conditional` — a `? :` conditional missing its condition, its `?` branch or its `:` branch."
+---
+
+A conditional is `cond ? a : b`: a condition, the value when it holds, and the value when it does
+not. This one is missing a part, and the message quotes the whole expression:
+
+```fossil
+User : Person from Users
+    @subject = "https://example.org/user/{Users.id}"
+    band = Users.age >= 18 ? "adult"
+```
+
+```text
+syntax/incomplete-conditional
+  × `Users.age >= 18 ? "adult"` is not a complete conditional: it needs a condition, a `?` branch
+    and a `:` branch
+```
+
+The parser has already reported the gap where it found it — usually an
+[`syntax/unexpected-token`](/docs/errors/syntax/unexpected-token) at the end of the line, where the
+`:` branch should have been. This diagnostic is the compiler declining to build a conditional out of
+fewer than three parts, and it means the property is not written.
+
+## Why fossil refuses it
+
+A conditional chooses one value per row, so it has to have a value for every row. A missing `:`
+branch would leave the rows where the condition is false with nothing, and fossil does not supply a
+default — not a null, not an empty string — because a property written from nothing is not the
+same thing as a column with no value ([values and expressions](/docs/book/expressions#the-conditional)).
+Both branches also have to be the same type, and a missing branch has no type to compare.
+
+The `:` is the same token a mapping header uses for its shape; the `?` before it is what makes it a
+conditional. A chain such as `a ? x : b ? y : z` is right-associative, so each `:` pairs with the
+nearest `?` to its left, and a chain that ends on a `?` branch is incomplete in the same way.
+
+## How to repair it
+
+- **Add the missing branch**: `band = Users.age >= 18 ? "adult" : "minor"`.
+- **In a chain**, count: every `?` needs a `:` after it, and the last `:` needs a value.
+- **There is no value for the other rows**: the conditional is not the right tool. Filter the rows
+  in the header instead — `from Users.where(Users.age >= 18)` — and write the property
+  unconditionally.

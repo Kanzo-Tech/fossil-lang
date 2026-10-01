@@ -5,6 +5,7 @@
     "(root)/index",
     "book",
     "format",
+    "errors",
     "---For maintainers---",
     "(root)/architecture",
     "design"

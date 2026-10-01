@@ -1,0 +1,30 @@
+---
+title: Values that cannot be compared
+description: "`type/incomparable` — a comparison between two values whose types do not compare, such as a string and a number."
+---
+
+A comparison — `==`, `!=`, `<`, `<=`, `>` or `>=` — has two sides whose types do not compare with
+each other. It is the mistake a mapping actually makes: a column the source reader typed as text,
+compared with a number.
+
+```fossil
+Adults := User.where(User.age >= 18)
+// cannot compare String with Integer using `>=`
+```
+
+## Why fossil refuses it
+
+The comparison rule in [typing](/docs/design/typing#arithmetic-comparison-boolean) asks for two
+sides of one type, up to subtyping. `Integer` and `Float` compare, because `Integer` widens into
+`Float`; a string against a number does not, because there is no single answer to whether `"9"` is
+greater than `18` — as text it is, as a number it is not.
+
+`null` is the one thing that compares with anything. `Row.celsius != null` asks whether a column has
+a value, so a comparison with `null` is never reported here.
+
+## How to repair it
+
+- **The column is a number held as text.** Convert it: `parse.integer(User.age) >= 18`.
+- **The literal is the wrong kind.** If the column really is text, compare it with a string:
+  `User.code == "18"`.
+- **The wrong column was named.** Compare the field of the type you meant.

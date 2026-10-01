@@ -1,0 +1,36 @@
+---
+title: An edge given the wrong number of values
+description: "`identity/edge-arity` — an edge passes a different number of values than the target type's `@subject` template has holes."
+---
+
+An edge `Person(…)` fills the holes of the target type's `@subject` template with the values it is
+given, in order. Here `Person`'s identity has one hole and the edge passes two:
+
+```fossil
+Users : Person from User
+    @subject = "https://shop.example/user/{User.email}"
+    name     = User.name
+//
+Orders : Order from Purchase.join(User, on = Purchase.user_id == User.id)
+    @subject = "https://shop.example/order/{Purchase.id}"
+    buyer    = Person(User.email, User.id)
+// `Person` is built from 1 value(s) and this passes 2; its identity is declared by `Users`
+// help: the Nth value fills the Nth hole of the `@subject`, in order
+```
+
+The message names the mapping whose `@subject` declares the template, which is where to look. A
+constant identity, with no holes, takes no values.
+
+## Why fossil refuses it
+
+The edge is replaced by exactly the interpolation the target's mapping wrote, with the edge's values
+where its holes were ([edges](/docs/book/edges#why-that-is-enough)). There is one template per type
+([identity](/docs/design/identity)), so the number of holes is known at compile time. A missing value
+would leave a hole unfilled and an extra one would have nowhere to go; either way the IRI built would
+not be the one the target's mapping mints, and the edge would point at a node that does not exist.
+
+## How to repair it
+
+- **Pass one value per hole, in the order the holes appear** in the target's `@subject`.
+- **If the identity should take more values**, change the `@subject` of the mapping the message names
+  — every mapping that produces the type has to change with it, and every edge to it.

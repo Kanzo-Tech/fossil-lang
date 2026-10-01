@@ -1,0 +1,43 @@
+---
+title: More names than shapes
+description: "`shape/binding-arity` — a binding names more shapes than its document declares, so a name past the end binds nothing."
+---
+
+A `type { … }` binding, or a destructuring source with a `schema =` document, names more shapes than
+the document declares. Here the document declares one shape, `shop:Person`, and the binding names
+two:
+
+```fossil
+type { Person, Extra } := io.shex("shop.shex")
+```
+
+`Person` takes the one shape; `Extra` has nothing to take. Each use of it reports:
+
+```text
+the binding names 2 shape(s) and the document declares 1, so `Extra`, at position 2, binds nothing
+```
+
+The position is the surplus name's own, so a binding with two surplus names tells each its own
+number. The error is on the mapping header (or the source reference) that uses the name; a surplus
+name that nothing uses is never reported.
+
+## Why fossil refuses it
+
+Names bind **by position**: the Nth name takes the Nth shape in the order the document declares
+them, and the name itself is a free local label that selects nothing. That is what lets one program
+read two documents whose vocabularies share a word, and it is why "matches no shape" is not a
+possible error. What the model does give is this check, for free: the Nth name wants an Nth shape,
+and there is none. A mapping producing `Extra` would be checked against nothing, so it is refused
+instead. [Naming what you produce](/docs/book/what-you-produce) has the table of what each count
+means; [inference from shapes](/docs/design/shapes) states the cost of binding by position.
+
+Fewer names than shapes is not an error: a prefix binds and the rest of the document is ignored.
+
+## How to repair it
+
+- **Drop the surplus name** if the document really has fewer shapes than you thought.
+- **The shape is in another document.** Bind it from there, in a binding of its own:
+  `type { Order } := io.shex("orders.shex")`.
+- **The document is not the one you meant, or was reordered.** Positional binding means a document
+  that lost a shape, or was tidied into a different order, rebinds the program; check the shapes it
+  declares, in order, against the names.

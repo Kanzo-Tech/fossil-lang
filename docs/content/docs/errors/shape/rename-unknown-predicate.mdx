@@ -1,0 +1,41 @@
+---
+title: A rename of a predicate the shape does not declare
+description: "`shape/rename-unknown-predicate` — an `@rename` names a predicate IRI the bound shape does not declare, so the rename never fires."
+---
+
+The type in an `@rename` is right, and the predicate is not one its shape declares. The usual cause
+is an IRI copied wrong, or written short:
+
+```fossil
+@rename(Person, "http://xmlns.com/foaf/0.1/nmae" as foaf_name)
+type { Person } := io.shex("mixed.shex")
+```
+
+```text
+`Person` declares no predicate `http://xmlns.com/foaf/0.1/nmae`, so this rename never fires
+```
+
+The `help` is a did-you-mean over the predicates the shape declares when one is close; otherwise it
+lists them all, and adds that the predicate is a full IRI.
+
+## Why fossil refuses it
+
+A rename that matches nothing changes nothing: the short name stays what it was, the
+[collision](/docs/errors/shape/name-collision) it was written to repair is still there, and the
+author is told about a collision they believe they fixed. The repair is usually made by copying an
+IRI out of a diagnostic, and an IRI copied wrong is invisible to the eye — so the check reads the
+shape document and compares the IRI against the predicates the bound shape actually declares.
+
+The predicate has to be the full IRI, not a prefixed name or the short name, because two predicates
+that collide are by definition the same in their last segment; only the part before it tells them
+apart. A binding whose document could not be read is not checked here: it has already been
+reported, once, against the binding.
+
+## How to repair it
+
+- **Take the IRI from the diagnostic.** The name-collision error labels each colliding predicate
+  with its full IRI, and its `help` is a rename ready to paste.
+- **Expand a prefixed name.** `foaf:name` is written
+  `"http://xmlns.com/foaf/0.1/name"` in a rename.
+- **Check the shape.** If the predicate is declared on a different shape, the rename belongs to the
+  type bound to that one.

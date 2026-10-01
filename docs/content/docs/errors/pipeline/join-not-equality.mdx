@@ -1,0 +1,45 @@
+---
+title: A join condition that is not an equality
+description: "`pipeline/join-not-equality` — a `join`'s `on` is not an equality, or a conjunction of equalities, between its two sides."
+---
+
+`on` is taken apart on `and`, and every piece has to be an `==`. A comparison, a disjunction or a
+constant is not:
+
+```fossil
+Overlap := Booking.join(Room, on = Booking.since < Room.until)
+Either  := Left.join(Right, on = Left.k == Right.k or Left.id == Right.rid)
+```
+
+```text
+`join` in `Overlap` relates its two sides by equality, and `Booking.since < Room.until` is not one
+```
+
+The condition quoted is the piece that failed, not the whole `on` — for the `or` it is the whole
+disjunction, because only `and` splits a condition.
+
+## Why fossil refuses it
+
+These are ordinary relational conditions, and an algebra would allow them. fossil refuses them for
+the engine's reason: a theta join or a disjunction leaves no equality to plan a hash join against,
+so what would execute is a nested loop over the product of the two relations — and a corpus is the
+size at which that is not a slow program but a hung one.
+
+The rule is older than the check. The engine's planner has refused such a condition since joins
+first executed, but only at `fossil run`, with no span, because by then the program is a plan. The
+checker refuses it at `fossil check`, over the text you wrote. [The
+algebra](/docs/design/algebra#the-join-condition-is-a-predicate-not-a-key) covers the two questions a
+condition has to answer, and [relations](/docs/book/relations#join) the conditions that are allowed.
+
+## How to repair it
+
+The `help` states the form: an equality between one column of each side, `on = A.k == B.k`, or
+several joined by `and`.
+
+- **A compound key.** Join the equalities with `and`:
+  `on = Left.k == Right.k and Left.id == Right.rid`.
+- **A range or an inequality alongside a real key.** Join on the equality the two relations do
+  share, and put the comparison in a `where` after the join, where both sides' columns are in
+  scope.
+- **No shared key at all.** Then there is nothing to join on inside fossil; a key has to be
+  prepared in the source.

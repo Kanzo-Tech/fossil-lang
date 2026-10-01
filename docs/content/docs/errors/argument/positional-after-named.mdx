@@ -1,0 +1,31 @@
+---
+title: A positional argument after a named one
+description: "`argument/positional-after-named` — a call writes an unnamed argument after a named one."
+---
+
+Arguments that would read as a puzzle carry a name, and they come after the ones that do not need
+one. Once an argument in a call is named, every argument after it has to be named too:
+
+```fossil
+    name = str.replace(User.name, needle = " ", "-")
+```
+
+```text
+`"-"` is positional and follows `needle = …`; once an argument is named, the ones after it are too
+help: otherwise which position this fills depends on where the named one landed
+```
+
+## Why fossil refuses it
+
+A positional argument fills the next position by counting, and a named argument fills whatever
+position its name declares. After a named argument, the next position is ambiguous: it could be the
+one after the last positional argument, or the one after the named argument. Either rule is
+writable, and a reader has to know which one fossil chose to know what the call does. Refusing the
+order removes the question, and the call reads the same to everyone. See [named
+arguments](/docs/book/expressions#two-paths-to-the-same-function) for the order the book gives.
+
+## How to repair it
+
+- **Name the trailing argument too:** `str.replace(User.name, needle = " ", replacement = "-")`.
+- **Or pass them all by position**, in the order the standard library prints the parameters:
+  `str.replace(User.name, " ", "-")`.

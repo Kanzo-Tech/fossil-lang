@@ -1,0 +1,35 @@
+---
+title: A mapping with no identity
+description: "`identity/missing-subject` — a mapping body has no `@subject` line, so the nodes it writes would have no IRI."
+---
+
+Every mapping body starts with `@subject = <expr>`, the line that mints the IRI of each node the
+mapping writes. This one has none:
+
+```fossil
+Users : Person from User
+    name = User.name
+// `Users` declares no `@subject`, so the rows it writes have no identity
+```
+
+The diagnostic covers the whole body. It is also raised when a `@subject` line is present but its
+expression could not be lowered, after the diagnostic for that expression — either way there is no
+identity to build.
+
+## Why fossil refuses it
+
+An IRI is not in your data: you mint it, and the shape document has nowhere to declare it, because
+in RDF the subject is the node rather than one of its properties
+([identity](/docs/design/identity#the-shape-document-cannot-declare-it)). So the program has to say,
+and there is no sensible default. This check used to be absent, and the silence was expensive: a
+mapping with no identity lowered to nodes whose subject was the empty string, which merged every row
+of the mapping into one blank node, and the mistake surfaced later as an internal compiler error.
+
+## How to repair it
+
+- **Add the identity as the first line of the body**, built from what identifies a row — usually an
+  interpolated string over a key column:
+  `@subject = "https://shop.example/user/{User.email}"`. See
+  [`@subject`](/docs/book/mappings#subject).
+- **If another mapping already produces this type**, copy its `@subject`: a type has one identity,
+  and every mapping that writes it uses the same one.

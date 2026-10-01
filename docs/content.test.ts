@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import matter from "gray-matter";
 import { describe, expect, it } from "vitest";
+import { catalogue } from "@/lib/problems";
 import { repoRoot } from "@/lib/repo";
 
 /**
@@ -1151,4 +1152,55 @@ describe("every bare call in a ts block names something a package exports", () =
         "a mechanism",
     ).toBe(true);
   });
+});
+
+/**
+ * The error index is the catalogue, page for page — rustc's tidy check, in this repository's terms.
+ *
+ * Every live code in `problem.schema.json` has a page under `errors/` at its code, every page there
+ * names a live code, and a page's title is the code's title. A retired code has neither a variant
+ * nor a page, so it is in neither set. The schema file is the source because it is the derived one:
+ * `crates/fossil-graph-schema/tests/problem_schema.rs` holds it equal to `Problem`, and the
+ * TypeScript the hosts branch on is generated from it.
+ *
+ * WHAT IT CANNOT PROVE: that a page says anything. The requirement a page owes — what the mistake
+ * is, why fossil refuses it, how to repair it — is reading, and the reversal `design/errors` names
+ * is a quarter of the pages being stubs a year on. If two pages cannot say different things, the
+ * fix is to merge the two codes, never to write the second page thinner.
+ */
+const ERRORS_ROOT = join(CONTENT_ROOT, "errors");
+
+const liveCodes = catalogue();
+
+const errorPages = mdxUnder(ERRORS_ROOT)
+  .map((path) => relative(ERRORS_ROOT, path).replace(/\\/g, "/").replace(/\.mdx$/, ""))
+  .filter((code) => code !== "index")
+  .sort();
+
+describe("every live code has a page, and every page a live code", () => {
+  // Two ways to go vacuous: the schema stops parsing into arms, or the walk stops finding pages.
+  // Either would leave both set checks comparing nothing with nothing.
+  it("reads codes out of the catalogue, and pages out of errors/", () => {
+    expect(liveCodes.length, "no arm read out of problem.schema.json").toBeGreaterThan(0);
+    expect(liveCodes.every(({ code }) => /^[a-z]+\/[a-z0-9-]+$/.test(code))).toBe(true);
+    expect(errorPages.length, "no page found under content/docs/errors/").toBeGreaterThan(0);
+  });
+
+  it("has a page for every live code", () => {
+    const pages = new Set(errorPages);
+    expect(liveCodes.map(({ code }) => code).filter((code) => !pages.has(code))).toEqual([]);
+  });
+
+  it("has a live code for every page", () => {
+    const codes = new Set(liveCodes.map(({ code }) => code));
+    expect(errorPages.filter((page) => !codes.has(page))).toEqual([]);
+  });
+
+  it.each(liveCodes.filter(({ code }) => errorPages.includes(code)))(
+    "errors/$code is titled with the catalogue's title",
+    ({ code, title }) => {
+      const page = read(join(ERRORS_ROOT, `${code}.mdx`));
+      expect(page.data.title, `${page.id}: the title is fixed per code`).toBe(title);
+    },
+  );
 });

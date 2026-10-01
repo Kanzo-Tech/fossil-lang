@@ -1,0 +1,42 @@
+---
+title: A store could not be reached
+description: "`storage/unreachable` — fossil asked a store for a file it was entitled to, and the store answered with an error, which is kept as the cause."
+---
+
+The locator routed, the credential covered it, and the request went out — and the store answered
+with an error. A missing file, a credential the store rejected, a network failure: fossil reports
+all of them as one code, and keeps the store's own error underneath it.
+
+```text
+s3://b/lake/gone.csv could not be reached
+```
+
+A host sees `data: { locator }`, and the store's error as `cause` — on a thrown `FossilError` a nested
+error with the store's own name, on a returned problem `cause: { name, detail }`. It comes from
+`fossil-storage`'s reads and writes through `object_store`: a storage read answers it as the file's
+`problem`; a document that could not be read this way fails a run as `document/unread`, with this as
+the cause; a run raises it directly for an RDF source it reads as bytes, and as the cause of
+`write/failed` when a file of its output cannot be put. `runInMemory` in the executor raises it from
+its in-memory store, for the same reason a real store would.
+
+## Why fossil refuses it
+
+**A foreign error is a cause, never a code** ([one error, from Rust to the screen](/docs/design/errors)).
+`object_store`, the S3 and Azure services and the network each have their own vocabulary, and fossil
+does not reclassify them into codes of its own: it says which locator it could not reach, and hands
+over the store's answer whole. Branch on the code; read the cause to find out what the store said.
+
+A failure is one file's, never the batch's: a storage read answers every target in order, so one
+unreachable file does not hide whether its neighbours were read.
+
+## How to repair it
+
+Read `cause` first.
+
+- **Not found** — the file does not exist at `data.locator`. Check the path the program wrote and the
+  base the connection expands it against.
+- **Forbidden or unauthorised** — the credential reached the store but does not allow this operation:
+  a `read` credential used to write, an expired token the host keeps vending, a policy narrower than
+  the prefix.
+- **A network or CORS error** — in a browser, the bucket must allow the page's origin; the store is
+  asked directly, not through fossil.

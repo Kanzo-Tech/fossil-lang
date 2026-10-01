@@ -1,0 +1,49 @@
+---
+title: Not a shape this program declares
+description: "`name/unknown-shape` — a mapping header or an edge names a type that no `type { … } := …` binding gives the program."
+---
+
+A mapping header says which type it produces, and that type is a local name: one a
+`type { … } := io.shex(…)` binding introduced. A header naming anything else has nothing to be
+checked against:
+
+```fossil
+type { Person, Order } := io.shex("shop.shex")
+User := io.csv("data/users.csv")
+// the binding introduces Person, not Persn
+Users : Persn from User
+    @subject = "https://shop.example/user/{User.email}"
+    email    = User.email
+```
+
+```text
+`Persn` is not a shape this program declares
+help: did you mean `Person`?
+```
+
+The same code is raised for an edge, `buyer = Person(User.email)`, when the program names `Person`
+in a `type` binding but the name binds no shape, so there is no identity to build.
+
+## Why fossil refuses it
+
+The shape is the contract a mapping body is checked against: which properties may appear, what each
+holds, how many. Without one, every property line would be unchecked, and the program would compile
+into triples nobody had agreed to. A header cannot name a shape IRI or reach into the document
+directly; it names a bare local name, and [the binding gives that name its shape by
+position](/docs/book/what-you-produce#binding-is-by-position) — the Nth name takes the Nth shape the
+document declares. So the only thing a header can get wrong at this point is the name, and the
+suggestions are drawn from the names the program binds, not from the IRIs the document declares.
+
+A name the program does bind but which resolves to nothing is reported by its cause instead — a
+binding with no document is [`shape/no-document`](/docs/errors/shape/no-document), and a name past
+the end of the document is [`shape/binding-arity`](/docs/errors/shape/binding-arity) — so this code
+means only what its title says.
+
+## How to repair it
+
+- **The name is misspelt.** The `help` suggests the nearest bound name; when none is near, it lists
+  every name the program binds.
+- **The name is not bound yet.** Add it to a `type { … }` binding. Remember the binding is
+  positional: put it where the shape sits in the document, or it takes another shape's IRI.
+- **The program binds no shapes at all.** The `help` says so; write a
+  `type { … } := io.shex("…")` binding before the mapping.

@@ -1,0 +1,45 @@
+---
+title: A number fossil cannot carry
+description: "`syntax/number-out-of-range` — a number literal that cannot be read as the type it is written as, so the property is not written."
+---
+
+A whole number in a program is an `Integer`, and fossil carries it as a signed 64-bit integer. A
+literal outside that range is refused, with the reason the number reader gave:
+
+```fossil
+User : Person from Users
+    @subject = "https://example.org/user/{Users.id}"
+    population = 99999999999999999999
+```
+
+```text
+syntax/number-out-of-range
+  × `99999999999999999999` does not fit in Integer: number too large to fit in target type
+```
+
+The range is −9,223,372,036,854,775,808 to 9,223,372,036,854,775,807. A minus sign is an operator
+applied to the literal after it, so the literal itself is read as positive first, and the most
+negative value cannot be written as a literal at all.
+
+The message names the kind, `Integer` or `Float`, because the same check guards both. A `Float`
+literal is read as a 64-bit float and does not reach it in practice: a float too large to represent
+is read as infinity rather than refused.
+
+One case is reported here that is not about size. The grammar lets `_` separate digits, and a
+`Float` such as `1_000.5` has them removed before it is read — but an `Integer` does not, so
+`1_000` is refused with *invalid digit found in string*. Write `1000` until that is fixed.
+
+## Why fossil refuses it
+
+A literal is a value the program states, and the compiler has to carry it exactly into the plan it
+runs. A number that does not fit would have to be wrapped, saturated or silently turned into a float,
+and each of those writes a different value from the one in the source. fossil refuses instead, at
+the literal, before anything runs. The value is not written, and the message says why.
+
+## How to repair it
+
+- **The number really is that large**: write it as a `Float` with a point, `99999999999999999999.0`,
+  if the shape's datatype accepts a float, or as a string if the value is an identifier rather than
+  a quantity.
+- **A typo**: an extra digit is the usual cause.
+- **Digit separators in an integer**: remove the `_`.

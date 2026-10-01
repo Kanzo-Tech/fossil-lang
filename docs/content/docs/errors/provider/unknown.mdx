@@ -1,0 +1,45 @@
+---
+title: Not a provider this host installs
+description: "`provider/unknown` — a binding calls an `io.` constructor that no provider installed on this host answers to."
+---
+
+A binding names its provider by constructor — `io.csv`, `io.shex` — and this one is not installed:
+
+```fossil
+type { Person } := io.linkml("person.yaml")
+```
+
+```text
+`io.linkml` is not a provider this host installs
+help: this host installs `io.csv`, `io.json`, `io.parquet`, `io.rdf`, `io.shex`, `io.shacl`
+```
+
+The `help` lists what the host installs, in its own order; the list above is a host with every
+reader.
+The error underlines the binding; in a `schema =` argument it underlines the argument. A mapping
+that uses a type the binding introduces is also told the type bound nothing.
+
+## Why fossil refuses it
+
+`io` is the registry of providers, and **adding a format is a row** in it — not a grammar
+production, not a change to the checker. So an unknown name is never a syntax error: the parser
+accepts any `io.` call, and the question "is this a provider" is asked of the installed table. The
+day `io.linkml` exists, this message is the only thing that changes. The provider is named in the
+program, not guessed from the file's extension, so there is no fallback to try instead.
+See [type providers](/docs/design/type-providers).
+
+Which rows are installed is the host's answer. A host that installs no row for a capability is not
+in that business and stays silent: the browser executor installs no type reader, because its shapes
+arrive already decoded, so it does not call `io.shex` unknown. A host that does install type readers
+means it when it says a name is not one.
+
+A binding whose right side is not an `io.` call — `Adults := User.where(…)` — is a derived binding,
+not a provider, and is never reported here.
+
+## How to repair it
+
+- **A typo.** Pick the constructor from the list in the `help`: `io.shex`, not `io.shexc`.
+- **A format fossil does not read.** Convert the file to one it does — a shape document to ShEx or
+  SHACL, data to CSV, JSON, Parquet or RDF.
+- **The provider exists on another host.** Check where the program runs: the list in the `help` is
+  this host's, and it is the one that counts.

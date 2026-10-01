@@ -1,0 +1,33 @@
+---
+title: The corpus could not be read
+description: "`corpus/unreadable` — `open` could not read the corpus's `fossil.json`; the engine's error, when there is one, is the cause."
+---
+
+`open` reads exactly one file before anything else: `fossil.json` at the root of the corpus. When the
+engine cannot read it, or reads nothing, the corpus is not opened:
+
+```ts
+await open('https://data.example/graphs/people/', { engine });
+// FossilError corpus/unreadable
+// https://data.example/graphs/people/fossil.json could not be read
+```
+
+A host sees `data: { path }`, the full locator `open` asked the engine for — the location it was given
+with `fossil.json` appended, or, for a job, the name the mounted prefix gives that file. When the
+engine threw, its error is the `cause`; when the read returned no row there is none.
+
+## Why fossil refuses it
+
+`fossil.json` is written **after** every Parquet file, so its presence is the commit: a directory
+without it is a write that did not finish, and a reader that finds it can trust every path it names
+([the corpus](/docs/design/corpus)). Nothing about a corpus — its tables, their files, their columns —
+is known except from that file, and nothing is listed or guessed in its place. So when it cannot be
+read there is nothing to open, and `open` stops before it creates a view or reads a byte of Parquet.
+
+## How to repair it
+
+- **Pass the corpus root, not the manifest.** `open` appends `fossil.json` itself; a location that
+  already ends in `fossil.json` asks for `…/fossil.json/fossil.json`.
+- **Read `cause`.** A 404 means there is no manifest at that root — the wrong directory, or a write
+  that has not finished. A network or CORS error means the engine could not reach the file at all.
+- **For a job**, check that the prefix the host vends is the directory the corpus was written to.

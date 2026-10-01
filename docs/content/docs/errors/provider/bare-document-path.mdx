@@ -1,0 +1,40 @@
+---
+title: A document path with no provider
+description: "`provider/bare-document-path` — a document is named by a bare string, with no provider call to say which reader reads it."
+---
+
+A document is written as a bare path where a provider call belongs. The place this happens is a
+source's `schema =` argument:
+
+```fossil
+{ Person } := io.rdf("g.ttl", schema = "person.shex")
+```
+
+```text
+`person.shex` is named by no provider
+help: write `schema = io.shex("…")` or `schema = io.shacl("…")`: the row that reads a document is
+      the one the program names, not the one its extension happens to match
+```
+
+The error underlines the argument, and the names the binding introduces bind nothing. A run of the
+same program fails with the same code.
+
+## Why fossil refuses it
+
+`schema =` used to take a bare path, and it was the last place in the language where a document
+arrived without a provider: the decoder came from the document's extension, the one dispatch that
+did not go by name. Now there is a single rule — **where there is a document, there is a provider
+that names it** — so `io.rdf(…, schema = …)` and `type { … } := io.shex(…)` read their documents
+the same way, and the extension is only checked against the named provider, never used to choose
+one. Falling back to the extension would bring back exactly the guess the rule removed.
+
+The alternative was to drop `schema =` and take every document from a `type { … }` binding. They
+are not the same document: `schema =` shapes the *input* rows and `type { … }` is the *output*
+contract, and nothing says a program's two ends read one file. See
+[type providers](/docs/design/type-providers).
+
+## How to repair it
+
+- **Wrap the path in its provider:** `schema = io.shex("person.shex")` for ShEx,
+  `schema = io.shacl("person.ttl")` for SHACL.
+- The same applies anywhere a document is named: the string always sits inside an `io.` call.

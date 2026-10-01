@@ -1,0 +1,34 @@
+---
+title: A property of the wrong type
+description: "`type/property-mismatch` — a mapping writes a value whose type is not the one the shape declares for that property."
+---
+
+A mapping writes a property, and the value it writes is not of the type the shape document declares
+for that predicate. Here the shape says an order's `total` is an `xsd:float`, and the mapping fills it
+from a column the source reader typed as text:
+
+<Program src="errors/type/property-mismatch/shape.shex" title="shape.shex" />
+
+<Program src="errors/type/property-mismatch/program.fossil" title="program.fossil" />
+
+<Program src="errors/type/property-mismatch/expected/diagnostic.txt" title="fossil check" />
+
+## Why fossil refuses it
+
+The shape is the contract the output is checked against, and a property's type is part of that
+contract. Writing a `String` where a `Float` is declared would produce triples that fail validation
+downstream, or — worse — a literal typed `xsd:float` whose lexical form is not a number. fossil knows
+both types at compile time: the shape's from the `.shex`, the value's from the source's schema or the
+expression that computes it. So it reports the mismatch before anything runs, with one label on the
+value and one on the line of the shape that declares the property.
+
+## How to repair it
+
+- **The wrong column was named.** When the row has a field of the expected type, the `help` names it (two at most, and a count for the rest):
+  here `Purchase.amount` is a `Float`, and `total = Purchase.amount` is probably what was meant.
+- **The right column holds the value as text.** Convert it explicitly — `parse.float`,
+  `parse.integer`, `parse.decimal`, `parse.date` and `parse.datetime` turn a string into the declared
+  type. The `help` names the one that fits, found by searching the standard library for a function
+  from the actual type to the expected one.
+- **The shape is wrong.** If the property really is text, change the shape's datatype instead; the
+  mapping is then correct as written.

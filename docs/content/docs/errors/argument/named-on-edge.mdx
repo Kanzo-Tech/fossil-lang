@@ -1,0 +1,31 @@
+---
+title: A named argument to an edge
+description: "`argument/named-on-edge` — an edge is given a named argument, and an edge's arguments are positional."
+---
+
+An edge names the type it points at and hands it the values its identity is built from:
+`buyer = Person(User.email)`. Those values are not parameters with names; they fill the holes of the
+target type's `@subject`, in the order they are written. A name has nothing to match:
+
+```fossil
+    buyer = Person(email = User.email)
+```
+
+```text
+`email = User.email` names an argument of `Person`, and an edge's arguments fill its identity template in the order they are written
+```
+
+## Why fossil refuses it
+
+A function's parameters are declared in a catalogue row, so a name can be looked up there. An edge
+has no row and no signature: its arguments are matched against the `@subject` template of the
+mapping that produces the target type, the Nth value filling the Nth hole, and that template is the
+only binding rule an edge has. Accepting a name and ignoring it would suggest a binding that does not
+exist — `email = …` would read as filling the `email` hole even when the template's first hole is
+something else. See [edges](/docs/book/edges) and [identity](/docs/design/identity).
+
+## How to repair it
+
+Drop the name and write the values in the order the target's `@subject` uses them:
+`buyer = Person(User.email)`. If the template has several holes, give one value per hole, in order;
+the wrong count is [`identity/edge-arity`](/docs/errors/identity/edge-arity).

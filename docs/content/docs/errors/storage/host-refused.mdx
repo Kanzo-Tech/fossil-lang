@@ -1,0 +1,38 @@
+---
+title: The host refused
+description: "`storage/host-refused` — the host rejected a request for credentials or for its connections; its rejection is kept as the cause."
+---
+
+fossil asked the host for something only the host can give — credentials for a scope, or its map of
+connections — and the call rejected. fossil reports the request it made, and keeps the host's
+rejection underneath:
+
+```text
+the host refused job 3
+```
+
+A host sees `data: { scope }` and its own error as `cause`. `scope` is `job <id>` or
+`connection <name>` for a credentials request, and names the connections request otherwise —
+`connections` from `resolveDocuments` in `@fossil-lang/storage`, `its connections` from the Rust side.
+It is thrown by `mount` (so `open(job, …)` and introspection), by `resolveDocuments`, and by a run;
+a storage read answers it as each affected file's `problem`.
+
+## Why fossil refuses it
+
+A host's rejection is its own decision in its own vocabulary — an expired session, a job the user may
+not read, a backend that is down — and fossil neither retries it nor reclassifies it. **A foreign error
+is a cause, never a code** ([one error, from Rust to the screen](/docs/design/errors)): the code says
+what fossil was trying to do, the cause carries the host's error whole, so the host can recognise
+its own rejection when it comes back.
+
+Some causes are fossil's description of a host that did not answer in the shape `Host` declares: a
+`TypeError` saying *the host has no `credentials`*, that it *returned something other than a promise*,
+or that what it resolved to is not a list of `StorageCredential`.
+
+## How to repair it
+
+- **Read `cause`.** When it is the host's own error, the repair is the host's: authorise the scope, or
+  fix whatever made the request fail.
+- **When the cause is a `TypeError`**, make the host match `@fossil-lang/types`' `Host`:
+  `connections()` resolves to `{ [name]: baseUrl }`, and `credentials(scope, access)` resolves to
+  `StorageCredential[]`, each `{ prefix, config }`.

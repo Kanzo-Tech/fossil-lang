@@ -1,0 +1,52 @@
+---
+title: Union sides with different rows
+description: "`pipeline/union-mismatch` — the two sides of a `union` do not carry the same columns, with the same types, in the same order."
+---
+
+A `union` stacks the rows of two relations, so both have to carry the same row. The message comes
+in two forms. When the two sides have different numbers of columns, it lists both:
+
+```text
+`union` in `Everyone` needs both sides to carry the same row: the left has `email: String`,
+`name: String`, the right has `email: String`, `name: String`, `rate: Float`
+```
+
+and when the counts agree, it names the first column that differs, counted from 1:
+
+```fossil
+Staff      := io.csv("data/staff.csv")        // email, name
+Contractor := io.csv("data/contractors.csv")  // name, email
+Everyone   := Staff.union(Contractor)
+```
+
+```text
+`union` in `Everyone` pairs its sides column by column, and column 1 is `email: String` on the
+left and `name: String` on the right
+```
+
+## Why fossil refuses it
+
+The sides are paired **by position**. That is not a rule of fossil's: DataFusion, the engine
+underneath, unions by position, and the plan's `Union` takes the left side's schema as the result's
+and asserts the right's is equal. So two files with
+the same columns in a different order would union `name` into `email` without complaint, and a
+column of one type would be stacked onto a column of another. Requiring equal names in equal order
+with equal types is the backend's rule, stated where a span can be put on it. See [the
+algebra](/docs/design/algebra#a-union-answers-to-the-pipeline-and-to-neither-side).
+
+The check needs both sides' columns. When either side has no schema the union is not refused, and
+its result is untyped.
+
+## How to repair it
+
+Make the two sides agree before the union, with `select` — it keeps the columns you list, in the
+order you list them:
+
+```fossil
+Left     := Staff.select(Staff.email, Staff.name)
+Right    := Contractor.select(Contractor.email, Contractor.name)
+Everyone := Left.union(Right)
+```
+
+A column that only one side has has to go from that side; a column whose type differs between the
+two files has to be fixed in the source.

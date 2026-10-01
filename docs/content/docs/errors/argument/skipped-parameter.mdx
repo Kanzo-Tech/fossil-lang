@@ -1,0 +1,35 @@
+---
+title: A parameter skipped
+description: "`argument/skipped-parameter` — a call leaves a parameter empty while giving one after it."
+---
+
+Named arguments let a call fill a later parameter by name, but they do not let it leave an earlier
+one empty. `str.replace` takes `(text, needle, replacement)`, and this call gives the first and the
+third:
+
+```fossil
+    name = str.replace(User.name, replacement = "-")
+```
+
+```text
+`str.replace` is given nothing for `needle`, and something after it; a parameter cannot be skipped
+help: name the ones you are giving, or give them all in order
+```
+
+## Why fossil refuses it
+
+This is the refusal that would otherwise be silent. The named arguments are written into their
+declared slots, and a slot left empty between two filled ones is a fact to report rather than a gap
+to close. Closing it would shift `"-"` into the `needle` position and leave a call of two arguments,
+which would then be reported as [`argument/arity`](/docs/errors/argument/arity) against a call the
+author did not write.
+
+It is also what keeps the arity check honest: because a hole is refused here, a short argument list
+is always one missing its trailing parameters, and the arity check only has to compare two lengths.
+
+## How to repair it
+
+- **The skipped argument is needed.** Give it, by position or by name:
+  `str.replace(User.name, " ", "-")` or `str.replace(User.name, needle = " ", replacement = "-")`.
+- **The later argument was given to the wrong parameter.** If the value was meant for the position
+  that is empty, name that parameter instead, or pass it positionally.

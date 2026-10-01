@@ -1,0 +1,37 @@
+---
+title: A corpus file could not be written
+description: "`write/failed` — the store refused one file of the corpus, so the write stopped and `fossil.json` was never written."
+---
+
+The run executed, laid the graph out, and was writing the corpus when the store refused a file:
+
+```text
+`vertex/Person.parquet` could not be written
+```
+
+`data.path` is the file's path relative to the destination — `vertex/<Type>.parquet`,
+`edge/<Src>_<label>_<Dst>.parquet`, or `fossil.json`. The cause is the store's refusal, kept as a
+nested problem with a code of its own — usually
+[`storage/unreachable`](/docs/errors/storage/unreachable), the store having answered with an error,
+which in turn carries the store's own message.
+
+```ts
+if (isFossilError(e, 'write/failed')) console.error(e.data.path, e.cause);
+```
+
+## Why fossil refuses it
+
+A corpus is one Parquet file per vertex type and per relation, and `fossil.json`, written **last**.
+The manifest's presence is the commit: a reader that finds it can trust every file it names, and a
+directory without it is a write that did not finish, which no reader opens. So when one file fails,
+the write stops at once — nothing after it is written, and the manifest never is. What is left under
+the destination is Parquet with nothing over it, not a corpus that looks whole and is missing a
+table. The layout of the files is on [the corpus](/docs/design/corpus#files-and-the-one-that-commits-them).
+
+## How to repair it
+
+- **Read the cause.** It is the store's answer — a permission refused, a network error, a quota.
+- **Check the write credential.** The host vends `write` for the job's prefix; a credential that has
+  expired, or that grants read only, is refused by the store at the first `put`.
+- **Run again.** The files a failed run left behind are not a corpus, and a new run to the same
+  destination writes every file again, `fossil.json` last.

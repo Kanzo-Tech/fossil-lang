@@ -1,0 +1,48 @@
+---
+title: An argument is invalid
+description: "`api/invalid-argument` — a caller passed a value that is not what the call takes; `data` names the argument and what was expected."
+---
+
+A call into fossil from JavaScript was handed something of the wrong shape: no engine, a negative
+limit, a credential that is not one. The message names the argument and what it should have been:
+
+```ts
+await open(url, {} as OpenOptions);
+```
+
+```text
+open() needs an engine: { engine } for a corpus at a URL, { engine, host } for a job's
+```
+
+A host sees `data: { argument, expected }` — the parameter's name as the call spells it, and a short
+description of what it takes. When JavaScript itself refused the value first, as a deserialiser does,
+that refusal is the `cause`. The places that raise it:
+
+| call | `argument` | `expected` |
+| --- | --- | --- |
+| `open` (`@fossil-lang/corpus`) | `engine` | an Engine |
+| `scan`, `sql` | `limit` | a count of rows |
+| `scan(…).read` | `tasks` | tasks of the scanned table |
+| a scan's `filter` | `bbox` | `[x0, y0, x1, y1]` with `x0 ≤ x1` and `y0 ≤ y1` |
+| a scan's `filter` | `filter` | a finite literal for the column |
+| `setConnections` (workspace and executor) | `connections` | an object of `{ name: baseUrl }` |
+| `registerInferredDescriptor` | `descriptorJson` | an InferredDescriptor as JSON |
+| `runInMemory` | `sources`, `dest` | an object of `{ [url]: Uint8Array }` keyed by URL; a URL |
+| `storageGrant`, `storageName` | `credential`, `access` | a StorageCredential; `read` or `write` |
+| `storageRead` | `targets` | an array of `{ locator, connection? }` |
+
+## Why fossil refuses it
+
+These are mistakes in the calling code, not in a program or a corpus, and the area says so: the
+code is `api/…` because the mistake is in how the API was called
+([one error, from Rust to the screen](/docs/design/errors)). Nearly every check runs at the entry
+point, before anything is read, so a wrong argument never becomes a half-done read or a confusing failure
+deeper down — a NaN that matches no comparison, a box whose corners are swapped and selects nothing,
+a scan task handed to a scan of another table. One code covers all of them because a host handles
+them the same way: it is a bug to fix in the caller, and `data` says where.
+
+## How to repair it
+
+Pass what `data.expected` describes for `data.argument`. When there is a `cause`, it is the
+deserialiser's account of where the value went wrong — a missing field, a wrong type — which is
+usually the fastest way to the line that built it.

@@ -1,0 +1,47 @@
+---
+title: A stage argument of the wrong kind
+description: "`pipeline/invalid-stage-argument` — a stage is given a value where its verb takes a qualified column or the name of a source binding."
+---
+
+The right number of arguments, and one of them is the wrong kind of thing. A relation verb's
+parameters are not all values: `select`'s columns and `group_by`'s keys are **qualified column
+references**, the other side of a `join` or a `union` is **the name of a source binding**, and an
+aggregation is a call over **one qualified column**. A literal, a computed expression or a derived
+relation written inline is none of those:
+
+```fossil
+Minimal  := Active.select("name")
+Everyone := Staff.union(Contractor.where(Contractor.active))
+Spend    := Order.group_by(Order.customer, total = math.sum(Order.amount * 2))
+```
+
+```text
+`cols` in `Minimal` takes a qualified column reference, and this is not one
+`other` in `Everyone` takes the name of a source binding, and this is not one
+`total` in `Spend` takes one qualified column of the group for `math.sum`, and this is not one
+```
+
+The first word is the parameter as the catalogue names it — `cols`, `keys`, `right`, `other` — or,
+for an aggregation, the column it produces.
+
+## Why fossil refuses it
+
+Which reading a position gets is the verb's catalogue row's to say, not the stage's: a column
+position is read as a name, a binding position as a bare identifier, a condition as an expression.
+The names are what the checker resolves against the rows in scope and what the plan addresses, and
+a value has no row to belong to. A binding has to be a name because a `join` keeps its sides
+addressable by binding — the body writes `User.email` — and an inline pipeline has no name to be
+addressed by.
+
+An aggregate over a computed value is refused for the same reason a computed join key is: there is
+nowhere in the language to put the computation first, so the column has to exist in the input. See
+[relations](/docs/book/relations) for what each verb takes.
+
+## How to repair it
+
+- **A column.** Write it qualified by its binding: `select(Active.name)`. The `help` shows the
+  form with your pipeline's base, `e.g. Active.id`.
+- **A binding.** Give the derived relation a name of its own and use the name:
+  `Current := Contractor.where(Contractor.active)`, then `Staff.union(Current)`.
+- **An aggregated column.** Aggregate a column the input already has — `math.sum(Order.amount)`
+  — and prepare a derived one in the source.

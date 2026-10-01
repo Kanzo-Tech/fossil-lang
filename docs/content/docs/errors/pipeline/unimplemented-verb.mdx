@@ -1,0 +1,49 @@
+---
+title: A verb with no lowering yet
+description: "`pipeline/unimplemented-verb` — the stage names a relation verb the catalogue declares and the lowering cannot compile yet."
+---
+
+The verb is real: the catalogue declares it for a relation, with a signature, and the checker knows
+what it takes. What fossil does not have is the lowering that turns it into an operator of the
+plan, so the pipeline cannot compile:
+
+```fossil
+Ordered := Purchase.sort(Purchase.id)
+```
+
+```text
+`sort` is a relation verb the lowering does not implement yet, so `Ordered` cannot compile;
+implemented today: `distinct`, `group_by`, `join`, `select`, `union`, `where`
+```
+
+Six verbs are in this position today — `map`, `flatten`, `take`, `drop`, `sort` and `count` — and
+the list of implemented ones is read from the catalogue, so it moves the day one of them gains a
+lowering.
+
+## Why fossil refuses it
+
+The lowering is exhaustive over the operators the catalogue names, and the unlowered six are named
+in it one by one rather than swept into a catch-all. They used to be: the old catch-all told a user
+writing `sort` that it *"is not a relation verb fossil lowers"*, which was false — `sort` is
+catalogued, and what it lacked was a lowering. Two different situations get two codes, and this one
+says the gap is fossil's, not the program's. [Not a relation verb](/docs/errors/pipeline/unknown-verb)
+is the other one.
+
+A verb arrives with the operator that carries it and a program that spells it, not as a row; [the
+algebra](/docs/design/algebra#what-this-does-not-settle) lists the six as what it does not settle
+yet. `distinct` is a worked example of why one waits: it lost its `on` columns because without `sort`
+there is no way to say which row of a group to keep.
+
+## How to repair it
+
+There is no flag that turns the verb on. Write the pipeline with the six that are implemented, or
+do the work before fossil reads the source:
+
+- **A summary per group** is `group_by`, which is lowered:
+  `Order.group_by(Order.customer, total = math.sum(Order.amount))`. Its aggregates are `math.sum`,
+  `math.min`, `math.max` and `math.avg`; there is no counting aggregate, so a `count` has to be
+  prepared in the source.
+- **`sort`, `take`, `drop`** decide the order of rows or cut them by position, and nothing lowered
+  does either. A cut by position has to be made in the source until they land.
+- **A computed value**, which is what `map` would give, usually belongs in the mapping body, where
+  any expression of the row is allowed.

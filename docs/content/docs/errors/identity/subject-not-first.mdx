@@ -1,0 +1,28 @@
+---
+title: The identity is not first
+description: "`identity/subject-not-first` — a mapping's `@subject` is written after one of its properties instead of on the first line of the body."
+---
+
+The `@subject` line is present but is not the first line of the mapping body. The message gives the
+line it is on, counted from the start of the body:
+
+```fossil
+Users : Person from User
+    name     = User.name
+    @subject = "https://shop.example/user/{User.email}"
+// `@subject` is the first line of a mapping body, and in `Users` it is line 2
+```
+
+## Why fossil refuses it
+
+Not by convention: it is the grammar, `MappingBody := SubjectAssign Property+`, and the checker holds
+it. The identity comes before what it identifies. Putting it first means every mapping reads the
+same way — the header says what is produced and from where, the first line says how each node is
+named — and the one line that carries obligations no other property has
+([identity](/docs/design/identity#two-obligations-no-other-property-has)) is never hunted for in the
+middle of a body. See [`@subject`](/docs/book/mappings#subject).
+
+## How to repair it
+
+Move the `@subject` line to the top of the body, directly under the mapping header. Nothing else
+changes: property order does not affect what is written.

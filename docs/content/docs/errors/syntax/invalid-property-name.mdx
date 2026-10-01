@@ -1,0 +1,49 @@
+---
+title: Not a property name
+description: "`syntax/invalid-property-name` — the left-hand side of a property line is not a bare name, so the property is not written."
+---
+
+The left of a property line's `=` is a property **name**: a bare identifier, the last segment of a
+predicate IRI the target shape declares. This one is something else, and the property is not
+written. The message quotes what was there:
+
+```text
+User : Person from Users
+    @subject = "https://example.org/user/{Users.id}"
+    ex:name = Users.name
+```
+
+```text
+syntax/invalid-property-name
+  × `ex:name` is not a property name: a property is named by a bare name, the last segment of a
+    predicate IRI the shape declares
+```
+
+In practice it arrives with a [`syntax/retired-spelling`](/docs/errors/syntax/retired-spelling) on
+the same key. The parser refuses the retired form — a CURIE such as `ex:name`, or an absolute IRI in
+`<…>` — by name, and the lowering then finds the key it was given is not one identifier, and says
+that the property is lost. When there is nothing on the left at all, the message is *this property
+has no name on its left, so it is not written* instead.
+
+## Why fossil refuses it
+
+A property key is not an IRI the program spells out. The shape document declares the predicates, and
+the program names one by its last segment — `name` for `http://xmlns.com/foaf/0.1/name` — so the key
+is checked against what the shape declares and the IRI comes from the shape
+([mappings](/docs/book/mappings)). A key that is not a bare name cannot be looked up there, so there
+is no predicate to write it to.
+
+The diagnostic exists so that the loss is loud. A property the compiler could not read used to be
+dropped without a word, and the program compiled, ran and wrote a corpus with that column missing.
+Here the dropped property is a red build, with the reason on the key.
+
+## How to repair it
+
+- **A CURIE** — `ex:name = …`: write the bare name, `name = …`.
+- **An absolute IRI** — `<http://xmlns.com/foaf/0.1/name> = …`: write its last segment, `name = …`.
+- **Two predicates share that last segment**: the bare name is ambiguous, and the repair is a
+  `@rename` above the type binding giving one of them another name
+  ([shape/name-collision](/docs/errors/shape/name-collision)). The key is then that name.
+
+Whichever applies, the name has to be one the shape declares; otherwise the next report is
+[`name/unknown-property`](/docs/errors/name/unknown-property), listing the ones it does.

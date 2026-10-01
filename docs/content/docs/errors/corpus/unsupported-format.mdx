@@ -1,0 +1,35 @@
+---
+title: The corpus format is not supported
+description: "`corpus/unsupported-format` — the manifest's `format` is not `fossil/1`, the only format this reader reads."
+---
+
+`fossil.json` parsed, and its `format` field is not `fossil/1`. A corpus written by a newer writer, or
+a JSON file that is not a fossil manifest at all, ends here:
+
+```json
+{ "format": "fossil/2", "vertex_tables": [], "edge_tables": [] }
+```
+
+```text
+https://data.example/graphs/people/fossil.json declares format "fossil/2"; this reader reads fossil/1 and nothing else
+```
+
+A host sees `data: { path, format }`. `format` is the declared string, or the JSON of whatever was
+there instead — `undefined` when the field is missing, as it is for any JSON that is not a manifest.
+It is thrown by `parseManifest`, inside `open`, before any view is created.
+
+## Why fossil refuses it
+
+`format` is the only version a corpus carries, and it is one string for the whole corpus. **Within
+`fossil/1` a field is added only if it is optional and a reader may ignore it**; anything that changes
+what a fixed column or a byte of a file means is `fossil/2`, and a `fossil/1` reader refuses it before
+reading a byte of Parquet ([/docs/format](/docs/format)). That is what lets a reader ignore every key
+it does not know: the format string is the one field it checks, so it is the one place an
+incompatible corpus can be stopped instead of misread.
+
+## How to repair it
+
+- **A newer format**: upgrade `@fossil-lang/corpus` to a release that reads it, or rewrite the corpus
+  with a writer that produces `fossil/1`.
+- **No format at all** (`format` is `undefined`): the location serves some other JSON file. Point
+  `open` at a corpus root whose `fossil.json` the fossil writer produced.

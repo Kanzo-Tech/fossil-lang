@@ -1,0 +1,55 @@
+---
+title: A stage given the wrong arguments
+description: "`pipeline/stage-arity` — a stage is missing an argument its verb needs, or is given more than the verb takes."
+---
+
+Each relation verb declares its parameters in the catalogue, and a stage is checked against them
+before it is built. The message says which way the count is off. A missing argument is named the
+way the verb declares it:
+
+```fossil
+Minimal := Active.select()
+Linked  := Purchase.join(User, Purchase.user_id == User.id)
+Spend   := Order.group_by(Order.customer)
+```
+
+```text
+`select` in `Minimal` needs one or more columns, and this call gives none
+`join` in `Linked` needs `on = <predicate>`, and this call gives none
+`group_by` in `Spend` needs one or more aggregations, and this call gives none
+```
+
+and one too many is reported at the extra argument:
+
+```text
+`distinct` in `Unique` is given more arguments than it takes
+```
+
+## Why fossil refuses it
+
+Arity, named arguments and their order are checked once, out of the verb's catalogue row, for every
+verb — not by each verb in its own words, which is what three hand-written arms did before. Two
+of the rules are not about counting and deserve their reason:
+
+- **`join`'s condition is reached only by its name.** Without that, the second positional argument
+  would quietly fill `on`, and the language would grow a second spelling by accident.
+- **`group_by` needs at least one aggregation.** `group_by(keys)` alone has exactly the rows of
+  `select(keys).distinct()`, and both of those already exist, so the aggregations are not
+  optional.
+
+`distinct` takes nothing: it lost its `on` columns because, with no `sort` to say which row of a
+group to keep, the output would differ between runs — see
+[the algebra](/docs/design/algebra#distinct-takes-nothing).
+
+## How to repair it
+
+The `help` gives an example call rendered from the verb's own signature, naming the base binding
+your program wrote — over `pedidos`, `select` is shown as `e.g. select(pedidos.id, pedidos.name)`.
+For too many arguments it first says what the verb takes: `it takes no arguments. e.g. distinct()`.
+Then:
+
+- give `join` its condition as `on = A.k == B.k`;
+- give `group_by` an aggregation per column it produces, `total = math.sum(Order.amount)`;
+- drop the arguments of `distinct()`, and use `select(…).distinct()` to dedupe on some columns.
+
+The table of what each verb takes is on [relations](/docs/book/relations#the-rest-of-them).

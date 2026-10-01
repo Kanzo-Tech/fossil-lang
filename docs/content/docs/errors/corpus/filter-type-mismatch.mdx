@@ -1,0 +1,37 @@
+---
+title: The filter compares different types
+description: "`corpus/filter-type-mismatch` — a filter compares a numeric column with a literal that is not a number."
+---
+
+A filter leaf compares a column with one or more literals. When the manifest says the column is an
+integer or a float, every literal must be a JavaScript `number` or `bigint`. A string that looks like
+a number is not one:
+
+```ts
+corpus.scan({ table: 'Person', filter: { column: 'dense_id', op: '=', value: '3' } });
+```
+
+```text
+dense_id holds numbers, and the filter compares it with "3"
+```
+
+A host sees `data: { column, holds, value }`. `holds` is `numbers` — numeric columns are the ones the
+binder checks — and `value` is the literal as JSON, so a string arrives quoted. A column is numeric
+when its manifest type is `int8`…`int64`, `uint8`…`uint64`, `float`, `double`, `float32` or `float64`.
+It is thrown synchronously by the filter binder when the scan is built.
+
+## Why fossil refuses it
+
+A bound filter becomes the `WHERE` of one DuckDB statement, and **the column is compared as it is
+stored, never cast**: a cast on the column is what keeps DuckDB from pruning a row group by its footer
+statistics, which is how a filter avoids reading most of a table. Comparing a numeric column with a
+string would leave DuckDB to cast one side, or fail, at the moment the statement runs. Refusing at bind
+time keeps the comparison typed and the pruning intact ([one door](/docs/design/one-door)).
+
+## How to repair it
+
+- **Pass a number**: `value: 3`, not `'3'`. Convert input that arrives as text before building the
+  filter.
+- **Use a `bigint`** for a 64-bit column whose values pass `Number.MAX_SAFE_INTEGER`.
+- A `NaN` or an infinity is refused separately, as [`api/invalid-argument`](/docs/errors/api/invalid-argument):
+  it is a number, but not a value a comparison can match.

@@ -1,0 +1,49 @@
+---
+title: Not a function fossil knows
+description: "`name/unknown-function` — a call names something the standard library catalogue does not have."
+---
+
+Everything callable in fossil is a row of one catalogue — the [standard library](/docs/book/stdlib)
+— and a call to a name it does not have is refused. A dotted name has two halves, and the message
+says which one is wrong:
+
+```fossil
+    email = str.trimm(User.email)
+    name  = strr.trim(User.name)
+```
+
+```text
+`str.trimm` is not a function fossil knows
+help: did you mean `str.trim`?
+```
+
+```text
+`strr` is not a namespace or a type fossil knows, so `strr.trim` names nothing
+help: did you mean `str.trim`?
+```
+
+When `str` exists and `trimm` does not, the suggestion is drawn from `str`'s own members only. When
+the part before the dot is itself unknown, the suggestion corrects that part and keeps the member.
+
+The value path is checked the same way: `User.email.trimm()` is refused as
+`` `trimm` is not a function fossil knows ``. So is an edge whose type name is misspelt —
+`buyer = Persn(User.email)` — because a call reads as an edge only when its name is one a `type`
+binding introduced; anything else is looked up in the catalogue, and `Persn` is not there.
+
+## Why fossil refuses it
+
+[You declare no functions of your own](/docs/design/the-dot#why-you-declare-no-functions-of-your-own).
+Every callable name has a signature and a known lowering, which is what makes *if it compiles, it
+runs* true of the whole language. A name outside the catalogue has neither, so there is nothing to
+type its arguments against and nothing to run. The two misses are told apart because they are two
+mistakes: an unknown receiver and an unknown member of a known one used to produce the same
+sentence, and only one of them is fixed by looking at that receiver's members.
+
+## How to repair it
+
+- **The name is misspelt.** Take the `help`'s suggestion.
+- **The function does not exist.** Compose catalogue entries instead; [the standard
+  library](/docs/book/stdlib) lists every row, and the section on what is not there explains the
+  ones that were deliberately left out.
+- **It was meant to be an edge.** Check the spelling against the names the `type { … }` binding
+  introduces.

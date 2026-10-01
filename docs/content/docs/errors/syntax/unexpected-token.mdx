@@ -1,0 +1,51 @@
+---
+title: Unexpected token
+description: "`syntax/unexpected-token` — tokens the parser could not place in any construct, and skipped to resume parsing."
+---
+
+The parser met a token that starts nothing it can parse at that point, and stepped over it. The
+message names nothing, and the label covers what was skipped:
+
+```fossil
+stray
+Users := io.csv("users.csv")
+```
+
+```text
+syntax/unexpected-token
+  × unexpected token
+```
+
+A bare name on a line of its own is not a binding, a type binding or a mapping, so `stray` is
+reported and the binding on the next line is parsed normally. The same message covers a run of
+tokens the parser skipped while recovering from an earlier mistake, a line indented back to a column
+that no enclosing line started at, and a `{` where an expression was due.
+
+## Why fossil refuses it
+
+A token that belongs to no construct has no meaning, and fossil does not guess one. What the parser
+does instead is keep going: after a mistake it consumes tokens until it reaches one that reliably
+starts something — a name at the top level, the next property or the end of a mapping body — and
+reports the whole skipped run as **one** diagnostic rather than one per token, so a single mistake
+does not fill the Problems panel. The tree keeps the skipped tokens under an error node, which is
+what lets the rest of the file be checked.
+
+Because it is a recovery message, it often arrives second. An
+[`syntax/expected-token`](/docs/errors/syntax/expected-token) at the same place is usually the cause,
+and this one only marks what the parser had to step over afterwards. Where the parser can say more
+it does: a byte no token starts with is
+[`syntax/unknown-character`](/docs/errors/syntax/unknown-character), and a form the language used to
+have is [`syntax/retired-spelling`](/docs/errors/syntax/retired-spelling).
+
+## How to repair it
+
+There is no `help`; the underlined text is the evidence.
+
+- **Fix any other syntax error on the same line first.** Recovery skipped these tokens because of
+  it, and they may parse once it is gone.
+- **A stray word** is usually half of something: a binding missing its `:= …`, or a mapping header
+  missing `: Shape from source`. Complete it or delete it.
+- **Inside a mapping body**, check the indentation. Every line of a body sits at the same column, and
+  the line after the body returns to the column of the header.
+- **Comments are `//`**, to the end of the line. Text written as a comment in another syntax is read
+  as code.
