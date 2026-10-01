@@ -44,7 +44,7 @@ Five shapes cover nearly all of them.
    or a 500 renders as `notFound()` or as the empty state ("No jobs"). No chart implements Mosaic's
    `queryError`, so a failing chart is blank. The auth callback renders a raw JSON body.
 5. **The code lost on the way.** fossil hands kanzo-ui a `FossilError`; kanzo-ui hands keasy a
-   string — `onFailure(message: string)` in the graph, `error: string` in `useAi`, `"anonymous"` in
+   string — `onFailure(message: string)` in the graph, `error: string` in `useAiStream`, `"anonymous"` in
    auth. Past the library, keasy cannot choose what to show by code, because there is no code left.
 
 ## G1 — every wait ends
@@ -57,21 +57,27 @@ thing that can wait forever is the person's own patience, and they can end it.
 
 1. **Every async function that crosses a package boundary takes `{ signal }`** and passes it down to
    every wait it makes. `open`, `mount`, `introspect`, `runJob`, `openProgram`, `engine()` gain one;
-   `Engine.query`'s stays and becomes required in the type a host implements, so that an engine that
-   drops it fails to compile.
+   `Engine.query`'s options become required, so fossil always passes one. TypeScript still accepts an
+   engine that declares fewer parameters, so honouring the signal is the engine's contract, not the
+   compiler's.
 2. **Every outside wait races a deadline**: `AbortSignal.any([signal, AbortSignal.timeout(ms)])`, in
    one helper per repository, not one per call site. The figures, each the slowest honest answer
-   rather than a guess at the fastest:
+   rather than a guess at the fastest. **Deadlines nest**: an inner wait must expire before the one
+   around it, or the outer deadline fires first and names the wrong party. A vend makes two calls
+   inside one API request inside one browser request, hence 10 s, 25 s, 30 s:
 
    | Wait | Deadline | Where |
    | --- | --- | --- |
    | A `Host` promise — credentials, connections | 30 s | `@fossil-lang/storage`, and `js.rs` on the Rust side |
-   | An object-store request (connect / whole request) | 5 s / 30 s, two retries | `fossil-storage`'s builders — the figures keasy's server already uses |
+   | An object-store request (connect / whole request) | 5 s / 30 s, two retries natively; 30 s raced and no retries on wasm32 | `fossil-storage` — on wasm32 `object_store` ignores the timeouts and its retry backoff needs Tokio, so fossil races each request itself |
    | Fetching a `.wasm` or the DuckDB worker | 60 s | the three wasm loaders, `@kanzo-tech/mosaic` |
    | DuckDB booting (`instantiate`, `LOAD httpfs`) | 60 s | `@kanzo-tech/mosaic` |
+   | cosmos.gl creating its GPU device (`ready`) | 10 s | `@kanzo-tech/graph` |
    | Any API request from the browser | 30 s | keasy's api client — streams excepted |
    | A stream's next chunk | 30 s idle | keasy's SSE reader, `@kanzo-tech/ai`, the server's provider stream |
-   | Entra, Azure, STS, Valkey | 5 s connect / 30 s request | keasy's server and web |
+   | Entra, Azure, STS | 5 s connect / 10 s request | keasy's server |
+   | Valkey | 5 s connect and per command | keasy's web |
+   | keasy's API handling one request | 25 s | keasy's server |
 
 3. **A deadline that fires is coded by who did not answer, never as a bare "timeout".** The person
    needs to know *what* is down. The host going quiet is `storage/host-silent` (new); the bucket is
@@ -90,13 +96,14 @@ measurement beside it; the rule that there *is* a figure does not.
 
 ## G2 — every failure is seen, whole, by one path
 
-1. **A library passes the thrown value, never its message.** The graph's `onFailure`, `useAi`'s
+1. **A library passes the thrown value, never its message.** The graph's `onFailure`, `useAiStream`'s
    `error` and the auth provider's failure all carry the `unknown` that was thrown — a `FossilError`
    arrives at keasy as a `FossilError`, with its code, `data` and causes. kanzo-ui does not depend on
    fossil's types to do this: it passes what it got, and the host's `toProblem` narrows it.
 2. **kanzo-ui's own failures carry a code in the same grammar.** No WebGL, a lost context, an engine
-   that will not boot, a silent stream: `graph/no-webgl`, `graph/context-lost`, `engine/unavailable`,
-   `ai/silent`. They are `Error`s with a `code` field, so one host registry keys fossil's codes,
+   that will not boot, a silent stream, a session store or IdP that is down: `graph/no-webgl`,
+   `graph/context-lost`, `engine/unavailable`, `ai/silent`, `session/unavailable`, `idp/unreachable`,
+   and the few beside them. They are `Error`s with a `code` field, so one host registry keys fossil's codes,
    kanzo-ui's and keasy's server's alike. kanzo-ui owns that short list; it is not fossil's
    catalogue and does not join it.
 3. **Every Mosaic client implements `queryError`**, and a chart that failed renders the failure in its
@@ -109,7 +116,9 @@ measurement beside it; the rule that there *is* a figure does not.
    that fails throws to the nearest boundary; there is no `data = []` default for a failure to hide
    behind, and no `isError` to forget. Today 18 files call `useQuery` and one route group has an
    `error.tsx`.
-5. **`notFound()` only for a `job/not-found`-shaped code.** Everything else throws to the boundary.
+5. **No `notFound()` for a failed read.** A not-found answer is a code like any other and renders in
+   `ProblemView`: Next's not-found page carries no code, and "Page not found" is exactly what this
+   page forbids.
 6. **A poll stops on failure.** `refetchInterval` returns `false` once the query is in error, so a
    dead API is not asked every two seconds and old data is not shown as current.
 7. **No swallowing.** No empty `catch`, no `.catch(() => {})`, no `let _ = …await` — except where a
@@ -171,7 +180,7 @@ cannot prove.
 | Every Mosaic client class has `queryError` | kanzo-ui | that it renders well |
 | No `onFailure`/`error` typed `string` on a public surface | kanzo-ui | a failure reaching the host another way |
 | No `useQuery(`; every route group has an `error.tsx` | keasy | a boundary that renders something other than `ProblemView` |
-| `notFound()` only inside a not-found branch | keasy | — |
+| `notFound()` never on a query's failure | keasy | — |
 | Every scenario in the audit tables has an e2e test, by name | keasy | that the test forces the failure it names |
 
 ## The migration, repository by repository
@@ -184,7 +193,7 @@ Each step is one branch and one merge, green.
    rejections no longer memoized; the cleanup-replaces-cause sites fixed; the guards; a test per G3
    case. *Breaking:* `Engine.query`'s `signal` is required.
 3. **kanzo-ui.** duckdb-wasm's `onError` wrapped and the boot raced; `engine()` retries after a
-   failure; `queryError` on every chart client; `onFailure(error: unknown)`, `useAi`'s `error: unknown`,
+   failure; `queryError` on every chart client; `onFailure(error: unknown)`, `useAiStream`'s `error: unknown`,
    the auth provider's failure surfaced rather than collapsed to `"anonymous"`; the four codes; the AI
    idle deadline; the guards; the unread modules audited first. *Breaking:* the three failure
    signatures.
