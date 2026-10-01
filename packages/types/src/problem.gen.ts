@@ -33,6 +33,7 @@ export type Code =
   | 'storage/unreachable'
   | 'storage/no-httpfs'
   | 'storage/host-refused'
+  | 'storage/host-silent'
   | 'corpus/unreadable'
   | 'corpus/not-json'
   | 'corpus/unsupported-format'
@@ -76,6 +77,7 @@ export const CODES: readonly Code[] = [
   'storage/unreachable',
   'storage/no-httpfs',
   'storage/host-refused',
+  'storage/host-silent',
   'corpus/unreadable',
   'corpus/not-json',
   'corpus/unsupported-format',
@@ -259,6 +261,13 @@ export interface ProblemData {
     scope: string;
   };
   /**
+   * The host did not answer a request for credentials or connections within the deadline fossil holds every host wait to; `after` is that deadline, in milliseconds.
+   */
+  'storage/host-silent': {
+    after: number;
+    scope: string;
+  };
+  /**
    * A corpus whose manifest could not be read; the reader's error is the cause.
    */
   'corpus/unreadable': {
@@ -377,6 +386,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'storage/unreachable': 'A store could not be reached',
   'storage/no-httpfs': 'The engine cannot read remote storage',
   'storage/host-refused': 'The host refused',
+  'storage/host-silent': 'The host did not answer',
   'corpus/unreadable': 'The corpus could not be read',
   'corpus/not-json': 'The manifest is not JSON',
   'corpus/unsupported-format': 'The corpus format is not supported',

@@ -35,19 +35,16 @@ struct NoHost;
 impl Host for NoHost {
     fn connections(
         &self,
-    ) -> BoxFuture<'static, Result<HashMap<String, String>, fossil_graph_schema::Foreign>> {
+    ) -> BoxFuture<'static, Result<HashMap<String, String>, fossil_storage::HostError>> {
         Box::pin(async { Ok(HashMap::new()) })
     }
     fn credentials(
         &self,
         _: &Scope,
         _: Access,
-    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, fossil_graph_schema::Foreign>> {
+    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, fossil_storage::HostError>> {
         Box::pin(async {
-            Err(fossil_graph_schema::Foreign::named(
-                "Error",
-                "these tests vend nothing",
-            ))
+            Err(fossil_graph_schema::Foreign::named("Error", "these tests vend nothing").into())
         })
     }
 }

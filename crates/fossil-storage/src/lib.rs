@@ -31,4 +31,4 @@ pub use credential::{Access, Grant, StorageCredential, StorageError};
 pub use js::JsHost;
 pub use resolved::{CloudSecret, ResolvedPath};
 #[cfg(feature = "object-store")]
-pub use store::{Host, Scope, Storage};
+pub use store::{Host, HostError, Scope, Storage};

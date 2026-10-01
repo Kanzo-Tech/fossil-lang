@@ -86,6 +86,9 @@ pub enum StorageError {
         #[source]
         cause: Foreign,
     },
+    /// The host answered nothing within the deadline fossil holds it to.
+    #[error("the host did not answer {scope} within {after} ms")]
+    HostSilent { scope: String, after: u64 },
     #[error("the host vended no {access} credential for {scope}")]
     NoCredential { scope: String, access: &'static str },
     /// A store answered with an error, kept whole.
@@ -95,6 +98,16 @@ pub enum StorageError {
         locator: String,
         #[source]
         source: Box<object_store::Error>,
+    },
+    /// A multipart upload failed, and aborting it failed too: its parts stay
+    /// in the bucket.
+    #[cfg(feature = "object-store")]
+    #[error("{locator}: {source}, and the upload could not be aborted: {abort}")]
+    Orphaned {
+        locator: String,
+        #[source]
+        source: Box<object_store::Error>,
+        abort: Box<object_store::Error>,
     },
 }
 
@@ -129,6 +142,9 @@ impl From<StorageError> for Failure {
             StorageError::HostRefused { scope, cause } => {
                 Self::new(Problem::HostRefused { scope }).caused_by(cause)
             }
+            StorageError::HostSilent { scope, after } => {
+                Self::new(Problem::HostSilent { scope, after })
+            }
             StorageError::NoCredential { scope, access } => Self::new(Problem::NoCredential {
                 scope,
                 access: access.to_string(),
@@ -137,6 +153,16 @@ impl From<StorageError> for Failure {
             StorageError::Io { locator, source } => {
                 Self::new(Problem::Unreachable { locator }).caused_by(*source)
             }
+            #[cfg(feature = "object-store")]
+            StorageError::Orphaned {
+                locator,
+                source,
+                abort,
+            } => Self::new(Problem::Unreachable { locator })
+                .caused_by(*source)
+                .with_help(format!(
+                    "the upload could not be aborted either, so its parts stay in the bucket until a lifecycle rule removes them: {abort}"
+                )),
         }
     }
 }

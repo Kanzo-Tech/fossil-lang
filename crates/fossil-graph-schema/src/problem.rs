@@ -233,6 +233,13 @@ catalogue! {
     #[error("the host refused {scope}")]
     HostRefused { scope: String },
 
+    /// The host did not answer a request for credentials or connections within
+    /// the deadline fossil holds every host wait to; `after` is that deadline,
+    /// in milliseconds.
+    "storage/host-silent", "The host did not answer",
+    #[error("the host did not answer {scope} within {after} ms")]
+    HostSilent { scope: String, after: u64 },
+
     /// A corpus whose manifest could not be read; the reader's error is the cause.
     "corpus/unreadable", "The corpus could not be read",
     #[error("{path} could not be read")]

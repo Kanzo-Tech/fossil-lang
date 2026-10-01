@@ -781,6 +781,40 @@
       }
     },
     {
+      "title": "The host did not answer",
+      "description": "The host did not answer a request for credentials or connections within the deadline fossil holds every host wait to; `after` is that deadline, in milliseconds.",
+      "type": "object",
+      "required": [
+        "code",
+        "data"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "storage/host-silent"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "after",
+            "scope"
+          ],
+          "properties": {
+            "after": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "scope": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
       "title": "The corpus could not be read",
       "description": "A corpus whose manifest could not be read; the reader's error is the cause.",
       "type": "object",

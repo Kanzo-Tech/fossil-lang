@@ -15,8 +15,10 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
 use std::ops::Range;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -28,9 +30,9 @@ use object_store::azure::{AzureCredential, MicrosoftAzureBuilder};
 use object_store::http::HttpBuilder;
 use object_store::path::Path;
 use object_store::{
-    CopyOptions, CredentialProvider, GetOptions, GetResult, ListResult, MultipartUpload,
-    ObjectMeta, ObjectStore, ObjectStoreExt, PutMultipartOptions, PutOptions, PutPayload,
-    PutResult, RenameOptions,
+    BackoffConfig, ClientOptions, CopyOptions, CredentialProvider, GetOptions, GetResult,
+    ListResult, MultipartUpload, ObjectMeta, ObjectStore, ObjectStoreExt, PutMultipartOptions,
+    PutOptions, PutPayload, PutResult, RenameOptions, RetryConfig,
 };
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
@@ -45,6 +47,60 @@ const RENEW_BEFORE_MS: u64 = 5 * 60_000;
 const PART_BYTES: usize = 8 * 1024 * 1024;
 /// Parts in flight at once.
 const PARTS_IN_FLIGHT: usize = 4;
+/// How long a store may take to accept a connection — `/docs/design/failure`'s G1 table.
+const CONNECT: Duration = Duration::from_secs(5);
+/// How long one request may take, whole.
+const REQUEST: Duration = Duration::from_secs(30);
+/// How many times a request that failed in a way worth repeating is sent again.
+const RETRIES: usize = 2;
+
+/// The client options every store fossil builds is given: the figures in
+/// `/docs/design/failure`.
+///
+/// **On wasm32 none of them reach the request.** `object_store` builds its
+/// wasm32 `reqwest` client without the timeouts — `fetch` has no connect phase
+/// and no timeout of its own — so [`Routed`] races every request against
+/// [`REQUEST`] there instead. Retries are off on wasm32 for a worse reason:
+/// `object_store`'s backoff sleeps with `tokio::time::sleep`, which panics
+/// outside a Tokio runtime, and a page has none.
+fn client() -> ClientOptions {
+    ClientOptions::new()
+        .with_connect_timeout(CONNECT)
+        .with_timeout(REQUEST)
+}
+
+fn retry() -> RetryConfig {
+    RetryConfig {
+        backoff: BackoffConfig::default(),
+        max_retries: if cfg!(target_arch = "wasm32") {
+            0
+        } else {
+            RETRIES
+        },
+        retry_timeout: REQUEST * 3,
+    }
+}
+
+/// Why a host did not answer with what it was asked for.
+#[derive(Debug, thiserror::Error)]
+pub enum HostError {
+    /// The host's own rejection, kept whole.
+    #[error(transparent)]
+    Refused(#[from] Foreign),
+    /// No answer within `after` milliseconds.
+    #[error("no answer within {after} ms")]
+    Silent { after: u64 },
+}
+
+impl HostError {
+    /// The storage failure this is, for a request about `scope`.
+    fn about(self, scope: String) -> StorageError {
+        match self {
+            Self::Refused(cause) => StorageError::HostRefused { scope, cause },
+            Self::Silent { after } => StorageError::HostSilent { scope, after },
+        }
+    }
+}
 
 /// What a credential is asked for: a connection's prefix, or a job's dataset.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -67,14 +123,15 @@ impl fmt::Display for Scope {
 pub trait Host: fmt::Debug + Send + Sync {
     /// Connection name → canonical prefix, as `@name/…` expands against it.
     ///
-    /// A refusal is the host's own error, kept whole as a [`Foreign`].
-    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, Foreign>>;
+    /// A refusal is the host's own error, kept whole as a [`Foreign`]; a host
+    /// that answers nothing within its deadline is [`HostError::Silent`].
+    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, HostError>>;
     /// Vend `access` on `scope`: short-lived, scoped to a prefix.
     fn credentials(
         &self,
         scope: &Scope,
         access: Access,
-    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, Foreign>>;
+    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, HostError>>;
 }
 
 /// Every store a run reaches, keyed as `DataFusion` registers them.
@@ -110,10 +167,7 @@ impl Storage {
             .host
             .credentials(&scope, access)
             .await
-            .map_err(|cause| StorageError::HostRefused {
-                scope: scope.to_string(),
-                cause,
-            })?;
+            .map_err(|e| e.about(scope.to_string()))?;
         if credentials.is_empty() {
             return Err(StorageError::NoCredential {
                 scope: scope.to_string(),
@@ -142,10 +196,7 @@ impl Storage {
         self.host
             .connections()
             .await
-            .map_err(|cause| StorageError::HostRefused {
-                scope: "its connections".to_string(),
-                cause,
-            })
+            .map_err(|e| e.about("its connections".to_string()))
     }
 
     /// Whether a store is routed for `locator` already.
@@ -168,6 +219,8 @@ impl Storage {
         if routed.routes.iter().all(|r| !r.key.is_empty()) {
             let store = HttpBuilder::new()
                 .with_url(&authority)
+                .with_client_options(client())
+                .with_retry(retry())
                 .build()
                 .map_err(|e| io(locator, e))?;
             routed.add(String::new(), Arc::new(store));
@@ -209,8 +262,9 @@ impl Storage {
     /// Nothing granted covers `locator`, or the store answers with an error.
     pub async fn get(&self, locator: &str) -> Result<Bytes, StorageError> {
         let (store, path) = self.resolve(locator)?;
-        let result = store.get(&path).await.map_err(|e| io(locator, e))?;
-        result.bytes().await.map_err(|e| io(locator, e))
+        bounded(async move { store.get(&path).await?.bytes().await })
+            .await
+            .map_err(|e| io(locator, e))
     }
 
     /// Write `bytes` at `locator`, in parts when it is large.
@@ -220,29 +274,35 @@ impl Storage {
     pub async fn put(&self, locator: &str, bytes: Bytes) -> Result<(), StorageError> {
         let (store, path) = self.resolve(locator)?;
         if bytes.len() <= PART_BYTES {
-            store
-                .put(&path, PutPayload::from(bytes))
+            bounded(store.put(&path, PutPayload::from(bytes)))
                 .await
                 .map_err(|e| io(locator, e))?;
             return Ok(());
         }
-        let mut upload = store
-            .put_multipart(&path)
+        let mut upload = bounded(store.put_multipart(&path))
             .await
             .map_err(|e| io(locator, e))?;
         let parts: Vec<_> = bytes
             .chunks(PART_BYTES)
-            .map(|chunk| upload.put_part(PutPayload::from(bytes.slice_ref(chunk))))
+            .map(|chunk| bounded(upload.put_part(PutPayload::from(bytes.slice_ref(chunk)))))
             .collect();
         let sent = stream::iter(parts)
             .buffer_unordered(PARTS_IN_FLIGHT)
             .try_collect::<Vec<()>>()
             .await;
         if let Err(e) = sent {
-            let _ = upload.abort().await;
-            return Err(io(locator, e));
+            return Err(match upload.abort().await {
+                Ok(()) => io(locator, e),
+                Err(abort) => StorageError::Orphaned {
+                    locator: locator.to_string(),
+                    source: Box::new(e),
+                    abort: Box::new(abort),
+                },
+            });
         }
-        upload.complete().await.map_err(|e| io(locator, e))?;
+        bounded(upload.complete())
+            .await
+            .map_err(|e| io(locator, e))?;
         Ok(())
     }
 
@@ -264,6 +324,33 @@ fn io(locator: &str, e: object_store::Error) -> StorageError {
     StorageError::Io {
         locator: locator.to_string(),
         source: Box::new(e),
+    }
+}
+
+/// `work`, given at most [`REQUEST`] on wasm32, where nothing below bounds it —
+/// see [`client`]. Elsewhere the client's own timeout does, and this is `work`.
+///
+/// It bounds what a call awaits: a listing or a body read as a stream is
+/// bounded until it starts, not until it ends.
+async fn bounded<T>(
+    work: impl Future<Output = object_store::Result<T>>,
+) -> object_store::Result<T> {
+    #[cfg(all(target_arch = "wasm32", feature = "js"))]
+    {
+        use futures::future::{Either, select};
+        let work = std::pin::pin!(work);
+        let after = u64::try_from(REQUEST.as_millis()).unwrap_or(u64::MAX);
+        match select(work, crate::js::elapse(after)).await {
+            Either::Left((done, _)) => done,
+            Either::Right(((), _)) => Err(object_store::Error::Generic {
+                store: "fossil-storage",
+                source: format!("the store did not answer within {after} ms").into(),
+            }),
+        }
+    }
+    #[cfg(not(all(target_arch = "wasm32", feature = "js")))]
+    {
+        work.await
     }
 }
 
@@ -292,6 +379,8 @@ fn build(grant: &Grant, renewal: Renewal) -> Result<Arc<dyn ObjectStore>, Storag
                 .with_url(grant.prefix())
                 .with_region(region)
                 .with_virtual_hosted_style_request(!path_style)
+                .with_client_options(client())
+                .with_retry(retry())
                 .with_credentials(Arc::new(Vended::<AwsCredential>::new(grant, renewal)));
             if let Some(Endpoint { authority, ssl }) = endpoint {
                 let scheme = if *ssl { "https" } else { "http" };
@@ -306,6 +395,8 @@ fn build(grant: &Grant, renewal: Renewal) -> Result<Arc<dyn ObjectStore>, Storag
         } => MicrosoftAzureBuilder::new()
             .with_account(account)
             .with_container_name(container)
+            .with_client_options(client())
+            .with_retry(retry())
             .with_credentials(Arc::new(Vended::<AzureCredential>::new(grant, renewal)))
             .build()
             .map(|s| Arc::new(s) as _),
@@ -369,9 +460,7 @@ impl ObjectStore for Routed {
         payload: PutPayload,
         opts: PutOptions,
     ) -> object_store::Result<PutResult> {
-        self.store(location)?
-            .put_opts(location, payload, opts)
-            .await
+        bounded(self.store(location)?.put_opts(location, payload, opts)).await
     }
 
     async fn put_multipart_opts(
@@ -379,9 +468,7 @@ impl ObjectStore for Routed {
         location: &Path,
         opts: PutMultipartOptions,
     ) -> object_store::Result<Box<dyn MultipartUpload>> {
-        self.store(location)?
-            .put_multipart_opts(location, opts)
-            .await
+        bounded(self.store(location)?.put_multipart_opts(location, opts)).await
     }
 
     async fn get_opts(
@@ -389,7 +476,7 @@ impl ObjectStore for Routed {
         location: &Path,
         options: GetOptions,
     ) -> object_store::Result<GetResult> {
-        self.store(location)?.get_opts(location, options).await
+        bounded(self.store(location)?.get_opts(location, options)).await
     }
 
     async fn get_ranges(
@@ -397,7 +484,7 @@ impl ObjectStore for Routed {
         location: &Path,
         ranges: &[Range<u64>],
     ) -> object_store::Result<Vec<Bytes>> {
-        self.store(location)?.get_ranges(location, ranges).await
+        bounded(self.store(location)?.get_ranges(location, ranges)).await
     }
 
     fn delete_stream(
@@ -438,9 +525,7 @@ impl ObjectStore for Routed {
 
     async fn list_with_delimiter(&self, prefix: Option<&Path>) -> object_store::Result<ListResult> {
         let prefix = prefix.cloned().unwrap_or_default();
-        self.store(&prefix)?
-            .list_with_delimiter(Some(&prefix))
-            .await
+        bounded(self.store(&prefix)?.list_with_delimiter(Some(&prefix))).await
     }
 
     async fn copy_opts(
@@ -449,7 +534,7 @@ impl ObjectStore for Routed {
         to: &Path,
         options: CopyOptions,
     ) -> object_store::Result<()> {
-        self.same(from, to)?.copy_opts(from, to, options).await
+        bounded(self.same(from, to)?.copy_opts(from, to, options)).await
     }
 
     async fn rename_opts(
@@ -458,7 +543,7 @@ impl ObjectStore for Routed {
         to: &Path,
         options: RenameOptions,
     ) -> object_store::Result<()> {
-        self.same(from, to)?.rename_opts(from, to, options).await
+        bounded(self.same(from, to)?.rename_opts(from, to, options)).await
     }
 }
 
@@ -499,10 +584,7 @@ impl Renewal {
             .host
             .credentials(&self.scope, self.access)
             .await
-            .map_err(|cause| StorageError::HostRefused {
-                scope: self.scope.to_string(),
-                cause,
-            })?
+            .map_err(|e| e.about(self.scope.to_string()))?
             .into_iter()
             .find(|c| c.prefix == self.prefix)
             .ok_or_else(|| StorageError::NoCredential {
@@ -639,7 +721,7 @@ mod tests {
     }
 
     impl Host for Fake {
-        fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, Foreign>> {
+        fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, HostError>> {
             Box::pin(async { Ok(HashMap::new()) })
         }
 
@@ -647,7 +729,7 @@ mod tests {
             &self,
             scope: &Scope,
             _access: Access,
-        ) -> BoxFuture<'static, Result<Vec<StorageCredential>, Foreign>> {
+        ) -> BoxFuture<'static, Result<Vec<StorageCredential>, HostError>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let prefix = match scope {
                 Scope::Connection(c) => format!("s3://lake/{c}/"),
@@ -752,6 +834,171 @@ mod tests {
             storage.public("s3://lake/a.csv"),
             Err(StorageError::Store(_))
         ));
+    }
+
+    #[derive(Debug)]
+    struct Silent;
+
+    impl Host for Silent {
+        fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, HostError>> {
+            Box::pin(async { Err(HostError::Silent { after: 30_000 }) })
+        }
+
+        fn credentials(
+            &self,
+            _: &Scope,
+            _: Access,
+        ) -> BoxFuture<'static, Result<Vec<StorageCredential>, HostError>> {
+            Box::pin(async { Err(HostError::Silent { after: 30_000 }) })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_host_that_does_not_answer_is_silent_and_not_refused() {
+        let mut storage = Storage::new(Arc::new(Silent));
+        let err = storage
+            .grant(Scope::Job("j-1".into()), Access::Read)
+            .await
+            .expect_err("silent");
+        let failure = fossil_graph_schema::Failure::from(err);
+        assert_eq!(
+            failure.problem,
+            fossil_graph_schema::Problem::HostSilent {
+                scope: "job j-1".into(),
+                after: 30_000
+            }
+        );
+        let err = storage.connections().await.expect_err("silent");
+        assert!(matches!(
+            err,
+            StorageError::HostSilent { after: 30_000, .. }
+        ));
+    }
+
+    /// A store whose multipart upload refuses every part, and refuses to abort.
+    #[derive(Debug)]
+    struct Unabortable(InMemory);
+
+    impl fmt::Display for Unabortable {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("Unabortable")
+        }
+    }
+
+    #[derive(Debug)]
+    struct Refusing;
+
+    #[async_trait]
+    impl MultipartUpload for Refusing {
+        fn put_part(&mut self, _: PutPayload) -> object_store::UploadPart {
+            Box::pin(async {
+                Err(object_store::Error::Generic {
+                    store: "test",
+                    source: "the part was refused".into(),
+                })
+            })
+        }
+
+        async fn complete(&mut self) -> object_store::Result<PutResult> {
+            unreachable!("no part was accepted")
+        }
+
+        async fn abort(&mut self) -> object_store::Result<()> {
+            Err(object_store::Error::Generic {
+                store: "test",
+                source: "the abort was refused".into(),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl ObjectStore for Unabortable {
+        async fn put_opts(
+            &self,
+            location: &Path,
+            payload: PutPayload,
+            opts: PutOptions,
+        ) -> object_store::Result<PutResult> {
+            self.0.put_opts(location, payload, opts).await
+        }
+
+        async fn put_multipart_opts(
+            &self,
+            _: &Path,
+            _: PutMultipartOptions,
+        ) -> object_store::Result<Box<dyn MultipartUpload>> {
+            Ok(Box::new(Refusing))
+        }
+
+        async fn get_opts(
+            &self,
+            location: &Path,
+            options: GetOptions,
+        ) -> object_store::Result<GetResult> {
+            self.0.get_opts(location, options).await
+        }
+
+        fn delete_stream(
+            &self,
+            locations: BoxStream<'static, object_store::Result<Path>>,
+        ) -> BoxStream<'static, object_store::Result<Path>> {
+            self.0.delete_stream(locations)
+        }
+
+        fn list(
+            &self,
+            prefix: Option<&Path>,
+        ) -> BoxStream<'static, object_store::Result<ObjectMeta>> {
+            self.0.list(prefix)
+        }
+
+        async fn list_with_delimiter(
+            &self,
+            prefix: Option<&Path>,
+        ) -> object_store::Result<ListResult> {
+            self.0.list_with_delimiter(prefix).await
+        }
+
+        async fn copy_opts(
+            &self,
+            from: &Path,
+            to: &Path,
+            options: CopyOptions,
+        ) -> object_store::Result<()> {
+            self.0.copy_opts(from, to, options).await
+        }
+    }
+
+    #[tokio::test]
+    async fn an_upload_that_could_not_be_aborted_says_so_beside_the_failure() {
+        let mut storage = Storage::new(Arc::new(Fake::default()));
+        storage
+            .with_store("s3://lake/out/", Arc::new(Unabortable(InMemory::new())))
+            .expect("store");
+        let err = storage
+            .put(
+                "s3://lake/out/big.parquet",
+                Bytes::from(vec![0; PART_BYTES + 1]),
+            )
+            .await
+            .expect_err("refused");
+        assert!(matches!(err, StorageError::Orphaned { .. }), "{err}");
+        let failure = fossil_graph_schema::Failure::from(err);
+        assert_eq!(
+            failure.problem,
+            fossil_graph_schema::Problem::Unreachable {
+                locator: "s3://lake/out/big.parquet".into()
+            }
+        );
+        assert!(matches!(
+            failure
+                .cause
+                .as_ref()
+                .and_then(|c| std::error::Error::source(c.as_ref()))
+                .and_then(|c| c.downcast_ref::<object_store::Error>()),
+            Some(object_store::Error::Generic { store: "test", .. })
+        ));
+        assert!(failure.help.is_some(), "the orphaned upload is said");
     }
 
     #[test]

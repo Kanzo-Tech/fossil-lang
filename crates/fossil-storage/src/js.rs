@@ -5,26 +5,33 @@
 //! neither, so the host is owned by a task on the page's event loop and asked
 //! over a channel: the pattern `object_store` itself uses to drive `fetch` from
 //! wasm32.
+//!
+//! **Every answer has a deadline**, [`HOST_MS`]: a host whose promise never
+//! settles is [`HostError::Silent`], not a run that never ends.
 
 use crate::credential::{Access, StorageCredential};
 use fossil_graph_schema::Foreign;
 use fossil_graph_schema::js::foreign;
 use std::collections::HashMap;
 
-use crate::store::{Host, Scope};
-use futures::StreamExt;
+use crate::store::{Host, HostError, Scope};
 use futures::channel::{mpsc, oneshot};
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, Either, select};
+use futures::{FutureExt, StreamExt};
 use js_sys::{Function, Promise, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
+/// How long a host may take to answer — `/docs/design/failure`'s G1 table, and
+/// `@fossil-lang/storage`'s figure for the same wait.
+const HOST_MS: u64 = 30_000;
+
 enum Request {
-    Connections(oneshot::Sender<Result<HashMap<String, String>, Foreign>>),
+    Connections(oneshot::Sender<Result<HashMap<String, String>, HostError>>),
     Credentials(
         Scope,
         Access,
-        oneshot::Sender<Result<Vec<StorageCredential>, Foreign>>,
+        oneshot::Sender<Result<Vec<StorageCredential>, HostError>>,
     ),
 }
 
@@ -68,8 +75,8 @@ impl JsHost {
 
     fn ask<T: Send + 'static>(
         &self,
-        request: impl FnOnce(oneshot::Sender<Result<T, Foreign>>) -> Request,
-    ) -> BoxFuture<'static, Result<T, Foreign>> {
+        request: impl FnOnce(oneshot::Sender<Result<T, HostError>>) -> Request,
+    ) -> BoxFuture<'static, Result<T, HostError>> {
         let (reply, answer) = oneshot::channel();
         let sent = self.requests.unbounded_send(request(reply));
         Box::pin(async move {
@@ -82,7 +89,7 @@ impl JsHost {
 }
 
 impl Host for JsHost {
-    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, Foreign>> {
+    fn connections(&self) -> BoxFuture<'static, Result<HashMap<String, String>, HostError>> {
         self.ask(Request::Connections)
     }
 
@@ -90,7 +97,7 @@ impl Host for JsHost {
         &self,
         scope: &Scope,
         access: Access,
-    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, Foreign>> {
+    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, HostError>> {
         let scope = scope.clone();
         self.ask(move |reply| Request::Credentials(scope, access, reply))
     }
@@ -106,21 +113,24 @@ fn method(host: &JsValue, name: &str) -> Result<Function, Foreign> {
 // These three run on the page's event loop, which is the point: the host never
 // leaves it.
 #[allow(clippy::future_not_send)]
-async fn settle(returned: Result<JsValue, JsValue>, name: &str) -> Result<JsValue, Foreign> {
+async fn settle(returned: Result<JsValue, JsValue>, name: &str) -> Result<JsValue, HostError> {
     let promise: Promise = returned.map_err(|e| foreign(&e))?.dyn_into().map_err(|_| {
         Foreign::named(
             "TypeError",
             format!("`{name}` returned something other than a promise"),
         )
     })?;
-    JsFuture::from(promise).await.map_err(|e| foreign(&e))
+    match select(JsFuture::from(promise), elapse(HOST_MS)).await {
+        Either::Left((answer, _)) => Ok(answer.map_err(|e| foreign(&e))?),
+        Either::Right(((), _)) => Err(HostError::Silent { after: HOST_MS }),
+    }
 }
 
 #[allow(clippy::future_not_send)]
-async fn connections(host: &JsValue) -> Result<HashMap<String, String>, Foreign> {
+async fn connections(host: &JsValue) -> Result<HashMap<String, String>, HostError> {
     let returned = method(host, "connections")?.call0(host);
     let map = settle(returned, "connections").await?;
-    serde_wasm_bindgen::from_value(map).map_err(|e| shape(&e))
+    Ok(serde_wasm_bindgen::from_value(map).map_err(|e| shape(&e))?)
 }
 
 #[allow(clippy::future_not_send)]
@@ -128,12 +138,43 @@ async fn credentials(
     host: &JsValue,
     scope: &Scope,
     access: Access,
-) -> Result<Vec<StorageCredential>, Foreign> {
+) -> Result<Vec<StorageCredential>, HostError> {
     let scope = serde_wasm_bindgen::to_value(scope).map_err(|e| shape(&e))?;
     let access = serde_wasm_bindgen::to_value(&access).map_err(|e| shape(&e))?;
     let returned = method(host, "credentials")?.call2(host, &scope, &access);
     let vended = settle(returned, "credentials").await?;
-    serde_wasm_bindgen::from_value(vended).map_err(|e| shape(&e))
+    Ok(serde_wasm_bindgen::from_value(vended).map_err(|e| shape(&e))?)
+}
+
+/// Resolves once `ms` have passed, by the page's own `setTimeout` — so a
+/// test's fake clock drives it — and is `Send`, so a store's future can race it.
+///
+/// The timer is `unref`'d where the runtime has that (Node), so a deadline that
+/// lost its race keeps no process alive; it is not cleared, because the id is
+/// a `JsValue` and the future must stay `Send`.
+// `pub(crate)` for `store.rs`'s request deadline: `unreachable_pub` refuses a
+// bare `pub` in this private module and `redundant_pub_crate` the other.
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn elapse(ms: u64) -> impl std::future::Future<Output = ()> + Send + Unpin {
+    let (fired, done) = oneshot::channel::<()>();
+    let callback = Closure::once_into_js(move || {
+        // A deadline whose race was already won has no receiver left.
+        let _ = fired.send(());
+    });
+    let global = js_sys::global();
+    #[allow(clippy::cast_precision_loss)] // a deadline is seconds, far below 2^53 ms
+    let delay = JsValue::from_f64(ms as f64);
+    if let Ok(timer) = method(&global, "setTimeout").and_then(|set| {
+        set.call2(&global, &callback, &delay)
+            .map_err(|e| foreign(&e))
+    }) && let Ok(unref) = method(&timer, "unref")
+    {
+        // `unref` returns the timer; a runtime whose timer has none is a browser.
+        let _ = unref.call0(&timer);
+    }
+    // Cancelled only if the callback is dropped unfired, which JS never does to
+    // a closure it holds; either way the deadline has nothing left to wait for.
+    done.map(|_cancelled| ())
 }
 
 /// A value the host handed back that is not the shape `Host` declares.

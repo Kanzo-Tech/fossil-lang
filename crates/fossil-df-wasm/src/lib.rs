@@ -277,7 +277,10 @@ struct NoHost;
 impl fossil_storage::Host for NoHost {
     fn connections(
         &self,
-    ) -> futures::future::BoxFuture<'static, Result<HashMap<String, String>, Foreign>> {
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<HashMap<String, String>, fossil_storage::HostError>,
+    > {
         Box::pin(async { Ok(HashMap::new()) })
     }
 
@@ -285,13 +288,15 @@ impl fossil_storage::Host for NoHost {
         &self,
         scope: &Scope,
         _access: Access,
-    ) -> futures::future::BoxFuture<'static, Result<Vec<fossil_storage::StorageCredential>, Foreign>>
-    {
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<Vec<fossil_storage::StorageCredential>, fossil_storage::HostError>,
+    > {
         let refused = Foreign::named(
             "Error",
             format!("a run in memory has no storage to vend {scope} from"),
         );
-        Box::pin(async move { Err(refused) })
+        Box::pin(async move { Err(refused.into()) })
     }
 }
 
