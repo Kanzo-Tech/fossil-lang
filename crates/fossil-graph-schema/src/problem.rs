@@ -1288,7 +1288,10 @@ mod tests {
         };
         let wire = serde_json::to_value(&quiet).expect("serializes");
         assert_eq!(wire["data"], serde_json::json!({ "locator": "m_bg.wasm" }));
-        assert_eq!(serde_json::from_value::<Problem>(wire).expect("reads back"), quiet);
+        assert_eq!(
+            serde_json::from_value::<Problem>(wire).expect("reads back"),
+            quiet
+        );
         let late = Problem::ModuleUnreachable {
             locator: "m_bg.wasm".into(),
             after: Some(60_000),
