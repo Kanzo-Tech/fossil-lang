@@ -25,9 +25,9 @@ your editor draws the same diagnostic as a squiggle on the spans the block under
 
 The shop program, one letter changed:
 
-<Program src="errors/unknown-field/program.fossil" title="program.fossil" />
+<Program src="errors/name/unknown-field/program.fossil" title="program.fossil" />
 
-<Program src="errors/unknown-field/expected/diagnostic.txt" title="program.fossil" />
+<Program src="errors/name/unknown-field/expected/diagnostic.txt" title="program.fossil" />
 
 **Why it can say that.** `User` is a type, and its fields are the columns of the CSV it names — so
 `nmae` is not an open question, it is a name that is not there. The suggestion comes from `User`'s
@@ -37,11 +37,11 @@ own fields rather than from everything the language knows, which is why it is a 
 
 ## 2. A value the shape will not accept
 
-<Program src="errors/wrong-type/shape.shex" title="shape.shex" />
+<Program src="errors/type/property-mismatch/shape.shex" title="shape.shex" />
 
-<Program src="errors/wrong-type/program.fossil" title="program.fossil" />
+<Program src="errors/type/property-mismatch/program.fossil" title="program.fossil" />
 
-<Program src="errors/wrong-type/expected/diagnostic.txt" title="program.fossil" />
+<Program src="errors/type/property-mismatch/expected/diagnostic.txt" title="program.fossil" />
 
 **Why two spans.** The error is a disagreement between the program and the document, and blaming one
 of them would be half the story. The expectation came from `shop.shex`, so `shop.shex` is on screen.
@@ -55,11 +55,11 @@ whole number is a float, and you do not write a conversion to say so.
 
 ## 3. A required property the mapping never writes
 
-<Program src="errors/missing-property/shape.shex" title="shape.shex" />
+<Program src="errors/shape/missing-required-property/shape.shex" title="shape.shex" />
 
-<Program src="errors/missing-property/program.fossil" title="program.fossil" />
+<Program src="errors/shape/missing-required-property/program.fossil" title="program.fossil" />
 
-<Program src="errors/missing-property/expected/diagnostic.txt" title="program.fossil" />
+<Program src="errors/shape/missing-required-property/expected/diagnostic.txt" title="program.fossil" />
 
 **Why it points at the header.** There is no line to blame — the error is a line that is not there —
 so it is reported against the mapping, and against the place in the document that required it.
@@ -69,9 +69,9 @@ so it is reported against the mapping, and against the place in the document tha
 
 ## 4. Two mappings that mint different identities
 
-<Program src="errors/two-identities/program.fossil" title="program.fossil" />
+<Program src="errors/identity/conflicting/program.fossil" title="program.fossil" />
 
-<Program src="errors/two-identities/expected/diagnostic.txt" title="program.fossil" />
+<Program src="errors/identity/conflicting/expected/diagnostic.txt" title="program.fossil" />
 
 **Why this is an error and not a warning.** What a warning here buys you is two nodes where you meant
 one, discovered later, in a graph that will not join up. There is no version of that which is worth a
@@ -83,11 +83,11 @@ changes too.
 
 ## 5. Two predicates with the same short name
 
-<Program src="errors/colliding-name/shape.shex" title="shape.shex" />
+<Program src="errors/shape/name-collision/shape.shex" title="shape.shex" />
 
-<Program src="errors/colliding-name/program.fossil" title="program.fossil" />
+<Program src="errors/shape/name-collision/program.fossil" title="program.fossil" />
 
-<Program src="errors/colliding-name/expected/diagnostic.txt" title="program.fossil" />
+<Program src="errors/shape/name-collision/expected/diagnostic.txt" title="program.fossil" />
 
 **Why fossil does not pick.** A short name is the last segment of a predicate IRI, and when two of
 them end in the same word there is no principled winner. Numbering them would make the name of a
@@ -101,9 +101,9 @@ Full program in [naming what you produce](/docs/book/what-you-produce#when-two-o
 
 ## 6. A join that names one side twice
 
-<Program src="errors/join-one-side/program.fossil" title="program.fossil" />
+<Program src="errors/pipeline/join-one-side/program.fossil" title="program.fossil" />
 
-<Program src="errors/join-one-side/expected/diagnostic.txt" title="program.fossil" />
+<Program src="errors/pipeline/join-one-side/expected/diagnostic.txt" title="program.fossil" />
 
 **Why this is an error and not a slow program.** Nothing here is misspelt and nothing is mistyped:
 `Purchase.id` and `Purchase.user_id` are both columns of `Purchase`, and comparing them is a

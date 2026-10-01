@@ -996,7 +996,7 @@ pub fn compatible<'db>(
 
 /// What to do about a value of the wrong type, when the compiler can see a way.
 ///
-/// Two suggestions, both of which `errors/wrong-type`'s hand-written target
+/// Two suggestions, both of which `errors/type/property-mismatch`'s hand-written target
 /// asked for and neither of which existed — the artefact said *«`Purchase.amount`
 /// is Float. If `reference` really holds the number,
 /// `parse.float(Purchase.reference)` converts it.»* and blessing the program

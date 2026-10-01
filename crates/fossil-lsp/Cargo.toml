@@ -53,7 +53,7 @@ fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 #
 # Without it the editor is SILENT on every diagnostic whose evidence is a source
 # column's type — measured over the real stdio transport on 2026-08-23, `fossil
-# check docs/programs/errors/unknown-field/program.fossil` reports ``nmae`
+# check docs/programs/errors/name/unknown-field/program.fossil` reports ``nmae`
 # is not a field of `User`` and exits 1 while the LSP published zero
 # diagnostics. The browser workspace has had those diagnostics all along, over
 # DuckDB-WASM, through `fossil/registerInferredDescriptor`.

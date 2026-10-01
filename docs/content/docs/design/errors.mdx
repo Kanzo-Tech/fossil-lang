@@ -289,9 +289,9 @@ Every code has a page in an `errors/` section of this site, under the code as it
 index. A page has the title as its heading, what the mistake is, why fossil refuses it, and how to
 repair it, and **where one exists it transcludes the failing program and its blessed rendering** with
 `<Program>`, the way this site already shows every program. The six directories under
-`docs/programs/errors/` — `colliding-name`, `join-one-side`, `missing-property`, `two-identities`,
-`unknown-field` and `wrong-type` — are the first six of those pages, already written and already
-compiled in CI; they are renamed to their codes.
+`docs/programs/errors/` are the first six of those pages, compiled in CI and named by their codes:
+`identity/conflicting`, `name/unknown-field`, `pipeline/join-one-side`,
+`shape/missing-required-property`, `shape/name-collision` and `type/property-mismatch`.
 
 `content.test.ts` gains one suite: every code in `problem.schema.json` has a page, every page under
 `errors/` names a live code, and a page's heading is the code's title. A retired code has neither a

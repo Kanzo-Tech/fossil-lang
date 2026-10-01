@@ -88,17 +88,18 @@
 //!
 //! What the five needed, in the order they were closed:
 //!
-//! - **`two-identities` needed nothing.** Message, both spans, both labels and
+//! - **`identity/conflicting` needed nothing.** Message, both spans, both labels and
 //!   the `help` were already identical; what differed was a `[{severity:?}]`
 //!   prefix this file's own renderer added and `fossil check` did not (see
 //!   `native::render_diagnostics`), and the context lines around the snippet. Both
 //!   are how the report is DRAWN, and the hand-written file was drawn by hand.
-//! - **`unknown-field` needed a second label in the same file and a narrower
+//! - **`name/unknown-field` needed a second label in the same file and a narrower
 //!   caret.** The label is the line that bound the row, saying which fields it
 //!   has; the caret is on `nmae` rather than on `User.nmae`, which took a span
 //!   per REFERENCE where the compiler recorded one per property
 //!   (`fossil_hir::body::HirBody::ref_spans`).
-//! - **`wrong-type`, `colliding-name` and `missing-property` needed the report
+//! - **`type/property-mismatch`, `shape/name-collision` and
+//!   `shape/missing-required-property` needed the report
 //!   to cite TWO FILES** — a label under a line of the `.shex`, which
 //!   [`fossil_base::SpanLabel`] could not express because it carried a span and
 //!   a frame and no file. It carries a `document` now; the range comes from
@@ -124,7 +125,7 @@
 //!
 //! # One thing the blessing deleted, and it came back
 //!
-//! `wrong-type`'s target carried a `help:` the compiler did not produce —
+//! `type/property-mismatch`'s target carried a `help:` the compiler did not produce —
 //! *«`Purchase.amount` is Float. If `reference` really holds the number,
 //! `parse.float(Purchase.reference)` converts it.»* — so for one commit this
 //! header was the only description of it. Both halves exist now
@@ -243,7 +244,7 @@ const EXPECTED_FAILING: usize = 6;
 
 /// One program of the set.
 struct Program {
-    /// `hello`, `errors/wrong-type` — relative to `docs/programs/`, and what
+    /// `hello`, `errors/type/property-mismatch` — relative to `docs/programs/`, and what
     /// every failure line names.
     name: String,
     /// The `.fossil` file.

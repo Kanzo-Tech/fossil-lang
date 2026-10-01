@@ -69,7 +69,7 @@ style guide.
 **Every mapping that produces a type writes the same one.** Two mappings producing `Person` with
 different identity templates is an error, and the diagnostic names both mappings and both templates:
 
-<Program src="errors/two-identities/expected/diagnostic.txt" title="program.fossil" />
+<Program src="errors/identity/conflicting/expected/diagnostic.txt" title="program.fossil" />
 
 Error rather than warning, because of what happens when the warning is ignored: two entities in the
 graph where there was one, discovered by whoever queries it. A warning is an appropriate response to

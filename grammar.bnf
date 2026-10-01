@@ -355,7 +355,7 @@ MappingBody         := SubjectAssign Property+
    carries, both checker-enforced and neither expressible here: the expression
    is deterministic and bounded to the row, and every mapping producing the
    same type declares the SAME `@subject` — otherwise error, naming both
-   mappings and both templates (the `errors/two-identities` conformance
+   mappings and both templates (the `errors/identity/conflicting` conformance
    program is the one that must produce that diagnostic). *)
 SubjectAssign       := AT_ATTR ASSIGN Expression
 

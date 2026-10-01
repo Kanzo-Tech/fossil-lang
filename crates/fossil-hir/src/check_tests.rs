@@ -831,7 +831,7 @@ Orders : Order from Purchase
 
 /// A value of the wrong type gets told what to DO about it, both ways.
 ///
-/// `errors/wrong-type`'s hand-written target asked for these and neither
+/// `errors/type/property-mismatch`'s hand-written target asked for these and neither
 /// existed, so blessing that program deleted the only description of them:
 /// *«`Purchase.amount` is Float. If `reference` really holds the number,
 /// `parse.float(Purchase.reference)` converts it.»*

@@ -1,7 +1,7 @@
 //! The editor reports what `fossil check` reports, for the diagnostics that
 //! need a source column's TYPE.
 //!
-//! `fossil check docs/programs/errors/unknown-field/program.fossil` prints
+//! `fossil check docs/programs/errors/name/unknown-field/program.fossil` prints
 //! ``` `nmae` is not a field of `User` ``` and exits 1. Driven over stdio, the
 //! LSP published **zero** diagnostics for the same bytes — measured 2026-08-23,
 //! and it was not a transport fault: [`the_transport_is_not_what_is_missing`]
@@ -92,7 +92,7 @@ fn unknown_field(diagnostics: &[Value], field: &str) -> bool {
         .any(|d| d["code"] == "name/unknown-field" && d["data"]["data"]["field"] == field)
 }
 
-/// The control. `errors/two-identities` conflicts two `@subject` templates,
+/// The control. `errors/identity/conflicting` conflicts two `@subject` templates,
 /// which is decided from the program alone — no source column's type is
 /// consulted. It has always arrived.
 ///
@@ -101,7 +101,7 @@ fn unknown_field(diagnostics: &[Value], field: &str) -> bool {
 /// failure message would not say which.
 #[test]
 fn the_transport_is_not_what_is_missing() {
-    let published = published_for("two-identities");
+    let published = published_for("identity/conflicting");
     assert!(
         !published.is_empty(),
         "the identity conflict must reach the editor, or this file is measuring \
@@ -118,7 +118,7 @@ fn the_transport_is_not_what_is_missing() {
 /// do.
 #[test]
 fn a_misspelt_source_field_reaches_the_editor() {
-    let published = published_for("unknown-field");
+    let published = published_for("name/unknown-field");
     assert!(
         unknown_field(&published, "nmae"),
         "`fossil check` reports ``nmae` is not a field of `User`` for this exact \
@@ -149,7 +149,7 @@ fn a_misspelt_source_field_reaches_the_editor() {
 /// the range the diagnostic underlines.
 #[test]
 fn the_did_you_mean_is_offered_as_a_code_action() {
-    let path = program_path("unknown-field");
+    let path = program_path("name/unknown-field");
     let uri = program_uri(&path);
     let text = std::fs::read_to_string(&path).expect("read the conformance program");
     // `name     = User.nmae` — the whole line, so the request's range certainly

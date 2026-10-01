@@ -55,7 +55,7 @@ The key is a bare name — the last segment of the predicate IRI the shape decla
 expression, and the shape decides what is allowed on the right: `shop:total` is `xsd:float`, so an
 `Integer` column is fine — a whole number is a float — and a `String` column is not:
 
-<Program src="errors/wrong-type/expected/diagnostic.txt" title="program.fossil" />
+<Program src="errors/type/property-mismatch/expected/diagnostic.txt" title="program.fossil" />
 
 The count the document writes after the datatype decides whether the body may leave the property out.
 
@@ -75,7 +75,7 @@ A required property the body never mentions cannot be blamed on a line, being a 
 so it is reported against the header, against the place in the document that required it, and with the
 list of what you may still leave out:
 
-<Program src="errors/missing-property/expected/diagnostic.txt" title="program.fossil" />
+<Program src="errors/shape/missing-required-property/expected/diagnostic.txt" title="program.fossil" />
 
 ## Two mappings of one type
 
