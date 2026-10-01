@@ -232,26 +232,6 @@
       }
     },
     {
-      "title": "A property with no value",
-      "description": "A property with nothing on its right-hand side.",
-      "type": "object",
-      "required": [
-        "code",
-        "data"
-      ],
-      "properties": {
-        "code": {
-          "type": "string",
-          "enum": [
-            "syntax/missing-value"
-          ]
-        },
-        "data": {
-          "type": "object"
-        }
-      }
-    },
-    {
       "title": "A number fossil cannot carry",
       "description": "A number literal that does not fit the type it is read as.",
       "type": "object",
@@ -552,41 +532,6 @@
                 "string",
                 "null"
               ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "title": "A member of more than one receiver",
-      "description": "A member call on a value whose member several receivers have.",
-      "type": "object",
-      "required": [
-        "code",
-        "data"
-      ],
-      "properties": {
-        "code": {
-          "type": "string",
-          "enum": [
-            "name/ambiguous-member"
-          ]
-        },
-        "data": {
-          "type": "object",
-          "required": [
-            "member",
-            "receivers"
-          ],
-          "properties": {
-            "member": {
-              "type": "string"
-            },
-            "receivers": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
             }
           }
         }
@@ -2028,38 +1973,6 @@
       }
     },
     {
-      "title": "A source constructor used as a stage",
-      "description": "A source constructor written as a stage of a pipeline.",
-      "type": "object",
-      "required": [
-        "code",
-        "data"
-      ],
-      "properties": {
-        "code": {
-          "type": "string",
-          "enum": [
-            "pipeline/source-as-stage"
-          ]
-        },
-        "data": {
-          "type": "object",
-          "required": [
-            "pipeline",
-            "verb"
-          ],
-          "properties": {
-            "pipeline": {
-              "type": "string"
-            },
-            "verb": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
-    {
       "title": "A stage given the wrong arguments",
       "description": "A stage missing a position it needs (`missing`), or given more than it takes (`missing` absent).",
       "type": "object",
@@ -2655,78 +2568,6 @@
           ],
           "properties": {
             "path": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
-    {
-      "title": "A relation names a missing vertex type",
-      "description": "A relation naming a vertex type the graph did not materialise.",
-      "type": "object",
-      "required": [
-        "code",
-        "data"
-      ],
-      "properties": {
-        "code": {
-          "type": "string",
-          "enum": [
-            "write/unknown-type"
-          ]
-        },
-        "data": {
-          "type": "object",
-          "required": [
-            "relation",
-            "vertex_type"
-          ],
-          "properties": {
-            "relation": {
-              "type": "string"
-            },
-            "vertex_type": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
-    {
-      "title": "A relation names missing vertices",
-      "description": "A relation whose rows name vertices that do not exist.",
-      "type": "object",
-      "required": [
-        "code",
-        "data"
-      ],
-      "properties": {
-        "code": {
-          "type": "string",
-          "enum": [
-            "layout/dangling-endpoint"
-          ]
-        },
-        "data": {
-          "type": "object",
-          "required": [
-            "before",
-            "dropped",
-            "relation"
-          ],
-          "properties": {
-            "before": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
-            "dropped": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
-            "relation": {
               "type": "string"
             }
           }

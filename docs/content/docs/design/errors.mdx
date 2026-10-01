@@ -307,19 +307,19 @@ reachable from a fixture has a page*.
 Nothing below is invented: each code is one or more of the sites counted above, merged where they
 are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no code; its variant goes.
 
-**Compile — 71 codes** (plus `internal/bug`, below):
+**Compile — 68 codes** (plus `internal/bug`, below):
 
 | Area | Codes |
 | --- | --- |
-| `syntax` (13) | `expected-token`, `unexpected-token`, `unknown-character`, `retired-spelling`, `malformed-rename`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `missing-value`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee` |
-| `name` (8) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `ambiguous-member`, `unknown-parameter`, `unknown-source` |
+| `syntax` (12) | `expected-token`, `unexpected-token`, `unknown-character`, `retired-spelling`, `malformed-rename`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee` |
+| `name` (7) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `unknown-parameter`, `unknown-source` |
 | `argument` (6) | `arity`, `duplicate`, `skipped-parameter`, `positional-after-named`, `named-on-edge`, `alias-in-value-call` |
 | `type` (7) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch` |
 | `shape` (9) | `no-document`, `name-collision`, `missing-required-property`, `unsupported-disjunction`, `cyclic-reference`, `unresolved-reference`, `binding-arity`, `rename-unknown-type`, `rename-unknown-predicate` |
 | `document` (2) | `not-registered`, `unparseable` |
 | `provider` (6) | `unknown`, `wrong-capability`, `wrong-extension`, `invalid-reader-option`, `foreign-reader-option`, `bare-document-path` |
 | `identity` (6) | `missing-subject`, `duplicate-subject`, `subject-not-first`, `conflicting`, `edge-without-template`, `edge-arity` |
-| `pipeline` (13) | `unknown-verb`, `unimplemented-verb`, `source-as-stage`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-one-side` |
+| `pipeline` (12) | `unknown-verb`, `unimplemented-verb`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-one-side` |
 | `unsupported` (1) | `expression` — a gap in the compiler, not a mistake in the program |
 
 **Run, storage, corpus and the API — 33 codes.** The executor's descriptor errors reuse the compile
@@ -333,9 +333,10 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 | `document` (+1) | `unread` | `runJob`'s unread list |
 | `source` (2) | `not-utf8`, `unparseable` | the RDF sources a run decodes |
 | `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the corpus's `ATTACH`, `scan` and `sql` |
-| `write` (2) | `failed`, `unknown-type` | `WriteError` |
-| `layout` (2) | `dangling-endpoint`, `too-large` | `LayoutError`; its other variants are `internal/bug` |
-| `storage` (8) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` |
+| `write` (1) | `failed` | `WriteError`; its other variants are `internal/bug` |
+| `layout` (1) | `too-large` | `LayoutError`; its other variants are `internal/bug` |
+| `storage` (9) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused`, `host-silent` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` — `host-silent` is [failure](/docs/design/failure)'s deadline |
+| `module` (1) | `unreachable` | the three wasm loaders, when a module cannot be fetched |
 | `corpus` (10) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `not-a-location`, `unknown-table`, `unknown-column`, `empty-projection`, `no-position`, `filter-type-mismatch` | `open`, `parseManifest`, `scan`, the filter binder |
 | `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy` and the executor's borrow, the workspace's `unknown_handle` |
 
@@ -344,7 +345,15 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 fresh object. Nobody branches on it; a host shows it and reports it. A panic stays a
 `WebAssembly.RuntimeError` — it is not a value that can be built at the moment it happens.
 
-**105 codes**, 104 of them a mistake someone other than fossil can repair.
+**102 codes**, 101 of them a mistake someone other than fossil can repair.
+
+**Retired, with no program that reached them.** `write/unknown-type` and `layout/dangling-endpoint`
+were released in `v0.3.0-alpha.18` and are in `RETIRED`: the executor builds the schema it writes
+from the types it has, and joins each relation to the vertices it names before the layout pass sees
+it, so neither could fire. `pipeline/source-as-stage`, `name/ambiguous-member` and
+`syntax/missing-value` never shipped and were deleted outright: the parser reports a property with no
+value itself, a stage resolves only against relation verbs, and no member is spelled on two
+receivers. Each of their arms reports `internal/bug` now.
 
 ## The screen: kanzo-ui's `Diagnostic`, and the product decides the words
 

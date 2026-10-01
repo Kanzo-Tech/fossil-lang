@@ -63,7 +63,10 @@ pub enum WriteError {
     /// Encoding `fossil.json`.
     #[error("fossil.json: {0}")]
     Json(#[from] serde_json::Error),
-    /// A relation naming a vertex type the graph did not materialise.
+    /// A relation naming a vertex type the graph did not materialise. The
+    /// schema the executor builds names only types it has, so this is fossil's
+    /// fault — `write/unknown-type`, retired after `v0.3.0-alpha.18`, had no
+    /// program that reached it.
     #[error("relation `{relation}` references vertex type `{vertex_type}`, which has no table")]
     UnknownType {
         relation: String,
@@ -78,9 +81,12 @@ pub enum WriteError {
     },
 }
 
-/// The code each way a write fails is. The two a program's data can cause —
-/// a dangling endpoint, too many vertices — and the store's own refusal have
-/// codes; the rest are fossil's fault, `internal/bug`, with the error as cause.
+/// The code each way a write fails is. The one a program's data can cause —
+/// too many vertices — and the store's own refusal have codes; the rest are
+/// fossil's fault, `internal/bug`, with the error as cause. A dangling endpoint
+/// is among them: the executor builds each relation by joining it to the
+/// vertices it names and counts what the join drops, so the layout pass never
+/// sees one, and `layout/dangling-endpoint` was retired after `v0.3.0-alpha.18`.
 impl From<WriteError> for Failure {
     fn from(e: WriteError) -> Self {
         let bug = |what: &str| {
@@ -92,22 +98,9 @@ impl From<WriteError> for Failure {
             WriteError::Store { path, source } => {
                 Self::new(Problem::WriteFailed { path }).caused_by(Self::from(source))
             }
-            WriteError::UnknownType {
-                relation,
-                vertex_type,
-            } => Self::new(Problem::UnknownType {
-                relation,
-                vertex_type,
-            }),
-            WriteError::Layout(LayoutError::DanglingEndpoint {
-                target,
-                before,
-                dropped,
-            }) => Self::new(Problem::DanglingEndpoint {
-                relation: target,
-                before,
-                dropped,
-            }),
+            e @ WriteError::UnknownType { .. } => {
+                bug("a relation names a vertex type with no table").caused_by(e)
+            }
             WriteError::Layout(LayoutError::TooLarge { vertices }) => {
                 Self::new(Problem::TooLarge { vertices })
             }

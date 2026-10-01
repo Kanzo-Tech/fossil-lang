@@ -15,7 +15,6 @@ export type Code =
   | 'syntax/misplaced-attribute'
   | 'syntax/invalid-mapping-header'
   | 'syntax/invalid-property-name'
-  | 'syntax/missing-value'
   | 'syntax/number-out-of-range'
   | 'syntax/incomplete-conditional'
   | 'syntax/uncalled-function'
@@ -25,7 +24,6 @@ export type Code =
   | 'name/unknown-field'
   | 'name/row-not-in-scope'
   | 'name/unknown-function'
-  | 'name/ambiguous-member'
   | 'name/unknown-parameter'
   | 'name/unknown-source'
   | 'argument/arity'
@@ -68,7 +66,6 @@ export type Code =
   | 'identity/edge-arity'
   | 'pipeline/unknown-verb'
   | 'pipeline/unimplemented-verb'
-  | 'pipeline/source-as-stage'
   | 'pipeline/stage-arity'
   | 'pipeline/invalid-stage-argument'
   | 'pipeline/not-an-aggregate'
@@ -87,8 +84,6 @@ export type Code =
   | 'source/unparseable'
   | 'engine/failed'
   | 'write/failed'
-  | 'write/unknown-type'
-  | 'layout/dangling-endpoint'
   | 'layout/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
@@ -125,7 +120,6 @@ export const CODES: readonly Code[] = [
   'syntax/misplaced-attribute',
   'syntax/invalid-mapping-header',
   'syntax/invalid-property-name',
-  'syntax/missing-value',
   'syntax/number-out-of-range',
   'syntax/incomplete-conditional',
   'syntax/uncalled-function',
@@ -135,7 +129,6 @@ export const CODES: readonly Code[] = [
   'name/unknown-field',
   'name/row-not-in-scope',
   'name/unknown-function',
-  'name/ambiguous-member',
   'name/unknown-parameter',
   'name/unknown-source',
   'argument/arity',
@@ -178,7 +171,6 @@ export const CODES: readonly Code[] = [
   'identity/edge-arity',
   'pipeline/unknown-verb',
   'pipeline/unimplemented-verb',
-  'pipeline/source-as-stage',
   'pipeline/stage-arity',
   'pipeline/invalid-stage-argument',
   'pipeline/not-an-aggregate',
@@ -197,8 +189,6 @@ export const CODES: readonly Code[] = [
   'source/unparseable',
   'engine/failed',
   'write/failed',
-  'write/unknown-type',
-  'layout/dangling-endpoint',
   'layout/too-large',
   'storage/no-credential',
   'storage/ambiguous-prefix',
@@ -278,10 +268,6 @@ export interface ProblemData {
     name?: string | null;
   };
   /**
-   * A property with nothing on its right-hand side.
-   */
-  'syntax/missing-value': Record<string, never>;
-  /**
    * A number literal that does not fit the type it is read as.
    */
   'syntax/number-out-of-range': {
@@ -344,13 +330,6 @@ export interface ProblemData {
   'name/unknown-function': {
     function: string;
     unknown_namespace?: string | null;
-  };
-  /**
-   * A member call on a value whose member several receivers have.
-   */
-  'name/ambiguous-member': {
-    member: string;
-    receivers: string[];
   };
   /**
    * A named argument no parameter of the function has.
@@ -657,13 +636,6 @@ export interface ProblemData {
     verb: string;
   };
   /**
-   * A source constructor written as a stage of a pipeline.
-   */
-  'pipeline/source-as-stage': {
-    pipeline: string;
-    verb: string;
-  };
-  /**
    * A stage missing a position it needs (`missing`), or given more than it takes (`missing` absent).
    */
   'pipeline/stage-arity': {
@@ -788,21 +760,6 @@ export interface ProblemData {
    */
   'write/failed': {
     path: string;
-  };
-  /**
-   * A relation naming a vertex type the graph did not materialise.
-   */
-  'write/unknown-type': {
-    relation: string;
-    vertex_type: string;
-  };
-  /**
-   * A relation whose rows name vertices that do not exist.
-   */
-  'layout/dangling-endpoint': {
-    before: number;
-    dropped: number;
-    relation: string;
   };
   /**
    * More vertices than a `u32` `dense_id` can number.
@@ -976,7 +933,6 @@ export const TITLES: { readonly [C in Code]: string } = {
   'syntax/misplaced-attribute': 'An attribute in the wrong place',
   'syntax/invalid-mapping-header': 'Not a mapping header',
   'syntax/invalid-property-name': 'Not a property name',
-  'syntax/missing-value': 'A property with no value',
   'syntax/number-out-of-range': 'A number fossil cannot carry',
   'syntax/incomplete-conditional': 'An incomplete conditional',
   'syntax/uncalled-function': 'A function named and not called',
@@ -986,7 +942,6 @@ export const TITLES: { readonly [C in Code]: string } = {
   'name/unknown-field': 'Not a field of this row',
   'name/row-not-in-scope': 'A row that is not in scope',
   'name/unknown-function': 'Not a function fossil knows',
-  'name/ambiguous-member': 'A member of more than one receiver',
   'name/unknown-parameter': 'Not a parameter of this function',
   'name/unknown-source': 'Not a source binding',
   'argument/arity': 'The wrong number of arguments',
@@ -1029,7 +984,6 @@ export const TITLES: { readonly [C in Code]: string } = {
   'identity/edge-arity': 'An edge given the wrong number of values',
   'pipeline/unknown-verb': 'Not a relation verb',
   'pipeline/unimplemented-verb': 'A verb with no lowering yet',
-  'pipeline/source-as-stage': 'A source constructor used as a stage',
   'pipeline/stage-arity': 'A stage given the wrong arguments',
   'pipeline/invalid-stage-argument': 'A stage argument of the wrong kind',
   'pipeline/not-an-aggregate': 'Not an aggregation',
@@ -1048,8 +1002,6 @@ export const TITLES: { readonly [C in Code]: string } = {
   'source/unparseable': 'A source does not parse',
   'engine/failed': 'The query engine failed',
   'write/failed': 'A corpus file could not be written',
-  'write/unknown-type': 'A relation names a missing vertex type',
-  'layout/dangling-endpoint': 'A relation names missing vertices',
   'layout/too-large': 'The graph has too many vertices',
   'storage/no-credential': 'No credential was vended',
   'storage/ambiguous-prefix': 'More than one prefix was vended',

@@ -555,7 +555,7 @@ Second : B from users
                 .file_absolute(),
                 fossil_base::Diagnostic::new(
                     fossil_base::Severity::Error,
-                    fossil_base::Problem::MissingValue {},
+                    fossil_base::Problem::NoHttpfs {},
                     span,
                 ),
             ],

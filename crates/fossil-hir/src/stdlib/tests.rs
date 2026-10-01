@@ -111,9 +111,9 @@ fn members_of_partitions_the_catalogue() {
 }
 
 /// The value path resolves a member by name, so an ambiguous member would make
-/// it guess. Today none is ambiguous, and this is what says so out loud —
-/// `crate::lower` has an arm for the ambiguous case that is unreachable while
-/// this passes.
+/// it guess. None is, and this is what says so out loud — `crate::lower`
+/// reports a second candidate as `internal/bug`, and `name/ambiguous-member`
+/// went with no row that reached it.
 #[test]
 fn no_member_is_spelled_on_two_receivers() {
     let r = FunctionRegistry::stdlib_default();

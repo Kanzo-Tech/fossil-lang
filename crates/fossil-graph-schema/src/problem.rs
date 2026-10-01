@@ -329,11 +329,6 @@ catalogue! {
     #[error("{}", property_name(.name.as_deref()))]
     InvalidPropertyName { name: Option<String> },
 
-    /// A property with nothing on its right-hand side.
-    "syntax/missing-value", "A property with no value",
-    #[error("this property has no value, so it is not written")]
-    MissingValue {},
-
     /// A number literal that does not fit the type it is read as.
     "syntax/number-out-of-range", "A number fossil cannot carry",
     #[error("`{literal}` does not fit in {kind}: {reason}")]
@@ -387,14 +382,6 @@ catalogue! {
     "name/unknown-function", "Not a function fossil knows",
     #[error("{}", unknown_function(.function, .unknown_namespace.as_deref()))]
     UnknownFunction { function: String, unknown_namespace: Option<String> },
-
-    /// A member call on a value whose member several receivers have.
-    "name/ambiguous-member", "A member of more than one receiver",
-    #[error(
-        "`{member}` is a member of {} receivers ({}), and fossil cannot tell which one this is",
-        .receivers.len(), code_list(.receivers)
-    )]
-    AmbiguousMember { member: String, receivers: Vec<String> },
 
     /// A named argument no parameter of the function has.
     "name/unknown-parameter", "Not a parameter of this function",
@@ -653,11 +640,6 @@ catalogue! {
     )]
     UnimplementedVerb { verb: String, pipeline: String, implemented: Vec<String> },
 
-    /// A source constructor written as a stage of a pipeline.
-    "pipeline/source-as-stage", "A source constructor used as a stage",
-    #[error("`{verb}` constructs a source and is not a stage of `{pipeline}`")]
-    SourceAsStage { verb: String, pipeline: String },
-
     /// A stage missing a position it needs (`missing`), or given more than
     /// it takes (`missing` absent).
     "pipeline/stage-arity", "A stage given the wrong arguments",
@@ -780,16 +762,6 @@ catalogue! {
     "write/failed", "A corpus file could not be written",
     #[error("`{path}` could not be written")]
     WriteFailed { path: String },
-
-    /// A relation naming a vertex type the graph did not materialise.
-    "write/unknown-type", "A relation names a missing vertex type",
-    #[error("relation `{relation}` references vertex type `{vertex_type}`, which has no table")]
-    UnknownType { relation: String, vertex_type: String },
-
-    /// A relation whose rows name vertices that do not exist.
-    "layout/dangling-endpoint", "A relation names missing vertices",
-    #[error("relation `{relation}` has {dropped} of {before} rows naming a vertex that does not exist")]
-    DanglingEndpoint { relation: String, before: u64, dropped: u64 },
 
     /// More vertices than a `u32` `dense_id` can number.
     "layout/too-large", "The graph has too many vertices",
@@ -941,7 +913,10 @@ catalogue! {
 
 /// Codes that were live once and are not now, with the tag that last emitted
 /// each. A code is never reused, and a test holds that no live code is here.
-pub const RETIRED: &[(&str, &str)] = &[];
+pub const RETIRED: &[(&str, &str)] = &[
+    ("write/unknown-type", "v0.3.0-alpha.18"),
+    ("layout/dangling-endpoint", "v0.3.0-alpha.18"),
+];
 
 /// The published documentation, and the error index within it — `DOCS` and
 /// `INDEX` in `@fossil-lang/types`' `error.ts`, held equal by a test below.

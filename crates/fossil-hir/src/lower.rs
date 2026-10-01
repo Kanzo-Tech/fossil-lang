@@ -1673,13 +1673,14 @@ fn lower_source_stage(
             );
             None
         }
+        // A stage resolves against the relation verbs, and a source constructor
+        // is not one of them, so no program reaches this arm.
         PlanOp::Source => {
             diagnose(
                 db,
                 stage,
-                Problem::SourceAsStage {
-                    verb: verb.to_string(),
-                    pipeline: pipe.to_string(),
+                Problem::Bug {
+                    what: format!("`{verb}` reached a pipeline of `{pipe}` as a stage"),
                 },
                 None,
             );
@@ -2254,8 +2255,17 @@ fn lower_property(
         }
     };
 
+    // The parser builds a PROPERTY only around a value, and reports its own
+    // syntax error when there is none, so a PROPERTY with no EXPR is fossil's.
     let Some(expr_node) = node.children().find(|c| c.kind() == SyntaxKind::EXPR) else {
-        diagnose(db, node, Problem::MissingValue {}, None);
+        diagnose(
+            db,
+            node,
+            Problem::Bug {
+                what: "a property reached lowering with no value".to_string(),
+            },
+            None,
+        );
         return None;
     };
     // `lower_expr` reports its own refusals — every arm that returns `None`
@@ -2297,7 +2307,14 @@ fn lower_expr(
     types: &[SmolStr],
 ) -> Option<HirExpr> {
     let Some(inner) = expr_node.children().next() else {
-        diagnose(db, expr_node, Problem::MissingValue {}, None);
+        diagnose(
+            db,
+            expr_node,
+            Problem::Bug {
+                what: "an expression reached lowering empty".to_string(),
+            },
+            None,
+        );
         return None;
     };
     lower_expr_inner(db, &inner, types)
@@ -2764,9 +2781,8 @@ fn lower_postfix(
     //
     // The limit, stated rather than hidden: the receiver's TYPE is not known
     // here, so the member is resolved against the catalogue by NAME. One
-    // candidate is a resolution; more than one needs the type and is refused by
-    // name rather than guessed. Today no member is spelled on two receivers, so
-    // the ambiguous arm is unreachable and is written for the day it is not.
+    // candidate is a resolution. No member is spelled on two receivers —
+    // `stdlib/tests.rs` holds it — so more than one is fossil's own fault.
     if let Some(member) = member_name(&callee)
         && let Some(recv_node) = callee.children().next()
         && lower_receiver_is_value(&recv_node)
@@ -2798,19 +2814,16 @@ fn lower_postfix(
                 .accumulate(db);
                 return None;
             }
+            // No two catalogue rows share a member name for one receiver, so
+            // a second candidate is a catalogue fossil shipped wrong.
             many => {
                 Diagnostic::new(
                     Severity::Error,
-                    Problem::AmbiguousMember {
-                        member: member.to_string(),
-                        receivers: many.iter().map(|e| e.name.to_string()).collect(),
+                    Problem::Bug {
+                        what: format!("`.{member}` is a member of {} catalogue rows", many.len()),
                     },
                     span,
                 )
-                .with_help(format!(
-                    "write the type path instead, e.g. `{}(…)`",
-                    many[0].name
-                ))
                 .accumulate(db);
                 return None;
             }
