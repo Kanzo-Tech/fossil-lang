@@ -4,7 +4,9 @@
 //! *which names a program may write* into six files; this one turns *which
 //! columns the writer emits* into one Rust table, so that the set stops being
 //! stated by hand. A TypeScript reader takes the columns from `fossil.json`'s
-//! `properties`, which lists every one of them, and its types from
+//! `properties`, which lists every one of them with the `role` of each the
+//! writer emits — the writer reads it off this table, which derives `serde` on
+//! [`Role`]'s projection for the purpose — and its types from
 //! `crates/fossil-sinks/fossil.schema.json`; the TypeScript projection this
 //! module also emitted went when the manifest started listing the columns.
 //!
@@ -269,7 +271,13 @@ pub fn emit_rust(columns: &[Column]) -> String {
         "\n/// What a column IS — never what a reader does with it.\n\
          ///\n\
          /// A reader that used to carry a list now names the roles it means.\n\
-         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]\n\
+         /// It is data in `fossil.json` too: a writer column's `role` in its\n\
+         /// table's `properties`, spelled as the variant in lowercase.\n\
+         #[derive(\n\
+         \x20   Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,\n\
+         \x20   serde::Serialize, serde::Deserialize, schemars::JsonSchema,\n\
+         )]\n\
+         #[serde(rename_all = \"lowercase\")]\n\
          pub enum ColumnRole {\n",
     );
     let mut seen: Vec<Role> = columns.iter().map(|c| c.role).collect();

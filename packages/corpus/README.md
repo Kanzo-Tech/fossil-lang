@@ -30,13 +30,22 @@ corpus.manifest.edge_tables       // name, label, path, source/destination {key,
 const scan = corpus.scan({ table: 'Person', select: ['dense_id', 'x', 'y'], filter: { bbox: [0, 0, 10, 10] } });
 const batches = await scan.read(scan.plan(), { signal });   // Arrow tables, one per task
 
+corpus.relation('Person')         // '"<url>"."Person"' — the view, as a statement of the host's must name it
+corpus.url; corpus.schema         // the catalog and schema `information_schema` lists the views under
+
 await corpus.sql('SUMMARIZE "<url>"."Person"');   // { columns, rows, truncated }, 10,000 rows by default
 await corpus.close();
 ```
 
 `open` reads `fossil.json` through the engine, refuses any `format` but `fossil/1` before it reads a
 byte of Parquet, and creates one view per table — `"<url>"."Person"` — in a catalog named after the
-corpus. A host's own SQL, Mosaic's included, reads the same relation `scan` does.
+corpus. A host's own SQL, Mosaic's included, reads the same relation `scan` does, and
+`relation(table)` is that name — never quote it again.
+
+**Each column the writer emits says what it IS**: `properties[].role` is `address` (the `key`),
+`identity`, `coordinate`, `categorical` or `endpoint`, from `corpus.bnf`, and a program's column has
+none. Hide the columns with a `role` from a field listing, colour by the `categorical` one — name the
+role, never the column.
 
 **It needs an engine, and the engine is the host's**: `@fossil-lang/types`' `Engine`, which answers
 `query(sql, { signal })` in Arrow columns and interrupts the running statement when the signal

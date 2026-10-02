@@ -46,10 +46,11 @@ the manifest is.
     "identity": "subject",
     "record_count": 1000000,
     "properties": [
-      { "name": "dense_id", "type": "uint32" },
-      { "name": "subject", "type": "string" },
-      { "name": "x", "type": "float" }, { "name": "y", "type": "float" },
-      { "name": "cluster_id", "type": "uint32" },
+      { "name": "dense_id", "type": "uint32", "role": "address" },
+      { "name": "subject", "type": "string", "role": "identity" },
+      { "name": "x", "type": "float", "role": "coordinate" },
+      { "name": "y", "type": "float", "role": "coordinate" },
+      { "name": "cluster_id", "type": "uint32", "role": "categorical" },
       { "name": "birth_year", "type": "int32", "nullable": true }
     ],
     "position": { "by": "layout", "x": "x", "y": "y" }
@@ -61,7 +62,10 @@ the manifest is.
     "source":      { "key": "src", "references": "Order" },
     "destination": { "key": "dst", "references": "Person" },
     "record_count": 2000000,
-    "properties": [ { "name": "src", "type": "uint32" }, { "name": "dst", "type": "uint32" } ]
+    "properties": [
+      { "name": "src", "type": "uint32", "role": "endpoint" },
+      { "name": "dst", "type": "uint32", "role": "endpoint" }
+    ]
   }]
 }
 ```
@@ -80,6 +84,7 @@ so `Src_label_Dst` is the name and `label` a field beside it.
 | `identity` | `subject` | keys anything held outside the corpus |
 | `record_count` | the rows in the file | sizes buffers, and checks a file it read in full |
 | `properties` | every column, in order, with its type | knows the schema without opening a footer |
+| `properties[].role` | what a column the writer emits IS | tells the writer's columns from the program's without a list of names |
 | `references` | the vertex table at each end | knows which relations join which types |
 | `position` | the two columns that place a vertex | knows which tables are drawn, and with what |
 
@@ -88,6 +93,14 @@ so `Src_label_Dst` is the name and `label` a field beside it.
 `crates/fossil-sinks/src/manifest.rs, data_type_name`. The JSON Schema of the whole document is
 `crates/fossil-sinks/fossil.schema.json`. `iri` and `nullable` are
 optional and absent when there is nothing to say.
+
+**`role` says what a column the writer emits IS**: `address` (`dense_id`), `identity` (`subject`),
+`coordinate` (the layout's `x` and `y`), `categorical` (`cluster_id`) and `endpoint` (`src`, `dst`).
+They are `corpus.bnf`'s roles, and the writer reads them from there. A column of the program's
+carries none, so the columns to leave out of a field listing are the ones with a `role`, and a
+reader that wants the colour asks for the `categorical` one rather than remembering its name. What a
+reader does with a role is the reader's decision. A corpus written before the field existed carries
+no `role` anywhere; it is optional within `fossil/1`.
 
 **A vertex table with no `position` is not drawn.** `{"by": "layout"}` names the columns the layout
 pass wrote; `{"by": "program"}` names columns the program itself declared as a position, such as a

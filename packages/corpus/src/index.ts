@@ -15,7 +15,7 @@
  * const [batch] = await scan.read(scan.plan());
  * ```
  *
- * `open · manifest · scan · sql · close` is the whole door; `/docs/design/one-door` has why.
+ * `open · manifest · scan · relation · sql · close` is the whole door; `/docs/design/one-door` has why.
  */
 
 export { open } from './open.js';
@@ -23,6 +23,6 @@ export { FOSSIL_FORMAT } from './manifest.js';
 
 export type { Corpus, SqlCorpus, SqlResult } from './corpus.js';
 export type { Filter, Literal } from './filter.js';
-export type { EdgeTable, Endpoint, Manifest, Position, Property, VertexTable } from './manifest.js';
+export type { ColumnRole, EdgeTable, Endpoint, Manifest, Position, Property, VertexTable } from './manifest.js';
 export type { OpenOptions } from './open.js';
 export type { Batch, Scan, ScanParams, ScanTask } from './scan.js';

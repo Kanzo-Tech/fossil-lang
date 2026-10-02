@@ -101,6 +101,24 @@ function interfaces(): Record<string, Record<string, string>> {
   return out;
 }
 
+/** Each type alias `src/manifest.ts` exports, as the TypeScript checker prints its type. */
+function aliases(): Record<string, string> {
+  const file = fileURLToPath(new URL('../src/manifest.ts', import.meta.url));
+  const program = ts.createProgram([file], { strict: true, target: ts.ScriptTarget.ES2022 });
+  const checker = program.getTypeChecker();
+  const out: Record<string, string> = {};
+  ts.forEachChild(program.getSourceFile(file)!, (node) => {
+    if (!ts.isTypeAliasDeclaration(node)) return;
+    const type = checker.getTypeAtLocation(node.type);
+    out[node.name.text] = checker.typeToString(type, undefined, ts.TypeFormatFlags.InTypeAlias);
+  });
+  return out;
+}
+
+/** A definition whose every arm is a string enum is a union of strings — a unit enum — and not an object. */
+const isUnion = (s: Schema): boolean =>
+  ((s.oneOf as Schema[] | undefined) ?? [s]).every((arm) => arm.type === 'string' && Array.isArray(arm.enum));
+
 /** The same, read off the schema: a field is optional when it is not `required`. */
 function definitions(): Record<string, Record<string, string>> {
   const out: Record<string, Record<string, string>> = {};
@@ -117,8 +135,17 @@ function definitions(): Record<string, Record<string, string>> {
     return Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, [...new Set(v)].join(' | ')]));
   };
   out.Manifest = one(SCHEMA);
-  for (const [name, s] of Object.entries(DEFINITIONS)) out[name] = one(s);
+  for (const [name, s] of Object.entries(DEFINITIONS)) if (!isUnion(s)) out[name] = one(s);
   return out;
+}
+
+/** The unions the schema defines, spelled as the checker prints a union of string literals. */
+function unions(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(DEFINITIONS)
+      .filter(([, s]) => isUnion(s))
+      .map(([name, s]) => [name, spelled(s)]),
+  );
 }
 
 const FIXTURES = ['../conformance/corpus/fossil.json'].map((path) => [
@@ -136,10 +163,12 @@ describe('the writer’s schema', () => {
     delete broken.vertex_tables[0].key;
     broken.edge_tables[0].source = 'Person';
     broken.vertex_tables[0].position.by = 'guess';
+    broken.vertex_tables[0].properties[0].role = 'key';
     expect(validate(broken, SCHEMA)).toEqual([
       '$.edge_tables[0].source: is string, not object',
       '$.vertex_tables[0].key: missing',
       '$.vertex_tables[0].position: matches no anyOf arm',
+      '$.vertex_tables[0].properties[0].role: matches no anyOf arm',
     ]);
   });
 
@@ -151,6 +180,11 @@ describe('the writer’s schema', () => {
     const schema = definitions();
     expect(Object.keys(schema).sort()).toEqual(['EdgeTable', 'Endpoint', 'Manifest', 'Position', 'Property', 'VertexTable']);
     expect(declared).toEqual(schema);
+  });
+
+  it('declares each of its unions — a column’s role — with the schema’s members, in its order', () => {
+    expect(unions()).toEqual({ ColumnRole: '"address" | "identity" | "coordinate" | "categorical" | "endpoint"' });
+    expect(aliases()).toEqual(unions());
   });
 });
 

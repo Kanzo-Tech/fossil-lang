@@ -10,7 +10,22 @@
 /// What a column IS — never what a reader does with it.
 ///
 /// A reader that used to carry a list now names the roles it means.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// It is data in `fossil.json` too: a writer column's `role` in its
+/// table's `properties`, spelled as the variant in lowercase.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum ColumnRole {
     /// The row's rank in the ordering, which a re-layout renumbers.
     Address,

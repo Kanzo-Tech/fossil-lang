@@ -26,7 +26,9 @@ use datafusion::parquet::schema::types::ColumnPath;
 use fossil_graph_schema::{Failure, NodeType, Problem};
 use fossil_layout::layout::{Layout, LayoutError, Relation, VertexType, layout};
 use fossil_mem_probe::Probe;
-use fossil_sinks::generated::{EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_COLUMNS};
+use fossil_sinks::generated::{
+    EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_COLUMNS, WriterColumn,
+};
 use fossil_sinks::manifest::{
     EdgeTable as EdgeEntry, Endpoint, FOSSIL_FORMAT, MANIFEST_FILE, Manifest, Position, Property,
     ROW_GROUP_ROWS, VertexTable as VertexEntry, data_type_name, edge_path, edge_table_name,
@@ -219,10 +221,7 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
                 references: edge.destination.clone(),
             },
             record_count: rows,
-            properties: EDGE_COLUMNS
-                .iter()
-                .map(|c| fixed(c.name, c.data_type))
-                .collect(),
+            properties: EDGE_COLUMNS.iter().map(fixed).collect(),
         });
         dropped.push(EdgeDrops {
             table: relation.name.to_string(),
@@ -257,13 +256,15 @@ async fn put(storage: &Storage, dest: &str, path: &str, bytes: Bytes) -> Result<
         })
 }
 
-/// A column the writer emits, as the manifest lists it.
-fn fixed(name: &str, data_type: &str) -> Property {
+/// A column the writer emits, as the manifest lists it: `corpus.bnf`'s name,
+/// type and role.
+fn fixed(column: &WriterColumn) -> Property {
     Property {
-        name: name.to_string(),
-        data_type: data_type.to_string(),
+        name: column.name.to_string(),
+        data_type: column.data_type.to_string(),
         iri: None,
         nullable: false,
+        role: Some(column.role),
     }
 }
 
@@ -320,10 +321,7 @@ fn vertex_parquet(
     t: usize,
 ) -> Result<(Bytes, Vec<Property>, u64), WriteError> {
     let fixed_names: Vec<&str> = PAYLOAD_COLUMNS.iter().map(|c| c.name).collect();
-    let mut properties: Vec<Property> = PAYLOAD_COLUMNS
-        .iter()
-        .map(|c| fixed(c.name, c.data_type))
-        .collect();
+    let mut properties: Vec<Property> = PAYLOAD_COLUMNS.iter().map(fixed).collect();
     // The type is the column's, as written: `properties` describes the file a
     // reader opens, and the checker's belief about a column the executor never
     // introspected is not what the bytes hold. The IRI is the shape's.
@@ -336,6 +334,7 @@ fn vertex_parquet(
             .find(|p| p.name == name)
             .and_then(|p| p.iri.clone()),
         nullable: true,
+        role: None,
     };
 
     let Some(first) = batches.first() else {

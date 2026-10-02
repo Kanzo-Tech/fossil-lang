@@ -9,7 +9,9 @@
  * 1. every table the manifest declares scans back at its `record_count`;
  * 2. a box scan returns exactly the rows of a full scan that fall in the box, and some that do not
  *    are left out;
- * 3. `guards/check.mjs` passes on what the writer wrote.
+ * 3. `guards/check.mjs` passes on what the writer wrote;
+ * 4. every column the writer emits says what it IS — its `role` — and the manifest's own `key`,
+ *    `identity`, `position` and endpoints name columns of the role they mean.
  *
  * The writer compresses every page with ZSTD, so (1) is also the proof that DuckDB-WASM reads it.
  */
@@ -145,6 +147,23 @@ describe('executor → HTTP → corpus', () => {
       all.filter(inside).map((r) => r[0]).sort((a, b) => a - b),
     );
   }, 120_000);
+
+  it('says what each writer column IS, and the manifest’s own fields agree', () => {
+    for (const table of corpus.manifest.vertex_tables) {
+      const role = (name: string) => table.properties.find((p) => p.name === name)?.role;
+      expect(role(table.key), table.name).toBe('address');
+      expect(role(table.identity), table.name).toBe('identity');
+      expect(table.position?.by, table.name).toBe('layout');
+      expect([role(table.position!.x), role(table.position!.y)], table.name).toEqual(['coordinate', 'coordinate']);
+      expect(table.properties.filter((p) => p.role === 'categorical'), table.name).toHaveLength(1);
+      // The program's columns carry none: what is left once the writer's five are taken out.
+      expect(table.properties.filter((p) => p.role === undefined).length, table.name).toBe(table.properties.length - 5);
+    }
+    for (const table of corpus.manifest.edge_tables) {
+      const role = (name: string) => table.properties.find((p) => p.name === name)?.role;
+      expect([role(table.source.key), role(table.destination.key)], table.name).toEqual(['endpoint', 'endpoint']);
+    }
+  });
 
   it('passes the guards', () => {
     const run = spawnSync(process.execPath, [GUARDS, dir], { encoding: 'utf8' });

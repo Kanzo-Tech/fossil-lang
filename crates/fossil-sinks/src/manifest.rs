@@ -24,6 +24,8 @@ use arrow_schema::DataType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::generated::ColumnRole;
+
 /// The format a corpus is written in, and what [`Manifest::format`] says.
 ///
 /// **Every writer reads this; every assertion spells the literal.** A site
@@ -124,6 +126,11 @@ pub struct Property {
     /// Whether a row may hold no value. Absent is `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub nullable: bool,
+    /// What the column IS, for a column the writer emits — `corpus.bnf`'s role, so
+    /// a reader names the roles it means rather than the names it remembers.
+    /// Absent on a column of the program's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<ColumnRole>,
 }
 
 /// Where a vertex table's rows are drawn.
@@ -235,6 +242,7 @@ mod tests {
             data_type: data_type.to_string(),
             iri: None,
             nullable,
+            role: None,
         }
     }
 
@@ -248,11 +256,17 @@ mod tests {
                 key: "dense_id".to_string(),
                 identity: "subject".to_string(),
                 record_count: 3,
-                properties: vec![column("dense_id", "uint32", false), {
-                    let mut name = column("name", "string", true);
-                    name.iri = Some("https://example.org/name".to_string());
-                    name
-                }],
+                properties: vec![
+                    Property {
+                        role: Some(ColumnRole::Address),
+                        ..column("dense_id", "uint32", false)
+                    },
+                    {
+                        let mut name = column("name", "string", true);
+                        name.iri = Some("https://example.org/name".to_string());
+                        name
+                    },
+                ],
                 position: Some(Position::Layout {
                     x: "x".to_string(),
                     y: "y".to_string(),
@@ -297,6 +311,11 @@ mod tests {
             "a column that cannot be null omits the field"
         );
         assert_eq!(person["properties"][1]["nullable"], true);
+        assert_eq!(person["properties"][0]["role"], "address");
+        assert!(
+            person["properties"][1].get("role").is_none(),
+            "a program column carries no role"
+        );
         let knows = &json["edge_tables"][0];
         assert_eq!(knows["name"], "Person_knows_Person");
         assert_eq!(knows["path"], "edge/Person_knows_Person.parquet");
@@ -341,6 +360,24 @@ mod tests {
         assert_eq!(data_type_name(&DataType::Float64), "double");
         let list = DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)));
         assert_eq!(data_type_name(&list), "list<string>");
+    }
+
+    /// The role on the wire is `corpus.bnf`'s word for it, so a reader in another
+    /// language matches the file it can read rather than a Rust variant name.
+    #[test]
+    fn a_role_is_spelled_as_corpus_bnf_writes_it() {
+        for column in crate::generated::PAYLOAD_COLUMNS
+            .iter()
+            .chain(crate::generated::EDGE_COLUMNS)
+        {
+            let wire = serde_json::to_value(column.role).unwrap();
+            assert_eq!(
+                wire,
+                serde_json::Value::String(format!("{:?}", column.role).to_lowercase()),
+                "`{}`",
+                column.name
+            );
+        }
     }
 
     #[test]

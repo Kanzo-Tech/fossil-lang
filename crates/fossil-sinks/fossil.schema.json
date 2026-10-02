@@ -29,6 +29,46 @@
     }
   },
   "definitions": {
+    "ColumnRole": {
+      "description": "What a column IS — never what a reader does with it.\n\nA reader that used to carry a list now names the roles it means. It is data in `fossil.json` too: a writer column's `role` in its table's `properties`, spelled as the variant in lowercase.",
+      "oneOf": [
+        {
+          "description": "The row's rank in the ordering, which a re-layout renumbers.",
+          "type": "string",
+          "enum": [
+            "address"
+          ]
+        },
+        {
+          "description": "What a bookmark keys on, and what survives a rebuild.",
+          "type": "string",
+          "enum": [
+            "identity"
+          ]
+        },
+        {
+          "description": "One axis of the plane.",
+          "type": "string",
+          "enum": [
+            "coordinate"
+          ]
+        },
+        {
+          "description": "An ordinal the writer computed, for a reader to colour by.",
+          "type": "string",
+          "enum": [
+            "categorical"
+          ]
+        },
+        {
+          "description": "One end of a relation, a vertex's global `dense_id`.",
+          "type": "string",
+          "enum": [
+            "endpoint"
+          ]
+        }
+      ]
+    },
     "EdgeTable": {
       "description": "One relation's table.",
       "type": "object",
@@ -187,6 +227,17 @@
         "nullable": {
           "description": "Whether a row may hold no value. Absent is `false`.",
           "type": "boolean"
+        },
+        "role": {
+          "description": "What the column IS, for a column the writer emits — `corpus.bnf`'s role, so a reader names the roles it means rather than the names it remembers. Absent on a column of the program's.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ColumnRole"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "type": {
           "description": "Its type, in the spelling [`data_type_name`] writes.",

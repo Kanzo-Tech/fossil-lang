@@ -49,7 +49,8 @@
    # What is data and what is not
 
    Same split as `catalogue.bnf`. The NAME, the TYPE and the ROLE are data and
-   live here. What a reader DOES with a role — hide it from a field listing,
+   live here — and the role is data on the wire too, a `role` on the column's
+   `properties` entry in `fossil.json`. What a reader DOES with a role — hide it from a field listing,
    surface it as a member, colour by it — is the reader's decision and stays
    where it is made.
 
@@ -68,7 +69,10 @@
    `cargo xtask corpus` generates `crates/fossil-sinks/src/generated.rs` from
    this file, and `cargo xtask corpus --check` fails when it is stale. There is
    no TypeScript projection: `fossil.json` lists every column of every table in
-   its `properties`, so a reader takes them from there.
+   its `properties`, and each column the writer emits there carries its `role`
+   from this file, so a reader takes both from there. The writer reads the role
+   off `generated.rs`; `fossil.schema.json` spells the five, and
+   `@fossil-lang/corpus`'s `ColumnRole` is held against it.
    `crates/xtask/tests/corpus_generated.rs` runs that check, so `cargo test`
    catches an edit to this file that was not regenerated, and an edit to a
    generated file by hand. There is no CI step for it, for the reason

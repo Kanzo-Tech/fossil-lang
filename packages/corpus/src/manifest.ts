@@ -13,6 +13,13 @@ import { FossilError } from '@fossil-lang/types';
 export const FOSSIL_FORMAT = 'fossil/1';
 
 
+/**
+ * What a column the writer emits IS — `corpus.bnf`'s roles, never what a reader does with one. A
+ * reader names the roles it means: the columns to hide from a field listing are the ones with a
+ * `role`, the key is the `address`, the colour is the `categorical`.
+ */
+export type ColumnRole = 'address' | 'identity' | 'coordinate' | 'categorical' | 'endpoint';
+
 /** One column of a table, as the manifest declares it. */
 export interface Property {
   readonly name: string;
@@ -20,6 +27,12 @@ export interface Property {
   readonly type: string;
   readonly iri?: string;
   readonly nullable?: boolean;
+  /**
+   * What the column IS, on every column the writer emits — `dense_id`, `subject`, `x`, `y`,
+   * `cluster_id`, `src`, `dst` — and absent on a column of the program's. A corpus written before
+   * the field existed carries none.
+   */
+  readonly role?: ColumnRole;
 }
 
 /**
