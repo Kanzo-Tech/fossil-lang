@@ -123,10 +123,7 @@ async fn reads_an_ndjson_source() {
     let batch = vertex.batches.first().unwrap();
     let schema = batch.schema();
     let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-    assert_eq!(
-        names,
-        ["dense_id", "subject", "name"]
-    );
+    assert_eq!(names, ["dense_id", "subject", "name"]);
 
     let name = batch
         .column(2)

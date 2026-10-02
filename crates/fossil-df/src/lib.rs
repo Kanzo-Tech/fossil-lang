@@ -192,7 +192,11 @@ pub async fn execute_graph<'db>(
     let mut first = 0u64;
     for (label, group) in groups {
         let (table, node) = finalize_vertex(ctx, group, first).await?;
-        first += table.batches.iter().map(|b| b.num_rows() as u64).sum::<u64>();
+        first += table
+            .batches
+            .iter()
+            .map(|b| b.num_rows() as u64)
+            .sum::<u64>();
         probe.mark(&format!("collect vertex {label}"));
         vertices.push(table);
         nodes.push(node);
@@ -554,7 +558,11 @@ fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
 /// The vertex projection exprs: `id AS subject`, then each prop.
 fn vertex_projection(subject: DfExpr, props: &[VProp<'_>]) -> Vec<DfExpr> {
     std::iter::once(subject.alias("subject"))
-        .chain(props.iter().map(|p| render(&p.value).alias(p.name.as_str())))
+        .chain(
+            props
+                .iter()
+                .map(|p| render(&p.value).alias(p.name.as_str())),
+        )
         .collect()
 }
 
@@ -576,9 +584,10 @@ fn prepend_dense_id(
     for batch in batches {
         let end = next + batch.num_rows() as u64;
         let (Ok(lo), Ok(hi)) = (u32::try_from(next), u32::try_from(end)) else {
-            let failure = fossil_graph_schema::Failure::new(
-                fossil_graph_schema::Problem::TooLarge { vertices: end },
-            );
+            let failure =
+                fossil_graph_schema::Failure::new(fossil_graph_schema::Problem::TooLarge {
+                    vertices: end,
+                });
             return Err(DataFusionError::External(Box::new(failure)));
         };
         let ids: ArrayRef = Arc::new(UInt32Array::from_iter_values(lo..hi));

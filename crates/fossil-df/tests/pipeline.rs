@@ -456,12 +456,7 @@ async fn a_joined_relation_feeds_the_vertex_it_emits() {
     let batch = one(vertex.batches);
     assert_eq!(
         names(&batch),
-        [
-            "dense_id",
-            "subject",
-            "name",
-            "team"
-        ],
+        ["dense_id", "subject", "name", "team"],
         "the vertex shape, with a column that only exists because of the join",
     );
     assert_eq!(

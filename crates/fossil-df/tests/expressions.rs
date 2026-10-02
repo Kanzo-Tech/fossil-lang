@@ -74,12 +74,7 @@ async fn a_call_produces_its_column() {
     let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
     assert_eq!(
         names,
-        [
-            "dense_id",
-            "subject",
-            "slug",
-            "shout"
-        ],
+        ["dense_id", "subject", "slug", "shout"],
         "the call's column is in the materialised shape"
     );
 

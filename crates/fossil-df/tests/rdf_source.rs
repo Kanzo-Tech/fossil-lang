@@ -98,10 +98,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     let batch = vertex.batches.first().unwrap();
     let schema = batch.schema();
     let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-    assert_eq!(
-        names,
-        ["dense_id", "subject", "name", "age"]
-    );
+    assert_eq!(names, ["dense_id", "subject", "name", "age"]);
 
     let col = |i: usize| {
         let a = batch

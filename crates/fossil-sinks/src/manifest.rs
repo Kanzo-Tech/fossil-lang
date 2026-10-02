@@ -277,7 +277,10 @@ mod tests {
         assert_eq!(person["path"], "vertex/Person.parquet");
         assert_eq!(person["key"], "dense_id");
         assert_eq!(person["identity"], "subject");
-        assert!(person.get("position").is_none(), "the corpus carries no picture");
+        assert!(
+            person.get("position").is_none(),
+            "the corpus carries no picture"
+        );
         assert_eq!(person["properties"][0]["type"], "uint32");
         assert!(
             person["properties"][0].get("nullable").is_none(),

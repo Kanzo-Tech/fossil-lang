@@ -97,10 +97,7 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
     );
     let project = vertex(&m, "Project");
     assert_eq!(project.record_count, 2);
-    assert_eq!(
-        columns(project),
-        ["dense_id", "subject", "title"]
-    );
+    assert_eq!(columns(project), ["dense_id", "subject", "title"]);
 
     // The shape-ref `hasProject` is a TYPED edge KB→Project, NOT a column on KB;
     // kb/1 references two projects → the LIST UNNESTs to two edges.

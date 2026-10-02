@@ -260,7 +260,11 @@ fn properties(delta: &[&str]) -> WriterProperties {
 /// Encode `batches` as one Parquet of `schema` under [`properties`], a row
 /// group per [`ROW_GROUP_ROWS`]. Each batch is taken column for column: the
 /// schema only renames and sets nullability.
-fn encode(schema: &SchemaRef, batches: &[RecordBatch], delta: &[&str]) -> Result<Bytes, WriteError> {
+fn encode(
+    schema: &SchemaRef,
+    batches: &[RecordBatch],
+    delta: &[&str],
+) -> Result<Bytes, WriteError> {
     let mut writer = ArrowWriter::try_new(Vec::new(), Arc::clone(schema), Some(properties(delta)))?;
     for batch in batches {
         writer.write(&RecordBatch::try_new(
