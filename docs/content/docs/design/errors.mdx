@@ -467,3 +467,148 @@ The owner accepted this page on 2026-10-01 and settled the four questions it had
    already depends on it, and a package of its own would be a second place to look. *What would
    reverse it:* `types` growing runtime code that is not about the contract, at which point it is no
    longer a types package and the split is by what the code is for.
+
+## A host's code, kept on a foreign cause
+
+<Callout type="warn" title="Proposal — written 2026-10-02 for the owner's review, and nothing in this section is built">
+Every present-tense sentence here describes `main` at `aa6c334a`; the type change, the migration and
+the decision are proposed. The section becomes part of the page when the owner accepts it, and the
+first step of its migration is deleting this callout.
+</Callout>
+
+**A host that refuses a `Host` call in its own vocabulary loses that vocabulary on fossil's wire.**
+keasy's server answers a credentials request with `job/not-found` or `store/silent`; its client
+throws an `ApiError` carrying that `code`, `title` and `data`; fossil wraps it as
+`storage/host-refused` with the rejection as cause — and the cause is a `Foreign`, which is
+`{ name, detail }` and nothing else. The code survives only as long as the live object does, and the
+live object does not survive the paths that matter:
+
+- **In Rust it never exists.** `js::foreign` (`crates/fossil-graph-schema/src/js.rs`) reads the
+  rejection's `name` and `message` and drops the object, because a `JsValue` is not `Send` and cannot
+  ride a `Failure`'s cause. That is the path `JsHost` takes for every document a run reads
+  (`storageRead`), so `document/unread > storage/host-refused` reaches `runJob` as plain data whose
+  innermost cause is `{ name: "ApiError" }`.
+- **On the wire it is never written.** `Failure`'s `Serialize` writes a foreign cause as
+  `name` and `detail`; `toWire` in `packages/types/src/error.ts` does the same on the TypeScript side.
+- **From the wire it is never rebuilt.** `js::from_wire` and `causeOf` rebuild a foreign cause as an
+  `Error` with a name and a message. keasy stores a failed run's problem as JSON (`jobs.problem`), so
+  what its job page shows is this rebuilt chain, not the thrown one.
+
+Five functions, one omission. **keasy's e2e suite caught it on its first run**: scenarios 01 and 02
+(`e2e/tests/discover.spec.ts`, `job/not-found`, `job/not-completed`) and 03 and 04
+(`e2e/tests/stack.spec.ts`, `store/silent`, `store/refused`) each showed `storage/host-refused` over
+an uncoded `ApiError`. keasy closed them with three workarounds, each in a commit that says why:
+
+1. `3c3a19d` — `toProblem` reads the cause off the live `FossilError`'s `cause` rather than its
+   `problem` (`web/src/lib/errors.ts, fossilProblem`), which fixes 01 and 02, where the wrap happens
+   in TypeScript and the object is still there; and the runner stops letting `runJob` report
+   `failed`, reporting it itself from the thrown error
+   (`web/src/app/(main)/(chrome)/(member)/jobs/[id]/_parts/use-browser-job-runner.ts`).
+2. `05f485a` — that was not enough for 03 and 04, where the wrap happens in Rust: `ApiError.name`
+   is set to the code (`api/src/client.ts`), and `ProblemView` shows a foreign cause whose name
+   matches the grammar as the code it is (`web/src/components/problem-view.tsx`).
+
+The second is a hidden convention between two repositories that neither one's types state, and
+it is exactly what [the boundary](#the-boundary-one-shape-and-a-real-error) exists to prevent:
+an identifier smuggled through a field meant for something else.
+
+### The decision
+
+**`Foreign` gains two optional fields, `code` and `data`, read from the thrown value.** A rejection
+that carries a string `code` of the [`area/kind`](#a-code-is-areakind) shape keeps it, and its
+`data` with it when `data` is a JSON object. RFC 9457's `type` is an identifier of the producer's
+vocabulary, not of one registry (§3.1.1), so a cause may name its own vocabulary's code. It stays a
+`Foreign`: it never joins fossil's catalogue, `CODES` never lists it, `isFossilError` never matches
+it, and fossil never branches on it. [A foreign error is a cause, never a code](#rust-one-type-and-diagnostic-carries-it)
+still holds, read as *never a fossil code*: fossil carries the host's code, it does not classify by it.
+
+A code outside the grammar — Node's `ECONNREFUSED`, a `DOMException`'s number — is not read. The
+grammar is what makes a string a key a host's registry can hold; anything else is still in `detail`.
+
+**The wire's discriminant moves from `code` to `name`.** Today `js::from_wire` treats a cause with a
+string `code` as a nested problem, and `isProblem` treats plain data with a catalogued `code` as
+one. A coded foreign cause breaks the first outright and the second on any collision with a fossil
+code. A problem has no `name` on the wire and a foreign cause always has one, so `name` decides: a
+cause with a `name` is foreign, whatever its `code` says.
+
+### The type change
+
+```rust
+pub struct Foreign {
+    name: String,
+    detail: String,
+    code: Option<String>,               // the producer's own `area/kind`
+    data: Option<serde_json::Value>,    // what that code carries, an object
+    source: Option<Box<dyn Error + Send + Sync>>,
+}
+impl Foreign {
+    pub fn coded(self, code: impl Into<String>, data: Option<serde_json::Value>) -> Self; // keeps no code off the grammar
+    pub fn code(&self) -> Option<&str>;
+    pub fn data(&self) -> Option<&serde_json::Value>;
+}
+```
+
+`serde_json` stops being optional in `fossil-graph-schema` — it is the only honest type for data
+fossil does not know the shape of, and every wasm crate already links it through the `js` feature.
+`js::foreign` reads `code` and `data` off any object, an `Error` or not, through `Reflect` and
+`JSON.stringify`; a `data` that will not stringify is dropped and the code kept. `Failure`'s
+`Serialize` writes them when present. `js::from_wire` sets them as own properties on the rebuilt
+`Error`, so `err.cause.code` reads the same on a live chain and a rebuilt one.
+
+```ts
+export interface Foreign {
+  name: string;
+  detail: string;
+  /** The producer's own code, `area/kind`. Never one of fossil's: `isFossilError` does not match it. */
+  code?: string;
+  /** What that code carries. */
+  data?: Record<string, unknown>;
+}
+```
+
+`toWire` reads `code` and `data` as `js::foreign` does; `causeOf` puts them back; `isProblem`
+refuses a value with a `name`. Every change is additive: a problem stored before it has no foreign
+`code` and reads as it did.
+
+### The alternatives, and why each is rejected
+
+- **Keep the workaround.** It works, and it is a contract written nowhere: fossil's types say
+  `name` is *the error's own name*, keasy's `ApiError` says it is a code, and the next host that
+  does not know the trick loses its code silently. It also costs keasy two code paths for one chain
+  — the live one and the stored one — which is what `3c3a19d` had to split.
+- **A host-supplied `Problem` as cause.** Let a rejection be a `Problem` and nest it as one. A
+  `Problem` is typed by fossil's catalogue — `code: Code`, `data: ProblemData[C]` — and a host's code
+  is not in it; widening `Code` to `string` throws away the narrowing the generated union exists
+  for, and `isFossilError` could no longer mean *fossil raised this*. The host's cause is foreign
+  by definition; it needs a code, not membership.
+- **Keep a JavaScript reference.** Hold the thrown object on the cause. It cannot cross the Rust
+  half — a `JsValue` is not `Send`, which is why `js::foreign` copies today — and it would not
+  survive `jobs.problem` or a `postMessage` anyway. The stored problem is what a job page renders;
+  only data reaches it.
+
+### The migration
+
+1. **fossil.** The two `Foreign`s, the five functions, the discriminant. Tests: in `problem.rs`, a
+   coded `Foreign` serializes `{ name, detail, code, data }`, and one off the grammar keeps no code;
+   in `packages/types/tests/error.test.ts`, `toWire` keeps `code` and `data`, `FossilError.from`
+   rebuilds them on the cause, a foreign cause whose code is a catalogued one is neither a problem
+   nor a `FossilError`; in `packages/storage/tests/objects.test.ts`, a host whose `credentials`
+   rejects with an error coded `job/not-found` yields `storage/host-refused` whose wire cause has
+   that code — the Rust path, end to end; in `packages/executor/tests/run-job.test.ts`, the same
+   rejection survives into the `failed` report's `document/unread` chain. Released as
+   `v0.3.0-alpha.20`. *Breaking:* nothing.
+2. **keasy**, on `alpha.20`: `ApiError.name` goes back to `"ApiError"` (`api/src/client.ts`);
+   `ProblemView`'s `CODED` name test goes and a foreign cause shows its `code`
+   (`web/src/components/problem-view.tsx`); `fossilProblem` goes and `toProblem` returns
+   `err.problem` (`web/src/lib/errors.ts`); `runJob` reports `failed` again through `Job.complete`
+   (`use-browser-job-runner.ts`); the name-is-code test in `web/src/lib/errors.test.ts` becomes one
+   that a stored problem's foreign cause carries `job/not-found`. *Gate:* scenarios 01–04 green
+   against the stored chain, not the live one.
+
+### What would reverse it
+
+A host whose own vocabulary is not `area/kind` and that needs its code kept anyway — then the
+grammar check is the wrong filter, and `code` becomes any string with the host's registry deciding
+what it keys. Or fossil starting to *act* on a foreign code — retrying on `store/silent`, say —
+which would mean the host's vocabulary had become part of fossil's contract, and the answer is a
+fossil code for that case, not a branch on someone else's.
