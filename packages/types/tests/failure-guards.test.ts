@@ -73,7 +73,7 @@ describe('the failure guards', () => {
   const files = sources();
 
   it('reads the packages', () => {
-    expect(files.some((f) => f.path === 'executor/src/run-job.ts')).toBe(true);
+    expect(files.some((f) => f.path === 'executor/src/run.ts')).toBe(true);
   });
 
   it('swallows no failure without a reason on the line', () => {
