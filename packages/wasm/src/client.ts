@@ -19,13 +19,14 @@ import {
   refs as rawRefs,
   providers as rawProviders,
 } from '../pkg/fossil_wasm.js';
-import type {
-  DocumentWorkspace,
-  MissingDocument,
-  Problem,
-  ProgramSource,
-  TokenKindLegend,
-  TokenRow,
+import {
+  until,
+  type DocumentWorkspace,
+  type MissingDocument,
+  type Problem,
+  type ProgramSource,
+  type TokenKindLegend,
+  type TokenRow,
 } from '@fossil-lang/types';
 import type {
   CheckRow,
@@ -37,6 +38,7 @@ import type {
   SourceRefInfo,
   ProviderInfo,
 } from './index.js';
+import { initFossilWasm, type BootOptions } from './load.js';
 
 /**
  * Opaque file-handle returned by {@link FossilWorkspace.openFile}. Pass it
@@ -88,25 +90,31 @@ export function tokenKinds(): TokenKindLegend {
 /**
  * Parse a Fossil program and return its external references — the typed lineage
  * (every data URI + `schema =` argument, each tagged with its `@conn` alias and
- * role). keasy's client-compute job runner reads this to derive a job's
- * connections WITHOUT subprocessing `fossil` / a server round-trip. Identical
- * shape to the native `fossil refs` (the SAME `fossil_lineage::SourceRefInfo`
- * struct), so the browser and the CLI never diverge.
+ * role). A host reads this to derive a program's connections WITHOUT a compile
+ * or a server round-trip. Identical shape to the native `fossil_lineage::SourceRefInfo`,
+ * so every host reads the same answer.
  *
- * MUST be called after {@link initFossilWasm} has resolved.
+ * **It boots the module itself**, the way {@link openProgram} does: the boot is shared and kept,
+ * so the call after the first costs the parse and nothing else, and a host writes no
+ * `initFossilWasm()` before it. That is why it answers a promise where {@link tokenize} does not —
+ * the lexer runs on every keystroke inside an editor that has already booted, and this runs once
+ * per question.
  */
-export function refs(program: string): SourceRefInfo[] {
+export async function refs(program: string, options: BootOptions = {}): Promise<SourceRefInfo[]> {
+  await until(initFossilWasm(options.wasm), options.signal);
   return rawRefs(program) as SourceRefInfo[];
 }
 
 /**
  * List the data-source providers fossil supports (`io.csv`, `io.rdf`, …) — the
- * provider name, the extensions it reads, and how it can be used. Identical
- * shape to the native `fossil providers`.
+ * provider name, the extensions it reads, and how it can be used. Compiled into the module,
+ * so a host may keep the answer for as long as it keeps the module.
  *
- * MUST be called after {@link initFossilWasm} has resolved.
+ * Boots the module itself, for the reason {@link refs} does. {@link providerFor} is the
+ * question a host usually asks of the answer.
  */
-export function providers(): ProviderInfo[] {
+export async function providers(options: BootOptions = {}): Promise<ProviderInfo[]> {
+  await until(initFossilWasm(options.wasm), options.signal);
   return rawProviders() as ProviderInfo[];
 }
 

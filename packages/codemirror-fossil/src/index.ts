@@ -51,6 +51,15 @@
  * more. What that push costs is the host's to decide: a string comparison against
  * what it last sent skips the call entirely in the common case.
  *
+ * ## A check that failed is a row, not a throw
+ *
+ * A check that throws — a document the host never answered for, a module that would not boot, a
+ * worker that died — is drawn on the first character by its code, and it reaches `onDiagnostics`
+ * as one row, {@link uncheckedRow}, through the same call as every successful batch. A host that
+ * renders its own panel or a "Valid" badge from `onDiagnostics` therefore needs no `try` around
+ * `check` to learn the check failed, and no copy of the row to say so: a failure before there is
+ * a linter at all — `openProgram` rejecting — is reported with the same `uncheckedRow(uri, cause)`.
+ *
  * ## Why one workspace, and not one per rate
  *
  * They could have been separate — a second `FossilWorkspace` for the position
@@ -79,7 +88,7 @@ export type {
   SemanticTokenSource,
 } from './highlight.js';
 
-export { fossilLinter, problemMessage, toDiagnostics } from './lint.js';
+export { fossilLinter, problemMessage, toDiagnostics, uncheckedRow } from './lint.js';
 export type { CheckRowLike, CheckSource, LinterOptions } from './lint.js';
 
 export { fossilHover, renderMarkdown } from './hover.js';

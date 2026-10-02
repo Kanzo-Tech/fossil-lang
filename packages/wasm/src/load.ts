@@ -8,6 +8,15 @@ import { boot } from '@fossil-lang/types';
 
 export type { InitInput };
 
+/** What a call that boots the module on its own takes — {@link openProgram}'s two boot options,
+ *  for the calls that need the module and no workspace. */
+export interface BootOptions {
+  /** The module's `.wasm`, for a host with no bundler — see {@link initFossilWasm}. */
+  wasm?: InitInput;
+  /** Stops the wait for the boot, rejecting with its reason. The boot itself is shared and goes on. */
+  signal?: AbortSignal;
+}
+
 let _initPromise: Promise<unknown> | null = null;
 
 /**

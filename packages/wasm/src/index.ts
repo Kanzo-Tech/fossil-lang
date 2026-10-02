@@ -10,6 +10,9 @@
  * - {@link openProgram} — one program open for an editor: the workspace, the push-before-ask
  *   discipline and the document resolution a host would otherwise write, shaped to spread into
  *   `@fossil-lang/codemirror-fossil`'s `fossil()`. What a host with one editor calls.
+ * - {@link refs} and {@link providers} — a program's external references, and the providers this
+ *   build reads. Each boots the module itself, as `openProgram` does: no `initFossilWasm()` first.
+ * - {@link providerFor} — which of those providers reads a path, as data or as a schema.
  * - {@link FossilWorkspace} — Workspace API class: open / update / close,
  *   `check`, the three position queries (`hover`, `completions`,
  *   `gotoDefinition`) and `semanticTokens` an editor draws its IDE surface from, and the documents
@@ -34,7 +37,7 @@
 import type { Problem } from '@fossil-lang/types';
 
 export { initFossilWasm } from './load.js';
-export type { InitInput } from './load.js';
+export type { BootOptions, InitInput } from './load.js';
 
 export {
   tokenize,
@@ -44,6 +47,8 @@ export {
   providers,
 } from './client.js';
 export type { FileHandle } from './client.js';
+
+export { providerFor } from './provider.js';
 
 export { openProgram } from './program.js';
 export type { FossilProgram, Introspection, OpenProgramOptions } from './program.js';
