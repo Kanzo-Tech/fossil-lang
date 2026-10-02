@@ -19,7 +19,7 @@
  */
 
 /** SHA-256 of the `grammar.bnf` {@link SURFACE} and {@link FORBIDDEN} were last reviewed against. */
-export const GRAMMAR_DIGEST = 'dcef7d4cc908208e9ebf6a9b816ef354faffb9b741bb8112641d03c34da81ee4';
+export const GRAMMAR_DIGEST = 'f68be43129d6be2cc41f6672af41f302cf2bb5ff40840cde5b45bfefe4ec2135';
 
 /** A complete program: `docs/programs/shop/shop.fossil`, region markers removed. */
 export const EXAMPLE = `type { Person, Order } := io.shex("shop.shex")
@@ -109,6 +109,11 @@ export const FORBIDDEN: readonly ForbiddenForm[] = [
     refused: `fn shout(x) = x\n${PREAMBLE}`,
   },
   {
+    form: 'a column name with a dot written bare, `Knows.Person.id`',
+    instead: 'a column whose name is not an identifier is quoted after the dot: `Knows."Person.id"`',
+    refused: `${PREAMBLE}People : Person from User\n    @subject = "https://example.org/{User.id}"\n    name = User.Person.id\n`,
+  },
+  {
     form: '`<http://…>` IRI brackets',
     instead: 'an IRI is an ordinary string',
     refused: `${PREAMBLE}People : Person from User\n    @subject = <https://example.org/user>\n`,
@@ -139,7 +144,7 @@ User     := io.csv("data/users.csv")
 Purchase := io.csv("data/orders.csv")
 \`\`\`
 
-One binding names both a type and a relation: \`User.age\` is a field, \`from User\` is a stream of rows. Columns are introspected from the file and are never declared in the program. A file reference is a STRING. A reference written \`"@name/path"\` reaches a connection the host defines; any other relative path is resolved against the program's own location.
+One binding names both a type and a relation: \`User.age\` is a field, \`from User\` is a stream of rows. Columns are introspected from the file and are never declared in the program. A column whose name is not an identifier — a header like \`Person.id\`, or a reserved word — is quoted after the dot: \`Knows."Person.id"\`; an identifier is never quoted. A header a file repeats is suffixed the way DuckDB reads it: \`Person.id\`, then \`Person.id_1\`. A file reference is a STRING. A reference written \`"@name/path"\` reaches a connection the host defines; any other relative path is resolved against the program's own location.
 
 ### 3. Derived relations — the verbs are member calls
 
