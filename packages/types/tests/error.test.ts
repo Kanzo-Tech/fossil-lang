@@ -55,6 +55,51 @@ describe('FossilError.of', () => {
   });
 });
 
+describe('a foreign cause that carries its own code', () => {
+  class ApiError extends Error {
+    override name = 'ApiError';
+    constructor(
+      readonly code: string,
+      readonly data: unknown,
+    ) {
+      super('no such job');
+    }
+  }
+
+  it('keeps an area/kind code and its data on the wire, and back on the rebuilt cause', () => {
+    const e = FossilError.of('storage/host-refused', { scope: 'job j1' }, { cause: new ApiError('job/not-found', { job: 'j1' }) });
+    expect(e.problem.cause).toEqual({ name: 'ApiError', detail: 'no such job', code: 'job/not-found', data: { job: 'j1' } });
+    const rebuilt = FossilError.from(JSON.parse(JSON.stringify(e.problem)) as Problem).cause as Error & { code?: string; data?: unknown };
+    expect(rebuilt.name).toBe('ApiError');
+    expect(rebuilt.code).toBe('job/not-found');
+    expect(rebuilt.data).toEqual({ job: 'j1' });
+    expect(isFossilError(rebuilt)).toBe(false);
+  });
+
+  it('reads the code off any thrown object, an Error or not', () => {
+    const e = FossilError.of('storage/host-refused', { scope: 'job j1' }, { cause: { code: 'store/refused' } });
+    expect(e.problem.cause).toMatchObject({ name: 'Error', code: 'store/refused' });
+  });
+
+  it('ignores a code that is not area/kind, and data that is not a JSON object', () => {
+    const refused = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED', data: { port: 443 } });
+    expect(FossilError.of('storage/host-refused', { scope: 's' }, { cause: refused }).problem.cause).toEqual({
+      name: 'Error',
+      detail: 'connect ECONNREFUSED',
+    });
+    const listed = FossilError.of('storage/host-refused', { scope: 's' }, { cause: new ApiError('job/not-found', [1]) });
+    expect(listed.problem.cause).toEqual({ name: 'ApiError', detail: 'no such job', code: 'job/not-found' });
+  });
+
+  it('is not rebuilt as a FossilError when its code spells one of fossil’s', () => {
+    const e = FossilError.of('storage/host-refused', { scope: 's' }, { cause: new ApiError('engine/failed', {}) });
+    const rebuilt = FossilError.from(JSON.parse(JSON.stringify(e.problem)) as Problem).cause as Error & { code?: string };
+    expect(rebuilt.name).toBe('ApiError');
+    expect(rebuilt.code).toBe('engine/failed');
+    expect(isFossilError(rebuilt)).toBe(false);
+  });
+});
+
 describe('isFossilError', () => {
   it('is structural: an Error named FossilError with a catalogued code passes, whatever built it', () => {
     const fromWasm = Object.assign(new Error('x'), { name: 'FossilError', code: 'api/busy', data: { call: 'run' } });

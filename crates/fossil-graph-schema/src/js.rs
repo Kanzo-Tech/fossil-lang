@@ -19,7 +19,8 @@ use crate::{Failure, Foreign, Problem};
 /// whose `message` is the detail, carrying `code`, `data`, `title`, `help`,
 /// `related`, `problem` — the whole wire object, as plain data — and `cause`:
 /// a nested `FossilError` for a cause fossil raised, an `Error` of the cause's
-/// own name for one it did not.
+/// own name — with its own `code` and `data` when it carried them — for one it
+/// did not.
 #[must_use]
 pub fn to_js(failure: &Failure) -> JsValue {
     from_wire(&to_wire(failure)).into()
@@ -53,11 +54,13 @@ impl From<Failure> for JsValue {
     }
 }
 
-/// A JavaScript rejection as a cause: its own `name` and `message`. A
-/// `JsValue` is not `Send`, so the object itself cannot ride the cause.
+/// A JavaScript rejection as a cause: its own `name` and `message`, and — off
+/// any object, an `Error` or not — its own `code` when that is `area/kind`, with
+/// its `data` when that is a JSON object. A `JsValue` is not `Send`, so the
+/// object itself cannot ride the cause; what a host needs back is copied.
 #[must_use]
 pub fn foreign(error: &JsValue) -> Foreign {
-    error.dyn_ref::<Error>().map_or_else(
+    let named = error.dyn_ref::<Error>().map_or_else(
         || {
             Foreign::named(
                 "Error",
@@ -65,7 +68,24 @@ pub fn foreign(error: &JsValue) -> Foreign {
             )
         },
         |e| Foreign::named(String::from(e.name()), String::from(e.message())),
-    )
+    );
+    if !error.is_object() {
+        return named;
+    }
+    match get(error, "code").as_string() {
+        Some(code) => named.coded(code, data(&get(error, "data"))),
+        None => named,
+    }
+}
+
+/// `value` as a JSON object, or nothing: an array, a primitive, or an object
+/// `JSON.stringify` refuses (a cycle, a `BigInt`) is not kept.
+fn data(value: &JsValue) -> Option<serde_json::Map<String, serde_json::Value>> {
+    if !value.is_object() || js_sys::Array::is_array(value) {
+        return None;
+    }
+    let text = JSON::stringify(value).ok()?.as_string()?;
+    serde_json::from_str(&text).ok()
 }
 
 fn get(object: &JsValue, key: &str) -> JsValue {
@@ -89,17 +109,18 @@ fn from_wire(problem: &JsValue) -> Error {
     put(&error, "problem", problem);
     let cause = get(problem, "cause");
     if cause.is_object() {
-        let cause: JsValue = if get(&cause, "code").is_string() {
-            from_wire(&cause).into()
-        } else {
-            let foreign = Error::new(&get(&cause, "detail").as_string().unwrap_or_default());
-            foreign.set_name(
-                &get(&cause, "name")
-                    .as_string()
-                    .unwrap_or_else(|| "Error".into()),
-            );
-            foreign.into()
-        };
+        // A foreign cause always has a `name` and a problem never does: a host's
+        // own `code` — even one that spells a fossil code — keeps it foreign.
+        let cause: JsValue = get(&cause, "name").as_string().map_or_else(
+            || from_wire(&cause).into(),
+            |name| {
+                let foreign = Error::new(&get(&cause, "detail").as_string().unwrap_or_default());
+                foreign.set_name(&name);
+                put(&foreign, "code", &get(&cause, "code"));
+                put(&foreign, "data", &get(&cause, "data"));
+                foreign.into()
+            },
+        );
         put(&error, "cause", &cause);
     }
     error

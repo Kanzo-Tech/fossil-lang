@@ -8,16 +8,18 @@
 #
 # It is also where the error catalogue lives (`problem`): `Problem` and
 # `Failure` are vocabulary every raising crate shares, so this leaf gained the
-# three crates an error needs — `thiserror` for the message, `schemars` for the
-# schema the TypeScript union is generated from, and `miette` (no default
-# features: the trait, no renderer) so a failure renders with its code. All
-# three are wasm-clean; none brings Arrow or ShEx.
+# crates an error needs — `thiserror` for the message, `schemars` for the
+# schema the TypeScript union is generated from, `miette` (no default
+# features: the trait, no renderer) so a failure renders with its code, and
+# `serde_json` for the `data` a host's own coded error carries on a `Foreign`
+# cause, whose shape fossil does not know. All are wasm-clean; none brings
+# Arrow or ShEx.
 #
 # The `js` feature is the boundary: `problem::js::to_js`, the ONE function that
 # turns a `Failure` into the JavaScript `FossilError` every wasm crate throws.
-# It adds `wasm-bindgen`, `js-sys` and `serde_json` (the wire object is built
-# by serialising and `JSON.parse`), all optional, so a crate that only raises
-# stays serde + the error crates. Its `to_js` calls wasm-bindgen intrinsics,
+# It adds `wasm-bindgen` and `js-sys` (the wire object is built by serialising
+# and `JSON.parse`), both optional, so a crate that only raises stays serde +
+# the error crates. Its `to_js` calls wasm-bindgen intrinsics,
 # which panic on a native target: native tests keep to the pure-Rust half.
 [package]
 name = "fossil-graph-schema"
@@ -41,13 +43,10 @@ schemars = { workspace = true }
 miette = { workspace = true }
 wasm-bindgen = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
+serde_json = { workspace = true }
 
 [features]
-js = ["dep:wasm-bindgen", "dep:js-sys", "dep:serde_json"]
-
-[dev-dependencies]
-serde_json = { workspace = true }
+js = ["dep:wasm-bindgen", "dep:js-sys"]
 
 [lints]
 workspace = true

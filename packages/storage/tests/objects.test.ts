@@ -2,7 +2,7 @@ import './boot.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { DocumentWorkspace, MissingDocument } from '@fossil-lang/types';
+import { FossilError, isFossilError, type DocumentWorkspace, type MissingDocument, type Problem } from '@fossil-lang/types';
 
 import { read, resolveDocuments } from '../src/index.js';
 import { countingHost, s3 } from './fixtures.js';
@@ -75,6 +75,48 @@ describe('read', () => {
       problem: { code: 'storage/outside-prefix', data: { locator: 's3://b/other/x.csv' } },
     });
     expect(seen.map((r) => r.url)).toEqual(['http://localhost:9000/b/lake/gone.csv']);
+  });
+});
+
+describe('a host that refuses in its own vocabulary', () => {
+  const refusing = (thrown: unknown) => countingHost(() => {
+    throw thrown;
+  }).host;
+  const causeOf = async (thrown: unknown) => {
+    const [result] = await read(refusing(thrown), [{ locator: `${LAKE}a.csv`, connection: 'lake' }]);
+    if (result!.ok) throw new Error('the read was refused, and answered bytes');
+    return result!.problem;
+  };
+
+  it('keeps its area/kind code and data through the Rust wrap, the wire, stored JSON and the rebuilt cause', async () => {
+    const thrown = Object.assign(new Error('no such job'), { name: 'ApiError', code: 'job/not-found', data: { job: 'j1' } });
+    const problem = await causeOf(thrown);
+    expect(problem).toMatchObject({
+      code: 'storage/host-refused',
+      cause: { name: 'ApiError', detail: 'no such job', code: 'job/not-found', data: { job: 'j1' } },
+    });
+    const stored = JSON.parse(JSON.stringify(problem)) as Problem;
+    const rebuilt = FossilError.from(stored).cause as Error & { code?: string; data?: unknown };
+    expect(rebuilt.name).toBe('ApiError');
+    expect(rebuilt.code).toBe('job/not-found');
+    expect(rebuilt.data).toEqual({ job: 'j1' });
+  });
+
+  it('reads the code off a thrown object that is not an Error', async () => {
+    expect((await causeOf({ code: 'store/refused' })).cause).toMatchObject({ code: 'store/refused' });
+  });
+
+  it('ignores a code that is not area/kind', async () => {
+    const thrown = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    expect((await causeOf(thrown)).cause).toEqual({ name: 'Error', detail: 'connect ECONNREFUSED' });
+  });
+
+  it('does not rebuild a cause as a FossilError because its code spells one of fossil’s', async () => {
+    const thrown = Object.assign(new Error('down'), { name: 'ApiError', code: 'engine/failed' });
+    const rebuilt = FossilError.from(await causeOf(thrown)).cause as Error & { code?: string };
+    expect(rebuilt.name).toBe('ApiError');
+    expect(rebuilt.code).toBe('engine/failed');
+    expect(isFossilError(rebuilt)).toBe(false);
   });
 });
 

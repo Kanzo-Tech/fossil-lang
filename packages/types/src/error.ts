@@ -18,12 +18,22 @@ export { CODES, DETAILS, TITLES, type Code, type DetailedCode, type ProblemData 
 /** How bad a problem is. */
 export type Severity = 'error' | 'warning' | 'info';
 
-/** An error fossil did not raise — DataFusion's, DuckDB's, a host's — kept as a cause. */
+/**
+ * An error fossil did not raise — DataFusion's, DuckDB's, a host's — kept as a cause. On the wire it
+ * is told from a {@link Problem} by `name`, which a problem never has.
+ */
 export interface Foreign {
   /** The error's own name. */
   name: string;
   /** The error's own text. */
   detail: string;
+  /**
+   * The producer's own code, `area/kind` — a host's vocabulary, never fossil's, even when it spells
+   * one of fossil's codes: {@link isFossilError} does not match it.
+   */
+  code?: string;
+  /** What that code carries. */
+  data?: Record<string, unknown>;
 }
 
 /**
@@ -64,23 +74,52 @@ export type Problem<C extends Code = Code> = {
 
 const codes: ReadonlySet<string> = new Set(CODES);
 
-/** Plain data with a catalogued code — a problem on the wire, not an error carrying one. */
+/**
+ * Plain data with a catalogued code and no `name` — a problem on the wire, not an error carrying one,
+ * and not a {@link Foreign} cause whose own code happens to spell a catalogued one.
+ */
 function isProblem(value: unknown): value is Problem {
   return (
     typeof value === 'object' &&
     value !== null &&
     !(value instanceof Error) &&
+    typeof (value as { name?: unknown }).name !== 'string' &&
     typeof (value as { code?: unknown }).code === 'string' &&
     codes.has((value as { code: string }).code)
   );
 }
 
+/** `area/kind`: two lowercase kebab-case words, a digit allowed after a word's first letter. */
+const CODE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*\/[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+
 function causeOf(cause: Problem | Foreign | undefined): Error | undefined {
   if (cause === undefined) return undefined;
   if (isProblem(cause)) return FossilError.from(cause);
-  const error = new Error(cause.detail);
+  const error: Error & Partial<Pick<Foreign, 'code' | 'data'>> = new Error(cause.detail);
   error.name = cause.name;
+  if (cause.code !== undefined) error.code = cause.code;
+  if (cause.data !== undefined) error.data = cause.data;
   return error;
+}
+
+/** The thrown value's own `code` when it is `area/kind`, and its `data` when that is a JSON object. */
+function codeOf(cause: unknown): Pick<Foreign, 'code' | 'data'> {
+  if (typeof cause !== 'object' || cause === null) return {};
+  const { code, data } = cause as { code?: unknown; data?: unknown };
+  if (typeof code !== 'string' || !CODE.test(code)) return {};
+  const json = jsonObject(data);
+  return json === undefined ? { code } : { code, data: json };
+}
+
+/** `value` as a JSON object, or nothing: an array, a primitive, or what `JSON.stringify` refuses. */
+function jsonObject(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+  } catch {
+    // A cycle or a BigInt: the code is kept without its data.
+    return undefined;
+  }
 }
 
 /** What {@link FossilError.of} takes beside the code, its data and its detail. */
@@ -90,7 +129,7 @@ export interface Occurrence {
   /**
    * What caused it. A {@link Problem} is kept as one; any other value — an engine's `Error`, a
    * host's rejection — is kept whole as the error's `cause`, and reaches `problem.cause` as
-   * `{ name, detail }`.
+   * `{ name, detail, code?, data? }`.
    */
   cause?: unknown;
 }
@@ -154,12 +193,16 @@ export class FossilError<C extends Code = Code> extends Error {
   }
 }
 
-/** Any cause as it goes on the wire: a problem as itself, any other thrown value `{ name, detail }`. */
+/**
+ * Any cause as it goes on the wire: a problem as itself, any other thrown value
+ * `{ name, detail, code?, data? }` — its own code read off it as `fossil_graph_schema::js::foreign`
+ * reads one.
+ */
 function toWire(cause: unknown): Problem | Foreign {
   if (isFossilError(cause)) return cause.problem;
   if (isProblem(cause)) return cause;
-  if (cause instanceof Error) return { name: cause.name, detail: cause.message };
-  return { name: 'Error', detail: String(cause) };
+  if (cause instanceof Error) return { name: cause.name, detail: cause.message, ...codeOf(cause) };
+  return { name: 'Error', detail: String(cause), ...codeOf(cause) };
 }
 
 /**

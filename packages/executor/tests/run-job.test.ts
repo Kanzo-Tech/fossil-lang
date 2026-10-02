@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { initStorage } from '@fossil-lang/storage';
-import type { Access, Host, Scope, StorageCredential } from '@fossil-lang/types';
+import { FossilError, type Access, type Host, type Problem, type Scope, type StorageCredential } from '@fossil-lang/types';
 
 import { initFossilExecutor, runJob, type CompletePayload, type Job } from '../src/index.js';
 
@@ -197,6 +197,26 @@ describe('runJob', () => {
     );
     expect(job.completed?.status).toBe('failed');
     expect(puts).toEqual([]);
+  });
+
+  it('reports a host’s own code under document/unread, and the stored problem rebuilds it', async () => {
+    stubFetch(FIXTURES);
+    const { host: inner } = recordingHost();
+    const host: Host = {
+      ...inner,
+      credentials: async () => {
+        throw Object.assign(new Error('no such job'), { name: 'ApiError', code: 'job/not-found', data: { job: 'job-1' } });
+      },
+    };
+    const job = recording(host);
+    await expect(runJob(PROGRAM, job)).rejects.toMatchObject({ code: 'document/unread' });
+    expect(job.completed?.problem).toMatchObject({
+      code: 'document/unread',
+      cause: { code: 'storage/host-refused', cause: { name: 'ApiError', code: 'job/not-found', data: { job: 'job-1' } } },
+    });
+    const stored = JSON.parse(JSON.stringify(job.completed?.problem)) as Problem;
+    const refused = FossilError.from(stored).cause as FossilError;
+    expect(refused.cause).toMatchObject({ name: 'ApiError', code: 'job/not-found', data: { job: 'job-1' } });
   });
 });
 

@@ -1007,17 +1007,45 @@ impl miette::Diagnostic for Related {
     }
 }
 
+/// Whether `code` is `area/kind`: two lowercase kebab-case words joined by a
+/// slash, a digit allowed after a word's first letter (`source/not-utf8`).
+fn is_code(code: &str) -> bool {
+    let word = |w: &str| {
+        w.starts_with(|c: char| c.is_ascii_lowercase())
+            && w.split('-').all(|p| {
+                !p.is_empty()
+                    && p.bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            })
+    };
+    code.split_once('/')
+        .is_some_and(|(area, kind)| word(area) && word(kind))
+}
+
 /// **An error fossil did not raise**, kept whole as a [`Failure`]'s cause.
 ///
 /// `DataFusion`, `object_store` and a host each have their own vocabulary and
 /// fossil does not classify it; `name` is the error's own name — its Rust type's
 /// last path segment, or the name a JavaScript host gave it — and `Display` is
 /// its own text. The original, when there is one, is [`Error::source`].
+///
+/// A host's error may carry its own vocabulary's `code`, `area/kind`, and the
+/// `data` that code carries: they ride along so a host reads its own code back
+/// off the chain. Neither is one of fossil's, and fossil never branches on them.
 #[derive(Debug)]
 pub struct Foreign {
     name: String,
     detail: String,
+    /// Boxed: most foreign errors carry no code, and every `Result` that holds
+    /// a `Foreign` pays for the field's width.
+    coded: Option<Box<Coded>>,
     source: Option<Box<dyn Error + Send + Sync>>,
+}
+
+#[derive(Debug)]
+struct Coded {
+    code: String,
+    data: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 impl Foreign {
@@ -1029,6 +1057,7 @@ impl Foreign {
         Self {
             name,
             detail: error.to_string(),
+            coded: None,
             source: Some(Box::new(error)),
         }
     }
@@ -1039,14 +1068,42 @@ impl Foreign {
         Self {
             name: name.into(),
             detail: detail.into(),
+            coded: None,
             source: None,
         }
+    }
+
+    /// The producer's own `code`, and the `data` it carries. A code that is not
+    /// `area/kind` is not kept, and neither is its data.
+    #[must_use]
+    pub fn coded(
+        mut self,
+        code: impl Into<String>,
+        data: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Self {
+        let code = code.into();
+        if is_code(&code) {
+            self.coded = Some(Box::new(Coded { code, data }));
+        }
+        self
     }
 
     /// The error's own name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The producer's own code — never one of fossil's, whatever it spells.
+    #[must_use]
+    pub fn code(&self) -> Option<&str> {
+        self.coded.as_ref().map(|c| c.code.as_str())
+    }
+
+    /// What [`Self::code`] carries.
+    #[must_use]
+    pub fn data(&self) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        self.coded.as_ref().and_then(|c| c.data.as_ref())
     }
 }
 
@@ -1159,7 +1216,8 @@ impl miette::Diagnostic for Failure {
 
 /// The wire shape of `/docs/design/errors#the-boundary-one-shape-and-a-real-error`:
 /// `{ code, data, title, detail, severity, help?, related?, cause? }`, where a
-/// cause is a nested failure or `{ name, detail }`.
+/// cause is a nested failure or `{ name, detail, code?, data? }` — told apart
+/// by `name`, which a failure never has.
 impl Serialize for Failure {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         #[derive(Serialize)]
@@ -1182,13 +1240,16 @@ impl Serialize for Failure {
                 if let Some(failure) = self.0.downcast_ref::<Failure>() {
                     return failure.serialize(serializer);
                 }
-                let name = self
-                    .0
-                    .downcast_ref::<Foreign>()
-                    .map_or("Error", Foreign::name);
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("name", name)?;
+                let foreign = self.0.downcast_ref::<Foreign>();
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("name", foreign.map_or("Error", Foreign::name))?;
                 map.serialize_entry("detail", &self.0.to_string())?;
+                if let Some(code) = foreign.and_then(Foreign::code) {
+                    map.serialize_entry("code", code)?;
+                }
+                if let Some(data) = foreign.and_then(Foreign::data) {
+                    map.serialize_entry("data", data)?;
+                }
                 map.end()
             }
         }
@@ -1246,21 +1307,6 @@ mod tests {
         ]
     }
 
-    /// `^[a-z][a-z0-9]*(-[a-z0-9]+)*/` the same `$`: lowercase kebab-case, a
-    /// digit allowed after a word's first letter because `source/not-utf8` is one.
-    fn well_formed(code: &str) -> bool {
-        let word = |w: &str| {
-            w.starts_with(|c: char| c.is_ascii_lowercase())
-                && w.split('-').all(|p| {
-                    !p.is_empty()
-                        && p.bytes()
-                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-                })
-        };
-        code.split_once('/')
-            .is_some_and(|(area, kind)| word(area) && word(kind))
-    }
-
     #[test]
     fn an_optional_field_with_no_value_is_absent_not_null() {
         let quiet = Problem::ModuleUnreachable {
@@ -1285,7 +1331,7 @@ mod tests {
     fn every_code_is_area_slash_kind_and_listed_once() {
         let mut seen = HashSet::new();
         for code in CODES {
-            assert!(well_formed(code), "{code} is not area/kind");
+            assert!(is_code(code), "{code} is not area/kind");
             assert!(seen.insert(code), "{code} is listed twice");
         }
     }
@@ -1352,6 +1398,43 @@ mod tests {
             wire["cause"],
             serde_json::json!({ "name": "AuthError", "detail": "no" })
         );
+    }
+
+    #[test]
+    fn a_foreign_cause_keeps_its_own_code_and_data() {
+        let data = serde_json::json!({ "job": "j1" });
+        let refused = Failure::new(Problem::HostRefused {
+            scope: "job j1".into(),
+        })
+        .caused_by(
+            Foreign::named("ApiError", "no such job")
+                .coded("job/not-found", data.as_object().cloned()),
+        );
+        let wire = serde_json::to_value(&refused).expect("serialises");
+        assert_eq!(
+            wire["cause"],
+            serde_json::json!({
+                "name": "ApiError",
+                "detail": "no such job",
+                "code": "job/not-found",
+                "data": { "job": "j1" },
+            })
+        );
+    }
+
+    #[test]
+    fn a_code_off_the_grammar_is_not_kept() {
+        for code in [
+            "ECONNREFUSED",
+            "ERR_INVALID_ARG_TYPE",
+            "job",
+            "Job/not-found",
+            "job/",
+        ] {
+            let foreign = Foreign::named("Error", "x").coded(code, Some(serde_json::Map::new()));
+            assert_eq!(foreign.code(), None, "{code}");
+            assert_eq!(foreign.data(), None, "{code}");
+        }
     }
 
     /// `help_url` and TypeScript's `helpUrl` are two spellings of one link; the
