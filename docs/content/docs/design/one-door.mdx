@@ -1,6 +1,6 @@
 ---
 title: One door
-description: "A corpus is read through `open` and four members — `manifest`, `scan`, `sql` and `close` — and each thing the door does is done once, by one layer; why a scan still plans tasks when it only ever plans one."
+description: "A corpus is read through `open` and five members — `manifest`, `scan`, `relation`, `sql` and `close` — and each thing the door does is done once, by one layer; why a scan still plans tasks when it only ever plans one."
 ---
 
 A consumer reads a corpus through one door, and the whole of it is five names:
@@ -15,7 +15,8 @@ await corpus.close();
 
 `open` (`packages/corpus/src/open.ts, open`) fetches `fossil.json`, rejects a `format` that is not `fossil/1` before a byte of Parquet is
 read, and creates one view per table in the host's engine. `manifest` is that document, parsed once.
-`scan` reads any table — vertices or edges — with a filter, a projection and a limit. `sql` is the
+`scan` reads any table — vertices or edges — with a filter, a projection and a limit. `relation`
+names a table as a statement must write it. `sql` is the
 escape hatch, present only on a corpus opened with `sql: 'allowed'`. `close` detaches. The contract is
 [the corpus](/docs/design/corpus); the format underneath is [/docs/format](/docs/format).
 
@@ -23,6 +24,19 @@ escape hatch, present only on a corpus opened with `sql: 'allowed'`. `close` det
 by tile is decided behind `scan`, never by the caller, which is why the door has no addressing
 member; [a door for a camera](/docs/design/later/one-door-camera) keeps the one a tiled corpus had and
 what it measured.
+
+## `relation` gives out the name the door composed
+
+`open` names every view `"<url>"."<table>"`, each part quoted, and `scan` reads through that name.
+A host that writes its own SQL — Mosaic's clients, an assistant's schema — needs the same name, and
+before `relation` it composed it a second time: keasy re-implemented the quoting and assumed the
+schema `information_schema` lists the views under. That is the second layer this page deletes, so
+the door hands out the one it built: `corpus.relation('Person')`, refused as `corpus/unknown-table`
+for a table the manifest does not declare, and `corpus.url` with `corpus.schema` for the catalog and
+schema `information_schema` lists the views in.
+
+**What would reverse it.** Views named without quoting or without a catalog — a corpus registered
+under a plain identifier — so that the name is the manifest's `name` and nothing needs composing.
 
 ## `scan` plans tasks, and plans one
 

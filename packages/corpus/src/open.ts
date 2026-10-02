@@ -13,6 +13,9 @@ import { ident, lit, query } from './sql.js';
 /** The file every open reads first. */
 const ENTRY_POINT = 'fossil.json';
 
+/** The schema an attached database creates its views in, and so where a corpus's views are. */
+const SCHEMA = 'main';
+
 /** Rows {@link SqlCorpus.sql} answers with when the caller names no limit. */
 const SQL_LIMIT = 10_000;
 
@@ -169,8 +172,15 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
     let closed = false;
     const corpus: Corpus = {
       url: catalog,
+      schema: SCHEMA,
       manifest,
       scan: scanOf(engine, relation, tables, live),
+      relation(table) {
+        if (!tables.has(table)) {
+          throw FossilError.of('corpus/unknown-table', { table, tables: [...tables.keys()] });
+        }
+        return relation(table);
+      },
       async close() {
         if (closed) return;
         closed = true;

@@ -58,6 +58,32 @@ describe('open', () => {
     await corpus.close();
   });
 
+  it('names each table as SQL must write it, and its columns are where information_schema says', async () => {
+    const quoted = join(scratch, 'a "quoted" corpus');
+    mkdirSync(quoted, { recursive: true });
+    for (const file of ['fossil.json', ...TABLES.map((t) => t.path)]) {
+      mkdirSync(join(quoted, file, '..'), { recursive: true });
+      writeFileSync(join(quoted, file), readFileSync(join(CORPUS, file)));
+    }
+    const corpus = await open(quoted, { engine });
+    const person = corpus.relation('Person');
+    expect(person).toBe(`"${quoted.replaceAll('"', '""')}"."Person"`);
+    const [count] = await query(`SELECT count(*)::INTEGER AS n FROM ${person}`);
+    expect(count!.n).toBe(MANIFEST.vertex_tables.find((t) => t.name === 'Person')!.record_count);
+    const columns = await query(
+      `SELECT column_name AS c FROM information_schema.columns
+        WHERE table_catalog = '${corpus.url.replaceAll("'", "''")}' AND table_schema = '${corpus.schema}'
+          AND table_name = 'Person' ORDER BY ordinal_position`,
+    );
+    expect(columns.map((r) => r.c)).toEqual(
+      MANIFEST.vertex_tables.find((t) => t.name === 'Person')!.properties.map((p) => p.name),
+    );
+    expect(() => corpus.relation('Nobody')).toThrow(
+      fossil('corpus/unknown-table', { table: 'Nobody', tables: expect.arrayContaining(['Person']) }),
+    );
+    await corpus.close();
+  });
+
   it.each(TABLES.map((t) => [t.name, t] as const))('%s holds its record_count', async (_, table) => {
     const corpus = await open(CORPUS, { engine });
     const scan = corpus.scan({ table: table.name });

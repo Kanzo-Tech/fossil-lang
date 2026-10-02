@@ -20,6 +20,11 @@ import type { Scan, ScanParams } from './scan.js';
 export interface Corpus {
   /** The name of the DuckDB catalog its views live in: the job or the URL `open` was given. */
   readonly url: string;
+  /**
+   * The schema of that catalog the views are in: `main`, an attached database's own. With `url`, what
+   * a host filters `information_schema` by — `table_catalog = url AND table_schema = schema`.
+   */
+  readonly schema: string;
   /** `fossil.json`, parsed once when the corpus opened. */
   readonly manifest: Manifest;
   /**
@@ -30,6 +35,13 @@ export interface Corpus {
    *   `corpus/no-position` for a box over a table with no position — see `bind` for the rest.
    */
   scan(params: ScanParams): Scan;
+  /**
+   * **A table as SQL names it** — `"<url>"."Person"`, each part quoted — the relation `scan` reads
+   * and the one a host's own statement, Mosaic's included, must write.
+   *
+   * @throws {FossilError} `corpus/unknown-table` for a table the manifest does not declare.
+   */
+  relation(table: string): string;
   /**
    * Give back what opening took: the catalog — once no other open corpus of the same name on the
    * same engine holds it — and, for a job's corpus, the credential it was read under.
