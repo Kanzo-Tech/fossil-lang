@@ -12,5 +12,5 @@ Spending: 3 written, 3 lowered
     total
 
 ── run ──
-vertex Spend (https://shop.example/voc#Spend) × 3 — dense_id, subject, x, y, cluster_id, customer, total
+vertex Spend (https://shop.example/voc#Spend) × 3 — dense_id, subject, customer, total
 NO EDGE TYPE was written

@@ -82,26 +82,22 @@
 (* ------------------------------------------------------------------ roles *)
 (* A role says what a column IS, not what anyone does with it.
 
-   address      the row's position in the ordering. `dense_id` is the vertex's
-                rank in Hilbert order of its position, over the whole graph, so
-                it is an ADDRESS and never an identity: re-running the layout
-                renumbers every vertex. `/docs/design/identity` is the argument.
+   address      the row's position in the ordering. `dense_id` numbers the
+                whole graph `0..V-1`: the types in manifest order, each one
+                contiguous range, subject order inside it. It is an ADDRESS and
+                never an identity: a new subject renumbers every vertex after
+                it. `/docs/design/identity` is the argument.
    identity     what a bookmark keys on and what survives a rebuild.
-   coordinate   the plane. Declared as a pair, drawn as a pair.
-   categorical  an ordinal the writer computed, for a reader to colour by.
    endpoint     one end of a relation: a vertex's `dense_id`, which is global,
                 so an endpoint needs no type to be resolved. *)
 
 (* ------------------------------------------------------- the vertex payload *)
-(* In writer order: the five a writer emits, then the program's properties in
+(* In writer order: the two a writer emits, then the program's properties in
    the order the compiled schema lists them. A reader may project any subset.
    Rows are sorted by `dense_id`. *)
 
 col dense_id   = in payload ; type uint32  ; role address .
 col subject    = in payload ; type string  ; role identity .
-col x          = in payload ; type float   ; role coordinate .
-col y          = in payload ; type float   ; role coordinate .
-col cluster_id = in payload ; type uint32  ; role categorical .
 
 (* --------------------------------------------------------------- the edges *)
 (* One table per relation, sorted by `(src, dst)`, and no second copy sorted by

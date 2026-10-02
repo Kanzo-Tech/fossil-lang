@@ -1846,7 +1846,6 @@ dependencies = [
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-introspect",
- "fossil-layout",
  "fossil-lineage",
  "fossil-locator",
  "fossil-mem-probe",
@@ -1863,6 +1862,7 @@ dependencies = [
  "salsa",
  "serde",
  "serde_json",
+ "sha2",
  "slug",
  "smol_str",
  "tempfile",
@@ -1961,19 +1961,6 @@ dependencies = [
  "smol_str",
  "tempfile",
  "tracing",
-]
-
-[[package]]
-name = "fossil-layout"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "duckdb",
- "fossil-hir",
- "fossil-mem-probe",
- "serde_json",
- "sha2",
- "thiserror 1.0.69",
 ]
 
 [[package]]

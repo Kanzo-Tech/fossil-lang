@@ -2,17 +2,15 @@
 //!
 //! Writing a ten-million-vertex corpus peaks at **17.0 GiB** for 713 MB of output (measured
 //! 2026-08-04), and four hypotheses about where that memory went were false — each eliminated by
-//! measurement rather than argument. This is the instrument that eliminated them, and both halves
-//! of the write path report through it: the `DataFusion` executor and Parquet writer in `fossil-df`,
-//! and the layout post-pass in `fossil-layout`. Neither may depend on the other, so it is a
-//! crate of its own rather than a module inside one of them.
+//! measurement rather than argument. This is the instrument that eliminated them: the `DataFusion`
+//! executor and the Parquet writer in `fossil-df` report through it.
 //!
 //! ```text
 //! FOSSIL_MEM_PROBE=1 cargo test -p fossil-df --test write -- --nocapture
 //! ```
 //!
-//! Three decisions are argued in `/docs/design/later/cost`: why it is not in `fossil-base` (that `ps`
-//! call was `fossil-layout`'s only edge to the compiler substrate), why the clock is `Instant`
+//! Three decisions are argued in `/docs/design/later/cost`: why it is not in `fossil-base` (an
+//! instrument should not reach the compiler substrate for a `ps` call), why the clock is `Instant`
 //! (NTP steps a wall clock backwards), and why it is off on wasm32 (`Instant::now()` is
 //! `unimplemented!()` there, and taking it before consulting the switch aborted every browser run).
 //!

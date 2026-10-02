@@ -1,13 +1,10 @@
 //! The workspace dependency graph, as `cargo metadata` reports it.
 //!
-//! Two guards ask the same question of it and neither may keep its own copy of
-//! the answer: `tests/engine_reach.rs` asks which crates link an execution
-//! engine `deny.toml` bans, and `tests/substrate_reach.rs` asks whether the
-//! batch pass links the Salsa substrate. Both questions are *which workspace
-//! members reach this crate over normal edges*, and a walk copied into both
-//! files is the second copy this repository has spent two deletions learning to
-//! avoid. It lives in the library rather than in one of the test binaries
-//! because an integration test is its own crate and cannot `use` its sibling.
+//! `tests/engine_reach.rs` asks which crates link an execution engine
+//! `deny.toml` bans — *which workspace members reach this crate over normal
+//! edges* — and `tests/tokio_placement.rs` reads the member list. It lives in
+//! the library rather than in one of the test binaries because an integration
+//! test is its own crate and cannot `use` its sibling.
 //!
 //! What is deliberately NOT here is the wasm closure. `tests/tokio_placement.rs`
 //! re-derives that one on purpose, from the same inputs `cargo xtask wasm-check`
@@ -214,9 +211,8 @@ mod tests {
     #[allow(clippy::iter_on_single_items)]
     #[test]
     fn a_dev_edge_is_not_a_link_and_nothing_behind_it_is_either() {
-        // `fossil-layout`'s shape under `salsa` since `39d0fb8`, exactly: the
-        // pass keeps `fossil-df` for a bench baseline and the substrate behind
-        // it reaches no artefact of the pass.
+        // A crate that keeps another for a test only: the engine behind the
+        // dev edge reaches no artefact of the crate.
         let g = graph(
             &["cmd", "harness"],
             &[("cmd", "harness", Some("dev")), ("harness", "engine", None)],

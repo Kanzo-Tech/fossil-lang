@@ -34,17 +34,12 @@ fossil-base = { path = "../fossil-base" }
 # It depends on nothing, so this edge costs a `std::path` join and no build time.
 fossil-locator = { path = "../fossil-locator" }
 fossil-hir = { path = "../fossil-hir" }
-# `FOSSIL_MEM_PROBE` — peak RSS and elapsed seconds per phase of a write. A
-# dependency-free leaf, shared with `fossil-layout`'s layout pass; neither half
-# of the write path may depend on the other.
+# `FOSSIL_MEM_PROBE` — peak RSS and elapsed seconds per phase of a run. A
+# dependency-free leaf.
 fossil-mem-probe = { path = "../fossil-mem-probe" }
 fossil-mir = { path = "../fossil-mir" }
 # The format: `fossil.json`'s structs and the writer's fixed columns. WASM-clean.
 fossil-sinks = { path = "../fossil-sinks" }
-# The layout pass `write` runs over the whole graph before it encodes a byte.
-# It reaches this crate over no edge — it links no compiler substrate — so the
-# edge runs this way; `crates/xtask/tests/substrate_reach.rs` holds that.
-fossil-layout = { path = "../fossil-layout" }
 # The one IO path of a run: sources read and the corpus written through
 # `object_store` stores built from vended credentials. `object-store` only — the
 # `js` host adapter is `fossil-df-wasm`'s.
@@ -124,8 +119,11 @@ unicode-normalization = { workspace = true }
 
 [dev-dependencies]
 # `tests/write.rs` reads the corpus back with a second engine: a corpus only
-# one writer can read is not a corpus.
+# one writer can read is not a corpus. `tests/builtin_smoke.rs` binds every
+# stdlib template on it, and `tests/corpus_exec.rs` writes the native half of
+# the cross-engine parity baseline (`tests/wasm_parity/`), digested with `sha2`.
 duckdb = { workspace = true }
+sha2 = { workspace = true }
 # `tests/write.rs` wraps an `object_store` store to record the order of the
 # writes, and the trait is an `async_trait`.
 async-trait = { workspace = true }

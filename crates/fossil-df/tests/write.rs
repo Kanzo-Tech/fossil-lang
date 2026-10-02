@@ -14,14 +14,13 @@
 //! 2. `dense_id` is global and gapless — `0..V` once each over the union of the
 //!    vertex tables — and every vertex table is sorted by it;
 //! 3. the columns are the ones `properties` lists, in its order, the writer's
-//!    five first;
+//!    two first;
 //! 4. `subject` is unique within a table;
 //! 5. an edge table is `src`, `dst`, sorted by both, and every endpoint is a
 //!    `dense_id` of the table its `references` names;
 //! 6. row groups of 122,880 rows, and the sorted key delta-encoded;
-//! 7. `dense_id` order is `ST_Hilbert` order over the union's bounding box —
-//!    asked of a `duckdb` binary with the spatial extension, and skipped with a
-//!    message when there is none;
+//! 7. each vertex table is one contiguous range of `dense_id`, the tables in
+//!    manifest order — so a reader that holds the counts holds every range;
 //! 8. a value travels with its row and an edge connects the identities it was
 //!    written from — asked through `subject`, since `dense_id` is an address;
 //! 9. `fossil.json` is the last object written, and a write that fails before
@@ -394,10 +393,7 @@ async fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
             "{} declares its columns",
             v.name
         );
-        assert_eq!(
-            &declared[..5],
-            ["dense_id", "subject", "x", "y", "cluster_id"]
-        );
+        assert_eq!(&declared[..2], ["dense_id", "subject"]);
 
         // 4. `subject` is unique within the table.
         assert_eq!(
@@ -487,28 +483,17 @@ async fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         );
     }
 
-    // 7. The order is `ST_Hilbert`'s, over the union's box.
-    let sql = format!(
-        "LOAD spatial; \
-         WITH v AS (SELECT dense_id, x, y FROM read_parquet([{all}])), \
-         b AS (SELECT {{'min_x': min(x), 'min_y': min(y), 'max_x': max(x), 'max_y': max(y)}}::BOX_2D AS bx FROM v), \
-         h AS (SELECT dense_id, ST_Hilbert(x, y, bx) AS code FROM v, b) \
-         SELECT count(*) FROM (SELECT code, lag(code) OVER (ORDER BY dense_id) AS prev FROM h) WHERE prev > code;"
-    );
-    match std::process::Command::new("duckdb")
-        .args(["-noheader", "-csv", "-c", &sql])
-        .output()
-    {
-        Ok(out) if out.status.success() => assert_eq!(
-            String::from_utf8_lossy(&out.stdout).trim(),
-            "0",
-            "dense_id order is ST_Hilbert order"
-        ),
-        Ok(out) => eprintln!(
-            "skipped the ST_Hilbert check: {}",
-            String::from_utf8_lossy(&out.stderr)
-        ),
-        Err(_) => eprintln!("skipped the ST_Hilbert check: no `duckdb` on the path"),
+    // 7. A vertex table is one contiguous range, in manifest order.
+    let mut first = 0i64;
+    for v in &m.vertex_tables {
+        let p = at(&v.path);
+        let range = text(
+            &conn,
+            &format!("SELECT min(dense_id) || '..' || max(dense_id) FROM read_parquet({p})"),
+        );
+        let last = first + v.record_count as i64 - 1;
+        assert_eq!(range, format!("{first}..{last}"), "{} is one range", v.name);
+        first = last + 1;
     }
 
     // 8. The payload half: a value travels with its row, and an edge connects
@@ -516,7 +501,7 @@ async fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     //    ids and order, so a writer that renumbered the rows and attached each
     //    name to the wrong vertex, or pointed each edge at the wrong id, keeps
     //    them all. Joined through `subject`, never `dense_id`: the id is an
-    //    address the layout assigns, and the IRI is what a stranger holds.
+    //    address, and the IRI is what a stranger holds.
     let ordinal = |column: &str| format!("regexp_extract({column}, '([0-9]+)$', 1)");
     let person = m
         .vertex_tables
@@ -582,78 +567,8 @@ async fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// **A cluster is one run of `dense_id`** — over the union of the vertex
-/// tables, because the layout is joint: one partition and one placement over
-/// the whole graph, and one rank across every type.
-///
-/// `fossil_layout::layout::cluster_layout` gives each group one aligned block
-/// off a frontier that never goes back, and `order_by_hierarchy` numbers the
-/// groups so a run of consecutive ids is a subtree — so a group is a run of
-/// adjacent blocks, hence of Hilbert codes, hence of ids. This goes red for a
-/// buddy allocation that reuses its holes, a placement that ignores the
-/// hierarchy's order, or a type laid out apart from the others: each writes a
-/// corpus that opens and draws, with a reader colouring scattered packets.
-///
-/// A budget and not a zero: `dense_id` is the Hilbert rank over the union's
-/// bounding box, quantised per axis over the extent the positions turned out
-/// to have, and that box is square only to within the margins of the groups at
-/// its corners. What is asserted is the mass — ids inside a group's range that
-/// are not the group's — against one per cent of the corpus.
-#[tokio::test]
-async fn a_cluster_is_one_run_of_dense_id() {
-    let (result, out) = run(PROGRAM, sources(2_000, 6_000), usize::MAX).await;
-    result.expect("the run");
-    let root = materialise(&out, "cluster_runs").await;
-    let m = manifest(&root);
-    let conn = Connection::open_in_memory().expect("duckdb");
-    let all = m
-        .vertex_tables
-        .iter()
-        .map(|v| format!("'{}'", root.join(&v.path).display()))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    // More than one group, and a group that spans types, or the property is
-    // vacuous: a partition of one is an interval whatever the placement did,
-    // and a partition that never mixes types could be laid out per type.
-    let groups = scalar(
-        &conn,
-        &format!("SELECT count(DISTINCT cluster_id) FROM read_parquet([{all}])"),
-    );
-    assert!(groups > 1, "one group is not a partition to check");
-    let mixed = scalar(
-        &conn,
-        &format!(
-            "SELECT count(*) FROM (SELECT cluster_id FROM read_parquet([{all}], filename = true) \
-             GROUP BY cluster_id HAVING count(DISTINCT filename) > 1)"
-        ),
-    );
-    assert!(
-        mixed > 0,
-        "no group spans two types, so the layout is not shown to be joint"
-    );
-
-    let total: i64 = m.vertex_tables.iter().map(|v| v.record_count as i64).sum();
-    let foreign = scalar(
-        &conn,
-        &format!(
-            "SELECT coalesce(sum(hi - lo + 1 - n), 0)::BIGINT FROM ( \
-               SELECT count(*) AS n, min(dense_id) AS lo, max(dense_id) AS hi \
-               FROM read_parquet([{all}]) GROUP BY cluster_id)"
-        ),
-    );
-    let budget = total / 100;
-    assert!(
-        foreign <= budget,
-        "{foreign} ids fall inside a group's range without belonging to it, over {groups} \
-         groups — the budget is {budget}, and a partition scattered across the axis reaches {}",
-        total * groups,
-    );
-    let _ = std::fs::remove_dir_all(&root);
-}
-
 /// A table past one row group is cut at [`ROW_GROUP_ROWS`], which is what lets
-/// a reader prune a bounding box by the footer's statistics.
+/// a reader prune a `dense_id` range by the footer's statistics.
 #[tokio::test]
 async fn a_table_past_one_row_group_is_cut_at_122_880_rows() {
     let rows = ROW_GROUP_ROWS as u32 + 7_000;

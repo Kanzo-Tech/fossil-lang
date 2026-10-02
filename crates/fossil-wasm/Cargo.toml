@@ -27,7 +27,7 @@ workspace = true
 [dependencies]
 # Compiler-core crates wired into FossilWorkspace::compile
 # The wasm dep tree is the compiler front-end crates plus WASM glue. NO
-# fossil-layout (the write path's post-pass), NO fossil-lsp (a binary), NO
+# fossil-lsp (a binary), NO
 # fossil-sinks (the corpus format — the editor writes no corpus; that is
 # fossil-df-wasm's job).
 fossil-base    = { path = "../fossil-base" }
@@ -51,7 +51,7 @@ fossil-graph-schema = { path = "../fossil-graph-schema", features = ["js"] }
 # `fossil_lineage::source_refs` is what the test-reachable `refs_native` core
 # calls to report a program's source bindings. WASM-clean: its own deps are
 # fossil-hir + salsa + smol_str, all already inside the WASM gate, and it pulls
-# NEITHER fossil-layout NOR any native UDF crate.
+# no native UDF crate.
 fossil-lineage = { path = "../fossil-lineage" }
 # The `check()` method converts byte-offset spans to UTF-16 LSP ranges via
 # `fossil_ide::LineIndex` (the rust-analyzer model). fossil-ide is inside the

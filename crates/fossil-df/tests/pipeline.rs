@@ -460,12 +460,9 @@ async fn a_joined_relation_feeds_the_vertex_it_emits() {
             "dense_id",
             "subject",
             "name",
-            "team",
-            "x",
-            "y",
-            "cluster_id"
+            "team"
         ],
-        "the W0b shape, with a column that only exists because of the join",
+        "the vertex shape, with a column that only exists because of the join",
     );
     assert_eq!(
         strings(&batch, 1),

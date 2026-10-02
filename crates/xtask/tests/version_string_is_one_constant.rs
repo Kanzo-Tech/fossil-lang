@@ -77,8 +77,7 @@
 //!
 //! # Why it lives in `xtask`
 //!
-//! Same reason as `engine_reach.rs`, `substrate_reach.rs` and
-//! `tokio_placement.rs`: the claim is about the repository, not about any one
+//! Same reason as `engine_reach.rs` and `tokio_placement.rs`: the claim is about the repository, not about any one
 //! crate, so it cannot live in a crate that is part of what it measures.
 //! `fossil-sinks` cannot assert that `fossil-df` does not spell a literal.
 

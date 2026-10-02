@@ -797,7 +797,7 @@ catalogue! {
     WriteFailed { path: String },
 
     /// More vertices than a `u32` `dense_id` can number.
-    "layout/too-large", "The graph has too many vertices",
+    "run/too-large", "The graph has too many vertices",
     #[error("the graph has {vertices} vertices; a `dense_id` is a u32")]
     TooLarge { vertices: u64 },
 

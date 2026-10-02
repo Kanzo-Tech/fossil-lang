@@ -92,14 +92,14 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
     assert_eq!(kb.record_count, 1);
     assert_eq!(
         columns(kb),
-        ["dense_id", "subject", "x", "y", "cluster_id", "label"],
-        "KB carries its own column after the writer's five"
+        ["dense_id", "subject", "label"],
+        "KB carries its own column after the writer's two"
     );
     let project = vertex(&m, "Project");
     assert_eq!(project.record_count, 2);
     assert_eq!(
         columns(project),
-        ["dense_id", "subject", "x", "y", "cluster_id", "title"]
+        ["dense_id", "subject", "title"]
     );
 
     // The shape-ref `hasProject` is a TYPED edge KB→Project, NOT a column on KB;

@@ -125,7 +125,7 @@ async fn reads_an_ndjson_source() {
     let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
     assert_eq!(
         names,
-        ["dense_id", "subject", "name", "x", "y", "cluster_id"]
+        ["dense_id", "subject", "name"]
     );
 
     let name = batch

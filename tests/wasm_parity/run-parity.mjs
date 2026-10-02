@@ -3,7 +3,7 @@
 // 1.10502 AND on DuckDB-WASM 1.33.x.
 //
 // The upper tier of the two-tier strategy:
-//   1. native tier      — fossil-layout/tests/corpus_exec.rs runs the executable
+//   1. native tier      — fossil-df/tests/corpus_exec.rs runs the executable
 //                        corpus subset on native duckdb 1.10502, asserts the
 //                        result bytes, and WRITES the digest baseline
 //                        tests/wasm_parity/native_baseline.json
@@ -53,9 +53,8 @@ const CORPUS_SQL_PATH = resolve(
 // baseline.
 //
 // THE PRODUCER IS NOT IN THE TREE. This named
-// `crates/fossil-layout/tests/io_parity_corpus.rs` and no such file exists —
-// `ls crates/fossil-layout/tests/` is builtin_smoke, corpus_exec and
-// layout_renumber. The committed fixtures under `fixtures/` were produced by
+// `crates/fossil-layout/tests/io_parity_corpus.rs`, a crate that no longer
+// exists either. The committed fixtures under `fixtures/` were produced by
 // something that is gone, so the io tier can be re-checked and cannot be
 // re-generated: a fixture nobody can rebuild is a fixture nobody can correct.
 const IO_BASELINE_PATH = resolve(

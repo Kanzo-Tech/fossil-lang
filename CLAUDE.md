@@ -71,17 +71,6 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   for months and X was the one crate that had none, because the set was kept by hand.
   `crates/xtask/tests/tokio_placement.rs` derives it instead, prints the real table on any
   failure, and goes red if a crate name reappears in this bullet.
-- **The batch pass does not link the compiler substrate.** `fossil-layout` must reach `salsa`
-  over no normal edge. It reached it over four branches until `39d0fb8`: one `use` of a 37-line
-  Parquet encoder the executor never called put a compiler front-end and a query engine inside
-  the closure of a pass that resolves no name and holds no database. The dev edge that outlived
-  it went too, when the one example that used it wrote its own baseline encoder: the executor may
-  now depend on the pass without a cycle. **This bullet is the policy and the only copy of it:**
-  `crates/xtask/tests/substrate_reach.rs` reads the crate name out of THIS line, derives the
-  linker set from `cargo metadata`, and prints the whole table when it goes red — so neither
-  half is ever written down twice. It does NOT keep the substrate out of the wasm payload and
-  never claimed to: two cdylib roots take the compiler directly, and the gate's crate set did
-  not shrink when this edge moved.
 - **No `Box<dyn Trait>` inside Salsa queries.** Salsa interns concrete types; trait objects break
   memoization. Use `&dyn` parameters or enum dispatch.
 - **`unsafe_code = "deny"`** at workspace level, not `"forbid"`. Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (future FFI — the four Salsa `Update` impls for rowan types went with salsa 0.28, whose `SalsaValue` needs none for a `'static` type, and the workspace holds no `unsafe` today), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
@@ -162,7 +151,7 @@ crates/
                            the writer's column table from `corpus.bnf`. It byte-writes
                            nothing: `arrow-schema` for the types, `serde_json` to emit
   fossil-df/               DataFusion backend for the property-graph MIR, the one corpus
-                           writer (`write`: layout, then a Parquet per table, `fossil.json`
+                           writer (`write`: a Parquet per table, `fossil.json`
                            last), and `Executor` — the whole run a host drives, under the
                            2 GiB pool in `memory.rs` that refuses as `run/over-budget`
   fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each source's columns,
@@ -175,16 +164,8 @@ crates/
                            DESCRIBEs is `fossil_lineage::program_sources` — the list the
                            browser's `sources()` returns — so it links the compiler front-end,
                            as every host does
-  fossil-layout/           the layout pass — one Louvain partition and placement over the
-                           whole graph, and the global `dense_id` as the `ST_Hilbert` rank of
-                           each position. It computes and writes nothing, over arrow-rs
-                           alone; `fossil-df` depends on it, never the reverse. It links no
-                           engine: `DuckDB` is a dev-dependency. It COMPILES for wasm32 and
-                           declares it with `[package.metadata.fossil] wasm = true`, which is
-                           what puts it in the gate closure
   fossil-mem-probe/        `FOSSIL_MEM_PROBE` — peak RSS + elapsed seconds per phase of a
-                           write. Depends on NOTHING; both halves of the write path
-                           (fossil-df, fossil-layout) report through it
+                           run. Depends on NOTHING
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
                            error catalogue: `Problem`, `Failure`, and (feature `js`) the one
                            function every wasm crate throws a failure through

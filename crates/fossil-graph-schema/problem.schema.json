@@ -2767,7 +2767,7 @@
       "properties": {
         "code": {
           "enum": [
-            "layout/too-large"
+            "run/too-large"
           ],
           "type": "string"
         },

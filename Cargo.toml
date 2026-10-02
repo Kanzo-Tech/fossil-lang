@@ -37,9 +37,9 @@ serde_json = "1"
 # codegen depends on the 0.8 JSON Schema draft-07 dialect for
 # openapi-typescript interop.
 schemars = { version = "0.8" }
-# Pure-Rust SHA-256 for the cross-engine parity digest (native_baseline.json
-# producer in fossil-layout tests). Already a transitive dep via duckdb/parquet;
-# WASM-safe (no C/FFI) though only used in a native-only dev dependency here.
+# Pure-Rust SHA-256 for the cross-engine parity digest
+# (`fossil-df/tests/corpus_exec.rs`). Already a transitive dep via
+# duckdb/parquet; only a native dev-dependency.
 sha2 = "0.10"
 # `fossil-storage`'s IO half: a vended credential as a store `DataFusion`
 # reads through and fossil writes through. `aws` + `azure` are the stores a
@@ -98,9 +98,9 @@ arrow = "58"
 bytes = "1"
 
 # === The native engine — NATIVE ONLY ===
-# `fossil-introspect` is the one crate on a normal edge; `fossil-df` and
-# `fossil-layout` keep it as a dev-dependency, to read a written corpus back or
-# to bring an engine to a test. `deny.toml`'s
+# `fossil-introspect` is the one crate on a normal edge; `fossil-df` keeps it
+# as a dev-dependency, to read a written corpus back or to bring an engine to a
+# test. `deny.toml`'s
 # `duckdb` wrappers list is the enforced version of that sentence.
 duckdb = { version = "1.10502", features = ["bundled"] }
 
@@ -149,8 +149,7 @@ expect-test = "1"
 wasm-bindgen-test = "0.3"
 # Native temp dirs for integration tests that write Parquet to disk and read it
 # back via duckdb — `fossil-df`, `fossil-introspect` and `fossil-lsp`, which
-# are its three dev-dependents. (It named `fossil-layout` here and that crate
-# dropped it along with the `tests/graphar_decomp.rs` it served.) Native-only
+# are its three dev-dependents. Native-only
 # (uses a real filesystem); no `tests/` target is built for wasm32.
 tempfile = "3"
 

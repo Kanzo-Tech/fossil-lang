@@ -33,7 +33,7 @@
       "description": "What a column IS — never what a reader does with it.\n\nA reader that used to carry a list now names the roles it means. It is data in `fossil.json` too: a writer column's `role` in its table's `properties`, spelled as the variant in lowercase.",
       "oneOf": [
         {
-          "description": "The row's rank in the ordering, which a re-layout renumbers.",
+          "description": "The row's rank in the ordering, which a new subject renumbers.",
           "type": "string",
           "enum": [
             "address"
@@ -44,20 +44,6 @@
           "type": "string",
           "enum": [
             "identity"
-          ]
-        },
-        {
-          "description": "One axis of the plane.",
-          "type": "string",
-          "enum": [
-            "coordinate"
-          ]
-        },
-        {
-          "description": "An ordinal the writer computed, for a reader to colour by.",
-          "type": "string",
-          "enum": [
-            "categorical"
           ]
         },
         {
@@ -150,61 +136,6 @@
         }
       }
     },
-    "Position": {
-      "description": "Where a vertex table's rows are drawn.",
-      "oneOf": [
-        {
-          "description": "The writer's layout pass placed the rows.",
-          "type": "object",
-          "required": [
-            "by",
-            "x",
-            "y"
-          ],
-          "properties": {
-            "by": {
-              "type": "string",
-              "enum": [
-                "layout"
-              ]
-            },
-            "x": {
-              "description": "The column holding the horizontal coordinate.",
-              "type": "string"
-            },
-            "y": {
-              "description": "The column holding the vertical coordinate.",
-              "type": "string"
-            }
-          }
-        },
-        {
-          "description": "The program declared two of its own columns as the position.",
-          "type": "object",
-          "required": [
-            "by",
-            "x",
-            "y"
-          ],
-          "properties": {
-            "by": {
-              "type": "string",
-              "enum": [
-                "program"
-              ]
-            },
-            "x": {
-              "description": "The column holding the horizontal coordinate.",
-              "type": "string"
-            },
-            "y": {
-              "description": "The column holding the vertical coordinate.",
-              "type": "string"
-            }
-          }
-        }
-      ]
-    },
     "Property": {
       "description": "One column.",
       "type": "object",
@@ -269,7 +200,7 @@
           ]
         },
         "key": {
-          "description": "The key column: `dense_id`, global and gapless across every vertex table.",
+          "description": "The key column: `dense_id`, global and gapless across every vertex table, and one contiguous range of it per table, in manifest order.",
           "type": "string"
         },
         "name": {
@@ -279,17 +210,6 @@
         "path": {
           "description": "The table's Parquet file, relative to the corpus root.",
           "type": "string"
-        },
-        "position": {
-          "description": "The columns this table is drawn at. Absent: the table is not drawn.",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Position"
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "properties": {
           "description": "Every column of the file, in file order.",

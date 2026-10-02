@@ -362,14 +362,9 @@ pub fn connection_urls(connections: &HashMap<String, ConnectionCreds>) -> HashMa
 /// `read_csv_auto` over a cloud `@conn` source authenticates. No-op for
 /// connections without a secret (local / public-URL sources).
 ///
-/// This ran through `fossil_layout::install_secret`, and that indirection is
-/// gone. The rendering — which is the part with a decision in it, and the part
+/// The rendering — which is the part with a decision in it, and the part
 /// with tests — is [`fossil_storage::ResolvedPath::create_secret_sql`], in `fossil-storage`,
-/// and it has not moved. What wrapped it was `conn.execute_batch(sql)` under an
-/// error enum that both of its two callers immediately flattened to a string.
-/// A crate does not need a dependency to run one statement on a connection it
-/// already holds, and that dependency was the last thing making `fossil-layout`
-/// link `DuckDB`.
+/// and this runs it: one statement on a connection the caller already holds.
 #[allow(clippy::implicit_hasher)] // as `pre_introspect_and_register`.
 pub fn apply_source_creds(
     conn: &duckdb::Connection,

@@ -78,10 +78,7 @@ async fn a_call_produces_its_column() {
             "dense_id",
             "subject",
             "slug",
-            "shout",
-            "x",
-            "y",
-            "cluster_id"
+            "shout"
         ],
         "the call's column is in the materialised shape"
     );

@@ -88,7 +88,7 @@ export type Code =
   | 'source/unparseable'
   | 'engine/failed'
   | 'write/failed'
-  | 'layout/too-large'
+  | 'run/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
   | 'storage/outside-prefix'
@@ -197,7 +197,7 @@ export const CODES: readonly Code[] = [
   'source/unparseable',
   'engine/failed',
   'write/failed',
-  'layout/too-large',
+  'run/too-large',
   'storage/no-credential',
   'storage/ambiguous-prefix',
   'storage/outside-prefix',
@@ -795,7 +795,7 @@ export interface ProblemData {
   /**
    * More vertices than a `u32` `dense_id` can number.
    */
-  'layout/too-large': {
+  'run/too-large': {
     vertices: number;
   };
   /**
@@ -1037,7 +1037,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'source/unparseable': 'A source does not parse',
   'engine/failed': 'The query engine failed',
   'write/failed': 'A corpus file could not be written',
-  'layout/too-large': 'The graph has too many vertices',
+  'run/too-large': 'The graph has too many vertices',
   'storage/no-credential': 'No credential was vended',
   'storage/ambiguous-prefix': 'More than one prefix was vended',
   'storage/outside-prefix': 'Outside the vended prefix',
@@ -1128,7 +1128,7 @@ export type DetailedCode =
   | 'source/unparseable'
   | 'engine/failed'
   | 'write/failed'
-  | 'layout/too-large'
+  | 'run/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
   | 'storage/outside-prefix'
@@ -1218,7 +1218,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'source/unparseable': (d) => `the source \`${d.locator}\` does not parse`,
   'engine/failed': (_) => `the query engine failed`,
   'write/failed': (d) => `\`${d.path}\` could not be written`,
-  'layout/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
+  'run/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
   'storage/no-credential': (d) => `the host vended no ${d.access} credential for ${d.scope}`,
   'storage/ambiguous-prefix': (d) => `${d.scope} vends ${d.count} prefixes, and one was expected`,
   'storage/outside-prefix': (d) => `${d.locator} lies outside ${d.prefix}`,

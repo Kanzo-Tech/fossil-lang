@@ -16,5 +16,5 @@ Orders: 3 written, 3 lowered
     region
 
 ── run ──
-vertex Order (https://shop.example/voc#Order) × 2 — dense_id, subject, x, y, cluster_id, amount, region
+vertex Order (https://shop.example/voc#Order) × 2 — dense_id, subject, amount, region
 NO EDGE TYPE was written
