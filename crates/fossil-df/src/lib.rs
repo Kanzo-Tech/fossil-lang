@@ -929,7 +929,11 @@ pub(crate) async fn read_source(
             ctx.read_csv(uri, options.schema(&schema)).await
         }
         SourceFormat::Json => read_json_source(ctx, uri).await,
-        SourceFormat::Parquet => ctx.read_parquet(uri, ParquetReadOptions::default()).await,
+        SourceFormat::Parquet => {
+            let options = ParquetReadOptions::default();
+            source_files(ctx, uri, options.file_extension).await?;
+            ctx.read_parquet(uri, options).await
+        }
         SourceFormat::Provider { name } => {
             let table = provider_table_name(binding);
             ctx.table(&table).await.map_err(|e| {
@@ -959,22 +963,15 @@ async fn csv_schema(
 ) -> datafusion::error::Result<Schema> {
     use datafusion::datasource::file_format::csv::CsvFormat;
     use datafusion::datasource::file_format::options::ReadOptions as _;
-    use datafusion::datasource::listing::ListingTableUrl;
     use futures::{StreamExt as _, TryStreamExt as _};
     use object_store::ObjectStoreExt as _;
 
-    let table = ListingTableUrl::parse(uri)?;
     let state = ctx.state();
     let listing = options.to_listing_options(&ctx.copied_config(), ctx.copied_table_options());
     let format = (listing.format.as_ref() as &dyn std::any::Any)
         .downcast_ref::<CsvFormat>()
         .ok_or_else(|| DataFusionError::Internal("CSV options without a CSV format".into()))?;
-    let store = ctx.runtime_env().object_store(&table)?;
-    let objects: Vec<object_store::ObjectMeta> = table
-        .list_all_files(&state, store.as_ref(), &listing.file_extension)
-        .await?
-        .try_collect()
-        .await?;
+    let (store, objects) = source_files(ctx, uri, &listing.file_extension).await?;
     let mut remaining = options.schema_infer_max_records;
     let mut schemas = Vec::with_capacity(objects.len());
     for object in objects {
@@ -1004,6 +1001,49 @@ async fn csv_schema(
         }
     }
     Ok(Schema::try_merge(schemas)?)
+}
+
+/// The files `uri` names in its store, and `source/not-found` when it names
+/// none.
+///
+/// `DataFusion` reads a locator that matches nothing as a relation with no
+/// columns — a `HEAD` that answers not-found is retried as a prefix, and an
+/// empty listing infers an empty schema — so a missing file failed later, at
+/// the first column the program read, as `No field named <row>.<column>`: a
+/// sentence about the program for a mistake in the store. The listing is the
+/// one `read_csv` and `read_parquet` make themselves.
+async fn source_files(
+    ctx: &SessionContext,
+    uri: &str,
+    extension: &str,
+) -> datafusion::error::Result<(
+    Arc<dyn object_store::ObjectStore>,
+    Vec<object_store::ObjectMeta>,
+)> {
+    use datafusion::datasource::listing::ListingTableUrl;
+    use futures::TryStreamExt as _;
+
+    let table = ListingTableUrl::parse(uri)?;
+    let store = ctx.runtime_env().object_store(&table)?;
+    let objects: Vec<object_store::ObjectMeta> = table
+        .list_all_files(&ctx.state(), store.as_ref(), extension)
+        .await?
+        .try_collect()
+        .await?;
+    if objects.is_empty() {
+        return Err(source_not_found(uri));
+    }
+    Ok((store, objects))
+}
+
+/// `source/not-found` for `uri`, as a `Failure` the executor finds in whatever
+/// `DataFusion` wraps it in — the way [`refuse_if_poisoned`] carries its own.
+fn source_not_found(uri: &str) -> DataFusionError {
+    DataFusionError::External(Box::new(fossil_graph_schema::Failure::new(
+        fossil_graph_schema::Problem::SourceNotFound {
+            locator: uri.to_string(),
+        },
+    )))
 }
 
 /// A header's names made unique by `DuckDB`'s rule, because `DuckDB` is the
@@ -1106,7 +1146,10 @@ async fn fetch_bytes(ctx: &SessionContext, uri: &str) -> datafusion::error::Resu
             datafusion::object_store::GetOptions::default(),
         )
         .await
-        .map_err(|e| DataFusionError::Execution(format!("read `{uri}`: {e}")))?
+        .map_err(|e| match e {
+            object_store::Error::NotFound { .. } => source_not_found(uri),
+            e => DataFusionError::Execution(format!("read `{uri}`: {e}")),
+        })?
         .bytes()
         .await
         .map_err(|e| DataFusionError::Execution(format!("read `{uri}`: {e}")))?;

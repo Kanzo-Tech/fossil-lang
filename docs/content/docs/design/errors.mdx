@@ -330,7 +330,7 @@ are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no cod
 | `pipeline` (12) | `unknown-verb`, `unimplemented-verb`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-one-side` |
 | `unsupported` (1) | `expression` — a gap in the compiler, not a mistake in the program |
 
-**Run, storage, corpus and the API — 33 codes.** The executor's descriptor errors reuse the compile
+**Run, storage, corpus and the API — 34 codes.** The executor's descriptor errors reuse the compile
 codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-registered`,
 `document/unparseable`, …), because they are the same mistake found late:
 
@@ -339,7 +339,7 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 | `run` (3) | `over-budget`, `does-not-compile`, `destination-uncovered` | `RunError`, `refuse_if_poisoned`, the destination check |
 | `shape` (+1) | `more-than-one-output` | the executor's descriptor |
 | `document` (+1) | `unread` | `runJob`'s unread list |
-| `source` (2) | `not-utf8`, `unparseable` | the RDF sources a run decodes |
+| `source` (3) | `not-found`, `not-utf8`, `unparseable` | a CSV, JSON or Parquet source that names no file; the RDF sources a run decodes |
 | `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the corpus's `ATTACH`, `scan` and `sql` |
 | `write` (1) | `failed` | `WriteError`; its other variants are `internal/bug` |
 | `layout` (1) | `too-large` | `LayoutError`; its other variants are `internal/bug` |
@@ -353,7 +353,7 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 fresh object. Nobody branches on it; a host shows it and reports it. A panic stays a
 `WebAssembly.RuntimeError` — it is not a value that can be built at the moment it happens.
 
-**102 codes**, 101 of them a mistake someone other than fossil can repair.
+**106 codes**, 105 of them a mistake someone other than fossil can repair.
 
 **Retired, with no program that reached them.** `write/unknown-type` and `layout/dangling-endpoint`
 were released in `v0.3.0-alpha.18` and are in `RETIRED`: the executor builds the schema it writes

@@ -1,0 +1,38 @@
+---
+title: A source names no file
+description: "`source/not-found` — a CSV, JSON or Parquet source names a location where its store holds no file."
+---
+
+A program reads a file with `io.csv`, `io.json` or `io.parquet`, and the store the run reads through
+holds nothing at that location:
+
+```fossil
+PlaceRow := io.csv("@ldbc/static/place_0_0.csv", delimiter = "|")
+```
+
+```text
+the source `s3://keasy-dev/ldbc/static/place_0_0.csv` names no file
+```
+
+`data.locator` is the location fossil resolved — after a connection alias such as `@ldbc` has been
+resolved to its URL — and it is the one place to look. An RDF source that is missing fails earlier,
+when its bytes are fetched, as [`storage/unreachable`](/docs/errors/storage/unreachable).
+
+## Why fossil refuses it
+
+The query engine reads a location that matches nothing as a table with no columns: a file that is not
+there is retried as a folder, and an empty folder has no schema. The run then failed at the first
+column the program read, as [`engine/failed`](/docs/errors/engine/failed) with `No field named
+PlaceRow.id` — a sentence about the program, for a mistake in the store, and the same sentence for
+every mapping that reads the file. So fossil lists the location before it reads it, and a location
+that names no file stops the run there, with the file named. How a source is bound is in
+[what you read](/docs/book/what-you-read).
+
+## How to repair it
+
+- **Check that the file was uploaded.** A seed or an export that never ran leaves the bucket without
+  it; list the locator's folder in the store.
+- **Check the connection's URL.** The locator is the alias resolved through the connection map, so a
+  connection that points at the wrong bucket or prefix shows here as a path you did not expect.
+- **Check the spelling and the case.** Object stores compare keys exactly: `Place_0_0.csv` is not
+  `place_0_0.csv`.

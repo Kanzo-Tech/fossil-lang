@@ -771,6 +771,11 @@ catalogue! {
 
     // ── source, engine, write, layout, storage, corpus, api ─────────────
 
+    /// A CSV, JSON or Parquet source names no file in its store.
+    "source/not-found", "A source names no file",
+    #[error("the source `{locator}` names no file")]
+    SourceNotFound { locator: String },
+
     /// A source's bytes are not UTF-8 text.
     "source/not-utf8", "A source is not UTF-8",
     #[error("the source `{locator}` is not UTF-8")]

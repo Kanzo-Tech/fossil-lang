@@ -103,8 +103,8 @@ describe('FossilExecutor', () => {
       ).rejects.toThrow(
         expect.objectContaining({
           name: 'FossilError',
-          code: 'engine/failed',
-          cause: expect.objectContaining({ name: 'DataFusionError' }),
+          code: 'source/not-found',
+          data: { locator: 'https://data.example.com/orders.csv' },
         }),
       );
     } finally {

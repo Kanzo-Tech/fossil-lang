@@ -24,7 +24,9 @@ It is raised from these places:
 - **A run**, when executing the graph fails for any reason other than the memory budget
   ([`run/over-budget`](/docs/errors/run/over-budget)) or a program that does not compile
   ([`run/does-not-compile`](/docs/errors/run/does-not-compile)). A CSV, JSON or Parquet source that
-  cannot be read or parsed fails here; so does `runInMemory` asked to read a source it was not given.
+  cannot be read or parsed fails here; one whose file is not there is
+  [`source/not-found`](/docs/errors/source/not-found), and so is `runInMemory` asked to read a
+  source it was not given.
 - **A corpus**, when DuckDB refuses the statements that open it, a `scan`, or a `sql` call.
 
 ## Why fossil refuses it

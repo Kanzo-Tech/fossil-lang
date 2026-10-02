@@ -164,8 +164,9 @@ impl Executor {
     /// for more than the run's [`BUDGET`](crate::memory::BUDGET) had left,
     /// before anything is written; `run/does-not-compile`, relating the
     /// program's diagnostics; `run/destination-uncovered`; a `storage/…` code
-    /// for a source that will not route; `engine/failed`, with `DataFusion`'s
-    /// error as the cause; or what [`crate::write()`] refused.
+    /// for a source that will not route; `source/not-found` for one whose file
+    /// is not in its store; `engine/failed`, with `DataFusion`'s error as the
+    /// cause; or what [`crate::write()`] refused.
     pub async fn execute(&self, storage: &mut Storage, dest: &str) -> Result<RunReport, Failure> {
         let (db, file, connections) = (&self.db, self.file, &self.connections);
         let descriptor = self.descriptor()?;

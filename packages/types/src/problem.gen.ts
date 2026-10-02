@@ -83,6 +83,7 @@ export type Code =
   | 'run/over-budget'
   | 'run/does-not-compile'
   | 'run/destination-uncovered'
+  | 'source/not-found'
   | 'source/not-utf8'
   | 'source/unparseable'
   | 'engine/failed'
@@ -191,6 +192,7 @@ export const CODES: readonly Code[] = [
   'run/over-budget',
   'run/does-not-compile',
   'run/destination-uncovered',
+  'source/not-found',
   'source/not-utf8',
   'source/unparseable',
   'engine/failed',
@@ -763,6 +765,12 @@ export interface ProblemData {
     destination: string;
   };
   /**
+   * A CSV, JSON or Parquet source names no file in its store.
+   */
+  'source/not-found': {
+    locator: string;
+  };
+  /**
    * A source's bytes are not UTF-8 text.
    */
   'source/not-utf8': {
@@ -1024,6 +1032,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'run/over-budget': 'The run needs more memory than its budget',
   'run/does-not-compile': 'The program does not compile',
   'run/destination-uncovered': 'No store covers the destination',
+  'source/not-found': 'A source names no file',
   'source/not-utf8': 'A source is not UTF-8',
   'source/unparseable': 'A source does not parse',
   'engine/failed': 'The query engine failed',
@@ -1114,6 +1123,7 @@ export type DetailedCode =
   | 'unsupported/expression'
   | 'run/does-not-compile'
   | 'run/destination-uncovered'
+  | 'source/not-found'
   | 'source/not-utf8'
   | 'source/unparseable'
   | 'engine/failed'
@@ -1203,6 +1213,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'unsupported/expression': (d) => `\`${d.expression}\` is not an expression fossil can lower yet, so this property is not written`,
   'run/does-not-compile': (_) => `the program does not compile; nothing was run`,
   'run/destination-uncovered': (d) => `no store covers the destination ${d.destination}`,
+  'source/not-found': (d) => `the source \`${d.locator}\` names no file`,
   'source/not-utf8': (d) => `the source \`${d.locator}\` is not UTF-8`,
   'source/unparseable': (d) => `the source \`${d.locator}\` does not parse`,
   'engine/failed': (_) => `the query engine failed`,
