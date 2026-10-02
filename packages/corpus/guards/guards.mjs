@@ -70,11 +70,6 @@ function spells(declared, actual) {
   return known === undefined ? null : known.includes(actual);
 }
 
-const NUMERIC = new Set([
-  "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
-  "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "FLOAT", "DOUBLE",
-]);
-
 /** The fixed columns of a table, by the fields of its manifest entry that name them. */
 function fixedColumns(table) {
   const e = table.entry;
@@ -88,8 +83,8 @@ export const GUARDS = [
     title: "The corpus is not empty",
     proves:
       "Every other guard is a count of violations, so an empty corpus satisfies all of them at " +
-      "once. This one asserts the manifest declares at least one vertex table and one with a " +
-      "`position`, and that every declared table — vertices and edges — holds rows. A table with " +
+      "once. This one asserts the manifest declares at least one vertex table, and that every " +
+      "declared table — vertices and edges — holds rows. A table with " +
       "no rows is a relation a reader creates a view over and draws nothing from, and a writer " +
       "that has nothing to say about a type does not declare it.",
     cannotProve:
@@ -99,9 +94,6 @@ export const GUARDS = [
     run(corpus) {
       const failures = [];
       if (corpus.vertices.length === 0) failures.push("the manifest declares no vertex table");
-      if (corpus.vertices.length > 0 && !corpus.vertices.some((t) => t.entry.position)) {
-        failures.push("no vertex table declares a position, so there is nothing to draw");
-      }
       for (const table of [...corpus.vertices, ...corpus.edges]) {
         if (table.rows === 0n) failures.push(`${table.kind} table ${table.name} has no rows`);
       }
@@ -240,44 +232,38 @@ export const GUARDS = [
 
   {
     id: "dense-ids",
-    title: "`dense_id` is one gapless 0..V−1 over the whole graph, the drawn vertices first",
+    title: "`dense_id` is one gapless 0..V−1 over the whole graph, a contiguous range per table",
     proves:
-      "Over the union of the vertex tables the keys are exactly `0..V−1`, with no gap, no repeat " +
-      "and no null, so a reader holding one buffer per column indexes it BY the id. And every " +
-      "table with a `position` holds ids below every table without one: the drawn vertices are " +
-      "`0..V_placed−1`, so a buffer sized by the drawn tables' counts holds every id an edge " +
-      "between drawn vertices can name.",
+      "Each vertex table holds exactly the ids `first..first+rows−1`, with no gap, no repeat and no " +
+      "null, where `first` is the rows of every vertex table before it in manifest order — so the " +
+      "union is `0..V−1`, a reader holding one buffer per column indexes it BY the id, and the " +
+      "counts alone say which table an id belongs to.",
     cannotProve:
-      "That the numbering means anything spatial. The ids are the Hilbert rank of the position " +
-      "when the writer is fossil's, and that is not checked: the order is not part of the " +
-      "contract, and a gapless numbering in any order passes here.",
+      "That the order inside a table is subject order. The writer's is, and a reader may not rely " +
+      "on it: `subject` is the identity, `dense_id` only an address.",
     run(corpus) {
-      const tables = readable(corpus.vertices).filter((t) => t.columns.has(t.entry.key));
-      if (tables.length === 0) return result();
-      const union = tables
-        .map((t) => `SELECT "${t.entry.key}"::UBIGINT AS id, ${t.entry.position ? 1 : 0} AS placed FROM ${parquet(t.file)}`)
-        .join(" UNION ALL ");
-      const row = query(
-        `SELECT min(id) AS lo, max(id) AS hi, count(*) AS n, count(DISTINCT id) AS distinct_n,
-                count(*) FILTER (id IS NULL) AS nulls,
-                max(id) FILTER (placed = 1) AS placed_hi, min(id) FILTER (placed = 0) AS unplaced_lo
-           FROM (${union})`,
-      )[0];
       const failures = [];
-      if (Number(row.nulls) > 0) failures.push(`${row.nulls} vertex(es) have no dense_id`);
-      if (Number(row.lo) !== 0) failures.push(`the graph starts at dense_id ${row.lo}, not 0`);
-      if (Number(row.hi) !== Number(row.n) - 1) {
-        failures.push(`the graph has ${row.n} vertices and a largest dense_id of ${row.hi}`);
+      let first = 0n;
+      for (const t of corpus.vertices) {
+        const declared = BigInt(t.entry.record_count ?? 0);
+        if (t.rows === null || !t.columns.has(t.entry.key)) {
+          first += declared;
+          continue;
+        }
+        const row = query(
+          `SELECT min("${t.entry.key}")::UBIGINT AS lo, max("${t.entry.key}")::UBIGINT AS hi, count(*) AS n,
+                  count(DISTINCT "${t.entry.key}") AS distinct_n, count(*) FILTER ("${t.entry.key}" IS NULL) AS nulls
+             FROM ${parquet(t.file)}`,
+        )[0];
+        const n = BigInt(row.n);
+        if (Number(row.nulls) > 0) failures.push(`${t.name}: ${row.nulls} vertex(es) have no dense_id`);
+        if (BigInt(row.distinct_n) !== n) failures.push(`${t.name}: ${n - BigInt(row.distinct_n)} dense_id(s) repeat`);
+        if (n > 0n && (BigInt(row.lo) !== first || BigInt(row.hi) !== first + n - 1n)) {
+          failures.push(`${t.name} holds dense_id ${row.lo}..${row.hi}, and its range is ${first}..${first + n - 1n}`);
+        }
+        first += n;
       }
-      if (Number(row.distinct_n) !== Number(row.n)) {
-        failures.push(`${Number(row.n) - Number(row.distinct_n)} dense_id(s) are held by two vertices`);
-      }
-      if (row.placed_hi !== null && row.unplaced_lo !== null && Number(row.unplaced_lo) < Number(row.placed_hi)) {
-        failures.push(
-          `a vertex with no position holds dense_id ${row.unplaced_lo}, below a drawn vertex's ${row.placed_hi}`,
-        );
-      }
-      return result(failures, [`${Number(row.n).toLocaleString("en-US")} vertices in ${tables.length} table(s)`]);
+      return result(failures, [`${first.toLocaleString("en-US")} vertices in ${corpus.vertices.length} table(s)`]);
     },
   },
 
@@ -367,44 +353,6 @@ export const GUARDS = [
     },
   },
 
-  {
-    id: "declared-position",
-    title: "A declared position names two numeric columns the table carries",
-    proves:
-      "Where a vertex table declares `position`, `by` is `layout` or `program`, and `x` and `y` " +
-      "name numeric columns of its file. A `layout` position has no null: the layout places every " +
-      "vertex it is given. A table with no `position` is one a reader does not draw, which is a " +
-      "declaration and not a gap.",
-    cannotProve:
-      "That the positions are any good, or that a `program` position's nulls are intended — a " +
-      "program may leave a vertex unplaced, and this reports how many it left rather than failing.",
-    run(corpus) {
-      const failures = [];
-      const notes = [];
-      for (const table of readable(corpus.vertices)) {
-        const position = table.entry.position;
-        if (position === undefined || position === null) {
-          notes.push(`${table.name}: no position — not drawn`);
-          continue;
-        }
-        if (position.by !== "layout" && position.by !== "program") {
-          failures.push(`${table.name}: position.by is ${JSON.stringify(position.by)}, not layout or program`);
-        }
-        const axes = [position.x, position.y];
-        const missing = axes.filter((c) => !NUMERIC.has(table.columns.get(c) ?? ""));
-        if (missing.length > 0) {
-          failures.push(`${table.name}: position names ${missing.join(", ")}, which is no numeric column`);
-          continue;
-        }
-        const nulls = scalar(
-          `SELECT count(*) FROM ${parquet(table.file)} WHERE "${position.x}" IS NULL OR "${position.y}" IS NULL`,
-        );
-        if (position.by === "layout") failures.push(...violations(nulls, `${table.name}: a laid-out vertex with no position`));
-        else notes.push(`${table.name}: ${nulls} vertex(es) the program left unplaced`);
-      }
-      return result(failures, notes);
-    },
-  },
 ];
 
 /** Run every guard, or the subset whose ids are given. */

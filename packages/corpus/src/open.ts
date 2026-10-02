@@ -1,53 +1,43 @@
 /**
- * The door: `fossil.json` read once, one view per table, and `close`.
+ * The door: a corpus attached to the host's engine under a name, and the function that detaches it.
  */
 
-import { mount, type Mount } from '@fossil-lang/storage';
+import { mount } from '@fossil-lang/storage';
 import { FossilError, attachCause, type Engine, type Host } from '@fossil-lang/types';
 
-import type { Corpus, SqlCorpus, SqlResult } from './corpus.js';
-import { parseManifest, type EdgeTable, type VertexTable } from './manifest.js';
-import { notACount, scanOf } from './scan.js';
+import { parseManifest, type Manifest } from './manifest.js';
 import { ident, lit, query } from './sql.js';
 
 /** The file every open reads first. */
 const ENTRY_POINT = 'fossil.json';
 
-/** The schema an attached database creates its views in, and so where a corpus's views are. */
-const SCHEMA = 'main';
+/** The two relations the manifest becomes, beside the tables' views. */
+const CATALOG_VIEWS = ['fossil_tables', 'fossil_columns'] as const;
 
-/** Rows {@link SqlCorpus.sql} answers with when the caller names no limit. */
-const SQL_LIMIT = 10_000;
-
-/**
- * What {@link open} takes.
- */
+/** What {@link open} takes: the engine, and where the corpus is — a job under its host, or a URL. */
 export interface OpenOptions {
   /**
-   * The page's engine — `@fossil-lang/types`' `Engine`, DuckDB-WASM in a browser. Every read goes
-   * through it, `fossil.json` included, and a scan's signal reaches the statement it is running.
+   * The page's engine — `@fossil-lang/types`' `Engine`, DuckDB-WASM in a browser. `fossil.json` is
+   * read through it and the views are created in it; every later read is the host's own SQL.
    */
   engine: Engine;
   /**
-   * What vends the job's credential. With it, the first argument of {@link open} names a job and
-   * not a URL: the corpus is the one prefix the host vends `read` on for `{ job }`, kept fresh by
-   * `@fossil-lang/storage` for as long as the corpus is open.
+   * What vends the job's credential. With it, the name {@link open} is given is the job: the corpus
+   * is the one prefix the host vends `read` on for `{ job }`, kept fresh by `@fossil-lang/storage`
+   * until the corpus is closed.
    */
   host?: Host;
-  /**
-   * Whether this corpus puts a caller's SQL in front of the engine. `'withheld'` by default, and
-   * `'allowed'` widens the answer to {@link SqlCorpus}: a withheld corpus does not carry a member
-   * that refuses, it does not carry the member. It is not a security boundary — the engine is the
-   * host's and so are the files — it is the host writing the decision down.
-   */
-  sql?: 'withheld' | 'allowed';
+  /** A corpus at a URL, for a caller with no host — public, or the local filesystem in Node. */
+  url?: string;
   /**
    * Stops the open: it rejects with the signal's reason, and what it had made — a mount, a catalog —
-   * is given back. It reaches the host's credential request and every statement the open runs; the
-   * corpus that comes back does not keep it.
+   * is given back. It reaches the host's credential request and every statement the open runs.
    */
   signal?: AbortSignal;
 }
+
+/** Gives back what {@link open} took: the catalog, once no other open of the name holds it, and the credential. */
+export type Close = () => Promise<void>;
 
 /**
  * How many open corpora hold each catalog, per engine: two opens of one name share its views, and
@@ -56,49 +46,52 @@ export interface OpenOptions {
 const holders = new WeakMap<object, Map<string, number>>();
 
 /**
- * Open a corpus: `GET fossil.json`, check its `format`, and create a view per table. Nothing else
- * is read until a scan or a statement asks.
+ * **Attach a corpus to the engine as the catalog `name`**: a view per table — `"<name>"."Person"` —
+ * and the manifest as two relations, `"<name>".fossil_tables` and `"<name>".fossil_columns`. Read it
+ * with SQL — Mosaic's, the host's — and call what comes back to detach it.
  *
  * ```ts
- * await open(url, { engine })                          // a corpus at a URL
- * await open(job, { engine, host })                    // a job's corpus, under the credential host vends
- * await open(url, { engine, sql: 'allowed' })          // …with `sql`
+ * const close = await open(job, { engine, host });          // a job's corpus, under its credential
+ * const close = await open('demo', { engine, url });        // a corpus at a URL
  * ```
+ *
+ * `fossil_tables(table_name, kind, iri, rows, first_id, source, destination)` — one row per table,
+ * in manifest order; `kind` is `vertex` or `edge`; a vertex table's `dense_id`s are
+ * `first_id … first_id + rows − 1`; an edge table's `source`/`destination` name the vertex tables
+ * its `src`/`dst` point into. `fossil_columns(table_name, column_name, ordinal, type, role, iri,
+ * nullable)` — one row per column, `role` the writer's (`address`, `identity`, `endpoint`) and null
+ * on a program's column.
  *
  * @throws {FossilError} before any Parquet is read: `corpus/unreadable` when `fossil.json` does not
  *   read, `corpus/not-json`, `corpus/unsupported-format` for a format other than `fossil/1`,
- *   `corpus/duplicate-table` when it names one table twice; `corpus/not-a-location` for a URL
- *   carrying a query or a fragment; `storage/ambiguous-prefix` for a job
- *   vended more than one prefix; `api/invalid-argument` when no `engine` is given; `engine/failed`
- *   when the engine refuses a view; for a job, what `mount` throws — `storage/host-silent` for a host
- *   that does not answer within 30 s among them.
+ *   `corpus/duplicate-table` when it names one table twice or a table `fossil_tables` /
+ *   `fossil_columns`; `corpus/not-a-location` for a URL carrying a query or a fragment;
+ *   `storage/ambiguous-prefix` for a job vended more than one prefix; `api/invalid-argument` without
+ *   an `engine`, or without exactly one of `host` and `url`; `engine/failed` when the engine refuses
+ *   a view; for a job, what `mount` throws — `storage/host-silent` among them.
  */
-export function open(source: string, options: OpenOptions & { sql: 'allowed' }): Promise<SqlCorpus>;
-export function open(source: string, options: OpenOptions): Promise<Corpus>;
-export async function open(source: string, options: OpenOptions): Promise<Corpus> {
-  const { engine, host, signal } = options;
+export async function open(name: string, options: OpenOptions): Promise<Close> {
+  const { engine, host, url, signal } = options;
   if (typeof engine?.query !== 'function') {
     throw FossilError.of(
       'api/invalid-argument',
       { argument: 'engine', expected: 'an Engine' },
-      { help: "open() needs { engine } for a corpus at a URL, and { engine, host } for a job's" },
+      { help: 'open() needs { engine } and either { host } for a job or { url } for a corpus at a URL' },
     );
+  }
+  if ((host === undefined) === (url === undefined)) {
+    throw FossilError.of('api/invalid-argument', { argument: 'host', expected: 'exactly one of host and url' });
   }
 
   // What SQL calls each file of the corpus, and what closing gives back. A job's files are lent
   // under the host's credential — an Azure file one by one — and a URL's are named as they are.
   let names: (paths: readonly string[]) => Promise<string[]>;
   let release = async (): Promise<void> => {};
-  let storage: Mount | undefined;
   if (host !== undefined) {
-    const mounted = await mount(engine, host, { job: source }, 'read', { signal });
-    storage = mounted;
+    const mounted = await mount(engine, host, { job: name }, 'read', { signal });
     release = () => mounted.close();
     if (mounted.prefixes.length !== 1) {
-      const ambiguous = FossilError.of(
-        'storage/ambiguous-prefix',
-        { scope: `job ${source}`, count: mounted.prefixes.length },
-      );
+      const ambiguous = FossilError.of('storage/ambiguous-prefix', { scope: `job ${name}`, count: mounted.prefixes.length });
       try {
         await release();
       } catch (cleanup) {
@@ -111,91 +104,45 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
   } else {
     // A corpus is a prefix and its files are named under it, so a query — a signature among them —
     // would end up in the middle of every path. Signed storage is a job under its host.
-    if (/[?#]/.test(source)) {
-      throw FossilError.of(
-        'corpus/not-a-location',
-        { location: source },
-      );
-    }
-    const base = source.endsWith('/') ? source : `${source}/`;
+    if (/[?#]/.test(url!)) throw FossilError.of('corpus/not-a-location', { location: url! });
+    const base = url!.endsWith('/') ? url! : `${url!}/`;
     names = async (paths) => paths.map((path) => `${base}${path}`);
   }
 
   let counted = false;
   const held = holders.get(engine) ?? new Map<string, number>();
   holders.set(engine, held);
-  const catalog = source;
   try {
     const [where] = await names([ENTRY_POINT]);
-    const unreadable = (cause?: unknown) =>
-      FossilError.of('corpus/unreadable', { path: where! }, cause === undefined ? {} : { cause });
-    let answer: Awaited<ReturnType<Engine['query']>>;
-    try {
-      answer = await engine.query(`SELECT content FROM read_text(${lit(where!)})`, {
-        signal: signal ?? new AbortController().signal,
-      });
-    } catch (cause) {
-      signal?.throwIfAborted();
-      throw unreadable(cause);
+    const manifest = await read(engine, where!, signal);
+    const tables = [...manifest.vertex_tables, ...manifest.edge_tables];
+    const seen = new Set<string>(CATALOG_VIEWS);
+    for (const table of tables) {
+      if (seen.has(table.name)) throw FossilError.of('corpus/duplicate-table', { table: table.name });
+      seen.add(table.name);
     }
-    if (answer.numRows === 0) throw unreadable();
-    const text = String(answer.getChild('content')?.get(0));
-    const manifest = parseManifest(text, where!);
+    const files = await names(tables.map((t) => t.path));
 
-    const tables = new Map<string, VertexTable | EdgeTable>();
-    for (const table of [...manifest.vertex_tables, ...manifest.edge_tables]) {
-      if (tables.has(table.name)) {
-        throw FossilError.of('corpus/duplicate-table', { table: table.name });
-      }
-      tables.set(table.name, table);
-    }
-    const files = await names([...tables.values()].map((t) => t.path));
-
-    const relation = (table: string): string => `${ident(catalog)}.${ident(table)}`;
-    held.set(catalog, (held.get(catalog) ?? 0) + 1);
+    held.set(name, (held.get(name) ?? 0) + 1);
     counted = true;
-    await query(engine, `ATTACH IF NOT EXISTS ':memory:' AS ${ident(catalog)}`, signal);
-    let at = 0;
-    for (const name of tables.keys()) {
+    const relation = (table: string): string => `${ident(name)}.${ident(table)}`;
+    await query(engine, `ATTACH IF NOT EXISTS ':memory:' AS ${ident(name)}`, signal);
+    for (const [at, table] of tables.entries()) {
       await query(
         engine,
-        `CREATE OR REPLACE VIEW ${relation(name)} AS SELECT * FROM read_parquet(${lit(files[at++]!)})`,
+        `CREATE OR REPLACE VIEW ${relation(table.name)} AS SELECT * FROM read_parquet(${lit(files[at]!)})`,
         signal,
       );
     }
+    await query(engine, `CREATE OR REPLACE VIEW ${relation('fossil_tables')} AS ${tablesOf(manifest)}`, signal);
+    await query(engine, `CREATE OR REPLACE VIEW ${relation('fossil_columns')} AS ${columnsOf(manifest)}`, signal);
 
-    // A credential whose renewal failed past expiry makes every read a 403; the read reports the
-    // storage failure instead, which names what to fix.
-    const live = (): void => {
-      if (storage?.failure !== undefined) throw storage.failure;
-    };
     let closed = false;
-    const corpus: Corpus = {
-      url: catalog,
-      schema: SCHEMA,
-      manifest,
-      scan: scanOf(engine, relation, tables, live),
-      relation(table) {
-        if (!tables.has(table)) {
-          throw FossilError.of('corpus/unknown-table', { table, tables: [...tables.keys()] });
-        }
-        return relation(table);
-      },
-      async close() {
-        if (closed) return;
-        closed = true;
-        await detached(release);
-      },
+    return async () => {
+      if (closed) return;
+      closed = true;
+      await detached(release);
     };
-    if (options.sql !== 'allowed') return corpus;
-    const widened: SqlCorpus = {
-      ...corpus,
-      sql: (statement, o) => {
-        live();
-        return sql(engine, statement, o);
-      },
-    };
-    return widened;
   } catch (cause) {
     try {
       if (counted) await detached(release);
@@ -211,13 +158,13 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
    * runs whether or not the detach did. Two failures are one: the detach's, the release's attached.
    */
   async function detached(after: () => Promise<void>): Promise<void> {
-    const left = (held.get(catalog) ?? 1) - 1;
+    const left = (held.get(name) ?? 1) - 1;
     let failure: unknown;
-    if (left > 0) held.set(catalog, left);
+    if (left > 0) held.set(name, left);
     else {
-      held.delete(catalog);
+      held.delete(name);
       try {
-        await query(engine, `DETACH DATABASE IF EXISTS ${ident(catalog)}`);
+        await query(engine, `DETACH DATABASE IF EXISTS ${ident(name)}`);
       } catch (cause) {
         failure = cause;
       }
@@ -232,21 +179,72 @@ export async function open(source: string, options: OpenOptions): Promise<Corpus
   }
 }
 
-async function sql(
-  engine: Engine,
-  statement: string,
-  { limit = SQL_LIMIT, signal }: { readonly limit?: number; readonly signal?: AbortSignal } = {},
-): Promise<SqlResult> {
-  if (!(Number.isSafeInteger(limit) && limit >= 0)) throw notACount(limit);
-  const body = statement.trim().replace(/;+\s*$/, '');
-  // The cap is an outer LIMIT whatever the statement says, and one row past it says it bit.
-  const wrapped = `SELECT * FROM (${body}) AS _q LIMIT ${limit + 1}`;
-  signal?.throwIfAborted();
-  const table = await query(engine, wrapped, signal);
-  signal?.throwIfAborted();
-  const columns = table.schema.fields.map((f) => f.name);
-  const children = columns.map((name) => table.getChild(name));
-  const n = Math.min(table.numRows, limit);
-  const rows = Array.from({ length: n }, (_, i) => children.map((c) => c?.get(i) ?? null));
-  return { columns, rows, truncated: table.numRows > limit };
+/** `fossil.json` at `where`, through the engine, parsed. */
+async function read(engine: Engine, where: string, signal?: AbortSignal): Promise<Manifest> {
+  const unreadable = (cause?: unknown) =>
+    FossilError.of('corpus/unreadable', { path: where }, cause === undefined ? {} : { cause });
+  let answer: Awaited<ReturnType<Engine['query']>>;
+  try {
+    answer = await engine.query(`SELECT content FROM read_text(${lit(where)})`, {
+      signal: signal ?? new AbortController().signal,
+    });
+  } catch (cause) {
+    signal?.throwIfAborted();
+    throw unreadable(cause);
+  }
+  if (answer.numRows === 0) throw unreadable();
+  return parseManifest(String(answer.getChild('content')?.get(0)), where);
+}
+
+/** A SQL literal, or `NULL`. */
+const opt = (value: string | undefined): string => (value === undefined ? 'NULL' : lit(value));
+
+/**
+ * The rows of a relation as a `SELECT`, its columns typed even when there are none — a `VALUES` with
+ * no row is not SQL, and a column of nulls only would have no type.
+ */
+function relationOf(columns: readonly (readonly [string, string])[], rows: readonly (readonly string[])[]): string {
+  const typed = columns.map(([column, type]) => `CAST(NULL AS ${type}) AS ${ident(column)}`).join(', ');
+  const empty = `SELECT ${typed} WHERE false`;
+  if (rows.length === 0) return empty;
+  const values = rows.map((row) => `(${row.join(', ')})`).join(', ');
+  return `${empty} UNION ALL BY NAME SELECT * FROM (VALUES ${values}) AS t(${columns.map(([c]) => ident(c)).join(', ')})`;
+}
+
+/** `fossil_tables`: one row per table, in manifest order. */
+function tablesOf(manifest: Manifest): string {
+  let first = 0;
+  const rows = [
+    ...manifest.vertex_tables.map((t) => {
+      const row = [lit(t.name), `'vertex'`, opt(t.iri), String(t.record_count), String(first), 'NULL', 'NULL'];
+      first += t.record_count;
+      return row;
+    }),
+    ...manifest.edge_tables.map((t) => [
+      lit(t.name), `'edge'`, opt(t.iri), String(t.record_count), 'NULL', lit(t.source.references), lit(t.destination.references),
+    ]),
+  ];
+  return relationOf(
+    [
+      ['table_name', 'VARCHAR'], ['kind', 'VARCHAR'], ['iri', 'VARCHAR'], ['rows', 'UBIGINT'],
+      ['first_id', 'UBIGINT'], ['source', 'VARCHAR'], ['destination', 'VARCHAR'],
+    ],
+    rows,
+  );
+}
+
+/** `fossil_columns`: one row per column of every table, in file order. */
+function columnsOf(manifest: Manifest): string {
+  const rows = [...manifest.vertex_tables, ...manifest.edge_tables].flatMap((t) =>
+    t.properties.map((p, at) => [
+      lit(t.name), lit(p.name), String(at + 1), lit(p.type), opt(p.role), opt(p.iri), p.nullable === true ? 'true' : 'false',
+    ]),
+  );
+  return relationOf(
+    [
+      ['table_name', 'VARCHAR'], ['column_name', 'VARCHAR'], ['ordinal', 'INTEGER'], ['type', 'VARCHAR'],
+      ['role', 'VARCHAR'], ['iri', 'VARCHAR'], ['nullable', 'BOOLEAN'],
+    ],
+    rows,
+  );
 }

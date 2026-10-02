@@ -897,31 +897,6 @@ catalogue! {
     )]
     NotALocation { location: String },
 
-    /// A table the corpus does not have.
-    "corpus/unknown-table", "Not a table of this corpus",
-    #[error("{table} is not a table of this corpus — its tables are {}", .tables.join(", "))]
-    UnknownTable { table: String, tables: Vec<String> },
-
-    /// A column a table does not declare.
-    "corpus/unknown-column", "Not a column of this table",
-    #[error("{table} does not declare {column} — its columns are {}", .columns.join(", "))]
-    UnknownColumn { table: String, column: String, columns: Vec<String> },
-
-    /// A projection that selects no column.
-    "corpus/empty-projection", "The projection selects nothing",
-    #[error("the projection names no column of {table}")]
-    EmptyProjection { table: String },
-
-    /// A spatial filter over a table that declares no position.
-    "corpus/no-position", "The table has no position",
-    #[error("{table} declares no position, so it has no box to filter by")]
-    NoPosition { table: String },
-
-    /// A filter comparing a column with a value of another type.
-    "corpus/filter-type-mismatch", "The filter compares different types",
-    #[error("{column} holds {holds}, and the filter compares it with {value}")]
-    FilterTypeMismatch { column: String, holds: String, value: String },
-
     /// An argument a caller passed that is not what the call takes.
     "api/invalid-argument", "An argument is invalid",
     #[error("`{argument}` is not {expected}")]
@@ -1310,9 +1285,8 @@ mod tests {
             Problem::DestinationUncovered {
                 destination: "s3://lake/out/".into(),
             },
-            Problem::UnknownTable {
-                table: "Pet".into(),
-                tables: vec!["Person".into()],
+            Problem::DuplicateTable {
+                table: "Person".into(),
             },
             Problem::NoHttpfs {},
             Problem::Bug { what: "x".into() },

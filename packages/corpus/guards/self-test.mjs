@@ -77,7 +77,7 @@ function failing(dir) {
 try {
   // ── 1. non-vacuity ────────────────────────────────────────────────────────────────────────────
   console.log("\nA conforming corpus");
-  const written = write(pristine, { count: 5_000, clusters: 64 });
+  const written = write(pristine, { count: 5_000 });
   const results = runAll(inspect(pristine));
   const broke = results.filter((r) => r.failures.length > 0);
   assert(
@@ -85,11 +85,6 @@ try {
     `${results.length} guards pass`,
     `${written.vertices.toLocaleString("en-US")} vertices · ${written.edges.toLocaleString("en-US")} edges · ` +
       `${written.tables} tables${broke.length ? ` · broke: ${broke.map((b) => `${b.guard.id}: ${b.failures[0]}`).join("; ")}` : ""}`,
-  );
-  assert(
-    written.vertices > written.placed && written.placed > 0,
-    "the corpus has drawn and undrawn vertices, so the placed-first rule has something to hold",
-    `${written.placed} drawn of ${written.vertices}`,
   );
 
   // ── 2. one mutation per guard ─────────────────────────────────────────────────────────────────
@@ -112,7 +107,7 @@ try {
       manifest(dir, (m) => (m.edge_tables[0].record_count += 1))],
     ["dense-ids", "an id repeated", (dir) =>
       rewrite(person(dir), "SELECT * REPLACE (CASE WHEN dense_id = 1 THEN 0 ELSE dense_id END::UINTEGER AS dense_id) FROM m ORDER BY dense_id")],
-    ["dense-ids", "an undrawn vertex numbered among the drawn ones", (dir) => {
+    ["dense-ids", "a vertex numbered in another table's range", (dir) => {
       const tag = join(dir, "vertex", "Tag.parquet");
       execute(
         `CREATE TEMP TABLE lo AS SELECT min(dense_id) AS id FROM read_parquet('${lit(tag)}');
@@ -131,8 +126,6 @@ try {
                             UNION ALL SELECT * FROM m WHERE src <> (SELECT min(src) FROM m) ORDER BY src, dst`)],
     ["identity-is-the-subject", "two vertices given one subject", (dir) =>
       rewrite(person(dir), "SELECT * REPLACE (CASE WHEN dense_id = 1 THEN (SELECT subject FROM m WHERE dense_id = 0) ELSE subject END AS subject) FROM m ORDER BY dense_id")],
-    ["declared-position", "a position naming a column that is not there", (dir) =>
-      manifest(dir, (m) => (m.vertex_tables[0].position.x = "lon"))],
   ];
 
   for (const [id, what, mutate] of MUTATIONS) {

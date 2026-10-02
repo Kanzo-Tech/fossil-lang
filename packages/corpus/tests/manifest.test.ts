@@ -1,20 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
-import { FOSSIL_FORMAT, parseManifest } from '../src/manifest.js';
+import { parseManifest } from '../src/manifest.js';
 
 /**
  * `fossil.json`: what the reader refuses, and the one shape the writer and the reader agree on.
  *
  * The shape is the writer's. `crates/fossil-sinks/fossil.schema.json` is generated from
  * `fossil_sinks::manifest::Manifest` (`FOSSIL_BLESS=1 cargo test -p fossil-sinks --test schema`),
- * and it is held here twice: every fixture must validate against it, and every interface in
- * `src/manifest.ts` must declare exactly the fields, optionality and types of the schema
- * definition of the same name. The TypeScript is written by hand and this is what stops it
- * drifting from the Rust.
+ * and every fixture must validate against it. The reader exports no type of the manifest — a
+ * caller reads it as `fossil_tables` and `fossil_columns` — so there is no second declaration of
+ * the shape here to drift from the Rust.
  */
 
 type Schema = Record<string, unknown>;
@@ -68,86 +66,6 @@ function validate(v: unknown, s: Schema, path = '$'): string[] {
   return out;
 }
 
-/** What a schema property is, spelled the way the TypeScript checker prints the type. */
-function spelled(s: Schema): string {
-  const ref = refName(s);
-  if (ref) return ref;
-  if (s.oneOf) return (s.oneOf as Schema[]).map(spelled).join(' | ');
-  if (s.enum) return (s.enum as unknown[]).map((e) => JSON.stringify(e)).join(' | ');
-  const kinds = ([] as unknown[]).concat(s.type).filter((k) => k !== 'null');
-  if (kinds.length !== 1) throw new Error(`no spelling for ${JSON.stringify(s)}`);
-  const kind = kinds[0];
-  if (kind === 'array') return `readonly ${spelled(s.items as Schema)}[]`;
-  if (kind === 'integer' || kind === 'number') return 'number';
-  return kind as string;
-}
-
-/** Each interface `src/manifest.ts` exports, as `{ field: 'type' }` with `?` on an optional one. */
-function interfaces(): Record<string, Record<string, string>> {
-  const file = fileURLToPath(new URL('../src/manifest.ts', import.meta.url));
-  const program = ts.createProgram([file], { strict: true, target: ts.ScriptTarget.ES2022 });
-  const checker = program.getTypeChecker();
-  const out: Record<string, Record<string, string>> = {};
-  ts.forEachChild(program.getSourceFile(file)!, (node) => {
-    if (!ts.isInterfaceDeclaration(node)) return;
-    const fields: Record<string, string> = {};
-    for (const symbol of checker.getDeclaredTypeOfSymbol(checker.getSymbolAtLocation(node.name)!).getProperties()) {
-      const optional = (symbol.flags & ts.SymbolFlags.Optional) !== 0;
-      const type = checker.getNonNullableType(checker.getTypeOfSymbol(symbol));
-      fields[symbol.name + (optional ? '?' : '')] = checker.typeToString(type);
-    }
-    out[node.name.text] = fields;
-  });
-  return out;
-}
-
-/** Each type alias `src/manifest.ts` exports, as the TypeScript checker prints its type. */
-function aliases(): Record<string, string> {
-  const file = fileURLToPath(new URL('../src/manifest.ts', import.meta.url));
-  const program = ts.createProgram([file], { strict: true, target: ts.ScriptTarget.ES2022 });
-  const checker = program.getTypeChecker();
-  const out: Record<string, string> = {};
-  ts.forEachChild(program.getSourceFile(file)!, (node) => {
-    if (!ts.isTypeAliasDeclaration(node)) return;
-    const type = checker.getTypeAtLocation(node.type);
-    out[node.name.text] = checker.typeToString(type, undefined, ts.TypeFormatFlags.InTypeAlias);
-  });
-  return out;
-}
-
-/** A definition whose every arm is a string enum is a union of strings — a unit enum — and not an object. */
-const isUnion = (s: Schema): boolean =>
-  ((s.oneOf as Schema[] | undefined) ?? [s]).every((arm) => arm.type === 'string' && Array.isArray(arm.enum));
-
-/** The same, read off the schema: a field is optional when it is not `required`. */
-function definitions(): Record<string, Record<string, string>> {
-  const out: Record<string, Record<string, string>> = {};
-  const one = (s: Schema): Record<string, string> => {
-    // `Position` is a oneOf of two objects differing only in `by`: one interface with a union.
-    const arms = (s.oneOf as Schema[] | undefined) ?? [s];
-    const fields: Record<string, string[]> = {};
-    for (const arm of arms) {
-      const required = new Set((arm.required as string[]) ?? []);
-      for (const [k, sub] of Object.entries(arm.properties as Record<string, Schema>)) {
-        (fields[k + (required.has(k) ? '' : '?')] ??= []).push(spelled(sub));
-      }
-    }
-    return Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, [...new Set(v)].join(' | ')]));
-  };
-  out.Manifest = one(SCHEMA);
-  for (const [name, s] of Object.entries(DEFINITIONS)) if (!isUnion(s)) out[name] = one(s);
-  return out;
-}
-
-/** The unions the schema defines, spelled as the checker prints a union of string literals. */
-function unions(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(DEFINITIONS)
-      .filter(([, s]) => isUnion(s))
-      .map(([name, s]) => [name, spelled(s)]),
-  );
-}
-
 const FIXTURES = ['../conformance/corpus/fossil.json'].map((path) => [
   path,
   readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'),
@@ -162,29 +80,12 @@ describe('the writer’s schema', () => {
     const broken = JSON.parse(FIXTURES[0]![1]!);
     delete broken.vertex_tables[0].key;
     broken.edge_tables[0].source = 'Person';
-    broken.vertex_tables[0].position.by = 'guess';
     broken.vertex_tables[0].properties[0].role = 'key';
     expect(validate(broken, SCHEMA)).toEqual([
       '$.edge_tables[0].source: is string, not object',
       '$.vertex_tables[0].key: missing',
-      '$.vertex_tables[0].position: matches no anyOf arm',
       '$.vertex_tables[0].properties[0].role: matches no anyOf arm',
     ]);
-  });
-
-  it('is what src/manifest.ts declares, interface by interface', () => {
-    const declared = interfaces();
-    // The one sanctioned narrowing: the reader types `format` as the one value it accepts.
-    expect(declared.Manifest!.format).toBe(JSON.stringify(FOSSIL_FORMAT));
-    declared.Manifest!.format = 'string';
-    const schema = definitions();
-    expect(Object.keys(schema).sort()).toEqual(['EdgeTable', 'Endpoint', 'Manifest', 'Position', 'Property', 'VertexTable']);
-    expect(declared).toEqual(schema);
-  });
-
-  it('declares each of its unions — a column’s role — with the schema’s members, in its order', () => {
-    expect(unions()).toEqual({ ColumnRole: '"address" | "identity" | "coordinate" | "categorical" | "endpoint"' });
-    expect(aliases()).toEqual(unions());
   });
 });
 

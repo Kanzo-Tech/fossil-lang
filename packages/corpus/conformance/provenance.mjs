@@ -22,7 +22,7 @@
  *
  * Regenerating in place and looking at the diff is the same check with the corpus already
  * overwritten. This writes to a temporary directory and leaves the corpus alone. To regenerate it
- * on purpose: `node guards/fixture.mjs conformance/corpus --vertices 300 --clusters 16`.
+ * on purpose: `node guards/fixture.mjs conformance/corpus --vertices 300`.
  */
 
 import { execFileSync } from "node:child_process";
@@ -40,7 +40,7 @@ const CORPUS = join(HERE, "corpus");
  * The command that wrote `conformance/corpus/`, as parameters rather than as prose. 300 people is
  * small enough to read by hand; the orders and tags are the fixture's defaults for that count.
  */
-export const RECIPE = { count: 300, clusters: 16 };
+export const RECIPE = { count: 300 };
 
 const failures = [];
 const notes = [];
