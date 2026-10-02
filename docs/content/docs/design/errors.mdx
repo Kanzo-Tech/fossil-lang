@@ -96,6 +96,10 @@ A code is two lowercase kebab-case words joined by a slash: `run/over-budget`, `
 `corpus/unknown-table`. The area names **where the mistake is**, not which crate noticed it — the same
 mistake found by `check` and again by `run` has one code, which is the point of sharing a namespace.
 
+The grammar is a predicate on both sides: `is_code` in `fossil_graph_schema`, and `isCode` exported
+from `@fossil-lang/types`, which a host's registry tests its own codes with rather than keeping a
+third copy of the rule.
+
 It is `area/kind` rather than `E0308` because a code is read by people before it is looked up: a
 host author writing `case 'storage/outside-prefix':` needs no index to review the line. It is a slash
 because the code is also the route of its page, and because keasy's server already spells its own

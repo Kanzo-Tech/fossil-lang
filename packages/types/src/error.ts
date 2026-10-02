@@ -92,6 +92,18 @@ function isProblem(value: unknown): value is Problem {
 /** `area/kind`: two lowercase kebab-case words, a digit allowed after a word's first letter. */
 const CODE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*\/[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
+/**
+ * Whether `value` is a code in the one grammar — `area/kind`, two lowercase kebab-case words joined by
+ * a slash, a digit allowed after a word's first letter (`source/not-utf8`). The GRAMMAR, not the
+ * catalogue: a host's own code passes, and {@link CODES} is the list of fossil's. It is the test a
+ * thrown value's `code` meets to be kept on a {@link Foreign} cause, and the one a host's registry of
+ * codes — fossil's, its libraries' and its own — needs to hold. `fossil_graph_schema`'s `is_code` is
+ * the same rule in Rust.
+ */
+export function isCode(value: unknown): value is string {
+  return typeof value === 'string' && CODE.test(value);
+}
+
 function causeOf(cause: Problem | Foreign | undefined): Error | undefined {
   if (cause === undefined) return undefined;
   if (isProblem(cause)) return FossilError.from(cause);
@@ -106,7 +118,7 @@ function causeOf(cause: Problem | Foreign | undefined): Error | undefined {
 function codeOf(cause: unknown): Pick<Foreign, 'code' | 'data'> {
   if (typeof cause !== 'object' || cause === null) return {};
   const { code, data } = cause as { code?: unknown; data?: unknown };
-  if (typeof code !== 'string' || !CODE.test(code)) return {};
+  if (!isCode(code)) return {};
   const json = jsonObject(data);
   return json === undefined ? { code } : { code, data: json };
 }

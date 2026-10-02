@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CODES, FossilError, TITLES, helpUrl, isFossilError, type Problem } from '../src/index.js';
+import { CODES, FossilError, TITLES, helpUrl, isCode, isFossilError, type Problem } from '../src/index.js';
 
 const overBudget: Problem<'run/over-budget'> = {
   code: 'run/over-budget',
@@ -142,5 +142,28 @@ describe('FossilError.of, its detail', () => {
     expect(FossilError.of('corpus/duplicate-table', { table: 'Person' }).message).toBe(
       'the corpus declares Person twice',
     );
+  });
+});
+
+describe('isCode', () => {
+  it('holds every catalogued code, a digit after a word’s first letter, and a host’s own', () => {
+    for (const code of CODES) expect(isCode(code)).toBe(true);
+    expect(isCode('source/not-utf8')).toBe(true);
+    expect(isCode('job/still-running')).toBe(true);
+    expect(isCode('graph/no-webgl')).toBe(true);
+  });
+
+  it.each([
+    ['a word that starts with a digit', '8bit/x'],
+    ['an upper-case letter', 'Job/still-running'],
+    ['a third word', 'a/b/c'],
+    ['an empty kind', 'storage/'],
+    ['a doubled hyphen', 'storage/host--silent'],
+    ['a trailing hyphen', 'storage/host-'],
+    ["Node's code", 'ECONNREFUSED'],
+    ['a number', 404],
+    ['nothing', undefined],
+  ])('refuses %s', (_, value) => {
+    expect(isCode(value)).toBe(false);
   });
 });
