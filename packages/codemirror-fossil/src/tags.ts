@@ -1,5 +1,5 @@
 /**
- * Lexer variant NAME → `@lezer/highlight` tag.
+ * Lexer variant NAME, and semantic-token kind NAME, → `@lezer/highlight` tag.
  *
  * ## Why this table is keyed by name and the old one was not
  *
@@ -22,10 +22,10 @@
  *
  * ## What is deliberately not coloured
  *
- * `Ident` gets no tag. The lexer cannot tell a type from a binding from a column
- * — `fossil-ide`'s semantic tokens can, and the legend for those is a separate
- * export (`semanticLegend`) over a separate call. Painting every identifier one
- * colour here would be a guess that a later overlay has to undo.
+ * `Ident` gets no lexical tag. The lexer cannot tell a type from a binding from a
+ * column — `fossil-ide`'s semantic tokens can, and {@link SEMANTIC_TAG_BY_KIND}
+ * is how they are painted over this table. Painting every identifier one colour
+ * here would be a guess the overlay has to undo.
  */
 import { tags, type Tag } from '@lezer/highlight';
 
@@ -45,8 +45,10 @@ export const TAG_BY_NAME: Readonly<Record<string, Tag>> = {
   KwOr: tags.logicOperator,
   KwNot: tags.logicOperator,
 
-  // `@subject`, `@rename` — a marker, not a value.
-  AtAttr: tags.annotation,
+  // `@subject`, `@rename` — a marker naming what the line is for. Not
+  // `annotation`: themes draw that as faint, comment-adjacent text, and these
+  // are the most load-bearing words in a mapping.
+  AtAttr: tags.special(tags.variableName),
 
   // Literals. `true`/`false`/`null` are literals rather than keywords in this
   // lexer, and that is not a technicality: they became tokens because leaving
@@ -96,4 +98,47 @@ export function tagFor(legend: readonly string[], kind: number): Tag | null {
   const name = legend[kind];
   if (name === undefined) return null;
   return TAG_BY_NAME[name] ?? null;
+}
+
+/**
+ * Semantic-token kind → tag, keyed by the legend NAMES `semanticTokens()` sends.
+ *
+ * `declaration` wraps the tag in `tags.definition`, so a binding where it is
+ * made can be styled apart from its uses and falls back to the plain tag when the
+ * theme does not.
+ *
+ * `string`, `number`, `operator` and `comment` are absent: the lexer names those
+ * already, and more finely (`integer` from `float`, `:=` from `==`).
+ */
+export const SEMANTIC_TAG_BY_KIND: Readonly<Record<string, Tag>> = {
+  namespace: tags.namespace,
+  type: tags.typeName,
+  function: tags.function(tags.variableName),
+  property: tags.propertyName,
+  parameter: tags.attributeName,
+  variable: tags.variableName,
+  keyword: tags.keyword,
+};
+
+/**
+ * Semantic kinds the lexer can also produce. A row of one of these paints only
+ * where the lexer painted nothing — that is how `type` and `as`, identifiers to
+ * the lexer, become keywords without `and` losing its `logicOperator`.
+ */
+export const LEXICAL_KINDS: ReadonlySet<string> = new Set([
+  'keyword',
+  'string',
+  'number',
+  'operator',
+  'comment',
+]);
+
+/**
+ * The tag for one semantic row, or `null` for a kind {@link SEMANTIC_TAG_BY_KIND}
+ * does not name — which leaves the lexical colour in place.
+ */
+export function semanticTagFor(kind: string, modifiers: readonly string[]): Tag | null {
+  const tag = SEMANTIC_TAG_BY_KIND[kind];
+  if (tag === undefined) return null;
+  return modifiers.includes('declaration') ? tags.definition(tag) : tag;
 }

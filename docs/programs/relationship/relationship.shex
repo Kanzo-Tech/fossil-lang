@@ -1,0 +1,17 @@
+PREFIX snb: <https://ldbc.example/voc#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+snb:Place {
+  snb:name xsd:string
+}
+
+snb:Tag {
+  snb:name xsd:string
+}
+
+snb:Person {
+  snb:firstName   xsd:string ;
+  snb:isLocatedIn @snb:Place ;
+  snb:knows       @snb:Person * ;
+  snb:hasInterest @snb:Tag *
+}

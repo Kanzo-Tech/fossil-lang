@@ -92,6 +92,29 @@ describe('openProgram', () => {
     }
   });
 
+  it('names shapes, declarations and connections across the boundary', async () => {
+    const { host } = recordingHost(SHAPE);
+    program = await openProgram('prog.fossil', { host });
+    try {
+      // Opened empty: the call pushes the text it is handed, like every other question.
+      const rows = program.semanticTokens(PROGRAM);
+      const lines = PROGRAM.split('\n');
+      const at = (text: string) =>
+        rows.find((r) => {
+          const line = lines[r.range.start.line]!;
+          return line.slice(r.range.start.character, r.range.end.character) === text;
+        });
+      expect(at('Person')).toMatchObject({ kind: 'type', modifiers: ['declaration'] });
+      expect(at('users')).toMatchObject({ kind: 'variable', modifiers: ['declaration'] });
+      expect(at('@lake')).toMatchObject({ kind: 'namespace', modifiers: [] });
+      expect(at('io')).toMatchObject({ kind: 'namespace' });
+      expect(at('csv')).toMatchObject({ kind: 'function' });
+      expect(at('name')).toMatchObject({ kind: 'property' });
+    } finally {
+      program.close();
+    }
+  });
+
   it('reports the sources through the connection map', async () => {
     const { host } = recordingHost(SHAPE);
     program = await openProgram('prog.fossil', { host });
@@ -108,7 +131,16 @@ describe('openProgram', () => {
     const { host } = recordingHost(SHAPE);
     program = await openProgram('prog.fossil', { host });
     try {
-      for (const key of ['uri', 'tokenize', 'tokenKinds', 'check', 'hover', 'complete', 'definition']) {
+      for (const key of [
+        'uri',
+        'tokenize',
+        'tokenKinds',
+        'semanticTokens',
+        'check',
+        'hover',
+        'complete',
+        'definition',
+      ]) {
         expect(program, key).toHaveProperty(key);
       }
       expect(program.tokenize('x := 1').length).toBeGreaterThan(0);

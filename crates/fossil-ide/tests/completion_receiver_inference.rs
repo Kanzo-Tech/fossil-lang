@@ -367,3 +367,58 @@ User : Person from users
         items.iter().map(|i| &i.label).collect::<Vec<_>>(),
     );
 }
+
+/// A column whose header is not an identifier — LDBC's `Person.id` — is
+/// labelled by its name and INSERTED in its one spelling, `"Person.id"`, which
+/// is what the parser takes after the dot. An identifier is inserted as itself.
+#[test]
+fn a_column_an_identifier_cannot_spell_is_inserted_quoted() {
+    const SRC: &str = "\
+knows := io.csv(\"knows.csv\")
+User : Person from knows
+    name = knows.
+";
+    let db = host();
+    register_inferred(
+        &db,
+        "knows.csv",
+        &[
+            ("Person.id", Primitive::String),
+            ("Person.id_1", Primitive::String),
+            ("since", Primitive::Integer),
+        ],
+    );
+    let f = SourceFile::new(&db, SRC.to_string(), "receiver.fossil".to_string());
+    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let fields: Vec<(&str, Option<&str>)> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+        .map(|i| (i.label.as_str(), i.insert_text.as_deref()))
+        .collect();
+    assert_eq!(
+        fields,
+        vec![
+            ("Person.id", Some("\"Person.id\"")),
+            ("Person.id_1", Some("\"Person.id_1\"")),
+            ("since", None),
+        ],
+    );
+}
+
+/// `knows."first name".` — a quoted column is a head like a bare one: the
+/// receiver is that column's type, so a String column offers `str.*`.
+#[test]
+fn a_quoted_column_is_a_receiver_like_a_bare_one() {
+    const SRC: &str = "\
+knows := io.csv(\"knows.csv\")
+User : Person from knows
+    name = knows.\"first name\".
+";
+    let db = host();
+    register_inferred(&db, "knows.csv", &[("first name", Primitive::String)]);
+    let f = SourceFile::new(&db, SRC.to_string(), "receiver.fossil".to_string());
+    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let functions = labels(&items, CompletionItemKind::FUNCTION);
+    assert!(functions.contains(&"trim"), "{functions:?}");
+    assert!(labels(&items, CompletionItemKind::FIELD).is_empty());
+}

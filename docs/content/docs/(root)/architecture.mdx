@@ -115,7 +115,7 @@ graph LR
   C["<b>corpus</b> · 4 crates<br/>layout · sinks<br/>storage · storage-wasm"]
   X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
-  E -->|19| L
+  E -->|20| L
   E -->|1| M
   M -->|11| L
   M -->|5| C
@@ -124,7 +124,7 @@ graph LR
   C -->|1| X
 ```
 
-**40 cross-group edges**, and no pair runs both ways. Every number above
+**41 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.

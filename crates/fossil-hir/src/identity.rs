@@ -388,7 +388,7 @@ fn identity_form(e: &HirExpr) -> String {
         // `User.email` — and it normalises to the same thing, so a file still
         // carrying the old spelling does not report a disagreement between two
         // spellings of one reference.
-        HirExpr::ColumnRef { column, .. } => format!(".{column}"),
+        HirExpr::ColumnRef { column, .. } => format!(".{}", fossil_syntax::name::spell(column)),
         HirExpr::FieldRef(name) => format!(".{name}"),
         HirExpr::StringLit(s) => format!("{s:?}"),
         HirExpr::NullLit => "null".to_string(),

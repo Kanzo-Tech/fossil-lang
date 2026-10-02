@@ -174,7 +174,8 @@ pub mod retired {
         replacement: "\"…{expr}…\"",
         why: "a backtick opens nothing: it was a second spelling of the quoted string, differing \
               only in the delimiter and in `${` for the hole. Write `\"…{expr}…\"` — one \
-              spelling, and the hole is an ordinary expression.",
+              spelling, and the hole is an ordinary expression. A column whose name is not an \
+              identifier is quoted the same way after the dot: `Row.\"Person.id\"`.",
     };
 
     /// There is no `PIPE`: `|>` is not a token.

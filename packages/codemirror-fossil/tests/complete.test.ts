@@ -13,8 +13,8 @@ import { describe, expect, it } from 'vitest';
 import { fossilCompletionSource, toCompletion, type CompletionRowLike } from '../src/complete.js';
 
 const rows: CompletionRowLike[] = [
-  { label: 'trim', kind: 'function', detail: 'str.trim(String) -> String' },
-  { label: 'upper', kind: 'function', detail: '' },
+  { label: 'trim', kind: 'function', detail: 'str.trim(String) -> String', insert: 'trim' },
+  { label: 'upper', kind: 'function', detail: '', insert: 'upper' },
 ];
 
 function contextAt(doc: string, pos: number, explicit = false): CompletionContext {
@@ -23,23 +23,46 @@ function contextAt(doc: string, pos: number, explicit = false): CompletionContex
 
 describe('toCompletion', () => {
   it('maps the LSP kind name onto CodeMirror’s vocabulary', () => {
-    expect(toCompletion({ label: 'x', kind: 'function', detail: '' }).type).toBe('function');
+    expect(toCompletion({ label: 'x', kind: 'function', detail: '', insert: 'x' }).type).toBe('function');
     // LSP has `field` and CodeMirror does not; both of LSP's field-ish kinds
     // are CodeMirror's `property`.
-    expect(toCompletion({ label: 'x', kind: 'field', detail: '' }).type).toBe('property');
-    expect(toCompletion({ label: 'x', kind: 'property', detail: '' }).type).toBe('property');
+    expect(toCompletion({ label: 'x', kind: 'field', detail: '', insert: 'x' }).type).toBe('property');
+    expect(toCompletion({ label: 'x', kind: 'property', detail: '', insert: 'x' }).type).toBe('property');
   });
 
   it('leaves the type off for a kind it does not know, rather than guessing', () => {
     // A kind appended by a compiler newer than this host. No icon beats a wrong
     // icon, and it must not throw.
-    expect(toCompletion({ label: 'x', kind: 'quasar', detail: '' }).type).toBeUndefined();
-    expect(toCompletion({ label: 'x', kind: '', detail: '' }).type).toBeUndefined();
+    expect(toCompletion({ label: 'x', kind: 'quasar', detail: '', insert: 'x' }).type).toBeUndefined();
+    expect(toCompletion({ label: 'x', kind: '', detail: '', insert: 'x' }).type).toBeUndefined();
   });
 
   it('omits an empty detail instead of rendering a blank line', () => {
-    expect(toCompletion({ label: 'x', kind: 'function', detail: '' }).detail).toBeUndefined();
-    expect(toCompletion({ label: 'x', kind: 'function', detail: 'sig' }).detail).toBe('sig');
+    expect(toCompletion({ label: 'x', kind: 'function', detail: '', insert: 'x' }).detail).toBeUndefined();
+    expect(toCompletion({ label: 'x', kind: 'function', detail: 'sig', insert: 'x' }).detail).toBe('sig');
+  });
+});
+
+describe('a quoted member', () => {
+  const quoted: CompletionRowLike = {
+    label: 'Person.id',
+    kind: 'field',
+    detail: 'source field : String',
+    insert: '"Person.id"',
+  };
+
+  it('inserts the spelling and lists the name', () => {
+    const option = toCompletion(quoted);
+    expect(option.label).toBe('"Person.id"');
+    expect(option.displayLabel).toBe('Person.id');
+    expect(toCompletion(rows[0]!).displayLabel).toBeUndefined();
+  });
+
+  it('replaces the quoted part, dots and all, and keeps the receiver', async () => {
+    const source = fossilCompletionSource(() => [quoted]);
+    const doc = 'x = KnowsRow."Person.i';
+    const result = await source(contextAt(doc, doc.length));
+    expect(doc.slice(result!.from)).toBe('"Person.i');
   });
 });
 

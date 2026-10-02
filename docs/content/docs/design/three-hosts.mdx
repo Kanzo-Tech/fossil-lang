@@ -146,8 +146,8 @@ carried a comment saying it must be updated in lockstep with any reorder. Nothin
 and nothing noticed for as long as it did not.
 
 So the legend ships instead of the warning. `tokenKinds()` returns every variant name indexed by the
-discriminant a row carries, and a host keys on `"Comment"` rather than on `2`; `semanticLegend()`
-already did this for LSP semantic tokens, and completion kinds followed — LSP spells
+discriminant a row carries, and a host keys on `"Comment"` rather than on `2`; semantic tokens
+cross the boundary as legend names (`"type"`, `"declaration"`), and completion kinds followed — LSP spells
 `CompletionItemKind` as an integer, and `kind_name` puts the table in Rust where
 `every_lsp_kind_has_a_name` can check it is total. Each of those tables is an **exhaustive** match,
 so adding or renaming a variant fails this build rather than someone else's product, which is the

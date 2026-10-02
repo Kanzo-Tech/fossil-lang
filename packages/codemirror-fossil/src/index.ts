@@ -5,7 +5,9 @@
  * had:
  *
  * - **Highlighting**, from `tokenize()` + `tokenKinds()` — the compiler's own
- *   lexer, so no editor reimplements the grammar in TypeScript and drifts.
+ *   lexer, so no editor reimplements the grammar in TypeScript and drifts — with
+ *   `semanticTokens()` laid over it: shapes, declarations and connections, which
+ *   the lexer cannot tell apart.
  * - **Diagnostics**, from `check()` — `CheckRow`s with UTF-16 spans, projected
  *   onto `@codemirror/lint`, with `fossil-ide`'s two quick fixes — the row's
  *   `didYouMean` and `suggestion` — as the diagnostic's actions.
@@ -64,17 +66,18 @@
  *
  * ## What it still does not cover
  *
- * **Semantic highlighting.** `semanticLegend()` is exported and `fossil-ide`
- * knows a type from a binding from a column; `tokenize()` does not, which is why
- * `Ident` carries no tag in `tags.ts`. The legend is on the main thread but the
- * tokens themselves come only from the native `fossil-lsp`.
  *
  * **Indentation.** Fossil is INDENT/DEDENT (`grammar.bnf`), so an `indentService`
  * would be genuinely useful and genuinely non-trivial — it needs the parser's view
  * of block openers, not the lexer's. Nothing here guesses at it.
  */
 export { fossilHighlighting, buildDecorations } from './highlight.js';
-export type { TokenSource, HighlightOptions } from './highlight.js';
+export type {
+  TokenSource,
+  HighlightOptions,
+  SemanticTokenRowLike,
+  SemanticTokenSource,
+} from './highlight.js';
 
 export { fossilLinter, problemMessage, toDiagnostics } from './lint.js';
 export type { CheckRowLike, CheckSource, LinterOptions } from './lint.js';
@@ -88,7 +91,7 @@ export type { CompletionRowLike, CompletionRowSource } from './complete.js';
 export { fossilGotoDefinition, gotoDefinitionAt } from './navigate.js';
 export type { DefinitionRowLike, DefinitionSource, NavigateOptions } from './navigate.js';
 
-export { TAG_BY_NAME, tagFor } from './tags.js';
+export { TAG_BY_NAME, tagFor, SEMANTIC_TAG_BY_KIND, LEXICAL_KINDS, semanticTagFor } from './tags.js';
 export { byteToUtf16Mapper } from './offsets.js';
 export { offsetOf, positionOf, rangeOf } from './positions.js';
 export type { Position, Range } from './positions.js';
@@ -141,15 +144,19 @@ export interface FossilOptions
  *
  * `tokenize`, `tokenKinds`, `uri` and `check` are required, because
  * highlighting without diagnostics is the thing this package exists to stop
- * being the only option. The three position sources are optional: a host that
- * has not wired the wasm workspace's position queries — or a read-only view that
- * does not want them — passes none and gets the two halves that were always
- * here.
+ * being the only option. `semanticTokens` and the three position sources are
+ * optional: a host that has not wired the wasm workspace's queries — or a
+ * read-only view that does not want them — passes none and gets lexical
+ * highlighting and diagnostics.
  */
 export function fossil(options: FossilOptions): Extension {
   const extensions: Extension[] = [
     fossilHighlighting(
-      { tokenize: options.tokenize, tokenKinds: options.tokenKinds },
+      {
+        tokenize: options.tokenize,
+        tokenKinds: options.tokenKinds,
+        semanticTokens: options.semanticTokens,
+      },
       { maxLength: options.maxLength },
     ),
     fossilLinter(options.check, {

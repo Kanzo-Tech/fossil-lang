@@ -12,7 +12,11 @@ import { EditorView } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { describe, expect, it } from 'vitest';
 
-import { buildDecorations, type TokenSource } from '../src/highlight.js';
+import {
+  buildDecorations,
+  type SemanticTokenRowLike,
+  type TokenSource,
+} from '../src/highlight.js';
 
 /** A legend in the shape `tokenKinds()` returns, and rows in `tokenize()`'s. */
 const LEGEND = ['Whitespace', 'Comment', 'KwFrom', 'Ident', 'String'];
@@ -25,7 +29,12 @@ function source(rows: { kind: number; start: number; end: number }[]): TokenSour
 const STYLE = HighlightStyle.define([
   { tag: tags.lineComment, class: 'tok-comment' },
   { tag: tags.keyword, class: 'tok-keyword' },
+  { tag: tags.logicOperator, class: 'tok-logic' },
   { tag: tags.string, class: 'tok-string' },
+  { tag: tags.namespace, class: 'tok-namespace' },
+  { tag: tags.typeName, class: 'tok-type' },
+  { tag: tags.variableName, class: 'tok-variable' },
+  { tag: tags.definition(tags.variableName), class: 'tok-definition' },
 ]);
 
 function view(doc: string, extensions = [syntaxHighlighting(STYLE)]): EditorView {
@@ -137,6 +146,119 @@ describe('buildDecorations', () => {
   it('drops a zero-width token rather than letting RangeSetBuilder throw', () => {
     const v = view('from');
     expect(ranges(v, source([{ kind: 2, start: 2, end: 2 }]))).toEqual([]);
+    v.destroy();
+  });
+});
+
+describe('buildDecorations — the semantic layer', () => {
+  /** The lexer's legend, extended with `KwAnd` for the fill rule. */
+  const KINDS = [...LEGEND, 'KwAnd'];
+
+  /** One-line rows: `[from, to, kind, modifiers]` as UTF-16 columns on line 0. */
+  function semantic(
+    lexical: { kind: number; start: number; end: number }[],
+    rows: [number, number, string, string[]?][],
+  ): TokenSource {
+    return {
+      tokenize: () => lexical,
+      tokenKinds: () => KINDS,
+      semanticTokens: (): SemanticTokenRowLike[] =>
+        rows.map(([from, to, kind, modifiers = []]) => ({
+          range: { start: { line: 0, character: from }, end: { line: 0, character: to } },
+          kind,
+          modifiers,
+        })),
+    };
+  }
+
+  it('paints the identifiers the lexer left plain', () => {
+    // `users : Person`
+    const v = view('users : Person');
+    const got = ranges(
+      v,
+      semantic(
+        [
+          { kind: 3, start: 0, end: 5 },
+          { kind: 3, start: 8, end: 14 },
+        ],
+        [
+          [0, 5, 'variable', ['declaration']],
+          [8, 14, 'type'],
+        ],
+      ),
+    );
+    expect(got).toEqual([
+      [0, 5, 'tok-definition'],
+      [8, 14, 'tok-type'],
+    ]);
+    v.destroy();
+  });
+
+  it('carves a connection out of the string around it', () => {
+    // `"@lake/x.csv"` — the lexer sees one string, the compiler a connection in it.
+    const doc = '"@lake/x.csv"';
+    const v = view(doc);
+    const got = ranges(
+      v,
+      semantic(
+        [{ kind: 4, start: 0, end: 13 }],
+        [
+          [0, 1, 'string'],
+          [1, 6, 'namespace'],
+          [6, 13, 'string'],
+        ],
+      ),
+    );
+    expect(got).toEqual([
+      [0, 1, 'tok-string'],
+      [1, 6, 'tok-namespace'],
+      [6, 13, 'tok-string'],
+    ]);
+    expect(v.state.doc.sliceString(1, 6)).toBe('@lake');
+    v.destroy();
+  });
+
+  it('lets a keyword fill a gap but not overwrite what the lexer named', () => {
+    // `type a and b`: `type` is an Ident to the lexer, `and` already a logic operator.
+    const v = view('type a and b');
+    const got = ranges(
+      v,
+      semantic(
+        [
+          { kind: 3, start: 0, end: 4 },
+          { kind: 5, start: 7, end: 10 },
+        ],
+        [
+          [0, 4, 'keyword'],
+          [7, 10, 'keyword'],
+        ],
+      ),
+    );
+    expect(got).toEqual([
+      [0, 4, 'tok-keyword'],
+      [7, 10, 'tok-logic'],
+    ]);
+    v.destroy();
+  });
+
+  it('keeps the lexical layer when the semantic call throws', () => {
+    const v = view('from');
+    const src: TokenSource = {
+      tokenize: () => [{ kind: 2, start: 0, end: 4 }],
+      tokenKinds: () => LEGEND,
+      semanticTokens: () => {
+        throw new Error('the workspace is busy');
+      },
+    };
+    expect(ranges(v, src)).toEqual([[0, 4, 'tok-keyword']]);
+    v.destroy();
+  });
+
+  it('leaves the lexical colour where the semantic kind has no tag', () => {
+    const v = view('"x"');
+    expect(
+      ranges(v, semantic([{ kind: 4, start: 0, end: 3 }], [[0, 3, 'string']])),
+    ).toEqual([[0, 3, 'tok-string']]);
     v.destroy();
   });
 });
