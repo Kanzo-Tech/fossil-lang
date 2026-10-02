@@ -323,6 +323,22 @@ describe('runJob, when reporting fails', () => {
     expect(calls.length).toBeGreaterThan(1);
   });
 
+  it('tries a refused completion for as long as the host’s lease, 60 s when it names none', async () => {
+    const attempts = async (lease?: number) => {
+      stubFetch(FIXTURES);
+      const { host } = recordingHost();
+      const { job, calls } = reporting(host, async () => {
+        throw new Error('keasy is down');
+      });
+      const outcome = await settled(runJob(PROGRAM, lease === undefined ? job : { ...job, lease }));
+      expect(outcome).toMatchObject({ status: 'rejected', reason: { code: 'storage/host-refused' } });
+      return calls.length;
+    };
+    // Pauses of 1, 2, 4, 8, 16 s: the attempt after a pause that would end past the lease is not made.
+    expect(await attempts(5_000)).toBe(3);
+    expect(await attempts()).toBe(6);
+  });
+
   it('throws the run’s failure, with the failed report’s own failure at the end of its causes', async () => {
     stubFetch({});
     const { host } = recordingHost();

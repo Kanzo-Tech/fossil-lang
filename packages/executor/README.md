@@ -32,6 +32,7 @@ const report = await runJob(program, {
   id: jobId,
   host,
   complete: async (outcome) => patchJob(outcome),
+  lease: 60_000, // the server's, in ms — how long it keeps a silent job
 });
 ```
 
@@ -43,6 +44,11 @@ locator and the connection it goes through, and every byte goes through an
 reads each source through `read` on its connection — by range requests, not
 whole — and the output is written at `<prefix><path>` through `write` on
 `{ job: id }`, in parts when a file is large. The host never signs a URL.
+
+A completion `complete` refuses is tried again, with backoff, for as long as the
+host's server keeps a silent job before sweeping it: pass that figure as
+`lease` (milliseconds) beside `complete`; it is 60 s when absent. The lease is
+the host's, so fossil does not keep a copy of it.
 
 A job that fails completes with `{ status: 'failed', problem }` — the failure as
 plain data, which a host stores as it is and turns back into the error with

@@ -149,6 +149,14 @@ learn of it from the tab; it must learn of it from silence.
 3. **A terminal job can be deleted**, so an abandoned one is not stuck in the list.
 4. **A completion that fails to report is retried** until the lease would have expired, after which
    the sweep owns it. `run-job.ts`'s `.catch(() => {})` on the failure report goes.
+5. **The lease's length is the host's figure, and `runJob` is handed it**: `Job.lease`, in
+   milliseconds, 60 s when it is absent. It is not one of G1's deadlines, and the first decision below
+   does not cover it: a deadline bounds a wait fossil makes, and fossil knows the slowest honest
+   answer to its own waits; the lease is how long a server keeps a silent job, which only that server
+   knows. A constant fossil exported would still be a second statement of the server's number, and the
+   first time the two differed a report would be retried past the sweep, or abandoned before it.
+   *What would reverse it:* nothing short of the lease leaving the host — a server fossil ships, whose
+   sweep reads the same constant.
 
 **What would reverse it.** Runs that leave the browser — a worker on the server. Then the runner is a
 process the server can supervise, and the lease becomes its liveness check rather than a guess.

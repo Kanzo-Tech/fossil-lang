@@ -30,6 +30,12 @@ export interface Job {
   host: Host;
   /** Report the run outcome (PATCH the job). A host promise like any other: 30 s to answer. */
   complete(req: CompletePayload, options: HostCall): Promise<void>;
+  /**
+   * How long the host's server keeps a silent job before its sweep ends it as abandoned, in
+   * milliseconds — and so how long a completion it refuses is tried again. The lease is the host's,
+   * so the figure is too; 60 000 when not given.
+   */
+  lease?: number;
 }
 
 /** The completion payload the host PATCHes back. */
@@ -45,10 +51,11 @@ export interface CompletePayload {
 }
 
 /**
- * How long a completion is retried: the server's lease (`/docs/design/failure`, *A job always reaches
- * an end*). Past it the server's sweep has ended the job as abandoned, and a report would be late.
+ * How long a completion is retried when the job names no {@link Job.lease}: the server's lease
+ * (`/docs/design/failure`, *A job always reaches an end*). Past it the server's sweep has ended the
+ * job as abandoned, and a report would be late.
  */
-export const REPORT_MS = 60_000;
+const LEASE_MS = 60_000;
 /** The first pause between two attempts to report; each pause after doubles it. */
 const BACKOFF_MS = 1_000;
 
@@ -58,7 +65,7 @@ const BACKOFF_MS = 1_000;
  * On success it reports `completed` and returns the `RunReport`. On a failure — a document or source
  * that could not be read included — it reports `failed` with the problem and throws the
  * `FossilError`; a failure fossil did not raise — a panic — is `internal/bug`, the original kept as
- * its cause. A report the host refuses is tried again until {@link REPORT_MS} has passed.
+ * its cause. A report the host refuses is tried again until the job's {@link Job.lease} has passed.
  *
  * - A run that wrote and could not report it is **not** reported `failed`: it throws the reporting
  *   failure — `storage/host-refused` or `storage/host-silent` about the completion — and the job's
@@ -135,10 +142,10 @@ function unreadable(unread: readonly UnreadDocument[]): FossilError<'document/un
   });
 }
 
-/** Report `payload`, each attempt within 30 s, until {@link REPORT_MS} has passed. */
+/** Report `payload`, each attempt within 30 s, until the job's lease has passed. */
 async function complete(job: Job, payload: CompletePayload): Promise<void> {
   const scope = `the completion of job ${job.id}`;
-  const deadline = Date.now() + REPORT_MS;
+  const deadline = Date.now() + (job.lease ?? LEASE_MS);
   for (let pause = BACKOFF_MS; ; pause *= 2) {
     try {
       await within(HOST_MS, (signal) => job.complete(payload, { signal }), {
