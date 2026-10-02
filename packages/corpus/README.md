@@ -27,7 +27,7 @@ const close = await open('demo', { engine, url });         // a corpus at a URL
 
 // everything else is SQL, over the catalog named by the first argument:
 //   "<name>"."Person"            a view per table
-//   "<name>".fossil_tables       table_name, kind, iri, rows, first_id, source, destination
+//   "<name>".fossil_tables       table_name, kind, iri, path, rows, first_id, source, destination
 //   "<name>".fossil_columns      table_name, column_name, ordinal, type, role, iri, nullable
 
 await close();

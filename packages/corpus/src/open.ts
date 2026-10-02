@@ -55,8 +55,9 @@ const holders = new WeakMap<object, Map<string, number>>();
  * const close = await open('demo', { engine, url });        // a corpus at a URL
  * ```
  *
- * `fossil_tables(table_name, kind, iri, rows, first_id, source, destination)` — one row per table,
- * in manifest order; `kind` is `vertex` or `edge`; a vertex table's `dense_id`s are
+ * `fossil_tables(table_name, kind, iri, path, rows, first_id, source, destination)` — one row per
+ * table, in manifest order; `kind` is `vertex` or `edge`; `path` is its file under the corpus root;
+ * a vertex table's `dense_id`s are
  * `first_id … first_id + rows − 1`; an edge table's `source`/`destination` name the vertex tables
  * its `src`/`dst` point into. `fossil_columns(table_name, column_name, ordinal, type, role, iri,
  * nullable)` — one row per column, `role` the writer's (`address`, `identity`, `endpoint`) and null
@@ -216,17 +217,17 @@ function tablesOf(manifest: Manifest): string {
   let first = 0;
   const rows = [
     ...manifest.vertex_tables.map((t) => {
-      const row = [lit(t.name), `'vertex'`, opt(t.iri), String(t.record_count), String(first), 'NULL', 'NULL'];
+      const row = [lit(t.name), `'vertex'`, opt(t.iri), lit(t.path), String(t.record_count), String(first), 'NULL', 'NULL'];
       first += t.record_count;
       return row;
     }),
     ...manifest.edge_tables.map((t) => [
-      lit(t.name), `'edge'`, opt(t.iri), String(t.record_count), 'NULL', lit(t.source.references), lit(t.destination.references),
+      lit(t.name), `'edge'`, opt(t.iri), lit(t.path), String(t.record_count), 'NULL', lit(t.source.references), lit(t.destination.references),
     ]),
   ];
   return relationOf(
     [
-      ['table_name', 'VARCHAR'], ['kind', 'VARCHAR'], ['iri', 'VARCHAR'], ['rows', 'UBIGINT'],
+      ['table_name', 'VARCHAR'], ['kind', 'VARCHAR'], ['iri', 'VARCHAR'], ['path', 'VARCHAR'], ['rows', 'UBIGINT'],
       ['first_id', 'UBIGINT'], ['source', 'VARCHAR'], ['destination', 'VARCHAR'],
     ],
     rows,
