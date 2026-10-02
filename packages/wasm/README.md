@@ -9,6 +9,15 @@ JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Prov
   package and the host's bundler emits it as an asset; the host copies nothing.
 - `tokenize(text)` — calls the Rust lexer, returns `TokenRow[]`. The Rust lexer
   is the only lexer: no host reimplements one and drifts from the grammar.
+- `refs(program)` and `providers()` — a program's external references (`@conn`
+  alias, path, role), and the providers this build reads. Each boots the module
+  itself, as `openProgram` does, so a host writes no `initFossilWasm()` before
+  it; both take `{ wasm, signal }` for the same reasons `openProgram` does.
+- `providerFor(path, role, providers)` — which of `providers()`' rows reads a
+  file as `'data'` or as `'schema'`, by extension. Pure: a host asks the module
+  for the list once and filters a whole listing with it. The role is required
+  because one extension names two providers — a `.ttl` is `rdf` as data and
+  `shacl` as a schema.
 - `FossilWorkspace` — the Workspace API class for LSP + compile. `fossil-lsp`
   itself is native-only (stdio over crossbeam), so the browser gets this
   equivalent dispatch surface over the same `fossil-ide` functions.
