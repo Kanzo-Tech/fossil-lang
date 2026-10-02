@@ -22,6 +22,7 @@ import {
 import type {
   DocumentWorkspace,
   MissingDocument,
+  Problem,
   ProgramSource,
   TokenKindLegend,
   TokenRow,
@@ -300,5 +301,17 @@ export class FossilWorkspace {
     // The wasm-bindgen wrapper accepts a JSON string; serialise here so callers
     // pass a typed object.
     this._inner.registerInferredDescriptor(JSON.stringify(descriptor));
+  }
+
+  /**
+   * Record that the host could not describe the source the program wrote as `key`, and why. A
+   * check then reports it at the binding that reads `key` — one warning per key, under
+   * `problem.code` — until a descriptor is registered under the same key, which forgets it.
+   *
+   * @throws {FossilError} `api/invalid-argument` if `problem` carries a code this build of fossil
+   *   does not know, the `serde_json` error as its cause.
+   */
+  registerUndescribed(key: string, problem: Problem): void {
+    this._inner.registerUndescribed(key, JSON.stringify(problem));
   }
 }

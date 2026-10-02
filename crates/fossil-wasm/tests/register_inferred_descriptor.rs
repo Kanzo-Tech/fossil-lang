@@ -20,7 +20,7 @@ fn sample_descriptor_json(uri: &str) -> String {
 
 #[test]
 fn register_inferred_descriptor_parses_and_stores() {
-    let ws = FossilWorkspace::new();
+    let mut ws = FossilWorkspace::new();
     ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
         .expect("valid JSON ok");
     let got = ws
@@ -36,7 +36,7 @@ fn register_inferred_descriptor_parses_and_stores() {
 
 #[test]
 fn register_inferred_descriptor_overwrites_on_duplicate_uri() {
-    let ws = FossilWorkspace::new();
+    let mut ws = FossilWorkspace::new();
     ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
         .expect("first ok");
     let second = r#"{"uri":"users.csv","columns":[{"name":"id","primitive":"integer"}],"freshness_token":"h2"}"#;
@@ -51,7 +51,7 @@ fn register_inferred_descriptor_overwrites_on_duplicate_uri() {
 
 #[test]
 fn register_inferred_descriptor_rejects_malformed_json() {
-    let ws = FossilWorkspace::new();
+    let mut ws = FossilWorkspace::new();
     let failure = ws
         .register_inferred_descriptor_native("not json at all")
         .expect_err("malformed JSON should err");
@@ -64,14 +64,14 @@ fn register_inferred_descriptor_rejects_malformed_json() {
 
 #[test]
 fn register_inferred_descriptor_rejects_missing_required_fields() {
-    let ws = FossilWorkspace::new();
+    let mut ws = FossilWorkspace::new();
     let result = ws.register_inferred_descriptor_native(r#"{"uri":"users.csv"}"#);
     assert!(result.is_err(), "missing `columns` field should err");
 }
 
 #[test]
 fn unknown_source_returns_none() {
-    let ws = FossilWorkspace::new();
+    let mut ws = FossilWorkspace::new();
     ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
         .expect("ok");
     assert!(ws.inferred_descriptor_native("nonexistent.csv").is_none());
@@ -79,7 +79,7 @@ fn unknown_source_returns_none() {
 
 #[test]
 fn distinct_uris_register_independently() {
-    let ws = FossilWorkspace::new();
+    let mut ws = FossilWorkspace::new();
     ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
         .expect("users ok");
     ws.register_inferred_descriptor_native(

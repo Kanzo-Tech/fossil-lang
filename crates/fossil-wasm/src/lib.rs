@@ -16,6 +16,8 @@
 //! | [`WasmWorkspace::missing_documents`] | `Array<{ key, locator, connection? }>` | `resolveDocuments` |
 //! | [`WasmWorkspace::register_document`] | `()`                           | `resolveDocuments` |
 //! | [`WasmWorkspace::sources`]     | `Array<ProgramSource>`               | introspection |
+//! | [`WasmWorkspace::register_inferred_descriptor`] | `()`                | introspection, a source described |
+//! | [`WasmWorkspace::register_undescribed`] | `()`                        | introspection, a source that was not |
 //! | [`WasmWorkspace::check`]       | `Array<CheckRow>`                    | a diagnostics panel, workspace-wide |
 //! | [`WasmWorkspace::diagnostics_for`] | `Array<CheckRow>`                | the same rows scoped to one file |
 //! | [`WasmWorkspace::hover`]       | `{ markdown, range } \| null`        | `textDocument/hover`       |
@@ -74,7 +76,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, System};
+use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, Span, System};
 use fossil_graph_schema::js::{bug, invalid_argument};
 use fossil_graph_schema::{Failure, Problem};
 use fossil_ide::LineIndex;
@@ -157,6 +159,10 @@ pub struct FossilWorkspace {
     /// it reaches locators only, never a registry key, so setting it
     /// invalidates nothing.
     connections: HashMap<String, String>,
+    /// Source key → why the host could not describe it. Outside Salsa, like
+    /// the descriptor table beside it, and read by `check` only: a row per key
+    /// at the binding that reads it — see [`FossilWorkspace::undescribed_diagnostics`].
+    undescribed: HashMap<String, Undescribed>,
     /// The open-file lifecycle map (handle → `SourceFile` + URI index).
     /// Mutated by `open_file` / `update_file` / `close_file`; iterated by
     /// `check` / `diagnostics_for`.
@@ -186,6 +192,7 @@ impl FossilWorkspace {
             db,
             system,
             connections: HashMap::new(),
+            undescribed: HashMap::new(),
             files: OpenFiles::default(),
         }
     }
@@ -596,6 +603,8 @@ impl WasmWorkspace {
     ///
     /// Registering the same URI twice REPLACES the previous descriptor
     /// — intentional, since the host re-introspects when the source changes.
+    /// It also forgets a problem [`Self::register_undescribed`] recorded under
+    /// that URI: the latest answer about a source is the one `check` reports.
     ///
     /// # Errors
     ///
@@ -604,11 +613,34 @@ impl WasmWorkspace {
     /// - The workspace is busy.
     #[wasm_bindgen(js_name = registerInferredDescriptor)]
     pub fn register_inferred_descriptor(&self, descriptor_json: &str) -> Result<(), JsValue> {
-        let ws = self
+        let mut ws = self
             .inner
-            .try_borrow()
+            .try_borrow_mut()
             .map_err(|_| busy("registerInferredDescriptor"))?;
         Ok(ws.register_inferred_descriptor_native(descriptor_json)?)
+    }
+
+    /// Record that the host could not describe the source the program wrote as
+    /// `key`, and why: `problem_json` is the `Problem` its introspection
+    /// answered (`{ code, data, help?, … }`; the fields the code does not carry
+    /// are ignored).
+    ///
+    /// `check` then reports it at the binding that reads `key` — one warning
+    /// per key, under the problem's own code — until a descriptor is registered
+    /// under the same key, which forgets it. Registering a key twice replaces
+    /// the problem.
+    ///
+    /// # Errors
+    ///
+    /// - `problem_json` is not a `Problem` fossil knows → `api/invalid-argument`.
+    /// - The workspace is busy.
+    #[wasm_bindgen(js_name = registerUndescribed)]
+    pub fn register_undescribed(&self, key: &str, problem_json: &str) -> Result<(), JsValue> {
+        let mut ws = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| busy("registerUndescribed"))?;
+        Ok(ws.register_undescribed_native(key, problem_json)?)
     }
 }
 
@@ -636,11 +668,66 @@ impl FossilWorkspace {
         for (h, file) in self.files.iter() {
             let uri = self.files.path_for(h, &self.db).unwrap_or_default();
             let index = fossil_ide::line_index(&self.db, file);
-            for d in fossil_ide::diagnostics(&self.db, file) {
+            for d in self.file_diagnostics(file) {
                 all.push(to_check_row(&self.db, file, &uri, &index, &d));
             }
         }
         all
+    }
+
+    /// The checker's diagnostics for `file`, then the sources it reads that the
+    /// host could not describe.
+    fn file_diagnostics(&self, file: SourceFile) -> Vec<Diagnostic> {
+        let mut all = fossil_ide::diagnostics(&self.db, file);
+        all.extend(self.undescribed_diagnostics(file));
+        all
+    }
+
+    /// One warning per source key `file` reads that the host registered as
+    /// undescribed, at the call of the first binding that reads it — the
+    /// `io.csv("users.csv")` right of `:=` — under the problem's own code.
+    ///
+    /// A warning and not an error: what is lost is the source's columns, so
+    /// field completion and forward typing, and the program still compiles
+    /// against an open row. Whether the source is readable at all is the run's
+    /// to say, under the same code. `/docs/design/tooling-for-humans` has the
+    /// argument and what would reverse it.
+    ///
+    /// Outside Salsa and recomputed per call: it is a table lookup per source
+    /// binding over the memoised def map, and a registration then needs no
+    /// revision bump to be seen.
+    fn undescribed_diagnostics(&self, file: SourceFile) -> Vec<Diagnostic> {
+        if self.undescribed.is_empty()
+            || fossil_base::claimed(fossil_base::installed(&self.db), file.path(&self.db))
+        {
+            return Vec::new();
+        }
+        let text = file.text(&self.db);
+        let mut seen: Vec<&str> = Vec::new();
+        let mut out = Vec::new();
+        for entry in fossil_hir::def_map::def_map(&self.db, file).sources(&self.db) {
+            let Some(key) = entry.uri.as_deref() else {
+                continue;
+            };
+            let Some(why) = self.undescribed.get(key) else {
+                continue;
+            };
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            let mut d = Diagnostic::new(
+                fossil_base::Severity::Warning,
+                why.problem.clone(),
+                call_span(text, entry.span),
+            )
+            .file_absolute();
+            if let Some(help) = &why.help {
+                d = d.with_help(help.clone());
+            }
+            out.push(d);
+        }
+        out
     }
 
     /// Native-reachable per-file diagnostic drain. Returns `None` when
@@ -652,7 +739,7 @@ impl FossilWorkspace {
         let uri = self.files.path_for(handle, &self.db).unwrap_or_default();
         let index = fossil_ide::line_index(&self.db, file);
         Some(
-            fossil_ide::diagnostics(&self.db, file)
+            self.file_diagnostics(file)
                 .into_iter()
                 .map(|d| to_check_row(&self.db, file, &uri, &index, &d))
                 .collect(),
@@ -789,7 +876,7 @@ impl FossilWorkspace {
     /// Returns `api/invalid-argument`, the `serde_json` error as its cause, if
     /// the JSON fails to deserialise. The descriptor table is not modified on error.
     pub fn register_inferred_descriptor_native(
-        &self,
+        &mut self,
         descriptor_json: &str,
     ) -> Result<(), Failure> {
         let descriptor: fossil_descriptors_input::InferredDescriptor =
@@ -800,9 +887,34 @@ impl FossilWorkspace {
                 })
                 .caused_by(e)
             })?;
+        self.undescribed.remove(descriptor.uri.as_str());
         if let Some(cache) = self.system.descriptors() {
             cache.insert(descriptor);
         }
+        Ok(())
+    }
+
+    /// Pure-Rust mirror of [`WasmWorkspace::register_undescribed`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `api/invalid-argument`, the `serde_json` error as its cause, if
+    /// `problem_json` is not a `Problem` this build of fossil knows. Nothing is
+    /// recorded on error.
+    pub fn register_undescribed_native(
+        &mut self,
+        key: &str,
+        problem_json: &str,
+    ) -> Result<(), Failure> {
+        let Undescribed { problem, help } = serde_json::from_str(problem_json).map_err(|e| {
+            Failure::new(Problem::InvalidArgument {
+                argument: "problemJson".to_string(),
+                expected: "a Problem as JSON".to_string(),
+            })
+            .caused_by(e)
+        })?;
+        self.undescribed
+            .insert(key.to_string(), Undescribed { problem, help });
         Ok(())
     }
 
@@ -877,6 +989,34 @@ pub fn refs_native(program: &str) -> Vec<fossil_lineage::SourceRefInfo> {
     let db = WasmDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), "<refs>".to_string());
     fossil_lineage::source_refs(&db, file)
+}
+
+/// Why a source could not be described: the problem a host's introspection
+/// answered, as `@fossil-lang/types`' `Problem` carries it. `title`, `detail`
+/// and `cause` are not read — the first two are rendered again from the code
+/// and its data, and a diagnostic has no place for the third.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct Undescribed {
+    #[serde(flatten)]
+    problem: Problem,
+    #[serde(default)]
+    help: Option<String>,
+}
+
+/// The call right of `:=` in the source item `item` spans — `io.csv("u.csv")`
+/// in `users := io.csv("u.csv")` — or the whole item when there is no `:=` in
+/// it to find.
+fn call_span(text: &str, item: Span) -> Span {
+    let Some(written) = item.slice(text) else {
+        return item;
+    };
+    let Some(at) = written.find(":=") else {
+        return item;
+    };
+    let rest = &written[at + 2..];
+    let skipped = rest.len() - rest.trim_start().len();
+    let start = item.start as usize + at + 2 + skipped;
+    u32::try_from(start).map_or(item, |start| Span::new(start, item.end))
 }
 
 /// `fossil_hir::documents::MissingDocument` in the shape it crosses to JS —

@@ -42,7 +42,9 @@ Four things narrow the list further than you might expect, and each is deliberat
 - **A receiver that is an expression resolves nothing.** `User.email.trim().` has a `)` to its left
   and no name to ask about. Nor does a binding reached through a derivation, or a join alias.
 - **A source the editor cannot open is not introspected.** A local file that exists gets columns; an
-  `https://` source gets none, and an editor's message loop is the wrong place to fetch one.
+  `https://` source gets none, and an editor's message loop is the wrong place to fetch one. In the
+  browser the host introspects, and a source it could not describe is a warning at its `io.csv(…)`
+  under the code of what stopped it — `source/not-found`, `storage/unreachable` — with no columns.
 - **A shape document open beside your program is not checked as one.** A URI some `io.` row reads is
   an input, and an input is not drained — without that rule the parser blames a perfectly good
   `ShExJ` file for every complaint it has.

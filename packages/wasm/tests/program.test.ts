@@ -61,7 +61,7 @@ describe('openProgram', () => {
       expect(asked).toEqual([{ connection: 'vocab' }]);
       expect(fetched).toHaveLength(1);
       expect(fetched[0]).toBe('http://minio.example/vocab/shapes/person.shex');
-      program.registerDescriptor(DESCRIPTOR);
+      program.registerIntrospection({ descriptors: [DESCRIPTOR], undescribed: [] });
       const rows = await program.check(PROGRAM);
       // The shape arrived: `name` is checked against its datatype, which only a read shape knows.
       const mismatch = rows.find((r) => r.code === 'type/property-mismatch');
@@ -81,7 +81,7 @@ describe('openProgram', () => {
     const { host } = recordingHost(SHAPE);
     program = await openProgram('prog.fossil', { host });
     try {
-      program.registerDescriptor(DESCRIPTOR);
+      program.registerIntrospection({ descriptors: [DESCRIPTOR], undescribed: [] });
       // Opened empty and never checked: hover must push the text itself to find anything.
       const line = PROGRAM.split('\n').findIndex((l) => l.includes('name = users.name'));
       const character = PROGRAM.split('\n')[line]!.indexOf('users.name') + 'users.'.length + 1;
@@ -144,6 +144,42 @@ describe('openProgram', () => {
         expect(program, key).toHaveProperty(key);
       }
       expect(program.tokenize('x := 1').length).toBeGreaterThan(0);
+    } finally {
+      program.close();
+    }
+  });
+});
+
+describe('openProgram, when a source cannot be described', () => {
+  const NOT_FOUND = {
+    code: 'source/not-found',
+    data: { locator: 's3://lake/users.csv' },
+    title: 'A source names no file',
+    detail: 'the source `s3://lake/users.csv` names no file',
+    severity: 'error',
+  } as const;
+
+  it('answers one warning at the call that reads it, under the code introspection answered', async () => {
+    const { host } = recordingHost(SHAPE);
+    const program = await openProgram('prog.fossil', { host });
+    try {
+      program.registerIntrospection({
+        descriptors: [],
+        undescribed: [{ source: { key: '@lake/users.csv' }, problem: NOT_FOUND }],
+      });
+      const rows = (await program.check(PROGRAM)).filter((r) => r.code === 'source/not-found');
+      expect(rows).toHaveLength(1);
+      const [row] = rows;
+      expect(row).toMatchObject({
+        uri: 'prog.fossil',
+        severity: 2,
+        title: 'A source names no file',
+        data: { locator: 's3://lake/users.csv' },
+        range: { start: { line: 1, character: 9 }, end: { line: 1, character: 34 } },
+      });
+
+      program.registerIntrospection({ descriptors: [DESCRIPTOR], undescribed: [] });
+      expect((await program.check(PROGRAM)).some((r) => r.code === 'source/not-found')).toBe(false);
     } finally {
       program.close();
     }

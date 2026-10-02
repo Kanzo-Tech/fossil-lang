@@ -243,9 +243,9 @@ export interface UndescribedSource {
  *
  * Best-effort: a source the host vends nothing for, or one DuckDB cannot read, is skipped, never
  * thrown, and answered in `undescribed` with its problem — the editor degrades to no field
- * completion for that source, and the host shows why. A source with no connection is read as it is
- * only when it is a public `http(s)` URL. The host registers the returned descriptors with the
- * checker.
+ * completion for that source. A source with no connection is read as it is only when it is a public
+ * `http(s)` URL. The host hands the whole result to `FossilProgram.registerIntrospection`: the
+ * descriptors type the program, and each undescribed source is a warning of `check` at its call.
  *
  * @throws {FossilError} only what giving the credentials back raised; an abort rejects with the
  *   signal's reason.

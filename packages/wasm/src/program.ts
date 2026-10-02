@@ -32,7 +32,13 @@
  * check rather than poisoning it.
  */
 import { resolveDocuments } from '@fossil-lang/storage';
-import { until, type Host, type ProgramSource, type UnreadDocument } from '@fossil-lang/types';
+import {
+  until,
+  type Host,
+  type Problem,
+  type ProgramSource,
+  type UnreadDocument,
+} from '@fossil-lang/types';
 
 import { FossilWorkspace, tokenize, tokenKinds } from './client.js';
 import type {
@@ -44,6 +50,15 @@ import type {
   SemanticTokenRow,
 } from './index.js';
 import { initFossilWasm, type InitInput } from './load.js';
+
+/**
+ * What a host's introspection answered — `introspect`'s result in `@fossil-lang/introspect`, passed
+ * as it came back: the sources it described, and the ones it could not, each with its problem.
+ */
+export interface Introspection {
+  descriptors: readonly InferredDescriptorJson[];
+  undescribed: readonly { source: Pick<ProgramSource, 'key'>; problem: Problem }[];
+}
 
 /** What {@link openProgram} takes beside the key. */
 export interface OpenProgramOptions {
@@ -93,10 +108,15 @@ export interface FossilProgram {
    */
   sources(text: string): Promise<ProgramSource[]>;
   /**
-   * A host-introspected input schema, registered under the URI the program wrote. The compiler
-   * never introspects a source itself; push this before the check that should see it.
+   * What the host's introspection answered, whole. The compiler never introspects a source itself;
+   * push this before the check that should see it.
+   *
+   * A described source types the program under the key it was written as. A source that could not
+   * be described is a warning of {@link check}'s at the call that reads it — `io.csv("…")` — under
+   * its problem's code (`source/not-found`, `storage/*`, `engine/failed`), once per key. The latest
+   * answer about a key wins, so a source that describes on a later call loses its warning.
    */
-  registerDescriptor(descriptor: InferredDescriptorJson): void;
+  registerIntrospection(introspection: Introspection): void;
   /** The workspace underneath, for the rare question this surface does not ask. */
   readonly workspace: FossilWorkspace;
   /** Free the workspace. Every member fails after it. */
@@ -178,8 +198,9 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
       await settle(next);
       return workspace.sources(handle);
     },
-    registerDescriptor(descriptor) {
-      workspace.registerInferredDescriptor(descriptor);
+    registerIntrospection({ descriptors, undescribed }) {
+      for (const descriptor of descriptors) workspace.registerInferredDescriptor(descriptor);
+      for (const { source, problem } of undescribed) workspace.registerUndescribed(source.key, problem);
     },
     workspace,
     close() {

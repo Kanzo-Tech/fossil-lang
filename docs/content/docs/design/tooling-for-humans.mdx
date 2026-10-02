@@ -154,6 +154,44 @@ configured it again would be reaching past the editor to set the editor's option
 bound beside `F12` because F12 is the browser's first — Chrome opens DevTools before the page sees
 it.
 
+### A source the host could not describe is a warning at the call that reads it
+
+The compiler performs no IO, so the columns a source has arrive from the host: `introspect` runs a
+`DESCRIBE` per source and answers `{ descriptors, undescribed }`, the second half each source it could
+not read with the problem that stopped it — `source/not-found`, a `storage/*` code, `engine/failed`.
+The descriptors went to the checker and the problems went nowhere it could see, so the editor's one
+diagnostic list said nothing about a file that 404s, and the only symptom was field completion that
+had quietly gone empty. A document the host could not read was already a row of `check`; a source
+was not.
+
+**Now both halves go in one call, and `check` derives the row.** `FossilProgram.registerIntrospection`
+takes `introspect`'s result as it came back. Under it are two workspace primitives —
+`registerInferredDescriptor` and `registerUndescribed(key, problem)` — and the program is the place
+that calls them, for the reason it exists at all: a protocol every host would otherwise write by
+hand, and get the order of wrong. The order does not matter even underneath: the latest answer about
+a key wins, so a descriptor registered under a key forgets the problem recorded under it and a
+source that describes on a later call loses its warning.
+
+The row is the workspace's and not the TypeScript layer's because only the def map knows where a
+source is read. It is one row per key — two bindings over one file are one `DESCRIBE` and one
+failure — at the call right of `:=` in the first binding that reads it, carrying the whole problem as
+every other row does: its code, `data`, `title`, `help`, and the code's page through `helpUrl`.
+`crates/fossil-wasm/tests/undescribed.rs` pins it, and `packages/wasm/tests/program.test.ts` pins it
+again across the wasm boundary.
+
+**It is a warning, where an unread document is an error.** What a missing descriptor costs is the
+source's columns: forward typing and field completion degrade to an open row, and the program still
+compiles. A missing shape document removes the output contract the program is checked against,
+which is a different loss. Whether the source can be read at all is the run's to say, and it says
+so under the same code.
+
+**What would reverse it.** For the call: a second editor host — the native `fossil-lsp` is the
+candidate, and today it logs and skips a source it cannot `DESCRIBE` — at which point the row moves
+into `fossil-ide` beside the diagnostics both transports render. For the severity: a source whose
+columns the program cannot compile without, the day a check refuses an open row rather than
+degrading to one. The alternatives this rejected are in
+[the discarded list](/docs/design/discarded#the-tooling).
+
 ## Interruption, and what a test of it must prove
 
 An editor generates work faster than a compiler can finish it, so the compiler has to be

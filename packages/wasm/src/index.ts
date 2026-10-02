@@ -46,7 +46,7 @@ export {
 export type { FileHandle } from './client.js';
 
 export { openProgram } from './program.js';
-export type { FossilProgram, OpenProgramOptions } from './program.js';
+export type { FossilProgram, Introspection, OpenProgramOptions } from './program.js';
 
 /** One external reference a program makes — the typed lineage returned by
  *  {@link refs}. Mirrors `fossil_lineage::SourceRefInfo`. `connection` is the `@conn` alias the reference

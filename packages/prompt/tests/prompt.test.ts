@@ -86,14 +86,19 @@ describe('every form the prompt calls gone is refused by the checker', () => {
     const program = await openProgram('forbidden.fossil', { host });
     try {
       program.workspace.registerDocument('person.shex', SHAPE);
-      program.registerDescriptor({
-        uri: 'users.csv',
-        columns: [
-          { name: 'id', primitive: 'string' },
-          { name: 'name', primitive: 'string' },
-          { name: 'age', primitive: 'integer' },
+      program.registerIntrospection({
+        descriptors: [
+          {
+            uri: 'users.csv',
+            columns: [
+              { name: 'id', primitive: 'string' },
+              { name: 'name', primitive: 'string' },
+              { name: 'age', primitive: 'integer' },
+            ],
+            freshness_token: '',
+          },
         ],
-        freshness_token: '',
+        undescribed: [],
       });
       return (await program.check(text)).filter((r) => r.severity === 1).map((r) => r.message);
     } finally {

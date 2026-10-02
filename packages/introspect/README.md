@@ -26,13 +26,14 @@ composed on both sides; making it one is a separate step.
 ```ts
 import { introspect } from "@fossil-lang/introspect";
 
-const { descriptors, undescribed } = await introspect(workspace.sources(handle), {
+const described = await introspect(await program.sources(text), {
   host,     // Host: vends a read credential per connection
   engine,   // Engine: DuckDB with httpfs, where the DESCRIBE runs
   signal,   // optional: stops it
 });
-// host then registers each descriptor with the checker, and shows each
-// `undescribed[i].problem` — the source it could not describe, by its code.
+// both halves to the checker: the descriptors type the program, and each
+// source in `undescribed` is a warning of `check` at its call, by its code.
+program.registerIntrospection(described);
 ```
 
 Best-effort: a source the host vends nothing for, or one DuckDB cannot read, is

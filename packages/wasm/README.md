@@ -22,8 +22,8 @@ import { fossil } from '@fossil-lang/codemirror-fossil';
 const program = await openProgram('job.fossil', { host, text });   // host: Host
 const extensions = fossil({ ...program, onNavigate });
 
-program.registerDescriptor(descriptor);        // a host-introspected source, before a check
 const sources = await program.sources(text);   // what introspection DESCRIBEs
+program.registerIntrospection(await introspect(sources, io));   // before a check
 ```
 
 It boots the module, opens `uri` in its own workspace, and reads the documents
@@ -69,7 +69,10 @@ const rows = ws.check();
 - `sources(h)` — the `ProgramSource[]` the program reads, through the map the
   last `resolveDocuments` set: binding, key,
   locator, connection, catalogue row, reader option. Introspection DESCRIBEs these and
-  registers each descriptor under `key` with `registerInferredDescriptor`.
+  registers each descriptor under `key` with `registerInferredDescriptor`, and each source it
+  could not describe with `registerUndescribed(key, problem)` — a warning of `check` at the call
+  that reads `key`, until a descriptor under it replaces the problem.
+  `FossilProgram.registerIntrospection` is both, from `introspect`'s result as it came back.
 
 ## Loading: the `.wasm` is an asset of this package
 
