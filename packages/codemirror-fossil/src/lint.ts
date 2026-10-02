@@ -28,7 +28,13 @@
  */
 import { linter, type Action, type Diagnostic } from '@codemirror/lint';
 import type { EditorState, Extension } from '@codemirror/state';
-import { FossilError, helpUrl, isFossilError, type Problem } from '@fossil-lang/types';
+import {
+  FossilError,
+  helpUrl,
+  isFossilError,
+  type CheckRow,
+  type Problem,
+} from '@fossil-lang/types';
 
 import { rangeOf, type Position } from './positions.js';
 
@@ -128,6 +134,36 @@ export function toDiagnostics(
   return out;
 }
 
+/** What a check threw, as fossil's failure: itself if fossil raised it, `internal/bug` if not. */
+function failureOf(cause: unknown): FossilError {
+  return isFossilError(cause)
+    ? cause
+    : FossilError.of('internal/bug', { what: 'the check failed outside fossil' }, { cause });
+}
+
+/**
+ * A check that never answered, as the one row a host counts: `cause` by its code on the first
+ * character of `uri`, and `internal/bug` when fossil did not raise it.
+ *
+ * {@link fossilLinter} draws a failed check with exactly this row and hands it to `onDiagnostics`,
+ * so a host's panel and the squiggle say the same thing and a program nobody could check never
+ * reads as clean. A host whose failure happens before there is a linter — `openProgram` rejecting
+ * — reports it with the same call rather than a copy of it.
+ */
+export function uncheckedRow(uri: string, cause: unknown): CheckRow {
+  const { problem } = failureOf(cause);
+  return {
+    uri,
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+    severity: 1,
+    code: problem.code,
+    data: problem.data,
+    title: problem.title,
+    message: problem.detail,
+    ...(problem.help === undefined ? {} : { help: problem.help }),
+  } as CheckRow;
+}
+
 /** What {@link fossilLinter} calls to get rows. Synchronous or not — the wasm
  *  surface is synchronous, but a host driving a Worker over `postMessage`
  *  is not, and both should be able to use this. */
@@ -157,7 +193,8 @@ export interface LinterOptions {
   delay?: number;
   /** Called with every batch, before filtering. A host that renders its own
    *  diagnostics panel reads it here rather than running
-   *  a second check. */
+   *  a second check. A check that threw is a batch too — its one
+   *  {@link uncheckedRow} — so the host never wraps `check` to learn of it. */
   onDiagnostics?: (rows: readonly CheckRowLike[]) => void;
 }
 
@@ -177,17 +214,18 @@ export function fossilLinter(source: CheckSource, options: LinterOptions): Exten
         rows = await source(text);
       } catch (cause) {
         // A refused check is a diagnostic in its own right, and a silent one is
-        // how "the editor stopped underlining things" becomes a mystery. It is
-        // shown by its code, and a failure fossil did not raise is `internal/bug`.
-        const failure = isFossilError(cause)
-          ? cause
-          : FossilError.of('internal/bug', { what: 'the check failed outside fossil' }, {
-              cause,
-            });
+        // how "the editor stopped underlining things" becomes a mystery. It goes
+        // through `onDiagnostics` like any batch, and is drawn by its code — the
+        // row's `message` is the problem's detail, and a squiggle with no code
+        // on it is one nobody can search for.
+        const failure = failureOf(cause);
+        const row = uncheckedRow(options.uri, failure);
+        options.onDiagnostics?.([row]);
+        const { from, to } = rangeOf(view.state, row.range);
         return [
           {
-            from: 0,
-            to: Math.min(1, view.state.doc.length),
+            from,
+            to,
             severity: 'error' as const,
             source: 'fossil',
             message: problemMessage(failure.problem),

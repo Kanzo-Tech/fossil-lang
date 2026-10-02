@@ -9,7 +9,13 @@ import { EditorView } from '@codemirror/view';
 import { FossilError, TITLES, type Problem } from '@fossil-lang/types';
 import { describe, expect, it } from 'vitest';
 
-import { fossilLinter, toDiagnostics, type CheckRowLike, type CheckSource } from '../src/lint.js';
+import {
+  fossilLinter,
+  toDiagnostics,
+  uncheckedRow,
+  type CheckRowLike,
+  type CheckSource,
+} from '../src/lint.js';
 
 const URI = 'hello.fossil';
 
@@ -156,5 +162,44 @@ describe('a failure, as a diagnostic', () => {
     };
     expect((await lint(() => Promise.reject(FossilError.from(unread))))[0]).toContain('[storage/host-silent]');
     expect((await lint(() => Promise.reject(new TypeError('worker died'))))[0]).toContain('[internal/bug]');
+  });
+
+  it('hands a refused check to onDiagnostics as its one row, so the host need not wrap check', async () => {
+    const batches: (readonly CheckRowLike[])[] = [];
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: DOC,
+        extensions: fossilLinter(() => Promise.reject(FossilError.from(unread)), {
+          uri: URI,
+          delay: 0,
+          onDiagnostics: (rows) => batches.push(rows),
+        }),
+      }),
+    });
+    forceLinting(view);
+    await new Promise((settle) => setTimeout(settle, 50));
+    view.destroy();
+    expect(batches).toEqual([[uncheckedRow(URI, FossilError.from(unread))]]);
+  });
+});
+
+describe('uncheckedRow', () => {
+  it('is the failure by its code, on the first character of the buffer', () => {
+    const failure = FossilError.of('api/busy', {} as never);
+    const row = uncheckedRow(URI, failure);
+    expect(row).toMatchObject({
+      uri: URI,
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+      severity: 1,
+      code: 'api/busy',
+      title: TITLES['api/busy'],
+      message: failure.problem.detail,
+    });
+  });
+
+  it('is internal/bug for a failure fossil did not raise', () => {
+    const row = uncheckedRow(URI, new Error('the wasm did not download'));
+    expect(row.code).toBe('internal/bug');
+    expect(row.severity).toBe(1);
   });
 });

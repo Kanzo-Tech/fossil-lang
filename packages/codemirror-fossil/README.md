@@ -44,6 +44,12 @@ get a range one keystroke wrong. `openProgram` pushes before every answer and co
 against what it last sent, so the push costs a string comparison in the common case; a
 host wiring `FossilWorkspace` by hand owes the same discipline.
 
+**A check that fails is a row, not a throw.** When `check` rejects, the linter draws the
+failure on the first character by its code (`internal/bug` when fossil did not raise it) and
+hands `onDiagnostics` that one row — `uncheckedRow(uri, cause)` — through the same call as any
+batch. A host counting rows for a panel or a badge wraps nothing; a failure before there is a
+linter, `openProgram` rejecting, is reported with the same `uncheckedRow`.
+
 `@kanzo-tech/ui`'s `CodeEditor` takes exactly that as its `extensions` prop and
 holds it in a live-reconfigured `Compartment`. So does a bare `EditorView`.
 
