@@ -207,8 +207,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
   corpus/                  the reader, and it is TypeScript and nothing else: `fossil.json`
                            through `JSON.parse`, one view per table on the host's DuckDB, and
-                           `open · manifest · scan · sql · close`. It links no engine and loads
-                           no WASM. Beside `src/` sits the contract it fulfils — `guards/`,
+                           `open · manifest · scan · relation · sql · close`. It links no engine
+                           and loads no WASM. Beside `src/` sits the contract it fulfils — `guards/`,
                            `conformance/` and `integration/` — outside `files`, so npm never
                            sees it. `tests/manifest.test.ts` holds `src/manifest.ts` against
                            `fossil-sinks/fossil.schema.json`; `integration/round-trip.test.ts`
@@ -226,7 +226,10 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            + `isFossilError` over `problem.gen.ts` (the codes, their data and
                            titles, generated) — the error every package throws, the same object
                            the wasm crates build in Rust — and `within`, the one deadline every
-                           host wait and module boot goes through (`/docs/design/failure`)
+                           host wait and module boot goes through (`/docs/design/failure`).
+                           `isCode` is the `area/kind` grammar as a predicate; `referenceTo` is
+                           the inverse of `@conn` expansion, held against the Rust in
+                           `packages/wasm/tests/reference.test.ts`
   storage/                 how every package reaches storage from a vended credential, over
                            `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
                            expires−5min, refcounted per prefix; Azure lent file by file),
