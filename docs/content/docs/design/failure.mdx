@@ -74,15 +74,16 @@ thing that can wait forever is the person's own patience, and they can end it.
    | DuckDB booting (`instantiate`, `LOAD httpfs`) | 60 s | `@kanzo-tech/mosaic` |
    | cosmos.gl creating its GPU device (`ready`) | 10 s | `@kanzo-tech/graph` |
    | Any API request from the browser | 30 s | keasy's api client — streams excepted |
-   | A stream's next chunk | 30 s idle | keasy's SSE reader, `@kanzo-tech/ai`, the server's provider stream |
+   | A model stream's headers, then each chunk | 30 s idle | `@kanzo-tech/llm`'s `createGateway`, the one door every model request goes through |
+   | The AI gateway's next chunk, relayed | 25 s idle, below the browser's 30 s | keasy's server |
    | Entra, Azure, STS | 5 s connect / 10 s request | keasy's server |
    | Valkey | 5 s connect and per command | keasy's web |
    | keasy's API handling one request | 25 s | keasy's server |
 
 3. **A deadline that fires is coded by who did not answer, never as a bare "timeout".** The person
    needs to know *what* is down. The host going quiet is `storage/host-silent` (new); the bucket is
-   `storage/unreachable` (exists); kanzo-ui's engine is `engine/unavailable`; the model is keasy's
-   `llm/silent`. Each carries `{ after }` in milliseconds.
+   `storage/unreachable` (exists); kanzo-ui's engine is `engine/unavailable`; the model is kanzo-ui's
+   `ai/silent`, and keasy's gateway is `gateway/silent`. Each carries `{ after }` in milliseconds.
 4. **A rejection is never memoized.** A cached promise is cleared when it rejects, so the next call
    tries again. `scope[KEY] ??= boot()` and the three `init`s are the sites; the rule is the guard
    below, not a helper — four sites do not earn one.
