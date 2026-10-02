@@ -84,7 +84,7 @@ pub fn source_refs(db: &dyn Db, file: SourceFile) -> Vec<SourceRefInfo> {
 /// locator. Reports the ALIAS, not the resolved URL — resolution is the host's
 /// data-plane job (`@conn` → `{base}/path`), kept out of fossil's semantics.
 fn parse_ref(raw: &str, role: RefRole) -> SourceRefInfo {
-    match raw.strip_prefix('@').and_then(|r| r.split_once('/')) {
+    match fossil_locator::split_alias(raw) {
         Some((conn, path)) => SourceRefInfo {
             connection: Some(conn.to_string()),
             path: path.to_string(),

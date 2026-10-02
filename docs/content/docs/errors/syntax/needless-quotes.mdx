@@ -1,0 +1,32 @@
+---
+title: Quotes around an identifier
+description: "`syntax/needless-quotes` — a member written in quotes although its name is already an identifier."
+---
+
+A member may be quoted after the dot so that a column whose header is not an identifier can be
+named: `Knows."Person.id"`. Quoting a name that already is one is refused:
+
+```fossil
+People : Person from PersonRow
+    @subject = "https://example.org/person/{PersonRow.id}"
+    name     = PersonRow."name"
+```
+
+```text
+syntax/needless-quotes
+  × `"name"` is an identifier, so it is written bare: `.name`
+  help: quotes are for a name an identifier cannot hold, like `Row."Person.id"`, and each name has one spelling
+```
+
+## Why fossil refuses it
+
+Each name has one spelling: bare when it lexes as one identifier, quoted otherwise
+([`Member`](/docs/book/grammar) in the grammar). SQL keeps both `t.a` and `t."a"` because the two
+differ in case-folding; fossil folds nothing, so `Row."name"` would be a second way to write
+`Row.name` and nothing else. Every suggestion and completion fossil offers prints the one spelling,
+so what a diagnostic proposes is always what the parser accepts.
+
+## How to repair it
+
+- **Drop the quotes**: `PersonRow.name`.
+- A reserved word is not an identifier, so a column called `from` stays quoted: `Row."from"`.

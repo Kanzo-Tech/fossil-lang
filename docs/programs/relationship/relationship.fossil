@@ -1,0 +1,49 @@
+// A many-to-many relationship, read from the files LDBC-SNB ships it in.
+//
+// A relationship file heads its columns with the entity each one points at —
+// `Person.id|Tag.id` — and `person_knows_person` names the same one twice.
+// Neither header is an identifier, so the member is written as a string after
+// the dot: `KnowsRow."Person.id"`. The second `Person.id` is `Person.id_1`, the
+// name the source was described with, on both sides of the compile.
+//
+// A relationship is one more mapping of the type it starts from, joined to the
+// file, and every such mapping writes what the type requires — `isLocatedIn`
+// three times here. That edge is one table holding all three contributions,
+// and `Alan`, who knows nobody and likes nothing, is in it because `People` is.
+
+type { Place, Tag, Person } := io.shex("relationship.shex")
+
+PlaceRow    := io.csv("data/place.csv", delimiter = "|")
+TagRow      := io.csv("data/tag.csv", delimiter = "|")
+PersonRow   := io.csv("data/person.csv", delimiter = "|")
+// #region sources
+KnowsRow    := io.csv("data/person_knows_person.csv", delimiter = "|")
+InterestRow := io.csv("data/person_hasInterest_tag.csv", delimiter = "|")
+// #endregion sources
+
+Places : Place from PlaceRow
+    @subject = "https://ldbc.example/place/{PlaceRow.id}"
+    name     = PlaceRow.name
+
+Tags : Tag from TagRow
+    @subject = "https://ldbc.example/tag/{TagRow.id}"
+    name     = TagRow.name
+
+People : Person from PersonRow
+    @subject    = "https://ldbc.example/person/{PersonRow.id}"
+    firstName   = PersonRow.firstName
+    isLocatedIn = Place(PersonRow.place)
+
+// #region relationship
+Friends : Person from PersonRow.join(KnowsRow, on = PersonRow.id == KnowsRow."Person.id")
+    @subject    = "https://ldbc.example/person/{PersonRow.id}"
+    firstName   = PersonRow.firstName
+    isLocatedIn = Place(PersonRow.place)
+    knows       = Person(KnowsRow."Person.id_1")
+// #endregion relationship
+
+Interested : Person from PersonRow.join(InterestRow, on = PersonRow.id == InterestRow."Person.id")
+    @subject    = "https://ldbc.example/person/{PersonRow.id}"
+    firstName   = PersonRow.firstName
+    isLocatedIn = Place(PersonRow.place)
+    hasInterest = Tag(InterestRow."Tag.id")

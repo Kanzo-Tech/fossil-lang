@@ -61,6 +61,19 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+/// `@name/path` → `("name", "path")`, and `None` for a reference that is not
+/// written through a connection.
+///
+/// The one place the alias is told from the path. The name runs to the FIRST
+/// `/`, so a connection name may hold spaces and dots but never a slash, and
+/// everything after it is the path inside that connection. The locator, the
+/// credential lookup, the lineage report and the editor's highlighting all read
+/// a reference through this.
+#[must_use]
+pub fn split_alias(raw: &str) -> Option<(&str, &str)> {
+    raw.strip_prefix('@')?.split_once('/')
+}
+
 /// The directory a program's relative references are written against: the
 /// directory the program itself lives in.
 ///
@@ -170,7 +183,7 @@ impl<'a> SourceAnchor<'a> {
     /// credential for, so it is answered here rather than parsed again there.
     #[must_use]
     pub fn connection(&self, raw: &str) -> Option<String> {
-        let (name, _) = raw.strip_prefix('@')?.split_once('/')?;
+        let (name, _) = split_alias(raw)?;
         self.connections
             .contains_key(name)
             .then(|| name.to_string())
@@ -182,7 +195,7 @@ impl<'a> SourceAnchor<'a> {
     /// fails to open `@warehouse/x.csv` says so naming what the program wrote,
     /// which is a better message than one this function could build.
     fn expand_alias(&self, raw: &str) -> String {
-        match raw.strip_prefix('@').and_then(|r| r.split_once('/')) {
+        match split_alias(raw) {
             Some((name, path)) => self.connections.get(name).map_or_else(
                 || raw.to_string(),
                 |base| format!("{}/{path}", base.trim_end_matches('/')),
@@ -201,6 +214,17 @@ mod tests {
             .iter()
             .map(|(n, u)| ((*n).to_string(), (*u).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn the_alias_runs_to_the_first_slash() {
+        assert_eq!(
+            split_alias("@MinIO dev bucket/people/2024.csv"),
+            Some(("MinIO dev bucket", "people/2024.csv"))
+        );
+        assert_eq!(split_alias("@warehouse"), None, "no path, no alias");
+        assert_eq!(split_alias("data/x.csv"), None);
+        assert_eq!(split_alias("s3://b/@x/y"), None);
     }
 
     #[test]

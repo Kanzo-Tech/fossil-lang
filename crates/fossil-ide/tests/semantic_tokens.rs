@@ -14,37 +14,29 @@ use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{FossilDb, SourceFile, System};
-use fossil_ide::{decode_tokens, legend_type_name, semantic_tokens};
+use fossil_ide::{decode_tokens, legend_type_name, modifier_names, semantic_tokens};
 
-/// A fixture exercising every legend token type the classifier can still
-/// produce: comment, keyword (`from` and the `@subject` sigil), function (a
-/// bare call callee), property (the member-access side of `users.name`), number,
-/// string (including the parts an interpolation carves the literal into),
-/// operators (`:=`, `=`, and the interpolation's `{` AND `}`) and variable (a
-/// mapping subject, a binding, a shape name).
+/// A fixture exercising every legend token type: comment, keyword (`from`,
+/// the `@subject` sigil, and the contextual `type`), namespace (the
+/// catalogue head `io` and a `@connection` carved out of a reference), type
+/// (a shape declared, named by a header, and applied as an edge), function (a
+/// called member), property (a column and a body key), parameter (a named
+/// argument), number, string (including the parts an interpolation carves the
+/// literal into), operators (`:=`, `=`, and the interpolation's `{` AND `}`)
+/// and variable (bindings, declared and used).
 ///
-/// The closer is named because it was the one this snapshot recorded missing:
-/// the row at `6:47` did not exist, so the committed table showed a literal
-/// opening as an operator and ending in a gap — string, string, operator,
-/// expression, nothing, string. It is the `RBRACE` arm of `semantic.rs` that
-/// puts it there, and this table is where its absence was legible.
-///
-/// Two legend entries have no fixture and cannot get one: NAMESPACE and TYPE.
-/// The first was the prefix segment of `ex:Person` plus the `<…>` absolute IRI,
-/// and the second the shape ref — `semantic.rs` deleted the rules for both when
-/// the CURIE and the IRI literal left the grammar, and a shape name is now an
-/// ordinary IDENT that falls through to variable. They stay in the legend
-/// because the legend is a wire index, and dropping an entry renumbers the ones
-/// after it.
+/// The `declaration` modifier renders as `+declaration` after the type.
 const FIXTURE: &str = "\
 // a Fossil mapping
-type { Person } := io.shex(\"person.shex\")
+type { Person } := io.shex(\"@shapes/person.shex\")
 
-users := io.csv(\"users.csv\")
+users := io.csv(\"users.csv\", delimiter = \";\")
+admins := users.where(users.age >= 18)
 
-User : Person from users
+User : Person from admins
     @subject = \"https://example.org/u/{users.id}\"
-    name = upper(users.name)
+    name = str.upper(users.name)
+    friend = Person(users.friend_id)
     age = 42
 ";
 
@@ -55,12 +47,13 @@ fn render(src: &str) -> String {
     let file = SourceFile::new(&db, src.to_string(), "fixture.fossil".to_string());
     let data = semantic_tokens(&db, file);
     let mut out = String::new();
-    for (line, col, len, ty) in decode_tokens(&data) {
-        let _ = writeln!(
-            out,
-            "{line:>2}:{col:<2} len={len:<2} {}",
-            legend_type_name(ty)
-        );
+    for (line, col, len, ty, mods) in decode_tokens(&data) {
+        let mut kind = legend_type_name(ty).to_string();
+        for m in modifier_names(mods) {
+            kind.push('+');
+            kind.push_str(m);
+        }
+        let _ = writeln!(out, "{line:>2}:{col:<2} len={len:<2} {kind}");
     }
     out
 }

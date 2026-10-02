@@ -18,11 +18,14 @@ export type Code =
   | 'syntax/number-out-of-range'
   | 'syntax/incomplete-conditional'
   | 'syntax/uncalled-function'
+  | 'syntax/needless-quotes'
+  | 'syntax/hole-in-member-name'
   | 'syntax/invalid-callee'
   | 'name/unknown-shape'
   | 'name/unknown-property'
   | 'name/unknown-field'
   | 'name/row-not-in-scope'
+  | 'name/dotted-column'
   | 'name/unknown-function'
   | 'name/unknown-parameter'
   | 'name/unknown-source'
@@ -123,11 +126,14 @@ export const CODES: readonly Code[] = [
   'syntax/number-out-of-range',
   'syntax/incomplete-conditional',
   'syntax/uncalled-function',
+  'syntax/needless-quotes',
+  'syntax/hole-in-member-name',
   'syntax/invalid-callee',
   'name/unknown-shape',
   'name/unknown-property',
   'name/unknown-field',
   'name/row-not-in-scope',
+  'name/dotted-column',
   'name/unknown-function',
   'name/unknown-parameter',
   'name/unknown-source',
@@ -288,6 +294,16 @@ export interface ProblemData {
     function: string;
   };
   /**
+   * A member written in quotes that is already an identifier. Each name has one spelling, and `name` is written bare.
+   */
+  'syntax/needless-quotes': {
+    name: string;
+  };
+  /**
+   * A quoted member with an interpolation hole. A member's name is a constant.
+   */
+  'syntax/hole-in-member-name': Record<string, never>;
+  /**
    * A call whose callee is not a name.
    */
   'syntax/invalid-callee': {
@@ -323,6 +339,13 @@ export interface ProblemData {
     column: string;
     rows: string[];
     scope: string;
+  };
+  /**
+   * A dotted run under a row binding, `Knows.Person.id`. A row's columns have no members, so it is read as a column whose name has a dot in it; `quoted` is how that column is written.
+   */
+  'name/dotted-column': {
+    quoted: string;
+    reference: string;
   };
   /**
    * A call to a name the catalogue does not have. `unknown_namespace` is set when the part before the dot is itself unknown.
@@ -936,11 +959,14 @@ export const TITLES: { readonly [C in Code]: string } = {
   'syntax/number-out-of-range': 'A number fossil cannot carry',
   'syntax/incomplete-conditional': 'An incomplete conditional',
   'syntax/uncalled-function': 'A function named and not called',
+  'syntax/needless-quotes': 'Quotes around an identifier',
+  'syntax/hole-in-member-name': 'A hole in a member\'s name',
   'syntax/invalid-callee': 'Not a function name',
   'name/unknown-shape': 'Not a shape this program declares',
   'name/unknown-property': 'Not a property the shape declares',
   'name/unknown-field': 'Not a field of this row',
   'name/row-not-in-scope': 'A row that is not in scope',
+  'name/dotted-column': 'A dotted name read as a column',
   'name/unknown-function': 'Not a function fossil knows',
   'name/unknown-parameter': 'Not a parameter of this function',
   'name/unknown-source': 'Not a source binding',
@@ -1041,9 +1067,12 @@ export type DetailedCode =
   | 'syntax/number-out-of-range'
   | 'syntax/incomplete-conditional'
   | 'syntax/uncalled-function'
+  | 'syntax/needless-quotes'
+  | 'syntax/hole-in-member-name'
   | 'syntax/invalid-callee'
   | 'name/unknown-shape'
   | 'name/unknown-field'
+  | 'name/dotted-column'
   | 'argument/skipped-parameter'
   | 'argument/positional-after-named'
   | 'argument/named-on-edge'
@@ -1127,9 +1156,12 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'syntax/number-out-of-range': (d) => `\`${d.literal}\` does not fit in ${d.kind}: ${d.reason}`,
   'syntax/incomplete-conditional': (d) => `\`${d.expression}\` is not a complete conditional: it needs a condition, a \`?\` branch and a \`:\` branch`,
   'syntax/uncalled-function': (d) => `\`${d.function}\` names a function but does not call it; fossil has no function values`,
+  'syntax/needless-quotes': (d) => `\`"${d.name}"\` is an identifier, so it is written bare: \`.${d.name}\``,
+  'syntax/hole-in-member-name': (_) => `a quoted member names a column, and a name is a constant: it cannot interpolate`,
   'syntax/invalid-callee': (d) => `\`${d.callee}\` calls something that is not a function name; only a catalogued name may be called`,
   'name/unknown-shape': (d) => `\`${d.shape}\` is not a shape this program declares`,
   'name/unknown-field': (d) => `\`${d.field}\` is not a field of \`${d.relation}\``,
+  'name/dotted-column': (d) => `\`${d.reference}\` reads a member of a column, and a row's columns have none — a column whose name has a dot in it is written quoted: \`${d.quoted}\``,
   'argument/skipped-parameter': (d) => `\`${d.function}\` is given nothing for \`${d.parameter}\`, and something after it; a parameter cannot be skipped`,
   'argument/positional-after-named': (d) => `\`${d.argument}\` is positional and follows \`${d.named} = …\`; once an argument is named, the ones after it are too`,
   'argument/named-on-edge': (d) => `\`${d.argument}\` names an argument of \`${d.target}\`, and an edge's arguments fill its identity template in the order they are written`,

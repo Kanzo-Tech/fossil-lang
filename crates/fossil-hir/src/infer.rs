@@ -532,7 +532,7 @@ fn column_of<'db>(
             pipe,
             Problem::RowNotInScope {
                 binding: binding.to_string(),
-                column: column.to_string(),
+                column: fossil_syntax::name::spell(column).into_owned(),
                 scope: pipe.name.to_string(),
                 rows: scope.bindings().map(ToString::to_string).collect(),
             },
@@ -547,9 +547,12 @@ fn column_of<'db>(
                 db,
                 pipe,
                 Problem::UnknownField {
-                    field: column.to_string(),
+                    field: fossil_syntax::name::spell(column).into_owned(),
                     relation: binding.to_string(),
-                    fields: fields.iter().map(|f| f.name.to_string()).collect(),
+                    fields: fields
+                        .iter()
+                        .map(|f| fossil_syntax::name::spell(&f.name).into_owned())
+                        .collect(),
                 },
             )
         })
@@ -825,7 +828,7 @@ fn check_join_condition<'db>(
                     pipe,
                     Problem::RowNotInScope {
                         binding: binding.to_string(),
-                        column: column.to_string(),
+                        column: fossil_syntax::name::spell(column).into_owned(),
                         scope: format!("this join in `{}`", pipe.name),
                         rows: left
                             .bindings()
@@ -942,7 +945,7 @@ fn column_list(db: &dyn fossil_base::Db, fields: &[RecordField<'_>]) -> Vec<Stri
         .map(|f| {
             format!(
                 "{}: {}",
-                f.name,
+                fossil_syntax::name::spell(&f.name),
                 crate::ty::display::render_ty_kind(db, f.ty.kind(db))
             )
         })

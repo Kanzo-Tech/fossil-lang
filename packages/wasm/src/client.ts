@@ -15,7 +15,6 @@ import {
   FossilWorkspace as RawFossilWorkspace,
   FileHandle as RawFileHandle,
   tokenize as rawTokenize,
-  semantic_legend as rawSemanticLegend,
   tokenKinds as rawTokenKinds,
   refs as rawRefs,
   providers as rawProviders,
@@ -24,7 +23,6 @@ import type {
   DocumentWorkspace,
   MissingDocument,
   ProgramSource,
-  SemanticTokensLegend,
   TokenKindLegend,
   TokenRow,
 } from '@fossil-lang/types';
@@ -34,6 +32,7 @@ import type {
   DefinitionRow,
   HoverRow,
   InferredDescriptorJson,
+  SemanticTokenRow,
   SourceRefInfo,
   ProviderInfo,
 } from './index.js';
@@ -83,18 +82,6 @@ export function tokenize(text: string): TokenRow[] {
  */
 export function tokenKinds(): TokenKindLegend {
   return rawTokenKinds() as string[];
-}
-
-/**
- * Returns the LSP `SemanticTokensLegend` (token types + modifiers list) the
- * editor uses to map LSP `semanticTokens/full` response indices to highlight
- * categories. Re-export of `fossil_ide::semantic_legend` over the wasm-bindgen
- * boundary — NO duplicate legend definition lives here.
- *
- * MUST be called after {@link initFossilWasm} has resolved.
- */
-export function semanticLegend(): SemanticTokensLegend {
-  return rawSemanticLegend() as SemanticTokensLegend;
 }
 
 /**
@@ -284,6 +271,16 @@ export class FossilWorkspace {
    */
   gotoDefinition(handle: FileHandle, line: number, character: number): DefinitionRow[] {
     return this._inner.gotoDefinition(handle, line, character) as DefinitionRow[];
+  }
+
+  /**
+   * Every classified span of the file at `handle`, in source order — the
+   * semantic layer an editor lays over {@link tokenize}'s lexical one. Ranges
+   * are LSP (UTF-16), like {@link hover}'s, and the same staleness note
+   * applies: push the buffer before you ask.
+   */
+  semanticTokens(handle: FileHandle): SemanticTokenRow[] {
+    return this._inner.semanticTokens(handle) as SemanticTokenRow[];
   }
 
   /**

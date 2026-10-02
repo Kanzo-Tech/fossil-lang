@@ -8,6 +8,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { createRequire } from 'node:module';
 import { initStorage } from '@fossil-lang/storage';
 import { FossilError, type Access, type Host, type Problem, type Scope, type StorageCredential } from '@fossil-lang/types';
@@ -80,49 +81,62 @@ const FIXTURES: Record<string, string> = {
   '/lake/in/orders.csv': '../../../crates/fossil-df/tests/fixtures/orders.csv',
 };
 
-/** An S3 that serves the fixtures by path to signed HEADs and GETs (ranged too), and records PUTs. */
-function stubFetch(serve: Record<string, string>) {
+/** Requests the stub has accepted and not yet answered. */
+let inFlight = 0;
+
+/** An S3 that serves the fixtures by path to signed HEADs and GETs (ranged too), and records PUTs.
+ *  `latency` is real time each answer takes, as a store's does. */
+function stubFetch(serve: Record<string, string>, latency = 0) {
   const gets: string[] = [];
   const puts: string[] = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = new Request(input, init);
-      const signed = request.headers.get('authorization')?.startsWith('AWS4-HMAC-SHA256 ') === true;
-      const answer = (response: Response) => Object.defineProperty(response, 'url', { value: request.url });
-      if (!signed) return answer(new Response(null, { status: 403 }));
-      if (request.method === 'PUT') {
-        puts.push(request.url);
-        return answer(new Response(null, { status: 200, headers: { etag: '"e"' } }));
+      inFlight++;
+      try {
+        if (latency > 0) await sleep(latency);
+        return await answerS3(new Request(input, init), serve, gets, puts);
+      } finally {
+        inFlight--;
       }
-      const fixture = serve[new URL(request.url).pathname];
-      if (fixture === undefined) return answer(new Response(null, { status: 404 }));
-      const whole = new Uint8Array(await readFile(fileURLToPath(new URL(fixture, import.meta.url))));
-      const meta = { 'last-modified': 'Tue, 29 Sep 2026 08:00:00 GMT', etag: '"f"' };
-      if (request.method === 'HEAD') {
-        return answer(new Response(null, { headers: { ...meta, 'content-length': String(whole.length) } }));
-      }
-      gets.push(request.url);
-      const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.get('range') ?? '');
-      if (range === null) {
-        return answer(new Response(whole, { headers: { ...meta, 'content-length': String(whole.length) } }));
-      }
-      const start = Number(range[1]);
-      const end = range[2] === '' ? whole.length - 1 : Math.min(Number(range[2]), whole.length - 1);
-      const part = whole.subarray(start, end + 1);
-      return answer(
-        new Response(part, {
-          status: 206,
-          headers: {
-            ...meta,
-            'content-length': String(part.length),
-            'content-range': `bytes ${start}-${end}/${whole.length}`,
-          },
-        }),
-      );
     }),
   );
   return { gets, puts };
+}
+
+async function answerS3(request: Request, serve: Record<string, string>, gets: string[], puts: string[]) {
+  const signed = request.headers.get('authorization')?.startsWith('AWS4-HMAC-SHA256 ') === true;
+  const answer = (response: Response) => Object.defineProperty(response, 'url', { value: request.url });
+  if (!signed) return answer(new Response(null, { status: 403 }));
+  if (request.method === 'PUT') {
+    puts.push(request.url);
+    return answer(new Response(null, { status: 200, headers: { etag: '"e"' } }));
+  }
+  const fixture = serve[new URL(request.url).pathname];
+  if (fixture === undefined) return answer(new Response(null, { status: 404 }));
+  const whole = new Uint8Array(await readFile(fileURLToPath(new URL(fixture, import.meta.url))));
+  const meta = { 'last-modified': 'Tue, 29 Sep 2026 08:00:00 GMT', etag: '"f"' };
+  if (request.method === 'HEAD') {
+    return answer(new Response(null, { headers: { ...meta, 'content-length': String(whole.length) } }));
+  }
+  gets.push(request.url);
+  const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.get('range') ?? '');
+  if (range === null) {
+    return answer(new Response(whole, { headers: { ...meta, 'content-length': String(whole.length) } }));
+  }
+  const start = Number(range[1]);
+  const end = range[2] === '' ? whole.length - 1 : Math.min(Number(range[2]), whole.length - 1);
+  const part = whole.subarray(start, end + 1);
+  return answer(
+    new Response(part, {
+      status: 206,
+      headers: {
+        ...meta,
+        'content-length': String(part.length),
+        'content-range': `bytes ${start}-${end}/${whole.length}`,
+      },
+    }),
+  );
 }
 
 beforeAll(async () => {
@@ -220,16 +234,31 @@ describe('runJob', () => {
   });
 });
 
-/** Drive `outcome` to its end under fake timers, letting the stub's file reads through between ticks. */
+/** Drive `outcome` to its end under fake timers, letting the stub's file reads through between ticks.
+ *
+ *  The fake clock moves only while no request is in flight. A request is raced
+ *  against the store's 30 s deadline on the page's `setTimeout`, which is this
+ *  clock: advancing it while the stub reads a fixture in real time made the
+ *  deadline fire whenever the read was slow — under a loaded CI runner, a run
+ *  failed with `the store did not answer within 30000 ms` from inside the
+ *  engine. Time here is the job's own waiting (its pauses between reports), not
+ *  the store's. */
 async function settled<T>(outcome: Promise<T>): Promise<PromiseSettledResult<T>> {
   let done = false;
   const result = outcome.then(
     (value) => ((done = true), { status: 'fulfilled' as const, value }),
     (reason: unknown) => ((done = true), { status: 'rejected' as const, reason }),
   );
-  for (let i = 0; !done && i < 20_000; i++) {
+  for (let i = 0; !done && i < 20_000; ) {
+    if (inFlight > 0) {
+      // Real time, which the store's answer is waiting on; the budget of
+      // ticks is for the fake clock.
+      await sleep(1);
+      continue;
+    }
     await vi.advanceTimersByTimeAsync(100);
     await new Promise((next) => setImmediate(next));
+    i++;
   }
   return result;
 }
@@ -257,6 +286,17 @@ describe('runJob, when reporting fails', () => {
     const outcome = await settled(runJob(PROGRAM, job));
     expect(outcome.status).toBe('fulfilled');
     expect(calls.map((c) => c.status)).toEqual(['completed', 'completed', 'completed']);
+  });
+
+  it('lets a slow store answer: only the job’s own waiting moves the clock', async () => {
+    stubFetch(FIXTURES, 40);
+    const { host } = recordingHost();
+    const { job, calls } = reporting(host, async (_, attempt) => {
+      if (attempt < 2) throw new Error('keasy is restarting');
+    });
+    const outcome = await settled(runJob(PROGRAM, job));
+    expect(outcome.status).toBe('fulfilled');
+    expect(calls.map((c) => c.status)).toEqual(['completed', 'completed']);
   });
 
   it('never reports failed for a run that wrote, when its completion cannot be reported', async () => {

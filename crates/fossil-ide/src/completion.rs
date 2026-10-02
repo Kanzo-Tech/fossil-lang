@@ -305,7 +305,11 @@ fn scope_at_cursor<'db>(
     let Some(head_token) = prev_meaningful(&dot) else {
         return Scope::Nothing;
     };
-    if head_token.kind() != SyntaxKind::IDENT {
+    // A quoted column (`users."first name".`) is a head like a bare one: the
+    // receiver is that column, read by its name and not by its spelling.
+    let quoted_column = head_token.kind() == SyntaxKind::STRING
+        && prev_meaningful(&head_token).is_some_and(|t| t.kind() == SyntaxKind::DOT);
+    if head_token.kind() != SyntaxKind::IDENT && !quoted_column {
         // A leading `.name` is a RETIRED form — `parser/expr.rs` refuses it by
         // name (`retired::LEADING_DOT`) because the row has a name and every
         // reference is qualified. A `)` is the other way to get here, and it is
@@ -313,13 +317,13 @@ fn scope_at_cursor<'db>(
         // the left of the dot, so neither source has anything to say.
         return Scope::Nothing;
     }
-    let head = head_token.text().to_string();
+    let head = fossil_syntax::name::token_name(&head_token).to_string();
 
     // The catalogue classifies its own heads, and `receiver_of` is the ONE
     // place that classification lives (`fossil-hir/src/stdlib.rs`). Asking it
     // about an arbitrary identifier would answer `Namespace` for `orders`, so
     // the head has to be catalogued FIRST.
-    if registry.is_catalogued_head(&head) {
+    if !quoted_column && registry.is_catalogued_head(&head) {
         let recv = fossil_hir::stdlib::receiver_of(&head);
         return if recv == Receiver::Namespace {
             Scope::Namespace(head)
@@ -333,7 +337,7 @@ fn scope_at_cursor<'db>(
     // left open: `users.name.` is a member of the type of the COLUMN `name`,
     // and the type is on the row the host's descriptor produced.
     if let Some((binding, record)) = enclosing_row(db, file, line, character) {
-        if head == binding {
+        if !quoted_column && head == binding {
             return Scope::Row(record);
         }
         // `users.name.` — the head is a column of the row, so the receiver is
@@ -351,6 +355,9 @@ fn scope_at_cursor<'db>(
     // A `:=` binding is a relation, so its members are the verbs. The symbol
     // index is the file's own table of them and is a plain CST walk — no Salsa
     // key is added here.
+    if quoted_column {
+        return Scope::Nothing;
+    }
     let indexed_source = crate::SymbolIndex::build(db, file)
         .of_kind(crate::SymbolKind::Source)
         .any(|e| e.name == head);
@@ -599,9 +606,16 @@ fn source_field_completions(
         return;
     };
     for field in record.fields(db) {
+        // Labelled by the column's name and inserted in its one spelling: a
+        // header like `Person.id` goes in as `"Person.id"`, which is what the
+        // parser takes after the dot (`fossil_syntax::name`).
+        let spelled = fossil_syntax::name::spell(&field.name);
+        let quoted = (spelled != field.name.as_str()).then(|| spelled.into_owned());
         items.push(CompletionItem {
             label: field.name.to_string(),
             kind: Some(CompletionItemKind::FIELD),
+            filter_text: quoted.clone(),
+            insert_text: quoted,
             detail: Some(format!(
                 "source field : {}",
                 render_ty_kind(db, field.ty.kind(db))

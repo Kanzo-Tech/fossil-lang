@@ -1,0 +1,35 @@
+---
+title: A dotted name read as a column
+description: "`name/dotted-column` — `Row.a.b`, a member of a column, which is a column whose name has a dot in it written without its quotes."
+---
+
+A row's columns have no members, so `Knows.Person.id` has no reading as written. The one it can have
+is the column called `Person.id` — LDBC's relationship files head their columns that way — and that
+column is written quoted:
+
+```fossil
+Friends : Person from PersonRow.join(KnowsRow, on = PersonRow.id == KnowsRow."Person.id")
+    @subject = "https://ldbc.example/person/{PersonRow.id}"
+    knows    = Person(KnowsRow.Person.id_1)
+```
+
+```text
+name/dotted-column
+  × `KnowsRow.Person.id_1` reads a member of a column, and a row's columns have none — a column whose name has a dot in it is written quoted: `KnowsRow."Person.id_1"`
+```
+
+A three-part name whose last part is a catalogue member, such as `Users.name.trim`, is the member
+call missing its `()` and is [`syntax/uncalled-function`](/docs/errors/syntax/uncalled-function)
+instead.
+
+## Why fossil refuses it
+
+A member access names one member, and the name after the first dot is the column. Splitting on every
+dot would make `Person.id` three names, and guessing which dots belong to the header would make a
+reference depend on which other columns the file happens to have.
+
+## How to repair it
+
+- **Quote the column**, as the message says: `KnowsRow."Person.id_1"`. A repeated header is
+  described with a suffix — the second `Person.id` is `Person.id_1` — and completion after
+  `KnowsRow.` offers the quoted names.

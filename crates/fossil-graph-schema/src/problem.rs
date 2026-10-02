@@ -353,6 +353,18 @@ catalogue! {
     #[error("`{function}` names a function but does not call it; fossil has no function values")]
     UncalledFunction { function: String },
 
+    /// A member written in quotes that is already an identifier. Each name has
+    /// one spelling, and `name` is written bare.
+    "syntax/needless-quotes", "Quotes around an identifier",
+    #[error("`\"{name}\"` is an identifier, so it is written bare: `.{name}`")]
+    NeedlessQuotes { name: String },
+
+    /// A quoted member with an interpolation hole. A member's name is a
+    /// constant.
+    "syntax/hole-in-member-name", "A hole in a member's name",
+    #[error("a quoted member names a column, and a name is a constant: it cannot interpolate")]
+    HoleInMemberName {},
+
     /// A call whose callee is not a name.
     "syntax/invalid-callee", "Not a function name",
     #[error("`{callee}` calls something that is not a function name; only a catalogued name may be called")]
@@ -382,6 +394,16 @@ catalogue! {
     "name/row-not-in-scope", "A row that is not in scope",
     #[error("`{binding}.{column}` reads a row `{scope}` does not have — it has {}", code_list(.rows))]
     RowNotInScope { binding: String, column: String, scope: String, rows: Vec<String> },
+
+    /// A dotted run under a row binding, `Knows.Person.id`. A row's columns
+    /// have no members, so it is read as a column whose name has a dot in it;
+    /// `quoted` is how that column is written.
+    "name/dotted-column", "A dotted name read as a column",
+    #[error(
+        "`{reference}` reads a member of a column, and a row's columns have none — a column whose \
+         name has a dot in it is written quoted: `{quoted}`"
+    )]
+    DottedColumn { reference: String, quoted: String },
 
     /// A call to a name the catalogue does not have. `unknown_namespace` is
     /// set when the part before the dot is itself unknown.

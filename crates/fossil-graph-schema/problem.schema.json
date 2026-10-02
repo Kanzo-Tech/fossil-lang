@@ -334,6 +334,56 @@
       "x-detail": "\"`{function}` names a function but does not call it; fossil has no function values\""
     },
     {
+      "description": "A member written in quotes that is already an identifier. Each name has one spelling, and `name` is written bare.",
+      "properties": {
+        "code": {
+          "enum": [
+            "syntax/needless-quotes"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Quotes around an identifier",
+      "type": "object",
+      "x-detail": "\"`\\\"{name}\\\"` is an identifier, so it is written bare: `.{name}`\""
+    },
+    {
+      "description": "A quoted member with an interpolation hole. A member's name is a constant.",
+      "properties": {
+        "code": {
+          "enum": [
+            "syntax/hole-in-member-name"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A hole in a member's name",
+      "type": "object",
+      "x-detail": "\"a quoted member names a column, and a name is a constant: it cannot interpolate\""
+    },
+    {
       "description": "A call whose callee is not a name.",
       "properties": {
         "code": {
@@ -517,6 +567,39 @@
       "title": "A row that is not in scope",
       "type": "object",
       "x-detail": "\"`{binding}.{column}` reads a row `{scope}` does not have — it has {}\",\ncode_list(.rows)"
+    },
+    {
+      "description": "A dotted run under a row binding, `Knows.Person.id`. A row's columns have no members, so it is read as a column whose name has a dot in it; `quoted` is how that column is written.",
+      "properties": {
+        "code": {
+          "enum": [
+            "name/dotted-column"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "quoted": {
+              "type": "string"
+            },
+            "reference": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "quoted",
+            "reference"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A dotted name read as a column",
+      "type": "object",
+      "x-detail": "\"`{reference}` reads a member of a column, and a row's columns have none — a column whose \\\n         name has a dot in it is written quoted: `{quoted}`\""
     },
     {
       "description": "A call to a name the catalogue does not have. `unknown_namespace` is set when the part before the dot is itself unknown.",

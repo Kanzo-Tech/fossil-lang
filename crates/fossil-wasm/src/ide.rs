@@ -1,5 +1,6 @@
-//! Hover, completion and goto-definition on the **main thread** — the
-//! browser's one wire over the `fossil-ide` answers the native LSP serves.
+//! Hover, completion, goto-definition and semantic tokens on the **main
+//! thread** — the browser's one wire over the `fossil-ide` answers the native
+//! LSP serves.
 //!
 //! # Why method calls and not an LSP transport
 //!
@@ -16,13 +17,14 @@
 //! What is shared is what `/docs/design/three-hosts` says is shared — the
 //! ANSWER, as a `fossil-ide` free function.
 //!
-//! # These three take a SHARED borrow, and that is the whole re-entrancy story
+//! # These four take a SHARED borrow, and that is the whole re-entrancy story
 //!
-//! Hover fires on mouse-move, completion on nearly every keystroke, and the
-//! checker on a 120 ms debounce — three different rates against one workspace,
+//! Hover fires on mouse-move, completion and semantic tokens on nearly every
+//! keystroke, and the checker on a 120 ms debounce — three different rates
+//! against one workspace,
 //! which is exactly the arrangement that poisoned a session before
 //! (`WasmWorkspace`'s type-level note has the defect). It cannot recur here,
-//! and not because of scheduling: **none of these three mutates**. Each takes
+//! and not because of scheduling: **none of these four mutates**. Each takes
 //! `try_borrow`, and shared borrows nest, so a hover during a live `check` — or
 //! two of them at once — returns an answer rather than an error. Only
 //! `update_file` takes `try_borrow_mut`, so the exclusive borrow is held on the
@@ -90,6 +92,10 @@ pub struct CompletionRow {
     /// The signature, the shape property's IRI, the source field's type —
     /// whatever `fossil-ide` wrote beside the label. `""` when it wrote none.
     pub detail: String,
+    /// The text a pick writes, which is the label's one spelling: the label
+    /// itself, or `"Person.id"` for a column whose name is not an identifier
+    /// (`fossil_syntax::name`). Never empty and never absent.
+    pub insert: String,
 }
 
 /// One place a definition is.
@@ -109,6 +115,25 @@ pub struct CompletionRow {
 pub struct DefinitionRow {
     pub uri: String,
     pub range: Range,
+}
+
+/// One classified span of the program — `textDocument/semanticTokens/full`
+/// as absolute rows rather than the LSP delta stream.
+///
+/// `kind` and `modifiers` are the legend's NAMES (`"type"`, `"declaration"`),
+/// for the reason [`CompletionRow::kind`] is one: the number is an index into
+/// a table, and the table belongs on the side that can check it. `range` is
+/// UTF-16, like every other range on this surface, and unlike the LSP stream it
+/// may cross a line — a multi-line string is one row.
+///
+/// The rows are in source order and never overlap; a connection reference is
+/// carved out of its string literal, so `"@warehouse/x.csv"` is three rows.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SemanticTokenRow {
+    pub range: Range,
+    pub kind: String,
+    /// Empty when the span carries none — never absent.
+    pub modifiers: Vec<String>,
 }
 
 /// The LSP `CompletionItemKind` constant, by name.
@@ -193,9 +218,35 @@ impl FossilWorkspace {
         fossil_ide::completions(db, &files, file, line, character)
             .into_iter()
             .map(|item| CompletionRow {
+                insert: item.insert_text.unwrap_or_else(|| item.label.clone()),
                 label: item.label,
                 kind: kind_name(item.kind).to_string(),
                 detail: item.detail.unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    /// Native-reachable semantic tokens — the pure-Rust half of
+    /// [`crate::WasmWorkspace::semantic_tokens`].
+    ///
+    /// An unknown handle is an empty list: a highlighter racing a `closeFile`
+    /// has nothing to paint either way.
+    #[must_use]
+    pub fn semantic_token_rows(&self, handle: crate::FileHandle) -> Vec<SemanticTokenRow> {
+        let db = self.base_db();
+        let Some(file) = self.file_by_handle(handle) else {
+            return Vec::new();
+        };
+        let index = fossil_ide::line_index(db, file);
+        fossil_ide::semantic_spans(db, file)
+            .into_iter()
+            .map(|span| SemanticTokenRow {
+                range: fossil_ide::byte_range_to_range(&index, span.range),
+                kind: fossil_ide::legend_type_name(span.token_type).to_string(),
+                modifiers: fossil_ide::modifier_names(span.modifiers)
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
             })
             .collect()
     }
