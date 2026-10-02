@@ -1,6 +1,6 @@
 ---
 title: Identity
-description: dense_id is an address and the subject IRI is a name. One gapless 0..V−1 across the whole graph, in the Hilbert order of the position, stored uint32; the subject is what anything outside the corpus keys on.
+description: dense_id is an address and the subject IRI is a name. One gapless 0..V−1 across the whole graph, each vertex type one contiguous range of it, stored uint32; the subject is what anything outside the corpus keys on.
 ---
 
 A corpus carries two things that are easy to confuse and must not be. **`dense_id` is where a
@@ -15,7 +15,7 @@ exactly the integers from zero to one less than the total vertex count, with no 
 - **One id space.** An edge's `src` and `dst` are two integers in it, and a reader needs no type to
   know which vertex one names: the id alone is enough, and the table holding it is the one whose
   rows cover it.
-- **A buffer is indexed by id.** A reader that loads every placed vertex into one array puts vertex
+- **A buffer is indexed by id.** A reader that loads every vertex into one array puts vertex
   `i` at index `i`, and an edge list becomes indices into that array with no lookup between.
 - **A missing tail is caught.** The declared counts sum to `V`, and the ids cover `0..V−1`; a table
   that stops short breaks the coverage.
@@ -25,29 +25,21 @@ Every vertex table is **sorted by `dense_id`**, and its rows are its ids in asce
 Guard: `dense-ids` — and every guard named here is specified in full, with what it cannot prove, on
 [the guard index](/docs/format#the-guards).
 
-## The order is the Hilbert rank of the position
+## Each type is one range, in manifest order
 
-`dense_id` is not arbitrary. Over the vertices that carry a position — the union of every table whose
-manifest entry declares one — it is the **rank of each vertex in the Hilbert order of its position**:
-the two coordinates quantised onto a 2¹⁶ × 2¹⁶ grid over their joint extent — in binary64, scaled by
-`65535 / (hi − lo)` and truncated — the
-order-16 Hilbert code of that cell, and the vertex's rank among all such codes. It is the order
-DuckDB's `ST_Hilbert(x, y, extent)` gives, so `ORDER BY ST_Hilbert(…)` over the placed vertices
-reproduces the numbering.
+The vertex tables take the ids in the order `vertex_tables` lists them: the first table holds
+`0..n₀−1`, the second `n₀..n₀+n₁−1`, and so on. Inside a table the ids follow the `subject` in
+ascending order. So a table's ids are the sum of the `record_count`s before it, and that many more —
+a reader knows which table holds an id from the counts alone, and loads a table into its slice of
+one buffer without reading another.
 
-Vertices without a position take the ids after every placed one, `V_placed..V−1`, ordered by table
-and then by `subject`.
-
-What the order buys a reader is that **a contiguous run of ids is a compact patch of the plane**, so
-sorting by id is sorting by space: a row group's footer statistics on `x` and `y` bound a small box,
-and a filter on a box prunes row groups. The order is a property of the numbering and not a second
-contract: a reader relies on the sort by `dense_id`, and nothing recomputes the curve to check it.
+The order carries no geometry. A corpus is the graph, not a picture of it; where a vertex is drawn
+is the reader's choice ([where x and y come from](/docs/design/position)).
 
 ## The identity is the subject IRI
 
-Redoing the layout renumbers every vertex. The spatial order *is* the id space, so a new placement
-produces a new numbering and a `dense_id` stored outside the corpus names a different vertex after
-the next write.
+A new subject renumbers every vertex after it — in its own table, and in every table after that one —
+so a `dense_id` stored outside the corpus names a different vertex after the next write.
 
 So the identity is the subject IRI, carried as the column the manifest's `identity` names —
 `subject` — non-null and unique within its table. A selection, a bookmark, a link from another system,

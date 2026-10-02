@@ -30,8 +30,8 @@ The executor is a `wasm32` program: its linear memory ends at 4 GiB and it has n
 operator can spill. Without a bound, `DataFusion`'s default pool summed reservations into a 32-bit
 `usize`, the sum wrapped on a large run, and the run died on a WebAssembly trap with its promise
 never settled. The budget turns that into a refusal that names who asked and for how much. It is half
-the address space because the pool sees only what operators reserve — the source bytes, the layout
-pass and the encoded Parquet sit outside it. The refusal comes before the write starts, so a store
+the address space because the pool sees only what operators reserve — the source bytes and the
+encoded Parquet sit outside it. The refusal comes before the write starts, so a store
 never holds a partial corpus from it. The measurements and the ceiling are on
 [three hosts](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no).
 

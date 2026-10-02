@@ -50,8 +50,8 @@ gets a `FossilError` whose code is `run/over-budget` and whose `data` says which
 how much, and what was already held. `crates/fossil-df/src/memory.rs` is the pool and its reasons.
 
 The budget is half the address space because the pool only sees what operators *reserve*: the source
-bytes, the collected graph, the layout pass and the encoded Parquet are outside it. Measured on
-`docs/programs/shop` in Node, one join and two deduplicated types:
+bytes, the collected graph and the encoded Parquet are outside it. Measured on `docs/programs/shop`
+in Node, one join and two deduplicated types, while the writer still ran a layout pass:
 
 | people · orders | outcome | linear memory | wall clock |
 | --- | --- | --- | --- |

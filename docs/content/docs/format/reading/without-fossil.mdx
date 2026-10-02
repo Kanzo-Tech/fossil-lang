@@ -14,7 +14,7 @@ sequenceDiagram
   participant R as reader
   participant O as origin
   R->>O: GET fossil.json
-  O-->>R: every table: its path, its columns, its row count, its position
+  O-->>R: every table: its path, its columns, its row count
   Note over R: <b>no request</b><br/>refuse any format but fossil/1<br/>every file of the corpus is now named
   R->>O: GET the footers, then the byte ranges a read needs
   O-->>R: the row groups whose statistics meet the predicate
@@ -32,8 +32,7 @@ advance, and it names every file.
   "vertex_tables": [{
     "name": "Person", "path": "vertex/Person.parquet",
     "key": "dense_id", "identity": "subject", "record_count": 1000000,
-    "properties": [{ "name": "dense_id", "type": "uint32" }, { "name": "subject", "type": "string" }, …],
-    "position": { "by": "layout", "x": "x", "y": "y" }
+    "properties": [{ "name": "dense_id", "type": "uint32" }, { "name": "subject", "type": "string" }, …]
   }],
   "edge_tables": [{
     "name": "Order_placedBy_Person", "label": "placedBy", "path": "edge/Order_placedBy_Person.parquet",
@@ -53,16 +52,15 @@ means is `fossil/2`. `packages/corpus/guards/manifest.mjs` is the whole of a rea
 What each table carries:
 
 - **A vertex table** holds one vertex type. `key` is `dense_id` — one gapless `0..V−1` over the
-  whole graph, not per type, with every vertex that has a `position` numbered before every vertex
-  that has none. `identity` is `subject`, the one column that survives a rewrite: `dense_id` is an
-  address and changes when the layout is redone, so anything held outside the corpus keys on the
-  subject. A table with a `position` is drawn at those two columns; a table without one is not
-  drawn.
+  whole graph, not per type, each table one contiguous range of it in manifest order: the sum of the
+  `record_count`s before it, and that many more. `identity` is `subject`, the one column that
+  survives a rewrite: `dense_id` is an address and a new subject renumbers what follows it, so
+  anything held outside the corpus keys on the subject.
 - **An edge table** holds one relation. `src` and `dst` are `dense_id`s of the tables its
   `source.references` and `destination.references` name — the same global ids, so an edge between
-  two drawn types indexes the same buffer as the vertices do.
+  two types indexes the same buffer as the vertices do.
 - **Every column the writer emits says what it is** in its `properties` entry — a `role` of
-  `address`, `identity`, `coordinate`, `categorical` or `endpoint` — and a column of the program's
+  `address`, `identity` or `endpoint` — and a column of the program's
   carries none, so a reader tells the two apart without a list of names.
 - **Every table is written in the order of its key** — vertices by `dense_id`, edges by
   `(src, dst)` — in row groups of 122,880 rows. That order is what lets a reader skip row groups
@@ -76,9 +74,6 @@ A view per table, and every question after that is SQL:
 CREATE VIEW "Person" AS SELECT * FROM read_parquet('vertex/Person.parquet');
 CREATE VIEW "Person_knows_Person" AS SELECT * FROM read_parquet('edge/Person_knows_Person.parquet');
 
--- everything drawn in a window: the footer's x/y statistics skip the row groups outside it
-SELECT dense_id, x, y FROM "Person" WHERE x BETWEEN 0 AND 100 AND y BETWEEN 0 AND 100;
-
 -- the edges out of a range of ids: sorted by src, so the same skip applies
 SELECT src, dst FROM "Person_knows_Person" WHERE src BETWEEN 40960 AND 45055;
 
@@ -90,9 +85,8 @@ A predicate on the column a table is sorted by is the one the footers answer wel
 anything else — `dst`, or `subject` — reads every row group. Which edges point *into* a vertex is
 that second kind: there is one copy of each relation, ordered by its source.
 
-Read whole, the drawn columns are small: over a million vertices, `dense_id, x, y, cluster_id` came
-back as **16 MB of Arrow in 77–152 ms**, and two million edges' `src, dst` as **16 MB in 51–127 ms**,
-in DuckDB-WASM on one thread from a local file.
+Read whole, a relation is small: two million edges' `src, dst` came back as **16 MB of Arrow in
+51–127 ms**, in DuckDB-WASM on one thread from a local file.
 
 ## A relation, joined to its ends
 
@@ -116,19 +110,19 @@ in-edge.
 
 ## The same read through the package
 
-`@fossil-lang/corpus` is that recipe and nothing more: it parses `fossil.json`, creates the views
-on the host's engine, and composes the `SELECT` a scan asks for.
+`@fossil-lang/corpus` is that recipe and nothing more: `packages/corpus/src/open.ts, open` reads
+`fossil.json` and creates the views on the host's engine, under a catalog it is given, with the
+manifest beside them as two relations — `fossil_tables` and `fossil_columns`.
 
 ```ts
 import { open } from '@fossil-lang/corpus';
-const corpus = await open('https://cdn.example.org/kg/2026-08', { engine });
-
-corpus.manifest.vertex_tables                                      // what is inside
-const scan = corpus.scan({ table: 'Person', select: ['dense_id', 'x', 'y'], filter: { bbox: [0, 0, 100, 100] } });
-await scan.read(scan.plan())                                       // Arrow columns
+const close = await open('kg', { engine, url: 'https://cdn.example.org/kg/2026-08' });
+// SELECT table_name, rows, first_id FROM "kg".fossil_tables WHERE kind = 'vertex'
+// SELECT dense_id, subject FROM "kg"."Person" WHERE subject = 'https://example.org/person/7'
+// and calling `close` detaches the catalog
 ```
 
 The one capability a host brings is an `Engine`: SQL in, Arrow-shaped columns out, and an
-`AbortSignal` that interrupts the running statement. The package decodes no Parquet and links no
-engine: bundling a decoder would make it a driver, and the engine already prunes row groups off the
-footer statistics.
+`AbortSignal` that interrupts the running statement. Every read after `open` is the host's own SQL.
+The package decodes no Parquet and links no engine: bundling a decoder would make it a driver, and
+the engine already prunes row groups off the footer statistics.

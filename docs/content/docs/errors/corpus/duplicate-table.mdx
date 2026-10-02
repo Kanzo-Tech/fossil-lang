@@ -24,9 +24,10 @@ anything to the engine.
 ## Why fossil refuses it
 
 A table's name is its address everywhere after `open`. Each table becomes one view, named after it,
-in the corpus's catalog, and `scan({ table })` finds a table by that name. Vertex and edge tables share
-the one namespace, so two entries with one name could only be one view over one of the two files,
-and a scan meant for the other would read the wrong rows without a word. The writer keeps names unique —
+in the corpus's catalog, and every read names the table by that name. Vertex and edge tables share
+the one namespace — with `fossil_tables` and `fossil_columns`, the manifest's own two — so two entries
+with one name could only be one view over one of the two files, and a read meant for the other would
+read the wrong rows without a word. The writer keeps names unique —
 an edge table's `name` is unique where its `label` repeats across relations — so a duplicate means the
 manifest did not come from it unchanged ([the corpus](/docs/design/corpus)).
 

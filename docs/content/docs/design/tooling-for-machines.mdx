@@ -43,10 +43,9 @@ answer it gets is only as correct as its model of that schema.
 
 So what fossil publishes is the part an agent would otherwise reconstruct. `fossil.json` names every
 vertex and edge table, its columns with their types, its row count and, for an edge table, which
-vertex table each endpoint references — and `@fossil-lang/corpus` hands it over parsed, as
-`manifest`, before a byte of Parquet is read. A `scan` names a table, a filter and a projection, and
-a table that is not in the manifest is refused at the door rather than producing a plausible wrong
-answer.
+vertex table each endpoint references — and `@fossil-lang/corpus` attaches it beside the tables as
+two relations, `fossil_tables` and `fossil_columns`, so an agent reads the structure with the same
+SQL it reads the data with, before it has to guess a column name.
 
 ### One binding, and no protocol server
 
@@ -54,14 +53,6 @@ What an agent reaches is the one binding — `@fossil-lang/corpus`, in process, 
 engine — and a host that wants to hand it to an agent over a protocol wraps that binding rather than
 growing a second one beside it. A protocol server of fossil's own is
 [discarded](/docs/design/discarded#the-tooling), with what would bring it back.
-
-<Callout title="The escape hatch is a thing a host opens">
-`sql` costs a function of whatever was typed, where `scan` costs a function of the answer, so it is
-withheld by default. A host opens it with `sql: 'allowed'` on `open`, and the type system carries the
-decision: the answer widens to `SqlCorpus`, and a corpus opened without it has no `sql` member to
-call. [The corpus](/docs/design/corpus#sql-reaches-the-engine-unparsed-and-one-option-opens-it) has
-the rest.
-</Callout>
 
 ### Credentials ride the call, never argv, never the environment
 

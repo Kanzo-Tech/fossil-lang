@@ -3,9 +3,8 @@ title: A door for a camera
 description: "How a camera read a tiled corpus through `open` and three members — `tileMatrix`, `scan` and `edges` — where every answer was a function of a tile's address; why the zoom was picked off the tile matrix, and why the coarse zooms were cells and not a sample."
 ---
 
-> **Deferred, not reversed.** A `fossil/1` corpus is read whole through `open · manifest · scan ·
-> sql · close` — [one door](/docs/design/one-door) — and `scan` plans one task; this is what the
-> door owed a camera when the corpus was tiled. The code existed at commit `ac1801d4` (main
+> **Deferred, not reversed.** A `fossil/1` corpus is attached by `open` and read with the host's
+> SQL — [one door](/docs/design/one-door); this is what the door owed a camera when the corpus was tiled. The code existed at commit `ac1801d4` (main
 > `e5b2113f`), and every path on this page is spelled against that commit. What brings it back: a
 > `fossil/1` corpus that fails the in-browser thresholds — open over 1.5 s, first paint over 3 s,
 > or heap over 1.5 GB at a million vertices over HTTP.

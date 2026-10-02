@@ -14,17 +14,18 @@ this repository has paid for twice.
 
 ## What a corpus is
 
-**Two sets of columns, seven columns between them**, declared once in `corpus.bnf` and projected
-into `crates/fossil-sinks/src/generated.rs` by `cargo xtask corpus`: the **payload** (5) —
-`dense_id`, `subject`, `x`, `y`, `cluster_id` — and the **edge** (2), `src` and `dst`. Every reader
+**Two sets of columns, four columns between them**, declared once in `corpus.bnf` and projected
+into `crates/fossil-sinks/src/generated.rs` by `cargo xtask corpus`: the **payload** (2) —
+`dense_id` and `subject`, before the program's own — and the **edge** (2), `src` and `dst`. Every reader
 names the ROLE it means rather than the name, because the words the writer emits were 545 string
 literals with no declaration any of them derived from.
 
 **One graph, one id space, and a file per table.** `dense_id` is global across every vertex type,
-gapless, and a vertex's rank in the Hilbert order of its position over the whole graph. A vertex type
-is `vertex/<Type>.parquet`, a relation is `edge/<Src>_<label>_<Dst>.parquet`, and
+gapless: the types in manifest order, each one contiguous range, subject order inside it. A vertex
+type is `vertex/<Type>.parquet`, a relation is `edge/<Src>_<label>_<Dst>.parquet`, and
 `fossil.json` — `crates/fossil-sinks/src/manifest.rs, Manifest` — names every one of them with its
-columns, its row count and, for a vertex table, its position. There is no directory listing over HTTP
+columns and its row count. It carries the graph and not a picture of it:
+[where a vertex is drawn](/docs/design/position) is the view's choice. There is no directory listing over HTTP
 and the format asks for none. [The format](/docs/format) is the specification.
 
 **The corpus has no coarse face.** A reader draws every vertex; the tiles, the cell pyramid and the
@@ -41,11 +42,10 @@ one back.
 
 | the step | where | what it produces |
 | --- | --- | --- |
-| every vertex, then every edge, with a hard barrier between them | `crates/fossil-df/src/lib.rs, execute_graph` | the payload columns and the edges, as Arrow in memory |
-| one joint layout over the whole graph: Louvain, placement, renumber into Hilbert order | `crates/fossil-layout/src/layout/pass.rs` | `x`, `y`, `cluster_id` and the global `dense_id`; the edges remapped onto it |
+| every vertex, then every edge, with a hard barrier between them | `crates/fossil-df/src/lib.rs, execute_graph` | the payload columns and the edges, as Arrow in memory; `dense_id` numbered globally as each type lands (`crates/fossil-df/src/lib.rs, prepend_dense_id`) |
 | one Parquet file per table, row groups of `crates/fossil-sinks/src/manifest.rs, ROW_GROUP_ROWS`, every page ZSTD | `crates/fossil-df/src/write.rs, write` | the payload and the edges on disk, sorted by `dense_id` and by `(src, dst)`, then `fossil.json` |
 
-Nothing is staged and read back: the rows reach the pass as the batches the executor already held.
+Nothing is staged and read back: the writer encodes the batches the executor already held.
 
 **The manifest is written last, and that is not tidiness.** `fossil.json` is the commit: a reader
 opens nothing a manifest does not name, so a run that fails halfway leaves Parquet no reader will
@@ -58,12 +58,12 @@ measured.
 it is TypeScript with no crate behind it:
 
 ```ts
-await open(job, { engine, host })  // a job's corpus, under the credential the host vends
-await open(url, { engine })        // a corpus at a URL
+const close = await open(job, { engine, host })     // a job's corpus, under the credential the host vends
+const close = await open('demo', { engine, url })   // a corpus at a URL
 ```
 
-`sql: 'allowed'` widens either to `SqlCorpus`. What comes back is `fossil.json` parsed once, a view
-per table on the host's `Engine`, and `scan` — a table, a filter, a projection — over those views.
+It attaches the corpus to the host's `Engine` as the catalog it is given: a view per table, and the
+manifest itself as `fossil_tables` and `fossil_columns`. Every read after that is the host's SQL.
 Pruning is the engine's: every table is written in the order of its key, and DuckDB skips the row
 groups whose footer statistics exclude a predicate. [One door](/docs/design/one-door) argues the
 surface.
@@ -78,28 +78,10 @@ artefact.
 
 One rule: **a document carries a fact exactly when a reader cannot recover it from the bytes, or
 must have it before it reads them.** `fossil.json` carries the tables, their columns and their types
-because `open` makes views out of them; `record_count` because a viewer sizes its buffers before the
-first byte; and `position` because two `float32` columns are two numbers until something says which
-two are the plane. What it does not carry — an extent, a column's domain, statistics — is in the
+because `open` makes views out of them; and `record_count` because a viewer sizes its buffers before
+the first byte. What it does not carry — an extent, a column's domain, statistics — is in the
 Parquet footers or one query away, and comes back as an additive field the day a reader needs it
-before reading. [Position](/docs/design/position) argues the one field that is a decision.
-
-## The heuristic stops at the corpus
-
-> **What crosses to the reader is arithmetic and declared.**
-
-The quality attribute this page states rather than links, because it has no page of its own. Louvain
-is a heuristic, and what it decides reaches a reader as columns — `x`, `y`, `cluster_id` and the
-order of `dense_id` — never as a structure a reader must fetch to address the rest.
-
-**Its first measured violation was a dependency edge and not a format decision**, which is why it
-belongs here rather than on the format. `fossil-layout`'s pass wrote through a Parquet encoder that
-lived in `fossil-df` and that `fossil-df` never called, and that one `use` put `datafusion`,
-`fossil-hir`, `fossil-mir`, `fossil-descriptors-output`, `fossil-base` and `salsa` into the normal
-closure of a pass that resolves no name and holds no database. `39d0fb8` cut it, and
-`crates/xtask/tests/substrate_reach.rs` is the attribute made checkable: it takes its subject from
-`CLAUDE.md` and its linkers from `cargo metadata`, so neither half is a list anybody keeps by hand.
-It proves the rule is enforced and not that the rule is right, and says so.
+before reading. [Position](/docs/design/position) argues the field it no longer carries.
 
 ## The graph today
 
@@ -112,19 +94,18 @@ graph LR
   L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 3 crates<br/>df · df-wasm · introspect"]
-  C["<b>corpus</b> · 4 crates<br/>layout · sinks<br/>storage · storage-wasm"]
+  C["<b>corpus</b> · 3 crates<br/>sinks · storage · storage-wasm"]
   X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
   E -->|20| L
   E -->|1| M
   M -->|11| L
-  M -->|5| C
+  M -->|4| C
   M -->|1| X
   C -->|2| L
-  C -->|1| X
 ```
 
-**41 cross-group edges**, and no pair runs both ways. Every number above
+**39 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -133,18 +114,11 @@ The single `editor → engine` edge is `fossil-lsp → fossil-introspect`, and i
 the columns a `DESCRIBE` finds, the editor is silent on every diagnostic whose evidence is a source's
 schema, which is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`.
 
-`engine ↔ corpus` was the mutual pair, and one edge held it: `fossil-layout → fossil-df`, for one
-type — the Parquet encoder the pass wrote through. A struct `fossil-df` never called put
-`datafusion`, `fossil-hir`, `fossil-mir`, `fossil-descriptors-output`, `fossil-base` and `salsa`
-into the closure of a pass that resolves no name and holds no database — measurable as
-`cargo tree -p fossil-layout -e normal -i salsa`, which printed a tree and now prints nothing. The
-encoder became a leaf crate, and the leaf went with the tiles it wrote: the pass computes columns and
-the writer encodes them. The arrow that remains runs one way:
+The arrow between engine and corpus runs one way:
 
 | direction | edge | why it is there |
 | --- | --- | --- |
 | engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
-| engine → corpus | `fossil-df-wasm → fossil-layout` | the write host runs the layout pass over what the executor produced |
 | engine → corpus | `fossil-df-wasm → fossil-sinks`, `fossil-df-wasm → fossil-storage` | the host names the files it writes and writes them through the job's store |
 | engine → corpus | `fossil-introspect → fossil-storage` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
 
@@ -258,7 +232,7 @@ and the cycle goes with it.
 
 ## The verdict is not the crate count
 
-**Twenty-two crates**, against Gluon's ~11 crates for 90k lines, Gleam's 15 (six real) for 228k
+**Twenty-one crates**, against Gluon's ~11 crates for 90k lines, Gleam's 15 (six real) for 228k
 and rust-analyzer's 36 for 571k. The line count that used to sit beside this number is deliberately
 not restated: it was measured on 2026-08-25 and the tree has changed since, so the only honest
 options were to re-measure or to drop it.
@@ -269,8 +243,8 @@ of `fossil-base`, `fossil-engine` left by moving three into the crate that alrea
 arrived carrying a write-time bound and left when it was [removed](/docs/design/discarded#privacy),
 `fossil-tile-writer` arrived by moving a struct out of a crate that never called it and left with the
 tiles, `fossil-cli` left with the native host, and `fossil-graph` and `fossil-graph-wasm` left when
-the reader became TypeScript. Which is the point of the heading — the count went
-25 → 26 → 25 → 27 → 28 → 26 → 24 → 22 and none of those numbers is the verdict.
+the reader became TypeScript, and `fossil-layout` left when the corpus stopped carrying a picture.
+Which is the point of the heading — the count went 25 → 26 → 25 → 27 → 28 → 26 → 24 → 22 → 21 and none of those numbers is the verdict.
 
 What makes two dozen feel like a maze is not the count. Two of them lie about what they are, and a
 false name costs more than a surplus crate because you cannot skip it while reading. There were

@@ -48,12 +48,8 @@ the manifest is.
     "properties": [
       { "name": "dense_id", "type": "uint32", "role": "address" },
       { "name": "subject", "type": "string", "role": "identity" },
-      { "name": "x", "type": "float", "role": "coordinate" },
-      { "name": "y", "type": "float", "role": "coordinate" },
-      { "name": "cluster_id", "type": "uint32", "role": "categorical" },
       { "name": "birth_year", "type": "int32", "nullable": true }
-    ],
-    "position": { "by": "layout", "x": "x", "y": "y" }
+    ]
   }],
   "edge_tables": [{
     "name": "Order_placedBy_Person",
@@ -86,7 +82,6 @@ so `Src_label_Dst` is the name and `label` a field beside it.
 | `properties` | every column, in order, with its type | knows the schema without opening a footer |
 | `properties[].role` | what a column the writer emits IS | tells the writer's columns from the program's without a list of names |
 | `references` | the vertex table at each end | knows which relations join which types |
-| `position` | the two columns that place a vertex | knows which tables are drawn, and with what |
 
 `type` is one of `string`, `bool`, `int8` … `int64`, `uint8` … `uint64`, `float`, `double`, `date`,
 `timestamp`, `time`, `decimal` and `list<…>` — `corpus.bnf`'s spellings, written by
@@ -94,19 +89,15 @@ so `Src_label_Dst` is the name and `label` a field beside it.
 `crates/fossil-sinks/fossil.schema.json`. `iri` and `nullable` are
 optional and absent when there is nothing to say.
 
-**`role` says what a column the writer emits IS**: `address` (`dense_id`), `identity` (`subject`),
-`coordinate` (the layout's `x` and `y`), `categorical` (`cluster_id`) and `endpoint` (`src`, `dst`).
-They are `corpus.bnf`'s roles, and the writer reads them from there. A column of the program's
-carries none, so the columns to leave out of a field listing are the ones with a `role`, and a
-reader that wants the colour asks for the `categorical` one rather than remembering its name. What a
-reader does with a role is the reader's decision. A corpus written before the field existed carries
-no `role` anywhere; it is optional within `fossil/1`.
+**`role` says what a column the writer emits IS**: `address` (`dense_id`), `identity` (`subject`)
+and `endpoint` (`src`, `dst`). They are `corpus.bnf`'s roles, and the writer reads them from there.
+A column of the program's carries none, so the columns to leave out of a field listing are the ones
+with a `role`. What a reader does with a role is the reader's decision. A corpus written before the
+field existed carries no `role` anywhere; it is optional within `fossil/1`.
 
-**A vertex table with no `position` is not drawn.** `{"by": "layout"}` names the columns the layout
-pass wrote; `{"by": "program"}` names columns the program itself declared as a position, such as a
-longitude and a latitude. Which of the two a type carries is the writer's statement, and a reader
-dispatches on it rather than on column names. fossil's writer lays out every vertex type and writes
-`layout` on each; `program` is the shape a writer states program coordinates in.
+**A corpus carries no position.** It is the graph and not a picture of it: where a vertex is drawn
+is the reader's choice, from two of the program's columns or from its own layout
+([where x and y come from](/docs/design/position)).
 
 ## The conventions
 
@@ -114,7 +105,7 @@ Three things define a corpus beyond the manifest. Each is held by a guard below.
 
 | | the convention | what it buys |
 | --- | --- | --- |
-| [Identity](/docs/format/conventions/identity) | `dense_id` is a gapless `0..V−1` across the whole graph, stored `uint32`, and every vertex table is sorted by it; the identity is the subject IRI | one id space, so an edge's endpoints are two integers and a vertex buffer is indexed by id |
+| [Identity](/docs/format/conventions/identity) | `dense_id` is a gapless `0..V−1` across the whole graph, stored `uint32`, each vertex table one contiguous range of it and sorted by it; the identity is the subject IRI | one id space, so an edge's endpoints are two integers and a vertex buffer is indexed by id |
 | [Adjacency](/docs/format/conventions/adjacency) | a relation is one table of `src`, `dst`, sorted by `(src, dst)` | the CSR a graph algorithm wants, read as it lies |
 | Payload | plain Parquet, row groups of **122,880** rows, every page ZSTD, default statistics | an engine prunes row groups off the footer, and any Parquet reader opens the file |
 

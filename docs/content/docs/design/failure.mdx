@@ -56,7 +56,7 @@ can take minutes; it has a **signal**, and the person has a Stop. The line is dr
 thing that can wait forever is the person's own patience, and they can end it.
 
 1. **Every async function that crosses a package boundary takes `{ signal }`** and passes it down to
-   every wait it makes. `open`, `mount`, `introspect`, `runJob`, `openProgram`, `engine()` gain one;
+   every wait it makes. `open`, `mount`, `introspect`, `run`, `openProgram`, `engine()` gain one;
    `Engine.query`'s options become required, so fossil always passes one. TypeScript still accepts an
    engine that declares fewer parameters, so honouring the signal is the engine's contract, not the
    compiler's.
@@ -147,16 +147,11 @@ learn of it from the tab; it must learn of it from silence.
    with the problem `job/abandoned`. No background task, no cron: the next person to look is who ends
    it, which is the only moment anyone can notice.
 3. **A terminal job can be deleted**, so an abandoned one is not stuck in the list.
-4. **A completion that fails to report is retried** until the lease would have expired, after which
-   the sweep owns it. `run-job.ts`'s `.catch(() => {})` on the failure report goes.
-5. **The lease's length is the host's figure, and `runJob` is handed it**: `Job.lease`, in
-   milliseconds, 60 s when it is absent. It is not one of G1's deadlines, and the first decision below
-   does not cover it: a deadline bounds a wait fossil makes, and fossil knows the slowest honest
-   answer to its own waits; the lease is how long a server keeps a silent job, which only that server
-   knows. A constant fossil exported would still be a second statement of the server's number, and the
-   first time the two differed a report would be retried past the sweep, or abandoned before it.
-   *What would reverse it:* nothing short of the lease leaving the host — a server fossil ships, whose
-   sweep reads the same constant.
+4. **The run throws, and the host records it.** `run` (`packages/executor/src/run.ts, run`) answers
+   its report or throws its `FossilError`, and nothing more. Reporting the outcome, and retrying a
+   report that fails until the lease would have expired — after which the sweep owns it — is the
+   host's lifecycle, in keasy's runner. The lease is the server's figure and fossil holds no copy of
+   it, so the two cannot differ.
 
 **What would reverse it.** Runs that leave the browser — a worker on the server. Then the runner is a
 process the server can supervise, and the lease becomes its liveness check rather than a guess.
@@ -197,7 +192,7 @@ cannot prove.
 Each step is one branch and one merge, green.
 
 1. **Accept the page.** Done on 2026-10-01.
-2. **fossil.** `signal` through `open`, `mount`, `introspect`, `runJob`, `openProgram`; the deadline
+2. **fossil.** `signal` through `open`, `mount`, `introspect`, `run`, `openProgram`; the deadline
    helper on every host wait and wasm fetch; `storage/host-silent`; object-store client options;
    rejections no longer memoized; the cleanup-replaces-cause sites fixed; the guards; a test per G3
    case. *Breaking:* `Engine.query`'s `signal` is required.
