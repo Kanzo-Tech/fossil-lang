@@ -1,16 +1,12 @@
 //! `CLAUDE.md`, read as a rulebook rather than as prose.
 //!
-//! Two guards hold a bullet in that file against the tree, and they need the
-//! same three things out of it: where a bullet starts and stops, which
-//! backticked spans are paths rather than crate names, and which workspace
-//! members a bullet writes down. `tests/tokio_placement.rs` uses them to prove
-//! its rule names NO crate — the set it governs is derivable, so writing one
-//! down can only rot. `tests/substrate_reach.rs` uses them the other way round,
-//! to read the one crate name its rule must name, because the subject of that
-//! rule is a choice and choices cannot be derived from a graph.
-//!
-//! Neither direction works if the two guards disagree about what a bullet IS,
-//! which is why the parser lives here and not in either of them.
+//! A guard that holds a bullet in that file against the tree needs three
+//! things out of it: where a bullet starts and stops, which backticked spans
+//! are paths rather than crate names, and which workspace members a bullet
+//! writes down. `tests/tokio_placement.rs` uses them to prove its rule names NO
+//! crate — the set it governs is derivable, so writing one down can only rot.
+//! The parser lives in the library because an integration test cannot `use`
+//! a sibling.
 
 use std::collections::BTreeSet;
 

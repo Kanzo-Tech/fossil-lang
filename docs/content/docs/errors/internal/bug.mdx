@@ -20,7 +20,7 @@ It is raised in three kinds of place:
 - **The compiler**, as a diagnostic at a position in the program, where the type checker or the
   lowering finds its own invariants broken.
 - **The run**, for the writer's failures a program's data cannot cause — a table's Parquet that did
-  not encode, `fossil.json` that did not serialise — and for a run's failure that `runJob` receives
+  not encode, `fossil.json` that did not serialise — and for a run's failure that `run` receives
   without a fossil code, which it reports as `the run failed outside fossil` with the original error
   as the cause.
 - **The boundary to JavaScript**, when a failure fossil built cannot be handed over as an object.

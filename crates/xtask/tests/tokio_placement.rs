@@ -22,8 +22,7 @@
 //!
 //! 1. **No crate in the wasm closure can pull `tokio` into a wasm artefact.**
 //!    The closure is re-derived here the way `xtask::wasm_check` derives it —
-//!    cdylib crates plus anything declaring `[package.metadata.fossil] wasm =
-//!    true`, transitively closed over workspace members — so the two cannot
+//!    cdylib crates, transitively closed over workspace members — so the two cannot
 //!    disagree about what "a wasm build" means. Within it, a `tokio` normal
 //!    dependency is a failure unless it is gated by exactly
 //!    `cfg(not(target_arch = "wasm32"))`.
@@ -32,9 +31,7 @@
 //!    as a whole word against the member list `cargo metadata` reports. A list
 //!    that cannot be written down cannot go stale, which is the only defect
 //!    this rule has ever actually had. The bullet parser is
-//!    `xtask::rulebook`, shared with `tests/substrate_reach.rs`, which reads
-//!    the same file for the opposite reason — its rule has a subject that no
-//!    graph can derive, so it must name exactly one crate.
+//!    `xtask::rulebook`.
 //!
 //! Both halves read the tree. Nothing here restates a fact that lives
 //! somewhere else, so there is no second copy to drift.
@@ -166,12 +163,11 @@ fn holders(meta: &Value, dep_name: &str) -> BTreeMap<String, Hold> {
 }
 
 /// The wasm closure, derived the way `xtask::wasm_check` derives it: cdylib
-/// crates and crates declaring `[package.metadata.fossil] wasm = true`, closed
-/// over workspace-member edges.
+/// crates, closed over workspace-member edges.
 ///
 /// This is a second implementation of `crates/xtask/src/main.rs::wasm_closure`
 /// and it is deliberate: that one is a private `fn` in a binary target, so a
-/// test cannot call it, and copying its *inputs* (the two roots and the
+/// test cannot call it, and copying its *inputs* (the cdylib roots and the
 /// metadata graph) keeps them answering the same question even though neither
 /// can call the other. What must not be copied is a crate list, and neither
 /// side has one.
@@ -193,8 +189,7 @@ fn wasm_closure(meta: &Value) -> BTreeSet<String> {
                     .is_some_and(|cts| cts.iter().any(|c| c.as_str() == Some("cdylib")))
             })
         });
-        let declares_wasm = p["metadata"]["fossil"]["wasm"].as_bool() == Some(true);
-        if is_cdylib || declares_wasm {
+        if is_cdylib {
             roots.push(id);
         }
     }
@@ -269,8 +264,8 @@ fn tokio_never_reaches_a_wasm_build() {
     assert!(
         !closure.is_empty(),
         "the wasm closure came out empty, so this guard checked nothing. \
-         No cdylib crate and no `[package.metadata.fossil] wasm = true` was \
-         found — the derivation is broken, not the repository."
+         No cdylib crate was found — the derivation is broken, not the \
+         repository."
     );
     assert!(
         !holders.is_empty(),

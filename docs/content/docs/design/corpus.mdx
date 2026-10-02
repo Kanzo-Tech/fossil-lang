@@ -19,8 +19,8 @@ beyond the engine the reader already has, no process to keep alive, no writer ve
   edge/<Src>_<label>_<Dst>.parquet      one per relation
 ```
 
-`fossil.json` names every table, its path, its columns with their types, its row count, and — for a
-vertex table that is drawn — the two columns it is drawn at. It is written **after** every Parquet
+`fossil.json` names every table, its path, its columns with their types and its row count. It is
+written **after** every Parquet
 file, so its presence is the commit: a directory without it is a write that did not finish, and a
 reader that finds it can trust every path it names. The shape is
 `crates/fossil-sinks/src/manifest.rs, Manifest`, and [/docs/format](/docs/format) specifies it for a
@@ -40,32 +40,29 @@ Every vertex of every type has a `dense_id`, and the ids run `0..V−1` across t
 per type. An edge table is `src` and `dst` over those ids, so an edge is a pair of integers whichever
 types it joins, and a viewer's buffer index **is** the id.
 
-The id is the rank of a vertex in the Hilbert order of its position, over the union of every vertex
-type. `crates/fossil-layout/src/layout/hilbert.rs, hilbert_codes` quantises in binary64 and truncates,
-exactly as DuckDB's `ST_Hilbert` does, so the order is the one `ST_Hilbert` computes, and
-`crates/fossil-layout/src/layout/hilbert.rs, hilbert_ranks` turns codes into ranks. The writer lays
-out every type, so every id is placed. Every table is written
-sorted by its key, so reading a vertex table in id order is reading it in curve order, and a filter
-on a box prunes row groups on the footers' own statistics. [Position](/docs/design/position) is where
-the coordinates come from.
+The types take the ids in manifest order, each one contiguous range, and inside a type the ids
+follow the subject — `crates/fossil-df/src/lib.rs, prepend_dense_id` numbers each type as it lands.
+So a vertex table is the range from the sum of the counts before it, and a viewer loads it into its
+slice of one buffer without reading another. Every table is written sorted by its key. The order
+carries no geometry: [where a vertex is drawn](/docs/design/position) is the view's choice.
 
-**What would reverse it.** A graph whose types cannot share one layout — relations between types so
-sparse that the joint placement pulls nothing together. That is measured against per-type planes on
-the same corpus before anything is decided, and per-type planes are what it would bring back.
+**What would reverse it.** A reader that has to address a subset of the graph smaller than a type by
+arithmetic on ids — which is what the Hilbert order the writer used to number in bought, and only the
+deferred [cells](/docs/design/later/cells) used it.
 
 ### A reader is handed the subject IRI, because an address is not something to key on
 
-A lookup by identity is a `scan` filtered on `subject`, the IRI. The alternative is the `dense_id`,
-and it is the cheap one. It is refused because **the spatial order is the id space**: redoing the
-layout ranks every vertex by the Hilbert code of its new position and lets that rank be its id, so a
-`dense_id` held anywhere outside the corpus names a *different vertex* after the next write. A
+A lookup by identity is `WHERE subject = ?`, the IRI. The alternative is the `dense_id`, and it is
+the cheap one. It is refused because **the id is an address**: a new subject renumbers every vertex
+after it, so a `dense_id` held anywhere outside the corpus names a *different vertex* after the next
+write. A
 bookmark, a selection, a link from another system and a row in somebody else's database all key on
 something, and an address is not something to key on.
 
 The manifest says which column is which — `key` is `dense_id` and `identity` is `subject`, on every
 vertex table — so a reader keys on the field rather than on a column name it was told.
 
-What would reverse it is a corpus whose ids survive a re-layout — a stable id column written beside
+What would reverse it is a corpus whose ids survive a rewrite — a stable id column written beside
 the address. Nothing writes one, and adding one is a format change and not a reader change.
 
 ## The artifact is the API
@@ -95,8 +92,8 @@ manifest. Its version string is `fossil/1`, one constant,
 `crates/fossil-sinks/src/manifest.rs, FOSSIL_FORMAT`, and a reader rejects any other before it reads a
 byte of Parquet.
 
-**Declared is all it is.** Nothing in fossil issues a graph query: the door is `scan` and `sql`, and
-DuckPGQ — the extension that would run `GRAPH_TABLE` over those views — does not load in
+**Declared is all it is.** Nothing in fossil issues a graph query: the door attaches views and every
+read is the host's SQL, and DuckPGQ — the extension that would run `GRAPH_TABLE` over those views — does not load in
 DuckDB-WASM 1.5.x, the engine a browser reader has. A traversal today is SQL over `src` and `dst`,
 written by whoever needs it.
 
@@ -111,25 +108,16 @@ what would bring it back.
 — every type together, since the id space is shared — and the question the number invites is whether
 that ceiling is close.
 
-**It is not close, and what is close is something else.** The layout pass assigns the numbering, and
-it was measured: on a 14-core machine with 48 GiB it peaked at **2.09 GiB at two million vertices and
-8.82 GiB at ten**, and the whole write at ten million took **404.4 s**. Linear over that range, 2³²
-vertices is on the order of **3.7 TiB resident and two days of wall clock** — the pass exhausts a
-machine roughly **430× before the column exhausts its range** — and the wasm writer, the one there is,
+**It is not close, and what is close is something else.** The whole write at ten million vertices
+took **404.4 s** on a 14-core machine with 48 GiB, so 2³² vertices is on the order of two days of
+wall clock — and the wasm writer, the one there is,
 [refuses long before that](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no):
 its budget is 2 GiB, and a `shop` corpus of a million people and three million orders is over it. The
-width is not what stops a corpus.
+width is not what stops a corpus. Past it the executor refuses by name, `run/too-large`, where it
+numbers the ids.
 
-It is also 32-bit *by construction* rather than by choice of spelling.
-`crates/fossil-layout/src/layout/community.rs, community_hierarchy` and
-`crates/fossil-layout/src/layout/hilbert.rs, hilbert_ranks` are `u32` throughout. Widening the column
-without widening the pass would declare a range nothing in the writer can number. And the ecosystem
-is at the same place: no maintained community-detection crate exceeds 32-bit indices, which is one
-of the reasons [adopting one is rejected](/docs/design/discarded#streaming-memory-and-scale).
-
-The cost of the other choice is on a column every drawing read takes: at a million vertices
-`dense_id` is **4.0 MB** on disk beside **4.0 MB** for `x` and **3.96 MB** for `y`, so `uint64`
-spends the most-read bytes of the corpus on range nothing can reach.
+The cost of the other choice is on the column every read takes: at a million vertices `dense_id` is
+**4.0 MB** on disk, so `uint64` spends the most-read bytes of the corpus on range nothing can reach.
 
 ### The gapless `0..V−1`, and the price of keeping it
 
@@ -165,21 +153,6 @@ atomic renames, lock files, visibility protocols and transaction logs exist to p
 a half-written state; with no such reader they are cost without benefit. The one ordering the writer
 keeps is the manifest last, and it is the only one a reader could observe.
 
-## `sql` reaches the engine unparsed, and one option opens it
-
-[The door](/docs/design/one-door) reads with `scan`, whose filter is a tree the door renders itself.
-`sql` takes a **raw SQL string**, evaluated by the host's engine against the corpus's views; it is
-not a parsed predicate language and nothing that reaches it is. It exists only on a corpus opened
-with `sql: 'allowed'` — the default withholds it — so a host that hands a corpus to code it does not
-trust decides once, at `open`, and the type says which it decided.
-
-Two things it does not claim. It does not stop a host *granting* access — withholding SQL is a
-policy, and a library cannot hold a policy for its consumers. And it is not a sanitiser: there is no
-chokepoint to sanitise towards, because a corpus is files and a recipient holds them.
-
-**What would reverse it.** A consumer whose question `scan` cannot express and that must not be
-handed SQL. Then the question earns a member of the door, argued with its measurement.
-
 ## The camera has a renderer, and it is not fossil's
 
 The door does not draw, which leaves one thing unstated: *something* has to put a million points on a
@@ -187,27 +160,11 @@ screen, and fossil does not ship it. What draws is `@kanzo-tech/graph`, a WebGL 
 cosmos.gl, and it is the only viewer. **The view owns the picture and every policy over it; fossil
 owns the bytes and the manifest that names them.**
 
-A `fossil/1` corpus is drawn whole: every vertex table with a `position`, and every edge table whose
-two ends are drawn. At a million vertices and two million edges that read was measured in
-DuckDB-WASM, one thread, a local file: the vertices' `dense_id`, `x`, `y` and `cluster_id` to **16 MB
-of Arrow in 77–152 ms**, the edges' `src` and `dst` to **16 MB in 51–127 ms**. The tiled read it
+A `fossil/1` corpus is drawn whole, every vertex and every edge, at a place the view chooses
+([where x and y come from](/docs/design/position)). At two million edges the read was measured in
+DuckDB-WASM, one thread, a local file: `src` and `dst` to **16 MB of Arrow in 51–127 ms**. The tiled read it
 replaced is on [the tiled corpus](/docs/design/later/corpus-tiles), and what brings it back is a
 corpus that does not fit the tab, measured.
-
-### A palette has a capacity, and a corpus does not know it
-
-`cluster_id` is what the layout pass writes and what colours the picture, and the two scales are not
-the same size. The bench corpus carries **128 communities**; the design system's categorical palette
-publishes its capacity as `--chart-capacity`, which is **8**, and an ordinal at or past it resolves
-to the muted token. Handed over unfolded, **937,496 of a million vertices came back one grey** — a
-picture that is not wrong about anything and shows nothing. Folded into the capacity by remainder,
-two communities can share a slot, which is what eight slots *means*; the fold is a function of the
-community alone, so a colour survives a pan.
-
-**The heading is the whole of it: a corpus does not know.** The manifest carries no domain for
-`cluster_id`, and a reader that draws everything counts the distinct values it holds. What would add
-one is a reader that needs the number before it reads — a view that sizes its palette before the
-first batch — and then it is an optional field within `fossil/1`.
 
 ## Conformance reads the bytes with an engine nobody here wrote
 

@@ -95,15 +95,16 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
         ("Order", "Person"),
     );
 
-    // dense ids (sorted by subject IRI):
+    // dense ids, global — the types in schema order, each one contiguous
+    // range, subject order inside it:
     //   Person: person/1=0, person/2=1, person/3=2
-    //   Order:  order/10=0, order/11=1, order/12=2, order/13=3
+    //   Order:  order/10=3, order/11=4, order/12=5, order/13=6
     // orders.csv user_ids: 10→3, 11→1, 12→2, 13→1
-    //   ⇒ (src_dense, dst_dense) = (0,2),(1,0),(2,1),(3,0)
+    //   ⇒ (src_dense, dst_dense) = (3,2),(4,0),(5,1),(6,0)
     assert_eq!(
         pairs(&edge.batches),
-        vec![(0, 2), (1, 0), (2, 1), (3, 0)],
-        "ORDER BY src_dense, dst_dense",
+        vec![(3, 2), (4, 0), (5, 1), (6, 0)],
+        "global ids, ORDER BY src_dense, dst_dense",
     );
 }
 
@@ -154,15 +155,8 @@ async fn the_write_emits_one_manifest_over_one_table_per_type_and_relation() {
     assert_eq!(person.record_count, 3);
     assert_eq!(m.vertex_tables[1].record_count, 4);
     let columns: Vec<&str> = person.properties.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(
-        &columns[..5],
-        ["dense_id", "subject", "x", "y", "cluster_id"]
-    );
+    assert_eq!(&columns[..2], ["dense_id", "subject"]);
     assert!(columns.contains(&"name"), "{columns:?}");
-    assert!(matches!(
-        person.position,
-        Some(fossil_sinks::manifest::Position::Layout { .. })
-    ));
 
     let edge = &m.edge_tables[0];
     assert_eq!(edge.name, "Order_placedBy_Person");

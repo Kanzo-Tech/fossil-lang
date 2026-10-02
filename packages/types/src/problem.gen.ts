@@ -88,7 +88,7 @@ export type Code =
   | 'source/unparseable'
   | 'engine/failed'
   | 'write/failed'
-  | 'layout/too-large'
+  | 'run/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
   | 'storage/outside-prefix'
@@ -104,11 +104,6 @@ export type Code =
   | 'corpus/unsupported-format'
   | 'corpus/duplicate-table'
   | 'corpus/not-a-location'
-  | 'corpus/unknown-table'
-  | 'corpus/unknown-column'
-  | 'corpus/empty-projection'
-  | 'corpus/no-position'
-  | 'corpus/filter-type-mismatch'
   | 'api/invalid-argument'
   | 'api/busy'
   | 'api/unknown-handle'
@@ -197,7 +192,7 @@ export const CODES: readonly Code[] = [
   'source/unparseable',
   'engine/failed',
   'write/failed',
-  'layout/too-large',
+  'run/too-large',
   'storage/no-credential',
   'storage/ambiguous-prefix',
   'storage/outside-prefix',
@@ -213,11 +208,6 @@ export const CODES: readonly Code[] = [
   'corpus/unsupported-format',
   'corpus/duplicate-table',
   'corpus/not-a-location',
-  'corpus/unknown-table',
-  'corpus/unknown-column',
-  'corpus/empty-projection',
-  'corpus/no-position',
-  'corpus/filter-type-mismatch',
   'api/invalid-argument',
   'api/busy',
   'api/unknown-handle',
@@ -795,7 +785,7 @@ export interface ProblemData {
   /**
    * More vertices than a `u32` `dense_id` can number.
    */
-  'layout/too-large': {
+  'run/too-large': {
     vertices: number;
   };
   /**
@@ -893,41 +883,6 @@ export interface ProblemData {
    */
   'corpus/not-a-location': {
     location: string;
-  };
-  /**
-   * A table the corpus does not have.
-   */
-  'corpus/unknown-table': {
-    table: string;
-    tables: string[];
-  };
-  /**
-   * A column a table does not declare.
-   */
-  'corpus/unknown-column': {
-    column: string;
-    columns: string[];
-    table: string;
-  };
-  /**
-   * A projection that selects no column.
-   */
-  'corpus/empty-projection': {
-    table: string;
-  };
-  /**
-   * A spatial filter over a table that declares no position.
-   */
-  'corpus/no-position': {
-    table: string;
-  };
-  /**
-   * A filter comparing a column with a value of another type.
-   */
-  'corpus/filter-type-mismatch': {
-    column: string;
-    holds: string;
-    value: string;
   };
   /**
    * An argument a caller passed that is not what the call takes.
@@ -1037,7 +992,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'source/unparseable': 'A source does not parse',
   'engine/failed': 'The query engine failed',
   'write/failed': 'A corpus file could not be written',
-  'layout/too-large': 'The graph has too many vertices',
+  'run/too-large': 'The graph has too many vertices',
   'storage/no-credential': 'No credential was vended',
   'storage/ambiguous-prefix': 'More than one prefix was vended',
   'storage/outside-prefix': 'Outside the vended prefix',
@@ -1053,11 +1008,6 @@ export const TITLES: { readonly [C in Code]: string } = {
   'corpus/unsupported-format': 'The corpus format is not supported',
   'corpus/duplicate-table': 'A table is declared twice',
   'corpus/not-a-location': 'Not a corpus location',
-  'corpus/unknown-table': 'Not a table of this corpus',
-  'corpus/unknown-column': 'Not a column of this table',
-  'corpus/empty-projection': 'The projection selects nothing',
-  'corpus/no-position': 'The table has no position',
-  'corpus/filter-type-mismatch': 'The filter compares different types',
   'api/invalid-argument': 'An argument is invalid',
   'api/busy': 'Another call is running',
   'api/unknown-handle': 'The handle names nothing',
@@ -1128,7 +1078,7 @@ export type DetailedCode =
   | 'source/unparseable'
   | 'engine/failed'
   | 'write/failed'
-  | 'layout/too-large'
+  | 'run/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
   | 'storage/outside-prefix'
@@ -1144,11 +1094,6 @@ export type DetailedCode =
   | 'corpus/unsupported-format'
   | 'corpus/duplicate-table'
   | 'corpus/not-a-location'
-  | 'corpus/unknown-table'
-  | 'corpus/unknown-column'
-  | 'corpus/empty-projection'
-  | 'corpus/no-position'
-  | 'corpus/filter-type-mismatch'
   | 'api/invalid-argument'
   | 'api/busy'
   | 'api/unknown-handle'
@@ -1218,7 +1163,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'source/unparseable': (d) => `the source \`${d.locator}\` does not parse`,
   'engine/failed': (_) => `the query engine failed`,
   'write/failed': (d) => `\`${d.path}\` could not be written`,
-  'layout/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
+  'run/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
   'storage/no-credential': (d) => `the host vended no ${d.access} credential for ${d.scope}`,
   'storage/ambiguous-prefix': (d) => `${d.scope} vends ${d.count} prefixes, and one was expected`,
   'storage/outside-prefix': (d) => `${d.locator} lies outside ${d.prefix}`,
@@ -1234,11 +1179,6 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'corpus/unsupported-format': (d) => `${d.path} declares format ${d.format}, and this reader reads fossil/1 only`,
   'corpus/duplicate-table': (d) => `the corpus declares ${d.table} twice`,
   'corpus/not-a-location': (d) => `${d.location} carries a query or a fragment, and a corpus location is a prefix: signed storage is opened as a job, under the host that vends its credential`,
-  'corpus/unknown-table': (d) => `${d.table} is not a table of this corpus — its tables are ${d.tables.join(', ')}`,
-  'corpus/unknown-column': (d) => `${d.table} does not declare ${d.column} — its columns are ${d.columns.join(', ')}`,
-  'corpus/empty-projection': (d) => `the projection names no column of ${d.table}`,
-  'corpus/no-position': (d) => `${d.table} declares no position, so it has no box to filter by`,
-  'corpus/filter-type-mismatch': (d) => `${d.column} holds ${d.holds}, and the filter compares it with ${d.value}`,
   'api/invalid-argument': (d) => `\`${d.argument}\` is not ${d.expected}`,
   'api/busy': (d) => `\`${d.call}\` was called while another call is running`,
   'api/unknown-handle': (_) => `the handle names nothing: it was dropped, or never issued`,

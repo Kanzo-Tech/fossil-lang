@@ -35,9 +35,9 @@ Interested: 4 written, 4 lowered
     hasInterest
 
 ── run ──
-vertex Place (https://ldbc.example/voc#Place) × 2 — dense_id, subject, x, y, cluster_id, name
-vertex Tag (https://ldbc.example/voc#Tag) × 2 — dense_id, subject, x, y, cluster_id, name
-vertex Person (https://ldbc.example/voc#Person) × 4 — dense_id, subject, x, y, cluster_id, firstName
+vertex Place (https://ldbc.example/voc#Place) × 2 — dense_id, subject, name
+vertex Tag (https://ldbc.example/voc#Tag) × 2 — dense_id, subject, name
+vertex Person (https://ldbc.example/voc#Person) × 4 — dense_id, subject, firstName
 edge Person_isLocatedIn_Place × 4
 edge Person_knows_Person × 3
 edge Person_hasInterest_Tag × 4

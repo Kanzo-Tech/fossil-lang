@@ -32,7 +32,7 @@ classes say *which package* refused, not *what* — `CorpusReadError` covers an 
 unknown column, a bad limit, an inverted box and a NaN, and the only way to tell them apart is the
 message. The one real discriminant was `run_error` in
 `crates/fossil-df-wasm/src/lib.rs` at `8d6114a3`, which named an over-budget run `OverBudget` — and
-`runJob` (`packages/executor/src/run-job.ts, runJob`) then reduced it to `error: string` in its
+`runJob` (`8d6114a3:packages/executor/src/run-job.ts, runJob`) then reduced it to `error: string` in its
 `CompletePayload`, so a host never saw the name. The `Refusal` behind it
 (`crates/fossil-df/src/memory.rs, Refusal`) carries the consumer, the bytes requested, the bytes held
 and the budget as four fields; all four reach JavaScript inside a sentence.
@@ -93,7 +93,7 @@ not parsed, typed data beside it, a link to a long explanation, and a chain of c
 ## A code is `area/kind`
 
 A code is two lowercase kebab-case words joined by a slash: `run/over-budget`, `type/property-mismatch`,
-`corpus/unknown-table`. The area names **where the mistake is**, not which crate noticed it — the same
+`corpus/not-json`. The area names **where the mistake is**, not which crate noticed it — the same
 mistake found by `check` and again by `run` has one code, which is the point of sharing a namespace.
 
 The grammar is a predicate on both sides: `is_code` in `fossil_graph_schema`, and `isCode` exported
@@ -330,22 +330,21 @@ are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no cod
 | `pipeline` (12) | `unknown-verb`, `unimplemented-verb`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-one-side` |
 | `unsupported` (1) | `expression` — a gap in the compiler, not a mistake in the program |
 
-**Run, storage, corpus and the API — 34 codes.** The executor's descriptor errors reuse the compile
+**Run, storage, corpus and the API — 28 codes.** The executor's descriptor errors reuse the compile
 codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-registered`,
 `document/unparseable`, …), because they are the same mistake found late:
 
 | Area | Codes | From |
 | --- | --- | --- |
-| `run` (3) | `over-budget`, `does-not-compile`, `destination-uncovered` | `RunError`, `refuse_if_poisoned`, the destination check |
+| `run` (4) | `over-budget`, `does-not-compile`, `destination-uncovered`, `too-large` | `RunError`, `refuse_if_poisoned`, the destination check, the numbering of `dense_id` |
 | `shape` (+1) | `more-than-one-output` | the executor's descriptor |
-| `document` (+1) | `unread` | `runJob`'s unread list |
-| `source` (3) | `not-found`, `not-utf8`, `unparseable` | a CSV, JSON or Parquet source that names no file; the RDF sources a run decodes |
-| `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the corpus's `ATTACH`, `scan` and `sql` |
+| `document` (+1) | `unread` | the executor's `run`, over the documents it could not read |
+| `source` (2) | `not-found`, `unparseable` | a CSV, JSON or Parquet source that names no file; the RDF sources a run decodes |
+| `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the views `open` creates |
 | `write` (1) | `failed` | `WriteError`; its other variants are `internal/bug` |
-| `layout` (1) | `too-large` | `LayoutError`; its other variants are `internal/bug` |
 | `storage` (9) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused`, `host-silent` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` — `host-silent` is [failure](/docs/design/failure)'s deadline |
 | `module` (1) | `unreachable` | the three wasm loaders, when a module cannot be fetched |
-| `corpus` (10) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `not-a-location`, `unknown-table`, `unknown-column`, `empty-projection`, `no-position`, `filter-type-mismatch` | `open`, `parseManifest`, `scan`, the filter binder |
+| `corpus` (5) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `not-a-location` | `open`, `parseManifest` |
 | `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy` and the executor's borrow, the workspace's `unknown_handle` |
 
 **`internal/bug` — 1 code** for everything that is fossil's fault and not the caller's: the
@@ -353,7 +352,7 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 fresh object. Nobody branches on it; a host shows it and reports it. A panic stays a
 `WebAssembly.RuntimeError` — it is not a value that can be built at the moment it happens.
 
-**106 codes**, 105 of them a mistake someone other than fossil can repair.
+**100 codes**, 99 of them a mistake someone other than fossil can repair.
 
 **Retired, with no program that reached them.** `write/unknown-type` and `layout/dangling-endpoint`
 were released in `v0.3.0-alpha.18` and are in `RETIRED`: the executor builds the schema it writes
@@ -600,7 +599,7 @@ refuses a value with a `name`. Every change is additive: a problem stored before
    rebuilds them on the cause, a foreign cause whose code is a catalogued one is neither a problem
    nor a `FossilError`; in `packages/storage/tests/objects.test.ts`, a host whose `credentials`
    rejects with an error coded `job/not-found` yields `storage/host-refused` whose wire cause has
-   that code — the Rust path, end to end; in `packages/executor/tests/run-job.test.ts`, the same
+   that code — the Rust path, end to end; in `34e5fd51:packages/executor/tests/run-job.test.ts`, the same
    rejection survives into the `failed` report's `document/unread` chain. Released as
    `v0.3.0-alpha.21`. *Breaking:* nothing.
 2. **keasy**, on `alpha.21`: `ApiError.name` goes back to `"ApiError"` (`api/src/client.ts`);

@@ -37,8 +37,8 @@
 //! to hold.
 //!
 //! What this cannot prove: the pool bounds what operators *reserve*, not what
-//! the process holds. The source bytes, the collected graph, the layout pass
-//! and the encoded Parquet are outside it, which is why
+//! the process holds. The source bytes, the collected graph and the encoded
+//! Parquet are outside it, which is why
 //! [`BUDGET`](crate::memory::BUDGET) is half the address space and not all of
 //! it. Measured on the shop program in Node: 900,000 people finish at 2.64 GiB
 //! of linear memory, and 1,000,000 are refused at 2.70 GiB, before the corpus

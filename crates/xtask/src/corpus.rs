@@ -79,14 +79,10 @@ impl Where {
 /// What a column is — never what a reader does with it. See the module docs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Role {
-    /// The row's rank in the ordering. Not an identity: a re-layout renumbers it.
+    /// The row's rank in the ordering. Not an identity: a new subject renumbers it.
     Address,
     /// What a bookmark keys on, and what survives a rebuild.
     Identity,
-    /// One axis of the plane. Declared and drawn as a pair.
-    Coordinate,
-    /// An ordinal the writer computed, for a reader to colour by.
-    Categorical,
     /// One end of a relation: a vertex's global `dense_id`.
     Endpoint,
 }
@@ -96,8 +92,6 @@ impl Role {
         match word {
             "address" => Some(Self::Address),
             "identity" => Some(Self::Identity),
-            "coordinate" => Some(Self::Coordinate),
-            "categorical" => Some(Self::Categorical),
             "endpoint" => Some(Self::Endpoint),
             _ => None,
         }
@@ -108,8 +102,6 @@ impl Role {
         match self {
             Self::Address => "Address",
             Self::Identity => "Identity",
-            Self::Coordinate => "Coordinate",
-            Self::Categorical => "Categorical",
             Self::Endpoint => "Endpoint",
         }
     }
@@ -119,8 +111,6 @@ impl Role {
         match self {
             Self::Address => "ADDRESS",
             Self::Identity => "IDENTITY",
-            Self::Coordinate => "COORDINATES",
-            Self::Categorical => "CATEGORICAL",
             Self::Endpoint => "ENDPOINTS",
         }
     }
@@ -376,10 +366,8 @@ fn capitalise(s: &str) -> String {
 /// One line of prose per role, for the generated doc comments.
 const fn role_doc(role: Role) -> &'static str {
     match role {
-        Role::Address => "the row's rank in the ordering, which a re-layout renumbers",
+        Role::Address => "the row's rank in the ordering, which a new subject renumbers",
         Role::Identity => "what a bookmark keys on, and what survives a rebuild",
-        Role::Coordinate => "one axis of the plane",
-        Role::Categorical => "an ordinal the writer computed, for a reader to colour by",
         Role::Endpoint => "one end of a relation, a vertex's global `dense_id`",
     }
 }
@@ -419,12 +407,12 @@ mod tests {
 
     #[test]
     fn a_column_parses_every_clause() {
-        let cols = parse("col x = in payload ; type float32 ; role coordinate .");
+        let cols = parse("col subject = in payload ; type string ; role identity .");
         assert_eq!(cols.len(), 1);
-        assert_eq!(cols[0].name, "x");
+        assert_eq!(cols[0].name, "subject");
         assert_eq!(cols[0].whence, Where::Payload);
-        assert_eq!(cols[0].data_type, "float32");
-        assert_eq!(cols[0].role, Role::Coordinate);
+        assert_eq!(cols[0].data_type, "string");
+        assert_eq!(cols[0].role, Role::Identity);
         assert!(cols[0].aligns.is_none());
     }
 
@@ -441,7 +429,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "belongs to an endpoint")]
     fn aligns_on_a_non_endpoint_is_refused() {
-        let _ = parse("col x = in payload ; type float32 ; role coordinate ; aligns src .");
+        let _ = parse("col subject = in payload ; type string ; role identity ; aligns src .");
     }
 
     #[test]
@@ -463,8 +451,6 @@ mod tests {
         assert_eq!(count(Where::Payload, Role::Address), 1);
         assert_eq!(cols.iter().filter(|c| c.role == Role::Identity).count(), 1);
         assert_eq!(count(Where::Payload, Role::Identity), 1);
-        // A coordinate is declared as a pair.
-        assert_eq!(count(Where::Payload, Role::Coordinate), 2);
         // An edge is its two endpoints, one per end.
         assert_eq!(count(Where::Edge, Role::Endpoint), 2);
         let ends: Vec<_> = cols.iter().filter_map(|c| c.aligns.as_deref()).collect();

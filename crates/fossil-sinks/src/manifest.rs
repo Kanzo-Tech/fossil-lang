@@ -43,7 +43,7 @@ pub const MANIFEST_FILE: &str = "fossil.json";
 ///
 /// `DuckDB`'s own default, set explicitly because parquet-rs defaults to
 /// 1,048,576 — which at a million vertices is one row group and no pruning by
-/// the statistics a bounding-box filter reads. A reader prunes on the footer's
+/// the statistics a `dense_id` range reads. A reader prunes on the footer's
 /// statistics; nothing reads this number back.
 pub const ROW_GROUP_ROWS: usize = 122_880;
 
@@ -68,7 +68,8 @@ pub struct VertexTable {
     pub iri: Option<String>,
     /// The table's Parquet file, relative to the corpus root.
     pub path: String,
-    /// The key column: `dense_id`, global and gapless across every vertex table.
+    /// The key column: `dense_id`, global and gapless across every vertex table,
+    /// and one contiguous range of it per table, in manifest order.
     pub key: String,
     /// The identity column: `subject`, unique within the table.
     pub identity: String,
@@ -76,9 +77,6 @@ pub struct VertexTable {
     pub record_count: u64,
     /// Every column of the file, in file order.
     pub properties: Vec<Property>,
-    /// The columns this table is drawn at. Absent: the table is not drawn.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub position: Option<Position>,
 }
 
 /// One relation's table.
@@ -131,26 +129,6 @@ pub struct Property {
     /// Absent on a column of the program's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<ColumnRole>,
-}
-
-/// Where a vertex table's rows are drawn.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "by", rename_all = "lowercase")]
-pub enum Position {
-    /// The writer's layout pass placed the rows.
-    Layout {
-        /// The column holding the horizontal coordinate.
-        x: String,
-        /// The column holding the vertical coordinate.
-        y: String,
-    },
-    /// The program declared two of its own columns as the position.
-    Program {
-        /// The column holding the horizontal coordinate.
-        x: String,
-        /// The column holding the vertical coordinate.
-        y: String,
-    },
 }
 
 impl Manifest {
@@ -267,10 +245,6 @@ mod tests {
                         name
                     },
                 ],
-                position: Some(Position::Layout {
-                    x: "x".to_string(),
-                    y: "y".to_string(),
-                }),
             }],
             edge_tables: vec![EdgeTable {
                 name: edge_table_name("Person", "knows", "Person"),
@@ -303,8 +277,10 @@ mod tests {
         assert_eq!(person["path"], "vertex/Person.parquet");
         assert_eq!(person["key"], "dense_id");
         assert_eq!(person["identity"], "subject");
-        assert_eq!(person["position"]["by"], "layout");
-        assert_eq!(person["position"]["x"], "x");
+        assert!(
+            person.get("position").is_none(),
+            "the corpus carries no picture"
+        );
         assert_eq!(person["properties"][0]["type"], "uint32");
         assert!(
             person["properties"][0].get("nullable").is_none(),
@@ -329,18 +305,6 @@ mod tests {
         let m = manifest();
         let back: Manifest = serde_json::from_str(&m.to_json().unwrap()).unwrap();
         assert_eq!(back, m);
-    }
-
-    #[test]
-    fn a_program_position_is_tagged_program() {
-        let p = Position::Program {
-            x: "lon".to_string(),
-            y: "lat".to_string(),
-        };
-        assert_eq!(
-            serde_json::to_value(&p).unwrap(),
-            serde_json::json!({ "by": "program", "x": "lon", "y": "lat" })
-        );
     }
 
     #[test]

@@ -27,14 +27,10 @@
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ColumnRole {
-    /// The row's rank in the ordering, which a re-layout renumbers.
+    /// The row's rank in the ordering, which a new subject renumbers.
     Address,
     /// What a bookmark keys on, and what survives a rebuild.
     Identity,
-    /// One axis of the plane.
-    Coordinate,
-    /// An ordinal the writer computed, for a reader to colour by.
-    Categorical,
     /// One end of a relation, a vertex's global `dense_id`.
     Endpoint,
 }
@@ -61,37 +57,16 @@ pub const PAYLOAD_COLUMNS: &[WriterColumn] = &[
         data_type: "string",
         role: ColumnRole::Identity,
     },
-    WriterColumn {
-        name: "x",
-        data_type: "float",
-        role: ColumnRole::Coordinate,
-    },
-    WriterColumn {
-        name: "y",
-        data_type: "float",
-        role: ColumnRole::Coordinate,
-    },
-    WriterColumn {
-        name: "cluster_id",
-        data_type: "uint32",
-        role: ColumnRole::Categorical,
-    },
 ];
 
 /// The names of a vertex payload row, in writer order.
-pub const PAYLOAD_NAMES: &[&str] = &["dense_id", "subject", "x", "y", "cluster_id"];
+pub const PAYLOAD_NAMES: &[&str] = &["dense_id", "subject"];
 
-/// The address column(s) of a vertex payload row — the row's rank in the ordering, which a re-layout renumbers.
+/// The address column(s) of a vertex payload row — the row's rank in the ordering, which a new subject renumbers.
 pub const PAYLOAD_ADDRESS: &[&str] = &["dense_id"];
 
 /// The identity column(s) of a vertex payload row — what a bookmark keys on, and what survives a rebuild.
 pub const PAYLOAD_IDENTITY: &[&str] = &["subject"];
-
-/// The coordinate column(s) of a vertex payload row — one axis of the plane.
-pub const PAYLOAD_COORDINATES: &[&str] = &["x", "y"];
-
-/// The categorical column(s) of a vertex payload row — an ordinal the writer computed, for a reader to colour by.
-pub const PAYLOAD_CATEGORICAL: &[&str] = &["cluster_id"];
 
 /// Every column of an edge row, in writer order.
 pub const EDGE_COLUMNS: &[WriterColumn] = &[

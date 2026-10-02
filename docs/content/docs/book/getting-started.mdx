@@ -75,7 +75,7 @@ exec.free();
 `out/` is the corpus: `fossil.json`, which names everything else, and one Parquet file per
 type — here `vertex/Person.parquet`, three `Person` rows in it, one per row of `people.csv`.
 
-A host that owns storage — a server, or a browser tab with credentials to a bucket — calls `runJob`
+A host that owns storage — a server, or a browser tab with credentials to a bucket — calls `run`
 instead, and the corpus is written straight into the prefix the host vends.
 [What you produce](/docs/book/what-you-produce) and [the corpus format](/docs/format) say what the
 files hold.

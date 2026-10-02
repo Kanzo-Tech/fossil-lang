@@ -42,9 +42,7 @@
 //! already make by hand and get wrong.
 //!
 //! Both sides are read from the tree: the policy out of `deny.toml`, the truth
-//! out of `cargo metadata` — through `xtask::depgraph`, which is where the walk
-//! lives because `tests/substrate_reach.rs` asks the same question of the same
-//! graph about `salsa`. Nothing here writes a crate name down, which is the
+//! out of `cargo metadata` — through `xtask::depgraph`. Nothing here writes a crate name down, which is the
 //! rule `crates/xtask/tests/tokio_placement.rs` establishes and the reason it is
 //! the model for this file. The one thing that IS written down — which crates
 //! may link an engine — is a policy choice that cannot be derived from anything,
@@ -53,11 +51,8 @@
 //! # What this CANNOT prove
 //!
 //! - **That any of the declared crates SHOULD link an engine.** It proves the
-//!   list is complete, not that it is right. `fossil-layout` was the example:
-//!   in the wasm closure, described everywhere as linking no engine, and
-//!   reaching `DataFusion` through `fossil-df` for a Parquet writer that has
-//!   since left the pass altogether. This guard is what made that visible, and it had no
-//!   opinion about it — the repair came from reading its table, not from it.
+//!   list is complete, not that it is right: the repair comes from reading its
+//!   table, not from it.
 //! - **Anything about a feature-gated edge.** `cargo metadata`'s resolve graph
 //!   is taken as given, for the default feature set and the host target. A
 //!   dependency that only exists under a non-default feature is counted as

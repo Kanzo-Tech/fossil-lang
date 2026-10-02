@@ -118,8 +118,8 @@ jobs:
           toolchain: "1.90"
           rustflags: ""
           target: wasm32-unknown-unknown
-      # `fossil-df` is in the gate's closure by two edges — `fossil-df-wasm`'s
-      # cdylib, and `fossil-layout`'s `wasm = true` — and it pulls datafusion,
+      # `fossil-df` is in the gate's closure through `fossil-df-wasm`'s cdylib,
+      # and it pulls datafusion,
       # which hardcodes `arrow-ipc[zstd]`, so the wasm32 zstd-sys C build needs a
       # wasm-capable clang. `crates/fossil-df/Cargo.toml` says so in the
       # imperative; `pnpm-ci.yml` installs it and this job did not, which is

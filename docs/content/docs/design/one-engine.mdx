@@ -26,34 +26,11 @@ prose.
 | --- | --- | --- | --- |
 | `fossil-introspect` | **directly** | no | the `DESCRIBE`, and the credentials that reach a cloud source |
 | `fossil-lsp` | via `fossil-introspect` | no | a host: it checks a program against the columns it reads |
-| `fossil-layout` | dev-dependency only | **yes** | the layout pass, over the executor's Arrow rows through `arrow-rs` |
-
-Removing the database from `fossil-layout` was necessary and not sufficient: `fossil-resolver` (now `fossil-storage`) was an
-unused edge carrying its own wasm32 refusal for an unrelated reason, and `cargo check` never reports
-an unused dependency. It links no `datafusion` either: its normal dependencies are `arrow`,
-`thiserror` and `fossil-mem-probe`, and `fossil-df` depends on it rather than the reverse.
 
 **There is no native write host** ([discarded](/docs/design/discarded#the-tooling) says why and what
 brings one back). The one host that writes is `fossil-df-wasm`, in a browser tab or in Node, so the
 compiler and the write path are both the wasm32 build and neither links a database. **DuckDB is still the engine that `DESCRIBE`s**: natively
 in the language server, and as DuckDB-WASM in a browser editor.
-
-## What the layout pass paid for it
-
-DuckDB's sort spilled; nothing in the Arrow pass spills, and it runs outside the executor's budget —
-[three hosts](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no) has the pool and
-what it does not see. Measured 2026-08-22, natively, one million nodes and ten million edges:
-
-| | |
-| --- | --- |
-| `execute_graph` peak, capped at 2 GiB | **2.21 G** against 7.42 G uncapped — the executor obeys |
-| what the layout adds on top | **+2.00 G**, ending at 2.4× the cap |
-| where it goes | the **vertex** read, not the adjacency sort, which is +0.17 G |
-
-A vertex row carries a subject IRI and every property; an adjacency row carries two integers. The
-valve is fitted — `interleave_record_batch` gathers across batches, so the pass no longer holds the
-vertex rows three times over — and the vertex half went from +0.32 G to +0.06 G at a million rows at
-no measurable time cost. What is left is the rows held **once**, as Arrow.
 
 ## How DataFusion reaches storage
 
@@ -70,8 +47,8 @@ cannot tell.
 [Unifying the two execution engines](/docs/design/discarded) is a discarded alternative, and it is a
 different decision from this one rather than the same one taken twice.
 
-That row is about the corpus **read** path, where `@fossil-lang/corpus` composes SQL in TypeScript
-and the host's DuckDB-WASM runs it. Putting DataFusion there adds a wasm build of several megabytes to
+That row is about the corpus **read** path, where `@fossil-lang/corpus` creates views in TypeScript
+and the host's DuckDB-WASM runs every read. Putting DataFusion there adds a wasm build of several megabytes to
 a path that loads none, and loses the range-request file system that makes reading a corpus over
 plain HTTP work at all. Still rejected.
 

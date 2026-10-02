@@ -102,38 +102,8 @@ describe('open, when something fails', () => {
 describe('close, when the detach fails', () => {
   it('still gives the credential back, and says the detach failed', async () => {
     const { engine, dropped } = scripted(MANIFEST, (sql) => sql.startsWith('DETACH'));
-    const corpus = await open('job-1', { engine, host: azure() });
-    await expect(corpus.close()).rejects.toMatchObject({ code: 'engine/failed' });
+    const close = await open('job-1', { engine, host: azure() });
+    await expect(close()).rejects.toMatchObject({ code: 'engine/failed' });
     expect(dropped).toHaveLength(1);
-  });
-});
-
-describe('a read after the credential expired', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  it('is the storage failure, not the engine’s 403', async () => {
-    const hour = 3_600_000;
-    let calls = 0;
-    const host: Host = {
-      connections: async () => ({}),
-      credentials: async () => {
-        if (++calls > 1) throw new Error('keasy is down');
-        return [
-          {
-            prefix: `abfss://lake@${AZURE}/jobs/job-1/`,
-            config: {
-              [`adls.sas-token.${AZURE}`]: 'sv=2025&sig=x',
-              [`adls.sas-token-expires-at-ms.${AZURE}`]: String(Date.now() + hour),
-            },
-          },
-        ];
-      },
-    };
-    const { engine } = scripted(MANIFEST);
-    const corpus = await open('job-1', { engine, host });
-    await vi.advanceTimersByTimeAsync(2 * hour);
-    const scan = corpus.scan({ table: corpus.manifest.vertex_tables[0]!.name });
-    await expect(scan.read(scan.plan())).rejects.toMatchObject({ code: 'storage/host-refused' });
   });
 });

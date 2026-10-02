@@ -1,5 +1,10 @@
-//! The corpus, written: [`write`](crate::write::write) lays the whole graph out and writes one
-//! Parquet per vertex type and per relation, then `fossil.json`.
+//! The corpus, written: [`write`](crate::write::write) writes one Parquet per
+//! vertex type and per relation, then `fossil.json`.
+//!
+//! **The corpus carries the graph, not a picture.** Where a vertex is drawn is
+//! the view's choice — two columns it binds, or its own simulation — so the
+//! writer places nothing and computes no community. `/docs/design/position`
+//! has the argument and `/docs/design/discarded` the nine placements before it.
 //!
 //! **`fossil.json` goes last, and that is the commit.** Every table is in the
 //! store before the document that names it, so a reader that finds the
@@ -14,8 +19,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use datafusion::arrow::array::{ArrayRef, Float32Array, RecordBatch, UInt32Array, new_empty_array};
-use datafusion::arrow::compute::interleave_record_batch;
+use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::arrow::error::ArrowError;
 use datafusion::parquet::arrow::ArrowWriter;
@@ -24,20 +28,19 @@ use datafusion::parquet::errors::ParquetError;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::schema::types::ColumnPath;
 use fossil_graph_schema::{Failure, NodeType, Problem};
-use fossil_layout::layout::{Layout, LayoutError, Relation, VertexType, layout};
 use fossil_mem_probe::Probe;
 use fossil_sinks::generated::{
     EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_COLUMNS, WriterColumn,
 };
 use fossil_sinks::manifest::{
-    EdgeTable as EdgeEntry, Endpoint, FOSSIL_FORMAT, MANIFEST_FILE, Manifest, Position, Property,
+    EdgeTable as EdgeEntry, Endpoint, FOSSIL_FORMAT, MANIFEST_FILE, Manifest, Property,
     ROW_GROUP_ROWS, VertexTable as VertexEntry, data_type_name, edge_path, edge_table_name,
     vertex_path,
 };
 use fossil_storage::{Storage, StorageError};
 
-use crate::Graph;
 use crate::report::EdgeDrops;
+use crate::{EdgeTable, Graph};
 
 /// What [`write`](fn@write) answers: the manifest it wrote, and what the edge join
 /// discarded — the one fact the corpus cannot hold about itself.
@@ -52,9 +55,6 @@ pub struct Written {
 /// Failure modes of [`write`](fn@write).
 #[derive(Debug, thiserror::Error)]
 pub enum WriteError {
-    /// The layout pass refused the graph.
-    #[error(transparent)]
-    Layout(#[from] LayoutError),
     /// An Arrow kernel refused a batch — reachable only through a column whose
     /// type is not what the executor produced.
     #[error("arrow: {0}")]
@@ -83,12 +83,10 @@ pub enum WriteError {
     },
 }
 
-/// The code each way a write fails is. The one a program's data can cause —
-/// too many vertices — and the store's own refusal have codes; the rest are
-/// fossil's fault, `internal/bug`, with the error as cause. A dangling endpoint
-/// is among them: the executor builds each relation by joining it to the
-/// vertices it names and counts what the join drops, so the layout pass never
-/// sees one, and `layout/dangling-endpoint` was retired after `v0.3.0-alpha.18`.
+/// The code each way a write fails is. The store's own refusal has one; the rest
+/// are fossil's fault, `internal/bug`, with the error as cause. Too many
+/// vertices is refused before the writer, where the executor numbers them
+/// (`run/too-large`).
 impl From<WriteError> for Failure {
     fn from(e: WriteError) -> Self {
         let bug = |what: &str| {
@@ -103,10 +101,6 @@ impl From<WriteError> for Failure {
             e @ WriteError::UnknownType { .. } => {
                 bug("a relation names a vertex type with no table").caused_by(e)
             }
-            WriteError::Layout(LayoutError::TooLarge { vertices }) => {
-                Self::new(Problem::TooLarge { vertices })
-            }
-            WriteError::Layout(e) => bug("the layout pass refused the graph").caused_by(e),
             WriteError::Arrow(e) => bug("an Arrow kernel refused a batch").caused_by(e),
             WriteError::Parquet(e) => bug("a table's Parquet did not encode").caused_by(e),
             WriteError::Json(e) => bug("`fossil.json` did not encode").caused_by(e),
@@ -114,11 +108,12 @@ impl From<WriteError> for Failure {
     }
 }
 
-/// Lay `graph` out and write it under `dest`, a prefix ending in `/` that
-/// `storage` covers.
+/// Write `graph` under `dest`, a prefix ending in `/` that `storage` covers.
 ///
 /// Vertex types and relations are written in the order the compiled schema
-/// lists them, which is the order `fossil.json` lists them in.
+/// lists them, which is the order `fossil.json` lists them in. The rows are the
+/// executor's, as they are: a vertex type sorted by `dense_id`, a relation by
+/// `(src, dst)`.
 ///
 /// # Errors
 ///
@@ -126,63 +121,17 @@ impl From<WriteError> for Failure {
 /// `fossil.json` never is.
 pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Written, WriteError> {
     let mut probe = Probe::new("write");
-    let nodes = &graph.schema.nodes;
     let empty: Vec<RecordBatch> = Vec::new();
-    let batches: Vec<&[RecordBatch]> = nodes
-        .iter()
-        .map(|node| {
-            graph
-                .vertices
-                .iter()
-                .find(|v| v.label == node.label)
-                .map_or(empty.as_slice(), |v| v.batches.as_slice())
-        })
-        .collect();
-    let types: Vec<VertexType<'_>> = nodes
-        .iter()
-        .zip(&batches)
-        .map(|(node, batches)| VertexType {
-            name: &node.label,
-            batches,
-        })
-        .collect();
 
-    let index_of = |relation: &str, name: &str| {
-        nodes
+    let mut vertex_tables = Vec::with_capacity(graph.schema.nodes.len());
+    for node in &graph.schema.nodes {
+        let batches = graph
+            .vertices
             .iter()
-            .position(|n| n.label == name)
-            .ok_or_else(|| WriteError::UnknownType {
-                relation: relation.to_string(),
-                vertex_type: name.to_string(),
-            })
-    };
-    let mut names = Vec::with_capacity(graph.schema.edges.len());
-    let mut tables = Vec::with_capacity(graph.schema.edges.len());
-    for edge in &graph.schema.edges {
-        let name = edge_table_name(&edge.source, &edge.label, &edge.destination);
-        let table = graph.edges.iter().find(|e| {
-            (&e.src_type, &e.label, &e.dst_type) == (&edge.source, &edge.label, &edge.destination)
-        });
-        names.push(name);
-        tables.push(table);
-    }
-    let mut relations = Vec::with_capacity(names.len());
-    for ((edge, name), table) in graph.schema.edges.iter().zip(&names).zip(&tables) {
-        relations.push(Relation {
-            name,
-            source: index_of(name, &edge.source)?,
-            destination: index_of(name, &edge.destination)?,
-            batches: table.map_or(empty.as_slice(), |t| t.batches.as_slice()),
-        });
-    }
-
-    let placed = layout(&types, &relations, None)?;
-    probe.mark("layout");
-
-    let mut vertex_tables = Vec::with_capacity(nodes.len());
-    for (t, node) in nodes.iter().enumerate() {
+            .find(|v| v.label == node.label)
+            .map_or(empty.as_slice(), |v| v.batches.as_slice());
         let path = vertex_path(&node.label);
-        let (bytes, properties, rows) = vertex_parquet(node, batches[t], &placed, t)?;
+        let (bytes, properties) = vertex_parquet(node, batches)?;
         put(storage, dest, &path, bytes).await?;
         vertex_tables.push(VertexEntry {
             name: node.label.clone(),
@@ -190,25 +139,32 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
             path,
             key: PAYLOAD_COLUMNS[0].name.to_string(),
             identity: PAYLOAD_COLUMNS[1].name.to_string(),
-            record_count: rows,
+            record_count: rows(batches),
             properties,
-            position: Some(Position::Layout {
-                x: "x".to_string(),
-                y: "y".to_string(),
-            }),
         });
     }
     probe.mark("write vertex tables");
 
-    let mut edge_tables = Vec::with_capacity(relations.len());
-    let mut dropped = Vec::with_capacity(relations.len());
-    for ((edge, relation), table) in graph.schema.edges.iter().zip(&relations).zip(&tables) {
-        let (sources, destinations) = placed.edges(relation)?;
-        let rows = sources.len() as u64;
-        let path = edge_path(relation.name);
-        put(storage, dest, &path, edge_parquet(sources, destinations)?).await?;
+    let mut edge_tables = Vec::with_capacity(graph.schema.edges.len());
+    let mut dropped = Vec::with_capacity(graph.schema.edges.len());
+    for edge in &graph.schema.edges {
+        let name = edge_table_name(&edge.source, &edge.label, &edge.destination);
+        for end in [&edge.source, &edge.destination] {
+            if !graph.schema.nodes.iter().any(|n| &n.label == end) {
+                return Err(WriteError::UnknownType {
+                    relation: name,
+                    vertex_type: end.clone(),
+                });
+            }
+        }
+        let table: Option<&EdgeTable> = graph.edges.iter().find(|e| {
+            (&e.src_type, &e.label, &e.dst_type) == (&edge.source, &edge.label, &edge.destination)
+        });
+        let batches = table.map_or(empty.as_slice(), |t| t.batches.as_slice());
+        let path = edge_path(&name);
+        put(storage, dest, &path, edge_parquet(batches)?).await?;
         edge_tables.push(EdgeEntry {
-            name: relation.name.to_string(),
+            name: name.clone(),
             label: edge.label.clone(),
             iri: edge.iri.clone().filter(|i| !i.is_empty()),
             path,
@@ -220,11 +176,11 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
                 key: ENDPOINT_DST.to_string(),
                 references: edge.destination.clone(),
             },
-            record_count: rows,
+            record_count: rows(batches),
             properties: EDGE_COLUMNS.iter().map(fixed).collect(),
         });
         dropped.push(EdgeDrops {
-            table: relation.name.to_string(),
+            table: name,
             dropped: table.map_or(0, |t| t.dropped),
         });
     }
@@ -244,6 +200,10 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
     .await?;
     probe.finish();
     Ok(Written { manifest, dropped })
+}
+
+fn rows(batches: &[RecordBatch]) -> u64 {
+    batches.iter().map(|b| b.num_rows() as u64).sum()
 }
 
 async fn put(storage: &Storage, dest: &str, path: &str, bytes: Bytes) -> Result<(), WriteError> {
@@ -297,30 +257,31 @@ fn properties(delta: &[&str]) -> WriterProperties {
     builder.build()
 }
 
-/// Encode `batches` as one Parquet under [`properties`], a row group per
-/// [`ROW_GROUP_ROWS`].
+/// Encode `batches` as one Parquet of `schema` under [`properties`], a row
+/// group per [`ROW_GROUP_ROWS`]. Each batch is taken column for column: the
+/// schema only renames and sets nullability.
 fn encode(
-    schema: SchemaRef,
-    batches: impl IntoIterator<Item = Result<RecordBatch, WriteError>>,
+    schema: &SchemaRef,
+    batches: &[RecordBatch],
     delta: &[&str],
 ) -> Result<Bytes, WriteError> {
-    let mut writer = ArrowWriter::try_new(Vec::new(), schema, Some(properties(delta)))?;
+    let mut writer = ArrowWriter::try_new(Vec::new(), Arc::clone(schema), Some(properties(delta)))?;
     for batch in batches {
-        writer.write(&batch?)?;
+        writer.write(&RecordBatch::try_new(
+            Arc::clone(schema),
+            batch.columns().to_vec(),
+        )?)?;
     }
     Ok(Bytes::from(writer.into_inner()?))
 }
 
-/// One vertex type's table: its rows in global `dense_id` order, the five
-/// writer columns first and the program's after, and the properties that
-/// describe them.
+/// One vertex type's table: the executor's rows as they are — `dense_id`,
+/// `subject`, then the program's columns — and the properties that describe
+/// them.
 fn vertex_parquet(
     node: &NodeType,
     batches: &[RecordBatch],
-    placed: &Layout,
-    t: usize,
-) -> Result<(Bytes, Vec<Property>, u64), WriteError> {
-    let fixed_names: Vec<&str> = PAYLOAD_COLUMNS.iter().map(|c| c.name).collect();
+) -> Result<(Bytes, Vec<Property>), WriteError> {
     let mut properties: Vec<Property> = PAYLOAD_COLUMNS.iter().map(fixed).collect();
     // The type is the column's, as written: `properties` describes the file a
     // reader opens, and the checker's belief about a column the executor never
@@ -342,115 +303,49 @@ fn vertex_parquet(
         // no row group.
         let mut fields: Vec<Field> = PAYLOAD_COLUMNS
             .iter()
-            .map(|c| Field::new(c.name, fixed_type(c.name), false))
+            .map(|c| {
+                let data_type = if c.name == PAYLOAD_COLUMNS[0].name {
+                    DataType::UInt32
+                } else {
+                    DataType::Utf8
+                };
+                Field::new(c.name, data_type, false)
+            })
             .collect();
         for p in &node.properties {
             fields.push(Field::new(&p.name, DataType::Utf8, true));
             properties.push(program(&p.name, &DataType::Utf8));
         }
-        let schema = Arc::new(Schema::new(fields));
-        return Ok((
-            encode(schema, std::iter::empty(), &["dense_id"])?,
-            properties,
-            0,
-        ));
+        let bytes = encode(&Arc::new(Schema::new(fields)), &[], &["dense_id"])?;
+        return Ok((bytes, properties));
     };
 
     let input = first.schema();
-    let rest: Vec<usize> = (0..input.fields().len())
-        .filter(|&i| !fixed_names.contains(&input.field(i).name().as_str()))
-        .collect();
-    let subject = input.index_of(PAYLOAD_COLUMNS[1].name)?;
-    let mut fields: Vec<Field> = PAYLOAD_COLUMNS
+    let fields: Vec<Field> = input
+        .fields()
         .iter()
-        .map(|c| {
-            let data_type = if c.name == PAYLOAD_COLUMNS[1].name {
-                input.field(subject).data_type().clone()
+        .enumerate()
+        .map(|(i, field)| {
+            if i < PAYLOAD_COLUMNS.len() {
+                field.as_ref().clone().with_nullable(false)
             } else {
-                fixed_type(c.name)
-            };
-            Field::new(c.name, data_type, false)
+                properties.push(program(field.name(), field.data_type()));
+                field.as_ref().clone().with_nullable(true)
+            }
         })
         .collect();
-    for &i in &rest {
-        let field = input.field(i);
-        fields.push(field.as_ref().clone().with_nullable(true));
-        properties.push(program(field.name(), field.data_type()));
-    }
-    let schema: SchemaRef = Arc::new(Schema::new(fields));
-
-    let refs: Vec<&RecordBatch> = batches.iter().collect();
-    let starts: Vec<usize> = batches
-        .iter()
-        .scan(0usize, |acc, b| {
-            let start = *acc;
-            *acc += b.num_rows();
-            Some(start)
-        })
-        .collect();
-    let locate = |row: u32| {
-        let row = row as usize;
-        let batch = starts.partition_point(|&s| s <= row) - 1;
-        (batch, row - starts[batch])
-    };
-    let order = &placed.order[t];
-    let rows = order.len() as u64;
-    let groups = order.chunks(ROW_GROUP_ROWS).map(|locals| {
-        let picks: Vec<(usize, usize)> = locals.iter().map(|&l| locate(l)).collect();
-        let gathered = interleave_record_batch(&refs, &picks)?;
-        let mut columns: Vec<ArrayRef> = vec![
-            Arc::new(UInt32Array::from_iter_values(
-                locals.iter().map(|&l| placed.ids[t][l as usize]),
-            )),
-            Arc::clone(gathered.column(subject)),
-            Arc::new(Float32Array::from_iter_values(
-                locals.iter().map(|&l| placed.x[t][l as usize]),
-            )),
-            Arc::new(Float32Array::from_iter_values(
-                locals.iter().map(|&l| placed.y[t][l as usize]),
-            )),
-            Arc::new(UInt32Array::from_iter_values(
-                locals.iter().map(|&l| placed.cluster[t][l as usize]),
-            )),
-        ];
-        columns.extend(rest.iter().map(|&i| Arc::clone(gathered.column(i))));
-        Ok(RecordBatch::try_new(Arc::clone(&schema), columns)?)
-    });
-    let bytes = encode(Arc::clone(&schema), groups, &["dense_id"])?;
-    Ok((bytes, properties, rows))
+    let bytes = encode(&Arc::new(Schema::new(fields)), batches, &["dense_id"])?;
+    Ok((bytes, properties))
 }
 
-/// The Arrow type of a writer column other than `subject`.
-fn fixed_type(name: &str) -> DataType {
-    match name {
-        "x" | "y" => DataType::Float32,
-        _ => DataType::UInt32,
-    }
-}
-
-/// One relation's table: `src`, `dst`, sorted by both.
-fn edge_parquet(src: Vec<u32>, dst: Vec<u32>) -> Result<Bytes, WriteError> {
+/// One relation's table: `src`, `dst`, sorted by both — the executor's
+/// `src_dense`/`dst_dense`, which are global `dense_id`s, renamed.
+fn edge_parquet(batches: &[RecordBatch]) -> Result<Bytes, WriteError> {
     let schema: SchemaRef = Arc::new(Schema::new(
         EDGE_COLUMNS
             .iter()
             .map(|c| Field::new(c.name, DataType::UInt32, false))
             .collect::<Vec<_>>(),
     ));
-    let rows = src.len();
-    let (src, dst): (ArrayRef, ArrayRef) = if rows == 0 {
-        (
-            new_empty_array(&DataType::UInt32),
-            new_empty_array(&DataType::UInt32),
-        )
-    } else {
-        (
-            Arc::new(UInt32Array::from(src)),
-            Arc::new(UInt32Array::from(dst)),
-        )
-    };
-    let whole = RecordBatch::try_new(Arc::clone(&schema), vec![src, dst])?;
-    let groups = (0..rows)
-        .step_by(ROW_GROUP_ROWS)
-        .map(|lo| Ok(whole.slice(lo, ROW_GROUP_ROWS.min(rows - lo))));
-    encode(schema, groups, &[ENDPOINT_SRC])
+    encode(&schema, batches, &[ENDPOINT_SRC])
 }

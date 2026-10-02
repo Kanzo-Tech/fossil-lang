@@ -11,12 +11,14 @@ guards' own fixture, and with the real writer (`@fossil-lang/executor`, in `roun
 served over HTTP) — and reads them back through `src/`. None of the three is in `files`, so npm
 never sees them. The prose half is `docs/content/docs/format/`.
 
-`src/` is TypeScript and nothing else: `fossil.json` through `JSON.parse`, a view per table, and the
-SQL a scan composes. **Do not put a second reader of the manifest back**, in Rust or here —
-`/docs/design/one-door` measured four of them over one read. The writer's `fossil_sinks::manifest` types are the one
-definition. `tests/manifest.test.ts` holds `src/manifest.ts` against the schema generated from them
-(`crates/fossil-sinks/fossil.schema.json`), interface by interface, and validates every fixture
-against it: change a field there and this package's `test` goes red until the TypeScript follows.
+`src/` is TypeScript and nothing else: `open` reads `fossil.json` through `JSON.parse`, creates a
+view per table and two relations of the manifest — `fossil_tables`, `fossil_columns` — and answers
+the function that detaches them. **Every read after that is the host's SQL** (Mosaic's, in keasy).
+Do not put a query API back here — `scan` and its `Filter` were a second, poorer copy of SQL, and the
+one consumer translated Mosaic's predicates into it — and do not export the manifest's types: a
+caller reads the manifest as the two relations. The writer's `fossil_sinks::manifest` types are the
+one definition; `tests/manifest.test.ts` validates every fixture against the schema generated from
+them (`crates/fossil-sinks/fossil.schema.json`).
 
 `guards/guards.mjs` is imported by `docs/components/guard-index.tsx` at build time, so renaming or
 moving it breaks the documentation build — the intended coupling: a page cannot drift from a table

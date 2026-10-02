@@ -15,7 +15,7 @@ import type { Engine, Host } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { open, type Corpus } from '../src/index.js';
+import { open } from '../src/index.js';
 
 // A job's corpus against a real DuckDB-WASM, vended as Azure: the one store the engine is lent
 // file by file, so every file the corpus reads crosses `lend`. The SAS URL a lease gets is mapped
@@ -85,10 +85,11 @@ const host: Host = {
 const catalogs = async (): Promise<string[]> =>
   Array.from((await engine.query(`SELECT database_name AS d FROM duckdb_databases()`)).getChild('d')!.toArray(), String);
 
-const people = async (corpus: Corpus): Promise<number> => {
-  const scan = corpus.scan({ table: 'Person', select: ['dense_id'] });
-  return (await scan.read(scan.plan()))[0]!.numRows;
-};
+const people = async (job: string): Promise<number> =>
+  Number((await engine.query(`SELECT count(*) AS n FROM "${job}"."Person"`)).getChild('n')!.get(0));
+
+const declared = async (job: string): Promise<number> =>
+  Number((await engine.query(`SELECT rows FROM "${job}".fossil_tables WHERE table_name = 'Person'`)).getChild('rows')!.get(0));
 
 describe('open(job, { engine, host })', () => {
   it('reads each job under its own prefix, so two corpora of one shape never meet', async () => {
@@ -100,25 +101,24 @@ describe('open(job, { engine, host })', () => {
     expect(lent).toContain('azure/acct/lake/jobs/2/vertex/Person.parquet');
     expect([...engine.lent.values()].every((u) => u.startsWith('https://acct.blob.core.windows.net/lake/jobs/'))).toBe(true);
 
-    expect(one.url).toBe('1');
-    const count = one.manifest.vertex_tables.find((t) => t.name === 'Person')!.record_count;
-    expect(await people(one)).toBe(count);
-    expect(await people(two)).toBe(count);
+    const count = await declared('1');
+    expect(await people('1')).toBe(count);
+    expect(await people('2')).toBe(count);
 
-    await one.close();
+    await one();
     expect([...engine.lent.keys()].some((n) => n.startsWith('azure/acct/lake/jobs/1/'))).toBe(false);
     expect(await catalogs()).not.toContain('1');
-    expect(await people(two)).toBe(count);
-    await two.close();
+    expect(await people('2')).toBe(count);
+    await two();
   }, 60_000);
 
   it('shares a job between two opens, and the first to close leaves the second whole', async () => {
     const first = await open('3', { engine, host });
     const again = await open('3', { engine, host });
-    await first.close();
-    expect(await people(again)).toBe(again.manifest.vertex_tables[0]!.record_count);
-    await again.close();
-    await again.close();
+    await first();
+    expect(await people('3')).toBe(await declared('3'));
+    await again();
+    await again();
     expect([...engine.lent.keys()].some((n) => n.startsWith('azure/acct/lake/jobs/3/'))).toBe(false);
     expect(await catalogs()).not.toContain('3');
   }, 60_000);

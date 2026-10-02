@@ -1,10 +1,11 @@
 /**
- * `fossil.json` — the one file a reader opens before any Parquet, parsed once.
+ * `fossil.json` — the one file a reader opens before any Parquet, parsed once, inside `open`.
  *
- * The shape mirrors the writer's (`fossil_sinks::manifest`, which serialises it), and the only
- * field this side validates is `format`: a reader refuses a format it does not know before it reads
- * a byte of Parquet, and ignores a key it does not know, which is what lets `fossil/1` grow
- * optional fields without a reader changing.
+ * Nothing here is exported past the package: a caller reads the manifest as the two relations `open`
+ * makes of it, so the shape is restated once — by the writer, `fossil_sinks::manifest`, and its
+ * `fossil.schema.json` — and this side declares only the fields `open` reads. The one field it
+ * validates is `format`: a reader refuses a format it does not know before it reads a byte of
+ * Parquet, and ignores a key it does not know, which is what lets `fossil/1` grow optional fields.
  */
 
 import { FossilError } from '@fossil-lang/types';
@@ -12,74 +13,39 @@ import { FossilError } from '@fossil-lang/types';
 /** The format this reader reads. Anything else is refused at `open`. */
 export const FOSSIL_FORMAT = 'fossil/1';
 
-
-/**
- * What a column the writer emits IS — `corpus.bnf`'s roles, never what a reader does with one. A
- * reader names the roles it means: the columns to hide from a field listing are the ones with a
- * `role`, the key is the `address`, the colour is the `categorical`.
- */
-export type ColumnRole = 'address' | 'identity' | 'coordinate' | 'categorical' | 'endpoint';
-
 /** One column of a table, as the manifest declares it. */
 export interface Property {
   readonly name: string;
-  /** The manifest's type word: `uint32`, `string`, `float`, `int32`, … — the writer's vocabulary. */
+  /** The manifest's type word: `uint32`, `string`, `int32`, … — the writer's vocabulary. */
   readonly type: string;
   readonly iri?: string;
   readonly nullable?: boolean;
-  /**
-   * What the column IS, on every column the writer emits — `dense_id`, `subject`, `x`, `y`,
-   * `cluster_id`, `src`, `dst` — and absent on a column of the program's. A corpus written before
-   * the field existed carries none.
-   */
-  readonly role?: ColumnRole;
+  /** What a column the writer emits IS — `corpus.bnf`'s role. Absent on a program's column. */
+  readonly role?: 'address' | 'identity' | 'endpoint';
 }
 
-/**
- * Which two columns a vertex table is drawn at: the layout's `x`/`y`, or two of the program's own
- * (`lon`/`lat`). A table without one is not drawn.
- */
-export interface Position {
-  readonly by: 'layout' | 'program';
-  readonly x: string;
-  readonly y: string;
-}
-
-/** A vertex table — one per vertex type, and a view of that name once the corpus is open. */
+/** A vertex table: one per vertex type, a contiguous range of `dense_id` in manifest order. */
 export interface VertexTable {
   readonly name: string;
   readonly iri?: string;
   /** Relative to the corpus root. */
   readonly path: string;
-  /** `dense_id`: global over the graph, gapless, and the drawn vertices first. */
-  readonly key: string;
-  /** `subject`: what survives a rewrite, where `key` does not. */
-  readonly identity: string;
   readonly record_count: number;
   readonly properties: readonly Property[];
-  readonly position?: Position;
-}
-
-/** One end of an edge table: the column holding it, and the vertex table whose key it is. */
-export interface Endpoint {
-  readonly key: string;
-  readonly references: string;
 }
 
 /** An edge table — one per relation `(source type, label, destination type)`. */
 export interface EdgeTable {
-  /** Unique; the `label` repeats across relations. */
   readonly name: string;
-  readonly label: string;
   readonly iri?: string;
   readonly path: string;
-  readonly source: Endpoint;
-  readonly destination: Endpoint;
+  readonly source: { readonly references: string };
+  readonly destination: { readonly references: string };
   readonly record_count: number;
   readonly properties: readonly Property[];
 }
 
-/** `fossil.json`. */
+/** `fossil.json`, as far as `open` reads it. */
 export interface Manifest {
   readonly format: typeof FOSSIL_FORMAT;
   readonly vertex_tables: readonly VertexTable[];

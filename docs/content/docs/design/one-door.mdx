@@ -1,68 +1,50 @@
 ---
 title: One door
-description: "A corpus is read through `open` and five members — `manifest`, `scan`, `relation`, `sql` and `close` — and each thing the door does is done once, by one layer; why a scan still plans tasks when it only ever plans one."
+description: "A corpus is attached to the host's engine by `open` and detached by what it answers; every read after that is the host's SQL, and each thing the door does is done once, by one layer."
 ---
 
-A consumer reads a corpus through one door, and the whole of it is five names:
+A consumer reads a corpus through one door, and the whole of it is one function and what it answers:
 
 ```ts
-const corpus = await open(url, { engine });
-const { vertex_tables, edge_tables } = corpus.manifest;       // fossil.json, parsed once
-const scan = corpus.scan({ table: 'Person', select: ['dense_id', 'x', 'y'] });
-const batches = await scan.read(scan.plan());
-await corpus.close();
+const close = await open(job, { engine, host });   // or { engine, url } for a corpus at a URL
+// SELECT * FROM "<job>".fossil_tables WHERE kind = 'vertex'
+// SELECT dense_id, name FROM "<job>"."Person"
+// and calling `close` detaches the catalog
 ```
 
-`open` (`packages/corpus/src/open.ts, open`) fetches `fossil.json`, rejects a `format` that is not `fossil/1` before a byte of Parquet is
-read, and creates one view per table in the host's engine. `manifest` is that document, parsed once.
-`scan` reads any table — vertices or edges — with a filter, a projection and a limit. `relation`
-names a table as a statement must write it. `sql` is the
-escape hatch, present only on a corpus opened with `sql: 'allowed'`. `close` detaches. The contract is
-[the corpus](/docs/design/corpus); the format underneath is [/docs/format](/docs/format).
+`open` (`packages/corpus/src/open.ts, open`) reads `fossil.json`, rejects a `format` that is not
+`fossil/1` before a byte of Parquet is read, and attaches the corpus to the host's engine as the
+catalog it is given: one view per table, and the manifest itself as two relations —
+`fossil_tables`, a row per table with its kind, its row count and, for a vertex table, the first id
+of its range; and `fossil_columns`, a row per column with its type and its writer's role. What it
+answers detaches the catalog. The contract is [the corpus](/docs/design/corpus); the format
+underneath is [/docs/format](/docs/format).
 
-**A consumer states what it wants, and how it is fetched is the door's business.** Whole, by range or
-by tile is decided behind `scan`, never by the caller, which is why the door has no addressing
-member; [a door for a camera](/docs/design/later/one-door-camera) keeps the one a tiled corpus had and
-what it measured.
+**Every read is the host's SQL.** Structure and data alike go through the engine the host already
+has — in keasy, Mosaic's coordinator over DuckDB-WASM — so a chart, a crossfilter and the graph view
+read the same views through one connection, and pruning is the engine's, from the Parquet footers.
+The door has no query API of its own; the one it had, and why it went, is in
+[what was discarded](/docs/design/discarded#the-corpus).
 
-## `relation` gives out the name the door composed
-
-`open` names every view `"<url>"."<table>"`, each part quoted, and `scan` reads through that name.
-A host that writes its own SQL — Mosaic's clients, an assistant's schema — needs the same name, and
-before `relation` it composed it a second time: keasy re-implemented the quoting and assumed the
-schema `information_schema` lists the views under. That is the second layer this page deletes, so
-the door hands out the one it built: `corpus.relation('Person')`, refused as `corpus/unknown-table`
-for a table the manifest does not declare, and `corpus.url` with `corpus.schema` for the catalog and
-schema `information_schema` lists the views in.
-
-**What would reverse it.** Views named without quoting or without a catalog — a corpus registered
-under a plain identifier — so that the name is the manifest's `name` and nothing needs composing.
-
-## `scan` plans tasks, and plans one
-
-`scan(params)` returns a plan and a read — `plan()` then `read(tasks)` — and `plan()` answers exactly
-one task, the whole table under the filter. The split is the seam and nothing more: it is where a
-tiled read would go without a consumer changing a line, and it is kept for that one reason.
-
-**What would reverse it.** A year with no reader that needed a second task — no corpus that failed
-the in-browser thresholds on [the page that keeps the tiles](/docs/design/later/backend). Then the
-split is ceremony, and `scan` answers batches directly.
+**What would reverse it.** A reader that cannot hold a SQL engine and still has to read a corpus.
+[A door for a camera](/docs/design/later/one-door-camera) keeps what a tiled corpus would need.
 
 ## One door, and one layer behind it
 
 One door is half of the rule. The other half is what stands behind it: **each thing the door does
 is done once, by one layer.** A layer that parses what the layer below already parsed, or forwards a
 call it could have made itself, is a second implementation with a longer path, and it is deleted.
-The door stays minimal and hides everything underneath: a consumer states what it wants, and how it
-is fetched — whole, by range, or by tile — is the door's business and never the consumer's.
 
 **The measurement that made it a rule, 2026-09-30 at `ac1801d4`.** One read crossed four layers
 that each knew the manifest: the TypeScript door scanned it line by line, a WASM crate resolved it
 again (twice per `open(job)`), a Rust verb path loaded it once more on every call, and the verb it
 served ended as SQL that DuckDB could have been sent directly. keasy's discover view parsed the
-manifest six times before it drew anything. The door above is the repair:
-`packages/corpus/src/manifest.ts, parseManifest` reads `fossil.json` once, in TypeScript, and a read is
-one statement to the host's engine. Writing is held to the same rule: one writer,
+manifest six times before it drew anything. The first repair made `fossil.json` a TypeScript parse
+and a read one statement; the second took the reader's own `scan` and `Filter` away, because they
+were a second query language over the engine every view already spoke SQL to, and keasy still read
+the manifest in TypeScript while its charts read the tables through Mosaic. Now
+`packages/corpus/src/manifest.ts, parseManifest` reads `fossil.json` once, into the two relations,
+and nothing else restates it. Writing is held to the same rule: one writer,
 `crates/fossil-df/src/write.rs, write`, and one host that calls it, the wasm executor, in a browser and
 in Node.
 
@@ -71,4 +53,4 @@ case: for every capability, count the layers that implement it, and keep one.
 
 **What would reverse it.** A layer that is the only place a capability can run — the WASM build is
 the only way the browser can *write* — earns its place for that capability and no other. Reading is
-not such a case: it is a small manifest and SQL, which the door can do without Rust.
+not such a case: it is a small manifest and SQL, which the engine does without Rust.

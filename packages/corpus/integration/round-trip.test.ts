@@ -3,15 +3,16 @@
  *
  * `docs/programs/shop/shop.fossil` runs through `@fossil-lang/executor` — the only host that writes a
  * corpus — in this process, over generated rows large enough that `Order` spans two row groups. The
- * files it hands back are served by a plain HTTP origin (ranges, no listing) and opened with
- * `@fossil-lang/corpus` on DuckDB-WASM, and the guards run over the same directory:
+ * files it hands back are served by a plain HTTP origin (ranges, no listing) and attached with
+ * `@fossil-lang/corpus` on DuckDB-WASM, read with plain SQL, and the guards run over the same
+ * directory:
  *
- * 1. every table the manifest declares scans back at its `record_count`;
- * 2. a box scan returns exactly the rows of a full scan that fall in the box, and some that do not
- *    are left out;
+ * 1. every table `fossil_tables` lists reads back at its `rows`;
+ * 2. each vertex table is the `dense_id` range `fossil_tables` gives it, and every edge's ends fall
+ *    in the ranges of the tables it names;
  * 3. `guards/check.mjs` passes on what the writer wrote;
- * 4. every column the writer emits says what it IS — its `role` — and the manifest's own `key`,
- *    `identity`, `position` and endpoints name columns of the role they mean.
+ * 4. every column the writer emits says what it IS — its `role` in `fossil_columns` — and a
+ *    program's column says nothing.
  *
  * The writer compresses every page with ZSTD, so (1) is also the proof that DuckDB-WASM reads it.
  */
@@ -26,7 +27,7 @@ import { Worker } from 'node:worker_threads';
 import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { open, type Corpus, type VertexTable } from '../src/index.js';
+import { open, type Close } from '../src/index.js';
 import { duckdb } from '../tests/engine.js';
 import { runShop } from './shop.js';
 import { installSyncXhr } from './sync-xhr.js';
@@ -40,7 +41,8 @@ const dir = join(scratch, 'corpus');
 let origin: { port: number; close: () => Promise<number> };
 let engine: Engine;
 let uninstall: (() => Promise<number>) | undefined;
-let corpus: Corpus;
+let close: Close | undefined;
+let rows: (sql: string) => Promise<Record<string, unknown>[]>;
 
 /**
  * A static origin over `root` — `GET`, `HEAD` and single `Range`s, no directory listing — on a
@@ -94,75 +96,52 @@ beforeAll(async () => {
   // DuckDB-WASM reads `http://` through httpfs, and httpfs through a synchronous XMLHttpRequest —
   // the page's in a browser, and one lent here, since Node has none.
   uninstall = installSyncXhr();
-  ({ engine } = await duckdb());
+  ({ engine, query: rows } = await duckdb());
   await engine.query('LOAD httpfs');
-  corpus = await open(`http://127.0.0.1:${origin.port}/`, { engine });
+  close = await open('shop', { engine, url: `http://127.0.0.1:${origin.port}/` });
 }, 300_000);
 
 afterAll(async () => {
-  await corpus?.close();
+  await close?.();
   await origin?.close();
   await uninstall?.();
   rmSync(scratch, { recursive: true, force: true });
 });
 
 describe('executor → HTTP → corpus', () => {
-  it('scans every table back at its record_count', async () => {
-    const tables = [...corpus.manifest.vertex_tables, ...corpus.manifest.edge_tables];
-    expect(tables.map((t) => t.name).sort()).toEqual(['Order', 'Order_buyer_Person', 'Person']);
-    for (const table of tables) {
-      expect(table.record_count, table.name).toBeGreaterThan(0);
-      const scan = corpus.scan({ table: table.name, select: [table.properties[0]!.name] });
-      const batches = await scan.read(scan.plan());
-      expect(batches.reduce((n, b) => n + b.numRows, 0), table.name).toBe(table.record_count);
+  it('reads every table back at its rows', async () => {
+    const tables = await rows('SELECT table_name AS t, rows::BIGINT AS n FROM shop.fossil_tables');
+    expect(tables.map((r) => r.t).sort()).toEqual(['Order', 'Order_buyer_Person', 'Person']);
+    for (const { t, n } of tables) {
+      expect(n, String(t)).toBeGreaterThan(0n);
+      const [read] = await rows(`SELECT count(*)::BIGINT AS n FROM shop."${String(t)}"`);
+      expect(read!.n, String(t)).toBe(n);
     }
-    const order = corpus.manifest.vertex_tables.find((t) => t.name === 'Order')!;
-    expect(order.record_count).toBeGreaterThan(122_880);
+    expect(tables.find((r) => r.t === 'Order')!.n).toBeGreaterThan(122_880n);
   }, 120_000);
 
-  it('returns from a box scan exactly the rows in the box', async () => {
-    const person = corpus.manifest.vertex_tables.find((t) => t.name === 'Person') as VertexTable;
-    const { x, y } = person.position!;
-    const read = async (filter?: { bbox: [number, number, number, number] }) => {
-      const scan = corpus.scan({ table: person.name, select: ['dense_id', x, y], ...(filter ? { filter } : {}) });
-      const rows: [number, number, number][] = [];
-      for (const b of await scan.read(scan.plan())) {
-        const [ids, xs, ys] = ['dense_id', x, y].map((c) => b.getChild(c)!);
-        for (let i = 0; i < b.numRows; i += 1) rows.push([Number(ids!.get(i)), xs!.get(i) as number, ys!.get(i) as number]);
-      }
-      return rows;
-    };
-    const all = await read();
-    const xs = all.map((r) => r[1]);
-    const ys = all.map((r) => r[2]);
-    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-    const box: [number, number, number, number] = [x0, y0, x0 + (x1 - x0) / 3, y0 + (y1 - y0) / 3];
-
-    const boxed = await read({ bbox: box });
-    const inside = (r: [number, number, number]) => r[1] >= box[0] && r[1] <= box[2] && r[2] >= box[1] && r[2] <= box[3];
-    expect(boxed.length).toBeGreaterThan(0);
-    expect(boxed.length).toBeLessThan(all.length);
-    expect(boxed.every(inside)).toBe(true);
-    expect(boxed.map((r) => r[0]).sort((a, b) => a - b)).toEqual(
-      all.filter(inside).map((r) => r[0]).sort((a, b) => a - b),
+  it('holds each vertex table to its range, and each edge to the tables it names', async () => {
+    const vertices = await rows(`SELECT table_name AS t, first_id::BIGINT AS first, rows::BIGINT AS n FROM shop.fossil_tables WHERE kind = 'vertex'`);
+    expect(vertices.map((r) => r.first)).toEqual([0n, vertices[0]!.n]);
+    for (const { t, first, n } of vertices) {
+      const [range] = await rows(`SELECT min(dense_id)::BIGINT AS lo, max(dense_id)::BIGINT AS hi FROM shop."${String(t)}"`);
+      expect([range!.lo, range!.hi], String(t)).toEqual([first, (first as bigint) + (n as bigint) - 1n]);
+    }
+    const [outside] = await rows(
+      `SELECT count(*)::BIGINT AS n FROM shop."Order_buyer_Person" e, shop.fossil_tables s, shop.fossil_tables d
+        WHERE s.table_name = 'Order' AND d.table_name = 'Person'
+          AND (e.src NOT BETWEEN s.first_id AND s.first_id + s.rows - 1 OR e.dst NOT BETWEEN d.first_id AND d.first_id + d.rows - 1)`,
     );
+    expect(outside!.n).toBe(0n);
   }, 120_000);
 
-  it('says what each writer column IS, and the manifest’s own fields agree', () => {
-    for (const table of corpus.manifest.vertex_tables) {
-      const role = (name: string) => table.properties.find((p) => p.name === name)?.role;
-      expect(role(table.key), table.name).toBe('address');
-      expect(role(table.identity), table.name).toBe('identity');
-      expect(table.position?.by, table.name).toBe('layout');
-      expect([role(table.position!.x), role(table.position!.y)], table.name).toEqual(['coordinate', 'coordinate']);
-      expect(table.properties.filter((p) => p.role === 'categorical'), table.name).toHaveLength(1);
-      // The program's columns carry none: what is left once the writer's five are taken out.
-      expect(table.properties.filter((p) => p.role === undefined).length, table.name).toBe(table.properties.length - 5);
-    }
-    for (const table of corpus.manifest.edge_tables) {
-      const role = (name: string) => table.properties.find((p) => p.name === name)?.role;
-      expect([role(table.source.key), role(table.destination.key)], table.name).toEqual(['endpoint', 'endpoint']);
-    }
+  it('says what each writer column IS, and nothing of a program’s', async () => {
+    const columns = await rows('SELECT table_name AS t, column_name AS c, role FROM shop.fossil_columns ORDER BY t, ordinal');
+    const roles = (t: string) => Object.fromEntries(columns.filter((r) => r.t === t && r.role !== null).map((r) => [r.c, r.role]));
+    expect(roles('Person')).toEqual({ dense_id: 'address', subject: 'identity' });
+    expect(roles('Order')).toEqual({ dense_id: 'address', subject: 'identity' });
+    expect(roles('Order_buyer_Person')).toEqual({ src: 'endpoint', dst: 'endpoint' });
+    expect(columns.filter((r) => r.t === 'Person' && r.role === null).length).toBeGreaterThan(0);
   });
 
   it('passes the guards', () => {

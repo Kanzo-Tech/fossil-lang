@@ -1,81 +1,45 @@
 ---
 title: Where x and y come from
-description: "A vertex table is drawn at two of its columns, and `fossil.json` says which and who chose them: the writer's joint layout over the whole graph, which is the default, or the program's own columns. A table with no position is not drawn."
+description: "The corpus carries the graph, not a picture of it. Where a vertex is drawn is the view's choice: two numeric columns it binds, or its own GPU force simulation."
 ---
 
-Zoom far enough out of a million-vertex graph and the individual vertices stop being visible. What is
-left is a distribution — dense here, empty there — and whether it means anything depends on one fact:
-whether the coordinates were measured outside the renderer, or chosen by an algorithm because a
-picture needed coordinates. Both are two numeric columns called `x` and `y`, so the manifest is the
-only place the difference can be said.
+A corpus has no `x`, no `y`, no community column and no `position` in `fossil.json`. It carries the
+vertices, the edges and the program's columns, numbered so that a view can upload them as they are:
+`dense_id` is `0..V−1` with each type one contiguous range, and an edge's `src`/`dst` are those ids
+([identity](/docs/format/conventions/identity)).
 
-## Two modes, and the manifest names the one a table was written in
+**Where a vertex is drawn is the view's choice**, and it has two:
 
-Every vertex table in `fossil.json` has a `position` or has none —
-`crates/fossil-sinks/src/manifest.rs, Position`:
+- **two numeric columns it binds** — `lon` and `lat`, or any pair the program wrote. A vertex table
+  without both is not drawn under that binding; the corpus does not invent a position for it.
+- **its own force simulation on the GPU**, when nothing is bound — seeded, settled in the tab, over
+  exactly the vertices and edges the corpus holds.
 
-| `position` | who chose the columns | the columns |
-| --- | --- | --- |
-| `{ "by": "layout", "x": "x", "y": "y" }` | the writer's layout pass | `x`, `y` as `float`, with `cluster_id` beside them |
-| `{ "by": "program", "x": "lon", "y": "lat" }` | the program, which declared two of its own columns | whatever the program named |
-| absent | nobody | the table is **not drawn** |
+That is Cosmograph's architecture — DuckDB-WASM, a Mosaic coordinator, cosmos.gl drawing points by
+index ([prior art](/docs/design/prior-art#where-a-vertex-is-drawn)) — and fossil's writer is
+the half of it that numbers points and links.
 
-**fossil's writer emits `layout` on every vertex table**, so it writes neither of the other two rows;
-they are the format's, for a writer that has coordinates of its own or none. **No absent table is
-drawn, and none is placed at a default.** A reader that invented a position for it would draw the
-invention, which is the one thing this page exists to prevent. Its vertices still have ids — the last
-ones, ordered by type and then by subject — and it is still read, filtered and joined like any other
-table.
+## Why the writer stopped placing
 
-**What would reverse it.** A reader that has to draw every type and has no position for some. Then
-that reader places them, in the view, and the corpus still says it did not.
+A placement computed by the writer is computed before anyone has chosen a view, and every one tried
+drew something the view then had to undo. Nine were built and none drew a readable graph;
+[what was discarded](/docs/design/discarded#the-corpus) lists them. The last ran Louvain in the
+user's tab for 113–127 s of a 159 s write at 10M vertices.
 
-## `layout` is one pass over the whole graph
+## The measurement that decided it
 
-The default is **one** layout over the union of every vertex type, with every relation in it — the
-ones between types included. Louvain over that graph gives a hierarchy of communities;
-`cluster_id` is its cut; `crates/fossil-layout/src/layout/place.rs, cluster_layout` places the
-communities and packs each one's members; and the position's Hilbert rank over the whole plane is the
-`dense_id` — `crates/fossil-layout/src/layout/hilbert.rs, hilbert_codes` quantised in binary64 and
-truncated, so that the order is exactly the one DuckDB spatial's `ST_Hilbert` computes over the same
-extent. That agreement is measured, not assumed: truncating in binary64 agreed with `ST_Hilbert` on
-**2,000 of 2,000** points, and the binary32 rounding it replaced on **504**. A reader can therefore recompute the order in SQL, and none
-has to: every table is written in it.
+The gate was the view's simulation, on the hardware a reader has: cosmos.gl 3.4.0, Apple M4 Pro,
+Chrome 154 headed, real GPU.
 
-There are no per-type planes. The writer used to lay each type out on its own and set the planes side
-by side, which drew a multi-type graph as islands joined by long lines — the relations between types
-were exactly the edges the placement never saw. [The derived plane](/docs/design/later/position-plane)
-keeps what the per-type placement measured.
+| N vertices | settings | settles in | frame |
+| --- | --- | --- | --- |
+| 200k | links hidden during the simulation, `simulationDecay` ≈ 600 | ~10–12 s | ~17 ms |
+| 500k | `simulationDecay` ≈ 240, `spaceSize` 8192, links off | ~11 s | ~48 ms |
+| ~50k | links drawn throughout | the practical limit | |
 
-**It is deterministic, and that was measured rather than argued**: two processes over com-DBLP
-(317,080 vertices, 1,049,866 edges) gave byte-identical community levels, and the whole pass over a
-200,000-vertex planted partition gave a byte-identical written tree.
+The layout's shape is there within 1–3 s at every N. Loading the buffers (`setPointPositions` +
+`setLinks`) is synchronous: 89 ms at 10k, 229 ms at 50k, ~450 ms at 200k, ~1,100 ms at 500k.
 
-**What would reverse it.** The joint layout keeping fewer of the drawable edges short than the
-per-type planes did, measured on the same multi-type corpus. That reopens how much a cross-type edge
-weighs in the community pass; it does not bring back a plane per type.
-
-## `program` is a design question
-
-The manifest has the shape — `crates/fossil-sinks/src/manifest.rs, Position` declares
-`{"by": "program", "x": …, "y": …}` — and the writer emits only `layout`. What is undecided is how a program says it: a clause in the language, checked like any other
-(the columns exist, and are numeric, on at least one type), or a parameter the host passes to the
-write. With a program position there is no community pass and no `cluster_id`; the ids are the
-`ST_Hilbert` rank of the declared columns over the types that have them, and every other type is
-absent.
-
-**What settles it.** The first program that has coordinates of its own and needs them drawn — a
-graph of places with `lon` and `lat`. Its author's program decides which of the two spellings reads
-as fossil, and the writer grows exactly that one.
-
-## What this page does not carry
-
-No taxonomy of where coordinates came from — no CRS, no *derived* against *measured*, no
-`coordinates:` list with a system per entry. `by` answers the one question a reader acts on — is this
-the writer's picture or the data's — and a CRS is a property of the program's columns that the
-program can name in a column of its own. The measured taxonomy, and the `channels:` block that
-declared a colour column and its domain, are on [the derived plane](/docs/design/later/position-plane).
-
-**What would bring a taxonomy back.** A reader that does something different for two programs whose
-positions are both `program` — reprojects one, say. Then the difference is a field, and it is named
-for what that reader does.
+**What would reverse it.** A measured corpus the GPU simulation cannot lay out — above the N this
+table reaches — that a view must still draw. Then a placement comes back, for that size, and
+[what was discarded](/docs/design/discarded#the-corpus) says which of the nine not to repeat.

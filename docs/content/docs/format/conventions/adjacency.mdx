@@ -31,15 +31,14 @@ not fail — it builds a different graph, silently. **Wrong answers rather than 
 what makes it worth a convention. Guard: `sorted-by-key` — and every guard named on this page is
 specified in full, with what it cannot prove, in [the guard index](/docs/format#the-guards).
 
-Because `src` ascends and `dense_id` is the Hilbert rank of the position, a row group of an edge
-table holds the edges out of one compact patch of the plane, and a filter on a range of `src` prunes
-row groups off the footer. A range of `dst` does not: the destination order inside a run is
-unrelated to the plane, so a filter on `dst` reads the table.
+Because `src` ascends, a filter on a range of `src` — the out-edges of one vertex type, which is one
+range of ids — prunes row groups off the footer. A range of `dst` does not: the destination order
+inside a run is unrelated to it, so a filter on `dst` reads the table.
 
 ## One copy, one orientation
 
 There is **no second copy sorted by `dst`**. The in-edges of a vertex are `WHERE dst = v` over the
-same table, which a reader answers by scanning `dst`, or by building the CSC in memory from the
+same table, which a reader answers by reading `dst`, or by building the CSC in memory from the
 columns it already read — the same two columns with their roles swapped. A corpus that stored the
 relation twice would carry it twice, and two copies of one relation can disagree about their rows
 while agreeing about their counts.

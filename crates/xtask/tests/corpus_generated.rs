@@ -12,7 +12,7 @@
 //!
 //! # What this cannot prove
 //!
-//! - **That the roles are right.** That `cluster_id` is a `categorical` and not
+//! - **That the roles are right.** That `subject` is an `identity` and not
 //!   a second address is a decision, and `corpus.bnf`'s commentary is where it
 //!   is argued. This proves the two projections say what the file says.
 //! - **That every generated file is listed.** `corpus::generated()` is the list;
@@ -24,7 +24,7 @@
 //!   person reading a diff.
 
 use xtask::catalogue::repo_root;
-use xtask::corpus::{self, Role, Where};
+use xtask::corpus;
 
 /// The check `cargo xtask corpus --check` runs, as a test.
 #[test]
@@ -51,39 +51,13 @@ fn the_checked_in_files_match_the_corpus_vocabulary() {
 fn the_parse_actually_read_the_file() {
     let cols = corpus::read();
     assert!(
-        cols.len() >= 7,
-        "corpus.bnf parsed to {} columns; the file declares seven",
+        cols.len() >= 4,
+        "corpus.bnf parsed to {} columns; the file declares four",
         cols.len()
     );
     let names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
     assert!(
         names.contains(&"dense_id") && names.contains(&"src"),
         "the parse missed columns it must see: {names:?}"
-    );
-}
-
-/// **The two sets that diverged, held apart on purpose.**
-///
-/// A field listing hides every column the writer emits; a
-/// viewer reads the address, the identity and the two coordinates by name.
-/// Five against four, and the difference is `cluster_id`. Asserted
-/// here so that a column added to `corpus.bnf` without a role makes a decision
-/// rather than silently joining both sets or neither.
-#[test]
-fn the_categorical_is_writer_emitted_and_is_not_a_named_member() {
-    let cols = corpus::read();
-    let payload: Vec<_> = cols.iter().filter(|c| c.whence == Where::Payload).collect();
-    let named: Vec<&str> = payload
-        .iter()
-        .filter(|c| matches!(c.role, Role::Address | Role::Identity | Role::Coordinate))
-        .map(|c| c.name.as_str())
-        .collect();
-    assert_eq!(payload.len(), 5, "every payload column has a role");
-    assert_eq!(named, ["dense_id", "subject", "x", "y"]);
-    assert!(
-        payload
-            .iter()
-            .any(|c| c.role == Role::Categorical && !named.contains(&c.name.as_str())),
-        "the categorical is emitted by the writer and surfaced by no named member",
     );
 }

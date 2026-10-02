@@ -6,15 +6,16 @@ import { fileURLToPath } from 'node:url';
 import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { FOSSIL_FORMAT, open, type Manifest } from '../src/index.js';
+import { open } from '../src/index.js';
+import type { Manifest } from '../src/manifest.js';
 import { duckdb } from './engine.js';
 
 /**
  * The door, run against the checked-in conformance corpus with a real DuckDB-WASM.
  *
- * **Every expectation is a second query, not a constant**: a count is held against the manifest and
- * against SQL this file writes over the same files, because a number transcribed from a run of the
- * code under test agrees with it by construction.
+ * **Every expectation is a second query, not a constant**: what the views answer is held against the
+ * manifest and against SQL this file writes over the same files, because a number transcribed from a
+ * run of the code under test agrees with it by construction.
  */
 
 const CORPUS = fileURLToPath(new URL('../conformance/corpus', import.meta.url));
@@ -46,179 +47,104 @@ const fossil = (code: string, data?: Record<string, unknown>) =>
   expect.objectContaining({ name: 'FossilError', code, ...(data === undefined ? {} : { data: expect.objectContaining(data) }) });
 
 describe('open', () => {
-  it('reads fossil.json once and registers a view per table under the corpus', async () => {
-    const corpus = await open(CORPUS, { engine });
-    expect(corpus.url).toBe(CORPUS);
-    expect(corpus.manifest).toEqual(MANIFEST);
-    expect(corpus.manifest.format).toBe(FOSSIL_FORMAT);
+  it('attaches a view per table and the manifest as two relations, under the name it was given', async () => {
+    const close = await open('conformance', { engine, url: CORPUS });
     const views = await query(
-      `SELECT table_name AS t FROM information_schema.tables WHERE table_catalog = '${CORPUS}' ORDER BY t`,
+      `SELECT table_name AS t FROM information_schema.tables WHERE table_catalog = 'conformance' ORDER BY t`,
     );
-    expect(views.map((r) => r.t)).toEqual(TABLES.map((t) => t.name).sort());
-    await corpus.close();
-  });
+    expect(views.map((r) => r.t)).toEqual([...TABLES.map((t) => t.name), 'fossil_columns', 'fossil_tables'].sort());
 
-  it('names each table as SQL must write it, and its columns are where information_schema says', async () => {
-    const quoted = join(scratch, 'a "quoted" corpus');
-    mkdirSync(quoted, { recursive: true });
-    for (const file of ['fossil.json', ...TABLES.map((t) => t.path)]) {
-      mkdirSync(join(quoted, file, '..'), { recursive: true });
-      writeFileSync(join(quoted, file), readFileSync(join(CORPUS, file)));
+    const tables = await query(`SELECT * FROM conformance.fossil_tables`);
+    expect(tables.map((r) => r.table_name)).toEqual(TABLES.map((t) => t.name));
+    expect(tables.map((r) => Number(r.rows))).toEqual(TABLES.map((t) => t.record_count));
+    for (const t of MANIFEST.edge_tables) {
+      expect(tables.find((r) => r.table_name === t.name)).toMatchObject({
+        kind: 'edge', source: t.source.references, destination: t.destination.references, first_id: null,
+      });
     }
-    const corpus = await open(quoted, { engine });
-    const person = corpus.relation('Person');
-    expect(person).toBe(`"${quoted.replaceAll('"', '""')}"."Person"`);
-    const [count] = await query(`SELECT count(*)::INTEGER AS n FROM ${person}`);
-    expect(count!.n).toBe(MANIFEST.vertex_tables.find((t) => t.name === 'Person')!.record_count);
-    const columns = await query(
-      `SELECT column_name AS c FROM information_schema.columns
-        WHERE table_catalog = '${corpus.url.replaceAll("'", "''")}' AND table_schema = '${corpus.schema}'
-          AND table_name = 'Person' ORDER BY ordinal_position`,
-    );
-    expect(columns.map((r) => r.c)).toEqual(
-      MANIFEST.vertex_tables.find((t) => t.name === 'Person')!.properties.map((p) => p.name),
-    );
-    expect(() => corpus.relation('Nobody')).toThrow(
-      fossil('corpus/unknown-table', { table: 'Nobody', tables: expect.arrayContaining(['Person']) }),
-    );
-    await corpus.close();
+
+    const columns = await query(`SELECT table_name, column_name, role FROM conformance.fossil_columns ORDER BY table_name, ordinal`);
+    for (const t of TABLES) {
+      expect(columns.filter((r) => r.table_name === t.name).map((r) => [r.column_name, r.role ?? undefined])).toEqual(
+        t.properties.map((p) => [p.name, p.role]),
+      );
+    }
+    await close();
   });
 
-  it.each(TABLES.map((t) => [t.name, t] as const))('%s holds its record_count', async (_, table) => {
-    const corpus = await open(CORPUS, { engine });
-    const scan = corpus.scan({ table: table.name });
-    const [batch] = await scan.read(scan.plan());
-    expect(batch!.numRows).toBe(table.record_count);
-    const [direct] = await query(`SELECT count(*)::INTEGER AS n FROM read_parquet('${join(CORPUS, table.path)}')`);
-    expect(batch!.numRows).toBe(direct!.n);
-    await corpus.close();
+  it.each(MANIFEST.vertex_tables.map((t) => [t.name] as const))(
+    "%s holds its record_count, as the range fossil_tables gives it",
+    async (name) => {
+      const close = await open('ranges', { engine, url: CORPUS });
+      const [range] = await query(
+        `SELECT t.first_id::BIGINT AS first, t.rows::BIGINT AS rows, min(v.dense_id)::BIGINT AS lo, max(v.dense_id)::BIGINT AS hi, count(*)::BIGINT AS n
+           FROM ranges.fossil_tables t, ranges."${name}" v WHERE t.table_name = '${name}' GROUP BY ALL`,
+      );
+      expect(range!.n).toBe(range!.rows);
+      expect([range!.lo, range!.hi]).toEqual([range!.first, range!.first + range!.rows - 1n]);
+      await close();
+    },
+  );
+
+  it('quotes a name SQL would not take bare', async () => {
+    const close = await open('a "quoted" name', { engine, url: CORPUS });
+    const [count] = await query(`SELECT count(*)::INTEGER AS n FROM "a ""quoted"" name"."Person"`);
+    expect(count!.n).toBe(MANIFEST.vertex_tables.find((t) => t.name === 'Person')!.record_count);
+    await close();
   });
 
   it('refuses a format it does not read before reading a byte of Parquet', async () => {
     const dir = manifestOnly('fossil2', JSON.stringify({ ...MANIFEST, format: 'fossil/2' }));
-    await expect(open(dir, { engine })).rejects.toThrow(fossil('corpus/unsupported-format', { format: 'fossil/2' }));
-    expect(await catalogs()).not.toContain(dir);
+    await expect(open('fossil2', { engine, url: dir })).rejects.toThrow(fossil('corpus/unsupported-format', { format: 'fossil/2' }));
+    expect(await catalogs()).not.toContain('fossil2');
   });
 
   it('refuses a manifest that is not JSON, and one that is not there', async () => {
-    await expect(open(manifestOnly('garbage', 'format: fossil/1'), { engine })).rejects.toThrow(fossil('corpus/not-json'));
-    await expect(open(join(scratch, 'nothing-here'), { engine })).rejects.toThrow(
+    await expect(open('garbage', { engine, url: manifestOnly('garbage', 'format: fossil/1') })).rejects.toThrow(fossil('corpus/not-json'));
+    await expect(open('nothing', { engine, url: join(scratch, 'nothing-here') })).rejects.toThrow(
       fossil('corpus/unreadable', { path: join(scratch, 'nothing-here', 'fossil.json') }),
     );
   });
 
-  it('ignores a key it does not know', async () => {
+  it('ignores a key it does not know, and an empty corpus is two empty relations', async () => {
     const dir = manifestOnly('extra', JSON.stringify({ ...MANIFEST, vertex_tables: [], edge_tables: [], extent: [0, 0, 1, 1] }));
-    const corpus = await open(dir, { engine });
-    expect(corpus.manifest.vertex_tables).toEqual([]);
-    await corpus.close();
+    const close = await open('extra', { engine, url: dir });
+    expect(await query('SELECT * FROM extra.fossil_tables')).toEqual([]);
+    expect(await query('SELECT * FROM extra.fossil_columns')).toEqual([]);
+    await close();
   });
 
-  it('refuses a manifest that names one table twice', async () => {
-    const dir = manifestOnly('twice', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'Person' }] }));
-    await expect(open(dir, { engine })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'Person' }));
-    expect(await catalogs()).not.toContain(dir);
+  it('refuses a manifest that names one table twice, or a table named like its own relations', async () => {
+    const twice = manifestOnly('twice', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'Person' }] }));
+    await expect(open('twice', { engine, url: twice })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'Person' }));
+    const reserved = manifestOnly('reserved', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'fossil_tables' }] }));
+    await expect(open('reserved', { engine, url: reserved })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'fossil_tables' }));
+    expect(await catalogs()).not.toContain('twice');
   });
 
-  it('needs an engine', async () => {
-    await expect(open(CORPUS, {} as never)).rejects.toThrow(fossil('api/invalid-argument', { argument: 'engine' }));
+  it('needs an engine, and exactly one of a host and a url', async () => {
+    await expect(open('x', { url: CORPUS } as never)).rejects.toThrow(fossil('api/invalid-argument', { argument: 'engine' }));
+    await expect(open('x', { engine })).rejects.toThrow(fossil('api/invalid-argument', { argument: 'host' }));
   });
 
   it('refuses a location carrying a query or a fragment, before the engine sees anything', async () => {
     const asked: string[] = [];
     const untouched = { query: async (sql: string) => void asked.push(sql) } as unknown as Engine;
     for (const location of ['https://acct.blob.core.windows.net/c?sv=x&sig=y', `${CORPUS}#frag`]) {
-      await expect(open(location, { engine: untouched })).rejects.toThrow(
-        fossil('corpus/not-a-location', { location }),
-      );
+      await expect(open('x', { engine: untouched, url: location })).rejects.toThrow(fossil('corpus/not-a-location', { location }));
     }
     expect(asked).toEqual([]);
   });
 
   it('shares a catalog between two opens, and the last to close detaches it', async () => {
-    const first = await open(CORPUS, { engine });
-    const again = await open(CORPUS, { engine });
-    await first.close();
-    await first.close();
-    const scan = again.scan({ table: 'Person', select: ['dense_id'] });
-    expect((await scan.read(scan.plan()))[0]!.numRows).toBe(MANIFEST.vertex_tables[0]!.record_count);
-    expect(await catalogs()).toContain(CORPUS);
-    await again.close();
-    expect(await catalogs()).not.toContain(CORPUS);
-  });
-});
-
-describe('sql', () => {
-  it('is not on a corpus the host did not open it on', async () => {
-    const corpus = await open(CORPUS, { engine });
-    expect('sql' in corpus).toBe(false);
-    await corpus.close();
-  });
-
-  it('answers columns and rows over the views, capped at limit', async () => {
-    const corpus = await open(CORPUS, { engine, sql: 'allowed' });
-    const people = MANIFEST.vertex_tables[0]!;
-    const summary = await corpus.sql(`SUMMARIZE "${CORPUS}"."${people.name}";`);
-    expect(summary.columns).toContain('column_name');
-    expect(summary.rows.map((r) => r[summary.columns.indexOf('column_name')])).toEqual(
-      people.properties.map((p) => p.name),
-    );
-    expect(summary.truncated).toBe(false);
-
-    const capped = await corpus.sql(`SELECT dense_id FROM "${CORPUS}"."${people.name}" ORDER BY dense_id LIMIT 50`, {
-      limit: 10,
-    });
-    expect(capped.rows).toHaveLength(10);
-    expect(capped.truncated).toBe(true);
-    const first = await query(`SELECT dense_id FROM read_parquet('${join(CORPUS, people.path)}') ORDER BY dense_id LIMIT 10`);
-    expect(capped.rows.map((r) => Number(r[0]))).toEqual(first.map((r) => Number(r.dense_id)));
-
-    const exact = await corpus.sql('SELECT 1 AS one', { limit: 1 });
-    expect(exact).toEqual({ columns: ['one'], rows: [[1]], truncated: false });
-    await corpus.close();
-  });
-
-  it("rejects an aborted statement with the signal's reason", async () => {
-    const corpus = await open(CORPUS, { engine, sql: 'allowed' });
-    const controller = new AbortController();
-    controller.abort(new DOMException('stale', 'AbortError'));
-    await expect(corpus.sql('SELECT 1', { signal: controller.signal })).rejects.toThrow(/stale/);
-    await corpus.close();
-  });
-});
-
-describe('scan, refused before any statement', () => {
-  it('names the tables when the table is not one', async () => {
-    const corpus = await open(CORPUS, { engine });
-    expect(() => corpus.scan({ table: 'Nobody' })).toThrow(
-      fossil('corpus/unknown-table', { table: 'Nobody', tables: expect.arrayContaining(['Person']) }),
-    );
-    await corpus.close();
-  });
-
-  it('refuses a column the table does not declare, an empty projection and a negative limit', async () => {
-    const corpus = await open(CORPUS, { engine });
-    const unknown = fossil('corpus/unknown-column', { table: 'Person', column: 'nope' });
-    expect(() => corpus.scan({ table: 'Person', select: ['nope'] })).toThrow(unknown);
-    expect(() => corpus.scan({ table: 'Person', select: [] })).toThrow(fossil('corpus/empty-projection', { table: 'Person' }));
-    expect(() => corpus.scan({ table: 'Person', limit: -1 })).toThrow(fossil('api/invalid-argument', { argument: 'limit' }));
-    expect(() => corpus.scan({ table: 'Person', filter: { column: 'nope', op: '=', value: 1 } })).toThrow(unknown);
-    await corpus.close();
-  });
-
-  it('refuses a box over a table with no position', async () => {
-    const corpus = await open(CORPUS, { engine });
-    const undrawn = MANIFEST.vertex_tables.find((t) => t.position === undefined)!;
-    expect(() => corpus.scan({ table: undrawn.name, filter: { bbox: [0, 0, 1, 1] } })).toThrow(
-      fossil('corpus/no-position', { table: undrawn.name }),
-    );
-    await corpus.close();
-  });
-
-  it('refuses a task of another table', async () => {
-    const corpus = await open(CORPUS, { engine });
-    const other = corpus.scan({ table: 'Tag' }).plan();
-    await expect(corpus.scan({ table: 'Person' }).read(other)).rejects.toThrow(fossil('api/invalid-argument', { argument: 'tasks' }));
-    await corpus.close();
+    const first = await open('shared', { engine, url: CORPUS });
+    const again = await open('shared', { engine, url: CORPUS });
+    await first();
+    await first();
+    const [count] = await query(`SELECT count(*)::INTEGER AS n FROM shared."Person"`);
+    expect(count!.n).toBe(MANIFEST.vertex_tables[0]!.record_count);
+    expect(await catalogs()).toContain('shared');
+    await again();
+    expect(await catalogs()).not.toContain('shared');
   });
 });

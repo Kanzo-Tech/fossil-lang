@@ -17,8 +17,7 @@ own `area/kind` `code`, and its `data` as a JSON object, both are kept, so a hos
 `job/not-found` comes back as `job/not-found` from a stored run too. It is still the host's code,
 never fossil's: `isFossilError` does not match it. `scope` is `job <id>` or
 `connection <name>` for a credentials request, and names the connections request otherwise —
-`its connections` from `resolveDocuments` in `@fossil-lang/storage` and from the Rust side alike, and
-`the completion of job <id>` for a completion `runJob` could not report. A host that does not answer at
+`its connections` from `resolveDocuments` in `@fossil-lang/storage` and from the Rust side alike. A host that does not answer at
 all is [`storage/host-silent`](/docs/errors/storage/host-silent).
 It is thrown by `mount` (so `open(job, …)` and introspection), by `resolveDocuments`, and by a run;
 a storage read answers it as each affected file's `problem`.

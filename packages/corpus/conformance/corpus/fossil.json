@@ -11,23 +11,13 @@
       "properties": [
         {
           "name": "dense_id",
-          "type": "uint32"
+          "type": "uint32",
+          "role": "address"
         },
         {
           "name": "subject",
-          "type": "string"
-        },
-        {
-          "name": "x",
-          "type": "float"
-        },
-        {
-          "name": "y",
-          "type": "float"
-        },
-        {
-          "name": "cluster_id",
-          "type": "uint32"
+          "type": "string",
+          "role": "identity"
         },
         {
           "name": "birth_year",
@@ -40,12 +30,7 @@
           "type": "string",
           "iri": "https://example.org/postcode"
         }
-      ],
-      "position": {
-        "by": "layout",
-        "x": "x",
-        "y": "y"
-      }
+      ]
     },
     {
       "name": "Order",
@@ -57,35 +42,20 @@
       "properties": [
         {
           "name": "dense_id",
-          "type": "uint32"
+          "type": "uint32",
+          "role": "address"
         },
         {
           "name": "subject",
-          "type": "string"
-        },
-        {
-          "name": "x",
-          "type": "float"
-        },
-        {
-          "name": "y",
-          "type": "float"
-        },
-        {
-          "name": "cluster_id",
-          "type": "uint32"
+          "type": "string",
+          "role": "identity"
         },
         {
           "name": "amount",
           "type": "double",
           "iri": "https://example.org/amount"
         }
-      ],
-      "position": {
-        "by": "layout",
-        "x": "x",
-        "y": "y"
-      }
+      ]
     },
     {
       "name": "Tag",
@@ -97,11 +67,13 @@
       "properties": [
         {
           "name": "dense_id",
-          "type": "uint32"
+          "type": "uint32",
+          "role": "address"
         },
         {
           "name": "subject",
-          "type": "string"
+          "type": "string",
+          "role": "identity"
         },
         {
           "name": "name",
@@ -125,15 +97,17 @@
         "key": "dst",
         "references": "Person"
       },
-      "record_count": 567,
+      "record_count": 600,
       "properties": [
         {
           "name": "src",
-          "type": "uint32"
+          "type": "uint32",
+          "role": "endpoint"
         },
         {
           "name": "dst",
-          "type": "uint32"
+          "type": "uint32",
+          "role": "endpoint"
         },
         {
           "name": "since",
@@ -158,11 +132,13 @@
       "properties": [
         {
           "name": "src",
-          "type": "uint32"
+          "type": "uint32",
+          "role": "endpoint"
         },
         {
           "name": "dst",
-          "type": "uint32"
+          "type": "uint32",
+          "role": "endpoint"
         }
       ]
     },
@@ -183,11 +159,13 @@
       "properties": [
         {
           "name": "src",
-          "type": "uint32"
+          "type": "uint32",
+          "role": "endpoint"
         },
         {
           "name": "dst",
-          "type": "uint32"
+          "type": "uint32",
+          "role": "endpoint"
         }
       ]
     }

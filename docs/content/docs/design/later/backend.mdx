@@ -3,8 +3,10 @@ title: The backend
 description: fossil is the backend and kanzo-ui is the view, with one path between them — a corpus read the way Apache Iceberg reads a table and addressed the way an OGC tile matrix set addresses a tile, with the cell pyramid as the zoom levels, the level files retired, and the reader split into modules that each follow one of the two.
 ---
 
-> **Deferred, not reversed.** A `fossil/1` corpus has no tile contract: it is read whole, through
-> `open` and `scan`, and a scan is one task. The code existed at commit `ac1801d4` (main
+> **Deferred, not reversed.** A `fossil/1` corpus has no tile contract: `open` attaches it and
+> every read is the host's SQL. The tiles were ordered by the writer's placement, which is gone too
+> ([where x and y come from](/docs/design/position)), so a tile contract that comes back brings an
+> order of its own. The code existed at commit `ac1801d4` (main
 > `e5b2113f`), and every path on this page is spelled against that commit. What brings it back: a
 > `fossil/1` corpus that fails the in-browser thresholds — open over 1.5 s, first paint over 3 s,
 > or heap over 1.5 GB at a million vertices over HTTP.

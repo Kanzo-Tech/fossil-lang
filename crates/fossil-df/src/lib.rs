@@ -3,14 +3,15 @@
 //!
 //! Consumes a [`fossil_mir::lower_to_mir_pg`] graph and materialises each
 //! vertex type on `DataFusion`: read the source, project `id AS subject` + each
-//! prop + the `x`/`y`/`cluster_id` layout placeholders, dedup single-valued
-//! shapes, sort by `subject` for a deterministic type-local id, `collect()`,
-//! and prepend `dense_id` (`0..N-1`, sort order). The result is registered in
-//! the [`SessionContext`] so the edge phase can resolve endpoint IRIs against
-//! it in memory (the hard barrier: vertices before edges).
+//! prop, dedup single-valued shapes, sort by `subject`, `collect()`, and prepend
+//! `dense_id` — global across the graph: the types in schema order, each one
+//! contiguous range, subject order inside it. The result is registered in the
+//! [`SessionContext`] so the edge phase can resolve endpoint IRIs against it in
+//! memory (the hard barrier: vertices before edges), and an edge's endpoints
+//! come out global too.
 //!
-//! [`write()`] lays the whole graph out and writes the corpus — one Parquet per
-//! vertex type and per relation, `fossil.json` last — and [`Executor`] is the
+//! [`write()`] writes the corpus — one Parquet per vertex type and per
+//! relation, `fossil.json` last — and [`Executor`] is the
 //! whole run a host drives: compile, register documents, read sources through
 //! a [`fossil_storage::Storage`], execute, write. `fossil-df-wasm` is a
 //! `wasm-bindgen` shell over it, and it is the only write host.
@@ -56,8 +57,7 @@ pub mod session;
 /// The catalog rendered for this engine: which `DataFusion` function each
 /// stdlib entry becomes, and which rows this engine cannot render.
 pub mod stdlib;
-/// The corpus, written: the layout pass over the whole graph, one Parquet per
-/// table, `fossil.json` last.
+/// The corpus, written: one Parquet per table, `fossil.json` last.
 pub mod write;
 
 pub use descriptor::output_descriptor;
@@ -118,7 +118,7 @@ pub struct Graph {
 }
 
 /// A materialised edge's rows, `ORDER BY src_dense, dst_dense`: two `u32`
-/// columns, each a type-local id of its endpoint's type. The `(src_type, label,
+/// columns, each its endpoint's global `dense_id`. The `(src_type, label,
 /// dst_type)` triple identifies the edge in the schema; all other metadata is
 /// in the [`GraphSchema`].
 #[derive(Debug)]
@@ -189,8 +189,14 @@ pub async fn execute_graph<'db>(
     probe.mark("prepare vertices (lazy)");
     let mut vertices = Vec::with_capacity(groups.len());
     let mut nodes = Vec::with_capacity(groups.len());
+    let mut first = 0u64;
     for (label, group) in groups {
-        let (table, node) = finalize_vertex(ctx, group).await?;
+        let (table, node) = finalize_vertex(ctx, group, first).await?;
+        first += table
+            .batches
+            .iter()
+            .map(|b| b.num_rows() as u64)
+            .sum::<u64>();
         probe.mark(&format!("collect vertex {label}"));
         vertices.push(table);
         nodes.push(node);
@@ -285,7 +291,7 @@ pub async fn execute_vertex<'db>(
     let program_dir = fossil_locator::program_dir(mapping.file(db).path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
-    finalize_vertex(ctx, vec![prepared]).await
+    finalize_vertex(ctx, vec![prepared], 0).await
 }
 
 /// Materialise the VERTEX of an op list that is already lowered and already
@@ -307,7 +313,7 @@ pub async fn execute_vertex_ops<'db>(
     anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
     let prepared = prepare_vertex_ops(ctx, db, ops, anchor).await?;
-    finalize_vertex(ctx, vec![prepared]).await
+    finalize_vertex(ctx, vec![prepared], 0).await
 }
 
 /// Refuse to execute a mapping whose lowering failed.
@@ -428,6 +434,7 @@ async fn prepare_vertex_ops<'db>(
 async fn finalize_vertex(
     ctx: &SessionContext,
     group: Vec<PreparedVertex>,
+    first_id: u64,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
     use datafusion::common::ScalarValue;
     use datafusion::functions_aggregate::expr_fn::first_value;
@@ -444,12 +451,11 @@ async fn finalize_vertex(
         }
     }
 
-    // `subject`, every property of the union, then the layout placeholders —
-    // the column order `vertex_projection` gives a single mapping.
+    // `subject`, then every property of the union — the column order
+    // `vertex_projection` gives a single mapping.
     let mut columns: Vec<(String, DataType)> = Vec::new();
     let names = std::iter::once("subject".to_string())
-        .chain(node.properties.iter().map(|p| p.name.clone()))
-        .chain(["x", "y", "cluster_id"].map(String::from));
+        .chain(node.properties.iter().map(|p| p.name.clone()));
     for name in names {
         let ty = group
             .iter()
@@ -520,7 +526,7 @@ async fn finalize_vertex(
         df.sort(by_subject)?
     };
 
-    let batches = prepend_dense_id(sorted.collect().await?)?;
+    let batches = prepend_dense_id(sorted.collect().await?, first_id)?;
     register_batches(ctx, &node.label, &batches)?;
     Ok((
         VertexTable {
@@ -549,36 +555,42 @@ fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
     }
 }
 
-/// The vertex projection exprs: `id AS subject`, each prop, and the
-/// `x`/`y`/`cluster_id` layout placeholders the discovery viewer expects
-/// (`RESERVED_VERTEX_COLUMNS`). Layout/cluster are filled by the layout pass;
-/// here they are deterministic zeros.
+/// The vertex projection exprs: `id AS subject`, then each prop.
 fn vertex_projection(subject: DfExpr, props: &[VProp<'_>]) -> Vec<DfExpr> {
-    let mut exprs = vec![subject.alias("subject")];
-    for p in props {
-        exprs.push(render(&p.value).alias(p.name.as_str()));
-    }
-    exprs.push(lit(0.0_f32).alias("x"));
-    exprs.push(lit(0.0_f32).alias("y"));
-    exprs.push(lit(0_u32).alias("cluster_id"));
-    exprs
+    std::iter::once(subject.alias("subject"))
+        .chain(
+            props
+                .iter()
+                .map(|p| render(&p.value).alias(p.name.as_str())),
+        )
+        .collect()
 }
 
-/// Prepend `dense_id` (`u32`, `0..N-1` in batch order) to each collected batch.
-/// The batches arrive globally sorted by `subject` (the plan sorts before
-/// collect), so a running offset yields the deterministic dense index the
-/// edge phase joins against.
-fn prepend_dense_id(batches: Vec<RecordBatch>) -> datafusion::error::Result<Vec<RecordBatch>> {
+/// Prepend `dense_id` to each collected batch: `first`, `first + 1`, … in
+/// batch order. The batches arrive sorted by `subject` (the plan sorts before
+/// collect) and `first` is the rows of every type before this one, so the id is
+/// global and a type is one contiguous range of it — the numbering the edge
+/// phase joins against, and the one the corpus is written in.
+///
+/// # Errors
+/// `run/too-large` when the graph outgrows a `u32` `dense_id`, which is the
+/// width `corpus.bnf` declares.
+fn prepend_dense_id(
+    batches: Vec<RecordBatch>,
+    first: u64,
+) -> datafusion::error::Result<Vec<RecordBatch>> {
     let mut out = Vec::with_capacity(batches.len());
-    let mut offset: u32 = 0;
+    let mut next = first;
     for batch in batches {
-        // `dense_id` is `uint32` in the corpus's own column table — the width
-        // `corpus.bnf` declares — so a type of more than 4,294,967,295 rows is
-        // unaddressable before it is untruncatable. `try_from` here would invent an error the writer has no
-        // way to report and no reader could act on.
-        #[allow(clippy::cast_possible_truncation)]
-        let n = batch.num_rows() as u32;
-        let ids: ArrayRef = Arc::new(UInt32Array::from_iter_values(offset..offset + n));
+        let end = next + batch.num_rows() as u64;
+        let (Ok(lo), Ok(hi)) = (u32::try_from(next), u32::try_from(end)) else {
+            let failure =
+                fossil_graph_schema::Failure::new(fossil_graph_schema::Problem::TooLarge {
+                    vertices: end,
+                });
+            return Err(DataFusionError::External(Box::new(failure)));
+        };
+        let ids: ArrayRef = Arc::new(UInt32Array::from_iter_values(lo..hi));
 
         let mut fields: Vec<Arc<Field>> =
             vec![Arc::new(Field::new("dense_id", DataType::UInt32, false))];
@@ -590,7 +602,7 @@ fn prepend_dense_id(batches: Vec<RecordBatch>) -> datafusion::error::Result<Vec<
             Arc::new(Schema::new(fields)),
             columns,
         )?);
-        offset += n;
+        next = end;
     }
     Ok(out)
 }
@@ -699,9 +711,8 @@ async fn execute_edges<'db>(
 ///
 /// This used to say it mirrored `fossil-sinks`'s `writer.rs`. There is no
 /// second writer to mirror any more — `fossil-sinks/src/` is the manifest model
-/// and nothing else, so THIS is where an edge becomes CSR/CSC. What still reads
-/// the pair afterwards is the layout pass and then `crate::write()`, which
-/// renumbers both ends into the global `dense_id`.
+/// and nothing else, so THIS is where an edge becomes CSR/CSC. Both ends are
+/// already the global `dense_id`, and `crate::write()` writes the pair as it is.
 async fn execute_edge(
     ctx: &SessionContext,
     rows: DataFrame,

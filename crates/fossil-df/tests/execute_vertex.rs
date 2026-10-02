@@ -70,8 +70,8 @@ async fn execute_vertex_materialises_the_vertex_table_shape() {
     let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
     assert_eq!(
         names,
-        ["dense_id", "subject", "name", "x", "y", "cluster_id"],
-        "writer-W0b column shape",
+        ["dense_id", "subject", "name"],
+        "the writer's two, then the program's",
     );
 
     let dense = column::<UInt32Array>(batch, 0);
