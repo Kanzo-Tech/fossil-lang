@@ -13,7 +13,7 @@ host that writes a corpus, in the browser and in Node.
 ## Usage
 
 ```ts
-import { initFossilExecutor, runJob } from '@fossil-lang/executor';
+import { initFossilExecutor, run } from '@fossil-lang/executor';
 import type { Host } from '@fossil-lang/types';
 
 // Lazy — only when the user runs a job (the artefact is large, datafusion-heavy).
@@ -28,32 +28,24 @@ const host: Host = {
   credentials: async (scope, access) => vend(scope, access),
 };
 
-const report = await runJob(program, {
-  id: jobId,
-  host,
-  complete: async (outcome) => patchJob(outcome),
-  lease: 60_000, // the server's, in ms — how long it keeps a silent job
-});
+const report = await run(program, { host, job: jobId });   // { dest, dropped }, or throws a FossilError
 ```
 
-`runJob` reads the documents the program names (every shape, not just the first)
-with `resolveDocuments` from `@fossil-lang/storage`, fails the job if any stays
-unread, then runs, writes and completes. Fossil turns each `@conn/path` into a
-locator and the connection it goes through, and every byte goes through an
-`object_store` store built from the credential the host vends for it: DataFusion
-reads each source through `read` on its connection — by range requests, not
-whole — and the output is written at `<prefix><path>` through `write` on
-`{ job: id }`, in parts when a file is large. The host never signs a URL.
+`run` reads the documents the program names (every shape, not just the first)
+with `resolveDocuments` from `@fossil-lang/storage`, fails if any stays unread,
+then runs and writes. Fossil turns each `@conn/path` into a locator and the
+connection it goes through, and every byte goes through an `object_store` store
+built from the credential the host vends for it: DataFusion reads each source
+through `read` on its connection — by range requests, not whole — and the output
+is written at `<prefix><path>` through `write` on `{ job }`, in parts when a file
+is large. The host never signs a URL.
 
-A completion `complete` refuses is tried again, with backoff, for as long as the
-host's server keeps a silent job before sweeping it: pass that figure as
-`lease` (milliseconds) beside `complete`; it is 60 s when absent. The lease is
-the host's, so fossil does not keep a copy of it.
-
-A job that fails completes with `{ status: 'failed', problem }` — the failure as
-plain data, which a host stores as it is and turns back into the error with
-`FossilError.from(problem)` from `@fossil-lang/types` — and `runJob` throws that
-`FossilError`. Branch on its `code`, never on its message.
+A run that fails throws a `FossilError`: branch on its `code`, never on its
+message. Its `problem` is the failure as plain data, which a host stores as it is
+and turns back into the error with `FossilError.from(problem)` from
+`@fossil-lang/types`. **Recording the outcome is the host's**: what a job's
+status is, and how long a refused report is tried again, belong to the host's
+own job lifecycle, not to the run.
 
 Step by step, the same thing is:
 

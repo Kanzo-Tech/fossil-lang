@@ -1,11 +1,11 @@
 /**
- * Orchestration smoke for {@link runJob} — drives the full browser job flow
- * (documents → sources → run → write → complete) against a host that vends
+ * Orchestration smoke for {@link run} — drives the full browser flow
+ * (documents → sources → run → write) against a host that vends
  * `read` on one connection and `write` on the job, and a stubbed `fetch` that
  * answers as S3 does — HEAD, ranged GET, PUT — and only to signed requests.
  * No network, no server.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import { initStorage } from '@fossil-lang/storage';
 import { FossilError, type Access, type Host, type Problem, type Scope, type StorageCredential } from '@fossil-lang/types';
 
-import { initFossilExecutor, runJob, type CompletePayload, type Job } from '../src/index.js';
+import { initFossilExecutor, run } from '../src/index.js';
 
 // See `execute.test.ts` for why this program changed shape: bare header names
 // bound positionally against `graph.shex`, which is the language since ruling 3
@@ -64,25 +64,11 @@ function recordingHost() {
   return { host, asks };
 }
 
-function recording(host: Host, id = 'job-1'): Job & { completed?: CompletePayload } {
-  const job: Job & { completed?: CompletePayload } = {
-    id,
-    host,
-    complete: async (req) => {
-      job.completed = req;
-    },
-  };
-  return job;
-}
-
 const FIXTURES: Record<string, string> = {
   '/lake/in/graph.shex': '../../../crates/fossil-df/tests/fixtures/graph.shex',
   '/lake/in/users.csv': '../../../crates/fossil-df/tests/fixtures/users.csv',
   '/lake/in/orders.csv': '../../../crates/fossil-df/tests/fixtures/orders.csv',
 };
-
-/** Requests the stub has accepted and not yet answered. */
-let inFlight = 0;
 
 /** An S3 that serves the fixtures by path to signed HEADs and GETs (ranged too), and records PUTs.
  *  `latency` is real time each answer takes, as a store's does. */
@@ -92,13 +78,8 @@ function stubFetch(serve: Record<string, string>, latency = 0) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      inFlight++;
-      try {
-        if (latency > 0) await sleep(latency);
-        return await answerS3(new Request(input, init), serve, gets, puts);
-      } finally {
-        inFlight--;
-      }
+      if (latency > 0) await sleep(latency);
+      return answerS3(new Request(input, init), serve, gets, puts);
     }),
   );
   return { gets, puts };
@@ -149,16 +130,13 @@ beforeAll(async () => {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('runJob', () => {
+describe('run', () => {
   it('reads through the connection and writes under the job prefix, every request signed', async () => {
     const { gets, puts } = stubFetch(FIXTURES);
     const { host, asks } = recordingHost();
-    const job = recording(host);
 
-    const report = await runJob(PROGRAM, job);
+    const report = await run(PROGRAM, { host, job: 'job-1' });
 
-    expect(job.completed?.status).toBe('completed');
-    expect(job.completed?.manifest).toEqual(report);
     expect(report.dest).toBe(JOB);
     // The relation exists only because the read shape document was the output
     // contract: without it `placedBy` would be a literal property.
@@ -185,35 +163,30 @@ describe('runJob', () => {
     expect(written.at(-1)).toBe(`${JOB}fossil.json`);
   });
 
-  it('fails the job, writing nothing, when a document the program names cannot be read', async () => {
+  it('fails, writing nothing, when a document the program names cannot be read', async () => {
     const { puts } = stubFetch({});
     const { host } = recordingHost();
-    const job = recording(host);
 
-    await expect(runJob(PROGRAM, job)).rejects.toThrow(
-      expect.objectContaining({ name: 'FossilError', code: 'document/unread', data: { documents: [expect.stringContaining('graph.shex')] } }),
-    );
-    expect(job.completed?.status).toBe('failed');
-    expect(job.completed?.problem).toMatchObject({
+    const failure = await run(PROGRAM, { host, job: 'job-1' }).catch((e: FossilError) => e);
+    expect(failure).toMatchObject({ name: 'FossilError', code: 'document/unread', data: { documents: [expect.stringContaining('graph.shex')] } });
+    expect((failure as FossilError).problem).toMatchObject({
       code: 'document/unread',
       cause: { code: 'storage/unreachable', data: { locator: expect.stringContaining('graph.shex') } },
     });
     expect(puts).toEqual([]);
   });
 
-  it('fails the job when the host vends no write on it', async () => {
+  it('fails when the host vends no write on the job', async () => {
     const { puts } = stubFetch(FIXTURES);
     const { host } = recordingHost();
-    const job = recording(host, 'job-2');
 
-    await expect(runJob(PROGRAM, job)).rejects.toThrow(
+    await expect(run(PROGRAM, { host, job: 'job-2' })).rejects.toThrow(
       expect.objectContaining({ name: 'FossilError', code: 'storage/no-credential', data: { scope: 'job job-2', access: 'write' } }),
     );
-    expect(job.completed?.status).toBe('failed');
     expect(puts).toEqual([]);
   });
 
-  it('reports a host’s own code under document/unread, and the stored problem rebuilds it', async () => {
+  it('keeps a host’s own code under document/unread, and the stored problem rebuilds it', async () => {
     stubFetch(FIXTURES);
     const { host: inner } = recordingHost();
     const host: Host = {
@@ -222,140 +195,19 @@ describe('runJob', () => {
         throw Object.assign(new Error('no such job'), { name: 'ApiError', code: 'job/not-found', data: { job: 'job-1' } });
       },
     };
-    const job = recording(host);
-    await expect(runJob(PROGRAM, job)).rejects.toMatchObject({ code: 'document/unread' });
-    expect(job.completed?.problem).toMatchObject({
+    const failure = (await run(PROGRAM, { host, job: 'job-1' }).catch((e: FossilError) => e)) as FossilError;
+    expect(failure.problem).toMatchObject({
       code: 'document/unread',
       cause: { code: 'storage/host-refused', cause: { name: 'ApiError', code: 'job/not-found', data: { job: 'job-1' } } },
     });
-    const stored = JSON.parse(JSON.stringify(job.completed?.problem)) as Problem;
+    const stored = JSON.parse(JSON.stringify(failure.problem)) as Problem;
     const refused = FossilError.from(stored).cause as FossilError;
     expect(refused.cause).toMatchObject({ name: 'ApiError', code: 'job/not-found', data: { job: 'job-1' } });
   });
 });
 
-/** Drive `outcome` to its end under fake timers, letting the stub's file reads through between ticks.
- *
- *  The fake clock moves only while no request is in flight. A request is raced
- *  against the store's 30 s deadline on the page's `setTimeout`, which is this
- *  clock: advancing it while the stub reads a fixture in real time made the
- *  deadline fire whenever the read was slow — under a loaded CI runner, a run
- *  failed with `the store did not answer within 30000 ms` from inside the
- *  engine. Time here is the job's own waiting (its pauses between reports), not
- *  the store's. */
-async function settled<T>(outcome: Promise<T>): Promise<PromiseSettledResult<T>> {
-  let done = false;
-  const result = outcome.then(
-    (value) => ((done = true), { status: 'fulfilled' as const, value }),
-    (reason: unknown) => ((done = true), { status: 'rejected' as const, reason }),
-  );
-  for (let i = 0; !done && i < 20_000; ) {
-    if (inFlight > 0) {
-      // Real time, which the store's answer is waiting on; the budget of
-      // ticks is for the fake clock.
-      await sleep(1);
-      continue;
-    }
-    await vi.advanceTimersByTimeAsync(100);
-    await new Promise((next) => setImmediate(next));
-    i++;
-  }
-  return result;
-}
-
-function reporting(host: Host, answer: (req: CompletePayload, attempt: number) => Promise<void>) {
-  const calls: CompletePayload[] = [];
-  const job: Job = {
-    id: 'job-1',
-    host,
-    complete: (req) => (calls.push(req), answer(req, calls.length)),
-  };
-  return { job, calls };
-}
-
-describe('runJob, when reporting fails', () => {
-  beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] }));
-  afterEach(() => vi.useRealTimers());
-
-  it('tries a refused completion again, and reports it once', async () => {
-    stubFetch(FIXTURES);
-    const { host } = recordingHost();
-    const { job, calls } = reporting(host, async (_, attempt) => {
-      if (attempt < 3) throw new Error('keasy is restarting');
-    });
-    const outcome = await settled(runJob(PROGRAM, job));
-    expect(outcome.status).toBe('fulfilled');
-    expect(calls.map((c) => c.status)).toEqual(['completed', 'completed', 'completed']);
-  });
-
-  it('lets a slow store answer: only the job’s own waiting moves the clock', async () => {
-    stubFetch(FIXTURES, 40);
-    const { host } = recordingHost();
-    const { job, calls } = reporting(host, async (_, attempt) => {
-      if (attempt < 2) throw new Error('keasy is restarting');
-    });
-    const outcome = await settled(runJob(PROGRAM, job));
-    expect(outcome.status).toBe('fulfilled');
-    expect(calls.map((c) => c.status)).toEqual(['completed', 'completed']);
-  });
-
-  it('never reports failed for a run that wrote, when its completion cannot be reported', async () => {
-    const { puts } = stubFetch(FIXTURES);
-    const { host } = recordingHost();
-    const { job, calls } = reporting(host, async () => {
-      throw new Error('keasy is down');
-    });
-    const outcome = await settled(runJob(PROGRAM, job));
-    expect(outcome).toMatchObject({
-      status: 'rejected',
-      reason: { code: 'storage/host-refused', data: { scope: 'the completion of job job-1' }, cause: new Error('keasy is down') },
-    });
-    expect(calls.every((c) => c.status === 'completed')).toBe(true);
-    expect(puts.at(-1)).toContain('fossil.json');
-  });
-
-  it('gives a silent completion 30 s an attempt, and says storage/host-silent once the lease is out', async () => {
-    stubFetch(FIXTURES);
-    const { host } = recordingHost();
-    const { job, calls } = reporting(host, () => new Promise<void>(() => {}));
-    const outcome = await settled(runJob(PROGRAM, job));
-    expect(outcome).toMatchObject({ status: 'rejected', reason: { code: 'storage/host-silent', data: { after: 30_000 } } });
-    expect(calls.length).toBeGreaterThan(1);
-  });
-
-  it('tries a refused completion for as long as the host’s lease, 60 s when it names none', async () => {
-    const attempts = async (lease?: number) => {
-      stubFetch(FIXTURES);
-      const { host } = recordingHost();
-      const { job, calls } = reporting(host, async () => {
-        throw new Error('keasy is down');
-      });
-      const outcome = await settled(runJob(PROGRAM, lease === undefined ? job : { ...job, lease }));
-      expect(outcome).toMatchObject({ status: 'rejected', reason: { code: 'storage/host-refused' } });
-      return calls.length;
-    };
-    // Pauses of 1, 2, 4, 8, 16 s: the attempt after a pause that would end past the lease is not made.
-    expect(await attempts(5_000)).toBe(3);
-    expect(await attempts()).toBe(6);
-  });
-
-  it('throws the run’s failure, with the failed report’s own failure at the end of its causes', async () => {
-    stubFetch({});
-    const { host } = recordingHost();
-    const { job } = reporting(host, async () => {
-      throw new Error('keasy is down');
-    });
-    const outcome = await settled(runJob(PROGRAM, job));
-    expect(outcome).toMatchObject({ status: 'rejected', reason: { code: 'document/unread' } });
-    const chain: unknown[] = [];
-    for (let at: unknown = (outcome as PromiseRejectedResult).reason; at instanceof Error; at = at.cause) chain.push(at);
-    expect(chain.at(-2)).toMatchObject({ code: 'storage/host-refused' });
-    expect(chain.at(-1)).toEqual(new Error('keasy is down'));
-  });
-});
-
-describe('runJob, when stopped or when several documents fail', () => {
-  it('stops when the caller does, and reports nothing', async () => {
+describe('run, when stopped or when several documents fail', () => {
+  it('stops when the caller does', async () => {
     stubFetch(FIXTURES);
     const stop = new AbortController();
     const { host: inner } = recordingHost();
@@ -366,20 +218,17 @@ describe('runJob, when stopped or when several documents fail', () => {
         return inner.credentials(scope, access, options);
       },
     };
-    const job = recording(host);
-    await expect(runJob(PROGRAM, job, { signal: stop.signal })).rejects.toMatchObject({ name: 'AbortError' });
-    expect(job.completed).toBeUndefined();
+    await expect(run(PROGRAM, { host, job: 'job-1', signal: stop.signal })).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('keeps every unread document’s problem, not only the first', async () => {
     stubFetch({});
     const { host } = recordingHost();
-    const job = recording(host);
     const program = ['type { Person } := io.shex("@lake/a.shex")', 'type { Order } := io.shex("@lake/b.shex")', ''].join('\n');
-    const e = await runJob(program, job).catch((x: unknown) => x);
+    const e = await run(program, { host, job: 'job-1' }).catch((x: unknown) => x);
     expect(e).toMatchObject({ code: 'document/unread', data: { documents: [expect.any(String), expect.any(String)] } });
     const cause = (e as Error).cause as AggregateError;
     expect(cause.errors.map((x: { code: string }) => x.code)).toEqual(['storage/unreachable', 'storage/unreachable']);
-    expect(job.completed?.problem?.related?.map((r) => r.code)).toEqual(['storage/unreachable', 'storage/unreachable']);
+    expect((e as FossilError).problem.related?.map((r) => r.code)).toEqual(['storage/unreachable', 'storage/unreachable']);
   });
 });

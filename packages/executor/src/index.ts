@@ -2,16 +2,16 @@
  * @fossil-lang/executor — the DataFusion executor that runs fossil mappings in
  * the browser (the heavy, lazy-loaded counterpart to the LSP @fossil-lang/wasm).
  *
- * A job, end to end — documents, sources, run, write, completion:
+ * A run, end to end — documents, sources, run, write:
  *
- *   import { initFossilExecutor, runJob } from '@fossil-lang/executor';
+ *   import { initFossilExecutor, run } from '@fossil-lang/executor';
  *
  *   await initFossilExecutor();                      // lazy — only when running a job
- *   const report = await runJob(program, { id, host, complete });
+ *   const report = await run(program, { host, job });
  *
  * `host` is the `Host` from `@fossil-lang/types`: it vends `read` per connection
- * and `write` on the job. `complete` records the outcome. {@link FossilExecutor} is the step-by-step surface
- * `runJob` drives.
+ * and `write` on the job. Recording the outcome is the host's. {@link FossilExecutor}
+ * is the step-by-step surface `run` drives.
  */
 
 // The wasm-bindgen glue (`../pkg/fossil_df_wasm.js`) is imported ONLY from leaf
@@ -24,8 +24,8 @@ export { FossilExecutor } from './client.js';
 export { initFossilExecutor } from './load.js';
 export type { InitInput } from './load.js';
 
-export { runJob } from './run-job.js';
-export type { Job, CompletePayload } from './run-job.js';
+export { run } from './run.js';
+export type { RunOptions } from './run.js';
 
 import type { DataRow } from './catalogue.generated.js';
 
