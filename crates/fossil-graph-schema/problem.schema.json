@@ -2626,6 +2626,35 @@
       "x-detail": "\"no store covers the destination {destination}\""
     },
     {
+      "description": "A CSV, JSON or Parquet source names no file in its store.",
+      "properties": {
+        "code": {
+          "enum": [
+            "source/not-found"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "locator": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "locator"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A source names no file",
+      "type": "object",
+      "x-detail": "\"the source `{locator}` names no file\""
+    },
+    {
       "description": "A source's bytes are not UTF-8 text.",
       "properties": {
         "code": {

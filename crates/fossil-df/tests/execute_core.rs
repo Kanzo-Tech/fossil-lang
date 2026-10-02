@@ -287,6 +287,52 @@ async fn a_program_that_does_not_compile_fails_with_its_diagnostics() {
     assert!(refused.related.iter().all(|r| r.span.is_some()));
 }
 
+/// **A source whose file is not in the store fails as `source/not-found`,
+/// naming the file.** `DataFusion` reads a locator that matches nothing as a
+/// relation with no columns, and the run used to fail at the first column the
+/// program read — keasy's unseeded LDBC job answered `engine/failed` with
+/// `Schema error: No field named "PlaceRow".id`, which reads as a program
+/// mistake. One spelling per object-store format, the CSV one as keasy writes
+/// it: through a connection, with a delimiter.
+#[tokio::test]
+async fn a_source_that_names_no_file_fails_as_source_not_found() {
+    for (source, locator) in [
+        (
+            "io.csv(\"@ldbc/static/place_0_0.csv\", delimiter = \"|\")",
+            "https://data.example.com/ldbc/static/place_0_0.csv",
+        ),
+        (
+            "io.json(\"https://data.example.com/users.json\")",
+            "https://data.example.com/users.json",
+        ),
+        (
+            "io.parquet(\"https://data.example.com/users.parquet\")",
+            "https://data.example.com/users.parquet",
+        ),
+    ] {
+        let program = PROGRAM.replace("io.csv(\"https://data.example.com/users.csv\")", source);
+        let (mut storage, _) =
+            storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
+        let refused = executor(
+            &program,
+            HashMap::from([(
+                "ldbc".to_string(),
+                "https://data.example.com/ldbc".to_string(),
+            )]),
+        )
+        .execute(&mut storage, DEST)
+        .await
+        .expect_err("a source with no file does not run");
+        assert_eq!(
+            refused.problem,
+            fossil_graph_schema::Problem::SourceNotFound {
+                locator: locator.to_string()
+            },
+            "{source}: {refused:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn at_conn_source_alias_resolves_through_the_ref_map() {
     // `@mybucket/users.csv` resolves to `{base}/users.csv` via the ref-map —
