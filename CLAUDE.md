@@ -187,8 +187,9 @@ crates/
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
   corpus/                  the reader, and it is TypeScript and nothing else: `fossil.json`
-                           through `JSON.parse`, one view per table on the host's DuckDB, and
-                           `open · manifest · scan · relation · sql · close`. It links no engine
+                           through `JSON.parse`: `open` attaches one view per table on the host's
+                           DuckDB and answers its `close`; `mapping` answers the corpus's RDF
+                           meaning as RML 2.0. `src/index.ts` is the surface. It links no engine
                            and loads no WASM. Beside `src/` sits the contract it fulfils — `guards/`,
                            `conformance/` and `integration/` — outside `files`, so npm never
                            sees it. `tests/manifest.test.ts` holds `src/manifest.ts` against
