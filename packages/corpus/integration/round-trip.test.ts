@@ -12,13 +12,16 @@
  *    in the ranges of the tables it names;
  * 3. `guards/check.mjs` passes on what the writer wrote;
  * 4. every column the writer emits says what it IS — its `role` in `fossil_columns` — and a
- *    program's column says nothing.
+ *    program's column says nothing;
+ * 5. `mapping` of what the writer wrote, run by an RML processor over the same views, makes the
+ *    triples the corpus holds — the vertices' classes and literals, and `buyer` joined subject to
+ *    subject across two types.
  *
  * The writer compresses every page with ZSTD, so (1) is also the proof that DuckDB-WASM reads it.
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,8 +30,10 @@ import { Worker } from 'node:worker_threads';
 import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { open, type Close } from '../src/index.js';
+import { mapping, open, type Close } from '../src/index.js';
+import type { Manifest } from '../src/manifest.js';
 import { duckdb } from '../tests/engine.js';
+import { held, materialise } from '../tests/rml.js';
 import { runShop } from './shop.js';
 import { installSyncXhr } from './sync-xhr.js';
 
@@ -143,6 +148,22 @@ describe('executor → HTTP → corpus', () => {
     expect(roles('Order_buyer_Person')).toEqual({ src: 'endpoint', dst: 'endpoint' });
     expect(columns.filter((r) => r.t === 'Person' && r.role === null).length).toBeGreaterThan(0);
   });
+
+  it('means, as RDF, what it holds: the mapping run over the corpus makes the corpus’s triples', async () => {
+    const text = readFileSync(join(dir, 'fossil.json'), 'utf8');
+    const XSD = 'http://www.w3.org/2001/XMLSchema#';
+    const want = await held(JSON.parse(text) as Manifest, 'shop', rows, {
+      string: `${XSD}string`,
+      float: `${XSD}double`,
+      double: `${XSD}double`,
+    });
+    const got = await materialise(mapping(text), 'shop', rows);
+    expect(want.size).toBeGreaterThan(PEOPLE);
+    expect([...got].filter((t) => !want.has(t))).toEqual([]);
+    expect([...want].filter((t) => !got.has(t))).toEqual([]);
+    const [buyers] = await rows('SELECT count(*)::BIGINT AS n FROM shop."Order_buyer_Person"');
+    expect(BigInt([...got].filter((t) => t.includes('<https://shop.example/voc#buyer>')).length)).toBe(buyers!.n);
+  }, 300_000);
 
   it('passes the guards', () => {
     const run = spawnSync(process.execPath, [GUARDS, dir], { encoding: 'utf8' });
