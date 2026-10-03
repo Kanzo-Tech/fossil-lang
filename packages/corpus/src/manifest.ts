@@ -3,7 +3,7 @@
  *
  * Nothing here is exported past the package: a caller reads the manifest as the two relations `open`
  * makes of it, so the shape is restated once — by the writer, `fossil_sinks::manifest`, and its
- * `fossil.schema.json` — and this side declares only the fields `open` reads. The one field it
+ * `fossil.schema.json` — and this side declares only the fields `open` and `mapping` read. The one field it
  * validates is `format`: a reader refuses a format it does not know before it reads a byte of
  * Parquet, and ignores a key it does not know, which is what lets `fossil/1` grow optional fields.
  */
@@ -30,6 +30,10 @@ export interface VertexTable {
   readonly iri?: string;
   /** Relative to the corpus root. */
   readonly path: string;
+  /** The key column, `dense_id`: what an edge's endpoint holds. */
+  readonly key: string;
+  /** The identity column, `subject`: the vertex's IRI. */
+  readonly identity: string;
   readonly record_count: number;
   readonly properties: readonly Property[];
 }
@@ -39,13 +43,20 @@ export interface EdgeTable {
   readonly name: string;
   readonly iri?: string;
   readonly path: string;
-  readonly source: { readonly references: string };
-  readonly destination: { readonly references: string };
+  /** The edge table's column holding the source's `key`, and the vertex table it references. */
+  readonly source: Endpoint;
+  readonly destination: Endpoint;
   readonly record_count: number;
   readonly properties: readonly Property[];
 }
 
-/** `fossil.json`, as far as `open` reads it. */
+/** One end of a relation: the edge table's column, and the vertex table whose `key` it holds. */
+export interface Endpoint {
+  readonly key: string;
+  readonly references: string;
+}
+
+/** `fossil.json`, as far as `open` and `mapping` read it. */
 export interface Manifest {
   readonly format: typeof FOSSIL_FORMAT;
   readonly vertex_tables: readonly VertexTable[];

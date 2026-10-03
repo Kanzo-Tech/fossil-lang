@@ -14,11 +14,16 @@
  * await close();
  * ```
  *
+ * `mapping` answers the same manifest's RDF meaning as an RML mapping in Turtle — a pure function of
+ * `fossil.json`'s text, for a SHACL engine, a triplestore or any RML processor to read the corpus as
+ * RDF with no fossil code (`/docs/format/reading/rdf`).
+ *
  * It links no engine, decodes no Parquet and loads no WASM: DuckDB-WASM in a browser is the host's,
  * and it prunes row groups from the footers. `/docs/design/one-door` has why the door is this small.
  */
 
 export { open } from './open.js';
+export { mapping } from './mapping.js';
 export { FOSSIL_FORMAT } from './manifest.js';
 
 export type { Close, OpenOptions } from './open.js';

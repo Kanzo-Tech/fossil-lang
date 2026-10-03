@@ -86,6 +86,15 @@ expression in an attribute argument. These are the languages, and the control ex
 | **Parquet's `LogicalType` against its deprecated `ConvertedType`** | What settles that an unsigned address is expressible at all, and what it costs to read one back. Unsignedness is an *annotation* on a signed physical `INT32`, so `uint32` is not an exotic type — but the format's original `min`/`max` statistics were defined by **signed** byte comparison and are therefore meaningless for it. A writer that gets this right leaves them empty and fills `min_value`/`max_value`; a reader that only knows the deprecated pair concludes the footer carries no box for exactly the column the whole address is built on. That is not hypothetical here: four checks in this repository passed over NULL for that reason before the fallback was written. |
 | **dbt, Delta, Lance, Malloy** | Five projects that have already been through "does the specification get its own repository". None of them separates the implementation. Delta shows co-location does not prevent drift and that what fixes it is a **process** (`protocol_rfcs/`, specification PR before implementation PR); Malloy is the counterexample, with twenty-five satellite repositories and one frozen 159 releases behind. |
 
+## The corpus as RDF
+
+| source | what it settles |
+| --- | --- |
+| **RML — RML-Core, RML-IO and RML-LV**, the W3C KG-Construct Community Group's drafts | The vocabulary [`mapping`](/docs/format/reading/rdf) writes. RML-Core is R2RML's term maps under `http://w3id.org/rml/`; RML-IO's `rml:SQL2008Table` reference formulation reads a table as `SELECT * FROM {table}`, which is why the iterator is a delimited identifier; RML-LV's `rml:LogicalView` with `rml:innerJoin` and `rml:joinCondition` is how a relation reaches the subjects of the two tables its ends reference without SQL in a string. |
+| **R2RML**, W3C Recommendation 2012 | The relational-to-RDF mapping RML generalises, and two things taken from it: the **natural mapping** of SQL types to XSD datatypes — every integer `xsd:integer`, every float `xsd:double` — and **delimited identifiers**, as the W3C RDB2RDF test cases spell `"\"Student\""`. Its `rr:sqlQuery` view is what was not taken ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
+| **RMLio's MappingLoom** | The RML processor the mapping is written to be read by: RML-Core, RML-IO and RML-LV in one engine, which is what makes the LogicalView join executable rather than only declared. |
+| **Ontop** | The virtual-graph reading of the same idea: a mapping over tables that stay where they are, the triples produced at query time. It reads R2RML, which is the reversal condition on the R2RML row of [discarded](/docs/design/discarded#the-corpus-as-rdf). |
+
 ## The backend
 
 [The backend](/docs/design/later/backend) takes its reading path from one system and its addressing from

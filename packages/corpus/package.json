@@ -49,6 +49,8 @@
   "devDependencies": {
     "@duckdb/duckdb-wasm": "1.32.0",
     "@fossil-lang/executor": "workspace:*",
+    "@types/n3": "^1.26.0",
+    "n3": "^1.26.0",
     "typescript": "^5.6.0",
     "vitest": "^4.1.11"
   }

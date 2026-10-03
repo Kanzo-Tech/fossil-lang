@@ -49,6 +49,21 @@ column. Hide the columns with a role from a field listing — name the role, nev
 `query(sql, { signal })` in Arrow columns. This package links no engine, decodes no Parquet and loads
 no WASM.
 
+## Its RDF meaning
+
+```ts
+import { mapping } from '@fossil-lang/corpus';
+
+const turtle = mapping(fossilJsonText);   // an RML mapping (RML-Core, RML-IO, RML-LV), in Turtle
+```
+
+`mapping` is a pure function of `fossil.json`: each vertex type a triples map over its table (the
+`subject` as an IRI, the type's class, a literal per column with an IRI), each relation a triples map
+over a logical view that joins `src`/`dst` to the `dense_id` of the tables they reference and takes
+their subjects. What has no IRI is not mapped. Table names are unqualified, reached through one
+`rml:Source`, `<#corpus>`, that you describe as the catalog you attached the corpus to. Any RML
+processor then reads the corpus as RDF — `/docs/format/reading/rdf`.
+
 ## Reading a corpus without this package
 
 `fossil.json` and `read_parquet` are the whole recipe — `/docs/format/reading/without-fossil`.
