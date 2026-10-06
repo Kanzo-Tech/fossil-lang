@@ -20,7 +20,7 @@ import { duckdb } from './engine.js';
 
 const CORPUS = fileURLToPath(new URL('../conformance/corpus', import.meta.url));
 const MANIFEST = JSON.parse(readFileSync(join(CORPUS, 'fossil.json'), 'utf8')) as Manifest;
-const TABLES = [...MANIFEST.vertex_tables, ...MANIFEST.edge_tables];
+const TABLES = [...MANIFEST.vertex_tables, ...MANIFEST.edge_tables, ...(MANIFEST.property_tables ?? [])];
 
 let engine: Engine;
 let query: (sql: string) => Promise<Record<string, unknown>[]>;
@@ -60,6 +60,11 @@ describe('open', () => {
     for (const t of MANIFEST.edge_tables) {
       expect(tables.find((r) => r.table_name === t.name)).toMatchObject({
         kind: 'edge', source: t.source.references, destination: t.destination.references, first_id: null,
+      });
+    }
+    for (const t of MANIFEST.property_tables ?? []) {
+      expect(tables.find((r) => r.table_name === t.name)).toMatchObject({
+        kind: 'property', source: t.source.references, destination: null, first_id: null,
       });
     }
 
@@ -107,7 +112,7 @@ describe('open', () => {
   });
 
   it('ignores a key it does not know, and an empty corpus is two empty relations', async () => {
-    const dir = manifestOnly('extra', JSON.stringify({ ...MANIFEST, vertex_tables: [], edge_tables: [], extent: [0, 0, 1, 1] }));
+    const dir = manifestOnly('extra', JSON.stringify({ ...MANIFEST, vertex_tables: [], edge_tables: [], property_tables: [], extent: [0, 0, 1, 1] }));
     const close = await open('extra', { engine, url: dir });
     expect(await query('SELECT * FROM extra.fossil_tables')).toEqual([]);
     expect(await query('SELECT * FROM extra.fossil_columns')).toEqual([]);
