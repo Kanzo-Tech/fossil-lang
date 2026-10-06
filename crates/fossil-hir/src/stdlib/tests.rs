@@ -2,10 +2,6 @@
 
 use super::*;
 
-// A `db()` helper stood here, and its only user was the test that materialised
-// an interned `FnSig`. The catalogue's own guards need no database: a row is a
-// `'static` description, which is the whole point of `SigSpec` being `'db`-free.
-
 /// The registry answers, and says no when it should.
 #[test]
 fn the_registry_answers_and_refuses() {
@@ -128,20 +124,6 @@ fn no_member_is_spelled_on_two_receivers() {
 }
 
 // ── The lowering ───────────────────────────────────────────────────────────
-
-// `anon_redact_is_a_template_that_ignores_its_argument` and
-// `core_require_is_a_template_that_reads_its_argument_twice` stood here. They
-// pinned the two shapes that make the `%N` holes INDEXED rather than
-// sequential — a hole used zero times and a hole used twice — and both rows
-// left the language in the same sweep.
-//
-// **No row exercises either shape now**, and that is worth saying rather than
-// quietly dropping two tests. The closest survivor is `core.lang`, whose `%0`
-// template declares two parameters and reads one, so a template still does not
-// determine arity. The repeated and out-of-order cases are exercised against
-// `render_template` directly, below: the notation keeps the capability, the
-// catalogue has stopped needing it, and if a future row needs it again the
-// renderer is already proven.
 
 /// **A template may never name an argument the signature does not have.**
 ///

@@ -68,27 +68,41 @@ use fossil_graph_schema::{
 
 use crate::db::{Db, FossilDb};
 use crate::files::{SourceFile, register_document};
-use crate::providers::{CSV, JSON, PARQUET, Provider, RDF};
+use crate::providers::{CSV, DATA, JSON, PARQUET, Provider, RDF};
 use crate::system::{FsError, System};
 use fossil_descriptors_input::DescriptorCache;
 
-/// The cheapest `System` a test can stand up: a real filesystem, a real clock,
-/// and whatever provider table the trait defaults to.
-///
-/// It lived in [`crate::system`] beside the trait, and moved here because it
-/// has no production consumer — every use in the workspace is a test, a bench
-/// or an example. A host that COMPILES a program installs the rows that read
-/// types, and the default table is the data rows alone; `fossil-lsp`'s
-/// `LspSystem` says so where it replaced this.
-///
-/// **It is not enough on its own for a test that resolves a shape document** —
-/// see [`DecodingHost`], which is this plus that table.
-#[derive(Debug, Default)]
+/// The `System` every test stands up: the real filesystem, the real clock, an
+/// introspected-schema table, and the provider rows it is given — the data rows
+/// by default, [`TABLE`] for a test that resolves a shape through the line
+/// decoder below, or a crate's own table.
+#[derive(Debug)]
 pub struct NativeSystem {
-    /// The introspected-schema table this host owns. One field, no methods —
-    /// the storage, the locking and the freshness rule all live on
-    /// [`DescriptorCache`].
     descriptors: DescriptorCache,
+    providers: &'static [&'static Provider],
+}
+
+impl Default for NativeSystem {
+    fn default() -> Self {
+        Self::with_providers(DATA)
+    }
+}
+
+impl NativeSystem {
+    /// A host that installs `providers`.
+    #[must_use]
+    pub fn with_providers(providers: &'static [&'static Provider]) -> Self {
+        Self {
+            descriptors: DescriptorCache::default(),
+            providers,
+        }
+    }
+
+    /// A host that installs the data rows and the line decoder, [`TABLE`].
+    #[must_use]
+    pub fn decoding() -> Self {
+        Self::with_providers(TABLE)
+    }
 }
 
 impl System for NativeSystem {
@@ -105,6 +119,10 @@ impl System for NativeSystem {
 
     fn descriptors(&self) -> Option<&DescriptorCache> {
         Some(&self.descriptors)
+    }
+
+    fn providers(&self) -> &'static [&'static Provider] {
+        self.providers
     }
 }
 
@@ -133,6 +151,7 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
             Some("shape") => shapes.push(Shape {
                 iri: tokens.next().unwrap_or_default().to_string(),
                 properties: Vec::new(),
+                span: None,
             }),
             Some("prop") => {
                 let Some(shape) = shapes.last_mut() else {
@@ -184,45 +203,12 @@ pub static SHEX: Provider = Provider {
     reads_types: Some(decode_lines),
 };
 
-/// The table [`DecodingHost`] hands out: the four data rows plus the line row.
+/// The table [`NativeSystem::decoding`] installs: the four data rows plus the line row.
 ///
 /// The data rows are here because they are not optional — a test program says
 /// `User := io.csv("u.csv")` as often as it says `io.shex`, and a host that
 /// installed only the type reader would fail to recognise its own sources.
 pub static TABLE: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF, &SHEX];
-
-/// The real filesystem for everything except shape documents, plus the provider
-/// table. A shape document is read through [`System::read_file`] like any other
-/// file, so this delegates rather than stubbing.
-///
-/// [`NativeSystem`] on its own is NOT enough for any test that resolves a
-/// shape: its [`System::providers`] is the trait default (the data rows only),
-/// so no row reads types, `shape_document` returns `None`, and every mapping
-/// resolves no shape at all.
-#[derive(Debug, Default)]
-pub struct DecodingHost(NativeSystem);
-
-impl System for DecodingHost {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        self.0.read_file(path)
-    }
-    fn now(&self) -> SystemTime {
-        self.0.now()
-    }
-    fn providers(&self) -> &'static [&'static Provider] {
-        TABLE
-    }
-    /// **The introspected-schema table, delegated.** `fossil_hir`'s
-    /// `lookup_inferred` reads `db.system().descriptors()`, so under the trait
-    /// default `None` no fixture above this crate could take a source row from
-    /// introspection at all. [`register_inferred`] is the other half: a host
-    /// puts the descriptor in before the compile, exactly as
-    /// `fossil_introspect::pre_introspect_and_register` and the browser's
-    /// `registerInferredDescriptor` do.
-    fn descriptors(&self) -> Option<&fossil_descriptors_input::DescriptorCache> {
-        self.0.descriptors()
-    }
-}
 
 /// Register an introspected row for `uri` — the HOST's job, done by hand.
 ///
@@ -253,7 +239,7 @@ pub fn register_inferred(db: &dyn Db, uri: &str, columns: &[(&str, Primitive)]) 
 /// A database whose host installs the line decoder.
 #[must_use]
 pub fn new_db() -> FossilDb {
-    let system: Arc<dyn System> = Arc::new(DecodingHost::default());
+    let system: Arc<dyn System> = Arc::new(NativeSystem::decoding());
     FossilDb::new(system)
 }
 

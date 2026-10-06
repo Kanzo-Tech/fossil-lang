@@ -12,7 +12,6 @@
 //! name is bound positionally against it, and a run that skipped it writes no
 //! type IRI.
 
-#![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use std::collections::HashMap;
@@ -187,14 +186,12 @@ Order : Order from orders
 
 #[test]
 fn program_sources_lists_each_distinct_source_with_its_format() {
-    let srcs = executor(TWO_SOURCE_PROGRAM, HashMap::new())
-        .sources()
-        .expect("sources enumerated");
-    let uris: Vec<&str> = srcs.iter().map(|(u, _, _)| u.as_str()).collect();
+    let srcs = executor(TWO_SOURCE_PROGRAM, HashMap::new()).sources();
+    let uris: Vec<&str> = srcs.iter().map(|s| s.locator.as_str()).collect();
     assert!(uris.contains(&"https://data.example.com/users.csv"));
     assert!(uris.contains(&"https://data.example.com/orders.csv"));
     assert_eq!(srcs.len(), 2);
-    assert!(srcs.iter().all(|(_, fmt, _)| *fmt == "csv"));
+    assert!(srcs.iter().all(|s| s.format == "csv"));
 }
 
 /// **The report is where the run wrote and what the join dropped** — and the
@@ -345,12 +342,12 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
         )]),
     );
 
-    let listed = exec.sources().expect("sources");
+    let listed = exec.sources();
     assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].0, "https://data.example.com/users.csv");
-    assert_eq!(listed[0].1, "csv");
+    assert_eq!(listed[0].locator, "https://data.example.com/users.csv");
+    assert_eq!(listed[0].format, "csv");
 
-    let (mut storage, out) = storage(&[(listed[0].0.as_str(), "users.csv")]).await;
+    let (mut storage, out) = storage(&[(listed[0].locator.as_str(), "users.csv")]).await;
     exec.execute(&mut storage, DEST)
         .await
         .expect("executor runs the @conn-aliased program");
@@ -370,10 +367,9 @@ Person : Person from users
 ";
 
 /// A document is keyed by what the program wrote and located through the
-/// connection map, and until it is registered the run has no output contract to
-/// run against — it refuses rather than writing an untyped corpus.
+/// connection map, and it stays missing until it is registered.
 #[test]
-fn a_document_is_missing_until_registered_and_the_run_waits_for_it() {
+fn a_document_is_missing_until_registered() {
     let mut exec = Executor::new(CONN_DOCUMENT_PROGRAM);
     exec.set_connections(HashMap::from([(
         "vocab".to_string(),
@@ -387,18 +383,8 @@ fn a_document_is_missing_until_registered_and_the_run_waits_for_it() {
         "https://shapes.example.com/v1/executor.shex"
     );
 
-    let refused = exec
-        .sources()
-        .expect_err("no output shape is registered yet");
-    assert_eq!(
-        refused.problem.code(),
-        "document/not-registered",
-        "{refused}"
-    );
-
     exec.register_document(&missing[0].key, EXECUTOR_SHEX);
     assert!(exec.missing_documents().is_empty());
-    assert_eq!(exec.sources().expect("sources").len(), 1);
 }
 
 /// Two mappings of one type: `finalize_vertex` unions them, and a `UNION ALL` of

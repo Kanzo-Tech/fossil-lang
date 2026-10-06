@@ -2,7 +2,6 @@
 //! one table (UNION + dedup by subject), not register twice and clobber each
 //! other. Regression guard for the multi-mapping same-type path.
 
-#![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::{Array, StringArray};

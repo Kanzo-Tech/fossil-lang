@@ -71,9 +71,6 @@ describe('FossilExecutor', () => {
     try {
       exec.setConnections({ vocab: 'https://shapes.example.com' });
       expect(exec.missingDocuments()).toEqual([{ key: 'graph.shex', locator: 'graph.shex' }]);
-      expect(() => exec.sources()).toThrow(
-        expect.objectContaining({ name: 'FossilError', code: 'document/not-registered', data: { document: 'graph.shex' } }),
-      );
       exec.registerDocument('graph.shex', SHEX);
       expect(exec.missingDocuments()).toEqual([]);
     } finally {
@@ -85,7 +82,7 @@ describe('FossilExecutor', () => {
     const exec = compiled();
     try {
       const srcs = exec.sources();
-      expect(srcs.map((s) => s.uri).sort()).toEqual([
+      expect(srcs.map((s) => s.locator).sort()).toEqual([
         'https://data.example.com/orders.csv',
         'https://data.example.com/users.csv',
       ]);
@@ -184,7 +181,7 @@ describe('FossilExecutor', () => {
         exec.registerDocument(d.key, await readFile(local(d.locator), 'utf8'));
       }
       const sources: Record<string, Uint8Array> = {};
-      for (const s of exec.sources()) sources[s.uri] = new Uint8Array(await readFile(local(s.uri)));
+      for (const s of exec.sources()) sources[s.locator] = new Uint8Array(await readFile(local(s.locator)));
       result = await exec.runInMemory(sources, 'memory://hello');
     } finally {
       exec.free();

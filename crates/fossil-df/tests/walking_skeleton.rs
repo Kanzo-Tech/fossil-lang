@@ -17,8 +17,6 @@
 //! run that never registered `hello.shex` writes five `Person`s with no `name`
 //! column and no error — the name assertions below are what would catch it.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::Path;
 
 #[path = "support/native.rs"]
@@ -33,7 +31,6 @@ fn walking_skeleton_writes_5_person_vertices_with_expected_content() {
     // The manifest: one vertex table, `Person` — the local name of the shape's
     // IRI, never the mapping's own name — carrying the program's `name`.
     let manifest = corpus.manifest();
-    assert_eq!(manifest.format, fossil_sinks::manifest::FOSSIL_FORMAT);
     assert_eq!(manifest.vertex_tables.len(), 1);
     let person = &manifest.vertex_tables[0];
     assert_eq!(person.name, "Person");

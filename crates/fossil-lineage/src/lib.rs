@@ -42,7 +42,8 @@ pub enum RefRole {
 /// regex over the script text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceRefInfo {
-    /// The `@conn` alias this reference targets, or `None` for a direct URL/path.
+    /// The `@conn` alias this reference targets; absent for a direct URL/path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection: Option<String>,
     /// The path within the connection, or the whole locator when unaliased.
     pub path: String,

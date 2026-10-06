@@ -37,7 +37,7 @@ program.registerIntrospection(await introspect(sources, io));   // before a chec
 
 It boots the module, opens `uri` in its own workspace, and reads the documents
 the text names through `host`. The answer carries `fossil()`'s option names —
-`uri`, `tokenize`, `tokenKinds`, `check`, `hover`, `complete`, `definition` —
+`uri`, `tokenize`, `check`, `hover`, `complete`, `definition` —
 and every one that answers about the program takes the text and pushes it
 first, comparing against what it last pushed so the common case costs a string
 comparison. `check` and `sources` also run `resolveDocuments`, which reads

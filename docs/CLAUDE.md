@@ -8,8 +8,7 @@ There is no `decisions/` directory, no design document in the repository root, a
 documentation app. All four existed. The first two produced the failure this site's guards were
 built to catch — **159 dead citations** in versioned prose, and eighteen of twenty citations of one
 record resolving to a *different* record. The third was `SURFACE-PLAN.md`, 1,443 lines, which
-diagnosed itself on its own line 5 and had been cited 89 times from the code by the time it went;
-`crates/xtask/tests/no_second_reference.rs` now fails if prose reappears at the root. The fourth was
+diagnosed itself on its own line 5 and had been cited 89 times from the code by the time it went. The fourth was
 the corpus contract's own site, a whole second Next.js app — nine runtime dependencies identical version for version
 to these — serving twelve pages that are now `content/docs/format/`.
 

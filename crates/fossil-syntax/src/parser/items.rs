@@ -94,13 +94,12 @@
 //!    because the language has no juxtaposition. Everywhere else `as` is an
 //!    ordinary identifier and lexes as one.
 
-use fossil_base::Problem;
+use fossil_graph_schema::Problem;
 
 use crate::kind::SyntaxKind;
 
-use super::diag::retired;
+use super::Parser;
 use super::recover::{self, MAPPING_BODY_ANCHORS, TOP_LEVEL_ANCHORS};
-use super::{Parser, RetiredRun};
 
 /// Top-level entry point for the item parser. Wraps a `PROGRAM` node around
 /// a `*`-loop over `TopLevel` productions. Called by `Parser::parse_program`
@@ -154,19 +153,6 @@ pub(crate) fn parse_program(p: &mut Parser) {
                 // `rdf:type` is the commonest predicate there is.
                 Some(SyntaxKind::LBRACE) if p.current_text() == Some("type") => {
                     parse_type_def(p);
-                }
-                // `prefix ex: …` — the retired vocabulary declaration, and there
-                // is no production for it. Recognised by SHAPE, not by the word:
-                // `prefix` is an ordinary identifier again, so `prefix := …`
-                // and `prefix : Shape from …` are matched by the two arms above
-                // and never reach here. Only the three-token opening the dead
-                // form had is refused, and the refusal takes the whole line
-                // because the whole line is the statement.
-                Some(SyntaxKind::IDENT)
-                    if p.current_text() == Some("prefix")
-                        && p.peek_kind(2) == Some(SyntaxKind::SHAPE_SEP) =>
-                {
-                    p.retire(&retired::PREFIX_DECL, RetiredRun::Line);
                 }
                 // Always make progress on a token we don't know what to do
                 // with at the program level — `bump_as_error` emits a single
@@ -291,7 +277,7 @@ fn parse_type_def(p: &mut Parser) {
         malformed(
             p,
             Problem::MisplacedAttribute {
-                attribute: "@rename".to_string(),
+                attribute: crate::attr::RENAME.to_string(),
                 place: "anywhere but above a `type` binding".to_string(),
             },
             "`@rename` renames a predicate of ONE type binding, so a `type { … } := …` has to \
@@ -343,7 +329,7 @@ fn malformed(p: &mut Parser, problem: Problem, help: &str) {
     p.push_diagnostic(crate::parser::diag::ParseDiagnostic::Malformed {
         problem,
         help: Some(help.to_string()),
-        span: fossil_base::Span::new(at, at),
+        span: fossil_graph_schema::Span::new(at, at),
     });
 }
 
@@ -376,7 +362,7 @@ fn parse_rename_attr(p: &mut Parser) {
     // in the HIR is deliberate: `@subject` in this position is not an unknown
     // name, it is a known one in the wrong place, and only the parser knows
     // which place this is.
-    if p.current_text() != Some("@rename") {
+    if p.current_text() != Some(crate::attr::RENAME) {
         let found = p.current_text().unwrap_or("@").to_string();
         malformed(
             p,
@@ -511,15 +497,7 @@ fn parse_mapping_header(p: &mut Parser) {
         SyntaxKind::SHAPE_SEP,
         &[SyntaxKind::KW_FROM, SyntaxKind::INDENT],
     );
-    // A retired absolute IRI in shape position takes the rest of the LINE with
-    // it — `from` and the source expression included, because `//` turned them
-    // into a comment before the parser ever saw them. Asking for a `from` that
-    // the lexer ate would report a second time about a line already refused,
-    // and one line of source has to produce one complaint.
-    if parse_shape_expr(p) == ShapeOutcome::LineConsumed {
-        p.finish();
-        return;
-    }
+    parse_shape_expr(p);
     p.skip_trivia();
     // `from` is required by the grammar but absent in some recovery
     // fixtures (e.g. fixture 16). Emit an ExpectedToken diagnostic and
@@ -551,44 +529,9 @@ fn parse_mapping_header(p: &mut Parser) {
 // There is no `in g` either: the named-graph clause parsed into an IN_CLAUSE
 // nothing read, and a `fossil/1` corpus is vertex and edge tables, not quads.
 
-/// Whether [`parse_shape_expr`] left anything on the line for its caller.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ShapeOutcome {
-    /// The header continues: `from` and the source expression are still there.
-    HeaderContinues,
-    /// A retired spelling took the rest of the line. Nothing is left to parse
-    /// and nothing more should be reported about it.
-    LineConsumed,
-}
-
-fn parse_shape_expr(p: &mut Parser) -> ShapeOutcome {
+fn parse_shape_expr(p: &mut Parser) {
     p.skip_trivia();
     p.start(SyntaxKind::SHAPE_EXPR);
-    // `ex:Person` — the CURIE, CONSUMED and named rather than recovered past.
-    // The three tokens are taken as one form so the span underlines the whole
-    // of what is being refused, and no contiguity check is needed to find them:
-    // a `:` in shape position has exactly one other reading, and it is the
-    // header's own, already consumed by the caller (disambiguation rule 3;
-    // grammar.bnf, § DISAMBIGUATION RULES).
-    if p.current() == Some(SyntaxKind::IDENT)
-        && p.peek_kind(1) == Some(SyntaxKind::SHAPE_SEP)
-        && p.peek_kind(2) == Some(SyntaxKind::IDENT)
-    {
-        p.retire(&retired::CURIE, RetiredRun::Count(3));
-        p.finish();
-        // Three tokens, not the line: `from Adults` after a CURIE shape is
-        // still there and still means what it says.
-        return ShapeOutcome::HeaderContinues;
-    }
-    // `<https://example.org/Person>` — the absolute IRI, which no longer lexes
-    // as one token. `<` is the comparison operator, so what arrives here is the
-    // operator and its operands, and then a COMMENT that runs to the line break
-    // because `//` opens one. The whole line goes.
-    if p.current() == Some(SyntaxKind::LT) {
-        p.retire(&retired::ABSOLUTE_IRI, RetiredRun::Line);
-        p.finish();
-        return ShapeOutcome::LineConsumed;
-    }
     recover::expect_or_recover(
         p,
         SyntaxKind::IDENT,
@@ -602,7 +545,6 @@ fn parse_shape_expr(p: &mut Parser) -> ShapeOutcome {
         ],
     );
     p.finish();
-    ShapeOutcome::HeaderContinues
 }
 
 // MappingBody: (SubjectAssign | Property)* — see this module's header for the
@@ -687,18 +629,6 @@ fn parse_subject_assign(p: &mut Parser) {
 fn parse_property(p: &mut Parser) {
     p.start(SyntaxKind::PROPERTY);
     p.skip_trivia();
-    // `<http://xmlns.com/foaf/0.1/name> = User.name` — the retired absolute-IRI
-    // key. The `//` in its scheme opened a comment that swallowed the `=` and
-    // the value, so the whole line is one refused form: asking for the `=` here
-    // would report twice about one line AND then take the NEXT property as this
-    // one's value, which is how a single dead key used to cost two.
-    if p.current() == Some(SyntaxKind::LT) {
-        p.start(SyntaxKind::PROPERTY_LHS);
-        p.retire(&retired::ABSOLUTE_IRI, RetiredRun::Line);
-        p.finish();
-        p.finish();
-        return;
-    }
     parse_property_lhs(p);
     recover::expect_or_recover(p, SyntaxKind::ASSIGN, MAPPING_BODY_ANCHORS);
     p.parse_expr();
@@ -707,35 +637,11 @@ fn parse_property(p: &mut Parser) {
 
 // PropertyLhs: IDENT   (grammar.bnf, PropertyLhs)
 //
-// A bare name. `name = User.name`, never `ex:name = …`, never
-// `<http://…/name> = …` and never `iri`. The name is the last segment of the
-// predicate IRI the shape declares — which is what `fossil-mir` already
-// computed internally, promoted to being what the author writes.
-//
-// The CURIE is CONSUMED here rather than recovered past, and that is the whole
-// reason this is not one `expect_or_recover`. A recovery leaves the tokens
-// outside `PROPERTY_LHS` and the author gets `unexpected token` — while the
-// parser knew exactly what they wrote and exactly what to write instead.
-//
-// The absolute IRI is refused one level up, in [`parse_property`], because it
-// takes the property's `=` and value with it. `iri` needs no arm at all: it is
-// an ordinary identifier now, so `iri = …` is a property called `iri`, which is
-// what a language whose corpus is RDF wants it to be.
+// A bare name: the last segment of the predicate IRI the shape declares.
 fn parse_property_lhs(p: &mut Parser) {
     p.start(SyntaxKind::PROPERTY_LHS);
     p.skip_trivia();
-    match p.current() {
-        // `ex:name = …`. Three tokens, one form, one span. No contiguity check:
-        // a ternary cannot start in key position, so `IDENT SHAPE_SEP IDENT`
-        // here has exactly one reading and it is the dead one.
-        Some(SyntaxKind::IDENT)
-            if p.peek_kind(1) == Some(SyntaxKind::SHAPE_SEP)
-                && p.peek_kind(2) == Some(SyntaxKind::IDENT) =>
-        {
-            p.retire(&retired::CURIE, RetiredRun::Count(3));
-        }
-        _ => recover::expect_or_recover(p, SyntaxKind::IDENT, MAPPING_BODY_ANCHORS),
-    }
+    recover::expect_or_recover(p, SyntaxKind::IDENT, MAPPING_BODY_ANCHORS);
     p.finish();
 }
 
@@ -750,20 +656,17 @@ fn parse_property_lhs(p: &mut Parser) {
 // They are NOT proof that the parser implements `grammar.bnf` — nothing
 // mechanical checks that file against this one, and its own header says so.
 // Rules 3, 6, 7 and 8 are here (rule 5's fork is fixture `31_type_def_and_
-// type_as_a_binding_name`), and so is every retired spelling this module
-// refuses, because a refusal is as much a fork as an acceptance and the one
-// thing this parser must not do with a dead form is take it quietly.
+// type_as_a_binding_name`).
 
 #[cfg(test)]
 mod disambiguation {
     use crate::SyntaxKind;
     use crate::indent::lex_with_indents;
     use crate::kind::SyntaxNode;
-    use fossil_base::Problem;
+    use fossil_graph_schema::Problem;
     use rowan::GreenNode;
 
     use super::super::Parser;
-    use super::super::diag::retired::{self, Retired};
 
     fn parse_str(src: &str) -> SyntaxNode {
         let tokens = lex_with_indents(src);
@@ -783,44 +686,6 @@ mod disambiguation {
             .cloned()
             .map(|d| d.to_diagnostic().problem)
             .collect()
-    }
-
-    /// The problem `form` is refused with.
-    fn refusal(form: &Retired) -> Problem {
-        Problem::RetiredSpelling {
-            spelling: form.spelling.to_string(),
-            replacement: form.replacement.to_string(),
-        }
-    }
-
-    /// The `(start, end)` byte span of the one diagnostic refusing `form`.
-    /// Panics unless exactly one does — a retired spelling that reports twice
-    /// is as wrong as one that reports never.
-    fn span_of(src: &str, form: &Retired) -> (u32, u32) {
-        let tokens = lex_with_indents(src);
-        let mut p = Parser::new(tokens);
-        super::parse_program(&mut p);
-        let want = refusal(form);
-        let hits: Vec<_> = p
-            .diagnostics
-            .iter()
-            .cloned()
-            .map(super::super::diag::ParseDiagnostic::to_diagnostic)
-            .filter(|d| d.problem == want)
-            .collect();
-        assert_eq!(
-            hits.len(),
-            1,
-            "expected exactly one diagnostic refusing {form:?} for {src:?}",
-        );
-        (hits[0].span.start, hits[0].span.end)
-    }
-
-    /// The source text a span selects. A refusal whose span points at a
-    /// plausible wrong place is worse than one that points nowhere, so every
-    /// retired-spelling test below asserts on this rather than on the offsets.
-    fn underlined(src: &str, span: (u32, u32)) -> &str {
-        &src[span.0 as usize..span.1 as usize]
     }
 
     fn find_first_kind(root: &SyntaxNode, want: SyntaxKind) -> Option<SyntaxNode> {
@@ -880,21 +745,6 @@ mod disambiguation {
     // what to write, and a member access that is now the only thing a `.` does.
 
     #[test]
-    fn a_leading_dot_is_refused_and_names_the_qualified_form() {
-        let src = "Users : Person from User\n    x = .name\n";
-        assert!(
-            messages(src).contains(&refusal(&retired::LEADING_DOT)),
-            "a leading `.` must be refused by name, got {:?}",
-            messages(src),
-        );
-        // And the span covers the reference, not the byte that opens it.
-        assert_eq!(
-            underlined(src, span_of(src, &retired::LEADING_DOT)),
-            ".name"
-        );
-    }
-
-    #[test]
     fn rule2_dot_after_ident_is_postfix_method_access() {
         let src = "Users : Person from User\n    x = obj.method()\n";
         let root = parse_str(src);
@@ -914,27 +764,6 @@ mod disambiguation {
     // test below asserts BOTH that the message names the replacement AND that
     // the span underlines the whole retired form.
 
-    #[test]
-    fn the_vocabulary_declaration_is_refused_over_its_whole_line() {
-        let src = "prefix ex: <https://example.org/>\n";
-        assert_eq!(
-            underlined(src, span_of(src, &retired::PREFIX_DECL)),
-            "prefix ex: <https://example.org/>",
-        );
-    }
-
-    #[test]
-    fn a_curie_in_a_shape_is_refused_over_all_three_tokens() {
-        let src = "Users : ex:Person from User\n    name = User.name\n";
-        assert_eq!(underlined(src, span_of(src, &retired::CURIE)), "ex:Person");
-    }
-
-    #[test]
-    fn a_curie_in_a_property_key_is_refused_over_all_three_tokens() {
-        let src = "Users : Person from User\n    ex:name = User.name\n";
-        assert_eq!(underlined(src, span_of(src, &retired::CURIE)), "ex:name");
-    }
-
     // ── The absolute IRI takes its whole line, and here is why ────────
     //
     // MEASURED, and it is the one consequence of dropping `ABS_IRI` that
@@ -949,66 +778,6 @@ mod disambiguation {
     // `<http:` and point at a plausible wrong place. And there is nothing after
     // it to save: a program with an absolute IRI in it has already lost the
     // rest of that line to the comment lexer, whatever this parser does.
-
-    #[test]
-    fn an_absolute_iri_property_key_is_refused_over_its_whole_line() {
-        let src = "Users : Person from User\n    <http://xmlns.com/foaf/0.1/name> = User.name\n";
-        assert_eq!(
-            underlined(src, span_of(src, &retired::ABSOLUTE_IRI)),
-            "<http://xmlns.com/foaf/0.1/name> = User.name",
-        );
-    }
-
-    #[test]
-    fn an_absolute_iri_shape_is_refused_over_its_whole_line() {
-        let src = "Users : <https://example.org/Person> from User\n    name = User.name\n";
-        assert_eq!(
-            underlined(src, span_of(src, &retired::ABSOLUTE_IRI)),
-            "<https://example.org/Person> from User",
-        );
-    }
-
-    /// And a `<…>` with no `//` in it — the only kind whose `>` survives —
-    /// still takes the line. One rule, not two: the form is dead either way,
-    /// and a second span rule for the rare shape would be a rule about the
-    /// IRI's scheme.
-    #[test]
-    fn an_absolute_iri_with_no_scheme_slashes_also_takes_its_line() {
-        let src = "Users : Person from User\n    <name> = User.name\n";
-        assert_eq!(
-            underlined(src, span_of(src, &retired::ABSOLUTE_IRI)),
-            "<name> = User.name",
-        );
-    }
-
-    #[test]
-    fn a_backtick_is_refused_and_names_the_quoted_string() {
-        // The backtick never reaches a production — it is a byte logos rejects
-        // — so `bump_as_error` is where it is named. Without that arm the file
-        // would report `unexpected character`, which is true and useless: the
-        // author wrote a string, in the spelling that lost.
-        let src = "Users : Person from User\n    @subject = `u/${User.id}`\n";
-        let msgs = messages(src);
-        assert!(msgs.contains(&refusal(&retired::BACKTICK)), "got {msgs:?}",);
-        assert_eq!(underlined(src, span_of(src, &retired::BACKTICK)), "`");
-    }
-
-    /// An unterminated `<…>` must not eat the rest of the FILE. The run stops
-    /// at the line break, so the mapping body under it still parses.
-    #[test]
-    fn an_unterminated_absolute_iri_stops_at_the_line_break() {
-        let src = "Users : <https://example.org/Person from User\n    name = User.name\n";
-        assert_eq!(
-            underlined(src, span_of(src, &retired::ABSOLUTE_IRI)),
-            "<https://example.org/Person from User",
-        );
-        // The body below it survives — one line lost, not the file.
-        let root = parse_str(src);
-        assert!(
-            find_first_kind(&root, SyntaxKind::PROPERTY).is_some(),
-            "the next line must still parse as a property",
-        );
-    }
 
     // ── RULE 3 — `:` in a MappingHeader vs `:` in a ternary ───────────
 

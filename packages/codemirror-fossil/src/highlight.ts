@@ -56,31 +56,20 @@ import {
   type EditorView,
   type ViewUpdate,
 } from '@codemirror/view';
-import type { TokenRow } from '@fossil-lang/types';
+import type { SemanticTokenRow, TokenRow } from '@fossil-lang/types';
 
-import { byteToUtf16Mapper } from './offsets.js';
-import { offsetOf, type Range } from './positions.js';
-import { LEXICAL_KINDS, semanticTagFor, tagFor } from './tags.js';
-
-/** The `SemanticTokenRow` shape, restated structurally so this module imports no
- *  runtime. `@fossil-lang/wasm` is the definition. */
-export interface SemanticTokenRowLike {
-  range: Range;
-  kind: string;
-  modifiers: readonly string[];
-}
+import { offsetOf } from './positions.js';
+import { LEXICAL_KINDS, TAG_BY_NAME, semanticTagFor } from './tags.js';
 
 /** What the semantic pass calls: the program's semantic tokens for `text`, in
  *  source order. Synchronous, because a decoration set is. */
-export type SemanticTokenSource = (text: string) => readonly SemanticTokenRowLike[];
+export type SemanticTokenSource = (text: string) => readonly SemanticTokenRow[];
 
 /** The wasm entry points this plugin needs. Injected rather than imported so
  *  the package does not decide when the module is initialised — see `index.ts`. */
 export interface TokenSource {
   /** `@fossil-lang/wasm`'s `tokenize`. */
   tokenize: (text: string) => TokenRow[];
-  /** `@fossil-lang/wasm`'s `tokenKinds` — the legend that makes `kind` readable. */
-  tokenKinds: () => readonly string[];
   /** `openProgram(...).semanticTokens`. Omit for lexical highlighting only. */
   semanticTokens?: SemanticTokenSource;
 }
@@ -101,10 +90,7 @@ interface Mark {
   cls: string;
 }
 
-/**
- * The decoration pass. Exported for the tests, which assert over ranges rather
- * than over a rendered DOM.
- */
+/** The decoration pass: the ranges to paint, before any DOM. */
 export function buildDecorations(
   view: EditorView,
   source: TokenSource,
@@ -123,10 +109,8 @@ export function buildDecorations(
 
 function lexicalMarks(view: EditorView, source: TokenSource, text: string): Mark[] {
   let rows: TokenRow[];
-  let legend: readonly string[];
   try {
     rows = source.tokenize(text);
-    legend = source.tokenKinds();
   } catch {
     // The module is not initialised yet, or the host tore it down. A highlighter
     // that throws takes the editor's whole update cycle with it; one that returns
@@ -134,15 +118,12 @@ function lexicalMarks(view: EditorView, source: TokenSource, text: string): Mark
     return [];
   }
 
-  const toUnits = byteToUtf16Mapper(text);
   const marks: Mark[] = [];
-  for (const row of rows) {
-    const tag = tagFor(legend, row.kind);
-    if (tag === null) continue;
+  for (const { kind, start: from, end: to } of rows) {
+    const tag = TAG_BY_NAME[kind];
+    if (tag === undefined) continue;
     const cls = highlightingFor(view.state, [tag]);
     if (!cls) continue;
-    const from = toUnits(row.start);
-    const to = toUnits(row.end);
     // `RangeSetBuilder` requires strictly sorted, non-empty ranges. The lexer
     // emits both in order, but a zero-width token would still be a runtime throw.
     if (to <= from) continue;
@@ -158,7 +139,7 @@ interface SemanticMark extends Mark {
 
 function semanticMarks(view: EditorView, source: TokenSource, text: string): SemanticMark[] {
   if (!source.semanticTokens) return [];
-  let rows: readonly SemanticTokenRowLike[];
+  let rows: readonly SemanticTokenRow[];
   try {
     rows = source.semanticTokens(text);
   } catch {

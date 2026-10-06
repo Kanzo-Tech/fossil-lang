@@ -581,31 +581,42 @@ pub enum ScalarTy {
     Date,
     /// `xsd:dateTime`.
     DateTime,
-    // An `Iri` variant stood here and no row in the catalogue used it — a
-    // signature can neither take nor return a reference, because a reference is
-    // to a SHAPE and the catalogue names no shapes. When one does, it will need
-    // to say WHICH, which is not a scalar tag.
     /// `Seq<String>` — the one repeated shape v0.1 needs (`str.split`).
     SeqString,
 }
 
 impl ScalarTy {
+    /// The primitive this tag is, or — for [`Self::SeqString`] — holds.
+    const fn primitive(self) -> Primitive {
+        match self {
+            Self::String | Self::SeqString => Primitive::String,
+            Self::Integer => Primitive::Integer,
+            Self::Float => Primitive::Float,
+            Self::Bool => Primitive::Bool,
+            Self::Date => Primitive::Date,
+            Self::DateTime => Primitive::DateTime,
+        }
+    }
+
     /// Intern this tag into a `Ty<'db>` via the fossil-hir constructor.
     #[must_use]
     pub fn to_ty(self, db: &dyn salsa::Database) -> Ty<'_> {
+        let primitive = TyKind::Primitive(self.primitive());
         let kind = match self {
-            Self::String => TyKind::Primitive(Primitive::String),
-            Self::Integer => TyKind::Primitive(Primitive::Integer),
-            Self::Float => TyKind::Primitive(Primitive::Float),
-            Self::Bool => TyKind::Primitive(Primitive::Bool),
-            Self::Date => TyKind::Primitive(Primitive::Date),
-            Self::DateTime => TyKind::Primitive(Primitive::DateTime),
-            Self::SeqString => {
-                let s = Ty::new(db, TyKind::Primitive(Primitive::String));
-                TyKind::Seq(s)
-            }
+            Self::SeqString => TyKind::Seq(Ty::new(db, primitive)),
+            _ => primitive,
         };
         Ty::new(db, kind)
+    }
+}
+
+/// The name `render_ty_kind` gives the type [`ScalarTy::to_ty`] interns.
+impl std::fmt::Display for ScalarTy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SeqString => write!(f, "Seq<{}>", self.primitive()),
+            _ => self.primitive().fmt(f),
+        }
     }
 }
 
@@ -758,7 +769,7 @@ impl FunctionRegistry {
     /// If two rows share a name, or if a row repeats a position that is not its
     /// last POSITIONAL one — see [`Arity`].
     #[must_use]
-    pub fn stdlib_default() -> Self {
+    fn stdlib_default() -> Self {
         let mut entries: HashMap<SmolStr, RegistryEntry> = HashMap::new();
         for row in generated::rows() {
             let name = row.name.clone();
@@ -828,19 +839,6 @@ impl FunctionRegistry {
         self.entries.values()
     }
 }
-
-// ── The templates are NOT here any more ────────────────────────
-//
-// `SLUG_TEMPLATE` and `STRIP_HTML_TEMPLATE` stood here as `const`s, each under
-// the fuzzing result that justified its exact text — 16/16 and 0 mismatches
-// over 240,998 inputs for the first, 27/29 and 1,837 over 120,000 for the
-// second. Both the value and the paragraph are in `catalogue.bnf` now, above
-// the row they are about, which is where that file already keeps every argument
-// it makes. Five `VALIDATE_*_TEMPLATE` consts went with the namespace.
-//
-// The two helpers that built this table — `expr(template)` and `L(op)` — went
-// too. They were sugar for writing a `LoweringKind` by hand, and nothing writes
-// one by hand: `crate::stdlib::generated` spells the variant out.
 
 /// Substitute a template's `%N` holes with the caller's rendered arguments.
 ///
@@ -926,5 +924,4 @@ pub fn template_holes(template: &str) -> Vec<usize> {
 }
 
 #[cfg(test)]
-#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

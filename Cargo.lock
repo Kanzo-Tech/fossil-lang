@@ -719,17 +719,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "console"
-version = "0.16.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d64e8af5551369d19cf50138de61f1c42074ab970f74e99be916646777f8fc87"
-dependencies = [
- "encode_unicode",
- "libc",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "console_error_panic_hook"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1669,12 +1658,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
-name = "encode_unicode"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1815,6 +1798,7 @@ version = "0.1.0"
 dependencies = [
  "fossil-graph-schema",
  "indexmap",
+ "schemars",
  "serde",
  "serde_json",
  "smol_str",
@@ -1840,6 +1824,7 @@ dependencies = [
  "bytes",
  "datafusion",
  "duckdb",
+ "expect-test",
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
@@ -1848,7 +1833,6 @@ dependencies = [
  "fossil-introspect",
  "fossil-lineage",
  "fossil-locator",
- "fossil-mem-probe",
  "fossil-mir",
  "fossil-shex",
  "fossil-sinks",
@@ -1860,6 +1844,7 @@ dependencies = [
  "oxrdf",
  "oxttl",
  "salsa",
+ "schemars",
  "serde",
  "serde_json",
  "sha2",
@@ -1868,8 +1853,8 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "unicode-normalization",
- "url",
 ]
 
 [[package]]
@@ -1887,6 +1872,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "object_store",
+ "serde",
  "serde-wasm-bindgen",
  "url",
  "wasm-bindgen",
@@ -1910,15 +1896,17 @@ dependencies = [
 name = "fossil-hir"
 version = "0.1.0"
 dependencies = [
+ "expect-test",
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-graph-schema",
  "fossil-locator",
  "fossil-syntax",
  "indexmap",
- "insta",
  "rowan",
  "salsa",
+ "schemars",
+ "serde",
  "smol_str",
  "strsim",
  "thiserror 1.0.69",
@@ -1928,6 +1916,7 @@ dependencies = [
 name = "fossil-ide"
 version = "0.1.0"
 dependencies = [
+ "expect-test",
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
@@ -1936,13 +1925,15 @@ dependencies = [
  "fossil-locator",
  "fossil-mir",
  "fossil-syntax",
- "insta",
+ "line-index",
  "lsp-types",
  "rowan",
  "salsa",
+ "schemars",
  "serde",
  "serde_json",
  "smol_str",
+ "url",
 ]
 
 [[package]]
@@ -1954,10 +1945,6 @@ dependencies = [
  "fossil-descriptors-input",
  "fossil-graph-schema",
  "fossil-lineage",
- "fossil-locator",
- "fossil-storage",
- "miette",
- "secrecy",
  "smol_str",
  "tempfile",
  "tracing",
@@ -2002,11 +1989,8 @@ dependencies = [
  "tempfile",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
-
-[[package]]
-name = "fossil-mem-probe"
-version = "0.1.0"
 
 [[package]]
 name = "fossil-mir"
@@ -2016,7 +2000,6 @@ dependencies = [
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-syntax",
- "insta",
  "salsa",
  "smol_str",
 ]
@@ -2052,12 +2035,14 @@ dependencies = [
  "js-sys",
  "object_store",
  "percent-encoding",
+ "schemars",
  "secrecy",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-time",
@@ -2086,9 +2071,12 @@ version = "0.1.0"
 dependencies = [
  "expect-test",
  "fossil-base",
+ "fossil-graph-schema",
  "logos",
  "rowan",
  "salsa",
+ "schemars",
+ "serde",
  "smol_str",
  "text-size",
 ]
@@ -2111,13 +2099,13 @@ dependencies = [
  "js-sys",
  "lsp-types",
  "salsa",
+ "schemars",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "smol_str",
  "uuid",
  "wasm-bindgen",
- "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2639,19 +2627,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "insta"
-version = "1.47.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b4a6248eb93a4401ed2f37dfe8ea592d3cf05b7cf4f8efa867b6895af7e094e"
-dependencies = [
- "console",
- "once_cell",
- "serde",
- "similar",
- "tempfile",
-]
-
-[[package]]
 name = "integer-encoding"
 version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2933,6 +2908,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
+name = "line-index"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e27e0ed5a392a7f5ba0b3808a2afccff16c64933312c84b57618b49d1209bd2"
+dependencies = [
+ "nohash-hasher",
+ "text-size",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3082,16 +3067,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minicov"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4869b6a491569605d66d3952bcdf03df789e5b536e5f0cf7758a7f08a55ae24d"
-dependencies = [
- "cc",
- "walkdir",
-]
-
-[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3117,6 +3092,12 @@ dependencies = [
  "wasi",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "nohash-hasher"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "nom"
@@ -3146,15 +3127,6 @@ dependencies = [
  "bytecount",
  "memchr",
  "nom 8.0.0",
-]
-
-[[package]]
-name = "nu-ansi-term"
-version = "0.50.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
-dependencies = [
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4634,12 +4606,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
-name = "similar"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
-
-[[package]]
 name = "siphasher"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5531,45 +5497,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasm-bindgen-test"
-version = "0.3.70"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29826f9d9ecaa314c480d376b276d1c790e6cb6a4681fab8532da69cbabf977d"
-dependencies = [
- "async-trait",
- "cast",
- "js-sys",
- "libm",
- "minicov",
- "nu-ansi-term",
- "num-traits",
- "oorandom",
- "serde",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-bindgen-test-macro",
- "wasm-bindgen-test-shared",
-]
-
-[[package]]
-name = "wasm-bindgen-test-macro"
-version = "0.3.70"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c610311887f9e6599a546d278d12d69dfd3a3e92639b2129e4b11ad6cf1961d6"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "wasm-bindgen-test-shared"
-version = "0.2.120"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60238e5b4b1b295701d6f9a66d2a126fe19990348f5fb9dae3b623a370119d94"
-
-[[package]]
 name = "wasm-encoder"
 version = "0.244.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6047,8 +5974,16 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "expect-test",
+ "fossil-descriptors-input",
+ "fossil-df",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-lineage",
+ "fossil-sinks",
+ "fossil-storage",
+ "fossil-wasm",
+ "schemars",
  "serde_json",
  "toml",
 ]

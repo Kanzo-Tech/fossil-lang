@@ -21,17 +21,16 @@ Optional one-time installs:
 
 ```bash
 cargo install wasm-bindgen-cli --version 0.2.120 --locked
+cargo install wasm-opt --version 0.116.1 --locked   # binaryen 116, as CI pins it
 cargo install cargo-deny --locked
-brew install binaryen   # macOS — for wasm-opt size optimization
 ```
 
 ## Build & test commands
 
 ```bash
-cargo check --workspace --all-targets                        # native, all crates AND their tests
+cargo clippy --workspace --all-targets -- -D warnings        # compile + lint, all crates AND their tests
 cargo test --workspace --no-fail-fast                        # native tests
 cargo fmt --all -- --check                                   # format check
-cargo clippy --workspace --all-targets -- -D warnings        # lint check
 RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" \
   cargo doc --workspace --no-deps                            # citations rustdoc can check
 cargo deny check                                             # advisories + licenses + bans
@@ -41,7 +40,7 @@ cargo xtask wasm-check                                       # WASM gate (highes
 CI runs all of these on every PR. See `.github/workflows/ci.yml`.
 
 **The two flags on the first two lines are load-bearing.** Without `--all-targets`,
-`check` does not compile `tests/`, and a signature change that breaks four test
+clippy does not compile `tests/` or `benches/`, and a signature change that breaks four test
 files reads as green — it did, on 2026-08-13. Without `--no-fail-fast`, `test`
 stops at the first failing suite and reports the tests it happened to reach as if
 they were the workspace. (CI omits `--no-fail-fast` deliberately: it wants the
@@ -75,7 +74,7 @@ claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm`.
 
 ## Generated files
 
-Two data files generate eight, and none of the eight may be hand-edited. Each data
+Two data files generate seven, and none of the seven may be hand-edited. Each data
 file has its own command and its own `--check`, because they answer different
 questions and a single command would make one file's staleness the other's
 failure.
@@ -83,10 +82,10 @@ failure.
 ```
                      ┌─▶ crates/fossil-base/src/providers/generated.rs
                      ├─▶ crates/fossil-descriptors-output/src/generated.rs
+                     ├─▶ crates/fossil-introspect/src/generated.rs
 catalogue.bnf ──cargo├─▶ crates/fossil-hir/src/stdlib/generated.rs
               xtask  ├─▶ packages/introspect/src/catalogue.generated.ts
-            catalogue├─▶ packages/executor/src/catalogue.generated.ts
-                     ├─▶ docs/content/generated/stdlib.mdx
+            catalogue├─▶ docs/content/generated/stdlib.mdx
                      └─▶ packages/prompt/src/catalogue.generated.ts
 
 corpus.bnf ─────cargo──▶ crates/fossil-sinks/src/generated.rs
@@ -127,27 +126,18 @@ the tool the problem broke. Cargo does not build dev-dependencies for a plain
 `the_generated_table_is_the_file` holds the emitted table against the registry it
 becomes, parameter by parameter.
 
-`crates/fossil-sinks/fossil.schema.json` is generated too, but from the Rust
-structs of `fossil.json` rather than from a data file: change a field in
-`crates/fossil-sinks/src/manifest.rs`, run `FOSSIL_BLESS=1 cargo test -p
-fossil-sinks --test schema`, and commit the schema beside it. The test fails on a
-stale one, and it is what a reader outside Rust checks `fossil.json` against —
-`packages/corpus/tests/manifest.test.ts` holds `@fossil-lang/corpus`'s hand-written
-types against it, so the TypeScript follows in the same commit.
+What is generated from a Rust type rather than a data file — `fossil.schema.json`,
+`problem.schema.json`, and the TypeScript every `@fossil-lang/*` package imports
+instead of restating a shape (`problem.gen.ts`, `wire.gen.ts`, `manifest.gen.ts`) —
+is `crates/xtask/tests/wire.rs`: change the Rust, run `UPDATE_EXPECT=1 cargo test -p
+xtask --test wire`, and commit what it wrote. The test fails on a stale file. It is
+a test and not an `xtask` command because the types live in crates the binary must
+not link, for the reason below.
 
 Add or change a column in `corpus.bnf`, run `cargo xtask corpus`, commit what it
 wrote; `crates/xtask/tests/corpus_generated.rs` is its `--check` as a test, and
 also holds the one cross-clause rule (`aligns` belongs to an endpoint) and the two
 sets the roles keep apart.
-
-Add or change a code in `crates/fossil-graph-schema/src/problem.rs`, re-bless its
-schema (`FOSSIL_BLESS=1 cargo test -p fossil-graph-schema --test problem_schema`), run
-`cargo xtask problem`, and commit both: the third generator reads that derived file and
-writes `packages/types/src/problem.gen.ts` — `Code`, `CODES`, `ProblemData`, `TITLES`, and `DETAILS`,
-each `#[error]` translated into the TypeScript that renders it.
-`cargo xtask problem --check` fails without writing, and
-`crates/xtask/tests/problem_generated.rs` is the same check as a test, so it has no CI
-step for the reason `catalogue --check` has none.
 
 Add or change a row in `catalogue.bnf`, run `cargo xtask catalogue`, commit what
 it wrote. `cargo xtask catalogue --check` fails without writing, and there is no
@@ -157,10 +147,11 @@ and a second gate would be one idea in two places. That file also holds the
 guards `--check` cannot give: the round trip above, that every row reaches the
 reference page, and that the page has not gone back to writing a row of its own.
 
-The `--check` proves each file matches its own emitter and nothing more. That the
-Rust and TypeScript projections AGREE is a separate claim, and
-`packages/introspect/tests/rust-parity.test.ts` is where it is checked — a `pnpm`
-test, so `cargo test` will not tell you.
+The `--check` proves each file matches its own emitter. The Rust and TypeScript
+projections agree because one parse feeds both emitters; that an emitter says
+what the row means is the emitter's own test — `fossil-introspect` runs the
+generated type table against a real `DuckDB`, `@fossil-lang/introspect` runs its
+twin.
 
 The file carries the argument for each row in its `(* … *)` commentary. A doc
 comment in the generated Rust is derived and one line long; if you want to know

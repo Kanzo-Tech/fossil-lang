@@ -49,8 +49,9 @@
 //! invalidation. (When the host wants to invalidate, it bumps the source
 //! file's text via `set_text`, which Salsa already tracks.)
 
-use fossil_base::{Diagnostic, Problem, Severity, Span, bug, report};
+use fossil_base::{Diagnostic, bug, report};
 use fossil_descriptors_input::InferredDescriptor;
+use fossil_graph_schema::{Problem, Severity, Span};
 use smol_str::SmolStr;
 
 use fossil_graph_schema::{Primitive, Shape, local_name};
@@ -109,14 +110,6 @@ fn field_from_inferred<'db>(
         ty: Ty::new(db, TyKind::Primitive(col.primitive)),
     }
 }
-
-// `RowScope` lived here — the rows of a relation, beside the type system rather
-// than in it. It is `crate::ty::Rows` now, the payload of `TyKind::Relation`,
-// and this module keeps the ALGEBRA that builds one.
-//
-// Two structures described the shape of data in flight and only one of them was
-// a type, which is why `seq.where` had the signature `p("rows", S::String)` and
-// why a `where` predicate was walked for the columns it names and never typed.
 
 /// The scope a mapping's `from` clause puts in the body — see [`Rows`].
 ///
@@ -644,14 +637,6 @@ fn right_scope<'db>(
     })
 }
 
-// `check_refs`, `collect_refs`, `Reference` and `binding_list` stood here — a
-// hand-written walk that collected the `ColumnRef`s a condition mentions and
-// asked, per name, whether the scope had it. Every one of those questions is a
-// question `synth` of a `ColumnRef` already asks, against the same scope. What
-// the walk could NOT ask is the other one, and that is the whole finding: it
-// answered «is there a column called `celsius`» and never «and is
-// `Row.celsius > "abc"` a condition».
-
 /// Type one stage's condition, against the rows the pipeline has AT that stage.
 ///
 /// The catalogue row says what the verb takes — `seq.where` is
@@ -696,7 +681,7 @@ fn typecheck_stage<'db>(
         && !crate::check::subtypes(db, ty, Ty::new(db, TyKind::Primitive(Primitive::Bool)))
     {
         let d = fossil_base::Diagnostic::new(
-            fossil_base::Severity::Error,
+            fossil_graph_schema::Severity::Error,
             Problem::ExpectedBool {
                 operand: format!(
                     "the condition of `{}` in `{}`",
@@ -1013,7 +998,7 @@ pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape
     // identifies a node of THIS shape — so the column is a reference to it,
     // where it used to be the untyped `TyKind::Iri` every reference shared.
     let mut fields: Vec<RecordField<'db>> = vec![RecordField {
-        name: SmolStr::new_static("subject"),
+        name: SmolStr::new_static(fossil_graph_schema::SUBJECT_COLUMN),
         ty: Ty::reference(db, std::iter::once(SmolStr::from(shape.iri.as_str()))),
     }];
     for c in &shape.properties {
@@ -1052,7 +1037,7 @@ pub(crate) fn record_from_inferred<'db>(
     Ty::new(db, TyKind::Record(Record::new(db, fields)))
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -1211,7 +1196,7 @@ mod tests {
         }
 
         let system: Arc<dyn fossil_base::System> =
-            Arc::new(fossil_base::test_support::DecodingHost::default());
+            Arc::new(fossil_base::test_support::NativeSystem::decoding());
         let db = fossil_base::FossilDb::new(system);
         // The two `id`s differ in TYPE, which is the whole point — and that is
         // why the join is on `k` and not on them. `on = Left.id == Right.id`
@@ -1323,6 +1308,7 @@ mod tests {
                 ),
                 constraint("https://example.org/seeAlso", Some(Primitive::AnyUri), &[]),
             ],
+            span: None,
         };
 
         let TyKind::Record(rec) = record_from_shape(&db, &shape).kind(&db) else {

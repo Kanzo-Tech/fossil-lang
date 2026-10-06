@@ -25,7 +25,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Where a run wrote, and what the write discarded.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunReport {
     /// The prefix the corpus was written under, `fossil.json` at its root.
     pub dest: String,
@@ -48,7 +48,7 @@ pub struct RunReport {
 /// not there and never were. And a third-party writer has no such number — it
 /// performs no join — so a manifest field for it would make a conforming corpus
 /// impossible to write without a fact only fossil's pipeline has.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EdgeDrops {
     /// The edge table's name in `fossil.json`, `<Src>_<label>_<Dst>`.
     pub table: String,

@@ -16,7 +16,7 @@
  * `duckdb` binary, which is the position a stranger is in.
  */
 
-import { lit, query, scalar } from "./duck.mjs";
+import { ident, lit, query, scalar } from "./duck.mjs";
 import { parquet } from "./inspect.mjs";
 import { ENTRY_POINT, FORMAT } from "./manifest.mjs";
 
@@ -52,9 +52,7 @@ const SPELLINGS = {
   uint32: ["UTINYINT", "USMALLINT", "UINTEGER"],
   uint64: ["UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT"],
   float: ["FLOAT"],
-  float32: ["FLOAT"],
   double: ["FLOAT", "DOUBLE"],
-  float64: ["FLOAT", "DOUBLE"],
   string: ["VARCHAR"],
   date: ["DATE"],
   time: ["TIME"],
@@ -293,8 +291,8 @@ export const GUARDS = [
           continue;
         }
         const row = query(
-          `SELECT min("${t.entry.key}")::UBIGINT AS lo, max("${t.entry.key}")::UBIGINT AS hi, count(*) AS n,
-                  count(DISTINCT "${t.entry.key}") AS distinct_n, count(*) FILTER ("${t.entry.key}" IS NULL) AS nulls
+          `SELECT min(${ident(t.entry.key)})::UBIGINT AS lo, max(${ident(t.entry.key)})::UBIGINT AS hi, count(*) AS n,
+                  count(DISTINCT ${ident(t.entry.key)}) AS distinct_n, count(*) FILTER (${ident(t.entry.key)} IS NULL) AS nulls
              FROM ${parquet(t.file)}`,
         )[0];
         const n = BigInt(row.n);
@@ -325,11 +323,11 @@ export const GUARDS = [
         const keys = fixedColumns(table).filter((c) => c !== table.entry.identity);
         if (!keys.every((k) => table.columns.has(k))) continue;
         const [a, b = a] = keys;
-        const lag = (c) => `lag("${c}") OVER (ORDER BY file_row_number)`;
+        const lag = (c) => `lag(${ident(c)}) OVER (ORDER BY file_row_number)`;
         const out = table.kind === "vertex" ? "a <= pa" : "a < pa OR (a = pa AND b < pb)";
         const bad = scalar(
           `SELECT count(*) FROM (
-             SELECT "${a}" AS a, "${b}" AS b, ${lag(a)} AS pa, ${lag(b)} AS pb
+             SELECT ${ident(a)} AS a, ${ident(b)} AS b, ${lag(a)} AS pa, ${lag(b)} AS pb
                FROM read_parquet('${lit(table.file)}', file_row_number = true))
             WHERE pa IS NOT NULL AND (${out})`,
         );
@@ -359,7 +357,7 @@ export const GUARDS = [
           if (!vertex || vertex.rows === null || !edge.columns.has(key)) continue;
           const bad = scalar(
             `SELECT count(*) FROM ${parquet(edge.file)} e
-              WHERE NOT EXISTS (SELECT 1 FROM ${parquet(vertex.file)} v WHERE v."${vertex.entry.key}" = e."${key}")`,
+              WHERE NOT EXISTS (SELECT 1 FROM ${parquet(vertex.file)} v WHERE v.${ident(vertex.entry.key)} = e.${ident(key)})`,
           );
           failures.push(...violations(bad, `${edge.name}: ${key} names no ${references}`));
         }
@@ -384,8 +382,8 @@ export const GUARDS = [
         const column = table.entry.identity;
         if (!table.columns.has(column)) continue;
         const row = query(
-          `SELECT count(*) FILTER ("${column}" IS NULL) AS nulls,
-                  count(*) - count(DISTINCT "${column}") AS repeats
+          `SELECT count(*) FILTER (${ident(column)} IS NULL) AS nulls,
+                  count(*) - count(DISTINCT ${ident(column)}) AS repeats
              FROM ${parquet(table.file)}`,
         )[0];
         failures.push(...violations(row.nulls, `${table.name}: a vertex has no ${column}`));

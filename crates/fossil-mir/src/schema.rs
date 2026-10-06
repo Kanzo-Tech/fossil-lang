@@ -1,13 +1,9 @@
-//! Structural MIR helpers: [`schema_of`] and [`free_cols`].
+//! [`schema_of`]: the column schema flowing through a [`crate::graph::MirGraph`].
 //!
-//! These are plain-Rust functions (NOT `#[salsa::tracked]` queries), so they
-//! do NOT affect `MAX_PER_MAPPING_FAN_OUT` — a function with no Salsa key
-//! cannot be re-executed by an invalidation, which is a property of the
-//! signature and not of the body. `tests/fan_out.rs` measures the fan-out of
-//! [`crate::lower_to_mir_pg`] and does not put these two in its loop, so the
-//! claim is read off the `fn` above, not off a count. They reason about the
-//! column schema flowing through a [`crate::graph::MirGraph`] and the free
-//! column references inside an [`Expr`].
+//! A plain-Rust function (NOT a `#[salsa::tracked]` query), so it does NOT
+//! affect `MAX_PER_MAPPING_FAN_OUT` — a function with no Salsa key cannot be
+//! re-executed by an invalidation, which is a property of the signature and
+//! not of the body.
 //!
 //! # `schema_of` takes `&dyn fossil_base::Db`
 //!
@@ -19,12 +15,10 @@
 //! not a tracked query, taking `db` here does not widen the per-mapping
 //! fan-out.
 
-use std::collections::BTreeSet;
-
 use fossil_hir::{Ty, TyKind};
 use smol_str::SmolStr;
 
-use crate::op::{Expr, Op};
+use crate::op::Op;
 
 /// Output column schema of the op at `idx`.
 ///
@@ -125,53 +119,6 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
     }
 }
 
-/// Free column references in an expression — the columns a predicate reads,
-/// which is what decides whether it may be evaluated against a given schema.
-///
-/// Walks the [`Expr`] recursively collecting `ColRef.column` names;
-/// `LitString` / `LitBool` contribute nothing; `Concat` / `Call` / `BinOp` /
-/// `Assert` recurse into their children.
-#[must_use]
-pub fn free_cols(expr: &Expr<'_>) -> BTreeSet<SmolStr> {
-    let mut acc = BTreeSet::new();
-    collect_free_cols(expr, &mut acc);
-    acc
-}
-
-fn collect_free_cols(expr: &Expr<'_>, acc: &mut BTreeSet<SmolStr>) {
-    match expr {
-        Expr::LitString(_) | Expr::LitBool(_) | Expr::LitInt(_) | Expr::LitFloat(_) => {}
-        Expr::ColRef { column, .. } => {
-            acc.insert(column.clone());
-        }
-        Expr::Concat(lhs, rhs) | Expr::BinOp { lhs, rhs, .. } => {
-            collect_free_cols(lhs, acc);
-            collect_free_cols(rhs, acc);
-        }
-        // The column being tested is read, exactly as it would be by any other
-        // comparison — `IS NULL` is not a way of not reading it.
-        Expr::IsNull { operand, .. } => collect_free_cols(operand, acc),
-        Expr::Call { args, .. } => {
-            for arg in args {
-                collect_free_cols(arg, acc);
-            }
-        }
-        Expr::Ternary {
-            cond,
-            then,
-            otherwise,
-            ..
-        } => {
-            collect_free_cols(cond, acc);
-            collect_free_cols(then, acc);
-            collect_free_cols(otherwise, acc);
-        }
-        Expr::Assert { inner, .. } | Expr::UnaryOp { operand: inner, .. } => {
-            collect_free_cols(inner, acc);
-        }
-    }
-}
-
 /// Deref an interned `Record` row type to its field names. A non-`Record`
 /// `row_type` (should not occur for a well-formed `Source`) yields an empty
 /// schema.
@@ -182,12 +129,11 @@ fn record_field_names(db: &dyn fossil_base::Db, row_type: Ty<'_>) -> Vec<SmolStr
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::op::{SinkRef, SourceFormat, VProp};
+    use crate::op::{Expr, SinkRef, SourceFormat, VProp};
     use fossil_graph_schema::Primitive;
-    use fossil_hir::BinOp;
     use fossil_hir::ty::{Record, RecordField};
     use std::sync::Arc;
 
@@ -317,55 +263,5 @@ mod tests {
             schema_of(&db, &ops, 2),
             vec![SmolStr::new_static("full_name")]
         );
-    }
-
-    #[test]
-    fn free_cols_over_binop_eq_colref_litstring() {
-        // BinOp(Eq, ColRef{status}, LitString) → {status}
-        let db = db();
-        let bool_ty = Ty::new(&db, TyKind::Primitive(Primitive::Bool));
-        let expr = Expr::BinOp {
-            op: BinOp::Eq,
-            lhs: Box::new(Expr::ColRef {
-                source: SmolStr::default(),
-                column: SmolStr::new_static("status"),
-            }),
-            rhs: Box::new(Expr::LitString(SmolStr::new_static("active"))),
-            ty: bool_ty,
-        };
-        let free = free_cols(&expr);
-        assert_eq!(free.len(), 1);
-        assert!(free.contains(&SmolStr::new_static("status")));
-    }
-
-    #[test]
-    fn free_cols_recurses_through_concat_and_call() {
-        let db = db();
-        let string_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
-        // concat(call(upper, ColRef{a}), ColRef{b})
-        let expr = Expr::Concat(
-            Box::new(Expr::Call {
-                func: SmolStr::new_static("upper"),
-                args: vec![Expr::ColRef {
-                    source: SmolStr::default(),
-                    column: SmolStr::new_static("a"),
-                }],
-                ty: string_ty,
-            }),
-            Box::new(Expr::ColRef {
-                source: SmolStr::default(),
-                column: SmolStr::new_static("b"),
-            }),
-        );
-        let free = free_cols(&expr);
-        assert_eq!(free.len(), 2);
-        assert!(free.contains(&SmolStr::new_static("a")));
-        assert!(free.contains(&SmolStr::new_static("b")));
-    }
-
-    #[test]
-    fn free_cols_empty_for_literals() {
-        assert!(free_cols(&Expr::LitString(SmolStr::new_static("x"))).is_empty());
-        assert!(free_cols(&Expr::LitBool(true)).is_empty());
     }
 }

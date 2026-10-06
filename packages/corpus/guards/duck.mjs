@@ -18,6 +18,11 @@ export function lit(value) {
   return String(value).replace(/'/g, "''");
 }
 
+/** A column name from the manifest as a delimited DuckDB identifier, quotes included. */
+export function ident(name) {
+  return `"${String(name).replace(/"/g, '""')}"`;
+}
+
 /**
  * The one place a `duckdb` run that did not succeed becomes a sentence.
  *

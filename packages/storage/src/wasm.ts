@@ -1,16 +1,24 @@
 // The glue is imported from this leaf module only, never from the entry — see
 // `@fossil-lang/executor`'s `client.ts` for why a `sideEffects: false` bundler must not see it twice.
 import init, {
+  storageCovering,
   storageGrant,
   storageName,
   storageRead as rawRead,
   type InitInput,
 } from '../pkg/fossil_storage_wasm.js';
-import { FossilError, boot, isFossilError, type Access, type Host, type StorageCredential } from '@fossil-lang/types';
+import {
+  FossilError,
+  isFossilError,
+  loader,
+  type Access,
+  type GrantPlan,
+  type Host,
+  type LocatorName,
+  type StorageCredential,
+} from '@fossil-lang/types';
 
 export type { InitInput };
-
-let booted: Promise<unknown> | null = null;
 
 /**
  * Boot the `fossil-storage` module. Every door awaits it with nothing, and the glue finds its
@@ -22,18 +30,7 @@ let booted: Promise<unknown> | null = null;
  * @throws {FossilError} `module/unreachable` when the module could not be fetched within 60 s,
  *   `internal/bug` when it would not instantiate.
  */
-export function initStorage(wasm?: InitInput): Promise<unknown> {
-  if (booted === null) {
-    const pending = boot('fossil_storage_wasm_bg.wasm', () =>
-      init(wasm === undefined ? undefined : { module_or_path: wasm }),
-    );
-    booted = pending;
-    pending.catch(() => {
-      if (booted === pending) booted = null; // forgotten, so the next call boots again
-    });
-  }
-  return booted;
-}
+export const initStorage = loader<InitInput>('fossil_storage_wasm_bg.wasm', init);
 
 /**
  * `call`, with a failure fossil did not raise — a panic is a `RuntimeError: unreachable`, and the
@@ -59,30 +56,17 @@ export async function storageRead(host: Host, targets: readonly unknown[]): Prom
   }
 }
 
-export interface GrantPlan {
-  prefix: string;
-  install: string | null;
-  uninstall: string | null;
-  expiresAtMs: number | null;
-}
-
 export const plan = (credential: StorageCredential, access: Access): GrantPlan =>
-  guarded('fossil-storage failed planning a grant', () => storageGrant(credential, access) as GrantPlan);
+  guarded('fossil-storage failed planning a grant', () => storageGrant(credential, access));
 
-export const nameOf = (
-  credential: StorageCredential,
-  locator: string,
-): { name: string; lend: string | null } =>
+export const nameOf = (credential: StorageCredential, locator: string): LocatorName =>
   guarded('fossil-storage failed naming a locator', () => storageName(credential, locator));
 
-/** The credential whose prefix is the longest one covering `locator`. */
+/** The credential whose prefix covers `locator`, by `fossil_storage::covering`. */
 export function covering(
   credentials: readonly StorageCredential[],
   locator: string,
 ): StorageCredential | undefined {
-  let best: StorageCredential | undefined;
-  for (const c of credentials) {
-    if (locator.startsWith(c.prefix) && c.prefix.length > (best?.prefix.length ?? -1)) best = c;
-  }
-  return best;
+  const prefix = storageCovering(credentials.map((c) => c.prefix), locator);
+  return credentials.find((c) => c.prefix === prefix);
 }

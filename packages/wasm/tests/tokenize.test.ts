@@ -37,13 +37,12 @@ beforeAll(async () => {
 });
 
 describe('@fossil-lang/wasm — tokenize', () => {
-  it('returns a non-empty TokenRow[] for a source binding', () => {
-    const rows: TokenRow[] = tokenize('users := io.csv("u.csv")\n');
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows[0]).toHaveProperty('kind');
-    expect(rows[0]).toHaveProperty('start');
-    expect(rows[0]).toHaveProperty('end');
-    expect(rows[0]!.start).toBe(0);
+  it('names each token and counts in UTF-16 code units', () => {
+    const text = '// ñ😀\nusers';
+    const rows: TokenRow[] = tokenize(text);
+    const last = rows.at(-1)!;
+    expect(last.kind).toBe('Ident');
+    expect(text.slice(last.start, last.end)).toBe('users');
   });
 
   it('returns empty array for empty source', () => {
@@ -69,11 +68,6 @@ describe('@fossil-lang/wasm — FossilWorkspace class', () => {
     expect(ws).toBeInstanceOf(FossilWorkspace);
     ws.free();
   });
-
-  // A `classification()` test sat here. The method is gone on both sides of the
-  // seam — see the tombstone in `src/index.ts`. It passed against a `pkg/` that
-  // had not been rebuilt since the Rust deletion; the first regeneration would
-  // have turned it into a `TypeError`, and a stale build output is not a fixture.
 
   it('openFile + check returns diagnostics array for an opened file', () => {
     const ws = new FossilWorkspace();

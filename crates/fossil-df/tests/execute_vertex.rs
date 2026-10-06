@@ -7,7 +7,6 @@
 //! El cwd de `cargo test` es la raíz del crate, así que la fuente se referencia
 //! como `tests/fixtures/users.csv` (relativa a `crates/fossil-df`).
 
-#![cfg(not(target_arch = "wasm32"))]
 // `{users.id}` is a Fossil interpolation hole, not a Rust format arg.
 #![allow(clippy::literal_string_with_formatting_args)]
 

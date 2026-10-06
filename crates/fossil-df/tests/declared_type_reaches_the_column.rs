@@ -14,7 +14,6 @@
 //! `aggregate_result_types.rs`; it is a question about the language, not about
 //! what a corpus says of its own bytes.
 
-#![cfg(not(target_arch = "wasm32"))]
 // The fixtures use interpolation syntax (`"…{Order.customer}"`), which clippy
 // mistakes for format args in a plain string literal.
 #![allow(clippy::literal_string_with_formatting_args)]

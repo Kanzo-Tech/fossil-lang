@@ -17,8 +17,8 @@
       }
     },
     "format": {
-      "description": "Always [`FOSSIL_FORMAT`] for a corpus this writer produces.",
-      "type": "string"
+      "description": "The format the corpus is written in.",
+      "const": "fossil/1"
     },
     "vertex_tables": {
       "description": "One per vertex type, in the order the compiled schema lists them.",
@@ -78,10 +78,7 @@
         },
         "iri": {
           "description": "The relation's IRI, when the program's shape document gives one.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "label": {
           "description": "The relation's label, e.g. `placedBy`.",
@@ -146,17 +143,11 @@
       "properties": {
         "datatype": {
           "description": "The literal datatype the shape declares, as the IRI it wrote — a mapping's `rr:datatype`. Absent where it declares none.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "iri": {
           "description": "The predicate IRI the program mapped it from, when there is one.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "name": {
           "description": "The column name, as in the Parquet schema.",
@@ -168,21 +159,15 @@
         },
         "role": {
           "description": "What the column IS, for a column the writer emits — `corpus.bnf`'s role, so a reader names the roles it means rather than the names it remembers. Absent on a column of the program's.",
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ColumnRole"
-            },
-            {
-              "type": "null"
             }
           ]
         },
         "term_type": {
           "description": "The RDF term type the shape declares for the values, as R2RML's IRI — [`RR_IRI`] or [`RR_LITERAL`] — which a mapping states as `rr:termType`. Absent where no shape declares one, and a reader then takes R2RML's default: a literal of the column's natural datatype (R2RML §10.2).",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "type": {
           "description": "Its type, in the spelling [`data_type_name`] writes.",
@@ -208,10 +193,7 @@
         },
         "iri": {
           "description": "The type's IRI, when the program's shape document gives one.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "key": {
           "description": "The key column: `dense_id`, global and gapless across every vertex table, and one contiguous range of it per table, in manifest order.",

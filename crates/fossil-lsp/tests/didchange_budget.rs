@@ -81,8 +81,6 @@
 //! that quietly stops resolving the contract fails here instead of producing a
 //! flattering millisecond count.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::PathBuf;
 use std::str::FromStr as _;
 use std::time::{Duration, Instant};

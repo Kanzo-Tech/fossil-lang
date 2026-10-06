@@ -43,12 +43,7 @@
 //! ERROR otherwise.
 //!
 //! The primaries match the grammar exactly: `PrimaryExpr` is a literal, an IDENT
-//! or a parenthesised expression. The retired forms this file refuses BY NAME
-//! are the leading-dot `FieldRef`, the CURIE `ex:name` and the `<…>` absolute
-//! IRI, each with an arm in [`parse_primary`], plus `|>` in infix position in
-//! [`parse_expression`]. The backtick reaches no production at all and is named
-//! in `super::Parser::bump_as_error`. A bare `unexpected token` would throw away
-//! what the parser can still see.
+//! or a parenthesised expression.
 //!
 //! `true` and `false` are tokens (grammar.bnf, BOOL) because a program writes
 //! `verified = true` and there is no binding for the name to resolve against.
@@ -56,8 +51,8 @@
 
 use crate::kind::SyntaxKind;
 
-use super::diag::{ParseDiagnostic, retired};
-use super::{Parser, RetiredRun};
+use super::Parser;
+use super::diag::ParseDiagnostic;
 
 /// Left-binding-power below which the Pratt loop will bail out (the caller's
 /// outer level wants control back).
@@ -96,13 +91,8 @@ pub(crate) fn parse_expression(p: &mut Parser, min_bp: Bp) {
         if matches!(p.current(), Some(SyntaxKind::T_QUESTION)) && TERNARY_LBP >= min_bp {
             p.start_at(cp, SyntaxKind::TERNARY_EXPR);
             p.bump(); // `?`
-            // The then-branch is parsed with the ternary marked open, so
-            // `parse_primary` knows the `:` waiting past it is this ternary's
-            // and not a retired CURIE. See `Parser::ternary_then_depth`.
-            p.inside_ternary_then(|p| {
-                // then-branch — cannot itself be a ternary at the same level
-                parse_expression(p, TERNARY_RBP + 1);
-            });
+            // then-branch — cannot itself be a ternary at the same level
+            parse_expression(p, TERNARY_RBP + 1);
             p.skip_trivia();
             // Disambiguation rule #3: the `:` here is a `SHAPE_SEP`, the same
             // token a mapping header takes, paired with the just-consumed `?`.
@@ -118,19 +108,6 @@ pub(crate) fn parse_expression(p: &mut Parser, min_bp: Bp) {
             p.finish();
             just_consumed_non_assoc = None;
             continue;
-        }
-
-        // `a |> f()` — the retired pipeline; `|>` is not a token. With the
-        // lexer rule gone, `|>` arrives as the unlexable `|` (an ERROR token
-        // carrying its text) followed by `GT`, so the two are matched here
-        // rather than by a kind. This is infix position and an operand is
-        // already parsed, which is the only place the operator could stand.
-        if p.current() == Some(SyntaxKind::ERROR)
-            && p.current_text() == Some("|")
-            && p.peek_kind(1) == Some(SyntaxKind::GT)
-        {
-            p.retire(&retired::PIPELINE, RetiredRun::Count(2));
-            break;
         }
 
         let Some((lbp, rbp, assoc, wrapper)) = peek_infix(p) else {
@@ -251,7 +228,7 @@ fn parse_postfix(p: &mut Parser) {
                         p.finish();
                         let end = p.prev_end();
                         p.push_diagnostic(ParseDiagnostic::Malformed {
-                            problem: fossil_base::Problem::HoleInMemberName {},
+                            problem: fossil_graph_schema::Problem::HoleInMemberName {},
                             help: Some(HOLE_IN_MEMBER_NAME_HELP.to_string()),
                             span: span_of(start, end),
                         });
@@ -295,7 +272,7 @@ fn refuse_needless_quotes(p: &mut Parser) {
         return;
     }
     p.push_diagnostic(ParseDiagnostic::Malformed {
-        problem: fossil_base::Problem::NeedlessQuotes { name },
+        problem: fossil_graph_schema::Problem::NeedlessQuotes { name },
         help: Some(
             "quotes are for a name an identifier cannot hold, like `Row.\"Person.id\"`, and each \
              name has one spelling"
@@ -305,8 +282,8 @@ fn refuse_needless_quotes(p: &mut Parser) {
     });
 }
 
-fn span_of(start: usize, end: usize) -> fossil_base::Span {
-    fossil_base::Span::new(
+fn span_of(start: usize, end: usize) -> fossil_graph_schema::Span {
+    fossil_graph_schema::Span::new(
         u32::try_from(start).unwrap_or(u32::MAX),
         u32::try_from(end).unwrap_or(u32::MAX),
     )
@@ -386,20 +363,8 @@ fn parse_arg(p: &mut Parser) {
 /// `PrimaryExpr := Literal | IDENT | LPAREN Expression RPAREN`
 /// (grammar.bnf, `PrimaryExpr`), where `Literal` is `INTEGER | FLOAT | STRING |
 /// BOOL | InterpolatedString` (grammar.bnf, Literal).
-///
-/// Three alternatives, as specified, plus three REFUSALS. The refusals are not
-/// alternatives: each consumes a retired spelling under an `ERROR` node so the
-/// message can name what replaces it. Falling through to `bump_as_error`
-/// instead would report `unexpected token` for a form the parser recognised
-/// exactly, and this file's whole failure history is silence in that position.
 fn parse_primary(p: &mut Parser) {
     p.skip_trivia();
-    // The literal arm and the bare-`IDENT` arm have the same body and cannot be
-    // merged: the guarded CURIE refusal sits between them, and match arms are
-    // tried in order. Folding `IDENT` into the literal arm above would shadow
-    // that guard, and `ex:name` would parse as a literal instead of naming what
-    // replaced it.
-    #[allow(clippy::match_same_arms)]
     match p.current() {
         // Literal-like primary tokens: numeric literals and strings. Both
         // wrap as LITERAL_EXPR with a single token payload.
@@ -408,54 +373,14 @@ fn parse_primary(p: &mut Parser) {
             | SyntaxKind::FLOAT
             | SyntaxKind::BOOL
             | SyntaxKind::NULL
-            | SyntaxKind::STRING,
+            | SyntaxKind::STRING
+            | SyntaxKind::IDENT,
         ) => {
             p.start(SyntaxKind::LITERAL_EXPR);
             p.bump();
             p.finish();
         }
         Some(SyntaxKind::STRING_OPEN) => parse_interpolated_string(p),
-        // `.name` — the leading-dot `FieldRef`, and a leading `.` is an error
-        // now. It named a column of an anonymous current row, and the row has a
-        // name: every reference is qualified, `User.name`. The
-        // run is the `.` and the name after it, so the span underlines the
-        // reference rather than the dot alone.
-        Some(SyntaxKind::DOT) => {
-            let run = if p.peek_kind(1) == Some(SyntaxKind::IDENT) {
-                RetiredRun::Count(2)
-            } else {
-                RetiredRun::Count(1)
-            };
-            p.retire(&retired::LEADING_DOT, run);
-        }
-        // `ex:name` — the CURIE, and a `:` that is not a mapping header or a
-        // ternary is an error now. The whitespace check is
-        // gone; what stands in its place is `in_ternary_then`, which is a fact
-        // the parser already has rather than a fact about the source's spacing.
-        // Inside a then-branch the `:` is the ternary's, so `cond ? a:b` parses
-        // clean — the very case the deleted rule got wrong.
-        Some(SyntaxKind::IDENT)
-            if !p.in_ternary_then()
-                && p.peek_kind(1) == Some(SyntaxKind::SHAPE_SEP)
-                && p.peek_kind(2) == Some(SyntaxKind::IDENT) =>
-        {
-            p.retire(&retired::CURIE, RetiredRun::Count(3));
-        }
-        Some(SyntaxKind::IDENT) => {
-            p.start(SyntaxKind::LITERAL_EXPR);
-            p.bump();
-            p.finish();
-        }
-        // `<http://…>` — no longer one token, so what arrives is `LT` and the
-        // operands after it. A constant IRI is a STRING and the shape decides
-        // that it denotes rather than reads.
-        //
-        // This arm CANNOT steal a comparison: `a < b` reaches `peek_infix` with
-        // `a` already parsed, and `parse_primary` is only ever entered where an
-        // operand is due. A `<` in operand position was always the IRI.
-        Some(SyntaxKind::LT) => {
-            p.retire(&retired::ABSOLUTE_IRI, RetiredRun::Line);
-        }
         Some(SyntaxKind::LPAREN) => {
             p.start(SyntaxKind::PAREN_EXPR);
             p.bump(); // LPAREN
@@ -602,40 +527,6 @@ mod tests {
         assert_eq!(messages.len(), 1, "{messages:?}");
         assert!(messages[0].contains("constant"), "{}", messages[0]);
         assert!(root.descendants().any(|n| n.kind() == SyntaxKind::ERROR));
-    }
-
-    /// `|>` is refused BY NAME, not as an unexpected token.
-    ///
-    /// The operand before it still parses — the refusal happens in infix
-    /// position, so `a` is a `LITERAL_EXPR` and only the `|>` is consumed under
-    /// the `ERROR` node. That is the difference between telling the author what
-    /// replaces the form and telling them a byte surprised the parser.
-    #[test]
-    fn pipe_is_retired_with_a_message_naming_the_member_call() {
-        let tokens = lex_with_indents("a |> f()");
-        let mut p = Parser::new(tokens);
-        p.start(SyntaxKind::EXPR);
-        parse_expression(&mut p, 0);
-        p.finish();
-        let retired: Vec<_> = p
-            .diagnostics
-            .iter()
-            .filter_map(|d| match d {
-                crate::parser::diag::ParseDiagnostic::RetiredSpelling { form, span } => {
-                    Some((*form, *span))
-                }
-                _ => None,
-            })
-            .collect();
-        assert_eq!(retired.len(), 1, "exactly one refusal, got {retired:?}");
-        let (form, span) = &retired[0];
-        assert_eq!(*form, &crate::parser::diag::retired::PIPELINE);
-        assert!(
-            form.replacement.contains("a.f("),
-            "the refusal must name what replaces `|>`: {form:?}"
-        );
-        // The span underlines the two bytes of `|>` and nothing else.
-        assert_eq!((span.start, span.end), (2, 4), "span over `|>`");
     }
 
     #[test]

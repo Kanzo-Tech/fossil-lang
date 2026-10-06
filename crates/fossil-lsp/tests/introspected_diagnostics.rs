@@ -22,15 +22,13 @@
 //! loop over one channel, so a `didOpen` that waits on the network is not one
 //! slow file, it is hover and completion dead in every other buffer too.
 //!
-//! So the editor introspects exactly what it can `stat` —
-//! `fossil_introspect::Reach::Local`. That is a local file that exists right
+//! So the editor introspects exactly what it can `stat`, which is all
+//! `fossil_introspect::pre_introspect_and_register` ever reads. That is a local file that exists right
 //! now; a remote locator, a path that does not exist yet, and a half-typed one
 //! are all the same answer, and it is the answer `freshness_token` already
 //! gave. [`a_remote_source_is_not_introspected_by_the_editor`] pins the gap that
 //! leaves, because it is a real one and the docblock alone would not keep it
 //! visible.
-
-#![cfg(not(target_arch = "wasm32"))]
 
 mod common;
 

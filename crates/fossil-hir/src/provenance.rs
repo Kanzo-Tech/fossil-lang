@@ -40,7 +40,7 @@
 //! [`crate::spans::spans`], so the blame STRUCTURE and the ranges it points at
 //! are both in place — an entry never carries a zero-width placeholder.
 
-use fossil_base::Span;
+use fossil_graph_schema::Span;
 use smol_str::SmolStr;
 
 use crate::body::ExprId;
@@ -61,20 +61,14 @@ pub struct Provenance {
 
 /// Categorical type-origin reason.
 ///
-/// One variant per channel a type can reach an expression through — a
-/// descriptor on either side, a literal, an operator, or a closure.
+/// One variant per channel a type can reach an expression through: a source
+/// column, a literal, a call or an operator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum ProvenanceKind {
     /// Type came from an input source descriptor — a source-row column.
     InputDescriptor {
         source_name: SmolStr,
         column: SmolStr,
-    },
-    /// Type came from the output shape document (e.g. a property
-    /// shape).
-    OutputDescriptor {
-        shape_iri: SmolStr,
-        property_iri: SmolStr,
     },
     /// Type is the inferred result of a literal expression (string, IRI,
     /// template).
@@ -83,26 +77,23 @@ pub enum ProvenanceKind {
     FnResult { name: SmolStr },
     /// Type is the result of a binary operator (e.g. `a ++ b`).
     BinaryOp { op: SmolStr },
-    /// Type was synthesised for an anonymous closure parameter (e.g. inside
-    /// `map(\x -> ...)`).
-    SynthesizedClosureParam,
-    /// Type came from the LHS of a pipeline (`x |> f` — `x`'s type flows into
-    /// `f`'s expected param).
-    PipelineLhs,
-    /// Type was synthesised inside an IMPLICIT closure body. The closure was
-    /// implicitly created because the
-    /// surrounding function-arg position expected `Fn(Record<R> -> τ)` and the
-    /// arg expression contains free `.field` references (Fossil has no surface
-    /// lambda syntax — implicit closure synthesis is the ONLY lambda form).
-    ///
-    /// `rendering` is the displayable form of the closure, e.g.
-    /// `(row: Record<{id: String, name: String, age: Integer}>) => row.age >= 18`.
-    /// LSP hover renders this above the field type so the synthesis
-    /// is NEVER hidden from the user.
-    ///
-    /// CRITICAL: it is built via [`crate::render_ty_kind`], never raw `{:?}`
-    /// Debug, so no `TyKind` variant reaches the user under its Rust spelling.
-    SynthesizedClosureRendering { rendering: SmolStr },
+}
+
+/// How hover names where a type came from, in the words of the program.
+impl std::fmt::Display for ProvenanceKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InputDescriptor {
+                source_name,
+                column,
+            } => {
+                write!(f, "the column `{source_name}.{column}`")
+            }
+            Self::Literal => f.write_str("a literal"),
+            Self::FnResult { name } => write!(f, "the result of `{name}`"),
+            Self::BinaryOp { op } => write!(f, "the operator `{op}`"),
+        }
+    }
 }
 
 /// Per-mapping interned table of `(expr_id, ty, provenance)` triples.
@@ -186,7 +177,7 @@ pub fn mapping_at<'db>(
     dm.mappings(db).get(index).copied()
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -235,14 +226,6 @@ Users : Person from User
             "a FieldRef RHS must not synthesise a type with no source row to resolve it against"
         );
     }
-
-    // `ty_origin_returns_iri_for_iri_literal_in_property` lived here, and with
-    // it the two `#[cfg(test)]` helpers it was the only caller of. It built a
-    // `HirExpr::PrefixedName` by hand because the lowering of `IDENT SHAPE_SEP
-    // IDENT` returned `None` — a limitation its own doc-comment called
-    // pre-existing and tracked elsewhere. It was not tracked: it was decided.
-    // The CURIE is gone, so the variant is gone, so the only test that could
-    // reach it was a test of a form the language does not have.
 
     /// Compile-time confirmation that `ty_origin`
     /// returns `Option<ExprTypeEntry<'_>>` (NOT `Option<(Ty, Provenance)>`).

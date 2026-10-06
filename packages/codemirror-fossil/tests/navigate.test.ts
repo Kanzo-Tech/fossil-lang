@@ -10,9 +10,10 @@
  */
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import type { DefinitionRow } from '@fossil-lang/types';
 import { describe, expect, it } from 'vitest';
 
-import { gotoDefinitionAt, type DefinitionRowLike } from '../src/navigate.js';
+import { gotoDefinitionAt } from '../src/navigate.js';
 
 const URI = 'hello.fossil';
 const DOC = [
@@ -35,11 +36,11 @@ const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve,
 describe('gotoDefinitionAt', () => {
   it('moves the cursor when the target is this buffer', async () => {
     const v = view();
-    const target: DefinitionRowLike = {
+    const target: DefinitionRow = {
       uri: URI,
       range: { start: { line: 1, character: 0 }, end: { line: 1, character: 4 } },
     };
-    let handed: DefinitionRowLike | null | undefined;
+    let handed: DefinitionRow | null | undefined;
     gotoDefinitionAt(v, DOC.length - 4, () => [target], {
       uri: URI,
       onNavigate: (t) => {
@@ -55,11 +56,11 @@ describe('gotoDefinitionAt', () => {
   it('hands a target in another file to the host, and does not move', async () => {
     const v = view();
     const before = v.state.selection.main.head;
-    const target: DefinitionRowLike = {
+    const target: DefinitionRow = {
       uri: 'hello.shex',
       range: { start: { line: 21, character: 2 }, end: { line: 21, character: 9 } },
     };
-    let handed: DefinitionRowLike | null | undefined;
+    let handed: DefinitionRow | null | undefined;
     gotoDefinitionAt(v, 8, () => [target], {
       uri: URI,
       onNavigate: (t) => {
@@ -74,7 +75,7 @@ describe('gotoDefinitionAt', () => {
 
   it('says nothing-here rather than leaving the keypress looking broken', async () => {
     const v = view();
-    let handed: DefinitionRowLike | null | undefined = undefined;
+    let handed: DefinitionRow | null | undefined = undefined;
     gotoDefinitionAt(v, 0, () => [], {
       uri: URI,
       onNavigate: (t) => {
@@ -88,7 +89,7 @@ describe('gotoDefinitionAt', () => {
 
   it('reports a refused request the same way, instead of throwing into the keymap', async () => {
     const v = view();
-    let handed: DefinitionRowLike | null | undefined = undefined;
+    let handed: DefinitionRow | null | undefined = undefined;
     gotoDefinitionAt(
       v,
       0,
@@ -109,15 +110,15 @@ describe('gotoDefinitionAt', () => {
 
   it('takes the first of several targets', async () => {
     const v = view();
-    const first: DefinitionRowLike = {
+    const first: DefinitionRow = {
       uri: 'a.shex',
       range: { start: { line: 1, character: 0 }, end: { line: 1, character: 1 } },
     };
-    const second: DefinitionRowLike = {
+    const second: DefinitionRow = {
       uri: 'b.shex',
       range: { start: { line: 2, character: 0 }, end: { line: 2, character: 1 } },
     };
-    let handed: DefinitionRowLike | null | undefined;
+    let handed: DefinitionRow | null | undefined;
     gotoDefinitionAt(v, 8, () => [first, second], {
       uri: URI,
       onNavigate: (t) => {

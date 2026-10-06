@@ -7,12 +7,11 @@
 //!   the [`def_map`] Salsa query.
 //! - Interned [`MappingLoc`]/[`SourceLoc`] location IDs (the rust-analyzer
 //!   pattern).
-//! - [`item_tree`] signature-only query + [`body`] per-mapping body query
-//!   (rust-analyzer invalidation-barrier pattern): the signature
-//!   query is what everything else depends on, so editing one mapping's body
-//!   re-runs that mapping and nothing else.
-//! - [`crate::lower::lower_to_hir`] for header-only `HirFile` lowering; body content lives
-//!   behind [`body`] (`body(db, MappingLoc) -> HirBody`).
+//! - [`crate::lower::lower_to_hir`] for header-only `HirFile` lowering, and
+//!   [`body`] per mapping (`body(db, MappingLoc) -> HirBody`) — the
+//!   rust-analyzer invalidation-barrier pattern: the signatures are what
+//!   everything else depends on, so editing one mapping's body re-runs that
+//!   mapping and nothing else.
 //! - [`check::typecheck_mapping`], the ONE tracked checker entry per mapping.
 //! - [`check::compatible`], the two-span blame pattern: real subtyping plus
 //!   cardinality facets, blaming the constraint and the expression separately.
@@ -33,13 +32,12 @@
 //!
 //! # The locked surface
 //!
-//! Public Salsa query signatures (`def_map`, `item_tree`, `lower_to_hir`,
-//! `body`, `typecheck_mapping`) and the public types in [`ty`], [`def_map`],
-//! [`item_tree`], [`body`], and [`lower`] are stable for every crate
+//! Public Salsa query signatures (`def_map`, `lower_to_hir`, `body`,
+//! `typecheck_mapping`) and the public types in [`ty`], [`def_map`], [`body`],
+//! and [`lower`] are stable for every crate
 //! downstream: bidirectional checking and [`fossil_base::ErrorGuaranteed`]
 //! propagation are built on top of them, not beside them.
 
-pub mod ast_id;
 pub mod body;
 pub mod check;
 pub mod def_map;
@@ -60,7 +58,6 @@ pub mod documents;
 /// they cannot hold.
 pub mod identity;
 pub mod infer;
-pub mod item_tree;
 pub mod lower;
 pub mod provenance;
 /// What the compiler says when a program names a provider it cannot use. Three
@@ -84,12 +81,10 @@ pub mod ty;
 // module paths (`fossil_hir::def_map::def_map`, `fossil_hir::lower::lower_to_hir`,
 // `fossil_hir::body::body`, etc.) to mirror the rust-analyzer convention and
 // avoid name shadowing with the modules themselves.
-pub use ast_id::{AstIdEntry, AstIdMap, FileAstId, MappingNode, SourceDefNode};
 pub use body::{ExprId, HirBody};
 pub use check::{Checker, TypeckOutput, compatible, render_split_suggestion, typecheck_mapping};
 pub use def_map::{DefMap, MappingLoc, SourceCall, SourceLoc};
 pub use didyoumean::did_you_mean;
-pub use item_tree::{ItemHeader, ItemTree, MappingHeader};
 pub use lower::{BinOp, FloatBits, HirExpr, HirFile, HirMapping, HirProperty, PropertyKey, UnOp};
 pub use provenance::{
     ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind, expr_types, mapping_at, ty_origin,

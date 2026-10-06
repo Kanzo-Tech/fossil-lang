@@ -5,14 +5,18 @@
 import { mount } from '@fossil-lang/storage';
 import { FossilError, attachCause, type Engine, type Host } from '@fossil-lang/types';
 
-import { parseManifest, type Manifest } from './manifest.js';
+import type { Manifest } from './manifest.gen.js';
+import { parseManifest } from './manifest.js';
 import { ident, lit, query } from './sql.js';
 
 /** The file every open reads first. */
 const ENTRY_POINT = 'fossil.json';
 
-/** The two relations the manifest becomes, beside the tables' views. */
-const CATALOG_VIEWS = ['fossil_tables', 'fossil_columns'] as const;
+/** The relations the manifest becomes, beside the tables' views, and the SQL of each. */
+const CATALOG_VIEWS: Readonly<Record<string, (manifest: Manifest) => string>> = {
+  fossil_tables: tablesOf,
+  fossil_columns: columnsOf,
+};
 
 /** What {@link open} takes: the engine, and where the corpus is — a job under its host, or a URL. */
 export interface OpenOptions {
@@ -117,7 +121,7 @@ export async function open(name: string, options: OpenOptions): Promise<Close> {
     const [where] = await names([ENTRY_POINT]);
     const manifest = await read(engine, where!, signal);
     const tables = [...manifest.vertex_tables, ...manifest.edge_tables];
-    const seen = new Set<string>(CATALOG_VIEWS);
+    const seen = new Set(Object.keys(CATALOG_VIEWS));
     for (const table of tables) {
       if (seen.has(table.name)) throw FossilError.of('corpus/duplicate-table', { table: table.name });
       seen.add(table.name);
@@ -135,8 +139,9 @@ export async function open(name: string, options: OpenOptions): Promise<Close> {
         signal,
       );
     }
-    await query(engine, `CREATE OR REPLACE VIEW ${relation('fossil_tables')} AS ${tablesOf(manifest)}`, signal);
-    await query(engine, `CREATE OR REPLACE VIEW ${relation('fossil_columns')} AS ${columnsOf(manifest)}`, signal);
+    for (const [view, sql] of Object.entries(CATALOG_VIEWS)) {
+      await query(engine, `CREATE OR REPLACE VIEW ${relation(view)} AS ${sql(manifest)}`, signal);
+    }
 
     let closed = false;
     return async () => {

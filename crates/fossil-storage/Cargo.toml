@@ -23,7 +23,10 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # `Debug`-printed, zeroed on drop.
 secrecy = { workspace = true }
 serde = { workspace = true }
+schemars = { workspace = true }
 percent-encoding = { workspace = true }
+# Every locator is a URL, parsed once by the WHATWG rules.
+url = { workspace = true }
 # The IO half: `DataFusion` reads through `object_store`, so a vended credential
 # becomes a store. Off, the crate is sans-IO for the hosts that only render SQL.
 object_store = { workspace = true, optional = true }

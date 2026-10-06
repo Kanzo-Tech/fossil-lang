@@ -21,23 +21,21 @@
 //! # Domain + WASM boundary
 //!
 //! Returns `lsp_types::CodeAction` directly — no stdio / JSON-RPC. All edits use
-//! UTF-16 LSP ranges (via [`crate::line_index::LineIndex`]); the byte spans on
+//! UTF-16 LSP ranges (via [`crate::position::LineIndex`]); the byte spans on
 //! the incoming diagnostics are converted via the FILE-keyed line index, so no
 //! new per-mapping Salsa query is added. No `Box<dyn>`; no
 //! `TyKind::Unknown` ever reaches a title or edit (the action text is built from
 //! the structured candidate / the pre-generated snippet, never from a type).
 
 use std::collections::HashMap;
-use std::str::FromStr as _;
 
-use fossil_base::{Diagnostic, SourceFile, Span};
+use fossil_base::{Diagnostic, SourceFile};
+use fossil_graph_schema::Span;
 use lsp_types::{
-    CodeAction, CodeActionKind, Diagnostic as LspDiagnostic, Position, Range, TextEdit, Uri,
-    WorkspaceEdit,
+    CodeAction, CodeActionKind, Diagnostic as LspDiagnostic, Range, TextEdit, Uri, WorkspaceEdit,
 };
 
-use crate::line_index::{LineIndex, Utf16Position};
-use crate::position::line_index;
+use crate::position::{LineIndex, line_index, range, span};
 
 /// Compute the code actions for the diagnostics overlapping `range`.
 ///
@@ -64,8 +62,10 @@ pub fn code_actions(
     diagnostics: &[Diagnostic],
 ) -> Vec<CodeAction> {
     let index = line_index(db, file);
-    let uri = file_uri(db, file);
-    let sel = range_to_byte_span(&index, range);
+    let Some(uri) = crate::file_uri(file.path(db)) else {
+        return Vec::new();
+    };
+    let sel = span(index, range);
 
     let mut actions = Vec::new();
     for diag in diagnostics {
@@ -73,11 +73,11 @@ pub fn code_actions(
         if !spans_overlap(diag.span, sel) {
             continue;
         }
-        let resolves = || crate::lsp_diagnostic(db, file, &index, diag);
-        if let Some(a) = did_you_mean_action(&index, &uri, diag, resolves) {
+        let resolves = || crate::lsp_diagnostic(db, file, index, diag);
+        if let Some(a) = did_you_mean_action(index, &uri, diag, resolves) {
             actions.push(a);
         }
-        if let Some(a) = split_mapping_action(&index, &uri, diag, resolves) {
+        if let Some(a) = split_mapping_action(index, &uri, diag, resolves) {
             actions.push(a);
         }
     }
@@ -94,10 +94,7 @@ fn did_you_mean_action(
     resolves: impl FnOnce() -> LspDiagnostic,
 ) -> Option<CodeAction> {
     let dym = diag.did_you_mean.as_ref()?;
-    let edit = TextEdit::new(
-        byte_span_to_range(index, dym.wrong_span),
-        dym.replacement.clone(),
-    );
+    let edit = TextEdit::new(range(index, dym.wrong_span), dym.replacement.clone());
     Some(quick_fix(
         format!("Replace with `{}`", dym.replacement),
         uri.clone(),
@@ -124,7 +121,7 @@ fn split_mapping_action(
     resolves: impl FnOnce() -> LspDiagnostic,
 ) -> Option<CodeAction> {
     let snippet = diag.suggestion_source.as_ref()?;
-    let edit = TextEdit::new(byte_span_to_range(index, diag.span), snippet.clone());
+    let edit = TextEdit::new(range(index, diag.span), snippet.clone());
     Some(quick_fix(
         "Split mapping into one per ShEx OneOf disjunct".to_string(),
         uri.clone(),
@@ -166,66 +163,18 @@ fn quick_fix(
     }
 }
 
-/// Build the `file:` [`Uri`] for a source file from its interned path.
-/// `fossil-lsp` keys its open-document table by the URI string; the
-/// path stored on the `SourceFile` is that same string (or a bare filename in
-/// tests), so we round-trip it through `Uri::from_str`, prepending the `file://`
-/// scheme when the path is schemeless.
-fn file_uri(db: &dyn fossil_base::Db, file: SourceFile) -> Uri {
-    let path = file.path(db);
-    let candidate = if path.contains("://") {
-        path.clone()
-    } else if path.starts_with('/') {
-        format!("file://{path}")
-    } else {
-        format!("file:///{path}")
-    };
-    Uri::from_str(&candidate)
-        .unwrap_or_else(|_| Uri::from_str("file:///unknown").expect("valid uri"))
-}
-
-/// Convert a `fossil_base::Span` (byte offsets) to a UTF-16 LSP [`Range`].
-fn byte_span_to_range(index: &LineIndex, span: Span) -> Range {
-    Range {
-        start: to_position(index.position(span.start)),
-        end: to_position(index.position(span.end)),
-    }
-}
-
-/// Convert a UTF-16 LSP [`Range`] back to a byte-offset [`Span`] (for overlap
-/// testing against the diagnostics' byte spans). A range whose endpoints fall
-/// past EOF clamps to the file end.
-fn range_to_byte_span(index: &LineIndex, range: Range) -> Span {
-    let start = index.offset(from_position(range.start)).unwrap_or(u32::MAX);
-    let end = index.offset(from_position(range.end)).unwrap_or(u32::MAX);
-    Span::new(start.min(end), start.max(end))
-}
-
-const fn to_position(p: Utf16Position) -> Position {
-    Position {
-        line: p.line,
-        character: p.character,
-    }
-}
-
-const fn from_position(p: Position) -> Utf16Position {
-    Utf16Position {
-        line: p.line,
-        character: p.character,
-    }
-}
-
 /// Whether two byte spans intersect (touching endpoints count, so a zero-width
 /// selection at a span boundary still surfaces the action).
 const fn spans_overlap(a: Span, b: Span) -> bool {
     a.start <= b.end && b.start <= a.end
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
+    use fossil_base::System;
     use fossil_base::test_support::NativeSystem;
-    use fossil_base::{Problem, Severity, System};
+    use fossil_graph_schema::{Problem, Severity};
     use std::sync::Arc;
 
     fn db() -> fossil_base::FossilDb {
@@ -241,7 +190,7 @@ mod tests {
     fn whole(db: &fossil_base::FossilDb, file: SourceFile) -> Range {
         let idx = line_index(db, file);
         let len = u32::try_from(file.text(db).len()).unwrap_or(u32::MAX);
-        byte_span_to_range(&idx, Span::new(0, len))
+        range(idx, Span::new(0, len))
     }
 
     #[test]
@@ -310,7 +259,7 @@ mod tests {
             .with_did_you_mean(span, "name");
         // A range over just line 0 (bytes 0..27) does not intersect the typo.
         let idx = line_index(&db, f);
-        let r = byte_span_to_range(&idx, Span::new(0, 5));
+        let r = range(idx, Span::new(0, 5));
         let actions = code_actions(&db, f, r, &[diag]);
         assert!(
             actions.is_empty(),

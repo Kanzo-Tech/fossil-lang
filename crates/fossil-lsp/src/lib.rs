@@ -41,7 +41,7 @@
 //!   `Setter` (`set_text`), which BUMPS THE REVISION — the real cancellation
 //!   trigger (NOT a fictional `db.cancel_pending()`) — then republishes.
 //! - `textDocument/didClose` → forgets the buffer and publishes an empty list.
-//! - `textDocument/hover` → [`fossil_ide::hover_bidirectional`] (the
+//! - `textDocument/hover` → [`fossil_ide::hover()`] (the
 //!   target-side `ShEx` type is reachable whenever the program names its output
 //!   document — the editor supplies a filesystem, not a contract).
 //! - `textDocument/definition` → [`fossil_ide::goto_definition`] → `Location`s.
@@ -93,7 +93,7 @@ use lsp_types::request::{
 use lsp_types::{
     CodeActionProviderCapability, CompletionOptions, Diagnostic as LspDiagnostic,
     DocumentSymbolResponse, GotoDefinitionResponse, Hover, HoverContents, HoverProviderCapability,
-    Location, MarkupContent, MarkupKind, OneOf, PublishDiagnosticsParams, Range, SemanticTokens,
+    Location, MarkupContent, MarkupKind, OneOf, PublishDiagnosticsParams, SemanticTokens,
     SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, Uri, WorkDoneProgressOptions,
@@ -105,7 +105,7 @@ use lsp_types::{
 /// name, and the table of introspected input schemas. The LSP COMPILES
 /// programs, so it installs the same rows the native engine does: without them
 /// every program checks against no output contract, and the target-side halves
-/// of [`fossil_ide::hover_bidirectional`] / [`fossil_ide::completions`] go
+/// of [`fossil_ide::hover()`] / [`fossil_ide::completions`] go
 /// quietly empty for exactly the programs that declare a shape.
 ///
 /// It replaced `fossil_base::test_support::NativeSystem`, whose decoder table is the trait
@@ -165,23 +165,23 @@ impl System for LspSystem {
 /// answer there is `None`, and the document arrives — if it arrives — when the
 /// client opens it.
 ///
-/// Percent-escapes are NOT decoded. A workspace path containing one is read
-/// wrong today; the fix is a URI type at this seam, not a hand-rolled decoder.
+/// The URL Standard decodes it: a `%20` in the key is a space on disk.
 fn local_path(key: &str) -> Option<PathBuf> {
-    if let Some(rest) = key.strip_prefix("file://") {
-        return Some(PathBuf::from(rest));
+    if !key.contains("://") {
+        return Some(PathBuf::from(key));
     }
-    if key.contains("://") {
-        return None;
-    }
-    Some(PathBuf::from(key))
+    url::Url::parse(key)
+        .ok()
+        .filter(|u| u.scheme() == "file")?
+        .to_file_path()
+        .ok()
 }
 
 /// The LSP database.
 ///
 /// A `#[salsa::db]` struct carrying the Salsa runtime, the host [`System`] and
 /// the file registry. The target shape reaches
-/// [`fossil_ide::hover_bidirectional`] / [`fossil_ide::completions`] because
+/// [`fossil_ide::hover()`] / [`fossil_ide::completions`] because
 /// the PROGRAM names its output document and this host REGISTERS it — as a
 /// Salsa input, so an edit to the document re-checks the programs that read it.
 #[salsa::db]
@@ -324,10 +324,9 @@ impl LspState {
     /// Read the columns of every source the buffer names that this host can
     /// `stat`, and register them on [`LspSystem`]'s descriptor table.
     ///
-    /// **The buffer, not the file on disk.** `fossil_introspect::introspect_program`
-    /// is the sibling that opens a path, and it is the wrong one here: a source
-    /// line the user has typed and not saved is exactly the line whose columns
-    /// the editor needs, and the disk does not have it.
+    /// **The buffer, not the file on disk.** A source line the user has typed
+    /// and not saved is exactly the line whose columns the editor needs, and
+    /// the disk does not have it.
     ///
     /// # Two things this must not become
     ///
@@ -335,8 +334,8 @@ impl LspState {
     /// loop over one channel: a `didOpen` blocked on an `s3://` `DESCRIBE` is
     /// not one slow file, it is hover and completion dead in every other buffer
     /// until the read returns. A locator that is not a local path is dropped
-    /// here, and `fossil_introspect::Reach::Local` skips one this host cannot
-    /// `stat` — no connection opened, and the diagnostics that needed its
+    /// here, and `fossil_introspect::pre_introspect_and_register` skips one it
+    /// cannot `stat` — no connection opened, and the diagnostics that needed its
     /// columns stay absent. That gap is pinned by
     /// `tests/introspected_diagnostics.rs::a_remote_source_is_not_introspected_by_the_editor`.
     ///
@@ -370,12 +369,7 @@ impl LspState {
                 Some(fossil_lineage::ProgramSource { locator, ..source })
             })
             .collect();
-        fossil_introspect::pre_introspect_and_register(
-            &*self.db.system,
-            &sources,
-            &HashMap::new(),
-            fossil_introspect::Reach::Local,
-        );
+        fossil_introspect::pre_introspect_and_register(&*self.db.system, &sources);
     }
 
     /// Register every shape document `file` names that the database does not
@@ -467,9 +461,8 @@ pub fn server_capabilities() -> ServerCapabilities {
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
         completion_provider: Some(CompletionOptions {
-            // `.` opens field/property completion; `:` opens prefixed-name
-            // completion (after a `prefix:`).
-            trigger_characters: Some(vec![".".to_string(), ":".to_string()]),
+            // `.` opens field/property completion.
+            trigger_characters: Some(vec![".".to_string()]),
             ..CompletionOptions::default()
         }),
         document_symbol_provider: Some(OneOf::Left(true)),
@@ -505,7 +498,7 @@ pub fn handle_request(state: &LspState, req: Request) -> Response {
     }
 }
 
-/// `textDocument/hover` → [`fossil_ide::hover_bidirectional`] (target-aware
+/// `textDocument/hover` → [`fossil_ide::hover()`] (target-aware
 /// whenever the program names an output document). Renders Markdown with a
 /// UTF-16 range.
 fn handle_hover(state: &LspState, req: Request) -> Response {
@@ -519,13 +512,16 @@ fn handle_hover(state: &LspState, req: Request) -> Response {
     let Some(file) = state.get(uri) else {
         return null_response(req_id);
     };
-    let info = fossil_ide::hover_bidirectional(&state.db, file, pos.line, pos.character);
+    let info = fossil_ide::hover(&state.db, file, pos.line, pos.character);
     let payload = info.map(|hi| Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
             value: hi.markdown,
         }),
-        range: Some(byte_range_to_lsp_range(&state.db, file, hi.range)),
+        range: Some(fossil_ide::range(
+            fossil_ide::line_index(&state.db, file),
+            hi.range,
+        )),
     });
     result_response(req_id, &payload)
 }
@@ -548,10 +544,10 @@ fn handle_definition(state: &LspState, req: Request) -> Response {
     let locations: Vec<Location> = targets
         .into_iter()
         .filter_map(|t| {
-            let target_uri = Uri::from_str_maybe(t.file.path(&state.db))?;
+            let target_uri = fossil_ide::file_uri(t.file.path(&state.db))?;
             Some(Location {
                 uri: target_uri,
-                range: byte_range_to_lsp_range(&state.db, t.file, t.range),
+                range: fossil_ide::range(fossil_ide::line_index(&state.db, t.file), t.range),
             })
         })
         .collect();
@@ -592,8 +588,7 @@ fn handle_document_symbol(state: &LspState, req: Request) -> Response {
     result_response(req_id, &DocumentSymbolResponse::Nested(symbols))
 }
 
-/// `textDocument/semanticTokens/full` → [`fossil_ide::semantic_tokens`]
-/// (the spec-mandated flat `Vec<u32>` delta stream).
+/// `textDocument/semanticTokens/full` → [`fossil_ide::semantic_tokens`].
 fn handle_semantic_tokens(state: &LspState, req: Request) -> Response {
     let req_id = req.id.clone();
     let params = match extract::<SemanticTokensFullRequest, _>(req) {
@@ -603,10 +598,9 @@ fn handle_semantic_tokens(state: &LspState, req: Request) -> Response {
     let Some(file) = state.get(&params.text_document.uri) else {
         return null_response(req_id);
     };
-    let data = fossil_ide::semantic_tokens(&state.db, file);
     let payload = SemanticTokensResult::Tokens(SemanticTokens {
         result_id: None,
-        data: decode_to_lsp_tokens(&data),
+        data: fossil_ide::semantic_tokens(&state.db, file),
     });
     result_response(req_id, &payload)
 }
@@ -637,20 +631,6 @@ fn handle_code_action(state: &LspState, req: Request) -> Response {
         .map(lsp_types::CodeActionOrCommand::CodeAction)
         .collect();
     result_response(req_id, &payload)
-}
-
-/// Convert the flat `fossil_ide::semantic_tokens` `Vec<u32>` 5-tuple stream
-/// into the `lsp_types::SemanticToken` struct list (`SemanticTokens.data`).
-fn decode_to_lsp_tokens(data: &[u32]) -> Vec<lsp_types::SemanticToken> {
-    data.chunks_exact(5)
-        .map(|c| lsp_types::SemanticToken {
-            delta_line: c[0],
-            delta_start: c[1],
-            length: c[2],
-            token_type: c[3],
-            token_modifiers_bitset: c[4],
-        })
-        .collect()
 }
 
 /// Decode the params of a request typed by `R`. On a decode failure the `Err`
@@ -821,12 +801,6 @@ fn publish(uri: &Uri, diagnostics: Vec<LspDiagnostic>) -> Notification {
     }
 }
 
-/// Translate a byte-offset range (from a `fossil-ide` feature) to a UTF-16 LSP
-/// `Range`, resolving the file's memoised `LineIndex` first.
-fn byte_range_to_lsp_range(db: &LspDb, file: SourceFile, range: std::ops::Range<u32>) -> Range {
-    fossil_ide::byte_range_to_range(&fossil_ide::line_index(db, file), range)
-}
-
 /// Thin wrapper around [`Notification::extract`] — typed by `N`'s associated
 /// `METHOD` constant so a method/params-type mismatch becomes a compile error.
 fn cast_notif<N>(notif: Notification) -> Result<N::Params, lsp_server::ExtractError<Notification>>
@@ -834,24 +808,4 @@ where
     N: lsp_types::notification::Notification,
 {
     notif.extract::<N::Params>(N::METHOD)
-}
-
-/// Parse a path or URI string into an `lsp_types::Uri`. The LSP keys documents
-/// by URI; a `SourceFile.path` may be either a `file://` URI (from the LSP) or
-/// a bare path (from a test) — prepend `file://` when schemeless.
-trait UriExt: Sized {
-    fn from_str_maybe(s: &str) -> Option<Self>;
-}
-
-impl UriExt for Uri {
-    fn from_str_maybe(s: &str) -> Option<Self> {
-        use std::str::FromStr as _;
-        if s.contains("://") {
-            Self::from_str(s).ok()
-        } else if let Some(rest) = s.strip_prefix('/') {
-            Self::from_str(&format!("file:///{rest}")).ok()
-        } else {
-            Self::from_str(&format!("file://{s}")).ok()
-        }
-    }
 }

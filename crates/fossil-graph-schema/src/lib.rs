@@ -55,9 +55,10 @@ pub mod problem;
 pub mod shapes;
 pub mod span;
 
-pub use problem::{CODES, Failure, Foreign, Problem, RETIRED, Related, Severity, TEMPLATES};
+pub use problem::{CODES, Failure, Foreign, Problem, Related, Severity, TEMPLATES};
 pub use shapes::{
-    Occurs, OutputShapes, PropertyConstraint, Rejection, Renames, Shape, local_name, short_name,
+    Occurs, OutputShapes, PropertyConstraint, Rejection, Renames, SUBJECT_COLUMN, Shape,
+    local_name, short_name,
 };
 pub use span::Span;
 
@@ -160,7 +161,7 @@ impl Term {
 /// Materializers map it to their own vocabulary (`fossil.json` `string/int64/double/…`,
 /// `DataFusion` scalars, `DuckDB` column types) next to the materializer; only the
 /// xsd direction lives here, because xsd is the RDF border every side reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Primitive {
     String,
@@ -188,16 +189,20 @@ pub enum Cardinality {
     Multi,
 }
 
+/// The name a program reads: in a hover, a diagnostic, a completion's
+/// signature. The variant's own name — `AnyUri`, not the `snake_case` the wire
+/// carries.
+impl std::fmt::Display for Primitive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
+    }
+}
+
 impl Primitive {
     /// Parse an XSD datatype IRI into the lattice. Accepts all three spellings
     /// the tree carries: the full `http://www.w3.org/2001/XMLSchema#<name>` IRI,
     /// the `xsd:<name>` prefixed form, and the bare local name.
-    /// **This is the only xsd → [`Primitive`] table in the tree**, and
-    /// `crates/xtask/tests/xsd_table.rs` is what keeps it that way: it reads the
-    /// spellings and the variants out of this `match` and fails on a second
-    /// `match` anywhere in the repository that pairs them. Uniqueness was
-    /// asserted here and checked nowhere, which is how three copies of
-    /// [`local_name`] came to exist.
+    /// The only xsd → [`Primitive`] table in the tree.
     ///
     /// `None` for an XSD type outside the lattice — callers decide between a
     /// diagnostic and a `String` fallback, and they do differ: `ShEx` narrowing

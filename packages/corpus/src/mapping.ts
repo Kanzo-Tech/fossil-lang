@@ -11,7 +11,8 @@
  * consumer-side adapter, and why none of them.
  */
 
-import { parseManifest, type EdgeTable, type Manifest, type Property, type VertexTable } from './manifest.js';
+import type { EdgeTable, Manifest, Property, VertexTable } from './manifest.gen.js';
+import { parseManifest } from './manifest.js';
 import { ident } from './sql.js';
 
 /**

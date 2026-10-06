@@ -36,7 +36,8 @@
 //! produces an [`ErrorGuaranteed`]. `typecheck_mapping` returns `Err` when the
 //! body has even one type error.
 
-use fossil_base::{Diagnostic, ErrorGuaranteed, Problem, Severity, SourceFile, Span, SpanFrame};
+use fossil_base::{Diagnostic, ErrorGuaranteed, SourceFile, SpanFrame};
+use fossil_graph_schema::{Problem, Severity, Span};
 use salsa::Accumulator;
 use smol_str::SmolStr;
 
@@ -49,30 +50,12 @@ use crate::lower::{
     BinOp, HirExpr, HirProperty, InterpolationPart, PropertyKey, UnOp, lower_to_hir,
 };
 use crate::provenance::{ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind};
-use crate::shapes::{
-    NameCollision, Predicate, ResolvedShape, TargetShapeError, resolve_target_shape,
-};
+use crate::shapes::{NameCollision, Predicate, ResolvedShape, resolve_target_shape};
 use crate::spans::{Spans, mapping_header_span, spans};
 use crate::ty::display::render_ty_kind;
 use fossil_graph_schema::{Occurs, Primitive, Rejection};
 
 use crate::ty::{Rows, Ty, TyKind};
-
-// `BlamePos` stood here — a two-variant enum naming which side of a two-span
-// blame a position referred to. Both variants are gone, for opposite reasons.
-//
-// `Expr(ExprId)` had no constructor outside two subtyping tests, which passed
-// it as «some destination» while asserting something about the lattice. A
-// destination nothing designates is not a destination.
-//
-// `ShapeProperty` had one constructor and no payload, so [`compatible`] fell
-// back to the SOURCE expression's span and printed it into the message with
-// `{:?}`: a `Span { start: 102, end: 120 }` in front of an author, naming the
-// place the caret was already under. What the blame actually needs is the
-// property's name — the message says which slot refused the value — and that
-// is a `&str` parameter, not an enum. The second SPAN is in the `.shex`, and
-// `SpanLabel` cannot yet name another file; when it can, this grows a span
-// parameter rather than a variant.
 
 /// Per-mapping type-check output. The source of truth for per-expression types
 /// — `expr_types` reads it, not the reverse.
@@ -128,13 +111,7 @@ pub fn typecheck_mapping<'db>(
     // DOCUMENT, not by the mapping, so ten mappings checking against one
     // document share one decode. `tests/invalidation_regression.rs` carries the
     // full accounting.
-    let resolved_shape = match resolve_target_shape(db, mapping) {
-        Ok(shape) => shape,
-        Err(e) => {
-            surface_target_shape_error(db, mapping, &e);
-            None
-        }
-    };
+    let resolved_shape = resolve_target_shape(db, mapping);
 
     // The short-name table, and the collisions that make some names unwritable.
     // Built once per mapping: the body resolves every key against it, and a
@@ -191,52 +168,6 @@ pub fn typecheck_mapping<'db>(
         || Ok(TypeckOutput::new(db, expr_types, source_row, predicates)),
         Err,
     )
-}
-
-/// Report a target shape the program named and the document could not supply.
-///
-/// # Four arms stood here and none of them could fire
-///
-/// One per document failure — `Unregistered`, `Undecodable`, `Unparseable` and
-/// `Undeclared` — written because each had been a silent `None`. A mapping
-/// header names a bare LOCAL name now, `def_map` binds those positionally
-/// against the same decoded document, and every one of the four fails THERE
-/// first, so `resolve_target_shape` never returns them. They are deleted with
-/// the variants; `crate::shapes::TargetShapeError` records what is left and
-/// what it would take to remove it.
-///
-/// **The did-you-mean the `Undeclared` arm carried is not lost** — it moved to
-/// `crate::lower::unbound_shape_problem`, which is where a misspelt shape name
-/// is reported now. Its candidates changed with it, and correctly: that arm
-/// suggested over the shape IRIs a DOCUMENT declares, and what a header can
-/// misspell is a local NAME the program bound.
-///
-/// Informational-with-teeth, like [`crate::infer`]'s treatment of a source
-/// binding that resolved no shape: a `Diagnostic` is accumulated (so the CLI
-/// and the LSP show it) but the mapping is not poisoned — its body is still
-/// worth checking forward, and refusing to check it would report a second,
-/// invented error for every property.
-fn surface_target_shape_error<'db>(
-    db: &'db dyn fossil_base::Db,
-    mapping: MappingLoc<'db>,
-    e: &TargetShapeError,
-) {
-    // The mapping's header — `User : ex:Persn from users` — is where every one
-    // of these belongs: the shape name that did not resolve is written there,
-    // and so is the absence of a document. It used to be `Span { start: 0, end:
-    // 0 }`, which does not mean "no underline": the default frame is
-    // `MappingRelative`, so `rebase_to_file` turns it into `base..base` and the
-    // squiggle lands on the mapping's first byte — a plausible place and the
-    // wrong one. The commonest case is a misspelt shape name (`ex:Persn`).
-    let span = mapping_header_span(db, mapping);
-    let problem = match e {
-        TargetShapeError::NoDocument => Problem::NoDocument { binding: None },
-    };
-    let _eg = fossil_base::raise(
-        db,
-        Diagnostic::new(Severity::Error, problem, span)
-            .with_help("bring one in with `type { … } := io.shex(\"shop.shex\")`"),
-    );
 }
 
 /// Render the "split into N mappings" suggestion for a value disjunction:
@@ -831,7 +762,10 @@ impl Checker<'_> {
                     .find(|p| {
                         p.descendants_with_tokens()
                             .filter_map(fossil_syntax::SyntaxElement::into_token)
-                            .any(|t| t.kind() == SyntaxKind::AT_ATTR && t.text() == "@subject")
+                            .any(|t| {
+                                t.kind() == SyntaxKind::AT_ATTR
+                                    && t.text() == fossil_syntax::attr::SUBJECT
+                            })
                     })?
                     .children()
                     .find(|c| c.kind() == SyntaxKind::EXPR)
@@ -884,7 +818,7 @@ fn shape_iri_of<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> 
         .filter(|iri| !iri.is_empty())
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 #[path = "check_tests.rs"]
 mod tests;
 /// Compatibility check: is `actual` a subtype of `expected`, AND does
@@ -1535,17 +1469,6 @@ impl<'db> Expr<'db> {
         };
         Some(out)
     }
-
-    // `Checker::check` — checking mode — lived here, and its five callers were
-    // five tests. `typecheck_mapping` never called it: `check_property` runs its
-    // own `synth` + `compatible` because it has to resolve the predicate BEFORE
-    // the synth (an interpolation's type depends on what is expected of it), and
-    // that ordering is what a generic `check(expected)` could not express. What
-    // it carried that nothing else did was the implicit-closure fast-path, and
-    // that entry is dead: it fired on `TyKind::Fn`, which nothing constructs
-    // because the user declares no functions, over
-    // `expr_contains_free_field_refs`, which asked which
-    // sub-expressions read the anonymous row the language no longer has.
 
     /// Resolve a `.field` access against the source row.
     ///
@@ -2284,12 +2207,4 @@ impl<'db> Expr<'db> {
             (None, None) => None,
         }
     }
-
-    // `synthesize_closure` lived here — the implicit closure was the ONLY lambda
-    // form in the language, and it existed to give `.age >= 18` a row to read
-    // `.age` from. `grammar.bnf` names it dead in the same breath as `FieldRef`:
-    // a reference is qualified now (`User.age`), so it names its own row and
-    // there is nothing left to bind. Its one caller was `Checker::check`, above,
-    // and `ProvenanceKind::SynthesizedClosureRendering` is what remains of it —
-    // nothing in the workspace constructs that variant any more.
 }

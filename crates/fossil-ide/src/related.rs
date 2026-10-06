@@ -28,7 +28,8 @@
 //! the same reason, after the editor's hand-rolled copy of the second silently
 //! disagreed with the checker's on a `://` scheme.
 
-use fossil_base::{Db, Diagnostic, SourceFile, Span, file_at};
+use fossil_base::{Db, Diagnostic, SourceFile, file_at};
+use fossil_graph_schema::Span;
 use fossil_hir::documents::registry_key;
 
 /// One label, with the file it is in resolved.

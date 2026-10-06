@@ -1,80 +1,12 @@
-//! Repo-wide guard: no workspace crate LINKS an execution engine without
-//! saying so in `deny.toml`.
+//! Every workspace crate that LINKS a banned engine is in that engine's
+//! `wrappers` list in `deny.toml`.
 //!
-//! # The hole this closes
-//!
-//! `deny.toml`'s `[bans]` entry for `duckdb` says of its own list: *"adding a
-//! name here is declaring that crate native, and that is the review the rule
-//! exists to force."* That is the intent. The mechanism does not implement it.
-//!
-//! `cargo deny check bans` matches `wrappers` against the **direct parents** of
-//! the banned crate. A crate that reaches an engine one hop further away is
-//! invisible to it. Measured on 2026-08-25, with `fossil-lsp` freshly given a
-//! `fossil-introspect` dependency:
-//!
-//! ```text
-//! $ cargo tree -e normal -i duckdb --workspace
-//! duckdb v1.10502.0
-//! ├── fossil-introspect
-//! │   ├── fossil-cli
-//! │   └── fossil-lsp
-//! └── fossil-mcp
-//!
-//! $ cargo deny check bans
-//! bans ok
-//! ```
-//!
-//! Two crates link a bundled database, neither is in the list, and the gate is
-//! green. It is not specific to that edge either: **any** crate can acquire an
-//! engine transitively and nothing says so. The same measurement over
-//! `datafusion` found three undeclared linkers that had been there far longer,
-//! which is what makes this a hole rather than one bad commit.
-//!
-//! A review a gate cannot enforce is not a review, so the gate is extended
-//! rather than the comment strengthened.
-//!
-//! # What this proves
-//!
-//! **Every workspace member that would LINK a banned engine appears in that
-//! engine's `wrappers` list.** "Link" is the transitive closure over NORMAL
-//! dependency edges only — a dev-dependency puts the engine in a test binary,
-//! not in the crate, which is the distinction `deny.toml`'s reason strings
-//! already make by hand and get wrong.
-//!
-//! Both sides are read from the tree: the policy out of `deny.toml`, the truth
-//! out of `cargo metadata` — through `xtask::depgraph`. Nothing here writes a crate name down, which is the
-//! rule `crates/xtask/tests/tokio_placement.rs` establishes and the reason it is
-//! the model for this file. The one thing that IS written down — which crates
-//! may link an engine — is a policy choice that cannot be derived from anything,
-//! and it is written down exactly once, in the file cargo-deny already reads.
-//!
-//! # What this CANNOT prove
-//!
-//! - **That any of the declared crates SHOULD link an engine.** It proves the
-//!   list is complete, not that it is right: the repair comes from reading its
-//!   table, not from it.
-//! - **Anything about a feature-gated edge.** `cargo metadata`'s resolve graph
-//!   is taken as given, for the default feature set and the host target. A
-//!   dependency that only exists under a non-default feature is counted as
-//!   present, and one behind a `cfg` for another platform is not counted at all.
-//!   Both are conservative in the direction of over-reporting a link, which is
-//!   the safe direction for this question.
-//! - **That `cargo deny` agrees.** It runs neither cargo-deny nor its resolver.
-//!   The two read the same file and answer adjacent questions — direct parent
-//!   versus transitive linker — and this one deliberately does not restate the
-//!   other's verdict.
-//! - **That the engines are the right ones to police.** The set is whatever
-//!   `deny.toml` bans WITH a `wrappers` list, so a ban with no wrappers (an
-//!   outright strike-from-stack entry like `sqlx`) is not this file's business.
-//!
-//! # Why it lives in `xtask`
-//!
-//! Same reason as `tokio_placement.rs` and `snapshot_hygiene.rs`: `xtask` is the
-//! crate whose subject is the repository, it can read every sibling's manifest
-//! without inventing a dependency, and it is nobody's dependency, so this stays
-//! green while the compiler is red. No new CI step — `cargo test --workspace`
-//! runs it, and `CONTRIBUTING.md` is explicit that a second gate over an
-//! existing `cargo test` is one idea in two places.
+//! `cargo deny check bans` matches `wrappers` against the banned crate's DIRECT
+//! parents only, so a crate that reaches `duckdb` or `datafusion` one hop away
+//! passes it. This takes the transitive closure over normal edges (a
+//! dev-dependency links the engine into a test binary, not the crate), from
+//! `cargo metadata` through `xtask::depgraph`, against the lists `deny.toml`
+//! already holds. A ban with no `wrappers` is an outright strike and is skipped.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -155,7 +87,7 @@ fn table(engine: &str, declared: &BTreeSet<String>, linkers: &BTreeSet<String>) 
 
 #[test]
 fn no_crate_links_an_engine_without_declaring_it() {
-    let meta = depgraph::metadata();
+    let meta = depgraph::metadata(None);
     let policy = declared_wrappers(&deny_toml());
 
     // The guard's own premise. An empty policy means it asserted nothing, which
@@ -214,7 +146,7 @@ fn no_crate_links_an_engine_without_declaring_it() {
 /// dependency entirely, or was renamed, and the list kept the name.
 #[test]
 fn every_declared_wrapper_still_reaches_its_engine() {
-    let meta = depgraph::metadata();
+    let meta = depgraph::metadata(None);
     let policy = declared_wrappers(&deny_toml());
     let members = depgraph::member_names(&meta);
 

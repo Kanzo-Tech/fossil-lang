@@ -34,19 +34,9 @@ import {
 } from '@codemirror/autocomplete';
 import { EditorState, type Extension } from '@codemirror/state';
 
-import { positionOf } from './positions.js';
+import type { CompletionKind, CompletionRow } from '@fossil-lang/types';
 
-/** The `CompletionRow` shape, restated structurally so this module imports no
- *  runtime. `@fossil-lang/wasm` is the definition. */
-export interface CompletionRowLike {
-  label: string;
-  /** The LSP `CompletionItemKind`, by name — `"function"`, `"field"`. `""`
-   *  when the compiler set none. */
-  kind: string;
-  detail: string;
-  /** What a pick writes — the label, or its quoted spelling (`"Person.id"`). */
-  insert: string;
-}
+import { positionOf } from './positions.js';
 
 /** What {@link fossilCompletion} calls. Takes the text for the same reason
  *  {@link CheckSource} does — see the note in `hover.ts`. */
@@ -54,47 +44,19 @@ export type CompletionRowSource = (
   text: string,
   line: number,
   character: number,
-) => readonly CompletionRowLike[] | Promise<readonly CompletionRowLike[]>;
+) => readonly CompletionRow[] | Promise<readonly CompletionRow[]>;
 
 /**
  * LSP kind name → the vocabulary CodeMirror draws an icon for.
  *
- * The two halves of this boundary each own the half they can check. Rust owns
- * *which* kinds exist and their names, and `every_lsp_kind_has_a_name` is the
- * test — that is why `kind` crosses as a name and never as a number. What
- * CodeMirror calls each one is a CodeMirror fact, so it is here: LSP's `field`
- * and `property` are both CodeMirror's `property`, and its icon set has no
- * `field`.
- *
- * A name this table does not have is `undefined`, which CodeMirror renders as
- * an option with no icon — legible, and not a crash.
+ * Rust owns *which* kinds exist ({@link CompletionKind}, generated), and the
+ * `Record` over that union is what makes a new one a type error here. What
+ * CodeMirror calls each one is a CodeMirror fact, so it is here: its icon set
+ * has no `field`, and an LSP field is its `property`.
  */
-const CM_TYPE: Readonly<Record<string, string>> = {
-  text: 'text',
-  method: 'method',
+const CM_TYPE: Readonly<Record<CompletionKind, string>> = {
   function: 'function',
-  constructor: 'function',
   field: 'property',
-  variable: 'variable',
-  class: 'class',
-  interface: 'interface',
-  module: 'namespace',
-  property: 'property',
-  unit: 'constant',
-  value: 'constant',
-  enum: 'enum',
-  keyword: 'keyword',
-  snippet: 'text',
-  color: 'constant',
-  file: 'text',
-  reference: 'variable',
-  folder: 'text',
-  enum_member: 'enum',
-  constant: 'constant',
-  struct: 'class',
-  event: 'variable',
-  operator: 'keyword',
-  type_parameter: 'type',
 };
 
 /** One compiler row as a CodeMirror option.
@@ -102,8 +64,8 @@ const CM_TYPE: Readonly<Record<string, string>> = {
  *  CodeMirror filters on `label` and inserts it, so `label` is what the author
  *  types — the spelling, `"Person.id"` — and the column's own name is what the
  *  list shows. */
-export function toCompletion(row: CompletionRowLike): Completion {
-  const type = CM_TYPE[row.kind];
+export function toCompletion(row: CompletionRow): Completion {
+  const type = row.kind === undefined ? undefined : CM_TYPE[row.kind];
   return {
     label: row.insert,
     ...(row.insert === row.label ? {} : { displayLabel: row.label }),
@@ -131,7 +93,7 @@ export function fossilCompletionSource(source: CompletionRowSource) {
     // catalogue, which is what an explicit request is for.
     if (!context.explicit && (word === null || word.from === word.to)) return null;
     const { line, character } = positionOf(context.state, context.pos);
-    let rows: readonly CompletionRowLike[];
+    let rows: readonly CompletionRow[];
     try {
       rows = await source(context.state.doc.toString(), line, character);
     } catch {

@@ -35,6 +35,13 @@ impl Span {
         Self { start, end }
     }
 
+    /// This span moved `by` bytes later — from one frame's offsets into an
+    /// enclosing frame's.
+    #[must_use]
+    pub const fn shifted(self, by: u32) -> Self {
+        Self::new(self.start.saturating_add(by), self.end.saturating_add(by))
+    }
+
     /// The text this span selects, or `None` when it does not fall on a
     /// character boundary of `src`.
     ///
@@ -45,6 +52,18 @@ impl Span {
     #[must_use]
     pub fn slice(self, src: &str) -> Option<&str> {
         src.get(self.start as usize..self.end as usize)
+    }
+}
+
+impl From<Span> for std::ops::Range<u32> {
+    fn from(span: Span) -> Self {
+        span.start..span.end
+    }
+}
+
+impl From<std::ops::Range<u32>> for Span {
+    fn from(range: std::ops::Range<u32>) -> Self {
+        Self::new(range.start, range.end)
     }
 }
 

@@ -89,7 +89,6 @@ impl MappingHeader {
     }
 
     /// The header's `ShapeExpr` (`Person` in `Users : Person from Adults`).
-    /// `fossil_hir`'s `ItemTree` consumes this to build `Mapping.shape_id`.
     #[must_use]
     pub fn shape_expr(&self) -> Option<items::ShapeExpr> {
         self.0.children().find_map(items::ShapeExpr::cast)

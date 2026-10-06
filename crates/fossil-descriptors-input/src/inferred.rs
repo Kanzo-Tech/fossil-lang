@@ -19,9 +19,10 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 /// One column from a host-introspected source.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InferredColumn {
     /// Column name as introspected (`DuckDB` `column_name`).
+    #[schemars(with = "String")]
     pub name: SmolStr,
     /// The column's place in the lattice — the same enum the checker types
     /// against, so a host sends `"integer"`, not a name the consumer has to
@@ -36,13 +37,14 @@ pub struct InferredColumn {
 /// Identified by the source **URI**, which is what the descriptor is about: a
 /// binding name is a name for the *program*'s convenience, and two of them can
 /// point at one file.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InferredDescriptor {
     /// The source URI exactly as written in the program — the string inside
     /// `io.csv("examples/users.csv")`. NOT the resolved locator: the host
     /// resolves (`@conn` aliases, a program-relative path, a signed URL) in
     /// order to *read* the source, but the checker only ever sees what the
     /// program says, so that is the only string both ends can agree on.
+    #[schemars(with = "String")]
     pub uri: SmolStr,
     /// Ordered columns; the order is the source's own and is significant.
     pub columns: Vec<InferredColumn>,

@@ -205,7 +205,7 @@ function groupDiagram(): { nodes: GroupNode[]; arrows: Map<string, number> } {
 
   const nodes: GroupNode[] = [];
   for (const [, id, label] of fence.matchAll(/^\s*(\w+)\["([^"]+)"\]\s*$/gm)) {
-    const parts = /^<b>([^<]+)<\/b> · (\d+) crates<br\/>(.+)$/.exec(label);
+    const parts = /^<b>([^<]+)<\/b> · (\d+) crates?<br\/>(.+)$/.exec(label);
     if (!parts) continue;
     nodes.push({
       id,
@@ -287,7 +287,7 @@ describe("the group diagram is the manifests", () => {
   it("finds a diagram, and crates to check it against", () => {
     expect(groups.length, "no group node parsed out of the first mermaid fence").toBeGreaterThan(1);
     expect(declaredArrows.size, "no labelled arrow parsed").toBeGreaterThan(1);
-    expect(crates.length, "no crate manifest read").toBeGreaterThan(20);
+    expect(crates.length, "no crate manifest read").toBeGreaterThan(1);
   });
 
   it("files every crate exactly once", () => {

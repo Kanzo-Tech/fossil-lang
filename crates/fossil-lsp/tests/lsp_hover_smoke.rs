@@ -28,8 +28,6 @@
 //! real path, letting the server resolve `io.shex("hover.shex")` beside it the
 //! way it does in an editor.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 mod common;
 
 use common::{did_open, drive, notif, req, text_pos};
@@ -122,8 +120,8 @@ fn lsp_hover_on_the_identity_returns_markdown_naming_a_reference() {
         "expected hover markdown to contain a fenced fossil code block; got {value:?}",
     );
     assert!(
-        value.contains("Literal"),
-        "expected hover markdown to mention the Literal provenance kind; got {value:?}",
+        value.contains("*from a literal*"),
+        "expected hover markdown to name the literal provenance; got {value:?}",
     );
 
     // The initialize response: id == 1, hover_provider advertised.
@@ -168,8 +166,9 @@ fn lsp_hover_on_the_identity_returns_markdown_naming_a_reference() {
 // `result.contents.value` would carry over JSON-RPC.
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{FossilDb, Span, System};
+use fossil_base::{FossilDb, System};
 use fossil_graph_schema::Primitive;
+use fossil_graph_schema::Span;
 use fossil_hir::body::ExprId;
 use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};
 use fossil_hir::ty::{Ty, TyKind};
@@ -201,66 +200,6 @@ fn users_descriptor() -> fossil_descriptors_input::InferredDescriptor {
 fn bare_db() -> FossilDb {
     let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     FossilDb::new(system)
-}
-
-/// Hovering on `.age` inside an implicitly-synthesised closure surfaces BOTH
-/// the field type `Integer` AND the closure parameter binding
-/// `(row: Record<...>) => row.age >= 18` — the synthesis is NOT hidden.
-///
-/// Direct integration, for the reason above: the `SynthesizedClosureRendering`
-/// provenance recorded on the closure body's `ExprId` is fed to the public
-/// `fossil_ide::hover::render_markdown`, asserting the LSP hover Markdown body.
-#[test]
-fn hover_inside_synthesized_closure_via_typecheck_mapping() {
-    let db = bare_db();
-    let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
-    // The closure rendering for `users |> filter(.age >= 18)`, written out by
-    // hand because the
-    // function that produced it, `fossil_hir::check::render_closure`, is
-    // deleted along with `synthesize_closure` — so this asserts the RENDERING
-    // of a provenance kind nothing produces. It survives only until
-    // `ProvenanceKind::SynthesizedClosureRendering` itself goes.
-    let rendering = smol_str::SmolStr::from("(row: Record<{age: Integer}>) => row.age >= 18");
-    let entry = ExprTypeEntry {
-        expr_id: ExprId(0),
-        ty: int_ty,
-        provenance: Provenance {
-            span: Span { start: 0, end: 0 },
-            kind: ProvenanceKind::SynthesizedClosureRendering { rendering },
-        },
-    };
-
-    let md = fossil_ide::hover::render_markdown(&db, &entry);
-
-    // (a) closure rendering prefix + arrow + rewritten FieldRef.
-    assert!(
-        md.contains("(row: Record<"),
-        "hover must show the closure parameter binding; got {md:?}",
-    );
-    assert!(
-        md.contains(") =>"),
-        "hover must show the closure arrow; got {md:?}"
-    );
-    assert!(
-        md.contains("row.age"),
-        "hover must show the rewritten FieldRef `row.age`; got {md:?}",
-    );
-    // (b) field type from forward propagation.
-    assert!(
-        md.contains("Integer"),
-        "hover must show the field type `Integer`; got {md:?}",
-    );
-    // (c) the synthesis tagline so the user understands WHY the closure appears.
-    assert!(
-        md.contains("synthesised closure parameter binding"),
-        "hover must explain the implicit synthesis; got {md:?}",
-    );
-    // Risk Register (STATE.md "Do NOT"): internal inference state must NEVER leak.
-    assert!(!md.contains("Unknown"), "hover leaked `Unknown`: {md:?}");
-    assert!(
-        !md.contains("InferenceId"),
-        "hover leaked `InferenceId`: {md:?}"
-    );
 }
 
 /// `FieldRef` hover OUTSIDE a closure: a `.field` resolved against an
@@ -303,7 +242,7 @@ fn hover_on_introspected_fieldref_outside_closure() {
         },
     };
 
-    let md = fossil_ide::hover::render_markdown(&db, &entry);
+    let md = fossil_ide::hover::render_markdown(&db, &entry, None);
     assert!(
         md.contains("String"),
         "hover on an introspected FieldRef must show the field type `String`; got {md:?}",

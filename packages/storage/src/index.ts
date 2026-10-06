@@ -13,9 +13,9 @@
  * WASM — the same Rust a native host renders its secrets with, and the same `object_store` stores
  * `DataFusion` reads through.
  */
-// The renewal's two figures, for a host sizing what it vends: a credential that lives less than
-// `RENEW_BEFORE_MS` is renewed as soon as it is mounted.
-export { mount, RENEW_BEFORE_MS, RETRY_MS, type Mount } from './mount.js';
+// A renewal that failed is tried again after `RETRY_MS`; a credential that lives less than
+// `@fossil-lang/types`' `RENEW_BEFORE_MS` is renewed as soon as it is mounted.
+export { mount, RETRY_MS, type Mount } from './mount.js';
 export { read, type ReadResult, type Target } from './objects.js';
 export { resolveDocuments } from './documents.js';
 export { initStorage, type InitInput } from './wasm.js';

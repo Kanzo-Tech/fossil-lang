@@ -2,7 +2,7 @@
 //!
 //! Three refusals — a constructor no host installs, a capability the row does
 //! not declare, an extension the row does not accept. The refusal itself is a
-//! [`fossil_base::Problem`] (`provider/unknown`, `provider/wrong-capability`,
+//! [`fossil_graph_schema::Problem`] (`provider/unknown`, `provider/wrong-capability`,
 //! `provider/wrong-extension`); what lives here is the `help:` line under it,
 //! which names the alternatives, because a reader who guessed `io.linkml` needs
 //! the list more than the refusal.

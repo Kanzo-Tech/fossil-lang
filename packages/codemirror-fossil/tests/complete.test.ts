@@ -8,11 +8,12 @@
  */
 import { EditorState } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
+import type { CompletionRow } from '@fossil-lang/types';
 import { describe, expect, it } from 'vitest';
 
-import { fossilCompletionSource, toCompletion, type CompletionRowLike } from '../src/complete.js';
+import { fossilCompletionSource, toCompletion } from '../src/complete.js';
 
-const rows: CompletionRowLike[] = [
+const rows: CompletionRow[] = [
   { label: 'trim', kind: 'function', detail: 'str.trim(String) -> String', insert: 'trim' },
   { label: 'upper', kind: 'function', detail: '', insert: 'upper' },
 ];
@@ -24,17 +25,12 @@ function contextAt(doc: string, pos: number, explicit = false): CompletionContex
 describe('toCompletion', () => {
   it('maps the LSP kind name onto CodeMirror’s vocabulary', () => {
     expect(toCompletion({ label: 'x', kind: 'function', detail: '', insert: 'x' }).type).toBe('function');
-    // LSP has `field` and CodeMirror does not; both of LSP's field-ish kinds
-    // are CodeMirror's `property`.
+    // LSP has `field` and CodeMirror does not: it is CodeMirror's `property`.
     expect(toCompletion({ label: 'x', kind: 'field', detail: '', insert: 'x' }).type).toBe('property');
-    expect(toCompletion({ label: 'x', kind: 'property', detail: '', insert: 'x' }).type).toBe('property');
   });
 
-  it('leaves the type off for a kind it does not know, rather than guessing', () => {
-    // A kind appended by a compiler newer than this host. No icon beats a wrong
-    // icon, and it must not throw.
-    expect(toCompletion({ label: 'x', kind: 'quasar', detail: '', insert: 'x' }).type).toBeUndefined();
-    expect(toCompletion({ label: 'x', kind: '', detail: '', insert: 'x' }).type).toBeUndefined();
+  it('leaves the type off for an item with no kind', () => {
+    expect(toCompletion({ label: 'x', detail: '', insert: 'x' }).type).toBeUndefined();
   });
 
   it('omits an empty detail instead of rendering a blank line', () => {
@@ -44,7 +40,7 @@ describe('toCompletion', () => {
 });
 
 describe('a quoted member', () => {
-  const quoted: CompletionRowLike = {
+  const quoted: CompletionRow = {
     label: 'Person.id',
     kind: 'field',
     detail: 'source field : String',

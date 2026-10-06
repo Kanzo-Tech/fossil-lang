@@ -13,8 +13,6 @@
 //! op does not read still writes every row, and every one of those suites would
 //! stay green.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 #[path = "support/native.rs"]
 mod native;
 mod support;

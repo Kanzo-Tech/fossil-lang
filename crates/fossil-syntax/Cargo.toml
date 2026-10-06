@@ -15,11 +15,15 @@ workspace = true
 
 [dependencies]
 fossil-base = { path = "../fossil-base" }
+# `Problem`, `Severity` and `Span` — the diagnostic vocabulary the parser reports in.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 salsa = { workspace = true }
 rowan = { workspace = true }
 logos = { workspace = true }
 text-size = { workspace = true }
 smol_str = { workspace = true }
+serde = { workspace = true }
+schemars = { workspace = true }
 
 [dev-dependencies]
 # `NativeSystem` and the line-format decoder moved out of `fossil-base`'s

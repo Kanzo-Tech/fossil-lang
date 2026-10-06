@@ -180,6 +180,10 @@ impl From<OutputShapes> for OutputShapesRepr {
     }
 }
 
+/// The column a pivoted RDF row carries its entity IRI in — the row a
+/// shape types and the RDF reader writes.
+pub const SUBJECT_COLUMN: &str = "subject";
+
 /// One shape: a set of predicates a subject of this type may carry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Shape {
@@ -188,6 +192,10 @@ pub struct Shape {
     pub iri: String,
     /// The predicates, in the order the document lists them.
     pub properties: Vec<PropertyConstraint>,
+    /// Where the DOCUMENT declares this shape — its label — as a byte range
+    /// into that document's text. `None` on the same terms as
+    /// [`PropertyConstraint::span`].
+    pub span: Option<Span>,
 }
 
 // `closed` was a field here — `ShEx` `CLOSED` / SHACL `sh:closed` — and its doc
@@ -519,6 +527,7 @@ mod tests {
         Shape {
             iri: iri.into(),
             properties,
+            span: None,
         }
     }
 

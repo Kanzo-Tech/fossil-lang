@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "What a native host does before compiling: DESCRIBE each source's columns, and hold the credentials that let it."
+description = "What a native host does before compiling: DESCRIBE each source's columns."
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -27,19 +27,12 @@ fossil-lineage = { path = "../fossil-lineage" }
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # `Primitive`, the lattice a DuckDB column type maps onto.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-# `ResolvedPath::create_secret_sql` — the ONE place a `CREATE SECRET` is
-# rendered, for a connection secret and a vended credential alike.
-fossil-storage = { path = "../fossil-storage" }
-
 # The engine that DESCRIBES, on this side of the seam. The browser's side is the
 # host's DuckDB-WASM, reached through `@fossil-lang/introspect` — same engine,
-# same dialect, which is what keeps `rust-parity.test.ts` meaningful.
+# same dialect, which is what lets both sides read their type table out of `catalogue.bnf`.
 duckdb = { workspace = true }
 
 smol_str = { workspace = true }
-# Credentials never ride argv/env — kept off Debug via SecretString.
-secrecy = { workspace = true }
-miette = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
@@ -47,6 +40,4 @@ tracing = { workspace = true }
 # what lets these tests have a host without depending on one: a host that
 # depends on this crate would be a cycle.
 fossil-base = { path = "../fossil-base", features = ["test-support"] }
-# `SourceAnchor`, for the test that pins the creds projection it is built from.
-fossil-locator = { path = "../fossil-locator" }
 tempfile = { workspace = true }

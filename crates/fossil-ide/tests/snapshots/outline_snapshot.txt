@@ -1,0 +1,5 @@
+variable   users            @ 2:0-4:0
+class      User             @ 4:0-7:0
+interface  Person           @ 4:7-4:13
+class      Org              @ 7:0-9:0
+interface  Organization     @ 7:6-7:18

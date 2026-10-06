@@ -6,7 +6,7 @@
  * Pure, and needs no module: it reads the list `providers()` answered, so a host filtering a
  * listing of a thousand files asks the module once.
  */
-import type { ProviderInfo, SourceRefInfo } from './index.js';
+import type { ProviderInfo, SourceRefInfo } from '@fossil-lang/types';
 
 /**
  * The provider that reads `path` in `role`, by its extension, case-insensitively — or `undefined`
@@ -25,7 +25,8 @@ export function providerFor(
   role: SourceRefInfo['role'],
   providers: readonly ProviderInfo[],
 ): ProviderInfo | undefined {
-  const name = path.replace(/[?#].*$/, '').split('/').pop() ?? '';
+  const cut = path.search(/[?#]/);
+  const name = (cut < 0 ? path : path.slice(0, cut)).split('/').pop() ?? '';
   const dot = name.lastIndexOf('.');
   if (dot <= 0) return undefined;
   const extension = name.slice(dot + 1).toLowerCase();

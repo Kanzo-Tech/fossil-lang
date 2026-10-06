@@ -13,8 +13,6 @@
 //!   - a typed edge `KB --hasProject--> Project` (a `ShEx` shape-ref);
 //!   - multi-valued: the two `hasProject` objects unroll (UNNEST) into two edges.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use fossil_sinks::manifest::{EdgeTable, Manifest, VertexTable};
 
 #[path = "support/native.rs"]

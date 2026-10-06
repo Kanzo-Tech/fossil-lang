@@ -12,17 +12,12 @@ import { EditorView } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { describe, expect, it } from 'vitest';
 
-import {
-  buildDecorations,
-  type SemanticTokenRowLike,
-  type TokenSource,
-} from '../src/highlight.js';
+import type { SemanticTokenRow, TokenRow } from '@fossil-lang/types';
 
-/** A legend in the shape `tokenKinds()` returns, and rows in `tokenize()`'s. */
-const LEGEND = ['Whitespace', 'Comment', 'KwFrom', 'Ident', 'String'];
+import { buildDecorations, type TokenSource } from '../src/highlight.js';
 
-function source(rows: { kind: number; start: number; end: number }[]): TokenSource {
-  return { tokenize: () => rows, tokenKinds: () => LEGEND };
+function source(rows: TokenRow[]): TokenSource {
+  return { tokenize: () => rows };
 }
 
 /** A style that gives every tag we test a class we can recognise. */
@@ -60,9 +55,9 @@ describe('buildDecorations', () => {
     const got = ranges(
       v,
       source([
-        { kind: 1, start: 0, end: 7 }, // Comment
-        { kind: 2, start: 8, end: 12 }, // KwFrom
-        { kind: 4, start: 13, end: 16 }, // String
+        { kind: 'Comment', start: 0, end: 7 },
+        { kind: 'KwFrom', start: 8, end: 12 },
+        { kind: 'String', start: 13, end: 16 },
       ]),
     );
     expect(got).toEqual([
@@ -77,7 +72,7 @@ describe('buildDecorations', () => {
     // `highlightingFor` returns null with no style in the facet. Painting a
     // fallback palette here would fight whatever theme the host actually has.
     const v = view('from "x"', []);
-    expect(ranges(v, source([{ kind: 2, start: 0, end: 4 }]))).toEqual([]);
+    expect(ranges(v, source([{ kind: 'KwFrom', start: 0, end: 4 }]))).toEqual([]);
     v.destroy();
   });
 
@@ -87,32 +82,12 @@ describe('buildDecorations', () => {
       ranges(
         v,
         source([
-          { kind: 3, start: 0, end: 1 }, // Ident
-          { kind: 0, start: 1, end: 2 }, // Whitespace
-          { kind: 3, start: 2, end: 3 }, // Ident
+          { kind: 'Ident', start: 0, end: 1 },
+          { kind: 'Whitespace', start: 1, end: 2 },
+          { kind: 'Ident', start: 2, end: 3 },
         ]),
       ),
     ).toEqual([]);
-    v.destroy();
-  });
-
-  it('shifts every offset past a multi-byte character', () => {
-    // "// añ" is 5 characters and 6 bytes; the token after it starts at byte 6 and
-    // at code unit 5. Getting this wrong colours the wrong text and throws nothing.
-    const doc = '// añ\nfrom';
-    const v = view(doc);
-    const got = ranges(
-      v,
-      source([
-        { kind: 1, start: 0, end: 6 }, // Comment, bytes
-        { kind: 2, start: 7, end: 11 }, // KwFrom, bytes
-      ]),
-    );
-    expect(got).toEqual([
-      [0, 5, 'tok-comment'],
-      [6, 10, 'tok-keyword'],
-    ]);
-    expect(v.state.doc.sliceString(6, 10)).toBe('from');
     v.destroy();
   });
 
@@ -122,7 +97,6 @@ describe('buildDecorations', () => {
       tokenize: () => {
         throw new Error('null pointer passed to rust');
       },
-      tokenKinds: () => LEGEND,
     };
     expect(ranges(v, broken)).toEqual([]);
     v.destroy();
@@ -136,7 +110,6 @@ describe('buildDecorations', () => {
         called = true;
         return [];
       },
-      tokenKinds: () => LEGEND,
     };
     expect(ranges(v, counting, 2)).toEqual([]);
     expect(called).toBe(false);
@@ -145,24 +118,20 @@ describe('buildDecorations', () => {
 
   it('drops a zero-width token rather than letting RangeSetBuilder throw', () => {
     const v = view('from');
-    expect(ranges(v, source([{ kind: 2, start: 2, end: 2 }]))).toEqual([]);
+    expect(ranges(v, source([{ kind: 'KwFrom', start: 2, end: 2 }]))).toEqual([]);
     v.destroy();
   });
 });
 
 describe('buildDecorations — the semantic layer', () => {
-  /** The lexer's legend, extended with `KwAnd` for the fill rule. */
-  const KINDS = [...LEGEND, 'KwAnd'];
-
   /** One-line rows: `[from, to, kind, modifiers]` as UTF-16 columns on line 0. */
   function semantic(
-    lexical: { kind: number; start: number; end: number }[],
+    lexical: TokenRow[],
     rows: [number, number, string, string[]?][],
   ): TokenSource {
     return {
       tokenize: () => lexical,
-      tokenKinds: () => KINDS,
-      semanticTokens: (): SemanticTokenRowLike[] =>
+      semanticTokens: (): SemanticTokenRow[] =>
         rows.map(([from, to, kind, modifiers = []]) => ({
           range: { start: { line: 0, character: from }, end: { line: 0, character: to } },
           kind,
@@ -178,8 +147,8 @@ describe('buildDecorations — the semantic layer', () => {
       v,
       semantic(
         [
-          { kind: 3, start: 0, end: 5 },
-          { kind: 3, start: 8, end: 14 },
+          { kind: 'Ident', start: 0, end: 5 },
+          { kind: 'Ident', start: 8, end: 14 },
         ],
         [
           [0, 5, 'variable', ['declaration']],
@@ -201,7 +170,7 @@ describe('buildDecorations — the semantic layer', () => {
     const got = ranges(
       v,
       semantic(
-        [{ kind: 4, start: 0, end: 13 }],
+        [{ kind: 'String', start: 0, end: 13 }],
         [
           [0, 1, 'string'],
           [1, 6, 'namespace'],
@@ -225,8 +194,8 @@ describe('buildDecorations — the semantic layer', () => {
       v,
       semantic(
         [
-          { kind: 3, start: 0, end: 4 },
-          { kind: 5, start: 7, end: 10 },
+          { kind: 'Ident', start: 0, end: 4 },
+          { kind: 'KwAnd', start: 7, end: 10 },
         ],
         [
           [0, 4, 'keyword'],
@@ -244,8 +213,7 @@ describe('buildDecorations — the semantic layer', () => {
   it('keeps the lexical layer when the semantic call throws', () => {
     const v = view('from');
     const src: TokenSource = {
-      tokenize: () => [{ kind: 2, start: 0, end: 4 }],
-      tokenKinds: () => LEGEND,
+      tokenize: () => [{ kind: 'KwFrom', start: 0, end: 4 }],
       semanticTokens: () => {
         throw new Error('the workspace is busy');
       },
@@ -257,7 +225,7 @@ describe('buildDecorations — the semantic layer', () => {
   it('leaves the lexical colour where the semantic kind has no tag', () => {
     const v = view('"x"');
     expect(
-      ranges(v, semantic([{ kind: 4, start: 0, end: 3 }], [[0, 3, 'string']])),
+      ranges(v, semantic([{ kind: 'String', start: 0, end: 3 }], [[0, 3, 'string']])),
     ).toEqual([[0, 3, 'tok-string']]);
     v.destroy();
   });

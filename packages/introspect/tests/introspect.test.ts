@@ -5,11 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildDescriptor,
   describeSql,
-  duckdbTypeToFossilPrimitive,
   introspect,
   type DescribeRow,
   type IntrospectIO,
 } from "../src/index.js";
+import { duckdbPrimitive } from "../src/catalogue.generated.js";
 
 
 /** Rows as the columns an engine answers in. */
@@ -29,31 +29,32 @@ function tableOf(rows: readonly Record<string, unknown>[]): Table {
   };
 }
 
-describe("duckdbTypeToFossilPrimitive", () => {
+describe("duckdbPrimitive", () => {
   it("maps integer family to integer", () => {
     for (const t of ["INTEGER", "BIGINT", "INT", "SMALLINT", "TINYINT", "HUGEINT"]) {
-      expect(duckdbTypeToFossilPrimitive(t)).toBe("integer");
+      expect(duckdbPrimitive(t)).toBe("integer");
     }
   });
 
   it("maps float family + DECIMAL(p,s) to Float", () => {
     for (const t of ["DOUBLE", "FLOAT", "REAL", "DECIMAL(10,2)"]) {
-      expect(duckdbTypeToFossilPrimitive(t)).toBe("float");
+      expect(duckdbPrimitive(t)).toBe("float");
     }
   });
 
   it("maps temporal + boolean types", () => {
-    expect(duckdbTypeToFossilPrimitive("BOOLEAN")).toBe("bool");
-    expect(duckdbTypeToFossilPrimitive("DATE")).toBe("date");
-    expect(duckdbTypeToFossilPrimitive("TIMESTAMP")).toBe("date_time");
-    expect(duckdbTypeToFossilPrimitive("DATETIME")).toBe("date_time");
-    expect(duckdbTypeToFossilPrimitive("TIME")).toBe("time");
+    expect(duckdbPrimitive("BOOLEAN")).toBe("bool");
+    expect(duckdbPrimitive("DATE")).toBe("date");
+    expect(duckdbPrimitive("TIMESTAMP")).toBe("date_time");
+    expect(duckdbPrimitive("TIMESTAMP WITH TIME ZONE")).toBe("date_time");
+    expect(duckdbPrimitive("DATETIME")).toBe("date_time");
+    expect(duckdbPrimitive("TIME")).toBe("time");
   });
 
   it("falls back to String for VARCHAR + unknown types, case/space-insensitive", () => {
-    expect(duckdbTypeToFossilPrimitive("VARCHAR")).toBe("string");
-    expect(duckdbTypeToFossilPrimitive("  text ")).toBe("string");
-    expect(duckdbTypeToFossilPrimitive("STRUCT(a INT)")).toBe("string");
+    expect(duckdbPrimitive("VARCHAR")).toBe("string");
+    expect(duckdbPrimitive("  text ")).toBe("string");
+    expect(duckdbPrimitive("STRUCT(a INT)")).toBe("string");
   });
 });
 

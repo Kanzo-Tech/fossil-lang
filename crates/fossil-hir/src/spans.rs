@@ -98,7 +98,7 @@
 //! `HashMap<u32, Span>` or sorted-Vec + binary search — the public API
 //! shape (`spans(db, m).get(db, expr_id)`) stays unchanged.
 
-use fossil_base::Span;
+use fossil_graph_schema::Span;
 
 use crate::body::{ExprId, RefSpan, mapping_cst_node};
 use crate::def_map::MappingLoc;
@@ -249,11 +249,8 @@ pub fn mapping_header_span<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLo
 /// which sit outside that barrier and already hold the file text.
 #[must_use]
 pub fn mapping_start_offset<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> u32 {
-    fossil_syntax::parse(db, mapping.file(db))
-        .root(db)
-        .syntax()
-        .children()
-        .filter(|n| n.kind() == fossil_syntax::SyntaxKind::MAPPING)
+    let root = fossil_syntax::parse(db, mapping.file(db)).root(db).syntax();
+    crate::def_map::mapping_nodes(&root)
         .nth(mapping.index(db))
         .map_or(0, |n| u32::from(n.text_range().start()))
 }
@@ -274,10 +271,6 @@ pub fn rebase_to_file<'db>(
     diagnostics: impl IntoIterator<Item = fossil_base::Diagnostic>,
 ) -> Vec<fossil_base::Diagnostic> {
     let base = mapping_start_offset(db, mapping);
-    let shift = |s: Span| Span {
-        start: s.start.saturating_add(base),
-        end: s.end.saturating_add(base),
-    };
     diagnostics
         .into_iter()
         .map(|mut d| {
@@ -288,7 +281,7 @@ pub fn rebase_to_file<'db>(
             // decision because there was only one span.
             for label in &mut d.labels {
                 if label.frame == fossil_base::SpanFrame::MappingRelative {
-                    label.span = shift(label.span);
+                    label.span = label.span.shifted(base);
                 }
             }
             // A file-level diagnostic that happens to be emitted from a
@@ -297,16 +290,16 @@ pub fn rebase_to_file<'db>(
             if d.frame == fossil_base::SpanFrame::FileAbsolute {
                 return d;
             }
-            d.span = shift(d.span);
+            d.span = d.span.shifted(base);
             if let Some(dym) = d.did_you_mean.as_mut() {
-                dym.wrong_span = shift(dym.wrong_span);
+                dym.wrong_span = dym.wrong_span.shifted(base);
             }
             d
         })
         .collect()
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::def_map::def_map;
@@ -497,8 +490,8 @@ Second : B from users
         // And the whole-diagnostic path shifts `did_you_mean.wrong_span` too —
         // that one drives a quick-fix edit, so a stale offset corrupts source.
         let d = fossil_base::Diagnostic::new(
-            fossil_base::Severity::Error,
-            fossil_base::Problem::UnexpectedToken {},
+            fossil_graph_schema::Severity::Error,
+            fossil_graph_schema::Problem::UnexpectedToken {},
             raw,
         )
         .with_did_you_mean(raw, "name");
@@ -548,14 +541,14 @@ Second : B from users
             second,
             [
                 fossil_base::Diagnostic::new(
-                    fossil_base::Severity::Error,
-                    fossil_base::Problem::UnexpectedToken {},
+                    fossil_graph_schema::Severity::Error,
+                    fossil_graph_schema::Problem::UnexpectedToken {},
                     span,
                 )
                 .file_absolute(),
                 fossil_base::Diagnostic::new(
-                    fossil_base::Severity::Error,
-                    fossil_base::Problem::NoHttpfs {},
+                    fossil_graph_schema::Severity::Error,
+                    fossil_graph_schema::Problem::NoHttpfs {},
                     span,
                 ),
             ],
@@ -660,10 +653,6 @@ User : Person from users
             "the span must cover exactly `users.name`, got {extracted:?}"
         );
     }
-
-    // `spans_for_prefixed_name_rhs` lived here: `link = ex:Foo` had to record a
-    // span covering the six characters exactly. What it proved about spans, the
-    // `StringLit` test below proves on a form the language still has.
 
     /// `greeting = "Alice"` exercises the `StringLit` RHS form. The
     /// recorded mapping-relative span MUST cover the literal INCLUDING

@@ -2,8 +2,8 @@
 //!
 //! Consumes the per-mapping HEADER from [`fossil_hir::HirMapping`], the
 //! per-mapping BODY from [`fossil_hir::body::body`] — a query of its own
-//! because the `ItemTree` carries SIGNATURES ONLY, so editing one mapping's
-//! body invalidates neither the file's item tree nor its sibling mappings —
+//! because `lower_to_hir` carries SIGNATURES ONLY, so editing one mapping's
+//! body invalidates neither the file's signatures nor its sibling mappings —
 //! and the per-mapping TYPES from
 //! [`fossil_hir::check::typecheck_mapping`]. Emits a [`MirGraph`] of the shape
 //! `Source → (pipeline verbs) → EmitVertex → Sink(Corpus)`;
@@ -165,7 +165,15 @@ pub fn lower_to_mir_pg<'db>(
 
     // 0..k: the source relation. One `Op::Source` for a binding that reads a
     // file; `Source` plus one op per verb when the binding is a pipeline.
-    let source = match lower_source_chain(db, dm, file, &m.source_binding, span, &mut ops, 0) {
+    let source = match lower_source_chain(
+        db,
+        dm,
+        file,
+        &m.source_binding,
+        span,
+        &mut ops,
+        &mut Vec::new(),
+    ) {
         Ok(c) => c,
         Err(eg) => return poisoned(db, eg),
     };
@@ -181,7 +189,7 @@ pub fn lower_to_mir_pg<'db>(
             fossil_base::report(
                 db,
                 span,
-                fossil_base::Problem::MissingSubject {
+                fossil_graph_schema::Problem::MissingSubject {
                     mapping: m.name.to_string(),
                 },
             ),
@@ -381,12 +389,15 @@ fn untyped_row(db: &dyn fossil_base::Db) -> Ty<'_> {
 /// Span of the mapping's own CST node, for diagnostics anchored at the mapping
 /// rather than at one of its properties. Reads the `mapping_cst_node` barrier
 /// that `body`/`spans` already read, so it adds no per-mapping Salsa fan-out.
-fn mapping_span<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> fossil_base::Span {
+fn mapping_span<'db>(
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+) -> fossil_graph_schema::Span {
     mapping_cst_node(db, mapping).syntax().map_or_else(
-        || fossil_base::Span::new(0, 0),
+        || fossil_graph_schema::Span::new(0, 0),
         |node| {
             let r = node.text_range();
-            fossil_base::Span::new(r.start().into(), r.end().into())
+            fossil_graph_schema::Span::new(r.start().into(), r.end().into())
         },
     )
 }
@@ -541,22 +552,22 @@ impl Chain {
     }
 }
 
-/// A pipeline deriving from a pipeline deriving from … The cycle is already a
-/// diagnostic in the checker (`fossil_hir::infer`), so reaching this depth here
-/// means the graph got past type-checking, which is a bug and says so.
-const MAX_CHAIN_DEPTH: usize = 32;
-
 /// Lower the source binding a mapping reads into `ops`, following the pipeline
 /// if it is one. A binding that reads a file is one `Op::Source`; a pipeline is
 /// its base's chain followed by one op per verb.
+///
+/// `path` is the pipelines being lowered, outermost first. A binding met again
+/// on it is a cycle, which is already a diagnostic in the checker
+/// (`fossil_hir::infer`, by the same visited list), so reaching one here means
+/// the graph got past type-checking: a bug, and it says so.
 fn lower_source_chain<'db>(
     db: &'db dyn fossil_base::Db,
     dm: DefMap<'db>,
     file: fossil_base::SourceFile,
     binding: &SmolStr,
-    span: fossil_base::Span,
+    span: fossil_graph_schema::Span,
     ops: &mut Vec<Op<'db>>,
-    depth: usize,
+    path: &mut Vec<SmolStr>,
 ) -> Result<Chain, fossil_base::ErrorGuaranteed> {
     use fossil_hir::lower::HirSourceOp;
 
@@ -592,15 +603,18 @@ fn lower_source_chain<'db>(
         });
     };
 
-    if depth >= MAX_CHAIN_DEPTH {
+    if path.contains(binding) {
         return Err(fossil_base::bug(
             db,
             span,
-            format!("the source pipeline `{binding}` recurses past the checker's own cycle guard"),
+            format!(
+                "the source pipeline `{binding}` reaches itself past the checker's cycle guard"
+            ),
         ));
     }
+    path.push(binding.clone());
 
-    let mut chain = lower_source_chain(db, dm, file, &pipe.base, span, ops, depth + 1)?;
+    let mut chain = lower_source_chain(db, dm, file, &pipe.base, span, ops, path)?;
     for op in &pipe.ops {
         match op {
             HirSourceOp::Where(pred) => {
@@ -624,7 +638,7 @@ fn lower_source_chain<'db>(
                     .collect(),
             }),
             HirSourceOp::Join { right, alias, on } => {
-                let right_chain = lower_source_chain(db, dm, file, right, span, ops, depth + 1)?;
+                let right_chain = lower_source_chain(db, dm, file, right, span, ops, path)?;
                 // The condition is a PREDICATE the author writes, so there is
                 // no key to synthesise: it lowers like any other expression.
                 //
@@ -712,7 +726,7 @@ fn lower_source_chain<'db>(
             // a row of the result came from one of them and nothing says which.
             // The pipeline's name is what both sides are re-qualified under.
             HirSourceOp::Union { right } => {
-                let right_chain = lower_source_chain(db, dm, file, right, span, ops, depth + 1)?;
+                let right_chain = lower_source_chain(db, dm, file, right, span, ops, path)?;
                 ops.push(Op::Union {
                     left: chain.last,
                     right: right_chain.last,
@@ -738,6 +752,7 @@ fn lower_source_chain<'db>(
     // and `JoinSide`'s own doc comment both describe that program as working.
     // Only `union` and `group_by` put the pipeline's name on a column, and each
     // now says so in its own arm.
+    path.pop();
     Ok(chain)
 }
 
@@ -770,7 +785,7 @@ fn resolve_source<'db>(
     dm: DefMap<'db>,
     db: &'db dyn fossil_base::Db,
     binding: &SmolStr,
-    span: fossil_base::Span,
+    span: fossil_graph_schema::Span,
 ) -> Result<(SmolStr, SourceFormat), fossil_base::ErrorGuaranteed> {
     let call = dm
         .lookup_source_call(db, binding)
@@ -788,7 +803,7 @@ fn resolve_source<'db>(
         return Err(fossil_base::report(
             db,
             span,
-            fossil_base::Problem::UnknownSource {
+            fossil_graph_schema::Problem::UnknownSource {
                 binding: binding.to_string(),
                 bound_to: constructor.map(|c| c.to_string()),
             },
@@ -807,7 +822,7 @@ fn resolve_source<'db>(
                     name: SmolStr::new(row.name),
                 },
             },
-            None => match c.strip_prefix("io.") {
+            None => match c.strip_prefix(fossil_base::CONSTRUCTOR_PREFIX) {
                 Some(name) => SourceFormat::Provider {
                     name: SmolStr::new(name),
                 },
@@ -815,7 +830,7 @@ fn resolve_source<'db>(
                     return Err(fossil_base::report(
                         db,
                         span,
-                        fossil_base::Problem::UnknownProvider {
+                        fossil_graph_schema::Problem::UnknownProvider {
                             constructor: c.to_string(),
                         },
                     ));
@@ -826,7 +841,7 @@ fn resolve_source<'db>(
             return Err(fossil_base::report(
                 db,
                 span,
-                fossil_base::Problem::BareDocumentPath {
+                fossil_graph_schema::Problem::BareDocumentPath {
                     document: uri.to_string(),
                 },
             ));
@@ -1280,7 +1295,7 @@ fn lower_property_value<'db>(
         HirExpr::Edge { target, .. } => {
             let _eg = fossil_base::bug(
                 db,
-                fossil_base::Span::new(0, 0),
+                fossil_graph_schema::Span::new(0, 0),
                 format!(
                     "an edge to `{target}` reached the value lowering unresolved — \
                      `resolve_edges` runs before this and the checker refuses a mapping whose \
@@ -1401,7 +1416,7 @@ fn fold_concat_left<'db>(parts: Vec<Expr<'db>>) -> Expr<'db> {
     acc
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     // Every `@subject` below is an interpolated string, and `{Rows.id}` is
     // fossil's hole, not a Rust format argument. The lint reads the Rust
@@ -1843,7 +1858,7 @@ People : Person from Rows
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod null_lowering_tests {
     #![allow(clippy::literal_string_with_formatting_args)]
 

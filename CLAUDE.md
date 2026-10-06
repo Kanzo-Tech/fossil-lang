@@ -14,9 +14,10 @@ Keep it under 200 lines, rules-not-context.
   meant different questions by them. `cargo xtask corpus` generates the Rust projection;
   `crates/xtask/tests/corpus_generated.rs` is the `--check` as a test.
 - `catalogue.bnf` — WHICH NAMES EXIST, both halves: the `io.` constructors and every stdlib
-  function with its signature and lowering. Generated from, not compared against — seven files
-  come out of `cargo xtask catalogue` and no Rust states a row a second time. Adding a
-  function is a line here. `CONTRIBUTING.md` has the seven and the round-trip guard.
+  function with its signature and lowering, plus the DuckDB type table both introspecting
+  hosts read. Generated from, not compared against — `cargo xtask catalogue` writes every
+  projection and no Rust or TS states a row a second time. Adding a function is a line here.
+  `CONTRIBUTING.md` has the list and the round-trip guard.
 - `docs/` — the whole of the documentation, and there is no second site.
   `/docs/book/getting-started` teaches the language and `/docs/format` specifies the corpus;
   behind a maintainers' divider,
@@ -64,13 +65,10 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   `tower-lsp` (unmaintained ~3 years; use `lsp-server`, as all three reference implementations do),
   `wasm-pack` (archived; use `wasm-bindgen-cli` + Vite),
   `sqlx` (not WASM-compatible).
-- **`tokio` never reaches a wasm build, and that is the whole rule.** A crate may hold it behind
-  `cfg(not(target_arch = "wasm32"))`, or as a dev-dependency, or unconditionally if it sits
-  outside the wasm closure — and it must say which, and why, in a comment beside the dependency
-  in its own `Cargo.toml`. **This rule names no crate, on purpose.** It read "no tokio outside X"
-  for months and X was the one crate that had none, because the set was kept by hand.
-  `crates/xtask/tests/tokio_placement.rs` derives it instead, prints the real table on any
-  failure, and goes red if a crate name reappears in this bullet.
+- **`tokio` never reaches a wasm build from our own manifests.** A crate may hold it behind
+  `cfg(not(target_arch = "wasm32"))`, as a dev-dependency, or unconditionally outside the wasm
+  closure. `cargo xtask wasm-check` reads the graph cargo resolves for wasm32 and fails on any
+  crate in the closure that still depends on it.
 - **No `Box<dyn Trait>` inside Salsa queries.** Salsa interns concrete types; trait objects break
   memoization. Use `&dyn` parameters or enum dispatch.
 - **`unsafe_code = "deny"`** at workspace level, not `"forbid"`. Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (future FFI — the four Salsa `Update` impls for rowan types went with salsa 0.28, whose `SalsaValue` needs none for a `'static` type, and the workspace holds no `unsafe` today), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
@@ -101,7 +99,6 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | rowan | 0.16 | lossless CST |
 | logos | 0.16 | lexer |
 | miette | 7.6 | diagnostics |
-| sqlparser | 0.59 | SQL AST construction |
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
@@ -141,8 +138,7 @@ crates/
                            an Azure SAS lend, or (feature `object-store`) an `object_store` store
                            routed by longest prefix and renewed at expires−5min — the one IO path
                            of DataFusion and of every byte fossil reads or writes. `js`: a JS
-                           `Host` as its `Host`. The one renderer of a `CREATE SECRET`, native
-                           hosts' included
+                           `Host` as its `Host`. The one renderer of a `CREATE SECRET`
   fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
   fossil-sinks/            the `fossil/1` format: `fossil.json`'s structs (serde + schemars;
@@ -154,8 +150,8 @@ crates/
                            writer (`write`: a Parquet per table, `fossil.json`
                            last), and `Executor` — the whole run a host drives, under the
                            2 GiB pool in `memory.rs` that refuses as `run/over-budget`
-  fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each source's columns,
-                           and the payload that authenticates one. `fossil-lsp` calls it
+  fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each local source's
+                           columns, and nothing that is not a file it can `stat`. `fossil-lsp` calls it
                            before the compile. It links `DuckDB` on a normal edge, and
                            it is not the only crate that does — `cargo tree -e normal -i duckdb
                            --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
@@ -164,8 +160,6 @@ crates/
                            DESCRIBEs is `fossil_lineage::program_sources` — the list the
                            browser's `sources()` returns — so it links the compiler front-end,
                            as every host does
-  fossil-mem-probe/        `FOSSIL_MEM_PROBE` — peak RSS + elapsed seconds per phase of a
-                           run. Depends on NOTHING
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
                            error catalogue: `Problem`, `Failure`, and (feature `js`) the one
                            function every wasm crate throws a failure through
@@ -176,13 +170,13 @@ crates/
                            corpus, in the browser and in Node. There is no native CLI: it
                            was deleted on 2026-09-30 (`/docs/design/discarded` says what
                            brings it back)
-  xtask/                   repo automation. Four commands: `wasm-check` derives the wasm32
-                           subset from the cdylib closure, and `catalogue [--check]`,
-                           `corpus [--check]` and `problem [--check]` regenerate every
-                           projection of their source — `catalogue.bnf`, `corpus.bnf`, and
-                           `fossil-graph-schema/problem.schema.json` into `problem.gen.ts`.
-                           One generator loop behind all three, so the `--check` semantics
-                           cannot drift between them
+  xtask/                   repo automation. Three commands: `wasm-check` derives the wasm32
+                           subset from the cdylib closure, and `catalogue [--check]` and
+                           `corpus [--check]` regenerate every projection of their `.bnf`.
+                           What is generated from a Rust TYPE — the error catalogue, the
+                           manifest schema and every wire type in `@fossil-lang/types` — is
+                           the expect test `tests/wire.rs` (`UPDATE_EXPECT=1`), because the
+                           binary must not link the crates `catalogue` generates into
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
@@ -219,7 +213,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            No host ever signs a URL for fossil
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
                            and not an editor. FIVE of them, not two: highlighting from
-                           `tokenize()` + `tokenKinds()`, squiggles from `check()` through
+                           `tokenize()`, squiggles from `check()` through
                            `@codemirror/lint`, and hover / completion / goto-definition
                            over the three position queries `FossilWorkspace` grew. The
                            two that stay OUT are semantic tokens (only the native
@@ -231,12 +225,9 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            places by the time it went. This one keys on the NAMES the wasm
                            legend ships, and the guard is on the Rust side
   introspect/              source-binding schema introspection (the one home; `fossil-introspect`
-                           is the Rust sibling). Their agreement is ENFORCED, not asserted:
-                           `packages/introspect/tests/rust-parity.test.ts` derives the reader
-                           arms, the option keyword and the type table out of
-                           `crates/fossil-introspect/src/lib.rs` and fails on drift. It is a
-                           **pnpm** test — editing that Rust turns it red and `cargo test` will
-                           not tell you.
+                           is the Rust sibling). What they must agree on — the reader, its
+                           option keyword, the DuckDB type table — is `catalogue.bnf`'s and is
+                           generated into both
 
 docs/                      Next.js + fumadocs, and ALL of the prose: the book, the corpus
                            format, and the design argument behind a maintainers' divider.
@@ -246,8 +237,9 @@ docs/                      Next.js + fumadocs, and ALL of the prose: the book, t
                            `docs/CLAUDE.md` has the editorial rules
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
-catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
-                           source of seven generated files; no Rust states a row twice
+catalogue.bnf              which names exist — the `io.` rows, the stdlib rows and the
+                           DuckDB type table. Every projection is generated; no Rust or TS
+                           states a row twice
 corpus.bnf                 what a corpus is made of — the vertex and edge columns the writer
                            emits and the ROLE of each. The source of one generated file,
                            `fossil-sinks/src/generated.rs`. File names are NOT here: they are
@@ -265,8 +257,7 @@ over somebody else's editor, and the somebody else is `@kanzo-tech/ui`.
 - Prefer enum dispatch over `Box<dyn Trait>`. Salsa interning needs concrete types.
 - `Result<T, E>` with thiserror-style enums in lib crates; `miette` only where a host renders a diagnostic.
 - `tracing` for structured logs (not `log`). `RUST_LOG=fossil=debug` is the canonical filter.
-- Snapshot tests via `insta` — `git ls-files '*.snap'` shows which crates carry them (not the
-  parser CST: too brittle).
+- Golden files via `expect-test` (`expect!`/`expect_file!`); `UPDATE_EXPECT=1` rewrites them.
 - Doc comments on `pub` items in compiler-core crates.
 
 ## Common Tasks

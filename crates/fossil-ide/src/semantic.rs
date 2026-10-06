@@ -12,12 +12,11 @@
 //! # Shape (LSP spec)
 //!
 //! The provider declares a **legend** ([`semantic_legend`]) — an ordered list of
-//! token *types* and *modifiers*. Tokens themselves are a flat `Vec<u32>` of
-//! 5-tuples `(deltaLine, deltaStartChar, length, tokenType, tokenModifiers)`,
+//! token *types* and *modifiers*. Tokens themselves are `lsp_types::SemanticToken`s,
 //! delta-encoded relative to the previous token (the LSP wire format). The
 //! `tokenType` is an *index* into the legend's `token_types`; `length` and
 //! `deltaStartChar` are **UTF-16 code units** (Monaco counts UTF-16), so we route
-//! every column / length through the [`crate::line_index::LineIndex`]
+//! every column / length through the [`crate::position::LineIndex`]
 //! — without it any source with a multi-byte character
 //! (non-ASCII IRIs, emoji in comments) colors the wrong span.
 //!
@@ -40,64 +39,59 @@ use std::ops::Range;
 
 use fossil_base::SourceFile;
 use fossil_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
-use lsp_types::{SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend};
+use lsp_types::{
+    Position, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
+};
 use rowan::WalkEvent;
 use smol_str::SmolStr;
 
-use crate::line_index::LineIndex;
-use crate::position::line_index;
+use crate::position::{LineIndex, line_index, position};
 
-/// Token-type indices into [`semantic_legend`]'s `token_types`. The numeric
-/// value IS the `tokenType` field of the emitted 5-tuples, so the order here
-/// MUST stay in lock-step with [`LEGEND_TYPES`] — and with the third table,
-/// [`legend_type_name`], which renders the same indices back for review.
-///
-/// `tests/semantic_legend.rs` holds all three: it scrapes the names out of this
-/// module (they are `pub(super)`, so the name is reachable nowhere else) and
-/// calls the other two. A new type is APPENDED: a client that cached the legend
-/// reads every index before it unchanged.
-mod ty {
-    pub(super) const KEYWORD: u32 = 0;
-    pub(super) const NAMESPACE: u32 = 1;
-    pub(super) const TYPE: u32 = 2;
-    pub(super) const FUNCTION: u32 = 3;
-    pub(super) const PROPERTY: u32 = 4;
-    pub(super) const STRING: u32 = 5;
-    pub(super) const NUMBER: u32 = 6;
-    pub(super) const OPERATOR: u32 = 7;
-    pub(super) const COMMENT: u32 = 8;
-    pub(super) const VARIABLE: u32 = 9;
-    pub(super) const PARAMETER: u32 = 10;
+/// Declares [`TokenType`] and the legend's `token_types` from ONE list, so a
+/// variant's discriminant is its index in the legend by construction. A new
+/// type is APPENDED: a client that cached the legend reads every index before
+/// it unchanged.
+macro_rules! token_types {
+    ($($variant:ident => $lsp:ident),* $(,)?) => {
+        /// A legend token type. Its discriminant IS the `tokenType` of the LSP
+        /// wire, an index into [`semantic_legend`]'s `token_types`.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(u32)]
+        pub enum TokenType { $($variant),* }
+
+        static LEGEND_TYPES: &[SemanticTokenType] = &[$(SemanticTokenType::$lsp),*];
+    };
 }
 
-/// Token-modifier BIT indices into [`semantic_legend`]'s `token_modifiers`:
-/// modifier `i` is bit `1 << i` of the emitted `tokenModifiers`. Held against
-/// [`LEGEND_MODIFIERS`] and [`legend_modifier_name`] by the same guard as
-/// [`ty`].
-mod md {
-    pub(super) const DECLARATION: u32 = 0;
+token_types! {
+    Keyword => KEYWORD,
+    Namespace => NAMESPACE,
+    Type => TYPE,
+    Function => FUNCTION,
+    Property => PROPERTY,
+    String => STRING,
+    Number => NUMBER,
+    Operator => OPERATOR,
+    Comment => COMMENT,
+    Variable => VARIABLE,
+    Parameter => PARAMETER,
 }
 
-/// The legend's token *types*, in index order (index == the `tokenType` u32).
-const LEGEND_TYPES: [SemanticTokenType; 11] = [
-    SemanticTokenType::KEYWORD,
-    SemanticTokenType::NAMESPACE,
-    SemanticTokenType::TYPE,
-    SemanticTokenType::FUNCTION,
-    SemanticTokenType::PROPERTY,
-    SemanticTokenType::STRING,
-    SemanticTokenType::NUMBER,
-    SemanticTokenType::OPERATOR,
-    SemanticTokenType::COMMENT,
-    SemanticTokenType::VARIABLE,
-    SemanticTokenType::PARAMETER,
-];
+impl TokenType {
+    /// The LSP name of this type — `"keyword"`, `"namespace"` — read off the
+    /// legend entry it indexes.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        LEGEND_TYPES[self as usize].as_str()
+    }
+}
 
-/// The legend's token *modifiers*, in bit order.
-const LEGEND_MODIFIERS: [SemanticTokenModifier; 1] = [SemanticTokenModifier::DECLARATION];
+/// The legend's token *modifiers*, in bit order: modifier `i` is bit `1 << i`
+/// of the emitted `tokenModifiers`.
+static LEGEND_MODIFIERS: &[SemanticTokenModifier] = &[SemanticTokenModifier::DECLARATION];
 
 /// The bitset for a token carrying `declaration`.
-const DECLARATION: u32 = 1 << md::DECLARATION;
+const DECLARATION: u32 = 1 << 0;
 
 /// The LSP semantic-tokens legend Fossil's `semanticTokensProvider` declares.
 ///
@@ -123,10 +117,9 @@ pub fn semantic_legend() -> SemanticTokensLegend {
 pub struct SemanticSpan {
     /// Byte range into the file's text.
     pub range: Range<u32>,
-    /// Index into the legend's `token_types` — [`legend_type_name`] reads it.
-    pub token_type: u32,
-    /// Bitset over the legend's `token_modifiers` — [`legend_modifier_name`]
-    /// reads each bit.
+    /// The legend type it is painted as.
+    pub token_type: TokenType,
+    /// Bitset over the legend's `token_modifiers` — [`modifier_names`] reads it.
     pub modifiers: u32,
 }
 
@@ -149,9 +142,9 @@ pub fn semantic_spans(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<Semanti
         if let Some(alias) = connection_alias(&tok, &names) {
             let range = byte_range(&tok);
             let (at, past) = (alias.start, alias.end);
-            spans.push(span(range.start..at, ty::STRING, 0));
-            spans.push(span(alias, ty::NAMESPACE, 0));
-            spans.push(span(past..range.end, ty::STRING, 0));
+            spans.push(span(range.start..at, TokenType::String, 0));
+            spans.push(span(alias, TokenType::Namespace, 0));
+            spans.push(span(past..range.end, TokenType::String, 0));
         } else if let Some((token_type, modifiers)) = classify(&tok, &names) {
             spans.push(span(byte_range(&tok), token_type, modifiers));
         }
@@ -159,22 +152,35 @@ pub fn semantic_spans(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<Semanti
     spans
 }
 
-/// Full-document semantic tokens for `file`, delta-encoded per the LSP wire
-/// format: a flat `Vec<u32>` of 5-tuples
-/// `(deltaLine, deltaStartChar, length, tokenType, tokenModifiers)`.
-///
-/// [`semantic_spans`] through the FILE-keyed [`LineIndex`]. The result is
-/// exactly what `textDocument/semanticTokens/full` returns; `fossil-lsp` wraps
-/// it in `SemanticTokens { result_id: None, data }`.
+/// Full-document semantic tokens for `file` — exactly what
+/// `textDocument/semanticTokens/full` returns: [`semantic_spans`] through the
+/// FILE-keyed [`LineIndex`], each token's line relative to the previous one and
+/// its start relative to the previous one on the same line.
 #[must_use]
-pub fn semantic_tokens(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<u32> {
+pub fn semantic_tokens(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<SemanticToken> {
     let index = line_index(db, file);
     let text = file.text(db);
-    let abs: Vec<AbsToken> = semantic_spans(db, file)
-        .into_iter()
-        .filter_map(|s| abs_token(&index, text, &s))
-        .collect();
-    delta_encode(&abs)
+    let mut prev = Position::default();
+    semantic_spans(db, file)
+        .iter()
+        .filter_map(|s| {
+            let (at, length) = lsp_span(index, text, s)?;
+            let delta_start = if at.line == prev.line {
+                at.character - prev.character
+            } else {
+                at.character
+            };
+            let token = SemanticToken {
+                delta_line: at.line - prev.line,
+                delta_start,
+                length,
+                token_type: s.token_type as u32,
+                token_modifiers_bitset: s.modifiers,
+            };
+            prev = at;
+            Some(token)
+        })
+        .collect()
 }
 
 /// What the file itself declares, read once per walk.
@@ -211,7 +217,7 @@ impl FileNames {
     }
 }
 
-const fn span(range: Range<u32>, token_type: u32, modifiers: u32) -> SemanticSpan {
+const fn span(range: Range<u32>, token_type: TokenType, modifiers: u32) -> SemanticSpan {
     SemanticSpan {
         range,
         token_type,
@@ -253,11 +259,11 @@ fn connection_alias(tok: &SyntaxToken, names: &FileNames) -> Option<Range<u32>> 
 /// if it carries no color (whitespace, structural punctuation, indent/dedent,
 /// errors). An `IDENT` is disambiguated by its place in the tree — see
 /// [`ident`].
-fn classify(tok: &SyntaxToken, names: &FileNames) -> Option<(u32, u32)> {
+fn classify(tok: &SyntaxToken, names: &FileNames) -> Option<(TokenType, u32)> {
     use SyntaxKind as K;
     let token_type = match tok.kind() {
         // ── unambiguous lexical classes ───────────────────────────────
-        K::COMMENT => ty::COMMENT,
+        K::COMMENT => TokenType::Comment,
         // A string with a hole is carved into a run of tokens, so every part
         // of it has to be named here or the literal loses its colour halfway
         // through. A STRING after a member's `.` is not a literal: it is a
@@ -266,17 +272,17 @@ fn classify(tok: &SyntaxToken, names: &FileNames) -> Option<(u32, u32)> {
             if tok.parent().is_some_and(|p| p.kind() == K::POSTFIX_EXPR)
                 && follows_sibling(tok, K::DOT) =>
         {
-            ty::PROPERTY
+            TokenType::Property
         }
-        K::STRING | K::STRING_OPEN | K::STRING_TEXT | K::STRING_CLOSE => ty::STRING,
-        K::INTEGER | K::FLOAT => ty::NUMBER,
+        K::STRING | K::STRING_OPEN | K::STRING_TEXT | K::STRING_CLOSE => TokenType::String,
+        K::INTEGER | K::FLOAT => TokenType::Number,
 
         // ── the reserved words and the `@attr` marker ─────────────────
         //
         // `from`, `and`, `or`, `not` (grammar.bnf, § RESERVED KEYWORDS). The
         // contextual ones — `type` before a destructuring, `as` in a rename or
         // an alias — are IDENTs and are named by [`ident`] from their place.
-        K::KW_FROM | K::KW_AND | K::KW_OR | K::KW_NOT | K::AT_ATTR => ty::KEYWORD,
+        K::KW_FROM | K::KW_AND | K::KW_OR | K::KW_NOT | K::AT_ATTR => TokenType::Keyword,
 
         // ── operators (assignment, ternary, arithmetic, comparison) ───────
         K::DEFINE
@@ -295,7 +301,7 @@ fn classify(tok: &SyntaxToken, names: &FileNames) -> Option<(u32, u32)> {
         | K::T_QUESTION
         // The hole's opener: an operator, because it is what separates the
         // expression inside from the text around it.
-        | K::INTERP_OPEN => ty::OPERATOR,
+        | K::INTERP_OPEN => TokenType::Operator,
 
         K::IDENT => return Some(ident(tok, names)),
 
@@ -303,7 +309,7 @@ fn classify(tok: &SyntaxToken, names: &FileNames) -> Option<(u32, u32)> {
         // `type { Person } := …` and `{ A, B } := …`, and the grammar puts the
         // interpolation's directly under `INTERPOLATION` and nowhere else.
         K::RBRACE if tok.parent().is_some_and(|p| p.kind() == K::INTERPOLATION) => {
-            ty::OPERATOR
+            TokenType::Operator
         }
 
         _ => return None,
@@ -324,29 +330,31 @@ fn classify(tok: &SyntaxToken, names: &FileNames) -> Option<(u32, u32)> {
 /// | `delimiter = "|"` in a call | a parameter |
 /// | `x.name` | a property, or a function when it is called: `io.csv(…)`, `User.where(…)` |
 /// | a bare name | see [`bare_name`] |
-fn ident(tok: &SyntaxToken, names: &FileNames) -> (u32, u32) {
+fn ident(tok: &SyntaxToken, names: &FileNames) -> (TokenType, u32) {
     use SyntaxKind as K;
     let Some(parent) = tok.parent() else {
-        return (ty::VARIABLE, 0);
+        return (TokenType::Variable, 0);
     };
     match parent.kind() {
-        _ if is_contextual_keyword(tok, parent.kind()) => (ty::KEYWORD, 0),
-        K::TYPE_DEF => (ty::TYPE, DECLARATION),
-        K::SOURCE_DEF | K::MULTI_SOURCE_DEF | K::MAPPING_HEADER => (ty::VARIABLE, DECLARATION),
-        K::SHAPE_EXPR | K::RENAME_ATTR => (ty::TYPE, 0),
-        K::RENAME => (ty::PROPERTY, DECLARATION),
-        K::ALIAS_ARG if is_last_ident(tok) => (ty::VARIABLE, DECLARATION),
-        K::PROPERTY_LHS => (ty::PROPERTY, 0),
-        K::NAMED_ARG => (ty::PARAMETER, 0),
+        _ if is_contextual_keyword(tok, parent.kind()) => (TokenType::Keyword, 0),
+        K::TYPE_DEF => (TokenType::Type, DECLARATION),
+        K::SOURCE_DEF | K::MULTI_SOURCE_DEF | K::MAPPING_HEADER => {
+            (TokenType::Variable, DECLARATION)
+        }
+        K::SHAPE_EXPR | K::RENAME_ATTR => (TokenType::Type, 0),
+        K::RENAME => (TokenType::Property, DECLARATION),
+        K::ALIAS_ARG if is_last_ident(tok) => (TokenType::Variable, DECLARATION),
+        K::PROPERTY_LHS => (TokenType::Property, 0),
+        K::NAMED_ARG => (TokenType::Parameter, 0),
         K::POSTFIX_EXPR if follows_sibling(tok, K::DOT) => {
             if is_callee(&parent) {
-                (ty::FUNCTION, 0)
+                (TokenType::Function, 0)
             } else {
-                (ty::PROPERTY, 0)
+                (TokenType::Property, 0)
             }
         }
         K::LITERAL_EXPR => (bare_name(tok.text(), &parent, names), 0),
-        _ => (ty::VARIABLE, 0),
+        _ => (TokenType::Variable, 0),
     }
 }
 
@@ -370,21 +378,21 @@ fn is_contextual_keyword(tok: &SyntaxToken, parent: SyntaxKind) -> bool {
 ///    that shape, which the grammar writes as a call;
 /// 3. any other callee — a function;
 /// 4. everything else — a variable: a source, a mapping, an alias.
-fn bare_name(name: &str, literal: &SyntaxNode, names: &FileNames) -> u32 {
+fn bare_name(name: &str, literal: &SyntaxNode, names: &FileNames) -> TokenType {
     use fossil_hir::stdlib::{Receiver, receiver_of, stdlib};
     if is_member_receiver(literal) && stdlib().is_catalogued_head(name) {
         return match receiver_of(name) {
-            Receiver::Namespace => ty::NAMESPACE,
-            Receiver::Scalar(_) | Receiver::Relation => ty::TYPE,
+            Receiver::Namespace => TokenType::Namespace,
+            Receiver::Scalar(_) | Receiver::Relation => TokenType::Type,
         };
     }
     if names.is_type(name) {
-        return ty::TYPE;
+        return TokenType::Type;
     }
     if is_callee(literal) {
-        return ty::FUNCTION;
+        return TokenType::Function;
     }
-    ty::VARIABLE
+    TokenType::Variable
 }
 
 /// Whether `node` is the callee of a call: the first child of a `POSTFIX_EXPR`
@@ -433,24 +441,14 @@ fn is_last_ident(tok: &SyntaxToken) -> bool {
     .any(|el| el.kind() == SyntaxKind::IDENT)
 }
 
-/// A decoded, absolute-positioned token, before delta-encoding. `line` /
-/// `start_char` are UTF-16 coordinates; `length` is a UTF-16 code-unit count.
-#[derive(Debug, Clone, Copy)]
-struct AbsToken {
-    line: u32,
-    start_char: u32,
-    length: u32,
-    token_type: u32,
-    modifiers: u32,
-}
-
-/// One span in LSP coordinates, or `None` when it is empty. A span that runs
-/// over a line break (a multi-line string or comment) is recorded on its start
-/// line with its first-line length: an LSP token cannot cross a line unless the
-/// client declares `multilineTokenSupport`, and Monaco does not.
-fn abs_token(index: &LineIndex, text: &str, s: &SemanticSpan) -> Option<AbsToken> {
-    let start = index.position(s.range.start);
-    let end = index.position(s.range.end);
+/// One span's start in LSP coordinates and its length in UTF-16 code units, or
+/// `None` when it is empty. A span that runs over a line break (a multi-line
+/// string or comment) is recorded on its start line with its first-line length:
+/// an LSP token cannot cross a line unless the client declares
+/// `multilineTokenSupport`, and Monaco does not.
+fn lsp_span(index: &LineIndex, text: &str, s: &SemanticSpan) -> Option<(Position, u32)> {
+    let start = position(index, s.range.start);
+    let end = position(index, s.range.end);
     let length = if end.line == start.line {
         end.character.saturating_sub(start.character)
     } else {
@@ -458,99 +456,41 @@ fn abs_token(index: &LineIndex, text: &str, s: &SemanticSpan) -> Option<AbsToken
         let first = slice.split('\n').next().unwrap_or(slice);
         u32::try_from(first.encode_utf16().count()).ok()?
     };
-    (length > 0).then_some(AbsToken {
-        line: start.line,
-        start_char: start.character,
-        length,
-        token_type: s.token_type,
-        modifiers: s.modifiers,
-    })
+    (length > 0).then_some((start, length))
 }
 
-/// Delta-encode absolute tokens into the LSP flat `Vec<u32>` 5-tuple stream.
-/// `deltaLine` is relative to the previous token's line; `deltaStartChar` is
-/// relative to the previous token's start *when on the same line*, else absolute.
-fn delta_encode(abs: &[AbsToken]) -> Vec<u32> {
-    let mut data = Vec::with_capacity(abs.len() * 5);
-    let mut prev_line = 0u32;
-    let mut prev_start = 0u32;
-    for t in abs {
-        let delta_line = t.line - prev_line;
-        let delta_start = if delta_line == 0 {
-            t.start_char - prev_start
-        } else {
-            t.start_char
-        };
-        data.extend_from_slice(&[delta_line, delta_start, t.length, t.token_type, t.modifiers]);
-        prev_line = t.line;
-        prev_start = t.start_char;
-    }
-    data
-}
-
-/// Decode a flat 5-tuple stream back into absolute
-/// `(line, col, len, type, modifiers)` rows.
-///
-/// Public so the snapshot test (and a future LSP-side assertion) can produce a
-/// stable, human-reviewable view of the token stream.
+/// Decode a token stream back into absolute
+/// `(line, col, len, type, modifiers)` rows — a stable, human-reviewable view
+/// of what [`semantic_tokens`] put on the wire.
 #[must_use]
-pub fn decode_tokens(data: &[u32]) -> Vec<(u32, u32, u32, u32, u32)> {
-    let mut out = Vec::new();
+pub fn decode_tokens(data: &[SemanticToken]) -> Vec<(u32, u32, u32, u32, u32)> {
     let mut line = 0u32;
     let mut col = 0u32;
-    for chunk in data.chunks_exact(5) {
-        let (dl, dc, len, ty, mods) = (chunk[0], chunk[1], chunk[2], chunk[3], chunk[4]);
-        if dl == 0 {
-            col += dc;
-        } else {
-            line += dl;
-            col = dc;
-        }
-        out.push((line, col, len, ty, mods));
-    }
-    out
-}
-
-/// Human-readable legend type name for a `tokenType` index — the snapshot
-/// test renders through it, and `fossil-wasm` sends it across the boundary in
-/// place of the number.
-#[must_use]
-pub const fn legend_type_name(token_type: u32) -> &'static str {
-    match token_type {
-        ty::KEYWORD => "keyword",
-        ty::NAMESPACE => "namespace",
-        ty::TYPE => "type",
-        ty::FUNCTION => "function",
-        ty::PROPERTY => "property",
-        ty::STRING => "string",
-        ty::NUMBER => "number",
-        ty::OPERATOR => "operator",
-        ty::COMMENT => "comment",
-        ty::VARIABLE => "variable",
-        ty::PARAMETER => "parameter",
-        _ => "unknown",
-    }
-}
-
-/// Human-readable legend modifier name for a modifier BIT index.
-#[must_use]
-pub const fn legend_modifier_name(bit: u32) -> &'static str {
-    match bit {
-        md::DECLARATION => "declaration",
-        _ => "unknown",
-    }
+    data.iter()
+        .map(|t| {
+            if t.delta_line == 0 {
+                col += t.delta_start;
+            } else {
+                line += t.delta_line;
+                col = t.delta_start;
+            }
+            (line, col, t.length, t.token_type, t.token_modifiers_bitset)
+        })
+        .collect()
 }
 
 /// The names of every modifier set in `modifiers`, in bit order.
 #[must_use]
 pub fn modifier_names(modifiers: u32) -> Vec<&'static str> {
-    (0..u32::try_from(LEGEND_MODIFIERS.len()).unwrap_or(0))
-        .filter(|bit| modifiers & (1 << bit) != 0)
-        .map(legend_modifier_name)
+    LEGEND_MODIFIERS
+        .iter()
+        .enumerate()
+        .filter(|(bit, _)| modifiers & (1 << bit) != 0)
+        .map(|(_, m)| m.as_str())
         .collect()
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -572,7 +512,7 @@ mod tests {
             .map(|s| {
                 (
                     src[s.range.start as usize..s.range.end as usize].to_string(),
-                    legend_type_name(s.token_type),
+                    s.token_type.name(),
                     modifier_names(s.modifiers),
                 )
             })
@@ -628,14 +568,6 @@ Orders : Order from Adults
         );
         assert_eq!(modifier_names(DECLARATION), vec!["declaration"]);
         assert!(modifier_names(0).is_empty());
-    }
-
-    #[test]
-    fn tokens_are_a_multiple_of_five() {
-        let (db, file) = db_file(SRC);
-        let data = semantic_tokens(&db, file);
-        assert_eq!(data.len() % 5, 0, "the token stream must be 5-tuples");
-        assert!(!data.is_empty(), "a program should emit tokens");
     }
 
     /// The shape names are types wherever they are written: declared in the
@@ -783,7 +715,7 @@ Orders : Order from Adults
         let ops_on = |want: u32| -> Vec<u32> {
             decoded
                 .iter()
-                .filter(|&&(line, _, _, t, _)| line == want && t == ty::OPERATOR)
+                .filter(|&&(line, _, _, t, _)| line == want && t == TokenType::Operator as u32)
                 .map(|&(_, col, _, _, _)| col)
                 .collect()
         };
@@ -799,7 +731,10 @@ Orders : Order from Adults
             .iter()
             .find(|&&(line, col, _, _, _)| line == 1 && col == 0)
             .expect("`users` at 1:0");
-        assert_eq!((users.3, users.4), (ty::VARIABLE, DECLARATION));
+        assert_eq!(
+            (users.3, users.4),
+            (TokenType::Variable as u32, DECLARATION)
+        );
     }
 
     #[test]
@@ -808,31 +743,11 @@ Orders : Order from Adults
         let (db, file) = db_file(&format!("// a comment\n{SRC}"));
         let decoded = decode_tokens(&semantic_tokens(&db, file));
         assert!(
-            decoded.iter().any(|&(_, _, _, t, _)| t == ty::COMMENT),
+            decoded
+                .iter()
+                .any(|&(_, _, _, t, _)| t == TokenType::Comment as u32),
             "expected a comment token: {decoded:?}"
         );
-    }
-
-    #[test]
-    fn delta_encoding_is_relative() {
-        let abs = [
-            AbsToken {
-                line: 0,
-                start_char: 0,
-                length: 6,
-                token_type: ty::KEYWORD,
-                modifiers: 0,
-            },
-            AbsToken {
-                line: 0,
-                start_char: 7,
-                length: 2,
-                token_type: ty::NAMESPACE,
-                modifiers: DECLARATION,
-            },
-        ];
-        let data = delta_encode(&abs);
-        assert_eq!(&data[5..10], &[0, 7, 2, ty::NAMESPACE, DECLARATION]);
     }
 
     #[test]

@@ -59,14 +59,11 @@ pub const PAYLOAD_COLUMNS: &[WriterColumn] = &[
     },
 ];
 
-/// The names of a vertex payload row, in writer order.
-pub const PAYLOAD_NAMES: &[&str] = &["dense_id", "subject"];
+/// The address column of a vertex payload row — the row's rank in the ordering, which a new subject renumbers.
+pub const PAYLOAD_ADDRESS: &str = "dense_id";
 
-/// The address column(s) of a vertex payload row — the row's rank in the ordering, which a new subject renumbers.
-pub const PAYLOAD_ADDRESS: &[&str] = &["dense_id"];
-
-/// The identity column(s) of a vertex payload row — what a bookmark keys on, and what survives a rebuild.
-pub const PAYLOAD_IDENTITY: &[&str] = &["subject"];
+/// The identity column of a vertex payload row — what a bookmark keys on, and what survives a rebuild.
+pub const PAYLOAD_IDENTITY: &str = "subject";
 
 /// Every column of an edge row, in writer order.
 pub const EDGE_COLUMNS: &[WriterColumn] = &[
@@ -81,12 +78,6 @@ pub const EDGE_COLUMNS: &[WriterColumn] = &[
         role: ColumnRole::Endpoint,
     },
 ];
-
-/// The names of an edge row, in writer order.
-pub const EDGE_NAMES: &[&str] = &["src", "dst"];
-
-/// The endpoint column(s) of an edge row — one end of a relation, a vertex's global `dense_id`.
-pub const EDGE_ENDPOINTS: &[&str] = &["src", "dst"];
 
 /// The edge column the manifest's `source` endpoint names as its `key`.
 pub const ENDPOINT_SRC: &str = "src";

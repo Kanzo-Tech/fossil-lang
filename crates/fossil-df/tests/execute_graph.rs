@@ -21,7 +21,6 @@
 //! typed document serves both halves. That is why this file registers
 //! `graph.shex` for the checker and passes the same text as the descriptor.
 
-#![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::UInt32Array;

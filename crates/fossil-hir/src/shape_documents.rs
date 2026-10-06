@@ -106,7 +106,7 @@ pub fn shape_document(db: &dyn Db, doc: SourceFile, provider_name: &str) -> Opti
     decode_shape_document(db, TypeDocument::new(db, doc, provider_name.to_string()))
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     /// The registration half: a document written to the registry is reachable
     /// through the same `file_at` the compiler resolves with.
@@ -125,10 +125,8 @@ mod tests {
         assert!(shapes.lookup("http://example.org/Person").is_some());
     }
 
-    use std::path::Path;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::SystemTime;
 
     use fossil_graph_schema::Rejection;
     use salsa::Setter as _;
@@ -151,13 +149,8 @@ mod tests {
     use fossil_base::db::FossilDb;
     use fossil_base::files::{file_at, register_file};
     use fossil_base::providers::{DATA, Provider};
-    use fossil_base::system::{FsError, System};
-    // The line decoder used to be written out again here, in a THIRD dialect of
-    // the same idea (first line a shape IRI, each further line a predicate).
-    // There is one now, and it lives one module over — see
-    // `fossil_base::test_support`'s header for why it is a feature and not a
-    // `#[cfg(test)]` module.
-    use fossil_base::test_support::{SHEX, TABLE, decode_lines};
+    use fossil_base::system::System;
+    use fossil_base::test_support::{NativeSystem, SHEX, TABLE, decode_lines};
 
     /// A second type-reading row, to prove selection actually selects — and it
     /// shares `SHEX`'s extensions on purpose, so only the NAME can tell them
@@ -178,34 +171,6 @@ mod tests {
 
     static TWO_ROWS: &[&Provider] = &[&SHEX, &NOTHING];
 
-    #[derive(Debug, Default)]
-    struct DecodingHost;
-
-    impl System for DecodingHost {
-        fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-            Err(FsError::NotFound(path.display().to_string()))
-        }
-        fn now(&self) -> SystemTime {
-            SystemTime::UNIX_EPOCH
-        }
-        fn providers(&self) -> &'static [&'static Provider] {
-            TWO_ROWS
-        }
-    }
-
-    /// A host that installed no type readers — the default.
-    #[derive(Debug)]
-    struct BareHost;
-
-    impl System for BareHost {
-        fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-            Err(FsError::NotFound(path.display().to_string()))
-        }
-        fn now(&self) -> SystemTime {
-            SystemTime::UNIX_EPOCH
-        }
-    }
-
     fn person(db: &FossilDb) -> SourceFile {
         SourceFile::new(
             db,
@@ -221,7 +186,7 @@ mod tests {
     /// `io.shacl` behave identically.
     #[test]
     fn one_document_and_two_names_are_two_questions() {
-        let db = FossilDb::new(Arc::new(DecodingHost));
+        let db = FossilDb::new(Arc::new(NativeSystem::with_providers(TWO_ROWS)));
         let doc = person(&db);
         assert_eq!(
             shape_document(&db, doc, "shex")
@@ -242,8 +207,9 @@ mod tests {
 
     #[test]
     fn a_host_with_no_type_readers_yields_none() {
-        let db = FossilDb::new(Arc::new(BareHost));
-        assert_eq!(BareHost.providers(), DATA, "the default is the data rows");
+        let host = NativeSystem::default();
+        assert_eq!(host.providers(), DATA, "the default is the data rows");
+        let db = FossilDb::new(Arc::new(host));
         assert!(shape_document(&db, person(&db), "shex").is_none());
         assert!(!reads_types(&db, "shex"));
     }
@@ -252,7 +218,7 @@ mod tests {
     /// a row which reads ROWS.
     #[test]
     fn a_name_that_reads_no_types_yields_none() {
-        let db = FossilDb::new(Arc::new(DecodingHost));
+        let db = FossilDb::new(Arc::new(NativeSystem::with_providers(TWO_ROWS)));
         assert!(shape_document(&db, person(&db), "linkml").is_none());
         assert!(!reads_types(&db, "linkml"));
         assert!(!reads_types(&db, "csv"), "`io.csv` reads rows, not types");
@@ -260,7 +226,7 @@ mod tests {
 
     #[test]
     fn a_decoded_document_reaches_the_neutral_vocabulary() {
-        let db = FossilDb::new(Arc::new(DecodingHost));
+        let db = FossilDb::new(Arc::new(NativeSystem::with_providers(TWO_ROWS)));
         let shapes = shape_document(&db, person(&db), "shex").expect("the shex row");
         assert_eq!(shapes.shapes().count(), 1);
         let p = shapes
@@ -281,7 +247,7 @@ mod tests {
     /// only evidence a broken `.shex` produces.
     #[test]
     fn a_malformed_document_is_carried_not_dropped() {
-        let db = FossilDb::new(Arc::new(DecodingHost));
+        let db = FossilDb::new(Arc::new(NativeSystem::with_providers(TWO_ROWS)));
         let doc = SourceFile::new(
             &db,
             "!malformed empty document\n".to_string(),
@@ -311,7 +277,10 @@ mod tests {
                 seen.fetch_add(1, Ordering::SeqCst);
             }
         });
-        let mut db = FossilDb::with_event_callback(Arc::new(DecodingHost), callback);
+        let mut db = FossilDb::with_event_callback(
+            Arc::new(NativeSystem::with_providers(TWO_ROWS)),
+            callback,
+        );
 
         let doc = person(&db);
         let other = SourceFile::new(&db, "unrelated".to_string(), "m.fossil".to_string());
@@ -360,7 +329,7 @@ mod tests {
     /// path, the compiler resolves the path and decodes what it finds.
     #[test]
     fn a_registered_document_is_reachable_by_path_and_decodes() {
-        let mut db = FossilDb::new(Arc::new(DecodingHost));
+        let mut db = FossilDb::new(Arc::new(NativeSystem::with_providers(TWO_ROWS)));
         let doc = SourceFile::new(
             &db,
             "shape https://example.org/City\nprop https://example.org/population - 1 1\n"

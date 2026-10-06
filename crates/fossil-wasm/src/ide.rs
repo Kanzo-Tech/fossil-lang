@@ -57,38 +57,53 @@ use crate::FossilWorkspace;
 /// What is under the cursor, rendered — the payload of `textDocument/hover`
 /// with the LSP envelope taken off.
 ///
-/// `markdown` is [`fossil_ide::hover_bidirectional`]'s: a ```` ```fossil ````
+/// `markdown` is [`fossil_ide::hover()`]'s: a ```` ```fossil ````
 /// fence, the source-side type and where it came from, and — when the program
 /// names an output document that resolves — a second block with the type the
 /// shape demands of that predicate. `range` is UTF-16, because a JS host counts
 /// in UTF-16 and LSP does too.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct HoverRow {
     pub markdown: String,
+    #[schemars(with = "fossil_ide::wire::RangeSchema")]
     pub range: Range,
 }
 
-/// One completion candidate.
+/// What a completion candidate is: the two LSP `CompletionItemKind`s
+/// `fossil-ide` emits, by their LSP names.
 ///
-/// # `kind` is a NAME, and that is the whole reason this type exists
-///
-/// LSP spells `CompletionItemKind` as an integer, and the predecessor of
+/// A name and not a number, because the predecessor of
 /// `packages/codemirror-fossil` is what happens when a number crosses this
 /// boundary: it hard-copied the lexer's discriminants into a TS enum and was
-/// wrong in nine places by the time it was deleted. The numbers here are the
-/// LSP spec's rather than fossil's, so they are not going to be renumbered —
-/// but the table that reads them would still live in TypeScript, where nothing
-/// can check it. [`kind_name`] puts it in Rust, where
-/// `every_lsp_kind_has_a_name` does.
-///
-/// The name is the LSP constant, lowercased (`FUNCTION` → `"function"`,
-/// `ENUM_MEMBER` → `"enum_member"`). Mapping it onto whatever vocabulary an
-/// editor draws icons from is that editor's layer's job.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+/// wrong in nine places by the time it was deleted. And these two and not the
+/// specification's twenty-five, because a variant nothing emits is a row of a
+/// table on each side of the boundary that nothing can exercise. A third kind
+/// is a variant here, and the generated union makes the editor's table say
+/// what it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CompletionKind {
+    Function,
+    Field,
+}
+
+impl CompletionKind {
+    const fn of(kind: Option<CompletionItemKind>) -> Option<Self> {
+        match kind {
+            Some(CompletionItemKind::FUNCTION) => Some(Self::Function),
+            Some(CompletionItemKind::FIELD) => Some(Self::Field),
+            _ => None,
+        }
+    }
+}
+
+/// One completion candidate.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct CompletionRow {
     pub label: String,
-    /// The LSP kind, by name; `""` when the item carries none.
-    pub kind: String,
+    /// Absent when the item carries no kind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<CompletionKind>,
     /// The signature, the shape property's IRI, the source field's type —
     /// whatever `fossil-ide` wrote beside the label. `""` when it wrote none.
     pub detail: String,
@@ -111,9 +126,10 @@ pub struct CompletionRow {
 /// two of the three positions goto-def recognises resolve into the shape
 /// document — so a host with one editor pane still has to read `uri` before it
 /// moves a cursor.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct DefinitionRow {
     pub uri: String,
+    #[schemars(with = "fossil_ide::wire::RangeSchema")]
     pub range: Range,
 }
 
@@ -121,56 +137,20 @@ pub struct DefinitionRow {
 /// as absolute rows rather than the LSP delta stream.
 ///
 /// `kind` and `modifiers` are the legend's NAMES (`"type"`, `"declaration"`),
-/// for the reason [`CompletionRow::kind`] is one: the number is an index into
-/// a table, and the table belongs on the side that can check it. `range` is
+/// for the reason [`CompletionKind`] is one: the number is an index into a
+/// table, and the table belongs on the side that can check it. `range` is
 /// UTF-16, like every other range on this surface, and unlike the LSP stream it
 /// may cross a line — a multi-line string is one row.
 ///
 /// The rows are in source order and never overlap; a connection reference is
 /// carved out of its string literal, so `"@warehouse/x.csv"` is three rows.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct SemanticTokenRow {
+    #[schemars(with = "fossil_ide::wire::RangeSchema")]
     pub range: Range,
     pub kind: String,
     /// Empty when the span carries none — never absent.
     pub modifiers: Vec<String>,
-}
-
-/// The LSP `CompletionItemKind` constant, by name.
-///
-/// Total over the twenty-five the specification defines; `None` and anything
-/// outside them is `""`, which a host reads as "no icon".
-#[must_use]
-pub const fn kind_name(kind: Option<CompletionItemKind>) -> &'static str {
-    let Some(kind) = kind else { return "" };
-    match kind {
-        CompletionItemKind::TEXT => "text",
-        CompletionItemKind::METHOD => "method",
-        CompletionItemKind::FUNCTION => "function",
-        CompletionItemKind::CONSTRUCTOR => "constructor",
-        CompletionItemKind::FIELD => "field",
-        CompletionItemKind::VARIABLE => "variable",
-        CompletionItemKind::CLASS => "class",
-        CompletionItemKind::INTERFACE => "interface",
-        CompletionItemKind::MODULE => "module",
-        CompletionItemKind::PROPERTY => "property",
-        CompletionItemKind::UNIT => "unit",
-        CompletionItemKind::VALUE => "value",
-        CompletionItemKind::ENUM => "enum",
-        CompletionItemKind::KEYWORD => "keyword",
-        CompletionItemKind::SNIPPET => "snippet",
-        CompletionItemKind::COLOR => "color",
-        CompletionItemKind::FILE => "file",
-        CompletionItemKind::REFERENCE => "reference",
-        CompletionItemKind::FOLDER => "folder",
-        CompletionItemKind::ENUM_MEMBER => "enum_member",
-        CompletionItemKind::CONSTANT => "constant",
-        CompletionItemKind::STRUCT => "struct",
-        CompletionItemKind::EVENT => "event",
-        CompletionItemKind::OPERATOR => "operator",
-        CompletionItemKind::TYPE_PARAMETER => "type_parameter",
-        _ => "",
-    }
 }
 
 impl FossilWorkspace {
@@ -189,11 +169,11 @@ impl FossilWorkspace {
     ) -> Option<HoverRow> {
         let db = self.base_db();
         let file = self.file_by_handle(handle)?;
-        let info = fossil_ide::hover_bidirectional(db, file, line, character)?;
+        let info = fossil_ide::hover(db, file, line, character)?;
         let index = fossil_ide::line_index(db, file);
         Some(HoverRow {
             markdown: info.markdown,
-            range: fossil_ide::byte_range_to_range(&index, info.range),
+            range: fossil_ide::range(index, info.range),
         })
     }
 
@@ -220,7 +200,7 @@ impl FossilWorkspace {
             .map(|item| CompletionRow {
                 insert: item.insert_text.unwrap_or_else(|| item.label.clone()),
                 label: item.label,
-                kind: kind_name(item.kind).to_string(),
+                kind: CompletionKind::of(item.kind),
                 detail: item.detail.unwrap_or_default(),
             })
             .collect()
@@ -241,8 +221,8 @@ impl FossilWorkspace {
         fossil_ide::semantic_spans(db, file)
             .into_iter()
             .map(|span| SemanticTokenRow {
-                range: fossil_ide::byte_range_to_range(&index, span.range),
-                kind: fossil_ide::legend_type_name(span.token_type).to_string(),
+                range: fossil_ide::range(index, span.range),
+                kind: span.token_type.name().to_string(),
                 modifiers: fossil_ide::modifier_names(span.modifiers)
                     .into_iter()
                     .map(str::to_string)
@@ -273,73 +253,8 @@ impl FossilWorkspace {
             .into_iter()
             .map(|target| DefinitionRow {
                 uri: target.file.path(db).clone(),
-                range: fossil_ide::byte_range_to_range(
-                    &fossil_ide::line_index(db, target.file),
-                    target.range,
-                ),
+                range: fossil_ide::range(fossil_ide::line_index(db, target.file), target.range),
             })
             .collect()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{CompletionItemKind, kind_name};
-
-    /// The twenty-five the LSP specification defines, in its own order. Written
-    /// out because the point is that the table is TOTAL: a constant missing
-    /// from `kind_name`'s match falls through to `""`, which a host renders as
-    /// no icon and nothing else notices.
-    const ALL: [CompletionItemKind; 25] = [
-        CompletionItemKind::TEXT,
-        CompletionItemKind::METHOD,
-        CompletionItemKind::FUNCTION,
-        CompletionItemKind::CONSTRUCTOR,
-        CompletionItemKind::FIELD,
-        CompletionItemKind::VARIABLE,
-        CompletionItemKind::CLASS,
-        CompletionItemKind::INTERFACE,
-        CompletionItemKind::MODULE,
-        CompletionItemKind::PROPERTY,
-        CompletionItemKind::UNIT,
-        CompletionItemKind::VALUE,
-        CompletionItemKind::ENUM,
-        CompletionItemKind::KEYWORD,
-        CompletionItemKind::SNIPPET,
-        CompletionItemKind::COLOR,
-        CompletionItemKind::FILE,
-        CompletionItemKind::REFERENCE,
-        CompletionItemKind::FOLDER,
-        CompletionItemKind::ENUM_MEMBER,
-        CompletionItemKind::CONSTANT,
-        CompletionItemKind::STRUCT,
-        CompletionItemKind::EVENT,
-        CompletionItemKind::OPERATOR,
-        CompletionItemKind::TYPE_PARAMETER,
-    ];
-
-    #[test]
-    fn every_lsp_kind_has_a_name() {
-        for kind in ALL {
-            assert!(
-                !kind_name(Some(kind)).is_empty(),
-                "CompletionItemKind {kind:?} falls through kind_name's match — \
-                 an editor would draw no icon for it and nothing else would say so"
-            );
-        }
-    }
-
-    #[test]
-    fn names_are_distinct() {
-        let mut names: Vec<&str> = ALL.iter().map(|k| kind_name(Some(*k))).collect();
-        names.sort_unstable();
-        let before = names.len();
-        names.dedup();
-        assert_eq!(before, names.len(), "two kinds share a name: {names:?}");
-    }
-
-    #[test]
-    fn no_kind_is_the_empty_name() {
-        assert_eq!(kind_name(None), "");
     }
 }

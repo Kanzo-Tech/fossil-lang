@@ -88,10 +88,8 @@ unlowerable — its own fixture lowers fine today.
 **Anything the HIR does not need leaves the grammar**, because a token that never reaches the HIR is
 a promise the language does not keep — `|>`, the leading dot, the triple term, `&` shape
 intersection and the rest. No list here: `grammar.bnf` carries each as a tombstone, the never-built
-forms sit under `grammar.bnf, § NOT IN MVP`, six answer by name with a message saying what to write
-instead (`crates/fossil-syntax/src/parser/diag.rs, retired`), and
-`crates/fossil-syntax/tests/parse_corpus.rs, no_fenced_fossil_block_spells_a_retired_form` fails if any fenced `fossil` block on this site
-spells one.
+forms sit under `grammar.bnf, § NOT IN MVP`, and a form that left is a parse error like any other
+text the grammar does not have — no second list names it.
 
 ## What this does not settle
 

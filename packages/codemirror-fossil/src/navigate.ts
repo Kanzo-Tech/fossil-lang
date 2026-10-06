@@ -25,15 +25,9 @@
 import { EditorView, keymap } from '@codemirror/view';
 import { EditorSelection, type Extension } from '@codemirror/state';
 
-import { offsetOf, positionOf, type Range } from './positions.js';
+import type { DefinitionRow } from '@fossil-lang/types';
 
-/** The `DefinitionRow` shape, restated structurally so this module imports no
- *  runtime. `@fossil-lang/wasm` is the definition. */
-export interface DefinitionRowLike {
-  /** The key the file was opened under, verbatim — NOT a `file://` URI. */
-  uri: string;
-  range: Range;
-}
+import { offsetOf, positionOf } from './positions.js';
 
 /** What {@link fossilGotoDefinition} calls. Takes the text for the same reason
  *  the check source does — see the note in `hover.ts`. */
@@ -41,7 +35,7 @@ export type DefinitionSource = (
   text: string,
   line: number,
   character: number,
-) => readonly DefinitionRowLike[] | Promise<readonly DefinitionRowLike[]>;
+) => readonly DefinitionRow[] | Promise<readonly DefinitionRow[]>;
 
 /** Options for {@link fossilGotoDefinition}. */
 export interface NavigateOptions {
@@ -57,7 +51,7 @@ export interface NavigateOptions {
    * extension without this would silently do nothing on the majority of real
    * uses.
    */
-  onNavigate: (target: DefinitionRowLike | null) => void;
+  onNavigate: (target: DefinitionRow | null) => void;
   /** Bind Mod-click as well as the keys. Default true. */
   clickToNavigate?: boolean;
 }
@@ -77,7 +71,7 @@ export function gotoDefinitionAt(
 ): void {
   const { line, character } = positionOf(view.state, pos);
   void (async () => {
-    let rows: readonly DefinitionRowLike[];
+    let rows: readonly DefinitionRow[];
     try {
       rows = await source(view.state.doc.toString(), line, character);
     } catch {

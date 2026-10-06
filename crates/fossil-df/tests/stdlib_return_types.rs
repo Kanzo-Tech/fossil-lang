@@ -67,10 +67,8 @@
 //!   row is this crate's `UNREACHABLE_ON_DATAFUSION`, and it answers a
 //!   different question: *does it render*, not *what does it return*.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use duckdb::Connection;
-use fossil_hir::stdlib::{FunctionRegistry, LoweringKind, ScalarTy, SigTy, render_template};
+use fossil_hir::stdlib::{LoweringKind, ScalarTy, SigTy, render_template, stdlib};
 
 /// The `DuckDB` type name a [`ScalarTy`] means — what `DESCRIBE` must print.
 ///
@@ -114,7 +112,7 @@ fn dummy(ty: ScalarTy) -> String {
 #[test]
 fn every_expr_template_returns_the_type_its_row_declares() {
     let conn = Connection::open_in_memory().expect("open in-memory DuckDB");
-    let reg = FunctionRegistry::stdlib_default();
+    let reg = stdlib();
 
     let mut checked = 0usize;
     let mut mismatches: Vec<String> = Vec::new();
@@ -172,7 +170,7 @@ fn every_expr_template_returns_the_type_its_row_declares() {
     // against a literal. This was `35`, and it went stale the first time a row
     // was deleted; what the test needs to know is that EVERY `Expr` row reached
     // a real DuckDB, which is a claim about two numbers agreeing.
-    let expr_rows = FunctionRegistry::stdlib_default()
+    let expr_rows = stdlib()
         .iter()
         .filter(|e| matches!(e.lowering, LoweringKind::Expr(_)))
         .count();
@@ -197,7 +195,7 @@ fn every_expr_template_returns_the_type_its_row_declares() {
 /// `add_verb`.
 #[test]
 fn every_op_row_returns_rows_except_the_one_that_counts_them() {
-    let reg = FunctionRegistry::stdlib_default();
+    let reg = stdlib();
 
     let mut op_rows: Vec<(&str, SigTy)> = reg
         .iter()

@@ -15,11 +15,11 @@
 //! What makes that visible is that there is one `pub fn` and three call sites,
 //! not a test.
 
-#![cfg(not(target_arch = "wasm32"))]
 // `{Row.id}` is fossil's interpolation hole, not a Rust format argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use fossil_base::{Problem, test_support};
+use fossil_base::test_support;
+use fossil_graph_schema::Problem;
 use fossil_mir::program_diagnostics;
 
 /// One un-narrowed `name` predicate — enough for a mapping to type-check.
@@ -217,7 +217,7 @@ People : Person from Users
     let (db, file) = test_support::db_with_document_at("t.fossil", program, "p.shex", SHAPE);
     let errors: Vec<_> = program_diagnostics(&db, file)
         .into_iter()
-        .filter(|d| d.severity == fossil_base::Severity::Error)
+        .filter(|d| d.severity == fossil_graph_schema::Severity::Error)
         .map(|d| d.problem)
         .collect();
     assert!(errors.is_empty(), "a clean program reported {errors:?}");

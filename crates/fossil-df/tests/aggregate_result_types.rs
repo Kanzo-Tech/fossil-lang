@@ -15,8 +15,6 @@
 //! runs, its output schema is read, and the collected batch is checked to carry
 //! the same type the schema promised.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::sync::Arc;
 
 use datafusion::arrow::array::{ArrayRef, Decimal128Array, Float64Array, Int64Array, StringArray};
@@ -25,7 +23,7 @@ use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::datasource::MemTable;
 use datafusion::functions_aggregate::expr_fn::{avg, max, min, sum};
 use datafusion::prelude::{DataFrame, SessionContext, col};
-use fossil_hir::stdlib::{AggFn, FunctionRegistry, ScalarTy};
+use fossil_hir::stdlib::{AggFn, ScalarTy, stdlib};
 
 /// The four `math/` rows the catalogue calls aggregates, with the name each is
 /// reached by. `RegistryEntry::agg_fn` is the map; this is its inverse, and
@@ -49,7 +47,7 @@ struct Cell {
 /// The input column types a fossil source can hand an aggregate.
 ///
 /// `Decimal128` is in the list because it is REACHABLE and unrepresentable:
-/// `fossil_introspect`'s `duckdb_type_to_fossil_primitive` maps any `DECIMAL…`
+/// `catalogue.bnf`'s `duckdb` table maps any `DECIMAL…`
 /// to `Primitive::Float`, so the checker calls the column a `Float` while a
 /// Parquet source hands `DataFusion` a `Decimal128`. The language has no decimal
 /// type (`fossil_graph_schema::Primitive` is nine variants and none is one).
@@ -118,7 +116,7 @@ fn call(f: AggFn, arg: datafusion::prelude::Expr) -> datafusion::prelude::Expr {
 /// plan AND off the rows.
 async fn measure() -> Vec<Cell> {
     let ctx = SessionContext::new();
-    let registry = FunctionRegistry::stdlib_default();
+    let registry = stdlib();
     let mut cells = Vec::new();
     for (label, input, values) in input_columns() {
         for (name, agg) in AGGREGATES {
@@ -270,7 +268,7 @@ async fn nulls_do_not_move_the_type() {
 /// does it for `math.sum`.
 #[test]
 fn every_aggregate_row_is_reachable_and_declares_float() {
-    let registry = FunctionRegistry::stdlib_default();
+    let registry = stdlib();
     for (name, agg) in AGGREGATES {
         let entry = registry
             .lookup(name)

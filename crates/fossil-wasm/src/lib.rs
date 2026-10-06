@@ -64,21 +64,17 @@ pub mod tokenize;
 mod wasm_system;
 mod workspace;
 
-pub use crate::ide::{CompletionRow, DefinitionRow, HoverRow, SemanticTokenRow};
-pub use crate::tokenize::{TokenRow, token_kinds_native, tokenize_native};
-// The #[wasm_bindgen] `tokenize` and `tokenKinds` functions are exposed
-// to JS by virtue of their attribute. The `tokenize` module is `pub` so the
-// `#[wasm_bindgen]` items are reachable (the unreachable_pub lint would
-// otherwise flag them — they ARE reachable, just via wasm-bindgen-generated
-// glue, not via Rust callers).
+pub use crate::ide::{CompletionKind, CompletionRow, DefinitionRow, HoverRow, SemanticTokenRow};
+pub use crate::tokenize::{TokenRow, tokenize_native};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, Span, System};
+use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, System};
 use fossil_graph_schema::js::{bug, invalid_argument};
 use fossil_graph_schema::{Failure, Problem};
+use fossil_hir::documents::MissingDocument;
 use fossil_ide::LineIndex;
 use lsp_types::{DiagnosticSeverity, Range};
 use wasm_bindgen::prelude::*;
@@ -265,6 +261,12 @@ fn busy(method: &str) -> Failure {
     )
 }
 
+// The types the signatures above name, from the one place they are declared.
+#[wasm_bindgen(typescript_custom_section)]
+const WIRE_TYPES: &str = "import type { CheckRow, CompletionRow, DefinitionRow, HoverRow, \
+    MissingDocument, ProgramSource, ProviderInfo, SemanticTokenRow, SourceRefInfo, TokenRow } \
+    from '@fossil-lang/types';";
+
 /// A value this crate built, as plain JS data. A serialiser refusing one is
 /// fossil's fault, `internal/bug`.
 pub(crate) fn to_value<T: serde::Serialize + ?Sized>(
@@ -383,6 +385,7 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`.
+    #[wasm_bindgen(unchecked_return_type = "CheckRow[]")]
     pub fn check(&self) -> Result<JsValue, JsValue> {
         // Native-side tests reach the pure-Rust core via `check_rows()`;
         // the wasm-bindgen wrapper just serializes. Separating the two
@@ -402,6 +405,7 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
     /// if serialization fails.
+    #[wasm_bindgen(unchecked_return_type = "CheckRow[]")]
     pub fn diagnostics_for(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
         let ws = self
             .inner
@@ -423,7 +427,10 @@ impl WasmWorkspace {
     /// Returns a JS error if `connections` is not a string-to-string record, or
     /// if the workspace is busy.
     #[wasm_bindgen(js_name = setConnections)]
-    pub fn set_connections(&self, connections: JsValue) -> Result<(), JsValue> {
+    pub fn set_connections(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "Record<string, string>")] connections: JsValue,
+    ) -> Result<(), JsValue> {
         let connections: HashMap<String, String> = serde_wasm_bindgen::from_value(connections)
             .map_err(|e| {
                 invalid_argument(
@@ -446,7 +453,7 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
     /// if serialization fails.
-    #[wasm_bindgen(js_name = missingDocuments)]
+    #[wasm_bindgen(js_name = missingDocuments, unchecked_return_type = "MissingDocument[]")]
     pub fn missing_documents(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
         let ws = self
             .inner
@@ -480,6 +487,7 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
     /// if serialization fails.
+    #[wasm_bindgen(unchecked_return_type = "ProgramSource[]")]
     pub fn sources(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
         let ws = self.inner.try_borrow().map_err(|_| busy("sources"))?;
         let rows = ws.sources_native(*handle).ok_or_else(unknown_handle)?;
@@ -512,6 +520,7 @@ impl WasmWorkspace {
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`. An unknown handle is `null`, not an error —
     /// see [`FossilWorkspace::hover_row`].
+    #[wasm_bindgen(unchecked_return_type = "HoverRow | undefined")]
     pub fn hover(
         &self,
         handle: &FileHandle,
@@ -528,13 +537,14 @@ impl WasmWorkspace {
     /// no catalogue row.
     ///
     /// `kind` is the LSP `CompletionItemKind` **by name** (`"function"`,
-    /// `"field"`). See [`ide::CompletionRow`] for why a number does not cross
+    /// `"field"`). See [`ide::CompletionKind`] for why a number does not cross
     /// this boundary.
     ///
     /// # Errors
     ///
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`. An unknown handle is an empty array.
+    #[wasm_bindgen(unchecked_return_type = "CompletionRow[]")]
     pub fn completions(
         &self,
         handle: &FileHandle,
@@ -559,7 +569,7 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`.
-    #[wasm_bindgen(js_name = gotoDefinition)]
+    #[wasm_bindgen(js_name = gotoDefinition, unchecked_return_type = "DefinitionRow[]")]
     pub fn goto_definition(
         &self,
         handle: &FileHandle,
@@ -584,7 +594,7 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`. An unknown handle is an empty array.
-    #[wasm_bindgen(js_name = semanticTokens)]
+    #[wasm_bindgen(js_name = semanticTokens, unchecked_return_type = "SemanticTokenRow[]")]
     pub fn semantic_tokens(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
         let ws = self
             .inner
@@ -669,7 +679,7 @@ impl FossilWorkspace {
             let uri = self.files.path_for(h, &self.db).unwrap_or_default();
             let index = fossil_ide::line_index(&self.db, file);
             for d in self.file_diagnostics(file) {
-                all.push(to_check_row(&self.db, file, &uri, &index, &d));
+                all.push(to_check_row(&self.db, file, &uri, index, &d));
             }
         }
         all
@@ -702,7 +712,6 @@ impl FossilWorkspace {
         {
             return Vec::new();
         }
-        let text = file.text(&self.db);
         let mut seen: Vec<&str> = Vec::new();
         let mut out = Vec::new();
         for entry in fossil_hir::def_map::def_map(&self.db, file).sources(&self.db) {
@@ -717,9 +726,9 @@ impl FossilWorkspace {
             }
             seen.push(key);
             let mut d = Diagnostic::new(
-                fossil_base::Severity::Warning,
+                fossil_graph_schema::Severity::Warning,
                 why.problem.clone(),
-                call_span(text, entry.span),
+                entry.call_span,
             )
             .file_absolute();
             if let Some(help) = &why.help {
@@ -741,7 +750,7 @@ impl FossilWorkspace {
         Some(
             self.file_diagnostics(file)
                 .into_iter()
-                .map(|d| to_check_row(&self.db, file, &uri, &index, &d))
+                .map(|d| to_check_row(&self.db, file, &uri, index, &d))
                 .collect(),
         )
     }
@@ -801,18 +810,13 @@ impl FossilWorkspace {
     /// Pure-Rust mirror of [`WasmWorkspace::missing_documents`]; `None` for an
     /// unknown handle.
     #[must_use]
-    pub fn missing_documents_native(&self, handle: FileHandle) -> Option<Vec<MissingDocumentRow>> {
+    pub fn missing_documents_native(&self, handle: FileHandle) -> Option<Vec<MissingDocument>> {
         let file = self.files.get(handle)?;
-        Some(
-            fossil_hir::documents::missing_documents(&self.db, file, &self.connections)
-                .into_iter()
-                .map(|d| MissingDocumentRow {
-                    key: d.key,
-                    locator: d.locator,
-                    connection: d.connection,
-                })
-                .collect(),
-        )
+        Some(fossil_hir::documents::missing_documents(
+            &self.db,
+            file,
+            &self.connections,
+        ))
     }
 
     /// Pure-Rust mirror of [`WasmWorkspace::register_document`].
@@ -867,9 +871,7 @@ impl FossilWorkspace {
     /// `tests/workspace.rs`.
     ///
     /// `descriptor_json` is the JSON serialisation of
-    /// [`fossil_descriptors_input::InferredDescriptor`] — see
-    /// `packages/wasm/src/index.ts` `InferredDescriptorJson` for the
-    /// canonical shape.
+    /// [`fossil_descriptors_input::InferredDescriptor`].
     ///
     /// # Errors
     ///
@@ -956,7 +958,7 @@ impl Default for FossilWorkspace {
 ///
 /// # Errors
 /// Returns a JS error only if the result fails to serialize to `JsValue`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "ProviderInfo[]")]
 pub fn providers() -> Result<JsValue, JsValue> {
     to_value(
         "the providers",
@@ -972,7 +974,7 @@ pub fn providers() -> Result<JsValue, JsValue> {
 ///
 /// # Errors
 /// Returns a JS error only if the result fails to serialize to `JsValue`.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "SourceRefInfo[]")]
 pub fn refs(program: &str) -> Result<JsValue, JsValue> {
     to_value("the references", &refs_native(program))
 }
@@ -1003,60 +1005,20 @@ struct Undescribed {
     help: Option<String>,
 }
 
-/// The call right of `:=` in the source item `item` spans — `io.csv("u.csv")`
-/// in `users := io.csv("u.csv")` — or the whole item when there is no `:=` in
-/// it to find.
-fn call_span(text: &str, item: Span) -> Span {
-    let Some(written) = item.slice(text) else {
-        return item;
-    };
-    let Some(at) = written.find(":=") else {
-        return item;
-    };
-    let rest = &written[at + 2..];
-    let skipped = rest.len() - rest.trim_start().len();
-    let start = item.start as usize + at + 2 + skipped;
-    u32::try_from(start).map_or(item, |start| Span::new(start, item.end))
-}
-
-/// `fossil_hir::documents::MissingDocument` in the shape it crosses to JS —
-/// `MissingDocument` in `@fossil-lang/types`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct MissingDocumentRow {
-    pub key: String,
-    pub locator: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub connection: Option<String>,
-}
-
-/// One diagnostic row in the [`WasmWorkspace::check`] return array.
+/// One diagnostic row in the [`WasmWorkspace::check`] return array: the
+/// workspace's own shape, not the LSP wire's (`lsp_types::Diagnostic`).
 ///
-/// The workspace's own shape, and **not the LSP wire's**, which is
-/// `lsp_types::Diagnostic` ([`fossil_ide::lsp_diagnostics`]). This type's
-/// docblock once said it «mirrors the LSP `Diagnostic` shape exactly so the LSP
-/// Worker can republish each row as-is», and the worker did, so an extra `uri`
-/// and a `related` spelled nothing like `relatedInformation` went out on the
-/// wire.
-///
-/// What it is for is `check()`: one flat array across every open file, which
-/// needs a `uri` per row precisely because it is not per-file. The rows are
-/// keyed by the path the HOST opened the buffer under, which in the browser is
-/// often a bare name and not a URI — see [`Self::related`].
-///
-/// Everything but those keys is projected from the shared rendering, so the
-/// message, the code, the severity and the ranges here cannot disagree with
-/// what an editor is shown. On the wire:
-///
-/// ```text
-/// { uri, range, severity, code, message, title, data,
-///   help?, didYouMean?: { range, replacement }, suggestion?, related? }
-/// ```
-///
-/// `CheckRow` in `@fossil-lang/types` is this, with `data` typed by `code`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+/// `check()` is one flat array across every open file, so each row carries the
+/// `uri` the host opened its buffer under. Everything else is projected from the
+/// rendering an editor is shown, so the two cannot disagree. `CheckRow` in
+/// `@fossil-lang/types` is this, with `data` typed by `code`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[schemars(rename = "CheckRowBase")]
 pub struct CheckRow {
     pub uri: String,
+    #[schemars(with = "fossil_ide::wire::RangeSchema")]
     pub range: Range,
+    #[schemars(schema_with = "fossil_ide::wire::severity")]
     pub severity: DiagnosticSeverity,
     /// The problem's code — `area/kind`, what a host branches on.
     pub code: &'static str,
@@ -1084,9 +1046,10 @@ pub struct CheckRow {
 }
 
 /// One entry of [`CheckRow::related`] — a place, and what is there.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct CheckRelated {
     pub uri: String,
+    #[schemars(with = "fossil_ide::wire::RangeSchema")]
     pub range: Range,
     pub message: String,
 }
@@ -1120,17 +1083,10 @@ fn to_check_row(
                 // A `LineIndex` per file: a UTF-16 column is a fact about the
                 // text the range is in, and it is memoised, so the labels that
                 // are in the program cost nothing extra.
-                range: fossil_ide::span_to_range(&fossil_ide::line_index(db, r.file), r.span),
+                range: fossil_ide::range(fossil_ide::line_index(db, r.file), r.span),
                 uri: r.file.path(db).clone(),
                 message: r.text,
             })
             .collect(),
     }
 }
-
-// `diagnostics_for_file`, `severity_to_lsp_int`, `span_to_range` and
-// `utf16_to_pos` lived here, and every one of them had a twin in
-// `fossil-lsp/src/main.rs`. They are `crates/fossil-ide/src/diagnostics.rs` now.
-// The measurements this file used to carry — what a shape document produced
-// before the `claimed` guard — are in
-// `crates/fossil-wasm/tests/documents_are_not_programs.rs`.

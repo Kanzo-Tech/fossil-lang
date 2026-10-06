@@ -19,16 +19,24 @@
 //! Without `object-store` the crate is sans-IO. The store enforces the prefix;
 //! nothing here can widen a credential.
 
+/// How long a host may take to answer — `/docs/design/failure`'s G1 table.
+/// `@fossil-lang/types` holds every host wait to it.
+pub const HOST_MS: u64 = 30_000;
+
+/// Renew this long before a credential expires — Iceberg's
+/// `VendedCredentialsProvider` margin, and `@fossil-lang/storage`'s.
+pub const RENEW_BEFORE_MS: u64 = 5 * 60_000;
+
 pub mod credential;
 #[cfg(feature = "js")]
 mod js;
-pub mod resolved;
 #[cfg(feature = "object-store")]
 mod store;
 
-pub use credential::{Access, Grant, StorageCredential, StorageError};
+pub use credential::{
+    Access, Grant, GrantPlan, LocatorName, StorageCredential, StorageError, covering,
+};
 #[cfg(feature = "js")]
 pub use js::JsHost;
-pub use resolved::{CloudSecret, ResolvedPath};
 #[cfg(feature = "object-store")]
 pub use store::{Host, HostError, Scope, Storage};

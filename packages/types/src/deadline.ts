@@ -3,13 +3,11 @@
  * deadline set where the wait is made; work inside it has the caller's signal and nothing else.
  *
  * {@link within} is the one helper, and every `await host.…` and every module fetch goes through it —
- * `packages/types/tests/failure-guards.test.ts` holds that.
+ * the root `eslint.config.mjs` holds that.
  */
 
 import { FossilError } from './error.js';
 
-/** How long a {@link Host} promise may take — credentials, connections, a job's completion. */
-export const HOST_MS = 30_000;
 /** How long a `.wasm` module may take to fetch and instantiate. */
 export const MODULE_MS = 60_000;
 
@@ -59,8 +57,7 @@ export function until<T>(answer: Promise<T>, signal: AbortSignal | undefined): P
  * missing or silent — is `module/unreachable`, with `after` when the deadline ended the wait and the
  * browser's own error kept as the cause.
  *
- * It memoizes nothing. A loader that caches the promise clears it when it rejects, so the next call
- * tries again rather than answering a dropped download for the life of the page.
+ * It memoizes nothing: {@link loader} does.
  */
 export async function boot<T>(module: string, init: () => Promise<T>): Promise<T> {
   let silent: DOMException | undefined;
@@ -82,4 +79,26 @@ export async function boot<T>(module: string, init: () => Promise<T>): Promise<T
       { cause },
     );
   }
+}
+
+/**
+ * The loader of a wasm-bindgen module: the first call boots it through {@link boot}, handing `wasm`
+ * to the glue as its `module_or_path`. A boot that succeeded is kept; one that failed is forgotten,
+ * so the next call tries again rather than answering a dropped download for the life of the page.
+ */
+export function loader<I>(
+  module: string,
+  init: (options?: { module_or_path: I }) => Promise<unknown>,
+): (wasm?: I) => Promise<unknown> {
+  let booted: Promise<unknown> | null = null;
+  return (wasm) => {
+    if (booted === null) {
+      const pending = boot(module, () => init(wasm === undefined ? undefined : { module_or_path: wasm }));
+      booted = pending;
+      pending.catch(() => {
+        if (booted === pending) booted = null;
+      });
+    }
+    return booted;
+  };
 }

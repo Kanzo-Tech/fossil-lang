@@ -1,4 +1,4 @@
-//! Where a `ShExC` document DECLARES a predicate, as a byte range.
+//! Where a `ShExC` document DECLARES a shape or a predicate, as a byte range.
 //!
 //! One diagnostic wants this and three programs in the conformance set are
 //! written around it: `` `total` expects Float, and this is String `` says what
@@ -37,7 +37,20 @@
 //! would have to parse. `fossil_descriptors_output::shacl`'s «Positions»
 //! section carries the measurement and the upstream change that reverses it.
 
+use std::ops::Range;
+
 use fossil_graph_schema::Span;
+
+/// The range of `shape`'s label where the document declares it, spelled as the
+/// document spells it (`shop:Order`).
+#[must_use]
+pub fn shape_span(src: &str, shape: &str) -> Option<Span> {
+    let (label, _) = declaration(src, shape)?;
+    Some(Span::new(
+        u32::try_from(label.start).ok()?,
+        u32::try_from(label.end).ok()?,
+    ))
+}
 
 /// The range of `predicate` where `shape` declares it, both spelled as the
 /// document spells them (`shop:Order`, `shop:total`).
@@ -49,7 +62,7 @@ use fossil_graph_schema::Span;
 /// corpus has that exact pair in `errors/name/unknown-field/shop.shex`.
 #[must_use]
 pub fn predicate_span(src: &str, shape: &str, predicate: &str) -> Option<Span> {
-    let body = shape_body(src, shape)?;
+    let (_, body) = declaration(src, shape)?;
     let block = src.get(body.clone())?;
     let at = block
         .match_indices(predicate)
@@ -61,12 +74,13 @@ pub fn predicate_span(src: &str, shape: &str, predicate: &str) -> Option<Span> {
     Some(Span::new(start, end))
 }
 
-/// The byte range BETWEEN the braces of `shape`'s declaration.
+/// The byte ranges of `shape`'s LABEL and of what lies BETWEEN its braces.
 ///
 /// The label is matched as a whole token so `shop:Order` does not answer for
 /// `shop:OrderLine`, and the `{` must be the next non-whitespace byte after it
-/// — a shape label is followed by its body and by nothing else.
-fn shape_body(src: &str, shape: &str) -> Option<std::ops::Range<usize>> {
+/// — a shape label is followed by its body and by nothing else, which is also
+/// what tells the declaration from a `@shop:Order` reference before it.
+fn declaration(src: &str, shape: &str) -> Option<(Range<usize>, Range<usize>)> {
     for (i, _) in src.match_indices(shape) {
         if !is_token_at(src, i, shape) {
             continue;
@@ -85,7 +99,7 @@ fn shape_body(src: &str, shape: &str) -> Option<std::ops::Range<usize>> {
                 b'}' => {
                     depth -= 1;
                     if depth == 0 {
-                        return Some(body_start..body_start + j);
+                        return Some((i..after, body_start..body_start + j));
                     }
                 }
                 _ => {}
@@ -149,6 +163,26 @@ shop:Order {
     fn a_predicate_is_found_in_the_shape_that_declares_it() {
         assert_eq!(at(SHOP, "shop:Order", "shop:total"), Some("shop:total"));
         assert_eq!(at(SHOP, "shop:Person", "shop:email"), Some("shop:email"));
+    }
+
+    /// The label is the DECLARATION — the occurrence a `{` follows — so
+    /// `@shop:Order` written before it does not answer.
+    #[test]
+    fn a_shape_is_found_at_its_declaration() {
+        let declared = |src: &str, shape: &str| {
+            let span = shape_span(src, shape)?;
+            let after = src.get(span.end as usize..)?.trim_start();
+            Some((span.slice(src)?.to_string(), after.starts_with('{')))
+        };
+        assert_eq!(
+            declared(SHOP, "shop:Person"),
+            Some(("shop:Person".into(), true))
+        );
+        let before = format!("# see @shop:Order\n{SHOP}");
+        assert_eq!(
+            declared(&before, "shop:Order"),
+            Some(("shop:Order".into(), true))
+        );
     }
 
     /// The whole point of scoping to the shape's braces: two shapes in one

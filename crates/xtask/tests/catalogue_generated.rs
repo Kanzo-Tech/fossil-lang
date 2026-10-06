@@ -1,37 +1,7 @@
-//! **The checked-in generated files are what `catalogue.bnf` says.**
-//!
-//! This replaces `fossil-descriptors-output/tests/catalogue_parity.rs`, which
-//! parsed the same rows and compared them to hand-written statics. Under
-//! generation every one of its four assertions is an identity — the extensions
-//! in the static ARE the extensions in the file, because one was printed from
-//! the other — so what is left to check is the thing that can still be wrong:
-//! that somebody edited `catalogue.bnf` and did not re-run the generator, or
-//! edited a generated file by hand.
-//!
-//! It lives here rather than beside a provider crate because the reason the old
-//! one had to sit in `fossil-descriptors-output` has evaporated. That test
-//! needed a crate that could SEE all six rows as Rust items; a generator reads
-//! the file, so it sees every row from anywhere.
-//!
-//! # What this cannot prove
-//!
-//! - **That the rows are right.** That `io.csv` should accept `.csv` and not
-//!   `.tsv` is a decision, and `catalogue.bnf`'s commentary is where it is
-//!   argued. This proves the Rust says what the file says.
-//! - **That a `decodes` function does what its row claims.** The compiler now
-//!   proves the NAME resolves — which the parity test explicitly could not —
-//!   but `decode_shex` returning nonsense is a `fossil-shex` test's problem.
-//! - **That every generated file is listed.** `catalogue::generated()` is the
-//!   list; a target added to the generator and forgotten there is invisible to
-//!   this, exactly as it is to `--check`.
-//! - **That the reference page's prose is true.** The tables below the fold are
-//!   generated and therefore cannot be wrong; the sentences between them are
-//!   written by hand and no test reads English. What the last three tests here
-//!   buy is narrower and precise: the page cannot go back to writing a ROW by
-//!   hand, and a row cannot quietly stop reaching it.
+//! The checked-in generated files are what `catalogue.bnf` says, and the
+//! generated stdlib table is the registry `fossil-hir` builds from it.
 
 use xtask::catalogue::{self, Reads};
-use xtask::reference;
 
 /// The generator's own view of the file, parsed once.
 fn rows() -> Vec<catalogue::Row> {
@@ -119,12 +89,20 @@ fn every_row_lands_in_exactly_one_generated_file() {
 /// spell.
 #[test]
 fn a_new_native_reader_is_a_row_and_nothing_else() {
-    let invented =
-        catalogue::parse("row avro = extensions \"avro\" ; reads native read_avro_scan .\n").rows;
+    // The one `duckdb` line is the file's frame, which `parse` requires: the
+    // type table has to end in its catch-all.
+    let invented = catalogue::parse(
+        "row avro = extensions \"avro\" ; reads native read_avro_scan option sep .\n\
+         duckdb string = \"*\" .\n",
+    )
+    .rows;
     assert_eq!(invented.len(), 1);
     assert_eq!(
         invented[0].reads,
-        Some(Reads::Native("read_avro_scan".into()))
+        Some(Reads::Native {
+            function: "read_avro_scan".into(),
+            option: Some("sep".into())
+        })
     );
 
     let emitted = catalogue::emit_base(&invented);
@@ -137,107 +115,13 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
         "and `table_function` gives the token back: {emitted}"
     );
     assert!(
+        emitted.contains("Self::AvroScan => Some(\"sep\")"),
+        "and `option_keyword` its option: {emitted}"
+    );
+    assert!(
         emitted.contains("reads_rows: Some(RowReader::Native(NativeReader::AvroScan))"),
         "and the row points at it: {emitted}"
     );
-}
-
-// ── The reference page ─────────────────────────────────────────────────────
-//
-// `docs/content/docs/book/stdlib.mdx` used to write the catalogue out by
-// hand. The measurement that ended that is in `xtask::reference`'s module doc:
-// 51 rows in the registry, 58 on the page, seven of the page's naming nothing
-// the checker knows. These three tests are what stops it happening twice.
-
-/// The page pulls in every section the partial emits, and writes none of them
-/// itself.
-///
-/// Two halves, and the second is the one with teeth. A `<include>` that names a
-/// section the partial does not have fails the docs build, so the first half is
-/// belt and braces; a hand-written table row does NOT fail any build, which is
-/// exactly how the 58 rows accumulated.
-///
-/// **What it cannot prove:** that the page includes a section in the right
-/// place, or that the prose around it describes the rows below it. A section
-/// pasted under the wrong heading passes here.
-#[test]
-fn the_reference_page_includes_the_partial_and_writes_no_row_itself() {
-    let root = catalogue::repo_root();
-    let page = std::fs::read_to_string(root.join("docs/content/docs/book/stdlib.mdx"))
-        .expect("the reference page is on disk");
-    let partial = std::fs::read_to_string(root.join(reference::PARTIAL))
-        .expect("the generated partial is on disk");
-
-    let ids: Vec<&str> = partial
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("<section id=\""))
-        .filter_map(|rest| rest.split('"').next())
-        .collect();
-    // Without this the two loops below would sweep a corpus of zero and report
-    // it as a clean page — the vacuous pass this file's second test already
-    // exists to prevent, one level up.
-    // Six: `core`, `io`, `math`, `parse`, `seq`, `str`. It was eight, and the
-    // two that left are `validate` and `anon` — whole namespaces, not rows.
-    assert!(
-        ids.len() >= 6,
-        "the partial declares {} section(s); the catalogue has at least six receivers",
-        ids.len()
-    );
-
-    for id in &ids {
-        let include = format!("<include>../../generated/stdlib.mdx#{id}</include>");
-        assert!(
-            page.contains(&include),
-            "the page never includes section `{id}`; write `{include}`"
-        );
-    }
-
-    // A catalogue row is a table row carrying an arrow. The two example tables
-    // under «How to read this page» carry call spellings and no arrow, which is
-    // what keeps them out of this.
-    for (n, line) in page.lines().enumerate() {
-        assert!(
-            !(line.starts_with('|') && line.contains("->")),
-            "docs/content/docs/book/stdlib.mdx:{} writes a catalogue row by hand:\n  {line}\n\
-             rows come from `cargo xtask catalogue`; the page carries the prose",
-            n + 1
-        );
-    }
-}
-
-/// Every stdlib row reaches the page.
-///
-/// The emitter groups by receiver head and prints one table per group, so a row
-/// whose head nothing includes would vanish silently — the partial would simply
-/// be one section shorter and would still match itself, which is precisely the
-/// failure `every_row_lands_in_exactly_one_generated_file` guards for the Rust
-/// halves.
-///
-/// **What it cannot prove:** that the row's SIGNATURE is right. That
-/// `str.slice` should take an `end` is a decision, and `catalogue.bnf` is where
-/// it is argued; this proves the page says what the file says.
-#[test]
-fn every_stdlib_row_reaches_the_reference_page() {
-    let partial = std::fs::read_to_string(catalogue::repo_root().join(reference::PARTIAL))
-        .expect("the generated partial is on disk");
-
-    let cat = catalogue::read();
-    let grouped = reference::by_head(&cat);
-    assert!(
-        grouped.values().map(Vec::len).sum::<usize>() >= 30,
-        "the catalogue yielded almost nothing; a guard over an empty one passes vacuously"
-    );
-
-    for entries in grouped.values() {
-        for entry in entries {
-            let cell = format!("| `{}` |", reference::call_spelling(&entry.name));
-            assert!(
-                partial.contains(&cell),
-                "`{}` is in the catalogue and not on the page",
-                entry.name
-            );
-        }
-    }
 }
 
 // ── The round trip ─────────────────────────────────────────────────────────

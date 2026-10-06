@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { FossilError, MODULE_MS, attachCause, boot, isFossilError, until, within } from '../src/index.js';
+import { FossilError, MODULE_MS, attachCause, boot, isFossilError, loader, until, within } from '../src/index.js';
 
 const silent = (after: number) => new Error(`silent after ${after}`);
 const never = <T>(): Promise<T> => new Promise<T>(() => {});
@@ -81,6 +81,18 @@ describe('boot', () => {
     expect(isFossilError(e, 'module/unreachable')).toBe(true);
     expect((e as FossilError<'module/unreachable'>).data).toEqual({ locator: 'm_bg.wasm', after: MODULE_MS });
     expect(((e as Error).cause as Error).name).toBe('TimeoutError');
+  });
+});
+
+describe('loader', () => {
+  it('keeps a boot that succeeded and forgets one that failed', async () => {
+    const init = vi.fn<(options?: { module_or_path: string }) => Promise<unknown>>();
+    init.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValue('ok');
+    const load = loader<string>('m_bg.wasm', init);
+    await expect(load('bytes')).rejects.toSatisfy((e) => isFossilError(e, 'module/unreachable'));
+    await expect(load()).resolves.toBe('ok');
+    await expect(load()).resolves.toBe('ok');
+    expect(init.mock.calls).toEqual([[{ module_or_path: 'bytes' }], [undefined]]);
   });
 });
 

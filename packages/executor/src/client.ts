@@ -11,10 +11,11 @@
  * undefined (reading '__wbindgen_malloc…')`). Mirrors `@fossil-lang/corpus`'s
  * `client.ts` split, which is the known-good shape.
  */
-import type { DocumentWorkspace, Host, MissingDocument } from '@fossil-lang/types';
+import type { DocumentWorkspace, Host, MissingDocument, ProgramSource, RunReport } from '@fossil-lang/types';
 
 import { FossilExecutor as RawFossilExecutor } from '../pkg/fossil_df_wasm.js';
-import type { ExecutorResult, RunReport, SourceDescriptor } from './index.js';
+
+import type { ExecutorResult } from './index.js';
 
 /**
  * One compiled fossil program, run on DataFusion in the browser. Call
@@ -51,9 +52,9 @@ export class FossilExecutor implements DocumentWorkspace {
     this.#raw.registerDocument(key, text);
   }
 
-  /** The sources to read — `uri` is the locator fossil resolved. */
-  sources(): SourceDescriptor[] {
-    return this.#raw.sources() as SourceDescriptor[];
+  /** The sources to read — the list every host introspects; `locator` is what to fetch. */
+  sources(): ProgramSource[] {
+    return this.#raw.sources() as ProgramSource[];
   }
 
   /**

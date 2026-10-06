@@ -24,13 +24,13 @@ miette = { version = "7.6", default-features = false }
 thiserror = "1"
 
 # === IR / codegen ===
-sqlparser = "0.59"
 indexmap = "2"
 smol_str = "0.3"
 
 # === Serialization ===
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+url = "2"                               # the WHATWG URL Standard — every URI fossil parses or builds
 # `schemars` derives JSON Schema from Rust types, so a wire shape a TypeScript
 # package reads is generated from the struct that writes it rather than
 # restated by hand. Pin 0.8 because 0.9 is in alpha and the keasy-side TS
@@ -115,6 +115,8 @@ slug = "0.1"                            # the URL-slugification reference
 lsp-server = "0.7"
 lsp-types = "0.97"
 crossbeam-channel = "0.5"
+# rust-analyzer's UTF-8 ↔ UTF-16 line table — the reference the LSP hosts convert by.
+line-index = "0.1"
 
 # === WASM ===
 wasm-bindgen = "=0.2.120"
@@ -122,6 +124,10 @@ wasm-bindgen-futures = "0.4"
 serde-wasm-bindgen = "0.6"
 js-sys = "0.3"
 console_error_panic_hook = "0.1"
+# `object_store` signs with `chrono::Utc::now()`, which falls through to std's
+# `SystemTime::now()` — a panic on wasm32 — unless `wasmbind` is on. A wasm
+# crate that reaches `object_store` takes it to turn the feature on.
+chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 uuid = { version = "1", features = ["js"] }
 
@@ -144,9 +150,7 @@ secrecy = { version = "0.10", features = ["serde"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 # === Dev / testing ===
-insta = { version = "1", features = ["yaml"] }
 expect-test = "1"
-wasm-bindgen-test = "0.3"
 # Native temp dirs for integration tests that write Parquet to disk and read it
 # back via duckdb — `fossil-df`, `fossil-introspect` and `fossil-lsp`, which
 # are its three dev-dependents. Native-only

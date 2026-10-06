@@ -96,7 +96,7 @@ pub fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
 }
 
 /// A document a program names that the database does not hold yet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct MissingDocument {
     /// What it is registered under: [`registry_key`], anchored with no
     /// connection map, so repointing a connection never invalidates a query.
@@ -104,6 +104,7 @@ pub struct MissingDocument {
     /// Where it is fetched from: the same reference through the connection map.
     pub locator: String,
     /// The connection the locator lies under, when it was written `@name/…`.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub connection: Option<String>,
 }
 
@@ -163,7 +164,7 @@ pub fn register_missing_documents(
 // The `.fossil` sources below carry a `{users.id}` interpolation hole and
 // `type { … }` braces — LITERAL Fossil source, not Rust format-string args.
 #[allow(clippy::literal_string_with_formatting_args)]
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -254,10 +255,7 @@ mod tests {
             .mappings(db)
             .first()
             .expect("the program has one mapping");
-        matches!(
-            crate::shapes::resolve_target_shape(db, mapping),
-            Ok(Some(_))
-        )
+        crate::shapes::resolve_target_shape(db, mapping).is_some()
     }
 
     #[test]

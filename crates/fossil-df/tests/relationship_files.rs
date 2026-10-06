@@ -13,8 +13,6 @@
 //! - an edge read from it is written by a SECOND mapping of a type that already
 //!   has one, and every edge the two share is one table, not two under one name.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 #[path = "support/native.rs"]
 mod native;
 mod support;
@@ -237,7 +235,7 @@ fn a_dotted_column_written_bare_is_told_to_quote_it() {
     let outcome = native::check(&dir(&program).path().join("snb.fossil"));
     assert!(
         outcome.diagnostics.iter().any(|d| d.problem
-            == fossil_base::Problem::DottedColumn {
+            == fossil_graph_schema::Problem::DottedColumn {
                 reference: "KnowsRow.Person.id_1".into(),
                 quoted: r#"KnowsRow."Person.id_1""#.into(),
             }),

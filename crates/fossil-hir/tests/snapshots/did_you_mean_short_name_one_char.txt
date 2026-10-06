@@ -1,0 +1,8 @@
+# mode: Db-wired (production typecheck_mapping query)
+# bucket: did_you_mean
+Error: `ig` is not a field of `users`
+  at 92..94
+  label 92..94 (MappingRelative): here
+  label 42..70 (FileAbsolute): `users` has the fields id, name, age
+  help: did you mean `id`?
+  quick-fix: replace 92..94 with `id`

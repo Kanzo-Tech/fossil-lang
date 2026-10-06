@@ -1,15 +1,15 @@
 //! [`StorageCredential`] → [`Grant`]: one parse of the vended credential, and
 //! every form of access fossil derives from it.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write as _;
 
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use fossil_graph_schema::{Failure, Foreign, Problem};
-
-use crate::resolved::{CloudSecret, ResolvedPath};
 
 /// A storage credential scoped to one prefix — Iceberg REST's
 /// `StorageCredential`, verbatim on the wire.
@@ -19,10 +19,12 @@ use crate::resolved::{CloudSecret, ResolvedPath};
 /// `s3.session-token-expires-at-ms`; or `adls.sas-token.<host>` and
 /// `adls.sas-token-expires-at-ms.<host>`, `<host>` being the prefix's
 /// `<account>.dfs.core.windows.net`.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, schemars::JsonSchema)]
 pub struct StorageCredential {
     /// `s3://bucket/path/` or `abfss://container@account.dfs.core.windows.net/path/`.
     pub prefix: String,
+    /// Iceberg's keys, as above.
+    #[schemars(with = "HashMap<String, String>")]
     pub config: HashMap<String, SecretString>,
 }
 
@@ -37,8 +39,28 @@ impl std::fmt::Debug for StorageCredential {
     }
 }
 
+/// The item whose prefix is the longest one covering `key` — Iceberg's rule for
+/// several credentials over one table. A directory is covered by its own prefix,
+/// which is how a listing of `output/job` reaches `output/job/`.
+///
+/// The one copy of the rule: the routed store picks a store by it, and
+/// `@fossil-lang/storage` a credential, through `storageCovering`.
+pub fn covering<T>(
+    items: impl IntoIterator<Item = T>,
+    prefix: impl Fn(&T) -> &str,
+    key: &str,
+) -> Option<T> {
+    items
+        .into_iter()
+        .filter(|item| {
+            let p = prefix(item);
+            key.starts_with(p) || p.strip_suffix('/') == Some(key)
+        })
+        .max_by_key(|item| prefix(item).len())
+}
+
 /// What a credential was vended for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Access {
     Read,
@@ -179,6 +201,8 @@ pub(crate) enum Store {
     Azure {
         account: String,
         container: String,
+        /// The blob path the prefix names under the container, decoded.
+        base: String,
         sas: SecretString,
     },
 }
@@ -236,10 +260,14 @@ impl TryFrom<StorageCredential> for Grant {
                 .transpose()
         };
 
-        if let Some(rest) = prefix.strip_prefix("s3://") {
-            rest.split_once('/')
-                .filter(|(bucket, _)| !bucket.is_empty())
-                .ok_or_else(|| StorageError::Store(prefix.clone()))?;
+        let unread = || StorageError::Store(prefix.clone());
+        let url = Url::parse(&prefix).map_err(|_| unread())?;
+        let host = url
+            .host_str()
+            .filter(|h| !h.is_empty())
+            .ok_or_else(unread)?;
+
+        if url.scheme() == "s3" {
             let endpoint = take("s3.endpoint")
                 .map(|e| endpoint(&prefix, &e))
                 .transpose()?;
@@ -271,21 +299,23 @@ impl TryFrom<StorageCredential> for Grant {
             });
         }
 
-        if let Some(rest) = prefix.strip_prefix("abfss://") {
-            let (authority, _) = rest
-                .split_once('/')
-                .ok_or_else(|| StorageError::Store(prefix.clone()))?;
-            let (container, host) = authority
-                .split_once('@')
-                .ok_or_else(|| StorageError::Store(prefix.clone()))?;
+        if url.scheme() == "abfss" {
+            // `abfss://<container>@<account>.dfs.core.windows.net/<path>`: the
+            // container is the URL's user name.
+            let container = url.username();
             let account = host
                 .strip_suffix(".dfs.core.windows.net")
                 .filter(|a| !a.is_empty() && !container.is_empty())
-                .ok_or_else(|| StorageError::Store(prefix.clone()))?
+                .ok_or_else(unread)?
                 .to_string();
+            let base = percent_decode_str(url.path().trim_start_matches('/'))
+                .decode_utf8()
+                .map_err(|_| unread())?
+                .into_owned();
             let store = Store::Azure {
                 account,
                 container: container.to_string(),
+                base,
                 sas: need(&format!("adls.sas-token.{host}"))?,
             };
             let expires_at_ms = millis(&format!("adls.sas-token-expires-at-ms.{host}"))?;
@@ -307,21 +337,23 @@ fn endpoint(prefix: &str, url: &str) -> Result<Endpoint, StorageError> {
         what: "an http(s) URL with no path",
         value: url.to_string(),
     };
-    let (ssl, rest) = if let Some(rest) = url.strip_prefix("https://") {
-        (true, rest)
-    } else if let Some(rest) = url.strip_prefix("http://") {
-        (false, rest)
-    } else {
-        return Err(malformed());
+    let parsed = Url::parse(url).map_err(|_| malformed())?;
+    let ssl = match parsed.scheme() {
+        "https" => true,
+        "http" => false,
+        _ => return Err(malformed()),
     };
-    let authority = rest.strip_suffix('/').unwrap_or(rest);
-    if authority.is_empty() || authority.contains('/') {
+    if !matches!(parsed.path(), "" | "/")
+        || parsed.query().is_some()
+        || !parsed.username().is_empty()
+    {
         return Err(malformed());
     }
-    Ok(Endpoint {
-        authority: authority.to_string(),
-        ssl,
-    })
+    let host = parsed.host_str().ok_or_else(malformed)?;
+    let authority = parsed
+        .port()
+        .map_or_else(|| host.to_string(), |port| format!("{host}:{port}"));
+    Ok(Endpoint { authority, ssl })
 }
 
 impl std::fmt::Debug for Grant {
@@ -333,7 +365,60 @@ impl std::fmt::Debug for Grant {
     }
 }
 
+/// What a host does with a credential: the statements that put it in the engine
+/// and take it out, and when it stops working.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantPlan {
+    /// The prefix the credential covers.
+    pub prefix: String,
+    /// The statement that installs it; absent for a store the engine is lent file
+    /// by file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install: Option<String>,
+    /// The statement that takes `install` back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uninstall: Option<String>,
+    /// When it stops working, in milliseconds since 1970; absent when the host
+    /// did not say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at_ms: Option<u64>,
+}
+
+/// What SQL calls a locator under a credential.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct LocatorName {
+    /// The name a statement reads.
+    pub name: String,
+    /// The URL the engine lends `name` to; absent when the name is readable as
+    /// it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lend: Option<String>,
+}
+
 impl Grant {
+    /// [`GrantPlan`] for `access`.
+    #[must_use]
+    pub fn plan(&self, access: Access) -> GrantPlan {
+        GrantPlan {
+            prefix: self.prefix.clone(),
+            install: self.install_sql(access),
+            uninstall: self.uninstall_sql(access),
+            expires_at_ms: self.expires_at_ms,
+        }
+    }
+
+    /// [`Self::name`] and [`Self::lend`] together.
+    ///
+    /// # Errors
+    /// As [`Self::name`].
+    pub fn locator_name(&self, locator: &str) -> Result<LocatorName, StorageError> {
+        Ok(LocatorName {
+            name: self.name(locator)?,
+            lend: self.lend(locator)?,
+        })
+    }
+
     /// The prefix the credential was vended for, as the host wrote it.
     #[must_use]
     pub fn prefix(&self) -> &str {
@@ -378,27 +463,34 @@ impl Grant {
         else {
             return None;
         };
-        let mut params: HashMap<String, SecretString> = HashMap::from([
-            ("KEY_ID".to_string(), key_id.clone()),
-            ("SECRET".to_string(), secret.clone()),
-            ("REGION".to_string(), SecretString::from(region.clone())),
+        // Sorted, so the statement is deterministic (tests, logs). Every key is
+        // a literal here, so only the values are quoted.
+        let mut params: BTreeMap<&str, SecretString> = BTreeMap::from([
+            ("KEY_ID", key_id.clone()),
+            ("SECRET", secret.clone()),
+            ("REGION", SecretString::from(region.clone())),
             (
-                "URL_STYLE".to_string(),
+                "URL_STYLE",
                 SecretString::from(if *path_style { "path" } else { "vhost" }),
             ),
         ]);
         if let Some(token) = token {
-            params.insert("SESSION_TOKEN".to_string(), token.clone());
+            params.insert("SESSION_TOKEN", token.clone());
         }
         if let Some(Endpoint { authority, ssl }) = endpoint {
-            params.insert(
-                "ENDPOINT".to_string(),
-                SecretString::from(authority.clone()),
-            );
-            params.insert("USE_SSL".to_string(), SecretString::from(ssl.to_string()));
+            params.insert("ENDPOINT", SecretString::from(authority.clone()));
+            params.insert("USE_SSL", SecretString::from(ssl.to_string()));
         }
-        ResolvedPath::with_secret(&self.prefix, CloudSecret::new("s3", params))
-            .create_secret_sql(&self.secret_name(access))
+        let quote = |v: &str| format!("'{}'", v.replace('\'', "''"));
+        let mut sql = format!(
+            "CREATE OR REPLACE SECRET {} (TYPE s3",
+            self.secret_name(access)
+        );
+        for (k, v) in &params {
+            write!(sql, ", {k} {}", quote(v.expose_secret())).expect("writing to a String");
+        }
+        write!(sql, ", SCOPE {})", quote(&self.prefix)).expect("writing to a String");
+        Some(sql)
     }
 
     /// The statement that takes [`Self::install_sql`] back.
@@ -419,8 +511,11 @@ impl Grant {
         Ok(match &self.store {
             Store::S3(_) => locator.to_string(),
             Store::Azure {
-                account, container, ..
-            } => format!("azure/{account}/{container}/{}", self.path_of(rest)),
+                account,
+                container,
+                base,
+                ..
+            } => format!("azure/{account}/{container}/{base}{rest}"),
         })
     }
 
@@ -446,25 +541,17 @@ impl Grant {
             })
     }
 
-    /// The object key (S3) or blob path (Azure) of what follows the prefix.
-    fn path_of(&self, rest: &str) -> String {
-        let authority_end = self.prefix.find("://").map_or(0, |i| i + 3);
-        let base = self.prefix[authority_end..]
-            .split_once('/')
-            .map_or("", |(_, path)| path);
-        format!("{base}{rest}")
-    }
-
     fn azure_url(&self, rest: &str) -> String {
         let Store::Azure {
             account,
             container,
+            base,
             sas,
         } = &self.store
         else {
             unreachable!("only an Azure grant lends");
         };
-        let path = utf8_percent_encode(&self.path_of(rest), PATH).to_string();
+        let path = utf8_percent_encode(&format!("{base}{rest}"), PATH).to_string();
         let sas = sas.expose_secret().trim_start_matches('?');
         format!("https://{account}.blob.core.windows.net/{container}/{path}?{sas}")
     }
@@ -554,11 +641,14 @@ mod tests {
         ))
         .expect("grant");
         let sql = grant.install_sql(Access::Read).expect("sql");
+        // The statement carries the secret, so a failure names what is wrong
+        // and never prints it.
+        assert!(sql.contains("URL_STYLE 'vhost'"), "no virtual-hosted style");
+        assert!(!sql.contains("ENDPOINT"), "an endpoint nobody vended");
         assert!(
-            sql.contains("URL_STYLE 'vhost'") && !sql.contains("ENDPOINT"),
-            "{sql}"
+            !sql.contains("SESSION_TOKEN"),
+            "a session token nobody vended"
         );
-        assert!(!sql.contains("SESSION_TOKEN"), "{sql}");
     }
 
     #[test]

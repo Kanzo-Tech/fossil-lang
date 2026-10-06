@@ -3,7 +3,8 @@ import './boot.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mount } from '../src/index.js';
-import { RENEW_BEFORE_MS, RETRY_MS } from '../src/mount.js';
+import { RENEW_BEFORE_MS } from '@fossil-lang/types';
+import { RETRY_MS } from '../src/mount.js';
 import { azure, countingHost, recordingEngine, s3 } from './fixtures.js';
 
 const JOB = 's3://keasy-dev/output/job-1/';

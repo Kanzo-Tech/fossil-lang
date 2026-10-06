@@ -6,9 +6,10 @@
 //! over a channel: the pattern `object_store` itself uses to drive `fetch` from
 //! wasm32.
 //!
-//! **Every answer has a deadline**, [`HOST_MS`]: a host whose promise never
+//! **Every answer has a deadline**, [`crate::HOST_MS`]: a host whose promise never
 //! settles is [`HostError::Silent`], not a run that never ends.
 
+use crate::HOST_MS;
 use crate::credential::{Access, StorageCredential};
 use fossil_graph_schema::Foreign;
 use fossil_graph_schema::js::foreign;
@@ -21,10 +22,6 @@ use futures::{FutureExt, StreamExt};
 use js_sys::{Function, Promise, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-
-/// How long a host may take to answer — `/docs/design/failure`'s G1 table, and
-/// `@fossil-lang/storage`'s figure for the same wait.
-const HOST_MS: u64 = 30_000;
 
 enum Request {
     Connections(oneshot::Sender<Result<HashMap<String, String>, HostError>>),

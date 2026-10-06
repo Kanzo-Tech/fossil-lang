@@ -10,7 +10,6 @@
 //! `cargo test`'s cwd is the crate root, so the source is
 //! `tests/fixtures/users.csv`.
 
-#![cfg(not(target_arch = "wasm32"))]
 // `{users.id}` is a Fossil interpolation hole, not a Rust format arg.
 #![allow(clippy::literal_string_with_formatting_args)]
 

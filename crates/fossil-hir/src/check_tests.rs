@@ -300,7 +300,7 @@ User : Person from users
     // Mapping-relative, so rebase before slicing: `HELLO`'s mapping starts at
     // the `User :` line.
     let base = crate::spans::mapping_start_offset(&db, first_mapping(&db, file));
-    let slice = |s: fossil_base::Span| {
+    let slice = |s: fossil_graph_schema::Span| {
         let start = (base + s.start) as usize;
         let end = (base + s.end) as usize;
         &TYPO[start..end]
@@ -349,7 +349,7 @@ User : Person from users
     let m = first_mapping(&db, file);
     let table = spans(&db, m);
     let base = crate::spans::mapping_start_offset(&db, m);
-    let slice = |s: fossil_base::Span| {
+    let slice = |s: fossil_graph_schema::Span| {
         let start = (base + s.start) as usize;
         &JOINED[start..(base + s.end) as usize]
     };
@@ -565,17 +565,6 @@ fn compatible_string_to_integer_fails() {
     );
 }
 
-// Three tests lived here and all three built a `TyKind::Optional`:
-// `compatible_string_lifts_into_optional` (S-Opt),
-// `compatible_optional_fails_against_cardinality_one_required` and
-// `check_property_against_a_target_shape_optional_fails` (the cardinality
-// blame). The variant is gone because nothing but a test ever constructed one —
-// so what they proved was that the checker handles a value the compiler cannot
-// produce. The count a shape declares is still enforced, in the one direction
-// that is observable: `check_required_properties`, covered by
-// `a_named_document_that_cannot_answer_says_which_way_it_failed`'s siblings and
-// by the corpus.
-
 /// The defect, at the place it bit. A document that mentions `ex:name` and does
 /// not narrow its value used to reach here as `TyKind::Iri` — the narrowest
 /// type in the lattice — via `unwrap_or_else`, so the most ordinary property in
@@ -617,6 +606,7 @@ Contact : Person from users
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                span: None,
             }),
         );
         cx.check_property(
@@ -691,6 +681,7 @@ Orders : Order from Purchase
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                span: None,
             }),
         );
         cx.check_property(
@@ -775,10 +766,11 @@ Orders : Order from Purchase
                     term: None,
                     occurs: Occurs::ONE,
                     // What the decoder found — see `fossil_shex::spans`.
-                    span: Some(fossil_base::Span::new(60, 70)),
+                    span: Some(fossil_graph_schema::Span::new(60, 70)),
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("shape.shex"),
+                span: None,
             }),
         );
         cx.check_property(
@@ -819,7 +811,7 @@ Orders : Order from Purchase
     );
     let label = in_document[0];
     assert_eq!(label.document.as_deref(), Some("shape.shex"));
-    assert_eq!(label.span, fossil_base::Span::new(60, 70));
+    assert_eq!(label.span, fossil_graph_schema::Span::new(60, 70));
     assert_eq!(label.text, "`Order` declares `total` as Float");
     // A document has no mappings, so there is no other frame its offsets could
     // be in — and a label rebased by a mapping's start would land nowhere.
@@ -886,6 +878,7 @@ Orders : Order from Purchase
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("shape.shex"),
+                span: None,
             }),
         );
         cx.check_property(
@@ -944,6 +937,7 @@ fn a_wrong_type_with_no_repair_says_nothing() {
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                span: None,
             }),
         );
         cx.check_property(
@@ -976,12 +970,11 @@ fn a_wrong_type_with_no_repair_says_nothing() {
 ///
 /// # The message moved, and the assertions moved with it
 ///
-/// It asserted four `TargetShapeError` renderings, emitted per MAPPING by
-/// `surface_target_shape_error`. A header names a bare name now, so the
+/// It asserted four renderings emitted per MAPPING. A header names a bare name now, so the
 /// document is read where the NAME is bound (`type { T } := io.shex(…)`,
 /// `def_map`'s positional binding) and every one of these four failures lands
 /// there first; by the time a mapping asks for its target shape there is no
-/// shape IRI left to fail with, and `resolve_target_shape` answers `Ok(None)`.
+/// shape IRI left to fail with, and `resolve_target_shape` answers `None`.
 /// `crate::shapes`'s
 /// `a_document_that_cannot_answer_leaves_the_mapping_with_no_shape_clause`
 /// pins that collapse and its tombstone says what it costs.
@@ -1109,6 +1102,7 @@ fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
             constraints: Vec::new(),
             rejections: vec![disjunction_rejection()],
             document: smol_str::SmolStr::from("personas.shex"),
+            span: None,
         };
         let mut cx = build_checker(db, m, None, Some(shape));
         cx.surface_shape_lowering_errors();
@@ -1293,16 +1287,6 @@ fn row_record<'db>(db: &'db dyn fossil_base::Db, fields: &[(&str, Primitive)]) -
     );
     Ty::new(db, TyKind::Record(rec))
 }
-
-// The implicit-closure block lived here: `fn_over_row`, `closure_rendering`,
-// `rewrite_field_refs_to_row_dot_edge_cases`,
-// `expr_contains_free_field_refs_visits_all_arms`, and the six
-// `closure_synth_*` tests. They were the ONLY callers of `Checker::check` and
-// of `synthesize_closure`, which is what made both unreachable from
-// `typecheck_mapping` — a whole algorithm proved by nothing but its own tests.
-// `pipeline_typechecks_in_phase_3_v0_1` went with them: it asserted that
-// `HELLO` type-checks, which `fieldref_without_schema_synthesises_no_type_phase_2_compat`
-// already asserts, and its entire docblock was about the closure form.
 
 // ── F2 §1/§2: calls and comparisons against the catalog and the row ────────
 
@@ -1662,12 +1646,12 @@ fn a_reference_to_one_shape_satisfies_a_slot_that_accepts_two() {
 /// answer, and `synth` of a `ColumnRef` answers it now.
 #[test]
 fn a_stage_condition_is_typed_and_not_only_resolved() {
-    use fossil_base::test_support::{DecodingHost, register_inferred};
+    use fossil_base::test_support::{NativeSystem, register_inferred};
     use fossil_graph_schema::Primitive;
     use std::sync::Arc;
 
     fn diagnostics(condition: &str) -> Vec<String> {
-        let system: Arc<dyn fossil_base::System> = Arc::new(DecodingHost::default());
+        let system: Arc<dyn fossil_base::System> = Arc::new(NativeSystem::decoding());
         let db = FossilDb::new(system);
         register_inferred(
             &db,
@@ -1739,7 +1723,7 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
 /// everything would pass every assertion that only looks for a refusal.
 #[test]
 fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
-    use fossil_base::test_support::{DecodingHost, register_inferred};
+    use fossil_base::test_support::{NativeSystem, register_inferred};
     use fossil_graph_schema::Primitive;
     use std::sync::Arc;
 
@@ -1748,7 +1732,7 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
     /// arguments, and one more would be a `String` per call for a name the
     /// fixtures can simply agree on.
     fn diagnostics(program: &str) -> Vec<String> {
-        let system: Arc<dyn fossil_base::System> = Arc::new(DecodingHost::default());
+        let system: Arc<dyn fossil_base::System> = Arc::new(NativeSystem::decoding());
         let db = FossilDb::new(system);
         for (file, key) in [("l.csv", "id"), ("r.csv", "rid"), ("t.csv", "tid")] {
             register_inferred(
@@ -1925,12 +1909,12 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
 /// from nothing.
 #[test]
 fn null_compares_with_anything_and_assigns_to_nothing() {
-    use fossil_base::test_support::{DecodingHost, register_inferred};
+    use fossil_base::test_support::{NativeSystem, register_inferred};
     use fossil_graph_schema::Primitive;
     use std::sync::Arc;
 
     fn stage_diagnostics(condition: &str) -> Vec<String> {
-        let system: Arc<dyn fossil_base::System> = Arc::new(DecodingHost::default());
+        let system: Arc<dyn fossil_base::System> = Arc::new(NativeSystem::decoding());
         let db = FossilDb::new(system);
         register_inferred(
             &db,

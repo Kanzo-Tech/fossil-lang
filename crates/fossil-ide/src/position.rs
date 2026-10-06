@@ -14,79 +14,74 @@
 //!
 //! # UTF-16 positions
 //!
-//! LSP positions use UTF-16 code units (Monaco / VS Code). This module treated
-//! the `character` column as a raw byte offset once — correct only for ASCII
-//! source. The conversion goes through [`crate::line_index::LineIndex`]
-//! (the rust-analyzer pattern): [`position_to_offset`]
-//! interprets `character` as a UTF-16 code unit, and [`offset_to_lsp_position`]
-//! converts a byte offset back to a UTF-16 column. Both build the index from
-//! the SAME FILE-keyed [`line_offsets`] table, so no new per-mapping Salsa
-//! query is added (`MAX_PER_MAPPING_FAN_OUT` untouched).
+//! LSP positions count UTF-16 code units; rowan counts UTF-8 bytes. The table
+//! between them is rust-analyzer's [`LineIndex`] (the `line-index` crate), and
+//! the four functions below are the only way across: [`offset`] and
+//! [`position`] for a point, [`range`] and [`span`] for an extent.
 
+use ::line_index::{TextSize, WideEncoding, WideLineCol};
 use fossil_base::SourceFile;
+use fossil_graph_schema::Span;
 use fossil_syntax::{SyntaxNode, SyntaxToken};
+use lsp_types::{Position, Range};
 
-use crate::line_index::{LineIndex, Utf16Position};
+pub use ::line_index::LineIndex;
 
-/// Per-file table of byte offsets at the start of each line.
-///
-/// Salsa-tracked so re-derives memoise on unchanged source text. Stores a
-/// `Vec<u32>` where `offsets[i]` is the byte index of the first character
-/// of line `i`; `offsets[0] == 0` always.
-#[salsa::tracked(debug)]
-pub struct LineOffsets<'db> {
-    #[returns(ref)]
-    pub offsets: Vec<u32>,
-}
-
-/// Compute byte-offset-per-line table for `file`.
-#[salsa::tracked(returns(copy))]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
-pub fn line_offsets<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> LineOffsets<'db> {
-    let text = file.text(db);
-    let mut offsets: Vec<u32> = vec![0];
-    for (i, ch) in text.bytes().enumerate() {
-        if ch == b'\n' {
-            // Cast is safe: source files we accept are well under u32::MAX.
-            offsets.push(u32::try_from(i + 1).unwrap_or(u32::MAX));
-        }
-    }
-    LineOffsets::new(db, offsets)
-}
-
-/// Convert an LSP `(line, character)` position to a byte offset.
-///
-/// `character` is interpreted as a UTF-16 code unit (the LSP wire convention),
-/// converted to a UTF-8 byte offset via the [`LineIndex`]. `None` when `line`
-/// is past the end of the file; a `character` past the end of ITS line clamps
-/// to that line's last content byte. [`LineIndex::offset`] carries the argument
-/// for the split and what rust-analyzer does at the same layer.
-///
-/// The offset is therefore always inside the file's text, which is what the
-/// callers need: `rowan`'s `token_at_offset` panics on one that is not.
-#[must_use]
-pub fn position_to_offset(index: &LineIndex, line: u32, character: u32) -> Option<u32> {
-    index.offset(Utf16Position { line, character })
-}
-
-/// Convert a UTF-8 byte offset back to an LSP UTF-16 `(line, character)`.
-///
-/// The inverse of [`position_to_offset`]; the LSP handler uses this to
-/// translate Fossil byte ranges into UTF-16-correct `lsp_types::Range`s.
-#[must_use]
-pub fn offset_to_lsp_position(index: &LineIndex, offset: u32) -> Utf16Position {
-    index.position(offset)
-}
-
-/// Build the [`LineIndex`] for `file`.
-///
-/// Reads the FILE-keyed [`line_offsets`] table + the file text — a convenience
-/// for the position-resolution helpers and the LSP handler. Adds no Salsa
-/// query (reuses the existing memoised table).
-#[must_use]
+/// The [`LineIndex`] of `file`, memoised per text.
+#[salsa::tracked(returns(ref))]
 pub fn line_index(db: &dyn fossil_base::Db, file: SourceFile) -> LineIndex {
-    let los = line_offsets(db, file);
-    LineIndex::new(file.text(db), los.offsets(db))
+    LineIndex::new(file.text(db))
+}
+
+/// An LSP position as a byte offset. `None` when the line is past the end of
+/// the file; a column past the end of ITS line clamps to that line's last
+/// content byte (its `\n` excluded), so the offset is always inside the text —
+/// `rowan`'s `token_at_offset` panics on one that is not. A column inside a
+/// surrogate pair lands on the character's start.
+#[must_use]
+pub fn offset(index: &LineIndex, at: Position) -> Option<u32> {
+    let line = index.line(at.line)?;
+    let content_end = index
+        .line(at.line + 1)
+        .map_or(index.len(), |next| next.start() - TextSize::from(1));
+    let utf8 = index.to_utf8(
+        WideEncoding::Utf16,
+        WideLineCol {
+            line: at.line,
+            col: at.character,
+        },
+    )?;
+    let offset = line.start() + TextSize::from(utf8.col);
+    Some(offset.min(content_end).into())
+}
+
+/// A byte offset as an LSP position. An offset past the end of the file clamps
+/// to its end.
+#[must_use]
+pub fn position(index: &LineIndex, offset: u32) -> Position {
+    let utf8 = index.line_col(TextSize::from(offset).min(index.len()));
+    let wide = index
+        .to_wide(WideEncoding::Utf16, utf8)
+        .unwrap_or(WideLineCol {
+            line: utf8.line,
+            col: utf8.col,
+        });
+    Position::new(wide.line, wide.col)
+}
+
+/// A byte span as an LSP range.
+#[must_use]
+pub fn range(index: &LineIndex, span: impl Into<Span>) -> Range {
+    let span = span.into();
+    Range::new(position(index, span.start), position(index, span.end))
+}
+
+/// An LSP range as a byte span; an end past the file clamps to its end.
+#[must_use]
+pub fn span(index: &LineIndex, range: Range) -> Span {
+    let start = offset(index, range.start).unwrap_or_else(|| index.len().into());
+    let end = offset(index, range.end).unwrap_or_else(|| index.len().into());
+    Span::new(start.min(end), start.max(end))
 }
 
 /// Resolve an LSP position to the [`SyntaxToken`] that "contains" it.
@@ -97,7 +92,7 @@ pub fn line_index(db: &dyn fossil_base::Db, file: SourceFile) -> LineIndex {
 /// line or the file is empty.
 ///
 /// A `character` past the end of its line resolves to the token at the line's
-/// end rather than to `None`, because that is what [`position_to_offset`]
+/// end rather than to `None`, because that is what [`offset`]
 /// clamps it to. It used to hand `token_at_offset` an offset outside the CST,
 /// which is a `rowan` panic and so a crash in whatever embeds this crate.
 pub fn token_at_position(
@@ -106,8 +101,7 @@ pub fn token_at_position(
     line: u32,
     character: u32,
 ) -> Option<SyntaxToken> {
-    let index = line_index(db, file);
-    let offset = position_to_offset(&index, line, character)?;
+    let offset = offset(line_index(db, file), Position::new(line, character))?;
     let cst = fossil_syntax::parse(db, file);
     let root: SyntaxNode = cst.root(db).syntax();
     let offset = rowan::TextSize::new(offset);
@@ -130,7 +124,7 @@ pub fn node_at_position(
     token_at_position(db, file, line, character)?.parent()
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -144,26 +138,21 @@ mod tests {
     }
 
     #[test]
-    fn line_offsets_for_multi_line_file() {
-        let (db, file) = db_with_text("abc\ndefg\nh");
-        let los = line_offsets(&db, file);
-        assert_eq!(los.offsets(&db), &vec![0u32, 4, 9]);
-    }
-
-    #[test]
-    fn position_to_offset_handles_line_2_char_1() {
+    fn a_position_and_its_offset_round_trip() {
         // "abc\ndefg\nh": line 1 starts at byte 4; UTF-16 col 1 → byte 5.
-        let idx = LineIndex::new("abc\ndefg\nh", &[0u32, 4, 9]);
-        assert_eq!(position_to_offset(&idx, 1, 1), Some(5));
-        // Inverse round-trips.
-        assert_eq!(offset_to_lsp_position(&idx, 5).line, 1);
-        assert_eq!(offset_to_lsp_position(&idx, 5).character, 1);
+        let idx = LineIndex::new("abc\ndefg\nh");
+        assert_eq!(offset(&idx, Position::new(1, 1)), Some(5));
+        assert_eq!(position(&idx, 5), Position::new(1, 1));
+        assert!(offset(&idx, Position::new(99, 0)).is_none());
     }
 
+    /// `é` is two bytes and one UTF-16 unit, `😀` four bytes and two units.
     #[test]
-    fn position_to_offset_returns_none_past_eof_line() {
-        let idx = LineIndex::new("abc\ndefg\nh", &[0u32, 4, 9]);
-        assert!(position_to_offset(&idx, 99, 0).is_none());
+    fn a_column_counts_utf16_units() {
+        let idx = LineIndex::new("é😀x\n");
+        assert_eq!(offset(&idx, Position::new(0, 3)), Some(6));
+        assert_eq!(position(&idx, 6), Position::new(0, 3));
+        assert_eq!(position(&idx, 2), Position::new(0, 1));
     }
 
     /// The reproducer, verbatim: `tests/completion_property_key.rs`'s `BLANK`
@@ -183,14 +172,14 @@ Users : Person from User
     /// Before: `Some(127)` for a 124-byte file — an offset outside the text,
     /// handed to `rowan` by the caller below.
     #[test]
-    fn position_to_offset_clamps_a_column_past_the_end_of_its_line() {
+    fn a_column_past_the_end_of_its_line_clamps_to_it() {
         let (db, file) = db_with_text(PAST_EOL);
         let idx = line_index(&db, file);
         assert_eq!(PAST_EOL.len(), 124, "the fixture the panic was recorded on");
         // Line 4 is empty and starts at 123, the last byte being its `\n`.
-        assert_eq!(position_to_offset(&idx, 4, 0), Some(123));
+        assert_eq!(offset(idx, Position::new(4, 0)), Some(123));
         assert_eq!(
-            position_to_offset(&idx, 4, 4),
+            offset(idx, Position::new(4, 4)),
             Some(123),
             "a column past the line's end clamps to the line, never past it",
         );
@@ -198,12 +187,12 @@ Users : Person from User
         // EARLIER line stops at that line's last content byte (`\n` excluded),
         // rather than running on to EOF.
         assert_eq!(
-            position_to_offset(&idx, 2, 9_999),
+            offset(idx, Position::new(2, 9_999)),
             Some(99),
             "line 2 is `Users : Person from User`, 24 bytes from 75",
         );
         // And the line itself is still a `None`.
-        assert!(position_to_offset(&idx, 99, 0).is_none());
+        assert!(offset(idx, Position::new(99, 0)).is_none());
     }
 
     /// **The panic.** `token_at_position` handed `rowan` the unclamped offset

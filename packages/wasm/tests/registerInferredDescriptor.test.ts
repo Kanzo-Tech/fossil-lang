@@ -13,11 +13,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import {
-  initFossilWasm,
-  FossilWorkspace,
-  type InferredDescriptorJson,
-} from '../src/index.js';
+import type { InferredDescriptor } from '@fossil-lang/types';
+import { initFossilWasm, FossilWorkspace } from '../src/index.js';
 
 beforeAll(async () => {
   // Mirrors the tokenize.test.ts bootstrap — see that file for the
@@ -33,7 +30,7 @@ describe('FossilWorkspace.registerInferredDescriptor', () => {
   it('registers a valid descriptor without throwing', () => {
     const ws = new FossilWorkspace();
     try {
-      const desc: InferredDescriptorJson = {
+      const desc: InferredDescriptor = {
         uri: 'users.csv',
         columns: [
           { name: 'id', primitive: 'integer' },
@@ -50,12 +47,12 @@ describe('FossilWorkspace.registerInferredDescriptor', () => {
   it('re-registering the same uri does not throw', () => {
     const ws = new FossilWorkspace();
     try {
-      const first: InferredDescriptorJson = {
+      const first: InferredDescriptor = {
         uri: 'users.csv',
         columns: [{ name: 'id', primitive: 'integer' }],
         freshness_token: 'h1',
       };
-      const second: InferredDescriptorJson = {
+      const second: InferredDescriptor = {
         uri: 'users.csv',
         columns: [
           { name: 'id', primitive: 'integer' },
@@ -74,7 +71,7 @@ describe('FossilWorkspace.registerInferredDescriptor', () => {
     const ws = new FossilWorkspace();
     try {
       // Bypass TS to exercise runtime Rust-side validation.
-      const malformed = { uri: 'users.csv' } as unknown as InferredDescriptorJson;
+      const malformed = { uri: 'users.csv' } as unknown as InferredDescriptor;
       expect(() => ws.registerInferredDescriptor(malformed)).toThrow(
         expect.objectContaining({ name: 'FossilError', code: 'api/invalid-argument' }),
       );
@@ -109,7 +106,7 @@ describe('FossilWorkspace.registerInferredDescriptor', () => {
   it('accepts empty columns array', () => {
     const ws = new FossilWorkspace();
     try {
-      const desc: InferredDescriptorJson = {
+      const desc: InferredDescriptor = {
         uri: 'empty.csv',
         columns: [],
         freshness_token: '',

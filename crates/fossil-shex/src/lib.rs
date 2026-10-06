@@ -37,9 +37,8 @@
 //!
 //! [`ShExDescriptor::to_graph_schema`] goes through it rather than beside it, so
 //! there is one lowering and not two. The `ShEx`-typed surface
-//! ([`ShapeBinding`], [`ResolvedConstraint`]) stays for the
-//! callers that genuinely want the AST — the INPUT descriptor derives source
-//! column types from it.
+//! ([`ShapeBinding`], [`ResolvedConstraint`]) is what the lowering produces on
+//! the way.
 //!
 //! Re-emitting Fossil syntax is NOT among them, and the reasoning that it
 //! «only a crate that knows the syntax can do» was wrong: the suggestion needs
@@ -102,10 +101,11 @@ pub struct ShapeBinding {
 pub struct ResolvedConstraint {
     /// The predicate IRI (after prefix resolution).
     pub predicate: IriS,
-    /// The `valueExpr` clause from the `ShEx` `TripleConstraint`, kept opaque
-    /// for now — the bidirectional checker narrows this into a `Ty<'db>` against the
-    /// `Primitive` lattice.
-    pub value_expr: Option<ShapeExpr>,
+    /// The RDF term the `valueExpr` declares — [`PropertyConstraint::term`]'s
+    /// contract.
+    pub term: Option<Term>,
+    /// The destination shape IRIs — [`PropertyConstraint::targets`].
+    pub targets: Vec<String>,
     /// How many values the predicate may carry, decoded from `ShEx`'s
     /// `(min, max)` integer encoding by [`occurs_from_shex`].
     pub cardinality: Occurs,
@@ -148,53 +148,58 @@ pub fn occurs_from_shex(min: Option<i32>, max: Option<i32>) -> Occurs {
     }
 }
 
-/// Render a [`ShapeExprLabel`] to its IRI string (an edge's destination shape).
-/// Full IRIs render verbatim; a rare `Prefixed` form keeps `prefix:local`; a
-/// blank-node label renders as its `_:id`.
-fn shape_label_iri(label: &ShapeExprLabel) -> String {
-    match label {
-        ShapeExprLabel::IriRef { value } => match value {
-            IriRef::Iri(iri) => iri.to_string(),
-            IriRef::Prefixed { prefix, local } => format!("{prefix}:{local}"),
-        },
-        ShapeExprLabel::BNode { value } => value.to_string(),
-        ShapeExprLabel::Start => String::new(),
-    }
-}
-
 /// The destination shape IRIs of an edge constraint — empty for a literal/opaque
 /// property. A single shape `Ref` yields one; a value disjunction `@<A> OR @<B>`
 /// (`ShapeOr` of refs) yields all of them, so the canonical model emits one edge
 /// type per destination. `ShapeAnd`/`ShapeNot`/`NodeConstraint`/inline `Shape`
 /// are not inter-shape edges.
-fn edge_targets(value_expr: Option<&ShapeExpr>) -> Vec<String> {
-    match value_expr {
-        Some(ShapeExpr::Ref(label)) => vec![shape_label_iri(label)],
+fn edge_targets(
+    value_expr: Option<&ShapeExpr>,
+    prefixmap: &PrefixMap,
+) -> Result<Vec<String>, ShExLoweringError> {
+    let labels: Vec<&ShapeExprLabel> = match value_expr {
+        Some(ShapeExpr::Ref(label)) => vec![label],
         Some(ShapeExpr::ShapeOr { shape_exprs }) => shape_exprs
             .iter()
             .filter_map(|w| match &w.se {
-                ShapeExpr::Ref(label) => Some(shape_label_iri(label)),
+                ShapeExpr::Ref(label) => Some(label),
                 _ => None,
             })
             .collect(),
         _ => Vec::new(),
-    }
+    };
+    labels
+        .into_iter()
+        .filter_map(|label| match label {
+            ShapeExprLabel::IriRef { value } => {
+                Some(resolve_iri_ref(value, prefixmap).map(|iri| iri.to_string()))
+            }
+            ShapeExprLabel::BNode { value } => Some(Ok(value.to_string())),
+            ShapeExprLabel::Start => None,
+        })
+        .collect()
 }
 
-/// The RDF term a constraint's `valueExpr` declares, verbatim —
-/// `PropertyConstraint::term`'s contract. A datatype is a literal of that IRI as
-/// written, `LITERAL` a literal with none, and `IRI` an IRI: an opaque
-/// IRI-valued column, not an edge. Anything else declares no term.
-fn term_of(value_expr: Option<&ShapeExpr>) -> Option<Term> {
+/// The RDF term a constraint's `valueExpr` declares —
+/// `PropertyConstraint::term`'s contract. A datatype is a literal of that IRI,
+/// resolved through the document's prefixes; `LITERAL` a literal with none;
+/// and `IRI` an IRI: an opaque IRI-valued column, not an edge. Anything else
+/// declares no term.
+fn term_of(
+    value_expr: Option<&ShapeExpr>,
+    prefixmap: &PrefixMap,
+) -> Result<Option<Term>, ShExLoweringError> {
     let Some(ShapeExpr::NodeConstraint(nc)) = value_expr else {
-        return None;
+        return Ok(None);
     };
-    match (nc.datatype(), nc.node_kind()) {
-        (Some(dt), _) => Some(Term::Literal(Some(iri_ref_to_string(&dt)))),
+    Ok(match (nc.datatype(), nc.node_kind()) {
+        (Some(dt), _) => Some(Term::Literal(Some(
+            resolve_iri_ref(&dt, prefixmap)?.to_string(),
+        ))),
         (None, Some(NodeKind::Iri)) => Some(Term::Iri),
         (None, Some(NodeKind::Literal)) => Some(Term::Literal(None)),
         _ => None,
-    }
+    })
 }
 
 /// The predicate IRIs a single `OneOf` branch constrains, in order.
@@ -205,7 +210,7 @@ fn term_of(value_expr: Option<&ShapeExpr>) -> Option<Term> {
 fn branch_predicates(expr: &TripleExpr, prefixmap: &PrefixMap, out: &mut Vec<String>) {
     match expr {
         TripleExpr::TripleConstraint { predicate, .. } => {
-            if let Some(iri) = resolve_iri_ref(predicate, prefixmap) {
+            if let Ok(iri) = resolve_iri_ref(predicate, prefixmap) {
                 out.push(iri.to_string());
             }
         }
@@ -251,15 +256,6 @@ fn rejection_of(err: &ShExLoweringError, prefixmap: &PrefixMap) -> Rejection {
             in_shape: in_shape.clone(),
         },
         ShExLoweringError::MalformedSchema(m) => Rejection::Malformed(m.clone()),
-    }
-}
-
-/// Render an [`IriRef`] to its IRI string. Parsed `ShExJ` datatypes are full IRIs
-/// (`IriRef::Iri`); a `Prefixed` form (rare in JSON) falls back to `prefix:local`.
-fn iri_ref_to_string(iri_ref: &IriRef) -> String {
-    match iri_ref {
-        IriRef::Iri(iri) => iri.to_string(),
-        IriRef::Prefixed { prefix, local } => format!("{prefix}:{local}"),
     }
 }
 
@@ -398,8 +394,8 @@ impl ShExDescriptor {
                     .iter()
                     .map(|c| PropertyConstraint {
                         predicate: c.predicate.to_string(),
-                        term: term_of(c.value_expr.as_ref()),
-                        targets: edge_targets(c.value_expr.as_ref()),
+                        term: c.term.clone(),
+                        targets: c.targets.clone(),
                         occurs: c.cardinality,
                         // The spellings are rudof's, via `qualify`, so nothing
                         // here reads a `PREFIX` declaration a second time —
@@ -414,6 +410,9 @@ impl ShExDescriptor {
                         }),
                     })
                     .collect(),
+                span: self.source.as_deref().and_then(|src| {
+                    crate::spans::shape_span(src, &prefixmap.qualify(&binding.iri))
+                }),
             })
             .collect();
         let rejections = self
@@ -522,7 +521,13 @@ fn lower_shape_decl(
     errors: &mut Vec<ShExLoweringError>,
 ) -> Option<ShapeBinding> {
     let shape_iri = match &decl.id {
-        ShapeExprLabel::IriRef { value } => resolve_iri_ref(value, prefixmap)?,
+        ShapeExprLabel::IriRef { value } => match resolve_iri_ref(value, prefixmap) {
+            Ok(iri) => iri,
+            Err(e) => {
+                errors.push(e);
+                return None;
+            }
+        },
         ShapeExprLabel::BNode { .. } | ShapeExprLabel::Start => {
             // BNode / Start shape declarations are out of scope: only
             // IRI-identified shapes participate in backward checking.
@@ -537,7 +542,7 @@ fn lower_shape_decl(
         return None;
     };
 
-    let label_table = build_label_table(shape);
+    let label_table = build_label_table(shape, prefixmap);
 
     let mut visited: Vec<String> = Vec::new();
     let mut constraints: Vec<ResolvedConstraint> = Vec::new();
@@ -568,15 +573,22 @@ fn lower_shape_decl(
 ///
 /// Only inspects directly-nested `TripleExpr::EachOf` / `TripleExpr::OneOf` /
 /// `TripleExpr::TripleConstraint` nodes carrying an explicit `id`.
-fn build_label_table(shape: &Shape) -> HashMap<String, TripleExpr> {
+fn build_label_table(shape: &Shape, prefixmap: &PrefixMap) -> HashMap<String, TripleExpr> {
     let mut table = HashMap::new();
     if let Some(wrapper) = &shape.expression {
-        collect_labels(&wrapper.te, &mut table);
+        collect_labels(&wrapper.te, prefixmap, &mut table);
     }
     table
 }
 
-fn collect_labels(expr: &TripleExpr, table: &mut HashMap<String, TripleExpr>) {
+/// A label whose prefix the schema never declared is left out of the table:
+/// the `Ref` that names it fails to resolve the same way, and that is where the
+/// error is reported.
+fn collect_labels(
+    expr: &TripleExpr,
+    prefixmap: &PrefixMap,
+    table: &mut HashMap<String, TripleExpr>,
+) {
     match expr {
         TripleExpr::EachOf {
             id, expressions, ..
@@ -584,16 +596,16 @@ fn collect_labels(expr: &TripleExpr, table: &mut HashMap<String, TripleExpr>) {
         | TripleExpr::OneOf {
             id, expressions, ..
         } => {
-            if let Some(label) = id {
-                table.insert(label_to_string(label), expr.clone());
+            if let Some(key) = id.as_ref().and_then(|l| label_key(l, prefixmap).ok()) {
+                table.insert(key, expr.clone());
             }
             for w in expressions {
-                collect_labels(&w.te, table);
+                collect_labels(&w.te, prefixmap, table);
             }
         }
         TripleExpr::TripleConstraint { id, .. } => {
-            if let Some(label) = id {
-                table.insert(label_to_string(label), expr.clone());
+            if let Some(key) = id.as_ref().and_then(|l| label_key(l, prefixmap).ok()) {
+                table.insert(key, expr.clone());
             }
         }
         TripleExpr::Ref(_) => {}
@@ -620,12 +632,26 @@ fn walk_triple_expr(
             max,
             ..
         } => {
-            let Some(pred_iri) = resolve_iri_ref(predicate, prefixmap) else {
-                return;
+            let pred_iri = match resolve_iri_ref(predicate, prefixmap) {
+                Ok(iri) => iri,
+                Err(e) => {
+                    errors.push(e);
+                    return;
+                }
+            };
+            let value = value_expr.as_deref();
+            let (term, targets) = match (term_of(value, prefixmap), edge_targets(value, prefixmap))
+            {
+                (Ok(term), Ok(targets)) => (term, targets),
+                (Err(e), _) | (_, Err(e)) => {
+                    errors.push(e);
+                    return;
+                }
             };
             out.push(ResolvedConstraint {
                 predicate: pred_iri,
-                value_expr: value_expr.as_ref().map(|b| (**b).clone()),
+                term,
+                targets,
                 cardinality: occurs_from_shex(*min, *max),
             });
         }
@@ -658,7 +684,13 @@ fn walk_triple_expr(
             // Stop descending — a `OneOf` cannot be type-checked.
         }
         TripleExpr::Ref(label) => {
-            let key = label_to_string(label);
+            let key = match label_key(label, prefixmap) {
+                Ok(key) => key,
+                Err(e) => {
+                    errors.push(e);
+                    return;
+                }
+            };
             // `visited` is the path of labels being resolved, in order, so the
             // cycle reported is the loop itself — from the label met again,
             // round, and back to it — the same every time.
@@ -697,7 +729,9 @@ fn walk_triple_expr(
 /// `TripleExpr`, for reporting purposes.
 fn leading_predicate(expr: &TripleExpr, prefixmap: &PrefixMap) -> Option<IriS> {
     match expr {
-        TripleExpr::TripleConstraint { predicate, .. } => resolve_iri_ref(predicate, prefixmap),
+        TripleExpr::TripleConstraint { predicate, .. } => {
+            resolve_iri_ref(predicate, prefixmap).ok()
+        }
         TripleExpr::EachOf { expressions, .. } | TripleExpr::OneOf { expressions, .. } => {
             expressions
                 .first()
@@ -707,29 +741,29 @@ fn leading_predicate(expr: &TripleExpr, prefixmap: &PrefixMap) -> Option<IriS> {
     }
 }
 
-fn resolve_iri_ref(iri_ref: &IriRef, prefixmap: &PrefixMap) -> Option<IriS> {
+/// The IRI an [`IriRef`] names. A prefix the schema never declared is a
+/// malformed schema — never a guess at what the author meant.
+fn resolve_iri_ref(iri_ref: &IriRef, prefixmap: &PrefixMap) -> Result<IriS, ShExLoweringError> {
     match iri_ref {
-        IriRef::Iri(iri) => Some(iri.clone()),
-        IriRef::Prefixed { prefix, local } => prefixmap
-            .resolve_prefix_local(prefix, local)
-            .ok()
-            .or_else(|| {
-                // Fallback: concat the prefix + local literally so callers
-                // can still see the surface form. Real prefix-resolution
-                // failure is rare in well-formed schemas.
-                let s = format!("{prefix}{local}");
-                Some(IriS::new_unchecked(s.as_str()))
-            }),
+        IriRef::Iri(iri) => Ok(iri.clone()),
+        IriRef::Prefixed { prefix, local } => {
+            prefixmap.resolve_prefix_local(prefix, local).map_err(|_| {
+                ShExLoweringError::MalformedSchema(format!(
+                    "`{prefix}:{local}` uses the prefix `{prefix}:`, which the schema does not declare"
+                ))
+            })
+        }
     }
 }
 
-fn label_to_string(label: &TripleExprLabel) -> String {
+/// The key a triple-expression label is declared and referenced under: the IRI
+/// it names, so `:p` and `<http://x/p>` are one label; `_:id` for a blank node.
+fn label_key(label: &TripleExprLabel, prefixmap: &PrefixMap) -> Result<String, ShExLoweringError> {
     match label {
-        TripleExprLabel::IriRef { value } => match value {
-            IriRef::Iri(iri) => iri.to_string(),
-            IriRef::Prefixed { prefix, local } => format!("{prefix}:{local}"),
-        },
-        TripleExprLabel::BNode { value } => value.to_string(),
+        TripleExprLabel::IriRef { value } => {
+            resolve_iri_ref(value, prefixmap).map(|i| i.to_string())
+        }
+        TripleExprLabel::BNode { value } => Ok(value.to_string()),
     }
 }
 
@@ -747,6 +781,37 @@ mod tests {
 
     use super::*;
     use fossil_graph_schema::Primitive;
+
+    /// An undeclared prefix is a malformed schema. It used to resolve to the
+    /// prefix and local name glued together without the colon — a wrong IRI the
+    /// rest of the compiler then trusted.
+    #[test]
+    fn an_undeclared_prefix_is_malformed_not_glued() {
+        let iri_ref = IriRef::Prefixed {
+            prefix: "ex".into(),
+            local: "name".into(),
+        };
+        let err = resolve_iri_ref(&iri_ref, &PrefixMap::new()).expect_err("ex: is undeclared");
+        assert!(matches!(err, ShExLoweringError::MalformedSchema(m) if m.contains("`ex:name`")));
+    }
+
+    /// An edge target resolves through the same prefix table as a predicate,
+    /// so an undeclared prefix rejects the constraint rather than reaching the
+    /// output as the text `other:Shape`. `ShExC`'s parser refuses one first;
+    /// this is the AST a `ShExJ` or hand-built schema can still carry.
+    #[test]
+    fn a_target_under_an_undeclared_prefix_is_malformed() {
+        let target = ShapeExpr::Ref(ShapeExprLabel::IriRef {
+            value: IriRef::Prefixed {
+                prefix: "other".into(),
+                local: "Shape".into(),
+            },
+        });
+        let err = edge_targets(Some(&target), &PrefixMap::new()).expect_err("other: is undeclared");
+        assert!(
+            matches!(err, ShExLoweringError::MalformedSchema(m) if m.contains("`other:Shape`"))
+        );
+    }
 
     /// The range survives the whole decode, and it is the range of the
     /// PREDICATE — not of the line, not of the shape.

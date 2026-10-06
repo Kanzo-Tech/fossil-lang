@@ -68,9 +68,6 @@ pub use executor::Executor;
 /// [`execute_graph`] / [`provider_bindings`] take: it is passed as an argument,
 /// never read through `Db::system()`.
 pub use fossil_descriptors_output::OutputDescriptorKind;
-/// Re-exported so a host can classify a [`SourceRef`]'s format without depending
-/// on `fossil-mir` directly (the browser host maps it to a fetch strategy).
-pub use fossil_mir::SourceFormat;
 /// The relation an op index produces — the seam a host (or a test that builds a
 /// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
 pub use plan::plan_relation;
@@ -99,8 +96,8 @@ use fossil_graph_schema::{
 use fossil_hir::shapes::inner_primitive;
 use fossil_hir::{MappingLoc, def_map::def_map};
 use fossil_locator::SourceAnchor;
-use fossil_mem_probe::Probe;
-use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
+use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir_pg};
+use fossil_sinks::generated::{PAYLOAD_ADDRESS, PAYLOAD_IDENTITY};
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
 /// single source of all type/predicate/cardinality metadata) plus the relation
@@ -154,6 +151,7 @@ pub struct EdgeTable {
 // `BuildHasher` would add a parameter no caller can vary, which is the same call
 // `fossil-df-wasm` made.
 #[allow(clippy::implicit_hasher)]
+#[tracing::instrument(skip_all, fields(program = %file.path(db)))]
 pub async fn execute_graph<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
@@ -171,7 +169,6 @@ pub async fn execute_graph<'db>(
     let program_dir = fossil_locator::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
-    let mut probe = Probe::new(&format!("execute_graph — {} mapping(s)", mappings.len()));
 
     // Phase 1 (barrier): prepare every mapping's vertex projection, then merge
     // the mappings that emit the SAME type (UNION) before assigning dense ids —
@@ -186,18 +183,16 @@ pub async fn execute_graph<'db>(
             None => groups.push((prepared.node.label.clone(), vec![prepared])),
         }
     }
-    probe.mark("prepare vertices (lazy)");
     let mut vertices = Vec::with_capacity(groups.len());
     let mut nodes = Vec::with_capacity(groups.len());
     let mut first = 0u64;
-    for (label, group) in groups {
+    for (_, group) in groups {
         let (table, node) = finalize_vertex(ctx, group, first).await?;
         first += table
             .batches
             .iter()
             .map(|b| b.num_rows() as u64)
             .sum::<u64>();
-        probe.mark(&format!("collect vertex {label}"));
         vertices.push(table);
         nodes.push(node);
     }
@@ -214,7 +209,6 @@ pub async fn execute_graph<'db>(
     let mut edge_groups: Vec<(GraphEdge, Vec<PreparedEdge>)> = Vec::new();
     for &mapping in &mappings {
         let produced = execute_edges(ctx, db, mapping, descriptor, anchor).await?;
-        probe.mark(&format!("resolve {} edge relation(s)", produced.len()));
         for (prepared, edge_type) in produced {
             let key = |e: &GraphEdge| (e.source.clone(), e.label.clone(), e.destination.clone());
             match edge_groups
@@ -230,17 +224,8 @@ pub async fn execute_graph<'db>(
     let mut edge_types = Vec::with_capacity(edge_groups.len());
     for (edge_type, group) in edge_groups {
         edges.push(finalize_edge(&edge_type, group).await?);
-        probe.mark(&format!(
-            "collect edge {}",
-            fossil_sinks::manifest::edge_table_name(
-                &edge_type.source,
-                &edge_type.label,
-                &edge_type.destination
-            )
-        ));
         edge_types.push(edge_type);
     }
-    probe.finish();
 
     let schema = GraphSchema {
         nodes,
@@ -344,6 +329,7 @@ fn refuse_if_poisoned(
 
 /// Project a mapping's source rows to the W0b vertex columns (no dedup/sort/
 /// dense-id yet — those wait for [`finalize_vertex`], after the per-type union).
+#[tracing::instrument(skip_all)]
 async fn prepare_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
@@ -396,7 +382,7 @@ async fn prepare_vertex_ops<'db>(
         })?;
 
     let df = plan_relation(ctx, ops, input, anchor).await?;
-    let projected = df.select(vertex_projection(render(&id), &props))?;
+    let projected = df.select(vertex_projection(render(&id)?, &props)?)?;
     let node = NodeType {
         label: type_name,
         iri: rdf_type,
@@ -431,6 +417,7 @@ async fn prepare_vertex_ops<'db>(
 /// column, grouped by `subject`. Picking one whole ROW per subject, as
 /// `DISTINCT ON` did, would keep the `knows` mapping's row and its null `email`
 /// as often as the `People` row that has it.
+#[tracing::instrument(skip_all)]
 async fn finalize_vertex(
     ctx: &SessionContext,
     group: Vec<PreparedVertex>,
@@ -454,7 +441,7 @@ async fn finalize_vertex(
     // `subject`, then every property of the union — the column order
     // `vertex_projection` gives a single mapping.
     let mut columns: Vec<(String, DataType)> = Vec::new();
-    let names = std::iter::once("subject".to_string())
+    let names = std::iter::once(PAYLOAD_IDENTITY.to_string())
         .chain(node.properties.iter().map(|p| p.name.clone()));
     for name in names {
         let ty = group
@@ -493,7 +480,7 @@ async fn finalize_vertex(
     }
     let df = df.expect("a type group is never empty");
 
-    let by_subject = vec![col("subject").sort(true, false)];
+    let by_subject = vec![col(PAYLOAD_IDENTITY).sort(true, false)];
     let sorted = if dedup {
         // Each merged column under a positional name, renamed after. Aliased
         // straight to its input's own name, the plan was refused with
@@ -513,13 +500,13 @@ async fn finalize_vertex(
                 .map(|e| e.alias(format!("__merged_{i}")))
             })
             .collect::<datafusion::error::Result<_>>()?;
-        let renamed: Vec<DfExpr> = std::iter::once(col("subject"))
+        let renamed: Vec<DfExpr> = std::iter::once(col(PAYLOAD_IDENTITY))
             .chain(columns[1..].iter().enumerate().map(|(i, (name, _))| {
                 DfExpr::Column(Column::new_unqualified(format!("__merged_{i}")))
                     .alias(name.as_str())
             }))
             .collect();
-        df.aggregate(vec![col("subject")], merged)?
+        df.aggregate(vec![col(PAYLOAD_IDENTITY)], merged)?
             .select(renamed)?
             .sort(by_subject)?
     } else {
@@ -557,12 +544,15 @@ fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
 }
 
 /// The vertex projection exprs: `id AS subject`, then each prop.
-fn vertex_projection(subject: DfExpr, props: &[VProp<'_>]) -> Vec<DfExpr> {
-    std::iter::once(subject.alias("subject"))
+fn vertex_projection(
+    subject: DfExpr,
+    props: &[VProp<'_>],
+) -> datafusion::error::Result<Vec<DfExpr>> {
+    std::iter::once(Ok(subject.alias(PAYLOAD_IDENTITY)))
         .chain(
             props
                 .iter()
-                .map(|p| render(&p.value).alias(p.name.as_str())),
+                .map(|p| Ok(render(&p.value)?.alias(p.name.as_str()))),
         )
         .collect()
 }
@@ -593,8 +583,11 @@ fn prepend_dense_id(
         };
         let ids: ArrayRef = Arc::new(UInt32Array::from_iter_values(lo..hi));
 
-        let mut fields: Vec<Arc<Field>> =
-            vec![Arc::new(Field::new("dense_id", DataType::UInt32, false))];
+        let mut fields: Vec<Arc<Field>> = vec![Arc::new(Field::new(
+            PAYLOAD_ADDRESS,
+            DataType::UInt32,
+            false,
+        ))];
         fields.extend(batch.schema().fields().iter().cloned());
         let mut columns: Vec<ArrayRef> = vec![ids];
         columns.extend(batch.columns().iter().cloned());
@@ -636,6 +629,7 @@ struct PreparedEdge {
 /// ([`PreparedEdge`]) plus the [`EdgeType`](GraphEdge) it contributes to the
 /// schema. Reads the mapping's source once and joins it against the registered
 /// vertex tables.
+#[tracing::instrument(skip_all)]
 async fn execute_edges<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
@@ -724,8 +718,8 @@ async fn execute_edge(
     single_valued: bool,
 ) -> datafusion::error::Result<PreparedEdge> {
     let edge_src = rows.select(vec![
-        render(src_id).alias("src_iri"),
-        render(dst_id).alias("dst_iri"),
+        render(src_id)?.alias("src_iri"),
+        render(dst_id)?.alias("dst_iri"),
     ])?;
     // A multi-valued edge's `dst_iri` is a `List` (the RDF pivot kept every
     // object); UNNEST expands it to one (src, dst) row per element — the
@@ -765,12 +759,12 @@ async fn execute_edge(
     // Pre-project each vertex table to (subject, dense) with disjoint names so
     // the two joins never collide on `subject`/`dense_id`.
     let src_v = ctx.table(src_type).await?.select(vec![
-        col("subject").alias("v_src_subject"),
-        col("dense_id").alias("src_dense"),
+        col(PAYLOAD_IDENTITY).alias("v_src_subject"),
+        col(PAYLOAD_ADDRESS).alias("src_dense"),
     ])?;
     let dst_v = ctx.table(dst_type).await?.select(vec![
-        col("subject").alias("v_dst_subject"),
-        col("dense_id").alias("dst_dense"),
+        col(PAYLOAD_IDENTITY).alias("v_dst_subject"),
+        col(PAYLOAD_ADDRESS).alias("dst_dense"),
     ])?;
 
     // Before the join, because the join is what consumes it: how many rows were
@@ -839,6 +833,7 @@ async fn execute_edge(
 /// edge stored twice. There is nowhere for a multiplicity to live. The day an
 /// edge carries a property, this becomes a decision with two answers and the
 /// `Multi` arm is the one that changes.
+#[tracing::instrument(skip_all, fields(edge = %edge.label))]
 async fn finalize_edge(
     edge: &GraphEdge,
     group: Vec<PreparedEdge>,
@@ -871,46 +866,6 @@ async fn finalize_edge(
         batches,
         dropped,
     })
-}
-
-// `resolve_source_uri` lived here and expanded `@conn` aliases and nothing else
-// — it was called THE source-resolution rule, and it was half of one. A
-// reference also has to be anchored somewhere, and every caller of this was
-// left to decide that for itself: the executor decided "nowhere", which is the
-// process's working directory. Both halves are one function now,
-// `fossil_locator::SourceAnchor::locator`, and it cannot be called without an
-// anchor.
-
-/// Every resolved source URI + format + binding name of a lowered mapping, in
-/// op order. A mapping had exactly one `Source` until a `join` gave it two,
-/// so this is a list and not a lookup — the second source of a
-/// joined mapping is as much a source as the first, and a host that fetches
-/// only the first would run the program against half its inputs.
-///
-/// The raw `@conn` alias is resolved through `connections` before use, by
-/// `SourceAnchor::locator`. The `binding` is the table name a `Provider` source
-/// is registered under (the host pre-registers it; [`read_source`] scans it);
-/// object-store formats ignore it.
-fn sources_of(
-    ops: &[Op<'_>],
-    anchor: SourceAnchor<'_>,
-) -> Vec<(String, SourceFormat, String, Option<String>)> {
-    ops.iter()
-        .filter_map(|o| match o {
-            Op::Source {
-                uri,
-                format,
-                binding,
-                ..
-            } => Some((
-                anchor.locator(uri),
-                format.clone(),
-                binding.to_string(),
-                anchor.connection(uri),
-            )),
-            _ => None,
-        })
-        .collect()
 }
 
 /// Read a source into a [`DataFrame`], dispatching on its [`SourceFormat`] — the
@@ -1291,52 +1246,6 @@ pub fn provider_bindings(
     out
 }
 
-/// A source the host must fetch before running the executor: its program URI
-/// (`io.csv("…")`) and format. The browser host enumerates these (via the wasm
-/// `sources()` wrapper) to know which signed URLs to request and how to stage the
-/// bytes — object-store formats into the `SessionContext`, `Provider` (RDF) via
-/// [`register_rdf`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceRef {
-    pub uri: String,
-    pub format: SourceFormat,
-    /// The connection `uri` lies under, when the program wrote `@name/…`.
-    pub connection: Option<String>,
-}
-
-/// Enumerate every distinct source the program reads (one [`Op::Source`] per
-/// mapping, deduplicated by URI). Pure — no IO — so a host can call it to plan
-/// its fetches before [`execute_graph`]. Mirrors what [`execute_graph`] resolves
-/// internally, so the list is exactly the sources the run will read.
-#[must_use]
-#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
-pub fn program_sources(
-    db: &dyn fossil_base::Db,
-    file: SourceFile,
-    descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
-) -> Vec<SourceRef> {
-    let program_dir = fossil_locator::program_dir(file.path(db));
-    let anchor = SourceAnchor::new(&program_dir, connections);
-    let mappings = def_map(db, file).mappings(db).clone();
-    let schema = descriptor.to_graph_schema();
-    let mut out: Vec<SourceRef> = Vec::new();
-    for mapping in mappings {
-        let mir = lower_to_mir_pg(db, mapping);
-        let ops = apply_output_shape(mir.ops(db), &schema);
-        for (uri, format, _binding, connection) in sources_of(&ops, anchor) {
-            if !out.iter().any(|s| s.uri == uri) {
-                out.push(SourceRef {
-                    uri,
-                    format,
-                    connection,
-                });
-            }
-        }
-    }
-    out
-}
-
 /// The RDF pivot columns a mapping reads, derived from the descriptor-refined
 /// ops: each vertex prop AND each edge endpoint whose source value is a `ColRef`
 /// contributes `{ name: <that column>, predicate: <its IRI>, multi: <not single
@@ -1402,60 +1311,21 @@ fn provider_table_name(binding: &str) -> String {
     format!("__rdf_src_{binding}")
 }
 
-/// Native host convenience: read every provider source's bytes from the local
-/// filesystem and register the decoded relations in `ctx`. The browser host
-/// reimplements this loop with `fetch` + [`register_rdf`] (same decode, async
-/// byte source), which is why the byte read — and only the byte read — is gated
-/// off wasm here.
-///
-/// # Errors
-/// Filesystem read errors or decode/registration failures.
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
-pub fn register_provider_sources(
-    ctx: &SessionContext,
-    db: &dyn fossil_base::Db,
-    file: SourceFile,
-    descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
-) -> datafusion::error::Result<()> {
-    for binding in provider_bindings(db, file, descriptor, connections) {
-        let turtle = std::fs::read_to_string(&binding.uri).map_err(|e| {
-            DataFusionError::Execution(format!("read RDF source `{}`: {e}", binding.uri))
-        })?;
-        register_rdf(ctx, &binding, &turtle)?;
-    }
-    Ok(())
-}
-
 /// Render a MIR [`Expr`] to a `DataFusion` logical [`DfExpr`]. Total over the
 /// MIR expression space since F2 §2 — there is no `unimplemented!()` left to
 /// reach, which is what makes a property that type-checks a property that runs.
-pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
+pub(crate) fn render(e: &Expr<'_>) -> datafusion::error::Result<DfExpr> {
     use fossil_hir::{BinOp, UnOp};
-    match e {
+    Ok(match e {
         Expr::LitString(s) => lit(s.to_string()),
-        // `new_unqualified` / `TableReference::bare` (NOT `col()`): a bare
-        // `col("hasProject")` folds the identifier to lowercase, but the source
-        // columns (CSV headers, the RDF pivot's predicate-named columns)
-        // preserve case — reference them verbatim, and the relation too.
-        //
         // The source is the binding the author wrote (`User.email`), and
         // `plan_relation` qualifies each source relation under exactly that
         // name — which is what makes `Node.label` and `Other.label` two columns
-        // after a self-join. An empty source is the retired bare `.column`; it
-        // resolves against whichever relation carries the name.
-        Expr::ColRef { source, column } => DfExpr::Column(if source.is_empty() {
-            Column::new_unqualified(column.as_str())
-        } else {
-            Column::new(
-                Some(datafusion::common::TableReference::bare(source.as_str())),
-                column.as_str(),
-            )
-        }),
-        Expr::Concat(a, b) => binary_expr(render(a), Operator::StringConcat, render(b)),
-        Expr::Assert { inner, .. } => render(inner),
-        Expr::Call { func, args, .. } => render_call(func.as_str(), args),
+        // after a self-join.
+        Expr::ColRef { source, column } => plan::column(source, column),
+        Expr::Concat(a, b) => binary_expr(render(a)?, Operator::StringConcat, render(b)?),
+        Expr::Assert { inner, .. } => render(inner)?,
+        Expr::Call { func, args, .. } => render_call(func.as_str(), args)?,
         Expr::LitInt(v) => lit(*v),
         Expr::LitFloat(v) => lit(v.get()),
         Expr::LitBool(b) => lit(*b),
@@ -1463,7 +1333,7 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
         // NULL and not true, so this is where the surface's `x != null` gets
         // the operator it means.
         Expr::IsNull { operand, negated } => {
-            let inner = render(operand);
+            let inner = render(operand)?;
             if *negated {
                 DfExpr::IsNotNull(Box::new(inner))
             } else {
@@ -1482,17 +1352,19 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
             rhs,
             ..
         } => binary_expr(
-            datafusion::logical_expr::cast(render(lhs), DataType::Float64),
+            datafusion::logical_expr::cast(render(lhs)?, DataType::Float64),
             Operator::Divide,
-            render(rhs),
+            render(rhs)?,
         ),
-        Expr::BinOp { op, lhs, rhs, .. } => binary_expr(render(lhs), df_operator(*op), render(rhs)),
+        Expr::BinOp { op, lhs, rhs, .. } => {
+            binary_expr(render(lhs)?, df_operator(*op), render(rhs)?)
+        }
         // `-x` and `not x`, as themselves. Rendering `-x` as `0 - x` would make
         // `-0.0` come out `+0.0` — measured, and the reason
         // `fossil_hir::HirExpr::UnaryOp` is a node at all.
         Expr::UnaryOp { op, operand, .. } => match op {
-            UnOp::Neg => DfExpr::Negative(Box::new(render(operand))),
-            UnOp::Not => DfExpr::Not(Box::new(render(operand))),
+            UnOp::Neg => DfExpr::Negative(Box::new(render(operand)?)),
+            UnOp::Not => DfExpr::Not(Box::new(render(operand)?)),
         },
         // A two-armed CASE. `otherwise` is always present — fossil has no
         // one-armed conditional, so no row can fall through to NULL.
@@ -1501,12 +1373,10 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
             then,
             otherwise,
             ..
-        } => datafusion::prelude::when(render(cond), render(then))
-            .otherwise(render(otherwise))
-            .unwrap_or_else(|e| {
-                unsupported_call("? :", &format!("could not be built as a CASE: {e}"))
-            }),
-    }
+        } => {
+            datafusion::prelude::when(render(cond)?, render(then)?).otherwise(render(otherwise)?)?
+        }
+    })
 }
 
 /// The `DataFusion` operator for a fossil one. The two sets coincide exactly —
@@ -1541,20 +1411,21 @@ const fn df_operator(op: fossil_hir::BinOp) -> Operator {
 /// it can still hit is a function this engine has no implementation for — an
 /// aggregate in a scalar position — and that is an error carried in the plan,
 /// not a panic and not a dropped column.
-fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
+fn render_call(func: &str, args: &[Expr<'_>]) -> datafusion::error::Result<DfExpr> {
     use fossil_hir::stdlib::LoweringKind;
 
-    let rendered: Vec<DfExpr> = args.iter().map(render).collect();
+    let rendered = args
+        .iter()
+        .map(render)
+        .collect::<datafusion::error::Result<Vec<_>>>()?;
     let Some(entry) = fossil_hir::stdlib::stdlib().lookup(func) else {
-        return unsupported_call(func, "is not in the stdlib catalog");
+        return Err(unsupported_call(func));
     };
-
     match &entry.lowering {
-        LoweringKind::Expr(template) => match render_expr_template(template.as_str(), &rendered) {
-            Ok(e) => e,
-            Err(why) => unsupported_call(func, &why),
-        },
-        LoweringKind::Op(_) => unsupported_call(func, "is a plan operator, not a value"),
+        LoweringKind::Expr(template) => {
+            render_expr_template(template.as_str(), &rendered).map_err(|_| unsupported_call(func))
+        }
+        LoweringKind::Op(_) => Err(unsupported_call(func)),
     }
 }
 
@@ -1572,12 +1443,11 @@ fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
 /// `SessionContext::parse_sql_expr` is behind its `sql` feature, which
 /// `Cargo.toml` turns OFF on purpose — this crate compiles to `wasm32` and the
 /// SQL frontend is bundle weight for a backend that builds plans
-/// programmatically. `sqlparser` is declared in the workspace but is in nobody's
-/// dependency tree, so it would be a new dependency for one call site.
+/// programmatically. `sqlparser` would be a new dependency for one call site.
 ///
 /// What is read here is not SQL. It is the closed expression language the
-/// CATALOGUE writes, which is nine shapes wide and enumerated in
-/// [`TEMPLATE_GRAMMAR`]. A template outside it is an `Err` that names itself, so
+/// CATALOGUE writes, which is nine shapes wide and enumerated on
+/// [`TemplateReader`]. A template outside it is an `Err` that names itself, so
 /// the day the catalogue wants a tenth shape, the failure says so.
 ///
 /// # The dialect seam, which is real and is NOT hidden
@@ -1588,7 +1458,7 @@ fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
 /// rather than to a single builtin.
 ///
 /// What cannot be reconciled stays a NAMED gap — see [`crate::stdlib`]. An
-/// `Err` becomes an `unsupported_call`, never a dropped column.
+/// `Err` fails the plan as `unsupported/expression`, never a dropped column.
 ///
 /// # Errors
 ///
@@ -1612,15 +1482,8 @@ pub(crate) fn render_expr_template(template: &str, args: &[DfExpr]) -> Result<Df
     Ok(e)
 }
 
-/// A reader over one catalogue template. See [`TEMPLATE_GRAMMAR`] for the grammar.
-struct TemplateReader<'a> {
-    chars: Vec<char>,
-    pos: usize,
-    args: &'a [DfExpr],
-}
-
-/// The grammar of a catalogue template — the whole of it, and the reason a SQL
-/// parser is not needed:
+/// A reader over one catalogue template. Its grammar is the whole of it, and
+/// the reason a SQL parser is not needed:
 ///
 /// ```text
 /// Expr    := Or
@@ -1636,8 +1499,11 @@ struct TemplateReader<'a> {
 /// ```
 ///
 /// Nine shapes. Anything else is an error that names the offset.
-#[allow(dead_code)] // documentation anchor: the grammar above is the datum.
-const TEMPLATE_GRAMMAR: () = ();
+struct TemplateReader<'a> {
+    chars: Vec<char>,
+    pos: usize,
+    args: &'a [DfExpr],
+}
 
 impl TemplateReader<'_> {
     fn skip_ws(&mut self) {
@@ -1917,17 +1783,48 @@ fn cast_target(sql_type: &str) -> Option<datafusion::arrow::datatypes::DataType>
     })
 }
 
-/// A call the engine cannot make, rendered as an expression that fails the plan
-/// with fossil's own words. Not a panic: one unrunnable property must not take
-/// the whole run down before the other diagnostics are reported.
-fn unsupported_call(func: &str, why: &str) -> DfExpr {
-    DfExpr::Literal(datafusion::scalar::ScalarValue::Utf8(None), None)
-        .alias(format!("__fossil_unsupported__{func}__{why}"))
+/// A call the engine cannot make: the plan fails with fossil's own
+/// `unsupported/expression`, which [`crate::executor`] finds wherever
+/// `DataFusion` wrapped it.
+fn unsupported_call(func: &str) -> datafusion::error::DataFusionError {
+    datafusion::error::DataFusionError::External(Box::new(fossil_graph_schema::Failure::new(
+        fossil_graph_schema::Problem::UnsupportedExpression {
+            expression: func.to_owned(),
+        },
+    )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::unique_column_names;
+
+    /// A plan operator in a value position fails the plan with fossil's
+    /// `unsupported/expression` — before, it rendered as a NULL column under an
+    /// alias nothing read, and the run wrote the property empty.
+    #[test]
+    fn a_call_the_engine_cannot_make_fails_the_plan() {
+        use fossil_hir::ty::{Ty, TyKind};
+        let db = fossil_base::test_support::new_db();
+        let call = fossil_mir::Expr::Call {
+            func: "seq.where".into(),
+            args: vec![],
+            ty: Ty::new(
+                &db,
+                TyKind::Primitive(fossil_graph_schema::Primitive::String),
+            ),
+        };
+        let err = super::render(&call).expect_err("a plan operator is not a value");
+        let datafusion::error::DataFusionError::External(e) = err else {
+            panic!("expected fossil's failure, got {err}");
+        };
+        let failure = e
+            .downcast_ref::<fossil_graph_schema::Failure>()
+            .expect("a Failure");
+        assert!(matches!(
+            &failure.problem,
+            fossil_graph_schema::Problem::UnsupportedExpression { expression } if expression == "seq.where"
+        ));
+    }
 
     #[test]
     fn a_repeated_header_is_named_as_duckdb_names_it() {

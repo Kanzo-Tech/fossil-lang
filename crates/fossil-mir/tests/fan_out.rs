@@ -47,7 +47,6 @@
 //! - **That the editor is fast.** A fan-out of 1 over a re-lowering that got
 //!   ten times slower per mapping measures the same here.
 
-#![cfg(not(target_arch = "wasm32"))]
 // `@subject` below is an interpolated fossil string: `{users.id}` is fossil's
 // hole, not a Rust format argument.
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -56,7 +55,7 @@ use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
 use fossil_base::register_document;
-use fossil_base::test_support::DecodingHost;
+use fossil_base::test_support::NativeSystem;
 use fossil_base::{FossilDb, SourceFile, System};
 use fossil_hir::def_map::def_map;
 use fossil_mir::lower_to_mir_pg;
@@ -116,7 +115,7 @@ fn db_with_log() -> (FossilDb, Keys) {
                 .push(format!("{database_key:?}"));
         }
     });
-    let system: Arc<dyn System> = Arc::new(DecodingHost::default());
+    let system: Arc<dyn System> = Arc::new(NativeSystem::decoding());
     (FossilDb::with_event_callback(system, callback), keys)
 }
 

@@ -49,7 +49,6 @@
 use fossil_base::SourceFile;
 use fossil_graph_schema::Primitive;
 use fossil_hir::def_map::{MappingLoc, def_map};
-use fossil_hir::item_tree::{ItemHeader, item_tree};
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
 use fossil_hir::stdlib::{FunctionRegistry, Receiver, ScalarTy};
@@ -88,14 +87,6 @@ pub fn completions(
     // ONE receiver question, asked once, read by the two sources that have a
     // receiver. It was asked by `stdlib_completions` alone and
     // `source_field_completions` did not ask at all — see [`Scope`].
-    //
-    // `stdlib()` and not `stdlib_default()`: the second is the CONSTRUCTOR, so
-    // calling it here rebuilt the whole catalogue — every row, its signature and
-    // its lowering — on every completion request, which is the keystroke path.
-    // The `LazyLock` behind `stdlib()` exists for exactly this and was being
-    // walked past. The two names differ by eight characters and neither is a
-    // type error, which is why `is_static_catalogue_shared` below fails on the
-    // ADDRESS rather than on the contents.
     let registry = fossil_hir::stdlib::stdlib();
     let scope = scope_at_cursor(db, file, line, character, registry);
 
@@ -310,11 +301,8 @@ fn scope_at_cursor<'db>(
     let quoted_column = head_token.kind() == SyntaxKind::STRING
         && prev_meaningful(&head_token).is_some_and(|t| t.kind() == SyntaxKind::DOT);
     if head_token.kind() != SyntaxKind::IDENT && !quoted_column {
-        // A leading `.name` is a RETIRED form — `parser/expr.rs` refuses it by
-        // name (`retired::LEADING_DOT`) because the row has a name and every
-        // reference is qualified. A `)` is the other way to get here, and it is
-        // the call-result receiver nothing types yet. Neither has a receiver to
-        // the left of the dot, so neither source has anything to say.
+        // A leading `.` (no receiver) or a `)` (a call result nothing types
+        // yet): neither source has anything to say.
         return Scope::Nothing;
     }
     let head = fossil_syntax::name::token_name(&head_token).to_string();
@@ -418,7 +406,8 @@ fn qualifier(head: &SyntaxToken) -> Option<String> {
 /// The row the cursor's enclosing mapping reads, under the name its body
 /// addresses it by — `("users", {name: String, age: Integer})`.
 ///
-/// The name comes from [`item_tree`], the SIGNATURE-only query, so it survives
+/// The name comes from [`fossil_hir::lower::lower_to_hir`], the SIGNATURE-only
+/// query, so it survives
 /// every keystroke inside the body the user is typing in; the row comes from
 /// [`fossil_hir::infer::source_row_inferred`], the side-effect-free sibling of
 /// the checker's `resolve_source_scope`. That choice is load-bearing and not a
@@ -447,19 +436,10 @@ fn enclosing_row<'db>(
     character: u32,
 ) -> Option<(SmolStr, Record<'db>)> {
     let mapping = enclosing_mapping_loc(db, file, line, character)?;
-    // Filter-then-nth, the contract `MappingLoc::index` is numbered under: the
-    // item tree carries source definitions too, and counting them in would name
-    // a different mapping's binding.
-    let binding = item_tree(db, file)
-        .items(db)
-        .iter()
-        .filter_map(|item| match item {
-            ItemHeader::Mapping(header) => Some(header),
-            ItemHeader::SourceDef(_) => None,
-        })
-        .nth(mapping.index(db))?
+    let binding = fossil_hir::lower::lower_to_hir(db, file)
+        .mapping(db, mapping.index(db))?
         .source_binding
-        .clone()?;
+        .clone();
     let row = fossil_hir::infer::source_row_inferred(db, mapping)?;
     match row.kind(db) {
         TyKind::Record(record) => Some((binding, *record)),
@@ -541,11 +521,8 @@ fn shape_property_completions(
         return;
     };
     // A document that is missing, undecodable or does not declare this shape is
-    // a [`fossil_hir::shapes::TargetShapeError`], and `typecheck_mapping` is
-    // where it becomes a diagnostic the user reads. A completion list is not a
-    // place to report it: the honest answer here is to offer no shape
-    // properties, which is what a program with no output contract gets too.
-    let Ok(Some(shape)) = resolve_target_shape(db, *mapping) else {
+    // reported at its `type` binding; a completion list offers nothing.
+    let Some(shape) = resolve_target_shape(db, *mapping) else {
         return;
     };
     let renames = shape_iri_of(db, *mapping).map_or_else(Vec::new, |iri| {
@@ -650,19 +627,7 @@ fn enclosing_mapping_loc<'db>(
         }
         current = n.parent();
     }
-    let mapping_node = mapping_node?;
-    let cst = fossil_syntax::parse(db, file);
-    let mapping_index = cst
-        .root(db)
-        .syntax()
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::MAPPING)
-        .position(|c| c == mapping_node)?;
-    def_map(db, file)
-        .mappings(db)
-        .iter()
-        .find(|m| m.index(db) == mapping_index)
-        .copied()
+    fossil_hir::def_map::mapping_of(db, file, &mapping_node?)
 }
 
 /// Render a stdlib entry's signature as a `detail` string from its `'db`-free
@@ -688,7 +653,7 @@ fn render_sig(namespace: &str, entry: &fossil_hir::stdlib::RegistryEntry) -> Str
 fn sig_name(t: fossil_hir::stdlib::SigTy) -> String {
     use fossil_hir::stdlib::SigTy;
     match t {
-        SigTy::Scalar(s) => scalar_name(s),
+        SigTy::Scalar(s) => s.to_string(),
         SigTy::Rows => "Rows".to_string(),
         SigTy::Predicate => "Predicate".to_string(),
         // A position that NAMES rather than evaluates, and completion says so:
@@ -701,22 +666,7 @@ fn sig_name(t: fossil_hir::stdlib::SigTy) -> String {
     }
 }
 
-/// Human-readable name for a `'db`-free [`fossil_hir::stdlib::ScalarTy`].
-fn scalar_name(s: fossil_hir::stdlib::ScalarTy) -> String {
-    use fossil_hir::stdlib::ScalarTy as S;
-    match s {
-        S::String => "String",
-        S::Integer => "Integer",
-        S::Float => "Float",
-        S::Bool => "Bool",
-        S::Date => "Date",
-        S::DateTime => "DateTime",
-        S::SeqString => "Seq<String>",
-    }
-    .to_string()
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use fossil_base::test_support::NativeSystem;

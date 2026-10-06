@@ -145,20 +145,21 @@ was **wrong in nine places** by the time it went: `KwPrefix`, `KwIn`, `KwUse`, `
 carried a comment saying it must be updated in lockstep with any reorder. Nothing could hold that,
 and nothing noticed for as long as it did not.
 
-So the legend ships instead of the warning. `tokenKinds()` returns every variant name indexed by the
-discriminant a row carries, and a host keys on `"Comment"` rather than on `2`; semantic tokens
-cross the boundary as legend names (`"type"`, `"declaration"`), and completion kinds followed — LSP spells
-`CompletionItemKind` as an integer, and `kind_name` puts the table in Rust where
-`every_lsp_kind_has_a_name` can check it is total. Each of those tables is an **exhaustive** match,
+So a token crosses as its name: `tokenize()` returns `{ kind: "Comment", start, end }`, `kind` typed by
+the `Token` union generated from the lexer's enum, and a host keys on `"Comment"` rather than on `2`; semantic tokens
+cross the boundary as legend names (`"type"`, `"declaration"`), read off the same `TokenType` enum
+that numbers them, and completion kinds followed — LSP spells `CompletionItemKind` as an integer, and
+the two completion emits cross as the generated `CompletionKind` union, which the editor's icon
+table is a `Record` over. Each of those tables is an **exhaustive** match,
 so adding or renaming a variant fails this build rather than someone else's product, which is the
 whole difference between a guard and a comment. A kind past the end of a legend is a newer compiler
 than the host and reads as plain text, so appending stays backwards-compatible and reordering stops
 being an event at all.
 
-Where an implementation genuinely cannot be shared,
-`packages/introspect/tests/rust-parity.test.ts` is the shape of the guard: it derives its tables from
-the Rust rather than restating any value, so a rewritten crate fails it instead of quietly matching
-nothing.
+Where an implementation genuinely cannot be shared, what the two must agree on is data and is
+generated into both: the two introspecting hosts DESCRIBE through different DuckDBs, and the reader,
+its option keyword and the DuckDB→primitive table are rows of `catalogue.bnf` that
+`cargo xtask catalogue` writes into each.
 
 ## Storage is reached by a vended credential
 

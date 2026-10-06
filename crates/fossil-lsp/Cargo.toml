@@ -59,9 +59,9 @@ fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 # DuckDB-WASM, through `fossil/registerInferredDescriptor`.
 #
 # There is no cheaper way to get them that is also RIGHT. The columns' types
-# come from DuckDB's CSV sniffer, and `packages/introspect/tests/rust-parity.test.ts`
-# exists precisely because «the browser and the CLI answer the same program
-# differently» is the bug worth preventing. A second sniffer written for the
+# come from DuckDB's CSV sniffer, and both introspectors read their reader and
+# type tables out of `catalogue.bnf` precisely because «the browser and the
+# native host answer the same program differently» is the bug worth preventing. A second sniffer written for the
 # editor would be a third answer, and the editor disagreeing with `check` is the
 # defect this dependency is here to fix.
 #
@@ -108,6 +108,8 @@ lsp-types          = { workspace = true }
 crossbeam-channel  = { workspace = true }
 serde              = { workspace = true }
 serde_json         = { workspace = true }
+# A `file:` key back to a path on disk, percent-escapes decoded by the URL Standard.
+url                = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 

@@ -76,14 +76,6 @@ pub trait System: Send + Sync + std::fmt::Debug {
     fn providers(&self) -> &'static [&'static Provider] {
         DATA
     }
-
-    // Extension points considered and deliberately not added — keep the trait
-    // surface tight until a downstream consumer forces one:
-    //   fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, FsError>;
-    //   fn input_descriptor(&self, kind: &str) -> Option<&dyn InputDescriptor>;
-    //   fn output_descriptor(&self, kind: &str) -> Option<&dyn OutputDescriptor>;
-    //   fn registry(&self) -> &FunctionRegistry;
-    //   fn random_seed(&self) -> u64;
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -108,7 +100,7 @@ pub enum FsError {
 // A fixture on the crate root is a fixture something will eventually reach for
 // in production, and «in `base` only traits» is the rule that says so.
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod inferred_tests {
     use super::*;
     use crate::test_support::NativeSystem;

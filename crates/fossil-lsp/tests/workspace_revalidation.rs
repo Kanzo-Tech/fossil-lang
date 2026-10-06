@@ -32,7 +32,7 @@
 //!                       memos (check_identities, subject_templates,
 //!                       decode_shape_document)
 //!   executed  = m + 7   mapping_cst_node for every mapping, plus parse,
-//!                       def_map, line_offsets, a DatabaseKeyIndex, and
+//!                       def_map, line_index, a DatabaseKeyIndex, and
 //!                       body / typecheck_mapping / lower_to_mir_pg for the one
 //!                       mapping the edit touched
 //!   WALK      = 5m + 7  five per mapping — mapping_cst_node, body, spans,
@@ -118,8 +118,6 @@
 //! all. On the same probe `didchange_revalidation.rs` reported 75 revalidated
 //! against its ceiling of 65 — the number its own docs record, reproduced.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::{Path, PathBuf};
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -142,7 +140,7 @@ use serde_json::json;
 const PER_MAPPING: usize = 5;
 
 /// The file-keyed part of a keystroke's walk. Measured: seven — `parse`,
-/// `def_map`, `line_offsets`, `check_identities`, `subject_templates`,
+/// `def_map`, `line_index`, `check_identities`, `subject_templates`,
 /// `decode_shape_document` and one `DatabaseKeyIndex`.
 const FILE_LEVEL: usize = 7;
 

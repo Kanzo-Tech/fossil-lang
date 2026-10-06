@@ -34,7 +34,6 @@
 //! one and reported `missing response id=N` for a server that had written
 //! garbage. The shared one is strict; the module docs there say why.
 
-#![cfg(not(target_arch = "wasm32"))]
 // The fixtures contain `${ex:}` IRI-template placeholders — LITERAL Fossil
 // source embedded in assertion messages, not Rust format args.
 #![allow(clippy::literal_string_with_formatting_args)]

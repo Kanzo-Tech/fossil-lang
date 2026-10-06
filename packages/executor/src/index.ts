@@ -27,60 +27,13 @@ export type { InitInput } from './load.js';
 export { run } from './run.js';
 export type { RunOptions } from './run.js';
 
-import type { DataRow } from './catalogue.generated.js';
-
-/**
- * How a source is read — the reader `DataFusion` scans it with, or the provider that decodes it.
- *
- * It is the catalogue ROW's name: what the program wrote after `io.`, what
- * {@link FossilExecutor.sources} emits, and what `fossil-df-wasm` reads back
- * with `source_row`. It was a hand-written union of four literals; it is
- * generated from `catalogue.bnf` now, by `cargo xtask catalogue`, from the same
- * file the Rust side reads.
- */
-export type SourceFormat = DataRow;
-
-export { DATA_ROWS } from './catalogue.generated.js';
-
-/** A source the program reads, as enumerated by {@link FossilExecutor.sources}. */
-export interface SourceDescriptor {
-  /** The locator fossil resolved from what the program wrote. */
-  uri: string;
-  format: SourceFormat;
-  /** The connection the locator lies under, when the program wrote `@name/…`. */
-  connection?: string;
-}
+import type { RunReport } from '@fossil-lang/types';
 
 /** One file of the written corpus: a path relative to its root + its encoded bytes. */
 export interface CorpusFile {
   /** `fossil.json`, `vertex/<Type>.parquet` or `edge/<Src>_<label>_<Dst>.parquet`. */
   path: string;
   bytes: Uint8Array;
-}
-
-/** How many rows of one relation's input resolved no endpoint pair. */
-export interface EdgeDrops {
-  /** The edge table's `name` in `fossil.json`, `<Src>_<label>_<Dst>`. */
-  table: string;
-  /** Always present, `0` included: «nothing dropped» is not «this writer does not count». */
-  dropped: number;
-}
-
-/**
- * What a run tells its caller — the wire shape of `fossil_df::RunReport`: the
- * two facts the corpus cannot hold about itself.
- *
- * **The manifest is not here.** It is `<dest>fossil.json`, written last; open
- * the corpus (`@fossil-lang/corpus`) or read that file to learn what was
- * written. The report used to carry the whole manifest again, typed here by
- * hand, and a second description of one dataset is one that can disagree with
- * it.
- */
-export interface RunReport {
-  /** The prefix the corpus was written under, `fossil.json` at its root. */
-  dest: string;
-  /** One entry per edge table, in the order `fossil.json` lists them. */
-  dropped: EdgeDrops[];
 }
 
 /** The result of {@link FossilExecutor.runInMemory}. */

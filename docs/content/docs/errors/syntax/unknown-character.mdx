@@ -38,7 +38,6 @@ vocabularies ([identity](/docs/design/identity)).
 - **A comment** is `//`, running to the end of the line. Replace `#` with `//`.
 - **Inside a string** any character is allowed, so a `$` or `\` that belongs to a value goes between
   `"` quotes.
-- **A backtick** is not this error: it gets
-  [`syntax/retired-spelling`](/docs/errors/syntax/retired-spelling), because it once opened a string.
+- **A backtick** opens nothing: a string is quoted with `"`.
 - **Anything else** is likely a typo or pasted text; delete it. [The grammar](/docs/book/grammar)
   lists every token the language has.

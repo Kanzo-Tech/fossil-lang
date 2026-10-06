@@ -58,13 +58,7 @@ use datafusion::physical_plan::{
 };
 use datafusion::prelude::SessionConfig;
 
-use crate::memory::{BUDGET, Budget, Compact};
-
-/// The session every browser run executes in, under a fresh [`BUDGET`].
-#[must_use]
-pub fn session() -> SessionContext {
-    session_within(Arc::new(Budget::new(BUDGET)))
-}
+use crate::memory::{Budget, Compact};
 
 /// The session every browser run executes in: one target partition, `budget`
 /// as its pool and no disk, and [`OneTask`] and [`Compact`] after every
@@ -231,7 +225,7 @@ mod tests {
     use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties, Partitioning};
     use datafusion::prelude::{SessionConfig, col};
 
-    use super::{OneTask, session};
+    use super::{Budget, OneTask, session_within};
 
     fn names(plan: &Arc<dyn ExecutionPlan>, out: &mut Vec<String>) {
         out.push(plan.name().to_owned());
@@ -252,7 +246,7 @@ mod tests {
 
     #[test]
     fn a_deduplicated_union_plans_with_no_spawning_operator_and_runs_without_a_runtime() {
-        let ctx = session();
+        let ctx = session_within(Arc::new(Budget::new(crate::memory::BUDGET)));
         assert_eq!(ctx.copied_config().target_partitions(), 1);
         ctx.register_table("a", table(&[1, 2])).expect("a");
         ctx.register_table("b", table(&[2, 3])).expect("b");

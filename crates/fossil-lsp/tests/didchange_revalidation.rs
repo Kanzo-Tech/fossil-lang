@@ -93,8 +93,6 @@
 //! same 82 memos with as few as 7 of them validating, and a bound on
 //! `revalidated` alone goes GREENER when that happens.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::PathBuf;
 use std::str::FromStr as _;
 use std::sync::Arc;

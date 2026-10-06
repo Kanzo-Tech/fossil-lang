@@ -1,13 +1,8 @@
 /**
  * CodeMirror document offset ↔ LSP `{ line, character }`.
  *
- * This arithmetic is the *easy* one and it is worth saying why, because
- * `offsets.ts` next door is the hard one and they look alike. `TokenRow` offsets
- * are UTF-8 **bytes**, because the Rust lexer indexes a `&str` — those need a
- * map. Everything on the LSP surface is already UTF-16 code units, because the
- * compiler put it through `fossil_ide::LineIndex` (the rust-analyzer model) on
- * the Rust side, and UTF-16 code units are what a JavaScript string is indexed
- * in. So this file is line-start arithmetic and nothing else.
+ * Everything fossil hands an editor is in UTF-16 code units, the units a JavaScript string is
+ * indexed in, so this file is line-start arithmetic and nothing else.
  *
  * Both directions clamp. A position query is answered about the text as it was
  * when the request went out, and by the time the answer renders the user may
@@ -17,18 +12,7 @@
  * `lint.ts`'s, which is why that module's clamp now lives here.
  */
 import type { EditorState } from '@codemirror/state';
-
-/** One LSP position: zero-based line, UTF-16 `character` within it. */
-export interface Position {
-  line: number;
-  character: number;
-}
-
-/** An LSP range. */
-export interface Range {
-  start: Position;
-  end: Position;
-}
+import type { Position, Range } from '@fossil-lang/types';
 
 /** LSP position → document offset, clamped into the document. */
 export function offsetOf(state: EditorState, pos: Position): number {

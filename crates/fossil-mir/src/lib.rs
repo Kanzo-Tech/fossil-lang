@@ -36,4 +36,4 @@ pub use lower::{apply_output_shape, lower_to_mir_pg};
 pub use op::{
     AggSpec, Expr, JoinKind, JoinSide, Op, ProjectedColumn, SinkRef, SourceFormat, VProp,
 };
-pub use schema::{free_cols, schema_of};
+pub use schema::schema_of;

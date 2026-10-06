@@ -5,13 +5,11 @@
 //! byte range (`Range<u32>`) into the file text, so a downstream goto-def
 //! consumer can map a hit back to an LSP location.
 //!
-//! # Why a fresh CST walk and not `fossil-hir::def_map`?
+//! # Why a CST walk and not `fossil-hir::def_map`?
 //!
-//! `def_map` interns `MappingLoc`/`SourceLoc` (per-item Salsa keys) and does
-//! NOT carry byte ranges or function/shape names — it is the type-checker's
-//! signature table. The IDE search layer needs ranges (for goto-def
-//! highlighting) and the full `{source, mapping, shape}` symbol set
-//! (for the outline + completion), so it walks the CST directly. Crucially this
+//! `def_map` carries a span for each source and type binding, but a mapping is
+//! a bare `MappingLoc` there, with neither its name nor the shape it targets.
+//! The outline needs all three, so it walks the CST directly. Crucially this
 //! keeps the symbol index FILE-keyed: it is rebuilt whole on any edit (one
 //! re-run — NO per-mapping Salsa key is added here, so the
 //! per-mapping `body()` fan-out stays at 1).
@@ -166,7 +164,7 @@ fn node_range(node: &SyntaxNode) -> Range<u32> {
     u32::from(r.start())..u32::from(r.end())
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;

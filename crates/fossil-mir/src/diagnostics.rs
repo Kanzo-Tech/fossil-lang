@@ -49,7 +49,8 @@
 
 use std::collections::HashSet;
 
-use fossil_base::{Db, Diagnostic, Problem, Severity, SourceFile, Span, SpanFrame};
+use fossil_base::{Db, Diagnostic, SourceFile, SpanFrame};
+use fossil_graph_schema::{Problem, Severity, Span};
 
 /// Every diagnostic `file` produces, spans file-absolute, no duplicates.
 ///
