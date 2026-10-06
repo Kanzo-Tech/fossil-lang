@@ -609,6 +609,7 @@ Contact : Person from users
                 constraints: vec![crate::shapes::ShapeConstraint {
                     predicate: smol_str::SmolStr::from("https://example.org/name"),
                     value_ty: None,
+                    term: None,
                     occurs: Occurs::ONE,
                     // A hand-built table, not a decoded document: there is no
                     // `.shex` for a range to point into.
@@ -682,6 +683,7 @@ Orders : Order from Purchase
                 constraints: vec![crate::shapes::ShapeConstraint {
                     predicate: smol_str::SmolStr::from("https://shop.example/voc#total"),
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
+                    term: None,
                     occurs: Occurs::ONE,
                     // A hand-built table, not a decoded document: there is no
                     // `.shex` for a range to point into.
@@ -770,6 +772,7 @@ Orders : Order from Purchase
                 constraints: vec![crate::shapes::ShapeConstraint {
                     predicate: smol_str::SmolStr::from("https://shop.example/voc#total"),
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
+                    term: None,
                     occurs: Occurs::ONE,
                     // What the decoder found — see `fossil_shex::spans`.
                     span: Some(fossil_base::Span::new(60, 70)),
@@ -877,6 +880,7 @@ Orders : Order from Purchase
                 constraints: vec![crate::shapes::ShapeConstraint {
                     predicate: smol_str::SmolStr::from("https://shop.example/voc#total"),
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
+                    term: None,
                     occurs: Occurs::ONE,
                     span: None,
                 }],
@@ -934,6 +938,7 @@ fn a_wrong_type_with_no_repair_says_nothing() {
                 constraints: vec![crate::shapes::ShapeConstraint {
                     predicate: smol_str::SmolStr::from("https://example.org/name"),
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Bool))),
+                    term: None,
                     occurs: Occurs::ONE,
                     span: None,
                 }],

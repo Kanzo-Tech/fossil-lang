@@ -218,10 +218,9 @@ pub fn lower_to_mir_pg<'db>(
         // The short name IS the column name — it used to be computed here from
         // the IRI and is now what the author wrote. The IRI is the lookup.
         let pred_local = name.clone();
-        let iri = &predicates
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, i)| i.clone());
+        let predicate = predicates.iter().find(|p| p.name == *name);
+        let iri = &predicate.map(|p| p.iri.clone());
+        let term = &predicate.and_then(|p| p.term.clone());
         // `buyer = Person(User.email)` becomes the target type's identity
         // template with this row's values in its holes, and from here down it IS
         // that interpolation — the same shape a hand-written IRI template has,
@@ -253,6 +252,7 @@ pub fn lower_to_mir_pg<'db>(
                     value: lower_property_value(db, &prop.value, &m.source_binding, None),
                     ty: field_ty(field.as_str()),
                     rdf_uri: iri.clone(),
+                    term: term.clone(),
                     single_valued: true,
                 });
             }
@@ -268,6 +268,7 @@ pub fn lower_to_mir_pg<'db>(
                     value: lower_property_value(db, &prop.value, &m.source_binding, None),
                     ty: string_ty,
                     rdf_uri: iri.clone(),
+                    term: term.clone(),
                     single_valued: true,
                 }),
             // A computed property: the value is whatever the function returns,
@@ -279,6 +280,7 @@ pub fn lower_to_mir_pg<'db>(
                 value: lower_property_value(db, &prop.value, &m.source_binding, None),
                 ty: call_result_ty(db, func),
                 rdf_uri: iri.clone(),
+                term: term.clone(),
                 single_valued: true,
             }),
             // A comparison is a Bool column; a literal is its own type. An
@@ -292,6 +294,7 @@ pub fn lower_to_mir_pg<'db>(
                 value: lower_property_value(db, &prop.value, &m.source_binding, None),
                 ty: operator_ty(db, &prop.value, &field_ty),
                 rdf_uri: iri.clone(),
+                term: term.clone(),
                 single_valued: true,
             }),
             HirExpr::IntLit(_) => props.push(VProp {
@@ -299,6 +302,7 @@ pub fn lower_to_mir_pg<'db>(
                 value: lower_property_value(db, &prop.value, &m.source_binding, None),
                 ty: Ty::new(db, TyKind::Primitive(Primitive::Integer)),
                 rdf_uri: iri.clone(),
+                term: term.clone(),
                 single_valued: true,
             }),
             HirExpr::FloatLit(_) => props.push(VProp {
@@ -306,6 +310,7 @@ pub fn lower_to_mir_pg<'db>(
                 value: lower_property_value(db, &prop.value, &m.source_binding, None),
                 ty: Ty::new(db, TyKind::Primitive(Primitive::Float)),
                 rdf_uri: iri.clone(),
+                term: term.clone(),
                 single_valued: true,
             }),
             HirExpr::BoolLit(_) => props.push(VProp {
@@ -313,6 +318,7 @@ pub fn lower_to_mir_pg<'db>(
                 value: lower_property_value(db, &prop.value, &m.source_binding, None),
                 ty: Ty::new(db, TyKind::Primitive(Primitive::Bool)),
                 rdf_uri: iri.clone(),
+                term: term.clone(),
                 single_valued: true,
             }),
             // `resolve_edges` above replaced every one of these. Reaching it

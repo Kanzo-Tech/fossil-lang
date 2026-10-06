@@ -62,7 +62,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use fossil_graph_schema::{Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape};
+use fossil_graph_schema::{
+    Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape, Term,
+};
 
 use crate::db::{Db, FossilDb};
 use crate::files::{SourceFile, register_document};
@@ -144,12 +146,11 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
                 let max = tokens
                     .next()
                     .map_or(Some(1), |t| (t != "*").then(|| t.parse().unwrap_or(1)));
-                let (datatype, targets) = value.strip_prefix('@').map_or_else(
+                let (term, targets) = value.strip_prefix('@').map_or_else(
                     || {
+                        let datatype = format!("http://www.w3.org/2001/XMLSchema#{value}");
                         (
-                            Primitive::from_xsd_iri(&format!(
-                                "http://www.w3.org/2001/XMLSchema#{value}"
-                            )),
+                            (value != "-").then_some(Term::Literal(Some(datatype))),
                             Vec::new(),
                         )
                     },
@@ -157,7 +158,7 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
                 );
                 shape.properties.push(PropertyConstraint {
                     predicate,
-                    datatype,
+                    term,
                     targets,
                     occurs: Occurs { min, max },
                     // This toy `line`-per-predicate syntax is not `ShExC`, so
@@ -299,8 +300,8 @@ mod tests {
         )
         .expect("decodes");
         let person = doc.lookup("http://example.org/Person").expect("the shape");
-        assert_eq!(person.properties[0].datatype, Some(Primitive::String));
-        assert_eq!(person.properties[1].datatype, None, "`-` narrows nothing");
+        assert_eq!(person.properties[0].datatype(), Some(Primitive::String));
+        assert_eq!(person.properties[1].datatype(), None, "`-` narrows nothing");
         assert_eq!(person.properties[1].occurs, Occurs { min: 0, max: None });
         assert_eq!(person.properties[2].targets, ["http://example.org/City"]);
     }

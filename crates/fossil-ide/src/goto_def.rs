@@ -333,8 +333,8 @@ fn wanted_iri(db: &dyn fossil_base::Db, entry: &TypeEntry, wanted: &Wanted<'_>) 
             let (table, _collisions) = shape.short_names(&entry.renames);
             table
                 .iter()
-                .find(|(short, _)| short.as_str() == key.as_str())
-                .map(|(_, iri)| iri.to_string())
+                .find(|p| p.name.as_str() == key.as_str())
+                .map(|p| p.iri.to_string())
         }
     }
 }

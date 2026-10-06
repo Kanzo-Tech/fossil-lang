@@ -1020,7 +1020,7 @@ pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape
         let ty = if c.targets.is_empty() {
             Ty::new(
                 db,
-                TyKind::Primitive(c.datatype.unwrap_or(Primitive::String)),
+                TyKind::Primitive(c.datatype().unwrap_or(Primitive::String)),
             )
         } else {
             Ty::reference(db, c.targets.iter().map(SmolStr::from))
@@ -1299,17 +1299,18 @@ mod tests {
     /// pivoted row's entity IRI.
     #[test]
     fn a_shape_becomes_a_source_row_of_subject_plus_one_column_per_constraint() {
-        use fossil_graph_schema::{Occurs, PropertyConstraint, Shape};
+        use fossil_graph_schema::{Occurs, PropertyConstraint, Shape, Term};
 
         let db = db();
-        let constraint = |predicate: &str, datatype, targets: &[&str]| PropertyConstraint {
-            predicate: predicate.to_string(),
-            datatype,
-            targets: targets.iter().map(|t| (*t).to_string()).collect(),
-            occurs: Occurs::ONE,
-            // A test fixture, not a document: no text to point into.
-            span: None,
-        };
+        let constraint =
+            |predicate: &str, datatype: Option<Primitive>, targets: &[&str]| PropertyConstraint {
+                predicate: predicate.to_string(),
+                term: datatype.map(|p: Primitive| Term::Literal(Some(p.to_xsd_iri().into()))),
+                targets: targets.iter().map(|t| (*t).to_string()).collect(),
+                occurs: Occurs::ONE,
+                // A test fixture, not a document: no text to point into.
+                span: None,
+            };
         let shape = Shape {
             iri: "https://example.org/Beam".to_string(),
             properties: vec![

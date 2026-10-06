@@ -19,6 +19,10 @@ export interface Property {
   /** The manifest's type word: `uint32`, `string`, `int32`, … — the writer's vocabulary. */
   readonly type: string;
   readonly iri?: string;
+  /** The RDF term type the shape declares, as R2RML's IRI (`rr:IRI`, `rr:Literal`). */
+  readonly term_type?: string;
+  /** The literal datatype the shape declares, as the IRI it wrote. */
+  readonly datatype?: string;
   readonly nullable?: boolean;
   /** What a column the writer emits IS — `corpus.bnf`'s role. Absent on a program's column. */
   readonly role?: 'address' | 'identity' | 'endpoint';

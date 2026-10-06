@@ -75,7 +75,7 @@
 //! turns it into a diagnostic.
 
 use fossil_graph_schema::{
-    Occurs, OutputShapes, Primitive, Problem, PropertyConstraint, Rejection, Shape, Span,
+    Occurs, OutputShapes, Primitive, Problem, PropertyConstraint, Rejection, Shape, Span, Term,
 };
 use smol_str::SmolStr;
 
@@ -97,12 +97,28 @@ pub struct ShapeConstraint<'db> {
     /// **the document did not narrow the value type** — see
     /// [`expected_value_ty`], which is where that is decided.
     pub value_ty: Option<Ty<'db>>,
+    /// The RDF term the document declares for the values —
+    /// [`PropertyConstraint::term`], carried through untouched.
+    pub term: Option<Term>,
     /// How many values the property may carry.
     pub occurs: Occurs,
     /// Where the DOCUMENT declares this predicate — see
     /// [`fossil_graph_schema::PropertyConstraint::span`]. Paired with
     /// [`ResolvedShape::document`], it is a label in the `.shex`.
     pub span: Option<Span>,
+}
+
+/// One predicate of a mapping's target shape, by the short name a body writes —
+/// a row of [`ResolvedShape::short_names`]' table.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Predicate {
+    /// The short name: the `@rename` addressed to the predicate, else the last
+    /// segment of its IRI.
+    pub name: SmolStr,
+    /// The predicate IRI, fully resolved.
+    pub iri: SmolStr,
+    /// The RDF term the document declares for the values.
+    pub term: Option<Term>,
 }
 
 /// A mapping's resolved target shape — Phase-3-internal.
@@ -144,6 +160,7 @@ impl<'db> ResolvedShape<'db> {
             .map(|c| ShapeConstraint {
                 predicate: SmolStr::from(c.predicate.as_str()),
                 value_ty: expected_value_ty(db, c),
+                term: c.term.clone(),
                 occurs: c.occurs,
                 span: c.span,
             })
@@ -188,22 +205,26 @@ impl<'db> ResolvedShape<'db> {
     pub fn short_names(
         &self,
         renames: &[(SmolStr, SmolStr)],
-    ) -> (Vec<(SmolStr, SmolStr)>, Vec<NameCollision>) {
-        let mut table: Vec<(SmolStr, SmolStr)> = Vec::with_capacity(self.constraints.len());
+    ) -> (Vec<Predicate>, Vec<NameCollision>) {
+        let mut table: Vec<Predicate> = Vec::with_capacity(self.constraints.len());
         let mut collisions: Vec<NameCollision> = Vec::new();
         for c in &self.constraints {
             let short = SmolStr::from(fossil_graph_schema::short_name(
                 c.predicate.as_str(),
                 renames,
             ));
-            if let Some((_, first)) = table.iter().find(|(n, _)| *n == short) {
+            if let Some(first) = table.iter().find(|p| p.name == short) {
                 collisions.push(NameCollision {
                     name: short,
-                    first: first.clone(),
+                    first: first.iri.clone(),
                     second: c.predicate.clone(),
                 });
             } else {
-                table.push((short, c.predicate.clone()));
+                table.push(Predicate {
+                    name: short,
+                    iri: c.predicate.clone(),
+                    term: c.term.clone(),
+                });
             }
         }
         (table, collisions)
@@ -247,7 +268,7 @@ impl<'db> ResolvedShape<'db> {
 /// contradiction and asks whoever rewrites this to choose deliberately; this is
 /// the choice. A shape that does not narrow the value does not narrow it.
 fn expected_value_ty<'db>(db: &'db dyn fossil_base::Db, c: &PropertyConstraint) -> Option<Ty<'db>> {
-    if let Some(p) = c.datatype {
+    if let Some(p) = c.datatype() {
         return Some(Ty::new(db, TyKind::Primitive(p)));
     }
     if c.targets.is_empty() {
@@ -564,7 +585,7 @@ mod tests {
     fn prop(datatype: Option<Primitive>, targets: &[&str]) -> PropertyConstraint {
         PropertyConstraint {
             predicate: "https://example.org/p".into(),
-            datatype,
+            term: datatype.map(|p: Primitive| Term::Literal(Some(p.to_xsd_iri().into()))),
             targets: targets.iter().map(|t| (*t).to_string()).collect(),
             occurs: Occurs::ONE,
             // A test fixture, not a document: no text to point into.

@@ -237,6 +237,7 @@ fn kb_schema() -> GraphSchema {
         name: name.to_string(),
         datatype: Primitive::String,
         iri: Some(iri.to_string()),
+        term: None,
         cardinality,
     };
     GraphSchema {

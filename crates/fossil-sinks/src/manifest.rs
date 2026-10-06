@@ -36,6 +36,12 @@ use crate::generated::ColumnRole;
 /// first half.
 pub const FOSSIL_FORMAT: &str = "fossil/1";
 
+/// R2RML's term type of an IRI, as [`Property::term_type`] holds it.
+pub const RR_IRI: &str = "http://www.w3.org/ns/r2rml#IRI";
+
+/// R2RML's term type of a literal, as [`Property::term_type`] holds it.
+pub const RR_LITERAL: &str = "http://www.w3.org/ns/r2rml#Literal";
+
 /// The manifest's path under a corpus's root.
 pub const MANIFEST_FILE: &str = "fossil.json";
 
@@ -121,6 +127,16 @@ pub struct Property {
     /// The predicate IRI the program mapped it from, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iri: Option<String>,
+    /// The RDF term type the shape declares for the values, as R2RML's IRI —
+    /// [`RR_IRI`] or [`RR_LITERAL`] — which a mapping states as `rr:termType`.
+    /// Absent where no shape declares one, and a reader then takes R2RML's
+    /// default: a literal of the column's natural datatype (R2RML §10.2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub term_type: Option<String>,
+    /// The literal datatype the shape declares, as the IRI it wrote — a
+    /// mapping's `rr:datatype`. Absent where it declares none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub datatype: Option<String>,
     /// Whether a row may hold no value. Absent is `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub nullable: bool,
@@ -219,6 +235,8 @@ mod tests {
             name: name.to_string(),
             data_type: data_type.to_string(),
             iri: None,
+            term_type: None,
+            datatype: None,
             nullable,
             role: None,
         }

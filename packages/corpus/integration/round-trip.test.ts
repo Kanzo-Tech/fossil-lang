@@ -13,7 +13,7 @@
  * 3. `guards/check.mjs` passes on what the writer wrote;
  * 4. every column the writer emits says what it IS — its `role` in `fossil_columns` — and a
  *    program's column says nothing;
- * 5. `mapping` of what the writer wrote, run by an RML processor over the same views, makes the
+ * 5. `mapping` of what the writer wrote, run by an R2RML processor over the same views, makes the
  *    triples the corpus holds — the vertices' classes and literals, and `buyer` joined subject to
  *    subject across two types.
  *
@@ -33,7 +33,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mapping, open, type Close } from '../src/index.js';
 import type { Manifest } from '../src/manifest.js';
 import { duckdb } from '../tests/engine.js';
-import { held, materialise } from '../tests/rml.js';
+import { held, materialise } from '../tests/r2rml.js';
 import { runShop } from './shop.js';
 import { installSyncXhr } from './sync-xhr.js';
 
