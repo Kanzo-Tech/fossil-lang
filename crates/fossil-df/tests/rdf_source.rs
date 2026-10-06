@@ -1,6 +1,6 @@
 //! Host input seam (RDF): an `io.rdf` program runs end-to-end on `DataFusion`.
 //! The host reads the Turtle bytes and registers the pivoted relation
-//! ([`register_provider_sources`]); [`execute_graph`] then scans it exactly like
+//! (`support::register_provider_sources`); [`execute_graph`] then scans it exactly like
 //! a CSV — RDF stays at the I/O border, the executor never parses it.
 //!
 //! Verifies the seam derives the pivot from the MIR (the `foaf:name`/`foaf:age`
@@ -61,14 +61,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     // The host reads the bytes (here: from the filesystem) and registers the
     // decoded relation. Then the executor scans it.
     let ctx = SessionContext::new();
-    fossil_df::register_provider_sources(
-        &ctx,
-        &db,
-        file,
-        &accept_all,
-        &std::collections::HashMap::new(),
-    )
-    .expect("register io.rdf source");
+    support::register_provider_sources(&ctx, &db, file, &accept_all);
 
     let graph = fossil_df::execute_graph(
         &ctx,
@@ -172,14 +165,7 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
     );
 
     let ctx = SessionContext::new();
-    fossil_df::register_provider_sources(
-        &ctx,
-        &db,
-        file,
-        &descriptor,
-        &std::collections::HashMap::new(),
-    )
-    .expect("register both io.rdf shapes");
+    support::register_provider_sources(&ctx, &db, file, &descriptor);
     let graph = fossil_df::execute_graph(
         &ctx,
         &db,

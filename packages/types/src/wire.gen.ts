@@ -253,20 +253,20 @@ export interface LocatorName {
 }
 
 /**
- * A document a program names and the workspace does not hold yet —
- * `fossil_hir::documents::MissingDocument` in the shape it crosses to JS.
+ * A document a program names that the database does not hold yet.
  */
 export interface MissingDocument {
   /**
-   * The connection the locator lies under, when the program wrote `@name/…`.
+   * The connection the locator lies under, when it was written `@name/…`.
    */
   connection?: string;
   /**
-   * The registry key: what the program wrote, independent of any connection.
+   * What it is registered under: `registry_key`, anchored with no connection map, so repointing a
+   * connection never invalidates a query.
    */
   key: string;
   /**
-   * Where to read it: the key expanded through the connection map.
+   * Where it is fetched from: the same reference through the connection map.
    */
   locator: string;
 }

@@ -76,8 +76,18 @@ impl FossilExecutor {
     /// `api/invalid-argument` if `connections` is not an object of strings,
     /// `api/busy` if a run is in flight.
     #[wasm_bindgen(js_name = setConnections)]
-    pub fn set_connections(&self, connections: &JsValue) -> Result<(), JsValue> {
-        let connections = parse_connections(connections)?;
+    pub fn set_connections(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "Record<string, string>")] connections: JsValue,
+    ) -> Result<(), JsValue> {
+        let connections: HashMap<String, String> = serde_wasm_bindgen::from_value(connections)
+            .map_err(|e| {
+                invalid_argument(
+                    "connections",
+                    "an object of { name: baseUrl }",
+                    Some(e.into()),
+                )
+            })?;
         self.borrow_mut("setConnections")?
             .set_connections(connections);
         Ok(())
@@ -91,17 +101,10 @@ impl FossilExecutor {
     /// `api/busy` if a register is in flight.
     #[wasm_bindgen(js_name = missingDocuments)]
     pub fn missing_documents(&self) -> Result<JsValue, JsValue> {
-        let arr = js_sys::Array::new();
-        for missing in self.borrow("missingDocuments")?.missing_documents() {
-            let obj = js_sys::Object::new();
-            set(&obj, "key", &JsValue::from_str(&missing.key))?;
-            set(&obj, "locator", &JsValue::from_str(&missing.locator))?;
-            if let Some(connection) = &missing.connection {
-                set(&obj, "connection", &JsValue::from_str(connection))?;
-            }
-            arr.push(&obj);
-        }
-        Ok(arr.into())
+        Ok(to_value(
+            "the missing documents",
+            &self.borrow("missingDocuments")?.missing_documents(),
+        )?)
     }
 
     /// Register a fetched document under the `key` `missingDocuments` gave it.
@@ -116,26 +119,12 @@ impl FossilExecutor {
         Ok(())
     }
 
-    /// `[{ uri, format, connection? }]` — the sources to read, `uri` being the
-    /// locator fossil resolved, `format` the catalogue row's name and
-    /// `connection` the one a credential is vended for.
+    /// The sources to read — `ProgramSource`, the list every host introspects.
     ///
     /// # Errors
-    /// The executor's failure if the output shape document is unregistered or
-    /// does not decode; `api/busy` if a register is in flight.
+    /// `api/busy` if a register is in flight.
     pub fn sources(&self) -> Result<JsValue, JsValue> {
-        let srcs = self.borrow("sources")?.sources()?;
-        let arr = js_sys::Array::new();
-        for (uri, format, connection) in srcs {
-            let obj = js_sys::Object::new();
-            set(&obj, "uri", &JsValue::from_str(&uri))?;
-            set(&obj, "format", &JsValue::from_str(&format))?;
-            if let Some(connection) = &connection {
-                set(&obj, "connection", &JsValue::from_str(connection))?;
-            }
-            arr.push(&obj);
-        }
-        Ok(arr.into())
+        Ok(to_value("the sources", &self.borrow("sources")?.sources())?)
     }
 
     /// Run with the storage `host` vends: read each source through its
@@ -194,7 +183,7 @@ impl FossilExecutor {
         };
         let exec = self.borrow("run")?;
         let report = exec.execute(&mut storage, &dest).await?;
-        Ok(report_value(&report)?)
+        Ok(to_value("the run report", &report)?)
     }
 
     /// Run over files held in memory, for a host with no storage: `sources`
@@ -276,7 +265,7 @@ impl FossilExecutor {
         }
         let result = js_sys::Object::new();
         set(&result, "files", &files)?;
-        set(&result, "report", &report_value(&report)?)?;
+        set(&result, "report", &to_value("the run report", &report)?)?;
         Ok(result.into())
     }
 }
@@ -318,9 +307,9 @@ fn unreachable(locator: &str, error: object_store::Error) -> Failure {
     .caused_by(error)
 }
 
-/// The report of a run fossil just made, as plain data.
-fn report_value(report: &fossil_df::RunReport) -> Result<JsValue, Failure> {
-    serde_wasm_bindgen::to_value(report).map_err(|e| bug("serialising the run report", e))
+/// Plain data fossil just made, as a JS value.
+fn to_value<T: serde::Serialize + ?Sized>(what: &str, value: &T) -> Result<JsValue, Failure> {
+    serde_wasm_bindgen::to_value(value).map_err(|e| bug(format!("serialising {what}"), e))
 }
 
 /// The host of a run with no storage: it has no connections and vends nothing,
@@ -368,20 +357,6 @@ fn busy(call: &str) -> Failure {
     Failure::new(Problem::Busy {
         call: call.to_string(),
     })
-}
-
-/// Parse the JS `connections` object `{ name: baseUrl }`.
-fn parse_connections(connections: &JsValue) -> Result<HashMap<String, String>, Failure> {
-    let shape = || invalid_argument("connections", "an object of { name: baseUrl }", None);
-    let obj: &js_sys::Object = connections.dyn_ref::<js_sys::Object>().ok_or_else(shape)?;
-    let mut map = HashMap::new();
-    for entry in js_sys::Object::entries(obj).iter() {
-        let pair: js_sys::Array = entry.into();
-        let name = pair.get(0).as_string().ok_or_else(shape)?;
-        let url = pair.get(1).as_string().ok_or_else(shape)?;
-        map.insert(name, url);
-    }
-    Ok(map)
 }
 
 fn set(obj: &js_sys::Object, key: &str, value: &JsValue) -> Result<(), Failure> {

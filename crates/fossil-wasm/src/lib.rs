@@ -74,6 +74,7 @@ use std::sync::Arc;
 use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, System};
 use fossil_graph_schema::js::{bug, invalid_argument};
 use fossil_graph_schema::{Failure, Problem};
+use fossil_hir::documents::MissingDocument;
 use fossil_ide::LineIndex;
 use lsp_types::{DiagnosticSeverity, Range};
 use wasm_bindgen::prelude::*;
@@ -809,18 +810,13 @@ impl FossilWorkspace {
     /// Pure-Rust mirror of [`WasmWorkspace::missing_documents`]; `None` for an
     /// unknown handle.
     #[must_use]
-    pub fn missing_documents_native(&self, handle: FileHandle) -> Option<Vec<MissingDocumentRow>> {
+    pub fn missing_documents_native(&self, handle: FileHandle) -> Option<Vec<MissingDocument>> {
         let file = self.files.get(handle)?;
-        Some(
-            fossil_hir::documents::missing_documents(&self.db, file, &self.connections)
-                .into_iter()
-                .map(|d| MissingDocumentRow {
-                    key: d.key,
-                    locator: d.locator,
-                    connection: d.connection,
-                })
-                .collect(),
-        )
+        Some(fossil_hir::documents::missing_documents(
+            &self.db,
+            file,
+            &self.connections,
+        ))
     }
 
     /// Pure-Rust mirror of [`WasmWorkspace::register_document`].
@@ -1007,20 +1003,6 @@ struct Undescribed {
     problem: Problem,
     #[serde(default)]
     help: Option<String>,
-}
-
-/// A document a program names and the workspace does not hold yet —
-/// `fossil_hir::documents::MissingDocument` in the shape it crosses to JS.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
-#[schemars(rename = "MissingDocument")]
-pub struct MissingDocumentRow {
-    /// The registry key: what the program wrote, independent of any connection.
-    pub key: String,
-    /// Where to read it: the key expanded through the connection map.
-    pub locator: String,
-    /// The connection the locator lies under, when the program wrote `@name/…`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub connection: Option<String>,
 }
 
 /// One diagnostic row in the [`WasmWorkspace::check`] return array: the

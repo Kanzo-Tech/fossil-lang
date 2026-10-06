@@ -35,12 +35,12 @@ use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
 use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_graph_schema::{Failure, Problem, Related};
 use fossil_hir::documents::MissingDocument;
+use fossil_lineage::ProgramSource;
 use fossil_sinks::manifest::MANIFEST_FILE;
-use fossil_storage::{Access, Scope, Storage};
-use url::Url;
+use fossil_storage::Storage;
 
+use crate::RunReport;
 use crate::memory::{BUDGET, Budget, Refusal};
-use crate::{RunReport, SourceFormat};
 
 /// Minimal [`System`] for the executor host. The executor reads sources through
 /// the object-store / provider seams and documents through the registry, never
@@ -134,20 +134,11 @@ impl Executor {
         fossil_base::register_document(&mut self.db, key, text);
     }
 
-    /// The program's sources as `(locator, row-name, connection)`: what
-    /// [`Self::execute`] reads. The second element is the catalogue row's name,
-    /// which is what the program wrote after `io.`.
-    ///
-    /// # Errors
-    /// The output shape document is unregistered or does not decode.
-    pub fn sources(&self) -> Result<Vec<(String, String, Option<String>)>, Failure> {
-        let descriptor = self.descriptor()?;
-        Ok(
-            crate::program_sources(&self.db, self.file, &descriptor, &self.connections)
-                .into_iter()
-                .map(|s| (s.uri, format_kind(&s.format).to_owned(), s.connection))
-                .collect(),
-        )
+    /// The program's sources: what [`Self::execute`] reads, and the same list
+    /// every host introspects — [`fossil_lineage::program_sources`].
+    #[must_use]
+    pub fn sources(&self) -> Vec<ProgramSource> {
+        fossil_lineage::program_sources(&self.db, self.file, &self.connections)
     }
 
     fn descriptor(&self) -> Result<OutputDescriptorKind, Failure> {
@@ -177,17 +168,10 @@ impl Executor {
             .into());
         }
 
-        for source in crate::program_sources(db, file, &descriptor, connections) {
-            if storage.covers(&source.uri) {
-                continue;
-            }
-            match source.connection {
-                Some(connection) => storage
-                    .grant(Scope::Connection(connection), Access::Read)
-                    .await
-                    .map(drop),
-                None => storage.public(&source.uri),
-            }?;
+        for source in fossil_lineage::program_sources(db, file, connections) {
+            storage
+                .route(&source.locator, source.connection.as_deref())
+                .await?;
         }
 
         // No operator in any plan of this session spawns: the browser has no
@@ -197,13 +181,7 @@ impl Executor {
         let budget = Arc::new(Budget::new(BUDGET));
         let ctx = crate::session::session_within(Arc::clone(&budget));
         for (authority, store) in storage.stores() {
-            let url = Url::parse(authority).map_err(|e| {
-                Failure::new(Problem::Bug {
-                    what: format!("the routed authority `{authority}` is not a URL"),
-                })
-                .caused_by(e)
-            })?;
-            ctx.register_object_store(&url, store);
+            ctx.register_object_store(authority, store);
         }
         register_rdf_sources(&ctx, db, file, &descriptor, storage, connections).await?;
 
@@ -220,31 +198,8 @@ impl Executor {
     }
 }
 
-/// A source format as the wire names it — **the catalogue row's name**, which
-/// is what a program wrote after `io.`.
-///
-/// The `Provider` arm carries the name rather than the literal `"rdf"` because
-/// more than one row can be materialised: labelling an `io.avro` source `rdf`
-/// would send it back as the RDF row. That `rdf` is the only materialised row
-/// today is what would make the literal correct by coincidence.
-fn format_kind(f: &SourceFormat) -> &str {
-    match f {
-        // `{ .. }` because `Csv` carries the `delimiter =` the program wrote.
-        // It is not in the wire string on purpose: the delimiter is read by
-        // `crate::read_source` off the MIR the executor already holds.
-        SourceFormat::Csv { .. } => "csv",
-        SourceFormat::Json => "json",
-        SourceFormat::Parquet => "parquet",
-        SourceFormat::Provider { name } => name.as_str(),
-    }
-}
-
 /// Decode + register every provider (RDF) source through
 /// [`crate::register_rdf`], its bytes read through `storage`.
-///
-/// [`crate::register_provider_sources`] walks the same `provider_bindings` and
-/// calls the same `register_rdf` over the local filesystem, for tests; where
-/// the bytes come from is the whole difference.
 async fn register_rdf_sources(
     ctx: &SessionContext,
     db: &dyn fossil_base::Db,

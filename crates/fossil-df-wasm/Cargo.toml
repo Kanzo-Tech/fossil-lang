@@ -37,19 +37,16 @@ fossil-storage = { path = "../fossil-storage", features = ["js"] }
 object_store = { workspace = true }
 futures = { workspace = true }
 url = { workspace = true }
-# chrono is transitive (datafusion / object_store) and pulled with wasmbind OFF,
-# so `Utc::now()` falls through to std `SystemTime::now()` — which PANICS on
-# wasm32 ("time not implemented"). object_store stamps `InMemory::put` and signs
-# every S3 request with `Utc::now()`, so the executor hits it. Adding chrono directly
-# with `wasmbind` flips the feature on for the whole graph (js_sys::Date clock,
-# works in browser + node; target-gated to wasm32 → no-op on native).
-chrono = { version = "0.4", features = ["wasmbind"] }
+# `wasmbind` — the workspace entry says why. `InMemory::put` stamps with
+# `Utc::now()` too, so the executor hits it without a cloud store.
+chrono = { workspace = true }
 
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) to match
 # the wasm-bindgen-cli version exactly. `run()` is async, so
 # wasm-bindgen-futures bridges the Rust future to a JS Promise.
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
+serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 console_error_panic_hook = { workspace = true }

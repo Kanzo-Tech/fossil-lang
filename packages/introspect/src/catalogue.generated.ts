@@ -2,8 +2,7 @@
 //
 // The `io.` constructors that read through a native DuckDB table function,
 // and what the DESCRIBE answers means. A materialised row (`io.rdf`) has no
-// reader to DESCRIBE through and is deliberately absent — `packages/executor`
-// gets the list that includes it.
+// reader to DESCRIBE through and is deliberately absent.
 //
 // Edit `catalogue.bnf` and re-run `cargo xtask catalogue`.
 

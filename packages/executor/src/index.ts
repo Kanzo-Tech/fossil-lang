@@ -29,30 +29,6 @@ export type { RunOptions } from './run.js';
 
 import type { RunReport } from '@fossil-lang/types';
 
-import type { DataRow } from './catalogue.generated.js';
-
-/**
- * How a source is read — the reader `DataFusion` scans it with, or the provider that decodes it.
- *
- * It is the catalogue ROW's name: what the program wrote after `io.`, what
- * {@link FossilExecutor.sources} emits, and what `fossil-df-wasm` reads back
- * with `source_row`. It was a hand-written union of four literals; it is
- * generated from `catalogue.bnf` now, by `cargo xtask catalogue`, from the same
- * file the Rust side reads.
- */
-export type SourceFormat = DataRow;
-
-export { DATA_ROWS } from './catalogue.generated.js';
-
-/** A source the program reads, as enumerated by {@link FossilExecutor.sources}. */
-export interface SourceDescriptor {
-  /** The locator fossil resolved from what the program wrote. */
-  uri: string;
-  format: SourceFormat;
-  /** The connection the locator lies under, when the program wrote `@name/…`. */
-  connection?: string;
-}
-
 /** One file of the written corpus: a path relative to its root + its encoded bytes. */
 export interface CorpusFile {
   /** `fossil.json`, `vertex/<Type>.parquet` or `edge/<Src>_<label>_<Dst>.parquet`. */

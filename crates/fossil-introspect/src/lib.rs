@@ -1,6 +1,6 @@
 //! `fossil-introspect` — what a NATIVE host does before it asks the compiler to
-//! compile: read each source's columns, and hold the credentials that let it.
-//! The one native host is the language server, `fossil-lsp`.
+//! compile: read each source's columns. The one native host is the language
+//! server, `fossil-lsp`.
 //!
 //! # Why this is a crate and not a module of a host
 //!
@@ -19,16 +19,6 @@
 //! into both: «the browser and the language server answer the same program
 //! differently» cannot be written down.
 //!
-//! # Credentials came too, and they had to
-//!
-//! [`creds`] holds `ConnectionCreds` — a host's connection credentials, rendered into a
-//! `CREATE SECRET` by `fossil-storage`. Introspection and credentials are the
-//! same concern: the secret exists so that the `DESCRIBE` over a cloud `@conn`
-//! source authenticates.
-//!
-//! The host therefore takes a `HashMap<String, String>` of connection
-//! URLs and never sees a secret.
-//!
 //! # What this crate is NOT
 //!
 //! It is not a second compiler entry point. It fills a cache and returns
@@ -36,48 +26,14 @@
 //! order — introspect, then compile — is the caller's, and it is the order the
 //! browser has always used.
 
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
-use std::sync::Arc;
+use std::collections::HashSet;
 
-use fossil_base::{Db as _, System};
+use fossil_base::System;
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_lineage::ProgramSource;
 use smol_str::SmolStr;
 
-pub mod creds;
 pub mod generated;
-
-pub use creds::{ConnectionCreds, SecretSpec};
-
-/// How far a host is willing to reach for a source's columns.
-///
-/// It is a question about **who is waiting**, not about the source. There are
-/// two hosts on this side of the seam and they answer it differently, so the
-/// answer is a parameter rather than a rule inside the loop.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Reach {
-    /// Every source the program names, including a locator whose `DESCRIBE` is
-    /// a network round trip. What a COMMAND does: a one-shot check is the
-    /// thing the user is already waiting for, and a source
-    /// they cannot read is a source the answer would be wrong without.
-    Anywhere,
-    /// Only a source this host can `stat`: a local file that exists right now.
-    ///
-    /// What an EDITOR does. `fossil-lsp`'s `main_loop` is one sequential loop
-    /// over one channel, so a `didOpen` blocked on `s3://` is not one slow
-    /// file — it is hover and completion dead in every other buffer for as long
-    /// as the read takes. An editor may go and read a CSV beside the program; it
-    /// may not go on the network.
-    ///
-    /// The discriminator is [`freshness_token`] and not a scheme test, because
-    /// the two questions have one answer: a locator this host cannot `stat` is
-    /// exactly a locator whose freshness it cannot establish, which is already
-    /// the empty token. It also covers what a scheme test would miss — a
-    /// relative path that does not exist yet, and the half-typed one a keystroke
-    /// produces on the way to it.
-    Local,
-}
 
 /// The rows this host can `DESCRIBE`: the ones `catalogue.bnf` gives a
 /// `reads native <fn>`.
@@ -129,38 +85,6 @@ fn freshness_token(resolved: &str) -> String {
     )
 }
 
-/// Pre-introspect every source the program at `path` names — [`Reach::Anywhere`],
-/// because a host that reads the program off the disk is a COMMAND, and a
-/// command is allowed to wait. The editor does not come through here: its copy
-/// of the program is a buffer that may never have been saved, so it takes
-/// [`fossil_lineage::program_sources`] of the file it already holds and calls
-/// [`pre_introspect_and_register`] with them.
-///
-/// The sources are [`fossil_lineage::program_sources`] over a database on
-/// `system` — the list the browser's `sources()` returns — so both hosts
-/// DESCRIBE the sources the compiler bound, and nothing reads them off the
-/// text a second way. The `System` is the caller's because only the caller
-/// knows which host it is.
-///
-/// # Errors
-///
-/// If `path` cannot be read. Per-source introspection failures are NOT errors:
-/// they log and skip, so a compile can still succeed with no forward-propagated
-/// types for that source.
-#[allow(clippy::implicit_hasher)] // as `pre_introspect_and_register`.
-pub fn introspect_program(
-    system: Arc<dyn System>,
-    path: &Path,
-    connections: &HashMap<String, ConnectionCreds>,
-) -> std::io::Result<()> {
-    let text = std::fs::read_to_string(path)?;
-    let db = fossil_base::FossilDb::new(system);
-    let file = fossil_base::SourceFile::new(&db, text, path.to_string_lossy().into_owned());
-    let sources = fossil_lineage::program_sources(&db, file, &connection_urls(connections));
-    pre_introspect_and_register(db.system(), &sources, connections, Reach::Anywhere);
-    Ok(())
-}
-
 /// Register an [`InferredDescriptor`] on `system`'s cache for every native
 /// source in `sources`, BEFORE typecheck — keyed by [`ProgramSource::key`],
 /// what the program wrote, and read from [`ProgramSource::locator`]. One
@@ -175,18 +99,15 @@ pub fn introspect_program(
 /// Per-source failures are non-fatal — they log + skip; the compile may still
 /// succeed with no forward propagation for that source.
 ///
-/// `reach` is the caller's answer to "may this block on the network?" — see
-/// [`Reach`]. It is a parameter and not a property of the source because the
-/// same `s3://` URI is a legitimate read for a one-shot check and a stalled
-/// editor for `fossil-lsp`.
-#[allow(clippy::implicit_hasher)] // the host builds one map and passes it; a
-// generic hasher here would be a parameter no caller varies.
-pub fn pre_introspect_and_register(
-    system: &dyn System,
-    sources: &[ProgramSource],
-    connections: &HashMap<String, ConnectionCreds>,
-    reach: Reach,
-) {
+/// **Only a source this host can `stat` is read**: a local file that exists
+/// right now. `fossil-lsp`'s `main_loop` is one sequential loop over one
+/// channel, so a `didOpen` blocked on `s3://` is not one slow file — it is
+/// hover and completion dead in every other buffer for as long as the read
+/// takes. The discriminator is [`freshness_token`] and not a scheme test,
+/// because a locator this host cannot `stat` is exactly one whose freshness it
+/// cannot establish — which also covers a relative path that does not exist
+/// yet, and the half-typed one a keystroke produces on the way to it.
+pub fn pre_introspect_and_register(system: &dyn System, sources: &[ProgramSource]) {
     let Some(cache) = system.descriptors() else {
         tracing::debug!("host keeps no descriptor cache; skipping pre-introspection");
         return;
@@ -217,12 +138,11 @@ pub fn pre_introspect_and_register(
         }
         let token = freshness_token(locator);
         // An empty token means this host could not `stat` the locator — a
-        // scheme it does not own, or a path that is not there. Under
-        // `Reach::Local` that is the whole filter, and it is deliberately
-        // checked BEFORE `is_fresh`: an empty token is never fresh, so without
-        // this the editor would open a connection and attempt the read on every
-        // single keystroke.
-        if reach == Reach::Local && token.is_empty() {
+        // scheme it does not own, or a path that is not there. It is checked
+        // BEFORE `is_fresh`: an empty token is never fresh, so without this the
+        // editor would open a connection and attempt the read on every single
+        // keystroke.
+        if token.is_empty() {
             tracing::debug!(
                 "`{locator}` is not a file this host can stat; not reading it from here"
             );
@@ -236,17 +156,13 @@ pub fn pre_introspect_and_register(
         let conn = if let Some(c) = &conn {
             c
         } else {
-            let opened = match duckdb::Connection::open_in_memory() {
-                Ok(c) => c,
+            match duckdb::Connection::open_in_memory() {
+                Ok(c) => conn.insert(c),
                 Err(e) => {
                     tracing::warn!("DuckDB in-memory open failed; skipping pre-introspection: {e}");
                     return;
                 }
-            };
-            if let Err(e) = apply_source_creds(&opened, connections) {
-                tracing::warn!("applying source creds for pre-introspection failed: {e}");
             }
-            conn.insert(opened)
         };
 
         let reader = native.table_function();
@@ -295,55 +211,14 @@ pub fn pre_introspect_and_register(
     }
 }
 
-/// The name→base-URL view of the run's connections — what
-/// [`fossil_lineage::program_sources`] expands a `@conn` alias through, and what the
-/// executor is handed for the same purpose.
-///
-/// Projected ONCE per command and then borrowed, rather than rebuilt inside a
-/// per-URI resolver: the map was cloned for every source of every program, and
-/// a second copy of it was built again at the executor seam. One projection is
-/// also what lets the anchor be a borrow — the pair (directory, connections)
-/// has to outlive every resolution done against it, which is exactly the
-/// lifetime of the command.
-#[allow(clippy::implicit_hasher)] // as `pre_introspect_and_register`.
-pub fn connection_urls(connections: &HashMap<String, ConnectionCreds>) -> HashMap<String, String> {
-    connections
-        .iter()
-        .map(|(name, c)| (name.clone(), c.url.clone()))
-        .collect()
-}
-
-/// Install each source connection's scoped read secret on `conn`, so a
-/// `read_csv_auto` over a cloud `@conn` source authenticates. No-op for
-/// connections without a secret (local / public-URL sources).
-///
-/// The rendering — which is the part with a decision in it, and the part
-/// with tests — is [`fossil_storage::ResolvedPath::create_secret_sql`], in `fossil-storage`,
-/// and this runs it: one statement on a connection the caller already holds.
-#[allow(clippy::implicit_hasher)] // as `pre_introspect_and_register`.
-pub fn apply_source_creds(
-    conn: &duckdb::Connection,
-    connections: &HashMap<String, ConnectionCreds>,
-) -> miette::Result<()> {
-    for (i, c) in connections.values().enumerate() {
-        if let Some(spec) = &c.secret {
-            let resolved =
-                fossil_storage::ResolvedPath::with_secret(&c.url, spec.to_cloud_secret());
-            if let Some(sql) = resolved.create_secret_sql(&format!("__fossil_src_{i}")) {
-                conn.execute_batch(&sql)
-                    .map_err(|e| miette::miette!("install source secret: {e}"))?;
-            }
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use fossil_base::test_support::NativeSystem;
     use fossil_graph_schema::Primitive;
-    use fossil_locator::SourceAnchor;
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::sync::Arc;
 
     /// What `fossil_lineage::program_sources` reports for `program` written at
     /// `dir/prog.fossil` — the list every host introspects.
@@ -359,21 +234,6 @@ mod tests {
             dir.join("prog.fossil").to_string_lossy().into_owned(),
         );
         fossil_lineage::program_sources(&db, file, connections)
-    }
-
-    fn conns(pairs: &[(&str, &str)]) -> HashMap<String, ConnectionCreds> {
-        pairs
-            .iter()
-            .map(|(name, url)| {
-                (
-                    (*name).to_string(),
-                    ConnectionCreds {
-                        url: (*url).to_string(),
-                        secret: None,
-                    },
-                )
-            })
-            .collect()
     }
 
     /// Every spelling `DuckDB` has for an instant maps to an instant.
@@ -444,7 +304,7 @@ mod tests {
         let system = NativeSystem::default();
         let text = format!("User := io.csv(\"{}\", delimiter = \"|\")\n", csv.display());
         let sources = sources_of(dir.path(), &text, &HashMap::new());
-        pre_introspect_and_register(&system, &sources, &HashMap::new(), Reach::Anywhere);
+        pre_introspect_and_register(&system, &sources);
 
         let descriptor = system
             .descriptors()
@@ -456,31 +316,6 @@ mod tests {
             names,
             ["id", "name", "city"],
             "the DESCRIBE must use the delimiter the binding wrote"
-        );
-    }
-
-    /// The `@conn` cases this file used to assert against its own resolver
-    /// live beside the rule itself, in `fossil_locator` — there is one
-    /// implementation, so there is one place to test it. What is left here is
-    /// the host's own half: the projection the anchor is built from, which is
-    /// the LAST thing a credential touches before the host sees only
-    /// URLs.
-    ///
-    /// The fixture is `fossil_base::test_support::NativeSystem`: a `System`
-    /// with a descriptor cache, which exists so a test can have one without a
-    /// host crate.
-    #[test]
-    fn the_creds_map_projects_onto_the_anchor_the_rule_takes() {
-        let c = conns(&[("sales", "s3://bucket/prefix")]);
-        let urls = connection_urls(&c);
-        let dir = std::path::PathBuf::from("/programs/shop");
-        assert_eq!(
-            SourceAnchor::new(&dir, &urls).locator("@sales/2024/orders.csv"),
-            "s3://bucket/prefix/2024/orders.csv"
-        );
-        assert_eq!(
-            SourceAnchor::new(&dir, &urls).locator("data/items.csv"),
-            "/programs/shop/data/items.csv"
         );
     }
 
@@ -502,12 +337,11 @@ mod tests {
             "users := io.csv(\"users.csv\")\n",
             &HashMap::new(),
         );
-        let no_creds = HashMap::new();
 
         let system = NativeSystem::default();
         let cache = system.descriptors().expect("the engine keeps a table");
 
-        pre_introspect_and_register(&system, &sources, &no_creds, Reach::Anywhere);
+        pre_introspect_and_register(&system, &sources);
         assert_eq!(
             cache.registrations(),
             1,
@@ -515,7 +349,7 @@ mod tests {
         );
         assert_eq!(cache.get("users.csv").expect("registered").columns.len(), 2);
 
-        pre_introspect_and_register(&system, &sources, &no_creds, Reach::Anywhere);
+        pre_introspect_and_register(&system, &sources);
         assert_eq!(
             cache.registrations(),
             1,
@@ -523,7 +357,7 @@ mod tests {
         );
 
         std::fs::write(&csv, "id,name,email\n1,ada,ada@example.org\n").expect("rewrite csv");
-        pre_introspect_and_register(&system, &sources, &no_creds, Reach::Anywhere);
+        pre_introspect_and_register(&system, &sources);
         assert_eq!(
             cache.registrations(),
             2,
@@ -550,25 +384,23 @@ mod tests {
 
         let system = NativeSystem::default();
         let cache = system.descriptors().expect("the engine keeps a table");
-        pre_introspect_and_register(&system, &sources, &HashMap::new(), Reach::Anywhere);
+        pre_introspect_and_register(&system, &sources);
 
         assert_eq!(cache.registrations(), 1);
         assert_eq!(cache.len(), 1);
     }
 
-    /// [`Reach::Local`] reads the file beside the program and does not reach
-    /// for the URL — and, crucially, it does not reach for it AGAIN on the next
-    /// call.
+    /// A source this host cannot `stat` is skipped — and, crucially, skipped
+    /// AGAIN on the next call.
     ///
     /// The second half is the one with teeth. An unreachable locator has an
-    /// empty freshness token and an empty token is never fresh, so under
-    /// `Reach::Anywhere` every call opens a connection and attempts the read.
-    /// That is right for a command and ruinous for an editor, where "every
-    /// call" is every keystroke. `registrations()` cannot see it — a failed
+    /// empty freshness token and an empty token is never fresh, so reading it
+    /// would open a connection and attempt the read on every call — ruinous
+    /// for an editor, where "every call" is every keystroke. `registrations()` cannot see it — a failed
     /// DESCRIBE registers nothing either way — so the assertion is on the local
     /// source's count staying at 1 while the remote one never appears at all.
     #[test]
-    fn the_local_reach_skips_what_it_cannot_stat_and_keeps_skipping_it() {
+    fn what_cannot_be_stat_ed_is_skipped_and_stays_skipped() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("near.csv"), "id,name\n1,ada\n").expect("write csv");
         let sources = sources_of(
@@ -581,7 +413,7 @@ mod tests {
         let system = NativeSystem::default();
         let cache = system.descriptors().expect("the host keeps a table");
         for _ in 0..3 {
-            pre_introspect_and_register(&system, &sources, &HashMap::new(), Reach::Local);
+            pre_introspect_and_register(&system, &sources);
         }
 
         assert_eq!(
@@ -611,7 +443,7 @@ mod tests {
         );
 
         let system = NativeSystem::default();
-        pre_introspect_and_register(&system, &sources, &HashMap::new(), Reach::Anywhere);
+        pre_introspect_and_register(&system, &sources);
 
         let cache = system.descriptors().expect("the host keeps a table");
         assert_eq!(
@@ -634,7 +466,7 @@ mod tests {
         assert_eq!(sources.len(), 2, "one source per destructured binding");
 
         let system = NativeSystem::default();
-        pre_introspect_and_register(&system, &sources, &HashMap::new(), Reach::Anywhere);
+        pre_introspect_and_register(&system, &sources);
 
         assert_eq!(system.descriptors().expect("a table").registrations(), 0);
     }

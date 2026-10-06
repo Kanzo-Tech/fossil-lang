@@ -95,17 +95,16 @@ graph LR
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 3 crates<br/>df · df-wasm · introspect"]
   C["<b>corpus</b> · 3 crates<br/>sinks · storage · storage-wasm"]
-  X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
+  X["<b>no home</b> · 1 crate<br/>xtask"]
 
   E -->|20| L
   E -->|1| M
-  M -->|11| L
-  M -->|4| C
-  M -->|1| X
+  M -->|12| L
+  M -->|3| C
   C -->|2| L
 ```
 
-**39 cross-group edges**, and no pair runs both ways. Every number above
+**38 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -119,8 +118,7 @@ The arrow between engine and corpus runs one way:
 | direction | edge | why it is there |
 | --- | --- | --- |
 | engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
-| engine → corpus | `fossil-df-wasm → fossil-sinks`, `fossil-df-wasm → fossil-storage` | the host names the files it writes and writes them through the job's store |
-| engine → corpus | `fossil-introspect → fossil-storage` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
+| engine → corpus | `fossil-df → fossil-storage`, `fossil-df-wasm → fossil-storage` | a run reads its sources and writes the corpus through the job's store |
 
 `fossil-sinks` and `fossil-storage` are filed by subject and not by history. `fossil-sinks` is a
 leaf: it takes `serde`, `schemars` and `arrow-schema` and no fossil crate. The corpus side reaches

@@ -360,7 +360,7 @@ fn condition_refs<'e>(on: &'e Expr<'_>) -> Vec<(&'e str, &'e str)> {
 /// parses it as a SQL identifier): parsing folds an unquoted name to lowercase,
 /// so `Other` would become `other` while the `ColRef` reading it still says
 /// `Other`, and the column would resolve against nothing. It is the same trap
-/// [`crate::render`] avoids by using `Column::new_unqualified` instead of
+/// [`column`] avoids by using `Column::new_unqualified` instead of
 /// `col()`, and a source binding's case is the author's either way.
 fn qualify(df: DataFrame, name: &str) -> datafusion::error::Result<DataFrame> {
     let (state, plan) = df.into_parts();
@@ -389,7 +389,12 @@ fn agg_call(f: AggFn, arg: DfExpr) -> DfExpr {
 /// hand-built op list). A bare reference resolves against whichever relation
 /// carries the name, and is ambiguous if two do; that is `DataFusion`'s rule and
 /// its error names both candidates.
-fn column(source: &str, column: &str) -> DfExpr {
+///
+/// `Column::new_unqualified` / `TableReference::bare` and NOT `col()`: a bare
+/// `col("hasProject")` folds the identifier to lowercase, but the source
+/// columns (CSV headers, the RDF pivot's predicate-named columns) preserve
+/// case — reference them verbatim, and the relation too.
+pub(crate) fn column(source: &str, column: &str) -> DfExpr {
     DfExpr::Column(if source.is_empty() {
         datafusion::common::Column::new_unqualified(column)
     } else {

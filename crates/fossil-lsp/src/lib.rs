@@ -324,10 +324,9 @@ impl LspState {
     /// Read the columns of every source the buffer names that this host can
     /// `stat`, and register them on [`LspSystem`]'s descriptor table.
     ///
-    /// **The buffer, not the file on disk.** `fossil_introspect::introspect_program`
-    /// is the sibling that opens a path, and it is the wrong one here: a source
-    /// line the user has typed and not saved is exactly the line whose columns
-    /// the editor needs, and the disk does not have it.
+    /// **The buffer, not the file on disk.** A source line the user has typed
+    /// and not saved is exactly the line whose columns the editor needs, and
+    /// the disk does not have it.
     ///
     /// # Two things this must not become
     ///
@@ -335,8 +334,8 @@ impl LspState {
     /// loop over one channel: a `didOpen` blocked on an `s3://` `DESCRIBE` is
     /// not one slow file, it is hover and completion dead in every other buffer
     /// until the read returns. A locator that is not a local path is dropped
-    /// here, and `fossil_introspect::Reach::Local` skips one this host cannot
-    /// `stat` — no connection opened, and the diagnostics that needed its
+    /// here, and `fossil_introspect::pre_introspect_and_register` skips one it
+    /// cannot `stat` — no connection opened, and the diagnostics that needed its
     /// columns stay absent. That gap is pinned by
     /// `tests/introspected_diagnostics.rs::a_remote_source_is_not_introspected_by_the_editor`.
     ///
@@ -370,12 +369,7 @@ impl LspState {
                 Some(fossil_lineage::ProgramSource { locator, ..source })
             })
             .collect();
-        fossil_introspect::pre_introspect_and_register(
-            &*self.db.system,
-            &sources,
-            &HashMap::new(),
-            fossil_introspect::Reach::Local,
-        );
+        fossil_introspect::pre_introspect_and_register(&*self.db.system, &sources);
     }
 
     /// Register every shape document `file` names that the database does not

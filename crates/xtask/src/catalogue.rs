@@ -1062,8 +1062,7 @@ pub fn emit_ts_introspect(cat: &Catalogue) -> String {
     let mut out = ts_header(
         "// The `io.` constructors that read through a native DuckDB table function,\n\
          // and what the DESCRIBE answers means. A materialised row (`io.rdf`) has no\n\
-         // reader to DESCRIBE through and is deliberately absent — `packages/executor`\n\
-         // gets the list that includes it.",
+         // reader to DESCRIBE through and is deliberately absent.",
     );
     out.push_str("import type { Primitive } from \"@fossil-lang/types\";\n\n");
 
@@ -1127,35 +1126,6 @@ pub fn emit_ts_introspect(cat: &Catalogue) -> String {
         }
     }
     out.push_str("}\n");
-    out
-}
-
-/// `@fossil-lang/executor`: every constructor that reads DATA — the fetch
-/// strategies a host has to stage bytes for, `io.rdf` included.
-#[must_use]
-pub fn emit_ts_executor(rows: &[Row]) -> String {
-    let data: Vec<&str> = rows
-        .iter()
-        .filter(|r| r.reads.is_some())
-        .map(|r| r.name.as_str())
-        .collect();
-
-    let mut out = ts_header(
-        "// Every `io.` constructor that reads DATA. This is the wire vocabulary of\n\
-         // `FossilExecutor.sources()`: the string IS the catalogue row's name.\n\
-         // Unlike the introspect list, `io.rdf` is here — the executor reads its\n\
-         // bytes through the same storage as any other source; only the decoding\n\
-         // differs.",
-    );
-    out.push_str("/** Every `io.` constructor that reads data, in catalogue order. */\n");
-    let names: Vec<String> = data.iter().map(|n| format!("{n:?}")).collect();
-    let _ = writeln!(
-        out,
-        "export const DATA_ROWS = [{}] as const;\n",
-        names.join(", ")
-    );
-    out.push_str("/** The fetch strategy for a source — how the host must stage its bytes. */\n");
-    out.push_str("export type DataRow = (typeof DATA_ROWS)[number];\n");
     out
 }
 
@@ -1307,10 +1277,6 @@ pub fn generated() -> Vec<(PathBuf, String)> {
         (
             root.join("packages/introspect/src/catalogue.generated.ts"),
             emit_ts_introspect(&cat),
-        ),
-        (
-            root.join("packages/executor/src/catalogue.generated.ts"),
-            emit_ts_executor(rows),
         ),
         (
             root.join(crate::reference::PARTIAL),

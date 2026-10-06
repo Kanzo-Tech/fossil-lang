@@ -139,8 +139,6 @@ fn intern(db: &FossilDb, dir: &Path) -> SourceFile {
     fossil_introspect::pre_introspect_and_register(
         db.system(),
         &fossil_lineage::program_sources(db, file, &std::collections::HashMap::new()),
-        &std::collections::HashMap::new(),
-        fossil_introspect::Reach::Anywhere,
     );
     file
 }

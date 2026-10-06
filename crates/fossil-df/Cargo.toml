@@ -29,15 +29,17 @@ workspace = true
 doctest = false
 
 [dependencies]
+# A run's phases are spans; a host's subscriber times them (`FmtSpan::CLOSE`).
+tracing = { workspace = true }
 fossil-base = { path = "../fossil-base" }
 # The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
 # It depends on nothing, so this edge costs a `std::path` join and no build time.
 fossil-locator = { path = "../fossil-locator" }
 fossil-hir = { path = "../fossil-hir" }
-# `FOSSIL_MEM_PROBE` — peak RSS and elapsed seconds per phase of a run. A
-# dependency-free leaf.
-fossil-mem-probe = { path = "../fossil-mem-probe" }
 fossil-mir = { path = "../fossil-mir" }
+# `program_sources` — the one list of what a program reads, which every host
+# introspects and the executor routes.
+fossil-lineage = { path = "../fossil-lineage" }
 # The format: `fossil.json`'s structs and the writer's fixed columns. WASM-clean.
 fossil-sinks = { path = "../fossil-sinks" }
 # The one IO path of a run: sources read and the corpus written through
@@ -49,7 +51,6 @@ fossil-storage = { path = "../fossil-storage", features = ["object-store"] }
 object_store = { workspace = true }
 futures = { workspace = true }
 bytes = { workspace = true }
-url = { workspace = true }
 # The canonical graph-schema contract — the metadata fossil-df produces and the
 # manifest materializes from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
@@ -153,8 +154,6 @@ fossil-sinks = { path = "../fossil-sinks" }
 fossil-introspect = { path = "../fossil-introspect" }
 # The check host's `System::descriptors` names the cache's type.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
-# `tests/provider_registry.rs` lists the registry through `providers`.
-fossil-lineage = { path = "../fossil-lineage" }
 # `tests/census` counts `PROPERTY` nodes in the CST.
 fossil-syntax = { path = "../fossil-syntax" }
 # `tests/programs.rs` renders each diagnostic as `fossil check` rendered it —

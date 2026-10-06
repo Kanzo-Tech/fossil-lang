@@ -30,7 +30,6 @@ pub const RENEW_BEFORE_MS: u64 = 5 * 60_000;
 pub mod credential;
 #[cfg(feature = "js")]
 mod js;
-pub mod resolved;
 #[cfg(feature = "object-store")]
 mod store;
 
@@ -39,6 +38,5 @@ pub use credential::{
 };
 #[cfg(feature = "js")]
 pub use js::JsHost;
-pub use resolved::{CloudSecret, ResolvedPath};
 #[cfg(feature = "object-store")]
 pub use store::{Host, HostError, Scope, Storage};

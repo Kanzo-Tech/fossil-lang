@@ -1833,7 +1833,6 @@ dependencies = [
  "fossil-introspect",
  "fossil-lineage",
  "fossil-locator",
- "fossil-mem-probe",
  "fossil-mir",
  "fossil-shex",
  "fossil-sinks",
@@ -1854,8 +1853,8 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "unicode-normalization",
- "url",
 ]
 
 [[package]]
@@ -1873,6 +1872,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "object_store",
+ "serde",
  "serde-wasm-bindgen",
  "url",
  "wasm-bindgen",
@@ -1905,6 +1905,8 @@ dependencies = [
  "indexmap",
  "rowan",
  "salsa",
+ "schemars",
+ "serde",
  "smol_str",
  "strsim",
  "thiserror 1.0.69",
@@ -1943,10 +1945,6 @@ dependencies = [
  "fossil-descriptors-input",
  "fossil-graph-schema",
  "fossil-lineage",
- "fossil-locator",
- "fossil-storage",
- "miette",
- "secrecy",
  "smol_str",
  "tempfile",
  "tracing",
@@ -1993,10 +1991,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
 ]
-
-[[package]]
-name = "fossil-mem-probe"
-version = "0.1.0"
 
 [[package]]
 name = "fossil-mir"
@@ -2048,6 +2042,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-time",

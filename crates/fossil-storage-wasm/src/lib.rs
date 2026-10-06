@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use fossil_graph_schema::Failure;
 use fossil_graph_schema::js::{bug, invalid_argument, to_wire};
-use fossil_storage::{Access, Grant, JsHost, Scope, Storage, StorageCredential};
+use fossil_storage::{Access, Grant, JsHost, Storage, StorageCredential};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 
@@ -33,12 +33,9 @@ fn grant(credential: JsValue) -> Result<Grant, Failure> {
     Ok(Grant::try_from(credential)?)
 }
 
-fn parse_access(access: &str) -> Result<Access, Failure> {
-    match access {
-        "read" => Ok(Access::Read),
-        "write" => Ok(Access::Write),
-        _ => Err(invalid_argument("access", "`read` or `write`", None)),
-    }
+fn access(access: JsValue) -> Result<Access, Failure> {
+    serde_wasm_bindgen::from_value(access)
+        .map_err(|e| invalid_argument("access", "`read` or `write`", Some(e.into())))
 }
 
 fn object(fields: &[(&str, JsValue)]) -> Result<JsValue, Failure> {
@@ -52,7 +49,8 @@ fn object(fields: &[(&str, JsValue)]) -> Result<JsValue, Failure> {
 
 // The types the signatures below name, from the one place they are declared.
 #[wasm_bindgen(typescript_custom_section)]
-const WIRE_TYPES: &str = "import type { GrantPlan, LocatorName } from '@fossil-lang/types';";
+const WIRE_TYPES: &str =
+    "import type { Access, GrantPlan, LocatorName } from '@fossil-lang/types';";
 
 fn to_js(value: &impl serde::Serialize) -> Result<JsValue, Failure> {
     serde_wasm_bindgen::to_value(value).map_err(|e| bug("serialising an answer", e))
@@ -64,8 +62,11 @@ fn to_js(value: &impl serde::Serialize) -> Result<JsValue, Failure> {
 /// A `FossilError`: `api/invalid-argument` for an unknown `access` or a
 /// credential that is not one, the credential's own code for one fossil does not read.
 #[wasm_bindgen(js_name = storageGrant, unchecked_return_type = "GrantPlan")]
-pub fn storage_grant(credential: JsValue, access: &str) -> Result<JsValue, JsValue> {
-    let (grant, access) = (grant(credential)?, parse_access(access)?);
+pub fn storage_grant(
+    credential: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "Access")] access: JsValue,
+) -> Result<JsValue, JsValue> {
+    let (grant, access) = (grant(credential)?, self::access(access)?);
     Ok(to_js(&grant.plan(access))?)
 }
 
@@ -117,14 +118,13 @@ pub async fn storage_read(host: JsValue, targets: JsValue) -> Result<JsValue, Js
     let mut storage = Storage::new(Arc::new(JsHost::new(host)));
     let mut refused = Vec::with_capacity(targets.len());
     for target in &targets {
-        refused.push(match &target.connection {
-            Some(connection) => storage
-                .grant(Scope::Connection(connection.clone()), Access::Read)
+        refused.push(
+            storage
+                .route(&target.locator, target.connection.as_deref())
                 .await
                 .err()
                 .map(Failure::from),
-            None => storage.public(&target.locator).err().map(Failure::from),
-        });
+        );
     }
     let out = Array::new();
     for (target, refused) in targets.iter().zip(refused) {

@@ -29,9 +29,8 @@ js-sys = { workspace = true }
 # A panic is still a `RuntimeError: unreachable` — it is not a value that can be
 # built as it happens — but with the hook its message and trace reach the console.
 console_error_panic_hook = { workspace = true }
-# `object_store` signs with `chrono::Utc::now()`, which falls through to std's
-# `SystemTime::now()` — a panic on wasm32 — unless `wasmbind` is on.
-chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
+# `wasmbind` — the workspace entry says why.
+chrono = { workspace = true }
 # `object_store` draws randomness through two lines of getrandom — 0.2 from
 # `ring`, 0.4 from `rand` — and neither builds for wasm32 without its JS backend.
 getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }

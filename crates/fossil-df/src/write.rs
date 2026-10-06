@@ -28,9 +28,9 @@ use datafusion::parquet::errors::ParquetError;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::schema::types::ColumnPath;
 use fossil_graph_schema::{Failure, NodeType, Problem};
-use fossil_mem_probe::Probe;
 use fossil_sinks::generated::{
-    EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_COLUMNS, WriterColumn,
+    ColumnRole, EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_COLUMNS,
+    PAYLOAD_IDENTITY, WriterColumn,
 };
 use fossil_sinks::manifest::{
     EdgeTable as EdgeEntry, Endpoint, Format, MANIFEST_FILE, Manifest, Property, ROW_GROUP_ROWS,
@@ -118,8 +118,8 @@ impl From<WriteError> for Failure {
 ///
 /// [`WriteError`] on the first failure. Nothing is written after it, and
 /// `fossil.json` never is.
+#[tracing::instrument(skip_all, fields(dest = %dest))]
 pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Written, WriteError> {
-    let mut probe = Probe::new("write");
     let empty: Vec<RecordBatch> = Vec::new();
 
     let mut vertex_tables = Vec::with_capacity(graph.schema.nodes.len());
@@ -136,13 +136,12 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
             name: node.label.clone(),
             iri: node.iri.clone().filter(|i| !i.is_empty()),
             path,
-            key: PAYLOAD_COLUMNS[0].name.to_string(),
-            identity: PAYLOAD_COLUMNS[1].name.to_string(),
+            key: PAYLOAD_ADDRESS.to_string(),
+            identity: PAYLOAD_IDENTITY.to_string(),
             record_count: rows(batches),
             properties,
         });
     }
-    probe.mark("write vertex tables");
 
     let mut edge_tables = Vec::with_capacity(graph.schema.edges.len());
     let mut dropped = Vec::with_capacity(graph.schema.edges.len());
@@ -183,7 +182,6 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
             dropped: table.map_or(0, |t| t.dropped),
         });
     }
-    probe.mark("write edge tables");
 
     let manifest = Manifest {
         format: Format,
@@ -197,7 +195,6 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
         Bytes::from(manifest.to_json()?),
     )
     .await?;
-    probe.finish();
     Ok(Written { manifest, dropped })
 }
 
@@ -303,7 +300,7 @@ fn vertex_parquet(
         let mut fields: Vec<Field> = PAYLOAD_COLUMNS
             .iter()
             .map(|c| {
-                let data_type = if c.name == PAYLOAD_COLUMNS[0].name {
+                let data_type = if c.role == ColumnRole::Address {
                     DataType::UInt32
                 } else {
                     DataType::Utf8
@@ -315,7 +312,7 @@ fn vertex_parquet(
             fields.push(Field::new(&p.name, DataType::Utf8, true));
             properties.push(program(&p.name, &DataType::Utf8));
         }
-        let bytes = encode(&Arc::new(Schema::new(fields)), &[], &["dense_id"])?;
+        let bytes = encode(&Arc::new(Schema::new(fields)), &[], &[PAYLOAD_ADDRESS])?;
         return Ok((bytes, properties));
     };
 
@@ -333,7 +330,7 @@ fn vertex_parquet(
             }
         })
         .collect();
-    let bytes = encode(&Arc::new(Schema::new(fields)), batches, &["dense_id"])?;
+    let bytes = encode(&Arc::new(Schema::new(fields)), batches, &[PAYLOAD_ADDRESS])?;
     Ok((bytes, properties))
 }
 

@@ -96,7 +96,7 @@ pub fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
 }
 
 /// A document a program names that the database does not hold yet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct MissingDocument {
     /// What it is registered under: [`registry_key`], anchored with no
     /// connection map, so repointing a connection never invalidates a query.
@@ -104,6 +104,7 @@ pub struct MissingDocument {
     /// Where it is fetched from: the same reference through the connection map.
     pub locator: String,
     /// The connection the locator lies under, when it was written `@name/…`.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub connection: Option<String>,
 }
 

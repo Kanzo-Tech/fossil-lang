@@ -138,8 +138,7 @@ crates/
                            an Azure SAS lend, or (feature `object-store`) an `object_store` store
                            routed by longest prefix and renewed at expires−5min — the one IO path
                            of DataFusion and of every byte fossil reads or writes. `js`: a JS
-                           `Host` as its `Host`. The one renderer of a `CREATE SECRET`, native
-                           hosts' included
+                           `Host` as its `Host`. The one renderer of a `CREATE SECRET`
   fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
   fossil-sinks/            the `fossil/1` format: `fossil.json`'s structs (serde + schemars;
@@ -151,8 +150,8 @@ crates/
                            writer (`write`: a Parquet per table, `fossil.json`
                            last), and `Executor` — the whole run a host drives, under the
                            2 GiB pool in `memory.rs` that refuses as `run/over-budget`
-  fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each source's columns,
-                           and the payload that authenticates one. `fossil-lsp` calls it
+  fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each local source's
+                           columns, and nothing that is not a file it can `stat`. `fossil-lsp` calls it
                            before the compile. It links `DuckDB` on a normal edge, and
                            it is not the only crate that does — `cargo tree -e normal -i duckdb
                            --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
@@ -161,8 +160,6 @@ crates/
                            DESCRIBEs is `fossil_lineage::program_sources` — the list the
                            browser's `sources()` returns — so it links the compiler front-end,
                            as every host does
-  fossil-mem-probe/        `FOSSIL_MEM_PROBE` — peak RSS + elapsed seconds per phase of a
-                           run. Depends on NOTHING
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
                            error catalogue: `Problem`, `Failure`, and (feature `js`) the one
                            function every wasm crate throws a failure through

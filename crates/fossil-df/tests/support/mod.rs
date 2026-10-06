@@ -132,3 +132,20 @@ pub(crate) async fn write_in_memory(
     }
     (written, files)
 }
+
+/// Read every provider source's bytes from the local filesystem and register
+/// the decoded relations in `ctx` — what the executor does through its
+/// `Storage`, for a test that drives `execute_graph` itself.
+pub(crate) fn register_provider_sources(
+    ctx: &datafusion::prelude::SessionContext,
+    db: &FossilDb,
+    file: SourceFile,
+    descriptor: &fossil_df::OutputDescriptorKind,
+) {
+    let none = std::collections::HashMap::new();
+    for binding in fossil_df::provider_bindings(db, file, descriptor, &none) {
+        let turtle = std::fs::read_to_string(&binding.uri)
+            .unwrap_or_else(|e| panic!("read RDF source `{}`: {e}", binding.uri));
+        fossil_df::register_rdf(ctx, &binding, &turtle).expect("register the RDF source");
+    }
+}

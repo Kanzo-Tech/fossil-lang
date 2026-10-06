@@ -36,6 +36,9 @@ smol_str = { workspace = true }
 thiserror = { workspace = true }
 # Edit distance behind the did-you-mean diagnostics (`src/didyoumean.rs`).
 strsim = { workspace = true }
+# `MissingDocument` crosses to JS as it is: the wire type is this struct.
+serde = { workspace = true }
+schemars = { workspace = true }
 
 [dev-dependencies]
 # The diagnostic golden files in tests/snapshots.

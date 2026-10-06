@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
+use fossil_base::{Db as _, Diagnostic, FossilDb, SourceFile, System, file_at};
 use fossil_df::{Executor, RunReport};
 use fossil_hir::documents::{documents_named, register_missing_documents, registry_key};
 use fossil_sinks::manifest::Manifest;
@@ -57,15 +57,14 @@ pub(crate) fn open_db(path: &Path) -> (FossilDb, SourceFile) {
     let text =
         std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let system: Arc<dyn System> = Arc::new(check_host());
-    // A source that cannot be described is skipped, not fatal: the compile then
-    // has no forward-propagated type for it, which is what the checker reports.
-    let _ = fossil_introspect::introspect_program(
-        Arc::clone(&system),
-        path,
-        &std::collections::HashMap::new(),
-    );
     let mut db = FossilDb::new(system);
     let file = SourceFile::new(&db, text, path.to_string_lossy().into_owned());
+    // A source that cannot be described is skipped, not fatal: the compile then
+    // has no forward-propagated type for it, which is what the checker reports.
+    fossil_introspect::pre_introspect_and_register(
+        db.system(),
+        &fossil_lineage::program_sources(&db, file, &HashMap::new()),
+    );
     register_shape_documents(&mut db, file);
     (db, file)
 }

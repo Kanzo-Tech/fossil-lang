@@ -186,7 +186,7 @@ phase of the pass — `remap adjacencies + write edge tiles` is.
 ## What the write path costs, phase by phase
 
 One run of the whole write path over com-DBLP — 317,080 vertices, 1,049,866 undirected edges — with
-HEAD's binary in **debug** profile, 2026-09-15, reported by the probe below
+HEAD's binary in **debug** profile, 2026-09-15, reported by the probe that preceded the spans below
 (`ac1801d4:crates/fossil-mem-probe/src/lib.rs, Probe`).
 
 **The seconds are indicative and the bytes are exact.** A debug build is nobody's shipping profile,
@@ -291,35 +291,21 @@ moved, because a bench that flaps is not evidence. It left with the viewer it ra
 [the backend](/docs/design/later/backend) the unit it would measure is one tile, whose cost is its row
 count out of the manifest.
 
-The write half has its probe already — `FOSSIL_MEM_PROBE=1` and the two examples under
-`fossil-layout` — and what it lacks is the same discipline: W1 is `peak(10N) === peak(N)`, and it is
+The write half has its instrument already — the phase spans below — and what it lacks is the same discipline: W1 is `peak(10N) === peak(N)`, and it is
 red, and being red in public is the point of writing it down.
 
-## The instrument, and the three decisions inside it
+## The instrument is `tracing`
 
-`FOSSIL_MEM_PROBE` is a crate of its own — `fossil-mem-probe` — and each half of that sentence was
-argued.
+Each phase of a run is a span — `execute_graph`, `prepare_vertex`, `finalize_vertex`,
+`execute_edges`, `finalize_edge`, `write` — and a host that wants their durations installs a
+`tracing-subscriber` `fmt` layer with `FmtSpan::CLOSE`, which prints each span's busy and idle time
+when it ends. There is no crate of fossil's own for it. `fossil-mem-probe` was one: it shelled out
+to `ps -o rss=` per phase and printed with `eprintln!`, and its reason to exist — two halves of the
+write path reporting through one instrument without depending on each other — left with
+`fossil-layout`. A span costs nothing on `wasm32` when no subscriber is installed, which is the
+platform the probe once aborted on by reading a clock before its switch.
 
-**It is not in `fossil-base`.** It lived there once, on the reasoning that the substrate is what
-sits under both halves of the write path. It is not substrate: it asks the operating system for a
-number and reads a monotonic clock, which is precisely the I/O that `fossil-base`'s `System` exists
-to hold behind a trait — and it did neither through `System`. The cost was structural rather than
-tidy. That `ps` call was the **only** edge from `fossil-layout` to `fossil-base`, so a post-pass
-over Parquet linked the whole compiler substrate in order to time a phase. A crate that depends on
-nothing is what lets both halves report through one instrument without either depending on the
-other.
-
-**The clock is `Instant` and not `System::now()`.** A `SystemTime` is a wall clock, and NTP may
-step one backwards mid-run; a negative phase duration in the middle of a memory report is worse
-than no report. Nothing in the probe is inside a Salsa query and nothing about it is reproducible
-by construction — a timing report identical across two runs would be broken — so the usual reason
-to take a clock from `System` does not apply.
-
-**It is off on `wasm32`, and an off probe holds no clock.** `Instant::now()` on
-`wasm32-unknown-unknown` is `unimplemented!()` in `std`: it panics with *"time not implemented on
-this platform"*, which under `panic = "abort"` reaches JavaScript as a bare `RuntimeError:
-unreachable` naming nothing. The probe took its clock before consulting its switch, so every
-browser run of `execute_graph` aborted on its first line. What makes it worth recording is that
-nothing caught it — `cargo xtask wasm-check` compiles and does not run, and the executor's
-JavaScript suite loaded a gitignored `pkg/` that predated the crate by two and a half months. The
-switch is consulted first and the clock second, on every platform.
+**Peak RSS is not in it.** Reading it is a process question a library has no business asking; the
+day a measurement on this page needs it per phase, it is a `Layer` a benchmark installs, beside the
+benchmark, and the spans above are what it hangs off. *What would reverse it:* a phase whose memory
+can only be seen from inside the library, which no measurement so far has needed.

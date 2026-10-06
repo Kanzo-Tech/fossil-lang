@@ -31,7 +31,7 @@ export async function runShop(people: number): Promise<ExecutorResult> {
     }
     const { users, orders } = sources(people);
     const bytes: Record<string, Uint8Array> = {};
-    for (const s of exec.sources()) bytes[s.uri] = new TextEncoder().encode(s.uri.endsWith('users.csv') ? users : orders);
+    for (const s of exec.sources()) bytes[s.locator] = new TextEncoder().encode(s.locator.endsWith('users.csv') ? users : orders);
     return await exec.runInMemory(bytes, 'memory://shop');
   } finally {
     exec.free();

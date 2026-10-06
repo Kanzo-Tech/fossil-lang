@@ -34,8 +34,10 @@ use object_store::{
     ListResult, MultipartUpload, ObjectMeta, ObjectStore, ObjectStoreExt, PutMultipartOptions,
     PutOptions, PutPayload, PutResult, RenameOptions, RetryConfig,
 };
+use percent_encoding::percent_decode_str;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use fossil_graph_schema::Foreign;
 
@@ -137,7 +139,7 @@ pub trait Host: fmt::Debug + Send + Sync {
 #[derive(Debug)]
 pub struct Storage {
     host: Arc<dyn Host>,
-    authorities: HashMap<String, Routed>,
+    authorities: HashMap<Url, Routed>,
     granted: HashMap<(Scope, Access), Vec<String>>,
 }
 
@@ -204,6 +206,29 @@ impl Storage {
         self.resolve(locator).is_ok()
     }
 
+    /// Make `locator` readable: through `connection`'s read credential when the
+    /// program wrote `@connection/…`, else as a public `http(s)` URL. A locator
+    /// something already covers is left where it is routed.
+    ///
+    /// # Errors
+    /// What [`Self::grant`] or [`Self::public`] refused.
+    pub async fn route(
+        &mut self,
+        locator: &str,
+        connection: Option<&str>,
+    ) -> Result<(), StorageError> {
+        if self.covers(locator) {
+            return Ok(());
+        }
+        match connection {
+            Some(connection) => self
+                .grant(Scope::Connection(connection.to_string()), Access::Read)
+                .await
+                .map(drop),
+            None => self.public(locator),
+        }
+    }
+
     /// Route a public `http(s)` locator — one no credential covers — through a
     /// store that sends no credential.
     ///
@@ -211,13 +236,14 @@ impl Storage {
     /// `locator` is not an `http(s)` URL.
     pub fn public(&mut self, locator: &str) -> Result<(), StorageError> {
         let (authority, _) = split(locator)?;
-        if !(authority.starts_with("https://") || authority.starts_with("http://")) {
+        if !matches!(authority.scheme(), "http" | "https") {
             return Err(StorageError::Store(locator.to_string()));
         }
-        let routed = self.authorities.entry(authority.clone()).or_default();
+        let base = authority.as_str().trim_end_matches('/').to_string();
+        let routed = self.authorities.entry(authority).or_default();
         if routed.routes.iter().all(|r| !r.key.is_empty()) {
             let store = HttpBuilder::new()
-                .with_url(&authority)
+                .with_url(base)
                 .with_client_options(client())
                 .with_retry(retry())
                 .build()
@@ -249,10 +275,10 @@ impl Storage {
     }
 
     /// `(scheme://authority, store)` for each authority, for `DataFusion` to register.
-    pub fn stores(&self) -> impl Iterator<Item = (&str, Arc<dyn ObjectStore>)> {
+    pub fn stores(&self) -> impl Iterator<Item = (&Url, Arc<dyn ObjectStore>)> {
         self.authorities
             .iter()
-            .map(|(authority, routed)| (authority.as_str(), Arc::new(routed.clone()) as _))
+            .map(|(authority, routed)| (authority, Arc::new(routed.clone()) as _))
     }
 
     /// The bytes at `locator`.
@@ -354,15 +380,22 @@ async fn bounded<T>(
 }
 
 /// `scheme://authority/key` → (`scheme://authority`, `key`), the split
-/// `DataFusion` registers stores by.
-fn split(url: &str) -> Result<(String, String), StorageError> {
-    let store = || StorageError::Store(url.to_string());
-    let (scheme, rest) = url.split_once("://").ok_or_else(store)?;
-    let (authority, key) = rest.split_once('/').unwrap_or((rest, ""));
-    if scheme.is_empty() || authority.is_empty() {
+/// `DataFusion` registers stores by: the URL with its path taken off, and the
+/// path, decoded, as the object key.
+fn split(locator: &str) -> Result<(Url, String), StorageError> {
+    let store = || StorageError::Store(locator.to_string());
+    let mut url = Url::parse(locator).map_err(|_| store())?;
+    if url.host_str().is_none_or(str::is_empty) {
         return Err(store());
     }
-    Ok((format!("{scheme}://{authority}"), key.to_string()))
+    let key = percent_decode_str(url.path().trim_start_matches('/'))
+        .decode_utf8()
+        .map_err(|_| store())?
+        .into_owned();
+    url.set_path("");
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok((url, key))
 }
 
 fn build(grant: &Grant, renewal: Renewal) -> Result<Arc<dyn ObjectStore>, StorageError> {
@@ -807,7 +840,7 @@ mod tests {
             .expect("grant");
         assert_eq!(prefixes, ["s3://lake/data/"]);
         assert_eq!(host.calls.load(Ordering::SeqCst), 2);
-        let authorities: Vec<&str> = storage.stores().map(|(a, _)| a).collect();
+        let authorities: Vec<&str> = storage.stores().map(|(a, _)| a.as_str()).collect();
         assert_eq!(authorities, ["s3://lake"]);
         assert!(matches!(
             storage.resolve("s3://lake/other/x"),

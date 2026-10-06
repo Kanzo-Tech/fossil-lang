@@ -59,7 +59,7 @@ fn the_wire() {
     generator.subschema_for::<fossil_wasm::CompletionRow>();
     generator.subschema_for::<fossil_wasm::DefinitionRow>();
     generator.subschema_for::<fossil_wasm::SemanticTokenRow>();
-    generator.subschema_for::<fossil_wasm::MissingDocumentRow>();
+    generator.subschema_for::<fossil_hir::documents::MissingDocument>();
     generator.subschema_for::<fossil_lineage::ProgramSource>();
     generator.subschema_for::<fossil_lineage::SourceRefInfo>();
     generator.subschema_for::<fossil_lineage::ProviderInfo>();

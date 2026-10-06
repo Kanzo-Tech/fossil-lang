@@ -10,8 +10,9 @@
 
 use std::collections::HashMap;
 
+use fossil_hir::documents::MissingDocument;
 use fossil_lineage::ProgramSource;
-use fossil_wasm::{FossilWorkspace, MissingDocumentRow};
+use fossil_wasm::FossilWorkspace;
 
 const PROGRAM: &str = "\
 type { Person } := io.shex(\"@vocab/person.shex\")
@@ -81,7 +82,7 @@ fn registering_what_is_missing_under_its_key_is_what_the_checker_reads() {
     let missing = ws.missing_documents_native(program).expect("open handle");
     assert_eq!(
         missing,
-        [MissingDocumentRow {
+        [MissingDocument {
             key: "@vocab/person.shex".to_string(),
             locator: "https://minio.example/shapes/person.shex".to_string(),
             connection: Some("vocab".to_string()),
