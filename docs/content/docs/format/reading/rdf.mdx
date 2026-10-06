@@ -25,14 +25,15 @@ the mapping is what they mean.
 
 **A vertex type is a `rr:TriplesMap` over its table.** The subject is the `identity` column, as an
 IRI, of class `iri`. Each column with an `iri` is a predicate-object map whose object is the column,
-as a literal of the column's datatype.
+with the term its shape declared — `term_type` and `datatype`, copied as `rr:termType` and
+`rr:datatype`.
 
 ```turtle
 <#map/Person> a rr:TriplesMap ;
   rr:logicalTable [ rr:tableName "\"Person\"" ] ;
   rr:subjectMap [ rr:column "\"subject\"" ; rr:termType rr:IRI ; rr:class <https://example.org/Person> ] ;
   rr:predicateObjectMap [ rr:predicate <https://example.org/birthYear> ; rr:objectMap [
-    rr:column "\"birth_year\"" ; rr:termType rr:Literal ; rr:datatype xsd:integer ] ] .
+    rr:column "\"birth_year\"" ; rr:termType rr:Literal ; rr:datatype xsd:gYear ] ] .
 ```
 
 **A relation is a `rr:TriplesMap` over an `rr:sqlQuery`.** The query is the edge table, inner-joined
@@ -65,10 +66,12 @@ identifiers. R2RML §5.2 makes it a derived table, so a processor runs it as it 
   there is no default namespace a missing IRI falls back to.
 - **A `list<…>` column is not mapped.** One cell would be several literals, which no term map
   produces.
-- **The datatype is the column's type word's**, by R2RML's natural mapping of SQL types (§10.2):
-  every integer width is `xsd:integer`, `float` and `double` are `xsd:double`, and `decimal`, `bool`,
-  `date`, `time`, `timestamp`, `string` and `binary` are `xsd:decimal`, `xsd:boolean`, `xsd:date`,
-  `xsd:time`, `xsd:dateTime`, `xsd:string` and `xsd:hexBinary`.
+- **The term is the shape's, verbatim.** `fossil.json` carries the term each column's shape declared
+  — `term_type`, R2RML's `rr:IRI` or `rr:Literal`, and `datatype`, the IRI the document wrote — and
+  the mapping copies both. Nothing is derived from the column's `type`: a shape that says `xsd:gYear`
+  over an `int32` column is mapped `xsd:gYear`. Where the shape declared no term the mapping states
+  none, and R2RML's default holds: a literal of the column's natural datatype (§10.2), which the
+  processor derives from the SQL type.
 - **Every name is a delimited identifier, unqualified.** `rr:tableName`, `rr:column` and every name
   in a query is written `"Person"`, case kept, a `"` doubled — so every processor reads it the same
   way and none folds `birthYear` to upper case. No catalog or schema is in front of a table: R2RML
@@ -80,10 +83,10 @@ identifiers. R2RML §5.2 makes it a derived table, so a processor runs it as it 
 ## How it is held
 
 `packages/corpus/tests/mapping.test.ts` parses the Turtle as a graph and holds it against the
-manifest — every type, column and relation with an IRI mapped, nothing without one, each relation's
-query joining the right keys of the right tables — and holds the datatype table against the type
-words `crates/fossil-sinks/src/manifest.rs, data_type_name` spells. Then it runs the mapping:
+manifest — every type, column and relation with an IRI mapped, nothing without one, each column's
+declared term copied and none invented, each relation's query joining the right keys of the right
+tables. Then it runs the mapping:
 `packages/corpus/tests/r2rml.ts, materialise` is an R2RML processor for the constructs the mapping
-uses, over DuckDB, and the triples it makes of the checked-in corpus are compared with the triples a
-second query, written against the manifest, says the corpus holds. `integration/round-trip.test.ts`
+uses, natural datatypes included, over DuckDB, and the triples it makes of the checked-in corpus are
+compared with the triples a second query, written against the manifest, says the corpus holds. `integration/round-trip.test.ts`
 does the same over a corpus the executor writes, with an edge between two types.

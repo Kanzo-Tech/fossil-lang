@@ -7,7 +7,6 @@ import type { Term } from 'n3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { mapping, open } from '../src/index.js';
-import { DATATYPES } from '../src/mapping.js';
 import type { Manifest } from '../src/manifest.js';
 import { duckdb } from './engine.js';
 import { BASE, held, materialise, parse, undelimit } from './r2rml.js';
@@ -18,7 +17,8 @@ import { BASE, held, materialise, parse, undelimit } from './r2rml.js';
  *
  * 1. **It is R2RML a parser reads**, and it maps exactly what the manifest gives an IRI — every type,
  *    column and relation that has one, nothing that has none — read back as a graph, not as text.
- * 2. **Its datatypes cover every type word the writer spells**, read out of the Rust that spells them.
+ * 2. **It states the term the shape declared, verbatim**, and none where the shape declared none —
+ *    R2RML's natural datatype (§10.2) is then the processor's to derive, not the mapping's.
  * 3. **It means the corpus**: the triples an R2RML processor makes of it over the checked-in corpus
  *    are the triples a second query, written here against the manifest, says the corpus holds.
  */
@@ -61,10 +61,10 @@ describe('the mapping, as a graph', () => {
     expect(one(subject, 'class').value).toBe(t.iri);
     const poms = objects(map, 'predicateObjectMap').map((pom) => {
       const o = one(pom, 'objectMap');
-      return [one(pom, 'predicate').value, column(o), one(o, 'termType').value, one(o, 'datatype').value];
+      return [one(pom, 'predicate').value, column(o), objects(o, 'termType')[0]?.value, objects(o, 'datatype')[0]?.value];
     });
     expect(poms).toEqual(
-      t.properties.filter((p) => p.iri !== undefined).map((p) => [p.iri, p.name, `${RR}Literal`, DATATYPES[p.type]]),
+      t.properties.filter((p) => p.iri !== undefined).map((p) => [p.iri, p.name, p.term_type, p.datatype]),
     );
   });
 
@@ -133,30 +133,31 @@ describe('the mapping, as a graph', () => {
     expect(g.getObjects(object, `${RR}column`, null)[0]!.value).toBe('"birthYear"');
   });
 
+  it('copies the term the shape declared, and invents none', () => {
+    const [person] = MANIFEST.vertex_tables;
+    const declared = {
+      ...person!,
+      properties: [
+        { name: 'born', type: 'int32', iri: 'https://example.org/born', term_type: `${RR}Literal`, datatype: `${XSD}gYear` },
+        { name: 'homepage', type: 'string', iri: 'https://example.org/homepage', term_type: `${RR}IRI` },
+        { name: 'postcode', type: 'string', iri: 'https://example.org/postcode' },
+      ],
+    };
+    const g = parse(mapping(JSON.stringify({ ...MANIFEST, vertex_tables: [declared], edge_tables: [] })));
+    const term = (predicate: string) => {
+      const pom = g.getSubjects(`${RR}predicate`, predicate, null)[0]!;
+      const [o] = g.getObjects(pom, `${RR}objectMap`, null);
+      return ['termType', 'datatype'].map((p) => g.getObjects(o!, RR + p, null).map((t) => t.value));
+    };
+    expect(term('https://example.org/born')).toEqual([[`${RR}Literal`], [`${XSD}gYear`]]);
+    expect(term('https://example.org/homepage')).toEqual([[`${RR}IRI`], []]);
+    expect(term('https://example.org/postcode')).toEqual([[], []]);
+  });
+
   it('refuses a format it does not read, as open does', () => {
     expect(() => mapping(JSON.stringify({ ...MANIFEST, format: 'fossil/2' }))).toThrow(
       expect.objectContaining({ code: 'corpus/unsupported-format' }),
     );
-  });
-});
-
-describe('the datatypes', () => {
-  /** The type words `data_type_name` writes, read out of the Rust — the one place they are spelled. */
-  const spelled = (): string[] => {
-    const rust = readFileSync(fileURLToPath(new URL('../../../crates/fossil-sinks/src/manifest.rs', import.meta.url)), 'utf8');
-    const body = rust.slice(rust.indexOf('pub fn data_type_name'), rust.indexOf('#[cfg(test)]'));
-    return [...body.matchAll(/"([a-z0-9]+)"\.to_string\(\)/g)].map((m) => m[1]!);
-  };
-
-  it('cover every scalar type word the writer spells, and no other', () => {
-    const words = spelled();
-    expect(words.length).toBeGreaterThan(10);
-    expect(Object.keys(DATATYPES).sort()).toEqual([...new Set(words)].sort());
-  });
-
-  it('are the canonical IRIs of the lattice: one integer, one float', () => {
-    expect(new Set(['int8', 'int64', 'uint32'].map((w) => DATATYPES[w]))).toEqual(new Set(['http://www.w3.org/2001/XMLSchema#integer']));
-    expect(new Set(['float', 'double'].map((w) => DATATYPES[w]))).toEqual(new Set(['http://www.w3.org/2001/XMLSchema#double']));
   });
 });
 
@@ -202,7 +203,11 @@ describe('the mapping, executed over names a processor could fold', () => {
     vertex_tables: [
       {
         name: 'Person', iri: 'https://example.org/Person', path: 'p', key: 'dense_id', identity: 'subject', record_count: 2,
-        properties: [{ name: 'birthYear', type: 'int32', iri: 'https://example.org/birthYear' }],
+        properties: [
+          { name: 'birthYear', type: 'int32', iri: 'https://example.org/birthYear', term_type: `${RR}Literal`, datatype: `${XSD}gYear` },
+          { name: 'Homepage', type: 'string', iri: 'https://example.org/homepage', term_type: `${RR}IRI` },
+          { name: 'Rank', type: 'int64', iri: 'https://example.org/rank' },
+        ],
       },
       { name: ODD, iri: 'https://example.org/Odd', path: 'o', key: 'dense_id', identity: 'subject', record_count: 1, properties: [] },
     ],
@@ -219,8 +224,8 @@ describe('the mapping, executed over names a processor could fold', () => {
     ({ query } = await duckdb());
     for (const statement of [
       `ATTACH ':memory:' AS odd`,
-      `CREATE TABLE odd."Person" (dense_id UINTEGER, subject VARCHAR, "birthYear" INTEGER)`,
-      `INSERT INTO odd."Person" VALUES (0, 'https://example.org/ada', 1815), (1, 'https://example.org/alan', NULL)`,
+      `CREATE TABLE odd."Person" (dense_id UINTEGER, subject VARCHAR, "birthYear" INTEGER, "Homepage" VARCHAR, "Rank" BIGINT)`,
+      `INSERT INTO odd."Person" VALUES (0, 'https://example.org/ada', 1815, 'https://ada.example/', 1), (1, 'https://example.org/alan', NULL, NULL, NULL)`,
       `CREATE TABLE odd."A ""quoted"" type" (dense_id UINTEGER, subject VARCHAR)`,
       `INSERT INTO odd."A ""quoted"" type" VALUES (2, 'https://example.org/engine')`,
       `CREATE TABLE odd."Person_likes_Odd" (src UINTEGER, dst UINTEGER)`,
@@ -228,7 +233,7 @@ describe('the mapping, executed over names a processor could fold', () => {
     ]) await query(statement);
   }, 60_000);
 
-  it('reads every name as written, case and quotes kept', async () => {
+  it('reads every name as written, case and quotes kept, and makes the term each column declares', async () => {
     const got = await materialise(mapping(JSON.stringify(manifest)), 'odd', query);
     const type = (s: string, c: string) => `<https://example.org/${s}> <${RDF_TYPE}> <https://example.org/${c}>`;
     expect([...got].sort()).toEqual(
@@ -236,7 +241,10 @@ describe('the mapping, executed over names a processor could fold', () => {
         type('ada', 'Person'),
         type('alan', 'Person'),
         type('engine', 'Odd'),
-        `<https://example.org/ada> <https://example.org/birthYear> "1815"^^<${XSD}integer>`,
+        `<https://example.org/ada> <https://example.org/birthYear> "1815"^^<${XSD}gYear>`,
+        '<https://example.org/ada> <https://example.org/homepage> <https://ada.example/>',
+        // No term declared: R2RML's natural datatype of a BIGINT, which the processor derives.
+        `<https://example.org/ada> <https://example.org/rank> "1"^^<${XSD}integer>`,
         '<https://example.org/ada> <https://example.org/likes> <https://example.org/engine>',
       ].sort(),
     );

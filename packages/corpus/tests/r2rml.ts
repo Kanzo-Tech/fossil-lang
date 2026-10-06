@@ -6,8 +6,8 @@ import type { Manifest } from '../src/manifest.js';
  * **An R2RML processor for the subset `mapping` writes, over DuckDB** — the test's oracle, and not a
  * second implementation of `mapping`: it reads the Turtle as a graph and does what R2RML says each
  * term means, so a mapping that says something other than the corpus means produces other triples.
- * It knows `rr:tableName` and `rr:sqlQuery` logical tables, column-valued subject and object maps and
- * `rr:class` — and refuses anything else by name, so a mapping that grows a construct this does not
+ * It knows `rr:tableName` and `rr:sqlQuery` logical tables, column-valued subject and object maps,
+ * `rr:class`, and the natural datatype of a literal that names none — and refuses anything else by name, so a mapping that grows a construct this does not
  * read fails here rather than reading as empty.
  *
  * `catalog` is where the corpus was attached: the one thing R2RML leaves to the processor's
@@ -66,14 +66,23 @@ export async function materialise(
     return one(table, 'sqlQuery').value;
   };
 
-  /** A column-valued term map, as the term it makes of one row — or nothing for a null (§11). */
-  const term = (map: Term, row: Record<string, unknown>, fallback: 'IRI' | 'Literal'): string | undefined => {
-    const value = row[undelimit(one(map, 'column').value)];
+  /**
+   * A column-valued term map, as the term it makes of one row — or nothing for a null (§11). A
+   * literal with no `rr:datatype` takes its column's natural datatype (§10.2), from `types`.
+   */
+  const term = (
+    map: Term,
+    row: Record<string, unknown>,
+    types: Record<string, string>,
+    fallback: 'IRI' | 'Literal',
+  ): string | undefined => {
+    const name = undelimit(one(map, 'column').value);
+    const value = row[name];
     if (value === null || value === undefined) return undefined;
     const kind = all(map, 'termType')[0]?.value.slice(RR.length) ?? fallback;
     if (kind === 'IRI') return nt.iri(String(value));
     if (kind !== 'Literal') throw new Error(`term type ${kind}`);
-    return nt.literal(String(value), one(map, 'datatype').value);
+    return nt.literal(String(value), all(map, 'datatype')[0]?.value ?? natural(types[name]!));
   };
 
   const triples = new Set<Triple>();
@@ -86,14 +95,18 @@ export async function materialise(
         predicate: nt.iri(one(pom, 'predicate').value),
         object: one(pom, 'objectMap'),
       }));
+      const sql = relation(one(map, 'logicalTable'));
+      const types = Object.fromEntries(
+        (await query(`DESCRIBE ${sql}`)).map((c) => [String(c.column_name), String(c.column_type)]),
+      );
       // Every value as text: RDF has no other lexical form, and DuckDB's cast is the column's.
-      const rows = await query(`SELECT COLUMNS(*)::VARCHAR FROM (${relation(one(map, 'logicalTable'))})`);
+      const rows = await query(`SELECT COLUMNS(*)::VARCHAR FROM (${sql})`);
       for (const row of rows) {
-        const subject = term(subjectMap, row, 'IRI');
+        const subject = term(subjectMap, row, types, 'IRI');
         if (subject === undefined) continue;
         for (const c of classes) triples.add(`${subject} <${RDF_TYPE}> ${nt.iri(c.value)}`);
         for (const { predicate, object } of poms) {
-          const o = term(object, row, 'Literal');
+          const o = term(object, row, types, 'Literal');
           if (o !== undefined) triples.add(`${subject} ${predicate} ${o}`);
         }
       }
@@ -104,10 +117,27 @@ export async function materialise(
   return triples;
 }
 
+const XSD = 'http://www.w3.org/2001/XMLSchema#';
+
+/**
+ * The natural RDF datatype of a SQL type (R2RML §10.2): XSD's for the SQL types it names, by DuckDB's
+ * spelling of each, and `xsd:string` for character strings.
+ */
+function natural(sql: string): string {
+  if (/^U?(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT)$/.test(sql)) return `${XSD}integer`;
+  if (sql.startsWith('DECIMAL')) return `${XSD}decimal`;
+  if (sql === 'FLOAT' || sql === 'DOUBLE') return `${XSD}double`;
+  if (sql.startsWith('TIMESTAMP')) return `${XSD}dateTime`;
+  const word = { VARCHAR: 'string', BOOLEAN: 'boolean', DATE: 'date', TIME: 'time', BLOB: 'hexBinary' }[sql];
+  if (word === undefined) throw new Error(`a ${sql} column, whose natural datatype this oracle does not know`);
+  return `${XSD}${word}`;
+}
+
 /**
  * **What the corpus holds as RDF**, written against the manifest and the views `open` made — SQL a
- * test states, not the mapping, so {@link materialise} is held to something it did not compute. The
- * caller states the datatype of each type word its corpus uses; a word it did not state is refused.
+ * test states, not the mapping, so {@link materialise} is held to something it did not compute. A
+ * column's term is the one the manifest declares; where it declares none, the caller states the
+ * datatype of each type word its corpus uses, and a word it did not state is refused.
  */
 export async function held(
   manifest: Manifest,
@@ -121,10 +151,11 @@ export async function held(
       if (t.iri) out.add(`${nt.iri(String(r.subject))} <${RDF_TYPE}> ${nt.iri(t.iri)}`);
     }
     for (const p of t.properties.filter((p) => p.iri !== undefined)) {
-      const datatype = typed[p.type];
-      if (datatype === undefined) throw new Error(`a ${p.type} column the test did not say the datatype of`);
+      const datatype = p.datatype ?? typed[p.type];
+      if (p.term_type !== `${RR}IRI` && datatype === undefined) throw new Error(`a ${p.type} column the test did not say the datatype of`);
       const rows = await query(`SELECT subject, "${p.name}"::VARCHAR AS v FROM ${catalog}."${t.name}" WHERE "${p.name}" IS NOT NULL`);
-      for (const r of rows) out.add(`${nt.iri(String(r.subject))} ${nt.iri(p.iri!)} ${nt.literal(String(r.v), datatype)}`);
+      const object = (v: string) => (p.term_type === `${RR}IRI` ? nt.iri(v) : nt.literal(v, datatype!));
+      for (const r of rows) out.add(`${nt.iri(String(r.subject))} ${nt.iri(p.iri!)} ${object(String(r.v))}`);
     }
   }
   for (const e of manifest.edge_tables.filter((e) => e.iri !== undefined)) {

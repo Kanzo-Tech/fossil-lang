@@ -91,7 +91,7 @@
 
 use std::collections::BTreeMap;
 
-use fossil_graph_schema::{Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape};
+use fossil_graph_schema::{Occurs, OutputShapes, PropertyConstraint, Rejection, Shape};
 use oxrdf::{NamedOrBlankNode, Term};
 use oxttl::TurtleParser;
 
@@ -108,6 +108,7 @@ const SH_NODE: &str = "http://www.w3.org/ns/shacl#node";
 const SH_DATATYPE: &str = "http://www.w3.org/ns/shacl#datatype";
 const SH_NODE_KIND: &str = "http://www.w3.org/ns/shacl#nodeKind";
 const SH_IRI: &str = "http://www.w3.org/ns/shacl#IRI";
+const SH_LITERAL: &str = "http://www.w3.org/ns/shacl#Literal";
 const SH_MIN_COUNT: &str = "http://www.w3.org/ns/shacl#minCount";
 const SH_MAX_COUNT: &str = "http://www.w3.org/ns/shacl#maxCount";
 const SH_OR: &str = "http://www.w3.org/ns/shacl#or";
@@ -240,7 +241,7 @@ pub fn decode_shacl(_uri: &str, turtle: &str) -> Result<OutputShapes, Rejection>
             };
             properties.push(PropertyConstraint {
                 predicate: path.to_string(),
-                datatype: datatype_of(&store, &psh.value),
+                term: term_of(&store, &psh.value),
                 targets: edge_targets(&store, &psh.value),
                 occurs: occurs_of(&store, &psh.value),
                 // **SHACL declares no position, and this is a decision** — see
@@ -303,20 +304,21 @@ fn occurs_of(store: &Store, property_shape: &str) -> Occurs {
     }
 }
 
-/// The value type a property shape narrows to, or `None` when it narrows
-/// nothing — including an XSD datatype outside the lattice, which is the
-/// contract [`PropertyConstraint::datatype`] states.
-///
-/// `sh:nodeKind sh:IRI` with no `sh:class` is an **opaque IRI column**, not an
-/// edge: `Primitive::AnyUri`.
-fn datatype_of(store: &Store, property_shape: &str) -> Option<Primitive> {
+/// The RDF term a property shape declares, verbatim —
+/// [`PropertyConstraint::term`]'s contract: `sh:datatype D` is a literal of `D`
+/// as written, `sh:nodeKind sh:Literal` a literal with none, and
+/// `sh:nodeKind sh:IRI` an IRI — with no `sh:class`, an **opaque IRI column**,
+/// not an edge.
+fn term_of(store: &Store, property_shape: &str) -> Option<fossil_graph_schema::Term> {
+    use fossil_graph_schema::Term;
     if let Some(dt) = store.first(property_shape, SH_DATATYPE) {
-        return Primitive::from_xsd_iri(dt);
+        return Some(Term::Literal(Some(dt.to_string())));
     }
-    if store.first(property_shape, SH_NODE_KIND) == Some(SH_IRI) {
-        return Some(Primitive::AnyUri);
+    match store.first(property_shape, SH_NODE_KIND) {
+        Some(SH_IRI) => Some(Term::Iri),
+        Some(SH_LITERAL) => Some(Term::Literal(None)),
+        _ => None,
     }
-    None
 }
 
 /// The bare IRI / blank-node label of a triple subject (`as_str`, not the `<>`
@@ -356,6 +358,7 @@ mod tests {
     use fossil_graph_schema::{Cardinality, EdgeType};
 
     use super::*;
+    use fossil_graph_schema::Primitive;
 
     // One node shape exercising every canonical mapping: a typed literal
     // (→ a narrowed constraint, single-valued via sh:maxCount 1), an opaque IRI
@@ -387,7 +390,7 @@ ex:PersonShape a sh:NodeShape ;
                 .find(|c| c.predicate == format!("https://ex.org/{p}"))
                 .unwrap_or_else(|| panic!("{p}"))
         };
-        assert_eq!(by("name").datatype, Some(Primitive::String));
+        assert_eq!(by("name").datatype(), Some(Primitive::String));
         assert_eq!(
             by("name").occurs,
             Occurs {
@@ -396,7 +399,7 @@ ex:PersonShape a sh:NodeShape ;
             }
         );
         assert_eq!(
-            by("homepage").datatype,
+            by("homepage").datatype(),
             Some(Primitive::AnyUri),
             "`sh:nodeKind sh:IRI` with no class is an opaque IRI column"
         );

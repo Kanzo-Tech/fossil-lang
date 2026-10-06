@@ -248,6 +248,7 @@ mod tests {
                     },
                     ty: string_ty,
                     rdf_uri: Some(SmolStr::new_static("https://example.org/name")),
+                    term: None,
                     single_valued: true,
                 }],
             },

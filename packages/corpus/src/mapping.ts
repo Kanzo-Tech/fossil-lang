@@ -14,44 +14,14 @@
 import { parseManifest, type EdgeTable, type Manifest, type Property, type VertexTable } from './manifest.js';
 import { ident } from './sql.js';
 
-const XSD = 'http://www.w3.org/2001/XMLSchema#';
-
-/**
- * The literal datatype of a column, by the manifest's type word — `corpus.bnf`'s spellings, which
- * `crates/fossil-sinks/src/manifest.rs, data_type_name` writes. It is R2RML's natural mapping of SQL
- * types (§10.2): every integer width is `xsd:integer` and every float `xsd:double`. A `list<…>` has
- * no entry: one cell would be several literals, which no term map produces, so a list column is not
- * mapped.
- *
- * `tests/mapping.test.ts` holds the keys to the spellings `data_type_name` writes, read out of the
- * Rust.
- */
-export const DATATYPES: Readonly<Record<string, string>> = {
-  string: `${XSD}string`,
-  bool: `${XSD}boolean`,
-  int8: `${XSD}integer`,
-  int16: `${XSD}integer`,
-  int32: `${XSD}integer`,
-  int64: `${XSD}integer`,
-  uint8: `${XSD}integer`,
-  uint16: `${XSD}integer`,
-  uint32: `${XSD}integer`,
-  uint64: `${XSD}integer`,
-  float: `${XSD}double`,
-  double: `${XSD}double`,
-  decimal: `${XSD}decimal`,
-  date: `${XSD}date`,
-  time: `${XSD}time`,
-  timestamp: `${XSD}dateTime`,
-  binary: `${XSD}hexBinary`,
-};
-
 /**
  * **The corpus's RDF meaning, as an R2RML mapping in Turtle.** `manifest` is the text of `fossil.json`.
  *
  * - A vertex type is a `rr:TriplesMap` over its table (`rr:tableName`): the subject is the
  *   `identity` column as an IRI, of the type's class, and each column with a predicate IRI is a
- *   predicate-object map whose object is the column as a literal of {@link DATATYPES}' datatype.
+ *   predicate-object map whose object is the column, with the `term_type` and `datatype` the shape
+ *   declared copied as `rr:termType` and `rr:datatype`. Where it declared none, R2RML's default
+ *   holds: a literal of the column's natural datatype (§10.2), which the processor derives.
  * - A relation is a `rr:TriplesMap` over an `rr:sqlQuery` in Core SQL 2008 (`rr:SQL2008`): the edge
  *   table inner-joined at each end to the vertex table its key references, answering the two
  *   identities as `source` and `destination` — the source's subject, the relation's predicate, the
@@ -72,9 +42,12 @@ export function mapping(manifest: string): string {
 
 const has = (iri: string | undefined): iri is string => iri !== undefined && iri !== '';
 
-/** The predicate-mapped columns of a vertex table: an IRI, and a datatype a literal can carry. */
+/**
+ * The predicate-mapped columns of a vertex table: those with an IRI, less a `list<…>`, whose one cell
+ * would be several terms, which no term map produces.
+ */
 const mapped = (table: VertexTable): Property[] =>
-  table.properties.filter((p) => has(p.iri) && DATATYPES[p.type] !== undefined);
+  table.properties.filter((p) => has(p.iri) && !p.type.startsWith('list<'));
 
 function render(manifest: Manifest): string {
   const vertices = new Map(manifest.vertex_tables.map((t) => [t.name, t]));
@@ -93,7 +66,6 @@ const HEADER = [
   '# Every table and column is a delimited identifier, unqualified: resolve the names against the',
   '# database the corpus is attached to.',
   '@prefix rr: <http://www.w3.org/ns/r2rml#> .',
-  '@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .',
 ].join('\n');
 
 /** A vertex type: its identity as the subject, its class, and a literal per mapped column. */
@@ -109,7 +81,7 @@ function vertexMap(table: VertexTable): string {
     lines[lines.length - 1] += ' ;';
     lines.push(
       `  rr:predicateObjectMap [ rr:predicate ${iri(p.iri!)} ; rr:objectMap [ ` +
-        `rr:column ${column(p.name)} ; rr:termType rr:Literal ; rr:datatype ${datatype(p.type)} ] ]`,
+        `${objectMap(p)} ] ]`,
     );
   }
   return `${lines.join('\n')} .`;
@@ -140,8 +112,13 @@ function edgeMap(edge: EdgeTable, from: VertexTable, to: VertexTable): string {
 /** A column name as R2RML reads it: a delimited identifier, case kept (R2RML §6, §10.1). */
 const column = (name: string): string => str(ident(name));
 
-/** A literal datatype as Turtle: the `xsd:` prefix where the IRI is in it. */
-const datatype = (type: string): string => DATATYPES[type]!.replace(XSD, 'xsd:');
+/** A column's object map: the column, and the term the shape declared for it, verbatim. */
+const objectMap = (p: Property): string =>
+  [
+    `rr:column ${column(p.name)}`,
+    ...(has(p.term_type) ? [`rr:termType ${iri(p.term_type)}`] : []),
+    ...(has(p.datatype) ? [`rr:datatype ${iri(p.datatype)}`] : []),
+  ].join(' ; ');
 
 /**
  * A triples map, relative to wherever the document is kept. The name is percent-encoded, so no table
