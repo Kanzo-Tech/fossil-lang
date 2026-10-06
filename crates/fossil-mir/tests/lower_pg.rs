@@ -152,7 +152,7 @@ Thing : Thing from filtered
     assert!(
         diags.iter().any(|d| matches!(
             &d.problem,
-            fossil_base::Problem::UnknownSource { binding, bound_to: None } if binding == "Rows"
+            fossil_graph_schema::Problem::UnknownSource { binding, bound_to: None } if binding == "Rows"
         )),
         "the refusal names the binding that did not resolve, got: {:?}",
         diags.iter().map(|d| &d.problem).collect::<Vec<_>>(),

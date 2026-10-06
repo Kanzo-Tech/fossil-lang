@@ -25,24 +25,17 @@
 //! definition" for the two commonest identifiers in a program is worse than
 //! answering imprecisely, which is what the rest of this module is about.
 //!
-//! # Precision: the decoder keeps no offsets, and this says so
+//! # Precision: the decoder's own spans
 //!
-//! [`fossil_hir::shape_documents::shape_document`] answers with a
-//! `fossil_graph_schema::OutputShapes` — `Shape { iri, properties }` and
-//! `PropertyConstraint { predicate, datatype, targets, occurs }`. **There is no
-//! span anywhere in that vocabulary**, and there deliberately cannot be a cheap
-//! one: salsa memoises the value and decides "did this change?" by `PartialEq`
-//! (`fossil_graph_schema::shapes`'s own module docs), so a field that moved
-//! whenever a byte of unrelated whitespace moved would invalidate every mapping
-//! checked against the document on every edit.
-//!
-//! So the position inside the document is recovered by a **textual locator**
-//! over the document's own bytes ([`locate_iri`]) rather than by the decode,
-//! and the locator can fail. When it does, the answer is still the right FILE
-//! with a `0..0` range — the top of the document. That is the honest degraded
-//! answer, and it is deliberately not a `None`: an editor that opens
-//! `shop.shex` at line 1 has taken the user to the definition's file, which is
-//! most of the value; answering nothing takes them nowhere.
+//! The decoded shape carries where the document declares it and each of its
+//! predicates — [`fossil_graph_schema::Shape::span`] and
+//! [`fossil_graph_schema::PropertyConstraint::span`], found by
+//! `fossil_shex::spans` with rudof's own prefix spellings. When there is no span
+//! (`ShExJ`, SHACL), the answer is still the right FILE with a `0..0` range —
+//! the top of the document. That is the honest degraded answer, and it is
+//! deliberately not a `None`: an editor that opens `shop.shex` at line 1 has
+//! taken the user to the definition's file, which is most of the value;
+//! answering nothing takes them nowhere.
 //!
 //! [`NavigationTarget`] carries no precision flag, because no consumer could
 //! act on one — `fossil-lsp` and `fossil-wasm` both translate `{file, range}`
@@ -53,19 +46,19 @@
 //!
 //! Returns Fossil-domain [`NavigationTarget`]s (`{ file, range: Range<u32> }`),
 //! NEVER `lsp_types::Location` — the byte→UTF-16 range translation happens in
-//! `fossil-lsp` via [`crate::position::offset_to_lsp_position`], so this stays
+//! `fossil-lsp` via [`crate::position::position`], so this stays
 //! transport-free and WASM-clean. No new Salsa query is added: the
 //! `WorkspaceIndex` is a plain struct built by a CST walk, and the two document
 //! paths read queries that the checker already runs for this file
-//! (`def_map`, `resolve_target_shape`), so the per-mapping `body()` fan-out is
-//! unchanged.
+//! (`resolve_target_shape`, `typecheck_mapping`), so the per-mapping `body()`
+//! fan-out is unchanged.
 //!
 //! # Nothing here does index arithmetic
 //!
 //! There were three notions of `ExprId` in the tree and one of them was a
 //! position among the CST's `PROPERTY` children used to index the HIR's dense
 //! `properties` vector. This module never needs one: a property key is resolved
-//! by its TEXT against the shape's `short_names` table, so a property that
+//! by its TEXT against the checker's `predicates` table, so a property that
 //! parses and does not lower shifts nothing. The only index taken is the
 //! mapping's, which is the per-kind dense index `def_map` and `body()` both
 //! contract to, and it is taken by the same filter-then-position
@@ -74,7 +67,7 @@
 use std::ops::Range;
 
 use fossil_base::SourceFile;
-use fossil_hir::def_map::{MappingLoc, TypeEntry, def_map};
+use fossil_hir::check::typecheck_mapping;
 use fossil_hir::shapes::resolve_target_shape;
 use fossil_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
@@ -89,7 +82,7 @@ use fossil_hir::documents::registry_key;
 ///
 /// **`range == 0..0` means "this file, position unknown"** — see the module
 /// docs. It is produced only by the two document-crossing paths, and only when
-/// the locator could not find the IRI in the document's text.
+/// the decoder kept no span for what was asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NavigationTarget {
     /// The file that contains the definition. May be a `.fossil` program or the
@@ -118,7 +111,7 @@ pub struct NavigationTarget {
 /// an empty `Vec` when the cursor is not on a resolvable identifier.
 ///
 /// `line` / `character` are UTF-16 LSP coordinates (resolved via the
-/// [`crate::line_index::LineIndex`]); never byte offsets.
+/// [`crate::position::LineIndex`]); never byte offsets.
 #[must_use]
 pub fn goto_definition(
     db: &dyn fossil_base::Db,
@@ -137,197 +130,113 @@ pub fn goto_definition(
     // header's own range, so a cursor on `Person` would "resolve" to the
     // `Person` it is already sitting on — a jump that goes nowhere and looks
     // like it worked.
-    if let Some(shape) = shape_name_under_cursor(&token) {
-        return document_targets(db, file, &shape, &Wanted::Shape);
-    }
-    if let Some((mapping_node, key)) = property_key_under_cursor(&token) {
-        let Some(shape) = header_shape_name(&mapping_node) else {
-            return Vec::new();
-        };
-        let Some(mapping) = mapping_loc(db, file, &mapping_node) else {
-            return Vec::new();
-        };
-        return document_targets(db, file, &shape, &Wanted::Predicate { mapping, key });
+    if let Some((mapping, wanted)) = document_name_under_cursor(&token) {
+        return document_targets(db, file, &mapping, &wanted);
     }
 
     // A mapping name: the token under the cursor IS the name.
     let ws = WorkspaceIndex::build(db, files);
     let mut targets = Vec::new();
     for (decl_file, entry) in ws.resolve(token.text()) {
-        push_unique(
-            &mut targets,
-            NavigationTarget {
-                file: decl_file,
-                range: entry.range,
-            },
-        );
+        let target = NavigationTarget {
+            file: decl_file,
+            range: entry.range,
+        };
+        // A doubled location is one the LSP would show twice.
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
     }
     targets
 }
 
-/// What the cursor asked the document for.
-enum Wanted<'db> {
+/// What the cursor asked the document for, by the name it is on.
+enum Wanted {
     /// The shape itself — the cursor was on the header's shape name.
-    Shape,
-    /// The predicate a bare property key names, resolved through the shape's
-    /// `short_names` table.
-    Predicate {
-        mapping: MappingLoc<'db>,
-        key: String,
-    },
+    Shape(String),
+    /// The predicate a bare property key names.
+    Predicate(String),
 }
 
-/// The shape name the cursor is on, if it is on one.
+/// The enclosing `MAPPING` and what the cursor asks its document for, when the
+/// cursor is on one of the two names a document defines.
 ///
-/// `ShapeExpr := IDENT` under a `MAPPING_HEADER` (grammar.bnf, `ShapeExpr`). The
-/// token's own parent is the `SHAPE_EXPR`, so no walk is needed — and no walk is
-/// WANTED: climbing further would claim the mapping name and the `from`
-/// expression too,
-/// which are ordinary Fossil-side names.
-fn shape_name_under_cursor(token: &SyntaxToken) -> Option<String> {
+/// - `ShapeExpr := IDENT` under a `MAPPING_HEADER` (grammar.bnf, `ShapeExpr`).
+///   The token's own parent is the `SHAPE_EXPR`; climbing further from a
+///   different IDENT would claim the mapping name and the `from` expression,
+///   which are ordinary Fossil-side names.
+/// - `PropertyLhs := IDENT` (grammar.bnf, `PropertyLhs`). `@subject` is
+///   deliberately NOT one: it lexes as `AT_ATTR`, and a shape declares a
+///   node's predicates while in RDF the subject IS the node.
+fn document_name_under_cursor(token: &SyntaxToken) -> Option<(SyntaxNode, Wanted)> {
     if token.kind() != SyntaxKind::IDENT {
         return None;
     }
-    let parent = token.parent()?;
-    (parent.kind() == SyntaxKind::SHAPE_EXPR).then(|| token.text().to_string())
-}
-
-/// The `(mapping, key)` the cursor is on, if it is on a property key.
-///
-/// `PropertyLhs := IDENT` (grammar.bnf, `PropertyLhs`). `@subject` is deliberately
-/// NOT one: it lexes as `AT_ATTR`, and a shape declares a node's predicates
-/// while in RDF the subject IS the node — there is nothing in the document for
-/// it to name.
-fn property_key_under_cursor(token: &SyntaxToken) -> Option<(SyntaxNode, String)> {
-    if token.kind() != SyntaxKind::IDENT {
-        return None;
-    }
-    let mut node = token.parent()?;
-    if node.kind() != SyntaxKind::PROPERTY_LHS {
-        return None;
-    }
-    let key = token.text().to_string();
-    loop {
-        if node.kind() == SyntaxKind::MAPPING {
-            return Some((node, key));
-        }
-        node = node.parent()?;
-    }
-}
-
-/// The shape NAME a mapping's header targets.
-fn header_shape_name(mapping: &SyntaxNode) -> Option<String> {
-    use fossil_syntax::ast::Mapping;
-    Mapping::cast(mapping.clone())?
-        .header()?
-        .shape_expr()?
-        .name()
-        .map(|n| n.to_string())
-}
-
-/// The [`MappingLoc`] for a `MAPPING` node.
-///
-/// `MappingLoc.index` is the position among
-/// MAPPING-kind top-level children — filter BEFORE indexing. This is the same
-/// walk `def_map` and `body()` contract to, and taking it any other way
-/// resolves to a different mapping in any file with a `type` binding above it,
-/// which is now every file.
-fn mapping_loc<'db>(
-    db: &'db dyn fossil_base::Db,
-    file: SourceFile,
-    mapping_node: &SyntaxNode,
-) -> Option<MappingLoc<'db>> {
-    let cst = fossil_syntax::parse(db, file);
-    let index = cst
-        .root(db)
-        .syntax()
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::MAPPING)
-        .position(|c| &c == mapping_node)?;
-    def_map(db, file)
-        .mappings(db)
-        .iter()
-        .find(|m| m.index(db) == index)
-        .copied()
+    let name = token.text().to_string();
+    let wanted = match token.parent()?.kind() {
+        SyntaxKind::SHAPE_EXPR => Wanted::Shape(name),
+        SyntaxKind::PROPERTY_LHS => Wanted::Predicate(name),
+        _ => return None,
+    };
+    let mapping = token
+        .parent_ancestors()
+        .find(|n| n.kind() == SyntaxKind::MAPPING)?;
+    Some((mapping, wanted))
 }
 
 /// Resolve a name that lives in the shape document, and answer with a place in
 /// that document.
 ///
-/// The shape name is resolved against `def_map`'s [`TypeEntry`] table rather
-/// than against `DefMap::output_shape_binding`, and the difference is real: the
-/// latter takes the FIRST binding that names a document, so in a program with
-/// two `type { … }` lines it sends every shape to one file. A name knows which
-/// document introduced it.
-///
-/// [`DefMap::output_shape_binding`]: fossil_hir::def_map::DefMap::output_shape_binding
+/// The shape is the mapping's own target, [`resolve_target_shape`] — the
+/// document that declared it, not the first one the file names — and a
+/// property key resolves through the checker's `predicates` table, the same
+/// one hover and `fossil-mir` read, so a renamed predicate lands where the
+/// checker says it is.
 fn document_targets(
     db: &dyn fossil_base::Db,
     file: SourceFile,
-    shape_name: &str,
-    wanted: &Wanted<'_>,
+    mapping_node: &SyntaxNode,
+    wanted: &Wanted,
 ) -> Vec<NavigationTarget> {
-    let dm = def_map(db, file);
-    let Some(entry) = dm.types(db).iter().find(|t| t.name.as_str() == shape_name) else {
-        // The header names a shape no `type { … }` binding introduced. That is
-        // a diagnostic the checker owns; goto-def has nowhere to go.
+    let Some(mapping) = fossil_hir::def_map::mapping_of(db, file, mapping_node) else {
         return Vec::new();
     };
-
-    let document = entry.document.as_ref().map(|d| registry_key(db, file, d));
-    let doc_file = document
-        .as_deref()
-        .and_then(|key| fossil_base::file_at(db, key));
-
-    let Some(doc_file) = doc_file else {
+    let Some(shape) = resolve_target_shape(db, mapping) else {
         // The document is named and not registered — an unsaved buffer the host
         // has not opened, a path that does not exist, a browser host with no
-        // filesystem. The binding line is a real definition site for the NAME,
-        // so a shape lands there; a predicate does not, because the binding says
-        // nothing about which predicates the document declares.
+        // filesystem — or the header names a shape no binding introduced. The
+        // binding line is a real definition site for the NAME, so a shape lands
+        // there when there is one; a predicate does not, because the binding
+        // says nothing about which predicates the document declares.
         return match wanted {
-            Wanted::Shape => type_binding_range(db, file, shape_name)
+            Wanted::Shape(name) => type_binding_range(db, file, name)
                 .map(|range| NavigationTarget { file, range })
                 .into_iter()
                 .collect(),
-            Wanted::Predicate { .. } => Vec::new(),
+            Wanted::Predicate(_) => Vec::new(),
         };
     };
-
-    let Some(iri) = wanted_iri(db, entry, wanted) else {
+    let Some(doc_file) = fossil_base::file_at(db, &registry_key(db, file, &shape.document)) else {
         return Vec::new();
     };
-
-    let text = doc_file.text(db);
-    let range = locate_iri(text, &iri).unwrap_or(0..0);
+    let span = match wanted {
+        Wanted::Shape(_) => shape.span,
+        Wanted::Predicate(key) => {
+            let Some(iri) = typecheck_mapping(db, mapping).ok().and_then(|out| {
+                out.predicates(db)
+                    .iter()
+                    .find(|(short, _)| short.as_str() == key.as_str())
+                    .map(|(_, iri)| iri.clone())
+            }) else {
+                return Vec::new();
+            };
+            shape.constraint_for(&iri).and_then(|c| c.span)
+        }
+    };
     vec![NavigationTarget {
         file: doc_file,
-        range,
+        range: span.map_or(0..0, Into::into),
     }]
-}
-
-/// The IRI to look for in the document.
-fn wanted_iri(db: &dyn fossil_base::Db, entry: &TypeEntry, wanted: &Wanted<'_>) -> Option<String> {
-    match wanted {
-        Wanted::Shape => entry
-            .shape_iri
-            .as_ref()
-            .map(std::string::ToString::to_string),
-        Wanted::Predicate { mapping, key } => {
-            // `short_names` IS the rule — the last segment of
-            // the predicate IRI, with `@rename` substituted first — so this
-            // resolves a key exactly the way the checker resolves it, including
-            // the renamed ones. Splitting the IRI here instead would be a second
-            // implementation of `fossil_graph_schema::local_name`, which exists
-            // because three copies of that split had already disagreed.
-            let shape = resolve_target_shape(db, *mapping)?;
-            let (table, _collisions) = shape.short_names(&entry.renames);
-            table
-                .iter()
-                .find(|(short, _)| short.as_str() == key.as_str())
-                .map(|(_, iri)| iri.to_string())
-        }
-    }
 }
 
 /// The byte range of the `type { … } := io.shex("…")` binding that introduced
@@ -369,426 +278,4 @@ fn brace_members(node: &SyntaxNode) -> Vec<String> {
         }
     }
     members
-}
-
-// ── The locator ──────────────────────────────────────────────────────────────
-
-/// Where `iri` is written inside a shape document's text, as a byte range.
-///
-/// **This is a textual locator, not a parser.** The decode keeps no offsets (see
-/// the module docs for why it may not cheaply grow any), so there is no exact
-/// answer to hand back and this recovers one from the bytes. Two tiers:
-///
-/// 1. **the IRI verbatim.** `ShExJ` writes it out in full (`"predicate":
-///    "http://example.org/name"`), `ShExC` writes it inside `<…>`, and the line
-///    format `fossil_base::test_support` decodes writes it bare.
-/// 2. **a prefixed name**, when the document declares a prefix whose expansion
-///    the IRI starts with. `PREFIX shop: <https://shop.example/voc#>` makes
-///    `https://shop.example/voc#Person` findable as `shop:Person`, which is how
-///    every `.shex` in `docs/programs/` actually spells its shapes —
-///    asserted here for months and now held by
-///    [`tests::every_corpus_shape_is_reached_through_tier_2`], which walks the
-///    directory. A document with no `PREFIX` line makes tier 2 unreachable and
-///    goto-def lands at the top of the file, silently.
-///
-/// Both tiers require the match to stand alone — `http://example.org/name` must
-/// not match inside `http://example.org/nameOfThing`, and `shop:Person` must not
-/// match inside `shop:PersonName`.
-///
-/// `None` when neither finds it, and the caller turns that into the top of the
-/// file. What it cannot do is tell a shape's DECLARATION from a mention of it:
-/// `@shop:Person` in a value position is found first if it comes first. That is
-/// the price of not parsing, it is bounded (an editor lands a few lines off in
-/// the right file), and the fix is a decoder that carries spans, not a smarter
-/// regex.
-fn locate_iri(text: &str, iri: &str) -> Option<Range<u32>> {
-    if let Some(range) = find_standalone(text, iri) {
-        return Some(range);
-    }
-    let (prefix, expansion) = declared_prefixes(text)
-        .into_iter()
-        .filter(|(_, expansion)| iri.starts_with(expansion.as_str()))
-        // The longest expansion wins: two prefixes may nest
-        // (`https://x/` and `https://x/voc#`) and only one of them
-        // produces the name the document actually writes.
-        .max_by_key(|(_, expansion)| expansion.len())?;
-    let local = &iri[expansion.len()..];
-    find_standalone(text, &format!("{prefix}:{local}"))
-}
-
-/// The first occurrence of `needle` in `text` that is not part of a longer name.
-fn find_standalone(text: &str, needle: &str) -> Option<Range<u32>> {
-    if needle.is_empty() {
-        return None;
-    }
-    let mut from = 0usize;
-    while let Some(hit) = text[from..].find(needle) {
-        let start = from + hit;
-        let end = start + needle.len();
-        let after_ok = text[end..].chars().next().is_none_or(|c| !is_name_char(c));
-        if after_ok {
-            return Some(u32::try_from(start).ok()?..u32::try_from(end).ok()?);
-        }
-        from = start + 1;
-    }
-    None
-}
-
-/// A character that can continue an IRI's last segment or a prefixed name's
-/// local part. `:` and `/` are deliberately excluded — a hit followed by either
-/// is a different IRI, not a longer name, and `<http://example.org/name>` must
-/// match with the `>` after it.
-fn is_name_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_' || c == '-' || c == '.'
-}
-
-/// The `prefix → expansion` pairs a document declares.
-///
-/// Recognises the two spellings the corpus contains: SPARQL/ShExC's
-/// `PREFIX p: <iri>` (case-insensitively — `ShExC` accepts both) and Turtle's
-/// `@prefix p: <iri> .`, which is what a SHACL document written in Turtle uses.
-/// `ShExJ` declares none and needs none: it writes every IRI out in full, so tier
-/// 1 already answers for it.
-///
-/// This is the one piece of schema-language syntax this module knows, and it is
-/// here rather than behind the decoder seam on purpose: it feeds a locator whose
-/// failure mode is a slightly-off cursor. Nothing downstream reads it, no
-/// diagnostic quotes it, and the checker resolves every one of these IRIs
-/// through the real decoder.
-fn declared_prefixes(text: &str) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        let rest = trimmed.strip_prefix('@').map_or_else(
-            || strip_keyword(trimmed, "prefix"),
-            |rest| strip_keyword(rest, "prefix"),
-        );
-        let Some(rest) = rest else { continue };
-        let rest = rest.trim_start();
-        let Some((name, rest)) = rest.split_once(':') else {
-            continue;
-        };
-        if name.contains(char::is_whitespace) {
-            continue;
-        }
-        let rest = rest.trim_start();
-        let Some(expansion) = rest.strip_prefix('<').and_then(|r| r.split('>').next()) else {
-            continue;
-        };
-        out.push((name.to_string(), expansion.to_string()));
-    }
-    out
-}
-
-/// `s` with a leading case-insensitive `keyword` removed, when the keyword is
-/// followed by whitespace.
-fn strip_keyword<'a>(s: &'a str, keyword: &str) -> Option<&'a str> {
-    let head = s.get(..keyword.len())?;
-    if !head.eq_ignore_ascii_case(keyword) {
-        return None;
-    }
-    let rest = &s[keyword.len()..];
-    rest.starts_with(char::is_whitespace).then_some(rest)
-}
-
-/// Push a target only if an equal one is not already present, so the LSP does
-/// not show a doubled location.
-fn push_unique(targets: &mut Vec<NavigationTarget>, target: NavigationTarget) {
-    if !targets.contains(&target) {
-        targets.push(target);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // -- the locator, which is the half that has no database in it -----------
-
-    const SHEXC: &str = "\
-PREFIX shop: <https://shop.example/voc#>
-PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
-
-shop:Person {
-  shop:email xsd:string ;
-  shop:name  xsd:string
-}
-";
-
-    #[test]
-    fn a_prefixed_shape_is_located_through_the_documents_own_prefix_table() {
-        let range =
-            locate_iri(SHEXC, "https://shop.example/voc#Person").expect("shop:Person is written");
-        assert_eq!(
-            &SHEXC[range.start as usize..range.end as usize],
-            "shop:Person"
-        );
-        // And it is the DECLARATION line, not one of the two `shop:` predicates.
-        assert!(SHEXC[..range.start as usize].ends_with("\n\n"));
-    }
-
-    #[test]
-    fn a_prefixed_predicate_is_located() {
-        let range = locate_iri(SHEXC, "https://shop.example/voc#name").expect("shop:name");
-        assert_eq!(
-            &SHEXC[range.start as usize..range.end as usize],
-            "shop:name"
-        );
-    }
-
-    /// The bug a naive `find` has: `shop:name` is a substring of nothing here,
-    /// but `shop:email`'s local part starts the same way as a longer one would.
-    /// The guard is the character AFTER the match.
-    #[test]
-    fn a_longer_name_is_not_a_match() {
-        let doc = "PREFIX p: <http://e/>\np:nameOfThing xsd:string ;\np:name xsd:string\n";
-        let range = locate_iri(doc, "http://e/name").expect("p:name is written");
-        assert_eq!(&doc[range.start as usize..range.end as usize], "p:name");
-        assert!(
-            doc[..range.start as usize].contains("nameOfThing"),
-            "the first (longer) occurrence must have been skipped"
-        );
-    }
-
-    /// `ShExJ` writes every IRI out, so tier 1 answers without a prefix table.
-    #[test]
-    fn a_verbatim_iri_is_located_without_any_prefix_declaration() {
-        let doc = "{ \"id\": \"http://example.org/Person\" }";
-        let range = locate_iri(doc, "http://example.org/Person").expect("written in full");
-        assert_eq!(
-            &doc[range.start as usize..range.end as usize],
-            "http://example.org/Person"
-        );
-    }
-
-    /// The line format `fossil_base::test_support` decodes, which is what most
-    /// of the workspace's tests write.
-    #[test]
-    fn the_line_format_is_located() {
-        let doc = "shape http://example.org/Person\nprop http://example.org/name - 1 1\n";
-        let shape = locate_iri(doc, "http://example.org/Person").expect("the shape line");
-        assert_eq!(shape.start, 6, "just past `shape `");
-        let pred = locate_iri(doc, "http://example.org/name").expect("the prop line");
-        assert!(
-            pred.start > shape.end,
-            "the predicate comes after the shape"
-        );
-    }
-
-    #[test]
-    fn an_iri_the_document_does_not_write_is_not_located() {
-        assert!(locate_iri(SHEXC, "https://shop.example/voc#absent").is_none());
-        assert!(locate_iri(SHEXC, "http://elsewhere.example/Person").is_none());
-    }
-
-    #[test]
-    fn turtle_prefixes_are_read_too() {
-        let doc = "@prefix ex: <http://example.org/> .\nex:Person a sh:NodeShape .\n";
-        let range = locate_iri(doc, "http://example.org/Person").expect("ex:Person");
-        assert_eq!(&doc[range.start as usize..range.end as usize], "ex:Person");
-    }
-
-    /// Two prefixes where one expansion extends the other. Only the longer one
-    /// produces the name the document writes.
-    #[test]
-    fn the_longest_matching_prefix_wins() {
-        let doc = "PREFIX a: <https://x/>\nPREFIX b: <https://x/voc#>\nb:Person {}\n";
-        let range = locate_iri(doc, "https://x/voc#Person").expect("b:Person");
-        assert_eq!(&doc[range.start as usize..range.end as usize], "b:Person");
-    }
-
-    // -- the corpus, which is the half the synthetic documents above cannot see -
-
-    /// The conformance corpus, from this crate's manifest directory.
-    fn corpus_dir() -> std::path::PathBuf {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(std::path::Path::parent)
-            .expect("crates/fossil-ide is two levels below the repo root")
-            .join("docs/programs")
-    }
-
-    /// Every `.shex` under [`corpus_dir`], as `(path, text)`.
-    fn corpus_documents() -> Vec<(std::path::PathBuf, String)> {
-        fn walk(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, String)>) {
-            let entries =
-                std::fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display()));
-            // `read_dir` order is the filesystem's. Sort, or a failure message
-            // names a different file on each machine.
-            let mut paths: Vec<_> = entries
-                .map(|e| e.expect("a directory entry").path())
-                .collect();
-            paths.sort();
-            for path in paths {
-                if path.is_dir() {
-                    walk(&path, out);
-                } else if path.extension().is_some_and(|e| e == "shex") {
-                    let text = std::fs::read_to_string(&path)
-                        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-                    out.push((path, text));
-                }
-            }
-        }
-        let mut out = Vec::new();
-        walk(&corpus_dir(), &mut out);
-        out
-    }
-
-    /// The `prefix:Local` heads the document declares a shape under: the token
-    /// before a `{`, when it is a single prefixed name.
-    ///
-    /// This is the same not-a-parser bargain [`locate_iri`] makes. It is enough
-    /// to notice a document written the other way, which is the whole claim.
-    fn declared_shape_heads(text: &str) -> Vec<(usize, String)> {
-        let mut out = Vec::new();
-        for (i, line) in text.lines().enumerate() {
-            let Some((head, _)) = line.split_once('{') else {
-                continue;
-            };
-            let head = head.trim();
-            let Some((prefix, local)) = head.split_once(':') else {
-                continue;
-            };
-            let named = |s: &str| !s.is_empty() && s.chars().all(is_name_char);
-            if named(prefix) && named(local) {
-                out.push((i, head.to_string()));
-            }
-        }
-        out
-    }
-
-    /// Whether every shape `text` declares is reachable through tier 2 — the
-    /// document's own `PREFIX` table — landing on the declaration line.
-    ///
-    /// `Ok(n)` counts the shapes checked; `Err` is the reason, ready to print.
-    /// Pure over the text, so the failure modes below can be driven without
-    /// writing into the corpus.
-    fn tier_2_reaches_every_shape(text: &str) -> Result<usize, String> {
-        let prefixes = declared_prefixes(text);
-        if prefixes.is_empty() {
-            return Err(
-                "declares no prefix, so tier 2 of `locate_iri` can never answer \
-                        for it and goto-def lands at the top of the file"
-                    .to_string(),
-            );
-        }
-        let heads = declared_shape_heads(text);
-        if heads.is_empty() {
-            return Err("declares no `prefix:Local {` shape, so this guard read \
-                        nothing out of it"
-                .to_string());
-        }
-
-        for (line, head) in &heads {
-            let (prefix, local) = head.split_once(':').expect("a prefixed head");
-            let Some((_, expansion)) = prefixes.iter().find(|(p, _)| p == prefix) else {
-                return Err(format!(
-                    "line {}: declares `{head}` under the undeclared prefix `{prefix}:`",
-                    line + 1
-                ));
-            };
-            let iri = format!("{expansion}{local}");
-            let Some(range) = locate_iri(text, &iri) else {
-                return Err(format!(
-                    "`{iri}` — the expansion of `{head}` through the document's own \
-                     prefix table — is not locatable in it"
-                ));
-            };
-            let found = &text[range.start as usize..range.end as usize];
-            if found != head {
-                return Err(format!(
-                    "`{iri}` located `{found}`, not the prefixed spelling `{head}` \
-                     the document writes"
-                ));
-            }
-            let landed = text[..range.start as usize].matches('\n').count();
-            if landed != *line {
-                return Err(format!(
-                    "goto-def on `{head}` lands on line {} and the declaration is on \
-                     line {}",
-                    landed + 1,
-                    line + 1
-                ));
-            }
-        }
-        Ok(heads.len())
-    }
-
-    /// Every shape the corpus declares is reachable through tier 2 — the
-    /// document's own `PREFIX` table — and lands on the declaration.
-    ///
-    /// Tier 1 cannot answer for any of them: `ShExC` writes `shop:Person`, not
-    /// the expanded IRI, so a corpus document with no `PREFIX` line would send
-    /// goto-def to byte 0 of the right file with nothing going red.
-    ///
-    /// WHAT IT CANNOT PROVE: that goto-def as a whole answers. It exercises the
-    /// locator against the real corpus, not the Salsa query above it — the
-    /// decode, the document registry and the position lookup are
-    /// `tests/goto_def.rs`'s subject. Nor does it say the corpus is complete;
-    /// it says every document IN it is spelled the way tier 2 needs.
-    #[test]
-    fn every_corpus_shape_is_reached_through_tier_2() {
-        let documents = corpus_documents();
-        assert!(
-            !documents.is_empty(),
-            "no `.shex` under {} — this guard is asserting nothing. If the corpus \
-             moved, repoint it; do not delete it",
-            corpus_dir().display()
-        );
-
-        let mut shapes = 0usize;
-        for (path, text) in &documents {
-            match tier_2_reaches_every_shape(text) {
-                Ok(n) => shapes += n,
-                Err(why) => panic!("{}: {why}", path.display()),
-            }
-        }
-        assert!(
-            shapes >= documents.len(),
-            "{shapes} shapes across {} documents — a document contributed none",
-            documents.len()
-        );
-    }
-
-    // ------------------------------------ the failure modes, each proved
-    //
-    // The corpus is right today, which is exactly when a guard stops
-    // demonstrating that it works. These feed the same pure function the
-    // documents a contributor could plausibly write.
-
-    #[test]
-    fn a_document_with_no_prefix_line_is_caught() {
-        let doc = "<https://shop.example/voc#Person> {\n  <https://shop.example/voc#name> xsd:string\n}\n";
-        let why = tier_2_reaches_every_shape(doc).expect_err("no PREFIX line");
-        assert!(why.contains("declares no prefix"), "{why}");
-    }
-
-    #[test]
-    fn a_shape_under_an_undeclared_prefix_is_caught() {
-        let doc = "PREFIX shop: <https://shop.example/voc#>\n\nother:Person {\n  shop:name xsd:string\n}\n";
-        let why = tier_2_reaches_every_shape(doc).expect_err("`other:` is not declared");
-        assert!(why.contains("undeclared prefix `other:`"), "{why}");
-    }
-
-    /// The bounded miss the locator's own doc comment admits: a mention before
-    /// the declaration wins. Held here so the corpus cannot quietly acquire one.
-    #[test]
-    fn a_mention_before_the_declaration_is_caught() {
-        let doc = "PREFIX shop: <https://shop.example/voc#>\n\nshop:Order {\n  shop:buyer @shop:Person\n}\n\nshop:Person {\n  shop:name xsd:string\n}\n";
-        let why = tier_2_reaches_every_shape(doc).expect_err("`@shop:Person` comes first");
-        assert!(why.contains("lands on line 4"), "{why}");
-    }
-
-    #[test]
-    fn a_document_declaring_no_shape_is_not_a_document_that_passes() {
-        let doc = "PREFIX shop: <https://shop.example/voc#>\n";
-        let why = tier_2_reaches_every_shape(doc).expect_err("nothing was checked");
-        assert!(why.contains("declares no"), "{why}");
-    }
-
-    #[test]
-    fn a_well_formed_document_passes_and_says_how_many() {
-        let doc = "PREFIX shop: <https://shop.example/voc#>\n\nshop:Person {\n  shop:name xsd:string\n}\n\nshop:Order {\n  shop:buyer @shop:Person\n}\n";
-        assert_eq!(tier_2_reaches_every_shape(doc), Ok(2));
-    }
 }

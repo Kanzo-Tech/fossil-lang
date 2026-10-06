@@ -94,7 +94,7 @@
 //!    because the language has no juxtaposition. Everywhere else `as` is an
 //!    ordinary identifier and lexes as one.
 
-use fossil_base::Problem;
+use fossil_graph_schema::Problem;
 
 use crate::kind::SyntaxKind;
 
@@ -277,7 +277,7 @@ fn parse_type_def(p: &mut Parser) {
         malformed(
             p,
             Problem::MisplacedAttribute {
-                attribute: "@rename".to_string(),
+                attribute: crate::attr::RENAME.to_string(),
                 place: "anywhere but above a `type` binding".to_string(),
             },
             "`@rename` renames a predicate of ONE type binding, so a `type { … } := …` has to \
@@ -329,7 +329,7 @@ fn malformed(p: &mut Parser, problem: Problem, help: &str) {
     p.push_diagnostic(crate::parser::diag::ParseDiagnostic::Malformed {
         problem,
         help: Some(help.to_string()),
-        span: fossil_base::Span::new(at, at),
+        span: fossil_graph_schema::Span::new(at, at),
     });
 }
 
@@ -362,7 +362,7 @@ fn parse_rename_attr(p: &mut Parser) {
     // in the HIR is deliberate: `@subject` in this position is not an unknown
     // name, it is a known one in the wrong place, and only the parser knows
     // which place this is.
-    if p.current_text() != Some("@rename") {
+    if p.current_text() != Some(crate::attr::RENAME) {
         let found = p.current_text().unwrap_or("@").to_string();
         malformed(
             p,
@@ -663,7 +663,7 @@ mod disambiguation {
     use crate::SyntaxKind;
     use crate::indent::lex_with_indents;
     use crate::kind::SyntaxNode;
-    use fossil_base::Problem;
+    use fossil_graph_schema::Problem;
     use rowan::GreenNode;
 
     use super::super::Parser;

@@ -169,7 +169,7 @@ Users : Person from User
 /// `token_at_position` as an offset past the CST's range and panic inside
 /// `rowan` («Bad offset: range 0..124 offset 127»).
 ///
-/// `LineIndex::offset` clamps a column to its line now, so the stripped fixture
+/// `fossil_ide::offset` clamps a column to its line now, so the stripped fixture
 /// no longer aborts; `crate::position`'s own
 /// `token_at_position_past_the_end_of_a_line_does_not_panic` is the guard, and
 /// keeps this one. The indent still matters for what this file measures — four

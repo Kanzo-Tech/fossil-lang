@@ -57,7 +57,8 @@ pub mod span;
 
 pub use problem::{CODES, Failure, Foreign, Problem, Related, Severity, TEMPLATES};
 pub use shapes::{
-    Occurs, OutputShapes, PropertyConstraint, Rejection, Renames, Shape, local_name, short_name,
+    Occurs, OutputShapes, PropertyConstraint, Rejection, Renames, SUBJECT_COLUMN, Shape,
+    local_name, short_name,
 };
 pub use span::Span;
 
@@ -152,6 +153,15 @@ pub enum Cardinality {
     Single,
     /// Keep all values/edges per subject (multi-valued / `UNNEST`).
     Multi,
+}
+
+/// The name a program reads: in a hover, a diagnostic, a completion's
+/// signature. The variant's own name — `AnyUri`, not the `snake_case` the wire
+/// carries.
+impl std::fmt::Display for Primitive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
+    }
 }
 
 impl Primitive {

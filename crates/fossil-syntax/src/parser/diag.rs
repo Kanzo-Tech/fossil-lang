@@ -12,7 +12,8 @@
 //! `to_diagnostic` adapter keeps the parser decoupled from the public
 //! `Diagnostic` shape.
 
-use fossil_base::{Diagnostic, Problem, Severity, Span};
+use fossil_base::Diagnostic;
+use fossil_graph_schema::{Problem, Severity, Span};
 
 use crate::kind::SyntaxKind;
 

@@ -149,6 +149,7 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
             Some("shape") => shapes.push(Shape {
                 iri: tokens.next().unwrap_or_default().to_string(),
                 properties: Vec::new(),
+                span: None,
             }),
             Some("prop") => {
                 let Some(shape) = shapes.last_mut() else {

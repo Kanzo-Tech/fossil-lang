@@ -222,6 +222,9 @@ pub fn extension_of(uri: &str) -> Option<String> {
     Some(ext.to_ascii_lowercase())
 }
 
+/// What a program writes before a provider's name: `io.` in `io.csv`.
+pub const CONSTRUCTOR_PREFIX: &str = "io.";
+
 /// **The one lookup.** The row a program names, by the name it writes after
 /// `io.`.
 ///
@@ -231,7 +234,9 @@ pub fn extension_of(uri: &str) -> Option<String> {
 /// second way to say one thing.
 #[must_use]
 pub fn provider(table: &[&'static Provider], constructor: &str) -> Option<&'static Provider> {
-    let name = constructor.strip_prefix("io.").unwrap_or(constructor);
+    let name = constructor
+        .strip_prefix(CONSTRUCTOR_PREFIX)
+        .unwrap_or(constructor);
     table.iter().copied().find(|p| p.name == name)
 }
 

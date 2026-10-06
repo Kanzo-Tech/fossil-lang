@@ -586,22 +586,37 @@ pub enum ScalarTy {
 }
 
 impl ScalarTy {
+    /// The primitive this tag is, or — for [`Self::SeqString`] — holds.
+    const fn primitive(self) -> Primitive {
+        match self {
+            Self::String | Self::SeqString => Primitive::String,
+            Self::Integer => Primitive::Integer,
+            Self::Float => Primitive::Float,
+            Self::Bool => Primitive::Bool,
+            Self::Date => Primitive::Date,
+            Self::DateTime => Primitive::DateTime,
+        }
+    }
+
     /// Intern this tag into a `Ty<'db>` via the fossil-hir constructor.
     #[must_use]
     pub fn to_ty(self, db: &dyn salsa::Database) -> Ty<'_> {
+        let primitive = TyKind::Primitive(self.primitive());
         let kind = match self {
-            Self::String => TyKind::Primitive(Primitive::String),
-            Self::Integer => TyKind::Primitive(Primitive::Integer),
-            Self::Float => TyKind::Primitive(Primitive::Float),
-            Self::Bool => TyKind::Primitive(Primitive::Bool),
-            Self::Date => TyKind::Primitive(Primitive::Date),
-            Self::DateTime => TyKind::Primitive(Primitive::DateTime),
-            Self::SeqString => {
-                let s = Ty::new(db, TyKind::Primitive(Primitive::String));
-                TyKind::Seq(s)
-            }
+            Self::SeqString => TyKind::Seq(Ty::new(db, primitive)),
+            _ => primitive,
         };
         Ty::new(db, kind)
+    }
+}
+
+/// The name `render_ty_kind` gives the type [`ScalarTy::to_ty`] interns.
+impl std::fmt::Display for ScalarTy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SeqString => write!(f, "Seq<{}>", self.primitive()),
+            _ => self.primitive().fmt(f),
+        }
     }
 }
 

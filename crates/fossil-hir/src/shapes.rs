@@ -110,6 +110,9 @@ pub struct ShapeConstraint<'db> {
 pub struct ResolvedShape<'db> {
     /// Per-predicate constraint table.
     pub constraints: Vec<ShapeConstraint<'db>>,
+    /// Where the document declares the shape —
+    /// [`fossil_graph_schema::Shape::span`].
+    pub span: Option<Span>,
     /// The document that declared this shape, as the PROGRAM named it
     /// (`io.shex("shape.shex")` → `shape.shex`).
     ///
@@ -150,6 +153,7 @@ impl<'db> ResolvedShape<'db> {
             .collect();
         Self {
             constraints,
+            span: shape.span,
             document,
             rejections,
         }
@@ -618,7 +622,7 @@ User : Person from users
             crate::lower::lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
         assert!(
             diagnostics.iter().any(|d| d.problem
-                == fossil_base::Problem::UnknownShape {
+                == fossil_graph_schema::Problem::UnknownShape {
                     shape: "Person".into(),
                     declared: Vec::new(),
                 }

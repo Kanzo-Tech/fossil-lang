@@ -44,6 +44,11 @@ smol_str = { workspace = true }
 # `lsp-types` compiles to wasm32-unknown-unknown, which is what lets this crate
 # return `lsp_types` structs directly. Had it not, every feature here would have
 # had to return Fossil-domain byte-range structs for fossil-lsp to translate.
+# LSP positions are UTF-16; rowan is UTF-8. rust-analyzer's table between them, pure Rust.
+line-index = { workspace = true }
+# A bare-path key becomes a `file:` URI through the URL Standard's own path
+# percent-encoding, not a `format!`. Pure Rust, wasm-clean.
+url = { workspace = true }
 lsp-types = { workspace = true }
 # `DiagnosticData` — what an LSP diagnostic's `data` and a wasm `CheckRow`
 # carry beside the code: a problem's `data` is a `serde_json::Value`.

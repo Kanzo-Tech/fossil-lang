@@ -1,7 +1,7 @@
-//! Bidirectional hover integration test.
+//! Hover integration test: the source-side and the target-side type.
 //!
 //! Proves the hover feature end-to-end through the PUBLIC
-//! [`fossil_ide::hover_bidirectional`] entry: hovering on a `users.field`
+//! [`fossil_ide::hover`] entry: hovering on a `users.field`
 //! reference whose property key matches a target `ShEx` shape constraint
 //! surfaces BOTH
 //!
@@ -205,7 +205,7 @@ fn hover_shows_source_and_target_type_when_shape_resolves() {
     std::fs::create_dir_all(&tmp).expect("mk tmp");
     let (db, file) = fixture(&tmp);
 
-    let info = fossil_ide::hover_bidirectional(&db, file, NAME_LINE, NAME_COL)
+    let info = fossil_ide::hover(&db, file, NAME_LINE, NAME_COL)
         .expect("hover on `users.name` with a registered descriptor must return Some");
     let md = &info.markdown;
 
@@ -265,7 +265,7 @@ User : Person from users
         fossil_path.to_string_lossy().into_owned(),
     );
 
-    let info = fossil_ide::hover_bidirectional(&db, file, NAME_LINE_NO_DOCUMENT, NAME_COL)
+    let info = fossil_ide::hover(&db, file, NAME_LINE_NO_DOCUMENT, NAME_COL)
         .expect("hover on `users.name` still returns the source-side type with no output contract");
     let md = &info.markdown;
 

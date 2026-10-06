@@ -295,7 +295,7 @@ impl Parser {
             self.push_diagnostic(ParseDiagnostic::ExpectedToken {
                 want: kind,
                 got,
-                span: fossil_base::Span::new(
+                span: fossil_graph_schema::Span::new(
                     u32::try_from(span_start).unwrap_or(u32::MAX),
                     u32::try_from(span_start).unwrap_or(u32::MAX),
                 ),
@@ -327,7 +327,7 @@ impl Parser {
         let span_start = self.current_token_span_start();
         let tok = self.tokens.get(self.pos);
         let span_end = tok.map_or(span_start, |t| t.range.end);
-        let span = fossil_base::Span::new(
+        let span = fossil_graph_schema::Span::new(
             u32::try_from(span_start).unwrap_or(u32::MAX),
             u32::try_from(span_end).unwrap_or(u32::MAX),
         );
@@ -417,7 +417,7 @@ mod tests {
         SyntaxNode::new_root(p.builder.finish())
     }
 
-    fn diagnose_text(input: &str) -> Vec<fossil_base::Problem> {
+    fn diagnose_text(input: &str) -> Vec<fossil_graph_schema::Problem> {
         let tokens = lex_with_indents(input);
         let mut p = Parser::new(tokens);
         p.parse_program();

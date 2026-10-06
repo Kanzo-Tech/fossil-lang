@@ -40,7 +40,7 @@
 //! [`crate::spans::spans`], so the blame STRUCTURE and the ranges it points at
 //! are both in place — an entry never carries a zero-width placeholder.
 
-use fossil_base::Span;
+use fossil_graph_schema::Span;
 use smol_str::SmolStr;
 
 use crate::body::ExprId;

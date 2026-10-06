@@ -34,7 +34,8 @@
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Diagnostic, FossilDb, Problem, Severity, SourceFile, Span, System};
+use fossil_base::{Diagnostic, FossilDb, SourceFile, System};
+use fossil_graph_schema::{Problem, Severity, Span};
 use fossil_ide::code_actions;
 use lsp_types::{CodeAction, Position, Range, TextEdit};
 

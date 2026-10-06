@@ -34,7 +34,7 @@ import {
 } from '@codemirror/autocomplete';
 import { EditorState, type Extension } from '@codemirror/state';
 
-import type { CompletionRow } from '@fossil-lang/types';
+import type { CompletionKind, CompletionRow } from '@fossil-lang/types';
 
 import { positionOf } from './positions.js';
 
@@ -49,42 +49,14 @@ export type CompletionRowSource = (
 /**
  * LSP kind name → the vocabulary CodeMirror draws an icon for.
  *
- * The two halves of this boundary each own the half they can check. Rust owns
- * *which* kinds exist and their names, and `every_lsp_kind_has_a_name` is the
- * test — that is why `kind` crosses as a name and never as a number. What
- * CodeMirror calls each one is a CodeMirror fact, so it is here: LSP's `field`
- * and `property` are both CodeMirror's `property`, and its icon set has no
- * `field`.
- *
- * A name this table does not have is `undefined`, which CodeMirror renders as
- * an option with no icon — legible, and not a crash.
+ * Rust owns *which* kinds exist ({@link CompletionKind}, generated), and the
+ * `Record` over that union is what makes a new one a type error here. What
+ * CodeMirror calls each one is a CodeMirror fact, so it is here: its icon set
+ * has no `field`, and an LSP field is its `property`.
  */
-const CM_TYPE: Readonly<Record<string, string>> = {
-  text: 'text',
-  method: 'method',
+const CM_TYPE: Readonly<Record<CompletionKind, string>> = {
   function: 'function',
-  constructor: 'function',
   field: 'property',
-  variable: 'variable',
-  class: 'class',
-  interface: 'interface',
-  module: 'namespace',
-  property: 'property',
-  unit: 'constant',
-  value: 'constant',
-  enum: 'enum',
-  keyword: 'keyword',
-  snippet: 'text',
-  color: 'constant',
-  file: 'text',
-  reference: 'variable',
-  folder: 'text',
-  enum_member: 'enum',
-  constant: 'constant',
-  struct: 'class',
-  event: 'variable',
-  operator: 'keyword',
-  type_parameter: 'type',
 };
 
 /** One compiler row as a CodeMirror option.
@@ -93,7 +65,7 @@ const CM_TYPE: Readonly<Record<string, string>> = {
  *  types — the spelling, `"Person.id"` — and the column's own name is what the
  *  list shows. */
 export function toCompletion(row: CompletionRow): Completion {
-  const type = CM_TYPE[row.kind];
+  const type = row.kind === undefined ? undefined : CM_TYPE[row.kind];
   return {
     label: row.insert,
     ...(row.insert === row.label ? {} : { displayLabel: row.label }),

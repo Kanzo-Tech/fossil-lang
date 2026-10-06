@@ -7,8 +7,8 @@
 //!   - [`crate::check::compatible`]'s mismatch diagnostic messages,
 //!   - the LSP hover (which re-exports it from `fossil-ide::hover`).
 //!
-//! Everything that renders a type renders it here, never through `{:?}`, which
-//! is what keeps a `Debug` spelling out of a diagnostic and a hover.
+//! Everything that renders a type renders it here, and a primitive through its
+//! `Display`.
 
 use crate::ty::TyKind;
 use fossil_graph_schema::local_name;
@@ -20,7 +20,7 @@ use fossil_graph_schema::local_name;
 #[must_use]
 pub fn render_ty_kind<'db>(db: &'db dyn fossil_base::Db, kind: &TyKind<'db>) -> String {
     match kind {
-        TyKind::Primitive(p) => format!("{p:?}"),
+        TyKind::Primitive(p) => p.to_string(),
         // The shapes, not the word «Iri»: what a reader needs to know about a
         // reference is what it reaches.
         TyKind::Ref(shapes) if shapes.is_empty() => "Ref<?>".to_string(),

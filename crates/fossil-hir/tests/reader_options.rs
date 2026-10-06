@@ -20,7 +20,7 @@
 //!   whole thread at once.
 //! - **That the WORD is `delimiter`.** It is the catalogue's, read back by
 //!   `reader_option_of`; `crates/fossil-hir/src/def_map.rs`'s own
-//!   `the_option_the_scanner_reads_is_the_one_the_catalogue_declares` is what
+//!   `the_option_read_is_the_one_the_catalogue_declares` is what
 //!   holds the derivation to the file. This file writes the word because a
 //!   program written by an author writes it.
 

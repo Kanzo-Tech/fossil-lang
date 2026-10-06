@@ -16,9 +16,8 @@
 //!    `Diagnostic::accumulated`".
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{
-    Db, Diagnostic, FossilDb, Problem, Severity, SourceFile, Span, System, bug, report,
-};
+use fossil_base::{Db, Diagnostic, FossilDb, SourceFile, System, bug, report};
+use fossil_graph_schema::{Problem, Severity, Span};
 use std::sync::Arc;
 
 fn db_with_file() -> (FossilDb, SourceFile) {

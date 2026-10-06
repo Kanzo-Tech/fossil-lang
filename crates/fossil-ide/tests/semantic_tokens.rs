@@ -1,9 +1,10 @@
 //! Snapshot test for `fossil_ide::semantic_tokens` (LSP-01 / SC#4).
 //!
-//! The raw LSP output is a flat `Vec<u32>` of delta-encoded 5-tuples — opaque to
-//! review. We decode it back to absolute `(line, col, len, type)` rows and render
-//! each with its human-readable legend type name, so the snapshot diffs as a
-//! readable table when the classifier or fixture changes.
+//! The raw LSP output is delta-encoded indices — opaque to review. We decode it
+//! back to absolute `(line, col, len, type)` rows and render each type through
+//! the legend the server declares, so the snapshot diffs as a readable table
+//! when the classifier or fixture changes, and reads the wire the way a client
+//! does.
 
 // The fixture interpolates — `"…/{users.id}"` is LITERAL Fossil source, not a
 // Rust format-string arg.
@@ -13,7 +14,7 @@ use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{FossilDb, SourceFile, System};
-use fossil_ide::{decode_tokens, legend_type_name, modifier_names, semantic_tokens};
+use fossil_ide::{decode_tokens, modifier_names, semantic_legend, semantic_tokens};
 
 /// A fixture exercising every legend token type: comment, keyword (`from`,
 /// the `@subject` sigil, and the contextual `type`), namespace (the
@@ -44,10 +45,10 @@ fn render(src: &str) -> String {
     let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, src.to_string(), "fixture.fossil".to_string());
-    let data = semantic_tokens(&db, file);
+    let legend = semantic_legend();
     let mut out = String::new();
-    for (line, col, len, ty, mods) in decode_tokens(&data) {
-        let mut kind = legend_type_name(ty).to_string();
+    for (line, col, len, ty, mods) in decode_tokens(&semantic_tokens(&db, file)) {
+        let mut kind = legend.token_types[ty as usize].as_str().to_string();
         for m in modifier_names(mods) {
             kind.push('+');
             kind.push_str(m);

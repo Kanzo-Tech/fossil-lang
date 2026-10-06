@@ -64,14 +64,14 @@ pub mod tokenize;
 mod wasm_system;
 mod workspace;
 
-pub use crate::ide::{CompletionRow, DefinitionRow, HoverRow, SemanticTokenRow};
+pub use crate::ide::{CompletionKind, CompletionRow, DefinitionRow, HoverRow, SemanticTokenRow};
 pub use crate::tokenize::{TokenRow, tokenize_native};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, Span, System};
+use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, System};
 use fossil_graph_schema::js::{bug, invalid_argument};
 use fossil_graph_schema::{Failure, Problem};
 use fossil_ide::LineIndex;
@@ -536,7 +536,7 @@ impl WasmWorkspace {
     /// no catalogue row.
     ///
     /// `kind` is the LSP `CompletionItemKind` **by name** (`"function"`,
-    /// `"field"`). See [`ide::CompletionRow`] for why a number does not cross
+    /// `"field"`). See [`ide::CompletionKind`] for why a number does not cross
     /// this boundary.
     ///
     /// # Errors
@@ -678,7 +678,7 @@ impl FossilWorkspace {
             let uri = self.files.path_for(h, &self.db).unwrap_or_default();
             let index = fossil_ide::line_index(&self.db, file);
             for d in self.file_diagnostics(file) {
-                all.push(to_check_row(&self.db, file, &uri, &index, &d));
+                all.push(to_check_row(&self.db, file, &uri, index, &d));
             }
         }
         all
@@ -711,7 +711,6 @@ impl FossilWorkspace {
         {
             return Vec::new();
         }
-        let text = file.text(&self.db);
         let mut seen: Vec<&str> = Vec::new();
         let mut out = Vec::new();
         for entry in fossil_hir::def_map::def_map(&self.db, file).sources(&self.db) {
@@ -726,9 +725,9 @@ impl FossilWorkspace {
             }
             seen.push(key);
             let mut d = Diagnostic::new(
-                fossil_base::Severity::Warning,
+                fossil_graph_schema::Severity::Warning,
                 why.problem.clone(),
-                call_span(text, entry.span),
+                entry.call_span,
             )
             .file_absolute();
             if let Some(help) = &why.help {
@@ -750,7 +749,7 @@ impl FossilWorkspace {
         Some(
             self.file_diagnostics(file)
                 .into_iter()
-                .map(|d| to_check_row(&self.db, file, &uri, &index, &d))
+                .map(|d| to_check_row(&self.db, file, &uri, index, &d))
                 .collect(),
         )
     }
@@ -1010,22 +1009,6 @@ struct Undescribed {
     help: Option<String>,
 }
 
-/// The call right of `:=` in the source item `item` spans — `io.csv("u.csv")`
-/// in `users := io.csv("u.csv")` — or the whole item when there is no `:=` in
-/// it to find.
-fn call_span(text: &str, item: Span) -> Span {
-    let Some(written) = item.slice(text) else {
-        return item;
-    };
-    let Some(at) = written.find(":=") else {
-        return item;
-    };
-    let rest = &written[at + 2..];
-    let skipped = rest.len() - rest.trim_start().len();
-    let start = item.start as usize + at + 2 + skipped;
-    u32::try_from(start).map_or(item, |start| Span::new(start, item.end))
-}
-
 /// A document a program names and the workspace does not hold yet —
 /// `fossil_hir::documents::MissingDocument` in the shape it crosses to JS.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
@@ -1118,7 +1101,7 @@ fn to_check_row(
                 // A `LineIndex` per file: a UTF-16 column is a fact about the
                 // text the range is in, and it is memoised, so the labels that
                 // are in the program cost nothing extra.
-                range: fossil_ide::span_to_range(&fossil_ide::line_index(db, r.file), r.span),
+                range: fossil_ide::range(fossil_ide::line_index(db, r.file), r.span),
                 uri: r.file.path(db).clone(),
                 message: r.text,
             })

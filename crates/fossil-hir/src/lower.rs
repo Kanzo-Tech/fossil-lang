@@ -7,7 +7,7 @@
 //! keyed by [`crate::def_map::MappingLoc`]. The split is what buys the
 //! invalidation shape: editing one property's right-hand side invalidates only
 //! `body(M_k)` + its downstream queries, never the file-level
-//! `item_tree(file)` or `lower_to_hir(file)` queries' structural inputs.
+//! `lower_to_hir(file)` query's structural inputs.
 //!
 //! The expression encoding remains intentionally minimal:
 //! - [`HirExpr::Interpolation`] carries a string's literal runs and its holes,
@@ -16,7 +16,8 @@
 //! - [`HirExpr::FieldRef`] is just the name of a column of the one row in scope.
 //! - [`HirExpr::StringLit`] holds the literal text without surrounding quotes.
 
-use fossil_base::{Diagnostic, Problem, Severity, SourceFile, Span};
+use fossil_base::{Diagnostic, SourceFile};
+use fossil_graph_schema::{Problem, Severity, Span};
 use salsa::Accumulator;
 use smol_str::SmolStr;
 
@@ -109,7 +110,7 @@ pub struct HirSourcePipe {
     ///
     /// It was a `(u32, u32)`, and both of its readers opened with
     /// `Span::new(pipe.span.0, pipe.span.1)` — a second spelling of
-    /// [`fossil_base::Span`] with a conversion at every use.
+    /// [`fossil_graph_schema::Span`] with a conversion at every use.
     pub span: Span,
 }
 
@@ -739,7 +740,7 @@ fn check_provider(
         // Only a name that LOOKS like a provider is reported here. A derived
         // binding reads as `User.where` and belongs to `fossil-mir`'s
         // `resolve_source`, which already has a message for it.
-        if constructor.starts_with("io.") {
+        if constructor.starts_with(fossil_base::CONSTRUCTOR_PREFIX) {
             diagnose_item(
                 db,
                 node,
@@ -791,8 +792,8 @@ fn check_provider(
 ///    is read by nothing and changes nothing. That is the shape of defect this
 ///    whole thread exists to end: a delimiter execution ignores is worse than
 ///    no delimiter.
-/// 2. **The value is not a string literal.** The scanner reads `IDENT` `=`
-///    `STRING`, so anything else arrives as no value at all.
+/// 2. **The value is not a string literal.** Anything else arrives as no
+///    value at all.
 /// 3. **The value is not one ASCII character.** `DataFusion`'s
 ///    `CsvReadOptions` takes a BYTE, so `delimiter = "||"` cannot be passed on
 ///    — it would be truncated to `|` by whichever engine got there first while
@@ -844,18 +845,12 @@ fn check_reader_option(
     }
     // The row has NO option. An argument named as one belongs to a DIFFERENT
     // row, and saying which is the whole value of the message.
-    let toks: Vec<_> = node
-        .descendants_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-        .collect();
+    let written = crate::def_map::named_arg_names(node);
     for (name, owner) in crate::def_map::reader_option_names() {
-        if let Some(t) = toks
-            .iter()
-            .find(|t| t.kind() == fossil_syntax::SyntaxKind::IDENT && t.text() == name.as_str())
-        {
+        if let Some((_, span)) = written.iter().find(|(n, _)| n == name) {
             emit_item(
                 db,
-                Span::new(t.text_range().start().into(), t.text_range().end().into()),
+                *span,
                 Problem::ForeignReaderOption {
                     option: name.to_string(),
                     constructor: constructor.to_string(),
@@ -913,8 +908,8 @@ fn answers_about(
 /// program's two ends read one file.
 ///
 /// The span is the ARGUMENT's, not the binding's — `crate::def_map::SchemaArg`
-/// carries it out of the one scanner that reads this argument, because a second
-/// token scan over here is how the two spellings drifted apart the first time.
+/// carries it out of `crate::def_map::parse_schema_arg`, the one reader of
+/// this argument.
 fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) {
     let Some(arg) = crate::def_map::parse_schema_arg(node) else {
         return;
@@ -1843,7 +1838,7 @@ fn diagnose_item(
 }
 
 /// [`diagnose_item`] for a span that is not a whole node — an argument inside a
-/// call, whose extent the scanner that read it measured.
+/// call, whose extent the node it was read from gives.
 fn emit_item(db: &dyn fossil_base::Db, span: Span, problem: Problem, help: Option<String>) {
     with_help(Diagnostic::new(Severity::Error, problem, span), help)
         .file_absolute()
@@ -2198,7 +2193,7 @@ fn lower_property(
     // property name IS rather than only that this is not one.
     let key = match lhs_toks.as_slice() {
         [t] if t.kind() == SyntaxKind::AT_ATTR => {
-            if t.text() != "@subject" {
+            if t.text() != fossil_syntax::attr::SUBJECT {
                 let name = t.text();
                 diagnose(
                     db,
@@ -3552,7 +3547,7 @@ User : Person from users
             "an expression the lowering cannot read must produce a diagnostic",
         );
         let d = &diagnostics[0];
-        assert_eq!(d.severity, fossil_base::Severity::Error);
+        assert_eq!(d.severity, fossil_graph_schema::Severity::Error);
         assert!(
             d.message().contains("`.`"),
             "the diagnostic must quote what the user wrote, got: {}",

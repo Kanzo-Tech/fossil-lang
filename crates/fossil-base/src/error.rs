@@ -19,7 +19,8 @@
 //! `ErrorGuaranteed::new()`. The invariant is structurally enforced — a
 //! `Default` impl would defeat it and is intentionally omitted.
 
-use crate::diagnostic::{Diagnostic, Problem, Severity, Span};
+use crate::diagnostic::Diagnostic;
+use fossil_graph_schema::{Problem, Severity, Span};
 use salsa::Accumulator;
 
 /// Type-check failure taint.

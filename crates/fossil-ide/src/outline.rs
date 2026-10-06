@@ -28,10 +28,9 @@
 
 use crate::{SymbolEntry, SymbolIndex, SymbolKind as FossilSymbolKind};
 use fossil_base::SourceFile;
-use lsp_types::{DocumentSymbol, Position, Range, SymbolKind as LspSymbolKind};
+use lsp_types::{DocumentSymbol, SymbolKind as LspSymbolKind};
 
-use crate::line_index::LineIndex;
-use crate::position::line_index;
+use crate::position::{LineIndex, line_index, range};
 
 /// Build the document outline for `file`: a flat `Vec<DocumentSymbol>` in source
 /// order, one entry per top-level definition (source / mapping / shape).
@@ -46,14 +45,14 @@ pub fn document_symbols(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<Docum
     index
         .entries()
         .iter()
-        .map(|entry| to_document_symbol(entry, &li))
+        .map(|entry| to_document_symbol(entry, li))
         .collect()
 }
 
 /// Convert one [`SymbolEntry`] (Fossil byte range) to an LSP [`DocumentSymbol`]
 /// (UTF-16 range).
 fn to_document_symbol(entry: &SymbolEntry, li: &LineIndex) -> DocumentSymbol {
-    let range = byte_range_to_lsp(entry.range.start, entry.range.end, li);
+    let range = range(li, entry.range.clone());
     #[allow(deprecated)] // `deprecated` field is required by the lsp-types struct literal
     DocumentSymbol {
         name: entry.name.to_string(),
@@ -78,22 +77,6 @@ const fn map_kind(kind: FossilSymbolKind) -> LspSymbolKind {
         // something about what the right-hand side READS, which the index does
         // not know — `Adults := User.where(…)` opens no file.
         FossilSymbolKind::Source => LspSymbolKind::VARIABLE,
-    }
-}
-
-/// Convert a UTF-8 byte range to a UTF-16 LSP [`Range`] via the [`LineIndex`].
-fn byte_range_to_lsp(start: u32, end: u32, li: &LineIndex) -> Range {
-    let s = li.position(start);
-    let e = li.position(end);
-    Range {
-        start: Position {
-            line: s.line,
-            character: s.character,
-        },
-        end: Position {
-            line: e.line,
-            character: e.character,
-        },
     }
 }
 

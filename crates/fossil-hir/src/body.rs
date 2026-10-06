@@ -1,26 +1,18 @@
 //! [`HirBody`] — per-mapping body content + the [`body`] Salsa query.
 //!
 //! Lower half of the invalidation-barrier pattern.
-//! [`crate::item_tree::ItemTree`] is the SIGNATURE table; this module is the
+//! [`crate::lower::lower_to_hir`] is the SIGNATURE table; this module is the
 //! BODY table. They are deliberately separate `#[salsa::tracked]` queries
-//! with separate input-dependency surfaces.
-//!
-//! - `item_tree(db, file)` reads top-level header tokens + structural counts
-//!   only.
-//! - `body(db, mapping)` reads the body of ONE mapping.
+//! with separate input-dependency surfaces: `body(db, mapping)` reads the body
+//! of ONE mapping.
 //!
 //! Editing one mapping's body invalidates exactly that mapping's
 //! `body(M_k)` (and its downstream type-check / MIR / codegen queries).
 //! Sibling mappings stay cached.
 //!
-//! # `nth(idx)` correctness — CRITICAL
-//!
-//! [`body`] resolves the target mapping via [`mapping_cst_node`]'s filter-
-//! before-nth lookup over MAPPING-kind CST children. `.filter(...)` MUST
-//! come BEFORE `.nth(idx)`: without it, `PREFIX_DECL` / `SOURCE_DEF` /
-//! `IMPORT` top-level children inflate the count and `.nth(idx)` returns the
-//! wrong node. The regression test
-//! `tests::body_filters_to_mapping_kind_before_indexing` enforces this.
+//! [`body`] resolves the target mapping through [`mapping_cst_node`], which
+//! counts with [`crate::def_map::mapping_nodes`]; the regression test
+//! `tests::body_filters_to_mapping_kind_before_indexing` holds it.
 //!
 //! # The per-mapping invalidation barrier — CRITICAL
 //!
@@ -108,7 +100,7 @@ pub struct HirBody<'db> {
     /// subtree (rowan resets offsets to zero at a new root). The
     /// [`crate::spans::rebase_to_file`] direction is unchanged.
     #[returns(ref)]
-    pub expr_spans: Vec<fossil_base::Span>,
+    pub expr_spans: Vec<fossil_graph_schema::Span>,
     /// Count of distinct expression nodes lowered for this mapping. The
     /// provenance side table is keyed by `(MappingLoc, ExprId)` for the ids
     /// in `0..expr_count`.
@@ -165,7 +157,7 @@ pub struct RefSpan {
     /// `nmae` — what a did-you-mean replaces.
     pub name: smol_str::SmolStr,
     /// The name token's range, mapping-relative.
-    pub span: fossil_base::Span,
+    pub span: fossil_graph_schema::Span,
 }
 
 /// Salsa-storable handle to a per-mapping CST subtree.
@@ -212,33 +204,16 @@ impl MappingCstNode {
 /// re-executes on any byte edit) and [`body`] (which depends only on the
 /// per-mapping CST subtree, stable across sibling-mapping edits).
 ///
-/// Resolution uses filter-then-nth over MAPPING-kind top-level children, and
-/// `def_map`'s `MappingLoc.index` MUST allocate with the same convention — a
-/// dense position among MAPPING-kind children, never an all-children index.
-/// If the two sides ever disagree this query silently hands back another
-/// mapping's subtree, with no panic anywhere downstream.
+/// Resolution is [`crate::def_map::mapping_nodes`], the index space
+/// `MappingLoc::index` counts in.
 #[salsa::tracked(returns(clone))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn mapping_cst_node<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
 ) -> MappingCstNode {
-    let file = mapping.file(db);
-    let idx = mapping.index(db);
-    let cst = fossil_syntax::parse(db, file);
-
-    // CRITICAL: filter to MAPPING-kind BEFORE `.nth(idx)`. See the module-
-    // level comment + the `body_filters_to_mapping_kind_before_indexing`
-    // regression test. The previous (buggy) form was
-    //   cst.root(db).syntax().children().nth(idx).filter(|n| n.kind() == MAPPING)
-    // which silently returns the wrong node when a file has non-MAPPING
-    // top-level siblings before the target mapping.
-    let mapping_node = cst
-        .root(db)
-        .syntax()
-        .children()
-        .filter(|n| n.kind() == SyntaxKind::MAPPING)
-        .nth(idx);
+    let root = fossil_syntax::parse(db, mapping.file(db)).root(db).syntax();
+    let mapping_node = crate::def_map::mapping_nodes(&root).nth(mapping.index(db));
 
     let green = mapping_node.map(|n| n.green().into_owned());
     MappingCstNode { green }
@@ -268,14 +243,14 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
         .collect();
 
     let mut properties: Vec<HirProperty> = Vec::new();
-    let mut expr_spans: Vec<fossil_base::Span> = Vec::new();
+    let mut expr_spans: Vec<fossil_graph_schema::Span> = Vec::new();
     let mut ref_spans: Vec<Vec<RefSpan>> = Vec::new();
     let mut expr_count: u32 = 0;
     // Where the identity was written, among the properties that lowered. Its
     // three obligations — required, exactly one, first — are checked here and
     // not in the parser: each is a fact about a mapping
     // rather than about a token, and the message wants the mapping's name.
-    let mut subjects: Vec<(usize, fossil_base::Span)> = Vec::new();
+    let mut subjects: Vec<(usize, fossil_graph_schema::Span)> = Vec::new();
     if let Some(node) = mapping_cst.syntax() {
         let name = mapping_name(&node);
         if let Some(body_node) = node
@@ -291,7 +266,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
                         let r = prop_node.text_range();
                         subjects.push((
                             properties.len(),
-                            fossil_base::Span::new(r.start().into(), r.end().into()),
+                            fossil_graph_schema::Span::new(r.start().into(), r.end().into()),
                         ));
                     }
                     expr_spans.push(rhs_span(&prop_node));
@@ -331,7 +306,7 @@ fn reference_spans(prop_node: &SyntaxNode) -> Vec<RefSpan> {
     };
     let at = |t: &fossil_syntax::SyntaxToken| {
         let range = t.text_range();
-        fossil_base::Span::new(range.start().into(), range.end().into())
+        fossil_graph_schema::Span::new(range.start().into(), range.end().into())
     };
 
     prop_node
@@ -387,13 +362,13 @@ fn reference_spans(prop_node: &SyntaxNode) -> Vec<RefSpan> {
 /// right-hand side's tokens. A property that lowered without one falls back to
 /// the whole `PROPERTY` node, which is imprecise and inside the right line;
 /// what it must NOT do is skip, because the index is the `ExprId`.
-fn rhs_span(prop_node: &SyntaxNode) -> fossil_base::Span {
+fn rhs_span(prop_node: &SyntaxNode) -> fossil_graph_schema::Span {
     let range = prop_node
         .children()
         .find(|c| c.kind() == SyntaxKind::EXPR)
         .and_then(|expr| expr.children().next())
         .map_or_else(|| prop_node.text_range(), |inner| inner.text_range());
-    fossil_base::Span::new(range.start().into(), range.end().into())
+    fossil_graph_schema::Span::new(range.start().into(), range.end().into())
 }
 
 /// The mapping's own name, read off its header. Used only in the identity
@@ -423,13 +398,13 @@ fn mapping_name(mapping_node: &SyntaxNode) -> String {
 fn check_identity(
     db: &dyn fossil_base::Db,
     name: &str,
-    subjects: &[(usize, fossil_base::Span)],
+    subjects: &[(usize, fossil_graph_schema::Span)],
     body_node: &SyntaxNode,
 ) {
-    use fossil_base::Problem;
+    use fossil_graph_schema::Problem;
     use salsa::Accumulator as _;
-    let emit = |span: fossil_base::Span, problem: Problem, help: &str| {
-        fossil_base::Diagnostic::new(fossil_base::Severity::Error, problem, span)
+    let emit = |span: fossil_graph_schema::Span, problem: Problem, help: &str| {
+        fossil_base::Diagnostic::new(fossil_graph_schema::Severity::Error, problem, span)
             .with_help(help)
             .accumulate(db);
     };
@@ -437,7 +412,7 @@ fn check_identity(
     let Some(&(index, first_span)) = subjects.first() else {
         let r = body_node.text_range();
         emit(
-            fossil_base::Span::new(r.start().into(), r.end().into()),
+            fossil_graph_schema::Span::new(r.start().into(), r.end().into()),
             Problem::MissingSubject { mapping: mapping() },
             "the first line of a mapping body is `@subject = <expr>`",
         );

@@ -44,7 +44,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use census::ProgramCensus;
-use fossil_base::{Problem, Severity};
+use fossil_graph_schema::{Problem, Severity};
 
 /// One program of the set.
 struct Program {

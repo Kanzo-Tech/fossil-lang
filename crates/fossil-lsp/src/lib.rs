@@ -41,7 +41,7 @@
 //!   `Setter` (`set_text`), which BUMPS THE REVISION — the real cancellation
 //!   trigger (NOT a fictional `db.cancel_pending()`) — then republishes.
 //! - `textDocument/didClose` → forgets the buffer and publishes an empty list.
-//! - `textDocument/hover` → [`fossil_ide::hover_bidirectional`] (the
+//! - `textDocument/hover` → [`fossil_ide::hover`] (the
 //!   target-side `ShEx` type is reachable whenever the program names its output
 //!   document — the editor supplies a filesystem, not a contract).
 //! - `textDocument/definition` → [`fossil_ide::goto_definition`] → `Location`s.
@@ -93,7 +93,7 @@ use lsp_types::request::{
 use lsp_types::{
     CodeActionProviderCapability, CompletionOptions, Diagnostic as LspDiagnostic,
     DocumentSymbolResponse, GotoDefinitionResponse, Hover, HoverContents, HoverProviderCapability,
-    Location, MarkupContent, MarkupKind, OneOf, PublishDiagnosticsParams, Range, SemanticTokens,
+    Location, MarkupContent, MarkupKind, OneOf, PublishDiagnosticsParams, SemanticTokens,
     SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, Uri, WorkDoneProgressOptions,
@@ -105,7 +105,7 @@ use lsp_types::{
 /// name, and the table of introspected input schemas. The LSP COMPILES
 /// programs, so it installs the same rows the native engine does: without them
 /// every program checks against no output contract, and the target-side halves
-/// of [`fossil_ide::hover_bidirectional`] / [`fossil_ide::completions`] go
+/// of [`fossil_ide::hover`] / [`fossil_ide::completions`] go
 /// quietly empty for exactly the programs that declare a shape.
 ///
 /// It replaced `fossil_base::test_support::NativeSystem`, whose decoder table is the trait
@@ -165,23 +165,23 @@ impl System for LspSystem {
 /// answer there is `None`, and the document arrives — if it arrives — when the
 /// client opens it.
 ///
-/// Percent-escapes are NOT decoded. A workspace path containing one is read
-/// wrong today; the fix is a URI type at this seam, not a hand-rolled decoder.
+/// The URL Standard decodes it: a `%20` in the key is a space on disk.
 fn local_path(key: &str) -> Option<PathBuf> {
-    if let Some(rest) = key.strip_prefix("file://") {
-        return Some(PathBuf::from(rest));
+    if !key.contains("://") {
+        return Some(PathBuf::from(key));
     }
-    if key.contains("://") {
-        return None;
-    }
-    Some(PathBuf::from(key))
+    url::Url::parse(key)
+        .ok()
+        .filter(|u| u.scheme() == "file")?
+        .to_file_path()
+        .ok()
 }
 
 /// The LSP database.
 ///
 /// A `#[salsa::db]` struct carrying the Salsa runtime, the host [`System`] and
 /// the file registry. The target shape reaches
-/// [`fossil_ide::hover_bidirectional`] / [`fossil_ide::completions`] because
+/// [`fossil_ide::hover`] / [`fossil_ide::completions`] because
 /// the PROGRAM names its output document and this host REGISTERS it — as a
 /// Salsa input, so an edit to the document re-checks the programs that read it.
 #[salsa::db]
@@ -504,7 +504,7 @@ pub fn handle_request(state: &LspState, req: Request) -> Response {
     }
 }
 
-/// `textDocument/hover` → [`fossil_ide::hover_bidirectional`] (target-aware
+/// `textDocument/hover` → [`fossil_ide::hover`] (target-aware
 /// whenever the program names an output document). Renders Markdown with a
 /// UTF-16 range.
 fn handle_hover(state: &LspState, req: Request) -> Response {
@@ -518,13 +518,16 @@ fn handle_hover(state: &LspState, req: Request) -> Response {
     let Some(file) = state.get(uri) else {
         return null_response(req_id);
     };
-    let info = fossil_ide::hover_bidirectional(&state.db, file, pos.line, pos.character);
+    let info = fossil_ide::hover(&state.db, file, pos.line, pos.character);
     let payload = info.map(|hi| Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
             value: hi.markdown,
         }),
-        range: Some(byte_range_to_lsp_range(&state.db, file, hi.range)),
+        range: Some(fossil_ide::range(
+            fossil_ide::line_index(&state.db, file),
+            hi.range,
+        )),
     });
     result_response(req_id, &payload)
 }
@@ -550,7 +553,7 @@ fn handle_definition(state: &LspState, req: Request) -> Response {
             let target_uri = fossil_ide::file_uri(t.file.path(&state.db))?;
             Some(Location {
                 uri: target_uri,
-                range: byte_range_to_lsp_range(&state.db, t.file, t.range),
+                range: fossil_ide::range(fossil_ide::line_index(&state.db, t.file), t.range),
             })
         })
         .collect();
@@ -591,8 +594,7 @@ fn handle_document_symbol(state: &LspState, req: Request) -> Response {
     result_response(req_id, &DocumentSymbolResponse::Nested(symbols))
 }
 
-/// `textDocument/semanticTokens/full` → [`fossil_ide::semantic_tokens`]
-/// (the spec-mandated flat `Vec<u32>` delta stream).
+/// `textDocument/semanticTokens/full` → [`fossil_ide::semantic_tokens`].
 fn handle_semantic_tokens(state: &LspState, req: Request) -> Response {
     let req_id = req.id.clone();
     let params = match extract::<SemanticTokensFullRequest, _>(req) {
@@ -602,10 +604,9 @@ fn handle_semantic_tokens(state: &LspState, req: Request) -> Response {
     let Some(file) = state.get(&params.text_document.uri) else {
         return null_response(req_id);
     };
-    let data = fossil_ide::semantic_tokens(&state.db, file);
     let payload = SemanticTokensResult::Tokens(SemanticTokens {
         result_id: None,
-        data: decode_to_lsp_tokens(&data),
+        data: fossil_ide::semantic_tokens(&state.db, file),
     });
     result_response(req_id, &payload)
 }
@@ -636,20 +637,6 @@ fn handle_code_action(state: &LspState, req: Request) -> Response {
         .map(lsp_types::CodeActionOrCommand::CodeAction)
         .collect();
     result_response(req_id, &payload)
-}
-
-/// Convert the flat `fossil_ide::semantic_tokens` `Vec<u32>` 5-tuple stream
-/// into the `lsp_types::SemanticToken` struct list (`SemanticTokens.data`).
-fn decode_to_lsp_tokens(data: &[u32]) -> Vec<lsp_types::SemanticToken> {
-    data.chunks_exact(5)
-        .map(|c| lsp_types::SemanticToken {
-            delta_line: c[0],
-            delta_start: c[1],
-            length: c[2],
-            token_type: c[3],
-            token_modifiers_bitset: c[4],
-        })
-        .collect()
 }
 
 /// Decode the params of a request typed by `R`. On a decode failure the `Err`
@@ -818,12 +805,6 @@ fn publish(uri: &Uri, diagnostics: Vec<LspDiagnostic>) -> Notification {
         // the same impossible failure up through `main_loop`, ending the server.
         params: serde_json::to_value(&params).expect("PublishDiagnosticsParams serialises"),
     }
-}
-
-/// Translate a byte-offset range (from a `fossil-ide` feature) to a UTF-16 LSP
-/// `Range`, resolving the file's memoised `LineIndex` first.
-fn byte_range_to_lsp_range(db: &LspDb, file: SourceFile, range: std::ops::Range<u32>) -> Range {
-    fossil_ide::byte_range_to_range(&fossil_ide::line_index(db, file), range)
 }
 
 /// Thin wrapper around [`Notification::extract`] — typed by `N`'s associated

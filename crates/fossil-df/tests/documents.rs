@@ -145,12 +145,12 @@ fn intern(db: &FossilDb, dir: &Path) -> SourceFile {
     file
 }
 
-fn expects_integer(p: &fossil_base::Problem) -> bool {
-    matches!(p, fossil_base::Problem::PropertyMismatch { expected, .. } if expected == "Integer")
+fn expects_integer(p: &fossil_graph_schema::Problem) -> bool {
+    matches!(p, fossil_graph_schema::Problem::PropertyMismatch { expected, .. } if expected == "Integer")
 }
 
 /// Every mapping's diagnostics, drained the way `check` drains them.
-fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<fossil_base::Problem> {
+fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<fossil_graph_schema::Problem> {
     let def_map = fossil_hir::def_map::def_map(db, file);
     let mut out = Vec::new();
     for mapping in def_map.mappings(db) {

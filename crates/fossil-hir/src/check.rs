@@ -36,7 +36,8 @@
 //! produces an [`ErrorGuaranteed`]. `typecheck_mapping` returns `Err` when the
 //! body has even one type error.
 
-use fossil_base::{Diagnostic, ErrorGuaranteed, Problem, Severity, SourceFile, Span, SpanFrame};
+use fossil_base::{Diagnostic, ErrorGuaranteed, SourceFile, SpanFrame};
+use fossil_graph_schema::{Problem, Severity, Span};
 use salsa::Accumulator;
 use smol_str::SmolStr;
 
@@ -759,7 +760,10 @@ impl Checker<'_> {
                     .find(|p| {
                         p.descendants_with_tokens()
                             .filter_map(fossil_syntax::SyntaxElement::into_token)
-                            .any(|t| t.kind() == SyntaxKind::AT_ATTR && t.text() == "@subject")
+                            .any(|t| {
+                                t.kind() == SyntaxKind::AT_ATTR
+                                    && t.text() == fossil_syntax::attr::SUBJECT
+                            })
                     })?
                     .children()
                     .find(|c| c.kind() == SyntaxKind::EXPR)

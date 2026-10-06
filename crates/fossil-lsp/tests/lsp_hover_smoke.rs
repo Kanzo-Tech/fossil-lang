@@ -166,8 +166,9 @@ fn lsp_hover_on_the_identity_returns_markdown_naming_a_reference() {
 // `result.contents.value` would carry over JSON-RPC.
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{FossilDb, Span, System};
+use fossil_base::{FossilDb, System};
 use fossil_graph_schema::Primitive;
+use fossil_graph_schema::Span;
 use fossil_hir::body::ExprId;
 use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};
 use fossil_hir::ty::{Ty, TyKind};
@@ -241,7 +242,7 @@ fn hover_on_introspected_fieldref_outside_closure() {
         },
     };
 
-    let md = fossil_ide::hover::render_markdown(&db, &entry);
+    let md = fossil_ide::hover::render_markdown(&db, &entry, None);
     assert!(
         md.contains("String"),
         "hover on an introspected FieldRef must show the field type `String`; got {md:?}",

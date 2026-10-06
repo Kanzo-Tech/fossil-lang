@@ -68,27 +68,27 @@ export interface CheckRowBase {
    */
   suggestion?: string;
   /**
-   * Fixed per code — `fossil_base::Problem::title`.
+   * Fixed per code — `fossil_graph_schema::Problem::title`.
    */
   title: string;
   uri: string;
 }
 
 /**
+ * What a completion candidate is: the two LSP `CompletionItemKind`s `fossil-ide` emits, by their
+ * LSP names.
+ *
+ * A name and not a number, because the predecessor of `packages/codemirror-fossil` is what happens
+ * when a number crosses this boundary: it hard-copied the lexer's discriminants into a TS enum and
+ * was wrong in nine places by the time it was deleted. And these two and not the specification's
+ * twenty-five, because a variant nothing emits is a row of a table on each side of the boundary
+ * that nothing can exercise. A third kind is a variant here, and the generated union makes the
+ * editor's table say what it is.
+ */
+export type CompletionKind = 'function' | 'field';
+
+/**
  * One completion candidate.
- *
- * # `kind` is a NAME, and that is the whole reason this type exists
- *
- * LSP spells `CompletionItemKind` as an integer, and the predecessor of
- * `packages/codemirror-fossil` is what happens when a number crosses this boundary: it hard-copied
- * the lexer's discriminants into a TS enum and was wrong in nine places by the time it was deleted.
- * The numbers here are the LSP spec's rather than fossil's, so they are not going to be renumbered
- * — but the table that reads them would still live in TypeScript, where nothing can check it.
- * `kind_name` puts it in Rust, where `every_lsp_kind_has_a_name` does.
- *
- * The name is the LSP constant, lowercased (`FUNCTION` → `"function"`, `ENUM_MEMBER` →
- * `"enum_member"`). Mapping it onto whatever vocabulary an editor draws icons from is that editor's
- * layer's job.
  */
 export interface CompletionRow {
   /**
@@ -103,9 +103,9 @@ export interface CompletionRow {
    */
   insert: string;
   /**
-   * The LSP kind, by name; `""` when the item carries none.
+   * Absent when the item carries no kind.
    */
-  kind: string;
+  kind?: CompletionKind;
   label: string;
 }
 
@@ -179,10 +179,10 @@ export interface GrantPlan {
  * What is under the cursor, rendered — the payload of `textDocument/hover` with the LSP envelope
  * taken off.
  *
- * `markdown` is `fossil_ide::hover_bidirectional`'s: a ```` ```fossil ```` fence, the source-side
- * type and where it came from, and — when the program names an output document that resolves —
- * a second block with the type the shape demands of that predicate. `range` is UTF-16, because a JS
- * host counts in UTF-16 and LSP does too.
+ * `markdown` is `fossil_ide::hover`'s: a ```` ```fossil ```` fence, the source-side type and where
+ * it came from, and — when the program names an output document that resolves — a second block
+ * with the type the shape demands of that predicate. `range` is UTF-16, because a JS host counts in
+ * UTF-16 and LSP does too.
  */
 export interface HoverRow {
   markdown: string;
@@ -395,9 +395,9 @@ export type Scope = {
  * than the LSP delta stream.
  *
  * `kind` and `modifiers` are the legend's NAMES (`"type"`, `"declaration"`), for the reason
- * `CompletionRow::kind` is one: the number is an index into a table, and the table belongs on the
- * side that can check it. `range` is UTF-16, like every other range on this surface, and unlike the
- * LSP stream it may cross a line — a multi-line string is one row.
+ * `CompletionKind` is one: the number is an index into a table, and the table belongs on the side
+ * that can check it. `range` is UTF-16, like every other range on this surface, and unlike the LSP
+ * stream it may cross a line — a multi-line string is one row.
  *
  * The rows are in source order and never overlap; a connection reference is carved out of its
  * string literal, so `"@warehouse/x.csv"` is three rows.

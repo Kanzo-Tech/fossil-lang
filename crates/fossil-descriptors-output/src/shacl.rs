@@ -92,13 +92,10 @@
 use std::collections::BTreeMap;
 
 use fossil_graph_schema::{Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape};
+use oxrdf::vocab::rdf;
 use oxrdf::{NamedOrBlankNode, Term};
 use oxttl::TurtleParser;
 
-const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
-const RDF_FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
-const RDF_REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
-const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
 const SH_NODE_SHAPE: &str = "http://www.w3.org/ns/shacl#NodeShape";
 const SH_TARGET_CLASS: &str = "http://www.w3.org/ns/shacl#targetClass";
 const SH_PROPERTY: &str = "http://www.w3.org/ns/shacl#property";
@@ -122,6 +119,11 @@ struct Obj {
 /// A minimal in-memory triple store: `subject → predicate → objects`, plus the
 /// order subjects first appeared. Enough to walk SHACL's shape/property/list
 /// structure without an RDF database.
+///
+/// Not `oxrdf::Graph`: its indexes are sorted sets, so the objects of
+/// `sh:property` come back ordered by blank-node id — which the parser
+/// randomises — and a shape's predicates would change order from run to run.
+/// Both orders here are the document's.
 struct Store {
     by_subject: BTreeMap<String, BTreeMap<String, Vec<Obj>>>,
     /// Subjects in first-appearance order — see the module docs on why the map's
@@ -176,18 +178,22 @@ impl Store {
         let mut out = Vec::new();
         let mut cur = head.to_string();
         let mut guard = 0;
-        while cur != RDF_NIL && guard <= self.by_subject.len() {
+        while cur != rdf::NIL.as_str() && guard <= self.by_subject.len() {
             guard += 1;
             // Clone out of each borrow before reassigning `cur`, so the iterator
             // temporary (which borrows `cur`) is dropped first (E0506).
             if let Some(first) = self
-                .objects(&cur, RDF_FIRST)
+                .objects(&cur, rdf::FIRST.as_str())
                 .next()
                 .map(|o| o.value.clone())
             {
                 out.push(first);
             }
-            let Some(rest) = self.objects(&cur, RDF_REST).next().map(|o| o.value.clone()) else {
+            let Some(rest) = self
+                .objects(&cur, rdf::REST.as_str())
+                .next()
+                .map(|o| o.value.clone())
+            else {
                 break;
             };
             cur = rest;
@@ -216,7 +222,7 @@ pub fn decode_shacl(_uri: &str, turtle: &str) -> Result<OutputShapes, Rejection>
             continue;
         };
         let is_node_shape = store
-            .objects(subject, RDF_TYPE)
+            .objects(subject, rdf::TYPE.as_str())
             .any(|o| o.value == SH_NODE_SHAPE)
             || preds.contains_key(SH_TARGET_CLASS)
             || preds.contains_key(SH_PROPERTY);
@@ -250,7 +256,11 @@ pub fn decode_shacl(_uri: &str, turtle: &str) -> Result<OutputShapes, Rejection>
                 span: None,
             });
         }
-        shapes.push(Shape { iri, properties });
+        shapes.push(Shape {
+            iri,
+            properties,
+            span: None,
+        });
     }
 
     Ok(OutputShapes::new(shapes, Vec::new()))

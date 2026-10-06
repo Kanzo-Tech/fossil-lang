@@ -33,7 +33,7 @@ fossil-storage = { path = "../fossil-storage" }
 
 # The engine that DESCRIBES, on this side of the seam. The browser's side is the
 # host's DuckDB-WASM, reached through `@fossil-lang/introspect` — same engine,
-# same dialect, which is what keeps `rust-parity.test.ts` meaningful.
+# same dialect, which is what lets both sides read their type table out of `catalogue.bnf`.
 duckdb = { workspace = true }
 
 smol_str = { workspace = true }

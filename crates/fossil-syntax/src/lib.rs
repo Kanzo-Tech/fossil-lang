@@ -20,6 +20,15 @@ pub mod name;
 pub mod parser;
 
 pub use kind::{FossilLang, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
+
+/// The `@` attributes `grammar.bnf` defines, spelled as an `AT_ATTR` token's
+/// text.
+pub mod attr {
+    /// `@subject = "…"` — a mapping's identity.
+    pub const SUBJECT: &str = "@subject";
+    /// `@rename(Shape, "iri" as name)` — above a `type` binding.
+    pub const RENAME: &str = "@rename";
+}
 pub use parser::{Cst, CstRoot, parse};
 
 #[cfg(test)]

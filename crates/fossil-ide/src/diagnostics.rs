@@ -30,14 +30,14 @@
 //! opened the buffer under; see [`crate::related`] for why turning one of those
 //! into a URI is not always possible.
 
-use fossil_base::{Db, Diagnostic, Severity, SourceFile, Span};
+use fossil_base::{Db, Diagnostic, SourceFile};
+use fossil_graph_schema::Severity;
 use lsp_types::{
     CodeDescription, Diagnostic as LspDiagnostic, DiagnosticRelatedInformation, DiagnosticSeverity,
     Location, NumberOrString, Range, Uri,
 };
 
-use crate::line_index::LineIndex;
-use crate::position::{line_index, offset_to_lsp_position};
+use crate::position::{LineIndex, line_index, range};
 use crate::related::related_locations;
 
 /// Every diagnostic `file` produces, from the one implementation of that
@@ -103,7 +103,7 @@ pub fn lsp_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<LspDiagnostic> {
     let index = line_index(db, file);
     diagnostics(db, file)
         .iter()
-        .map(|d| lsp_diagnostic(db, file, &index, d))
+        .map(|d| lsp_diagnostic(db, file, index, d))
         .collect()
 }
 
@@ -111,7 +111,7 @@ pub fn lsp_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<LspDiagnostic> {
 ///
 /// Byte spans become UTF-16 ranges. `message` is the problem rendered and
 /// nothing else; `code` is its code, `codeDescription.href` the code's page
-/// ([`fossil_base::Problem::help_url`]), and `data` the rest of it —
+/// ([`fossil_graph_schema::Problem::help_url`]), and `data` the rest of it —
 /// [`DiagnosticData`]. A code action still reads `did_you_mean` and
 /// `suggestion_source` off the re-drained [`diagnostics()`], so the copy in
 /// `data` is for a client that has no drain.
@@ -141,14 +141,14 @@ pub fn lsp_diagnostic(
             Some(DiagnosticRelatedInformation {
                 location: Location {
                     uri: file_uri(r.file.path(db))?,
-                    range: span_to_range(&line_index(db, r.file), r.span),
+                    range: range(line_index(db, r.file), r.span),
                 },
                 message: r.text,
             })
         })
         .collect();
     LspDiagnostic {
-        range: span_to_range(index, d.span),
+        range: range(index, d.span),
         severity: Some(severity(d.severity)),
         code: Some(NumberOrString::String(d.problem.code().into())),
         code_description: Uri::from_str(&d.problem.help_url())
@@ -168,7 +168,7 @@ pub fn lsp_diagnostic(
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticData {
-    /// Fixed per code — [`fossil_base::Problem::title`].
+    /// Fixed per code — [`fossil_graph_schema::Problem::title`].
     pub title: &'static str,
     /// The problem's `data`: the values its message interpolates, typed per
     /// code by `ProblemData` in `@fossil-lang/types`.
@@ -207,7 +207,7 @@ impl DiagnosticData {
             data,
             help: d.help.clone(),
             did_you_mean: d.did_you_mean.as_ref().map(|m| Replacement {
-                range: span_to_range(index, m.wrong_span),
+                range: range(index, m.wrong_span),
                 replacement: m.replacement.clone(),
             }),
             suggestion: d.suggestion_source.clone(),
@@ -235,37 +235,11 @@ impl DiagnosticData {
 pub fn file_uri(key: &str) -> Option<Uri> {
     use std::str::FromStr as _;
     if key.contains("://") {
-        Uri::from_str(key).ok()
-    } else {
-        Uri::from_str(&format!("file:///{}", key.trim_start_matches('/'))).ok()
+        return Uri::from_str(key).ok();
     }
-}
-
-/// A byte-offset [`Span`] as a UTF-16 LSP [`Range`].
-#[must_use]
-pub fn span_to_range(index: &LineIndex, span: Span) -> Range {
-    Range {
-        start: position(index, span.start),
-        end: position(index, span.end),
-    }
-}
-
-/// A byte-offset range (what the feature functions return) as a UTF-16 LSP
-/// [`Range`].
-#[must_use]
-pub fn byte_range_to_range(index: &LineIndex, range: std::ops::Range<u32>) -> Range {
-    Range {
-        start: position(index, range.start),
-        end: position(index, range.end),
-    }
-}
-
-fn position(index: &LineIndex, offset: u32) -> lsp_types::Position {
-    let p = offset_to_lsp_position(index, offset);
-    lsp_types::Position {
-        line: p.line,
-        character: p.character,
-    }
+    let mut url = url::Url::parse("file:///").ok()?;
+    url.set_path(key);
+    Uri::from_str(url.as_str()).ok()
 }
 
 const fn severity(s: Severity) -> DiagnosticSeverity {
@@ -292,5 +266,16 @@ mod tests {
             Some("file:///w/main.fossil")
         );
         assert_eq!(uri("untitled://x").as_deref(), Some("untitled://x"));
+    }
+
+    /// The path is percent-encoded the way the URL Standard encodes one: a space
+    /// in a workspace path is `%20`, not a URI that fails to parse.
+    #[test]
+    fn a_bare_key_is_percent_encoded() {
+        let uri = |k| file_uri(k).map(|u| u.as_str().to_owned());
+        assert_eq!(
+            uri("/my work/a b.fossil").as_deref(),
+            Some("file:///my%20work/a%20b.fossil")
+        );
     }
 }

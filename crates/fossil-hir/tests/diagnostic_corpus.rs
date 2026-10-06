@@ -299,6 +299,7 @@ fn shape(iri: &str, properties: Vec<PropertyConstraint>) -> Shape {
     Shape {
         iri: iri.to_string(),
         properties,
+        span: None,
     }
 }
 

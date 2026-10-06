@@ -37,9 +37,8 @@
 //!
 //! [`ShExDescriptor::to_graph_schema`] goes through it rather than beside it, so
 //! there is one lowering and not two. The `ShEx`-typed surface
-//! ([`ShapeBinding`], [`ResolvedConstraint`], [`ConstraintValue`]) stays for the
-//! callers that genuinely want the AST — the INPUT descriptor derives source
-//! column types from it.
+//! ([`ShapeBinding`], [`ResolvedConstraint`]) is what the lowering produces on
+//! the way.
 //!
 //! Re-emitting Fossil syntax is NOT among them, and the reasoning that it
 //! «only a crate that knows the syntax can do» was wrong: the suggestion needs
@@ -102,10 +101,12 @@ pub struct ShapeBinding {
 pub struct ResolvedConstraint {
     /// The predicate IRI (after prefix resolution).
     pub predicate: IriS,
-    /// The `valueExpr` clause from the `ShEx` `TripleConstraint`, kept opaque
-    /// for now — the bidirectional checker narrows this into a `Ty<'db>` against the
-    /// `Primitive` lattice.
-    pub value_expr: Option<ShapeExpr>,
+    /// The datatype the `valueExpr` narrows the value to —
+    /// [`PropertyConstraint::datatype`]'s contract, see [`datatype_of`].
+    pub datatype: Option<Primitive>,
+    /// The destination shape IRIs — [`PropertyConstraint::targets`], see
+    /// [`edge_targets`].
+    pub targets: Vec<String>,
     /// How many values the predicate may carry, decoded from `ShEx`'s
     /// `(min, max)` integer encoding by [`occurs_from_shex`].
     pub cardinality: Occurs,
@@ -148,87 +149,36 @@ pub fn occurs_from_shex(min: Option<i32>, max: Option<i32>) -> Occurs {
     }
 }
 
-/// The Fossil-relevant narrowing of a [`ResolvedConstraint`]'s `ShEx` `valueExpr`.
-///
-/// `ShEx`'s `valueExpr` is a full `ShapeExpr` lattice; Fossil only needs to know,
-/// per property, whether the value is a typed literal (→ a scalar column of a
-/// known primitive), an IRI / object reference (→ an edge / IRI-valued column),
-/// or something it cannot narrow yet. This is the single decode of that
-/// question, shared by the INPUT descriptor (deriving source column types,
-/// compile-time) and the OUTPUT bidirectional checker.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConstraintValue {
-    /// A literal constrained to this datatype IRI (e.g.
-    /// `http://www.w3.org/2001/XMLSchema#integer`). The consumer maps the IRI
-    /// to its own type lattice.
-    Datatype(String),
-    /// An IRI-valued node (`nodeKind IRI`) or a reference to another shape — an
-    /// object property. The value is the referenced subject's IRI. (What turns a
-    /// shape-ref into a typed corpus edge is `edge_targets` filling
-    /// [`PropertyConstraint::targets`], which
-    /// `fossil_graph_schema::OutputShapes::to_graph_schema` reads; this INPUT
-    /// narrowing only needs "is it an IRI".)
-    Iri,
-    /// Could not be narrowed (`ShapeAnd`/`ShapeOr`/`ShapeNot`/external, or no
-    /// `valueExpr` at all). Consumers treat this as an opaque string.
-    Unknown,
-}
-
-impl ResolvedConstraint {
-    /// Narrow this constraint's `ShEx` `valueExpr` to the Fossil-relevant value
-    /// kind. See [`ConstraintValue`].
-    #[must_use]
-    pub fn value(&self) -> ConstraintValue {
-        match &self.value_expr {
-            Some(ShapeExpr::NodeConstraint(nc)) => nc.datatype().map_or_else(
-                || {
-                    if matches!(nc.node_kind(), Some(NodeKind::Iri)) {
-                        ConstraintValue::Iri
-                    } else {
-                        ConstraintValue::Unknown
-                    }
-                },
-                |dt| ConstraintValue::Datatype(iri_ref_to_string(&dt)),
-            ),
-            // A reference to another shape, or an inline nested shape, is an
-            // object property: its value is the referenced subject's IRI.
-            Some(ShapeExpr::Ref(_) | ShapeExpr::Shape(_)) => ConstraintValue::Iri,
-            _ => ConstraintValue::Unknown,
-        }
-    }
-}
-
-/// Render a [`ShapeExprLabel`] to its IRI string (an edge's destination shape).
-/// Full IRIs render verbatim; a rare `Prefixed` form keeps `prefix:local`; a
-/// blank-node label renders as its `_:id`.
-fn shape_label_iri(label: &ShapeExprLabel) -> String {
-    match label {
-        ShapeExprLabel::IriRef { value } => match value {
-            IriRef::Iri(iri) => iri.to_string(),
-            IriRef::Prefixed { prefix, local } => format!("{prefix}:{local}"),
-        },
-        ShapeExprLabel::BNode { value } => value.to_string(),
-        ShapeExprLabel::Start => String::new(),
-    }
-}
-
 /// The destination shape IRIs of an edge constraint — empty for a literal/opaque
 /// property. A single shape `Ref` yields one; a value disjunction `@<A> OR @<B>`
 /// (`ShapeOr` of refs) yields all of them, so the canonical model emits one edge
 /// type per destination. `ShapeAnd`/`ShapeNot`/`NodeConstraint`/inline `Shape`
 /// are not inter-shape edges.
-fn edge_targets(value_expr: Option<&ShapeExpr>) -> Vec<String> {
-    match value_expr {
-        Some(ShapeExpr::Ref(label)) => vec![shape_label_iri(label)],
+fn edge_targets(
+    value_expr: Option<&ShapeExpr>,
+    prefixmap: &PrefixMap,
+) -> Result<Vec<String>, ShExLoweringError> {
+    let labels: Vec<&ShapeExprLabel> = match value_expr {
+        Some(ShapeExpr::Ref(label)) => vec![label],
         Some(ShapeExpr::ShapeOr { shape_exprs }) => shape_exprs
             .iter()
             .filter_map(|w| match &w.se {
-                ShapeExpr::Ref(label) => Some(shape_label_iri(label)),
+                ShapeExpr::Ref(label) => Some(label),
                 _ => None,
             })
             .collect(),
         _ => Vec::new(),
-    }
+    };
+    labels
+        .into_iter()
+        .filter_map(|label| match label {
+            ShapeExprLabel::IriRef { value } => {
+                Some(resolve_iri_ref(value, prefixmap).map(|iri| iri.to_string()))
+            }
+            ShapeExprLabel::BNode { value } => Some(Ok(value.to_string())),
+            ShapeExprLabel::Start => None,
+        })
+        .collect()
 }
 
 /// The datatype a constraint's `valueExpr` narrows the value to, or `None` when
@@ -245,13 +195,18 @@ fn edge_targets(value_expr: Option<&ShapeExpr>) -> Vec<String> {
 /// for those cases — the permissive walking-skeleton column. The `Option` is
 /// what lets a consumer tell "the document said `String`" from "the document
 /// said nothing", which a bare `Primitive::String` cannot.
-fn datatype_of(value_expr: Option<&ShapeExpr>) -> Option<Primitive> {
-    match value_expr {
-        Some(ShapeExpr::NodeConstraint(nc)) => nc.datatype().map_or_else(
-            || matches!(nc.node_kind(), Some(NodeKind::Iri)).then_some(Primitive::AnyUri),
-            |dt| Primitive::from_xsd_iri(&iri_ref_to_string(&dt)),
-        ),
-        _ => None,
+fn datatype_of(
+    value_expr: Option<&ShapeExpr>,
+    prefixmap: &PrefixMap,
+) -> Result<Option<Primitive>, ShExLoweringError> {
+    let Some(ShapeExpr::NodeConstraint(nc)) = value_expr else {
+        return Ok(None);
+    };
+    match nc.datatype() {
+        Some(dt) => Ok(Primitive::from_xsd_iri(
+            resolve_iri_ref(&dt, prefixmap)?.as_str(),
+        )),
+        None => Ok(matches!(nc.node_kind(), Some(NodeKind::Iri)).then_some(Primitive::AnyUri)),
     }
 }
 
@@ -309,15 +264,6 @@ fn rejection_of(err: &ShExLoweringError, prefixmap: &PrefixMap) -> Rejection {
             in_shape: in_shape.clone(),
         },
         ShExLoweringError::MalformedSchema(m) => Rejection::Malformed(m.clone()),
-    }
-}
-
-/// Render an [`IriRef`] to its IRI string. Parsed `ShExJ` datatypes are full IRIs
-/// (`IriRef::Iri`); a `Prefixed` form (rare in JSON) falls back to `prefix:local`.
-fn iri_ref_to_string(iri_ref: &IriRef) -> String {
-    match iri_ref {
-        IriRef::Iri(iri) => iri.to_string(),
-        IriRef::Prefixed { prefix, local } => format!("{prefix}:{local}"),
     }
 }
 
@@ -456,8 +402,8 @@ impl ShExDescriptor {
                     .iter()
                     .map(|c| PropertyConstraint {
                         predicate: c.predicate.to_string(),
-                        datatype: datatype_of(c.value_expr.as_ref()),
-                        targets: edge_targets(c.value_expr.as_ref()),
+                        datatype: c.datatype,
+                        targets: c.targets.clone(),
                         occurs: c.cardinality,
                         // The spellings are rudof's, via `qualify`, so nothing
                         // here reads a `PREFIX` declaration a second time —
@@ -472,6 +418,9 @@ impl ShExDescriptor {
                         }),
                     })
                     .collect(),
+                span: self.source.as_deref().and_then(|src| {
+                    crate::spans::shape_span(src, &prefixmap.qualify(&binding.iri))
+                }),
             })
             .collect();
         let rejections = self
@@ -601,7 +550,7 @@ fn lower_shape_decl(
         return None;
     };
 
-    let label_table = build_label_table(shape);
+    let label_table = build_label_table(shape, prefixmap);
 
     let mut visited: Vec<String> = Vec::new();
     let mut constraints: Vec<ResolvedConstraint> = Vec::new();
@@ -632,15 +581,22 @@ fn lower_shape_decl(
 ///
 /// Only inspects directly-nested `TripleExpr::EachOf` / `TripleExpr::OneOf` /
 /// `TripleExpr::TripleConstraint` nodes carrying an explicit `id`.
-fn build_label_table(shape: &Shape) -> HashMap<String, TripleExpr> {
+fn build_label_table(shape: &Shape, prefixmap: &PrefixMap) -> HashMap<String, TripleExpr> {
     let mut table = HashMap::new();
     if let Some(wrapper) = &shape.expression {
-        collect_labels(&wrapper.te, &mut table);
+        collect_labels(&wrapper.te, prefixmap, &mut table);
     }
     table
 }
 
-fn collect_labels(expr: &TripleExpr, table: &mut HashMap<String, TripleExpr>) {
+/// A label whose prefix the schema never declared is left out of the table:
+/// the `Ref` that names it fails to resolve the same way, and that is where the
+/// error is reported.
+fn collect_labels(
+    expr: &TripleExpr,
+    prefixmap: &PrefixMap,
+    table: &mut HashMap<String, TripleExpr>,
+) {
     match expr {
         TripleExpr::EachOf {
             id, expressions, ..
@@ -648,16 +604,16 @@ fn collect_labels(expr: &TripleExpr, table: &mut HashMap<String, TripleExpr>) {
         | TripleExpr::OneOf {
             id, expressions, ..
         } => {
-            if let Some(label) = id {
-                table.insert(label_to_string(label), expr.clone());
+            if let Some(key) = id.as_ref().and_then(|l| label_key(l, prefixmap).ok()) {
+                table.insert(key, expr.clone());
             }
             for w in expressions {
-                collect_labels(&w.te, table);
+                collect_labels(&w.te, prefixmap, table);
             }
         }
         TripleExpr::TripleConstraint { id, .. } => {
-            if let Some(label) = id {
-                table.insert(label_to_string(label), expr.clone());
+            if let Some(key) = id.as_ref().and_then(|l| label_key(l, prefixmap).ok()) {
+                table.insert(key, expr.clone());
             }
         }
         TripleExpr::Ref(_) => {}
@@ -691,9 +647,21 @@ fn walk_triple_expr(
                     return;
                 }
             };
+            let value = value_expr.as_deref();
+            let (datatype, targets) = match (
+                datatype_of(value, prefixmap),
+                edge_targets(value, prefixmap),
+            ) {
+                (Ok(datatype), Ok(targets)) => (datatype, targets),
+                (Err(e), _) | (_, Err(e)) => {
+                    errors.push(e);
+                    return;
+                }
+            };
             out.push(ResolvedConstraint {
                 predicate: pred_iri,
-                value_expr: value_expr.as_ref().map(|b| (**b).clone()),
+                datatype,
+                targets,
                 cardinality: occurs_from_shex(*min, *max),
             });
         }
@@ -726,7 +694,13 @@ fn walk_triple_expr(
             // Stop descending — a `OneOf` cannot be type-checked.
         }
         TripleExpr::Ref(label) => {
-            let key = label_to_string(label);
+            let key = match label_key(label, prefixmap) {
+                Ok(key) => key,
+                Err(e) => {
+                    errors.push(e);
+                    return;
+                }
+            };
             // `visited` is the path of labels being resolved, in order, so the
             // cycle reported is the loop itself — from the label met again,
             // round, and back to it — the same every time.
@@ -792,13 +766,14 @@ fn resolve_iri_ref(iri_ref: &IriRef, prefixmap: &PrefixMap) -> Result<IriS, ShEx
     }
 }
 
-fn label_to_string(label: &TripleExprLabel) -> String {
+/// The key a triple-expression label is declared and referenced under: the IRI
+/// it names, so `:p` and `<http://x/p>` are one label; `_:id` for a blank node.
+fn label_key(label: &TripleExprLabel, prefixmap: &PrefixMap) -> Result<String, ShExLoweringError> {
     match label {
-        TripleExprLabel::IriRef { value } => match value {
-            IriRef::Iri(iri) => iri.to_string(),
-            IriRef::Prefixed { prefix, local } => format!("{prefix}:{local}"),
-        },
-        TripleExprLabel::BNode { value } => value.to_string(),
+        TripleExprLabel::IriRef { value } => {
+            resolve_iri_ref(value, prefixmap).map(|i| i.to_string())
+        }
+        TripleExprLabel::BNode { value } => Ok(value.to_string()),
     }
 }
 
@@ -827,6 +802,24 @@ mod tests {
         };
         let err = resolve_iri_ref(&iri_ref, &PrefixMap::new()).expect_err("ex: is undeclared");
         assert!(matches!(err, ShExLoweringError::MalformedSchema(m) if m.contains("`ex:name`")));
+    }
+
+    /// An edge target resolves through the same prefix table as a predicate,
+    /// so an undeclared prefix rejects the constraint rather than reaching the
+    /// output as the text `other:Shape`. `ShExC`'s parser refuses one first;
+    /// this is the AST a `ShExJ` or hand-built schema can still carry.
+    #[test]
+    fn a_target_under_an_undeclared_prefix_is_malformed() {
+        let target = ShapeExpr::Ref(ShapeExprLabel::IriRef {
+            value: IriRef::Prefixed {
+                prefix: "other".into(),
+                local: "Shape".into(),
+            },
+        });
+        let err = edge_targets(Some(&target), &PrefixMap::new()).expect_err("other: is undeclared");
+        assert!(
+            matches!(err, ShExLoweringError::MalformedSchema(m) if m.contains("`other:Shape`"))
+        );
     }
 
     /// The range survives the whole decode, and it is the range of the

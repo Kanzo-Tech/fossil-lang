@@ -24,7 +24,8 @@
 
 use std::path::{Path, PathBuf};
 
-use fossil_base::{Diagnostic, Problem};
+use fossil_base::Diagnostic;
+use fossil_graph_schema::Problem;
 
 #[path = "support/native.rs"]
 mod native;

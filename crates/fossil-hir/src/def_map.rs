@@ -39,8 +39,30 @@
 //! `HashMap` at the call site (or use the [`DefMap::lookup_source`] helper
 //! added below).
 
-use fossil_base::{SourceFile, Span};
+use fossil_base::SourceFile;
+use fossil_graph_schema::Span;
+use fossil_syntax::{SyntaxKind, SyntaxNode};
 use smol_str::SmolStr;
+
+/// The `MAPPING` nodes under `root`, in written order: the index space
+/// [`MappingLoc::index`] counts in. A `type` or `:=` binding above a mapping
+/// is not counted, and every walk from an index to a node, or back, goes
+/// through here so that no two of them can count differently.
+pub fn mapping_nodes(root: &SyntaxNode) -> impl Iterator<Item = SyntaxNode> {
+    root.children().filter(|n| n.kind() == SyntaxKind::MAPPING)
+}
+
+/// The [`MappingLoc`] of `node`, a `MAPPING` node of `file`'s tree.
+#[must_use]
+pub fn mapping_of<'db>(
+    db: &'db dyn fossil_base::Db,
+    file: SourceFile,
+    node: &SyntaxNode,
+) -> Option<MappingLoc<'db>> {
+    let root = fossil_syntax::parse(db, file).root(db).syntax();
+    let index = mapping_nodes(&root).position(|n| &n == node)?;
+    def_map(db, file).mappings(db).get(index).copied()
+}
 
 #[salsa::interned(debug)]
 pub struct MappingLoc<'db> {
@@ -71,7 +93,7 @@ pub enum ShapeBindError {
     /// The document is named and could not be read as one — nothing is
     /// registered at the path, the provider refused it, or its decoder rejected
     /// it. The problem is `crate::shapes::decoded_document`'s, kept typed.
-    Document(fossil_base::Problem),
+    Document(fossil_graph_schema::Problem),
     /// The binding names more shapes than the document declares. Binding is
     /// POSITIONAL, so this is the check that model gives
     /// away free: the Nth name wants an Nth shape and there is none.
@@ -185,6 +207,10 @@ pub struct SourceEntry<'db> {
     /// already walking these nodes, and structurally stable across body-only
     /// edits — the same argument [`Self::schema_arg`] makes.
     pub span: Span,
+    /// The call right of `:=` — `io.csv("u.csv")` in `users := io.csv("u.csv")`
+    /// — where a problem with the source itself, rather than with its name, is
+    /// underlined. The whole binding when the right-hand side did not parse.
+    pub call_span: Span,
 }
 
 /// One name bound by a type binding (`type { Person, City } := io.shex("s.shex")`).
@@ -491,28 +517,8 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
     let mut mappings: Vec<MappingLoc<'db>> = Vec::new();
     let mut types: Vec<TypeEntry> = Vec::new();
 
-    // Per-kind dense indices.
-    //
-    // CONTRACT: `MappingLoc.index` is the position
-    // of the mapping among MAPPING-kind CST children only, NOT among all
-    // top-level children (which would include SOURCE_DEF /
-    // MULTI_SOURCE_DEF / TYPE_DEF). This MUST match the
-    // ordering convention used by `crate::body::body`, which resolves a
-    // mapping's body via
-    //   cst.root(db).syntax().children()
-    //      .filter(|n| n.kind() == SyntaxKind::MAPPING)
-    //      .nth(loc.index(db))
-    // i.e. filter-then-nth over MAPPING-kind nodes. If THIS loop were
-    // ever changed to use the all-children index (e.g. via `.enumerate()`
-    // on the unfiltered `.children()` iterator), `body()` would silently
-    // resolve to the wrong CST subtree for any file with non-MAPPING
-    // top-level siblings before the target mapping. The
-    // `body_filters_to_mapping_kind_before_indexing` regression test in
-    // `body.rs` enforces this contract end-to-end.
-    //
-    // SOURCE_DEF indexing follows the same per-kind dense scheme for
-    // symmetry; no current downstream consumer depends on the all-children
-    // index space for SOURCE_DEF either.
+    // Per-kind dense indices: `mapping_idx` counts what [`mapping_nodes`]
+    // yields, and SOURCE_DEF follows the same scheme.
     let mut mapping_idx = 0usize;
     let mut source_idx = 0usize;
     for item in cst.root(db).syntax().children() {
@@ -537,6 +543,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         uri,
                         delimiter,
                         span: item_span(&item),
+                        call_span: call_span(&item),
                     });
                     source_idx += 1;
                 }
@@ -624,6 +631,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         // per-member range would need the brace list's tokens
                         // and nothing asks for one.
                         span: item_span(&item),
+                        call_span: call_span(&item),
                     });
                     source_idx += 1;
                 }
@@ -708,9 +716,8 @@ pub(crate) struct SchemaArg {
     pub document: Option<SmolStr>,
     /// The VALUE's own span, so the diagnostic underlines what was written and
     /// not the whole binding. This struct exists for that: the checking side
-    /// (`crate::lower`) may not scan tokens of its own — there is one scanner
-    /// for this argument and it is here, beside the other two.
-    pub span: fossil_base::Span,
+    /// (`crate::lower`) reads the argument through here and nowhere else.
+    pub span: fossil_graph_schema::Span,
 }
 
 /// Extract the `schema =` argument from a `SOURCE_DEF` / `MULTI_SOURCE_DEF`
@@ -730,64 +737,128 @@ pub(crate) struct SchemaArg {
 /// that reads it. A value that is not a call yields `provider: None`, which is
 /// reported with the span below rather than quietly falling back.
 ///
-/// Heuristic token scan (the parser's `NAMED_ARG` / call surface is not yet a
-/// stable structured node): find the `IDENT` `schema`, skip one `=`, then read
-/// the dotted callee run and the first `STRING` that follows it.
-pub(crate) fn parse_schema_arg(node: &fossil_syntax::SyntaxNode) -> Option<SchemaArg> {
-    use fossil_syntax::SyntaxKind;
-    let toks = non_trivia_tokens(node);
-    let at = toks
-        .iter()
-        .position(|t| t.kind() == SyntaxKind::IDENT && t.text() == "schema")?;
-    // The value begins after the `=`; a degenerate `schema "x"` (no binder) is
-    // still read, because the parser may have recovered one away.
-    let start = if toks
-        .get(at + 1)
-        .is_some_and(|t| matches!(t.kind(), SyntaxKind::ASSIGN | SyntaxKind::EQ))
-    {
-        at + 2
-    } else {
-        at + 1
-    };
-    let value = &toks[start.min(toks.len())..];
-    let (provider, document) = parse_call_tokens(value);
-    // The value's extent. A CALL runs to its own closing paren; a BARE STRING is
-    // one token and stops there — taking the first `RPAREN` for that case too
-    // would swallow the OUTER call's `)` and underline `"x.shex")`, which is not
-    // what the author wrote wrong.
-    let first = value.first()?;
-    let last = if provider.is_some() {
-        value
-            .iter()
-            .position(|t| t.kind() == SyntaxKind::RPAREN)
-            .and_then(|i| value.get(i))
-            .unwrap_or(first)
-    } else {
-        first
-    };
+pub(crate) fn parse_schema_arg(node: &SyntaxNode) -> Option<SchemaArg> {
+    let value = Call::of_binding(node)?.named("schema")?.value?;
+    let (provider, document) = Call::of(&value).map_or_else(
+        || (None, string_literal(&value)),
+        |call| (call.callee(), call.positional_string()),
+    );
     Some(SchemaArg {
         provider,
         document,
-        span: fossil_base::Span::new(
-            first.text_range().start().into(),
-            last.text_range().end().into(),
-        ),
+        span: span_of(value.text_range()),
     })
 }
 
-/// The node's tokens with whitespace, newlines and comments dropped — the shape
-/// every scan in this module reads.
-fn non_trivia_tokens(node: &fossil_syntax::SyntaxNode) -> Vec<fossil_syntax::SyntaxToken> {
-    use fossil_syntax::SyntaxKind;
-    node.descendants_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-        .filter(|t| {
-            !matches!(
-                t.kind(),
-                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
-            )
-        })
-        .collect()
+/// A call as the parser built it — `callee(arg, …, name = value, …)`, a
+/// `POSTFIX_EXPR` holding an `ARG_LIST`.
+struct Call {
+    node: SyntaxNode,
+}
+
+/// One `name = value` of a [`Call`].
+struct NamedArg {
+    name: fossil_syntax::SyntaxToken,
+    value: Option<SyntaxNode>,
+}
+
+impl Call {
+    /// `expr` as a call, if it is one.
+    fn of(expr: &SyntaxNode) -> Option<Self> {
+        let node = unwrap_expr(expr.clone())?;
+        node.children()
+            .any(|c| c.kind() == SyntaxKind::ARG_LIST)
+            .then_some(Self { node })
+    }
+
+    /// The call on the right of a binding's `:=`.
+    fn of_binding(binding: &SyntaxNode) -> Option<Self> {
+        Self::of(&binding_rhs(binding)?)
+    }
+
+    /// The dotted callee — `io.csv`.
+    fn callee(&self) -> Option<SmolStr> {
+        let text: String = self
+            .node
+            .first_child()?
+            .descendants_with_tokens()
+            .filter_map(fossil_syntax::SyntaxElement::into_token)
+            .filter(|t| matches!(t.kind(), SyntaxKind::IDENT | SyntaxKind::DOT))
+            .map(|t| t.text().to_owned())
+            .collect();
+        (!text.is_empty()).then(|| SmolStr::from(text))
+    }
+
+    fn args(&self) -> impl Iterator<Item = SyntaxNode> {
+        self.node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::ARG_LIST)
+            .into_iter()
+            .flat_map(|list| list.children())
+    }
+
+    /// The first positional argument, when it is a string literal.
+    fn positional_string(&self) -> Option<SmolStr> {
+        let arg = self.args().find(|a| a.kind() == SyntaxKind::ARG)?;
+        string_literal(&arg.first_child()?)
+    }
+
+    /// Every `name = value`, in written order.
+    fn named_args(&self) -> impl Iterator<Item = NamedArg> {
+        self.args()
+            .filter(|a| a.kind() == SyntaxKind::NAMED_ARG)
+            .filter_map(|a| {
+                Some(NamedArg {
+                    name: a
+                        .children_with_tokens()
+                        .filter_map(fossil_syntax::SyntaxElement::into_token)
+                        .find(|t| t.kind() == SyntaxKind::IDENT)?,
+                    value: a.children().next(),
+                })
+            })
+    }
+
+    fn named(&self, name: &str) -> Option<NamedArg> {
+        self.named_args().find(|a| a.name.text() == name)
+    }
+}
+
+/// The expression on the right of a binding's `:=`, past its `EXPR` wrappers.
+/// [`SourceEntry::call_span`].
+fn call_span(binding: &SyntaxNode) -> Span {
+    binding_rhs(binding).map_or_else(|| item_span(binding), |rhs| item_span(&rhs))
+}
+
+fn binding_rhs(binding: &SyntaxNode) -> Option<SyntaxNode> {
+    unwrap_expr(binding.children().find(|c| c.kind() == SyntaxKind::EXPR)?)
+}
+
+/// `node` past any `EXPR` wrapper — the node that says what the expression is.
+fn unwrap_expr(node: SyntaxNode) -> Option<SyntaxNode> {
+    std::iter::successors(Some(node), |n| {
+        (n.kind() == SyntaxKind::EXPR)
+            .then(|| n.first_child())
+            .flatten()
+    })
+    .find(|n| n.kind() != SyntaxKind::EXPR)
+}
+
+/// The contents of a string literal, unquoted; `None` for anything else.
+fn string_literal(expr: &SyntaxNode) -> Option<SmolStr> {
+    let expr = unwrap_expr(expr.clone())?;
+    if expr.kind() != SyntaxKind::LITERAL_EXPR {
+        return None;
+    }
+    let token = expr
+        .first_token()
+        .filter(|t| t.kind() == SyntaxKind::STRING)?;
+    Some(SmolStr::from(
+        token.text().trim_start_matches('"').trim_end_matches('"'),
+    ))
+}
+
+fn span_of(range: rowan::TextRange) -> Span {
+    Span::new(range.start().into(), range.end().into())
 }
 
 /// Extract the source constructor's dotted callee name and first positional
@@ -795,23 +866,21 @@ fn non_trivia_tokens(node: &fossil_syntax::SyntaxNode) -> Vec<fossil_syntax::Syn
 /// `users := io.csv("examples/users.csv")` → `(Some("io.csv"),
 /// Some("examples/users.csv"))`.
 ///
-/// Like [`parse_schema_arg`] this reads ONLY the `SOURCE_DEF` header
-/// tokens (the call expression on the right of `:=`), never any mapping body, so it
-/// is signatures-only and does NOT widen the per-mapping `body()`
-/// fan-out. The `def_map` query is file-keyed and structurally stable across
-/// body-only edits (`tests/invalidation_regression.rs`).
+/// Like [`parse_schema_arg`] this reads ONLY the call on the right of `:=`,
+/// never any mapping body, so it is signatures-only and does NOT widen the
+/// per-mapping `body()` fan-out (`tests/invalidation_regression.rs`).
 ///
-/// Heuristic token scan (the parser's call surface is not yet a stable
-/// structured node):
-/// - the callee is the dotted run of `IDENT`s separated by `DOT` that begins
-///   AFTER the `ASSIGN` token (skips the bound name's IDENT before `:=`);
-/// - the URI is the FIRST `STRING` token, but only when it is POSITIONAL — a
-///   `STRING` immediately preceded by `=`/`ASSIGN` is a named-argument value
-///   (e.g. `schema = io.shex("x.shex")`) and is skipped.
-pub(crate) fn parse_source_call(
-    node: &fossil_syntax::SyntaxNode,
-) -> (Option<SmolStr>, Option<SmolStr>) {
-    parse_call_after(node, fossil_syntax::SyntaxKind::DEFINE)
+/// A right-hand side that is not a call — `type { Person } := "person.shex"` —
+/// gives no callee and its string as the document, which is what lets the
+/// refusal name the document no provider reads.
+pub(crate) fn parse_source_call(node: &SyntaxNode) -> (Option<SmolStr>, Option<SmolStr>) {
+    let Some(rhs) = binding_rhs(node) else {
+        return (None, None);
+    };
+    Call::of(&rhs).map_or_else(
+        || (None, string_literal(&rhs)),
+        |call| (call.callee(), call.positional_string()),
+    )
 }
 
 /// The name of the READER OPTION `constructor`'s catalogue row declares, if it
@@ -850,7 +919,7 @@ pub(crate) fn reader_option_of(constructor: &str) -> Option<&'static SmolStr> {
 pub(crate) fn reader_option_names() -> Vec<(&'static SmolStr, &'static SmolStr)> {
     crate::stdlib::stdlib()
         .iter()
-        .filter(|e| e.name.starts_with("io."))
+        .filter(|e| e.name.starts_with(fossil_base::CONSTRUCTOR_PREFIX))
         .filter_map(|e| {
             e.sig
                 .params
@@ -878,144 +947,41 @@ pub(crate) struct ReaderOptionArg {
 /// Read the reader option a `SOURCE_DEF` / `MULTI_SOURCE_DEF` header wrote,
 /// under the name the CONSTRUCTOR's row declares.
 ///
-/// The same heuristic token scan as [`parse_schema_arg`] and for the same
-/// reason — the parser's `NAMED_ARG` surface is not yet a stable structured
-/// node — narrowed to the one shape a reader option has: `IDENT` `=` `STRING`.
-///
 /// `None` means the row declares no option, or the header wrote none. A row
 /// that declares one and a header that wrote it with a value that is not a
 /// string literal gives `Some` with `value: None`, which is a thing to report
 /// rather than a thing to skip.
 ///
-/// Signature-only: it reads the header tokens and never a mapping body, so it
-/// does not widen the per-mapping `body()` fan-out.
+/// Signature-only: it reads the header and never a mapping body, so it does
+/// not widen the per-mapping `body()` fan-out.
 pub(crate) fn parse_reader_option(
-    node: &fossil_syntax::SyntaxNode,
+    node: &SyntaxNode,
     constructor: Option<&SmolStr>,
 ) -> Option<ReaderOptionArg> {
-    use fossil_syntax::SyntaxKind;
     let name = reader_option_of(constructor?)?;
-    let toks = non_trivia_tokens(node);
-    let at = toks
-        .iter()
-        .position(|t| t.kind() == SyntaxKind::IDENT && t.text() == name.as_str())?;
-    let ident = &toks[at];
-    let ident_span = Span::new(
-        ident.text_range().start().into(),
-        ident.text_range().end().into(),
-    );
-    if !toks
-        .get(at + 1)
-        .is_some_and(|t| matches!(t.kind(), SyntaxKind::ASSIGN | SyntaxKind::EQ))
-    {
-        return Some(ReaderOptionArg {
+    let arg = Call::of_binding(node)?.named(name)?;
+    Some(match arg.value {
+        Some(value) => ReaderOptionArg {
+            name,
+            value: string_literal(&value),
+            span: span_of(value.text_range()),
+        },
+        None => ReaderOptionArg {
             name,
             value: None,
-            span: ident_span,
-        });
-    }
-    let Some(value) = toks.get(at + 2) else {
-        return Some(ReaderOptionArg {
-            name,
-            value: None,
-            span: ident_span,
-        });
-    };
-    let span = Span::new(
-        value.text_range().start().into(),
-        value.text_range().end().into(),
-    );
-    if value.kind() != SyntaxKind::STRING {
-        return Some(ReaderOptionArg {
-            name,
-            value: None,
-            span,
-        });
-    }
-    Some(ReaderOptionArg {
-        name,
-        value: Some(SmolStr::from(
-            value.text().trim_start_matches('"').trim_end_matches('"'),
-        )),
-        span,
+            span: span_of(arg.name.text_range()),
+        },
     })
 }
 
-/// [`parse_source_call`] with the binder spelled out.
-///
-/// It took a `binder` parameter because a `TYPE_DEF` used `=` where a
-/// `SOURCE_DEF` used `:=`. There is ONE binder now: `:=` binds a name
-/// (grammar.bnf, DEFINE) and `=` assigns a value (grammar.bnf, ASSIGN), and what
-/// is being bound is read off the left-hand side rather than off the glyph. The
-/// parameter stays spelled out because the FIRST occurrence being the binder is
-/// the fact this function rests on, and later `ASSIGN`s inside the call are
-/// named-argument separators the URI scan below already knows to skip.
-fn parse_call_after(
-    node: &fossil_syntax::SyntaxNode,
-    binder: fossil_syntax::SyntaxKind,
-) -> (Option<SmolStr>, Option<SmolStr>) {
-    let toks = non_trivia_tokens(node);
-    // The binder separates the bound name(s) from the RHS call.
-    let Some(define_pos) = toks.iter().position(|t| t.kind() == binder) else {
-        return (None, None);
-    };
-    parse_call_tokens(&toks[define_pos + 1..])
-}
-
-/// `(callee, first positional string)` of a call written out as tokens.
-///
-/// One scanner, three callers: the right-hand side of a binding, the right-hand
-/// side of a `type` binding, and now the value of `schema =` — which is a
-/// provider call like the other two and is read exactly like them. Writing a
-/// second scan for the argument is how `schema =` came to be dispatched by a
-/// different criterion in the first place.
-///
-/// - the callee is the leading dotted run of `IDENT`s separated by `DOT`;
-/// - the URI is the FIRST `STRING`, but only when it is POSITIONAL — a `STRING`
-///   immediately preceded by `=`/`ASSIGN` is a named-argument value and is
-///   skipped, which is what keeps `io.csv("u.csv", schema = …)` from reading the
-///   argument's document as the source's URI.
-fn parse_call_tokens(toks: &[fossil_syntax::SyntaxToken]) -> (Option<SmolStr>, Option<SmolStr>) {
-    use fossil_syntax::SyntaxKind;
-
-    let mut constructor = String::new();
-    let mut expect_ident = true;
-    for t in toks {
-        match t.kind() {
-            SyntaxKind::IDENT if expect_ident => {
-                constructor.push_str(t.text());
-                expect_ident = false;
-            }
-            SyntaxKind::DOT if !expect_ident => {
-                constructor.push('.');
-                expect_ident = true;
-            }
-            _ => break,
-        }
-    }
-    let constructor = if constructor.is_empty() {
-        None
-    } else {
-        Some(SmolStr::from(constructor))
-    };
-
-    let mut uri = None;
-    for (i, t) in toks.iter().enumerate() {
-        if t.kind() == SyntaxKind::STRING {
-            let preceded_by_eq = i
-                .checked_sub(1)
-                .and_then(|p| toks.get(p))
-                .is_some_and(|p| matches!(p.kind(), SyntaxKind::ASSIGN | SyntaxKind::EQ));
-            if !preceded_by_eq {
-                let raw = t.text();
-                let inner = raw.trim_start_matches('"').trim_end_matches('"');
-                uri = Some(SmolStr::from(inner));
-                break;
-            }
-        }
-    }
-
-    (constructor, uri)
+/// Every `name = value` the binding's call writes: the name, and where it is.
+/// What `crate::lower` measures against the catalogue's reader options.
+pub(crate) fn named_arg_names(node: &SyntaxNode) -> Vec<(SmolStr, Span)> {
+    Call::of_binding(node).map_or_else(Vec::new, |call| {
+        call.named_args()
+            .map(|a| (SmolStr::from(a.name.text()), span_of(a.name.text_range())))
+            .collect()
+    })
 }
 
 /// One `"…" as name` read off a `RENAME_ATTR`, with the name it is addressed
@@ -1402,7 +1368,7 @@ b := io.parquet(\"b.parquet\")
         );
     }
 
-    /// The name the scanner reads is the name `catalogue.bnf` declares.
+    /// The name the header is read for is the name `catalogue.bnf` declares.
     ///
     /// [`reader_option_of`] derives it from the registry, so this cannot fail
     /// by drift — what it holds is that the derivation FINDS something, which a
@@ -1410,7 +1376,7 @@ b := io.parquet(\"b.parquet\")
     /// the `.bnf` would make every `delimiter =` silently unread and every test
     /// above would still have to be edited to notice.
     #[test]
-    fn the_option_the_scanner_reads_is_the_one_the_catalogue_declares() {
+    fn the_option_read_is_the_one_the_catalogue_declares() {
         assert_eq!(
             reader_option_of("io.csv").map(SmolStr::as_str),
             Some("delimiter"),
@@ -1468,7 +1434,7 @@ b := io.parquet(\"b.parquet\")
             matches!(
                 dm.lookup_source_shape_error(&db, "a"),
                 Some(ShapeBindError::Document(
-                    fossil_base::Problem::BareDocumentPath { .. }
+                    fossil_graph_schema::Problem::BareDocumentPath { .. }
                 ))
             ),
             "no provider named ⇒ no row ⇒ no shapes, and it says which"
@@ -1533,7 +1499,7 @@ b := io.parquet(\"b.parquet\")
         assert!(matches!(
             dm.lookup_source_shape_error(&db, "a"),
             Some(ShapeBindError::Document(
-                fossil_base::Problem::NotRegistered { .. }
+                fossil_graph_schema::Problem::NotRegistered { .. }
             ))
         ));
     }
@@ -1547,7 +1513,7 @@ b := io.parquet(\"b.parquet\")
         let (db, file) = db_with_document(src, "broken.shex", "!malformed no shapes here\n");
         let dm = def_map(&db, file);
 
-        let Some(ShapeBindError::Document(fossil_base::Problem::Unparseable {
+        let Some(ShapeBindError::Document(fossil_graph_schema::Problem::Unparseable {
             document,
             reason: Some(reason),
         })) = dm.lookup_source_shape_error(&db, "a")

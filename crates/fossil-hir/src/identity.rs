@@ -57,7 +57,8 @@
 //! stable across an edit that shifts byte offsets — see `SubjectTemplate::span`
 //! for the trap that decides it.
 
-use fossil_base::{SourceFile, Span};
+use fossil_base::SourceFile;
+use fossil_graph_schema::Span;
 use smol_str::SmolStr;
 
 use crate::body::body;
@@ -329,15 +330,12 @@ pub fn check_identities(db: &dyn fossil_base::Db, file: SourceFile) -> usize {
                 .mappings(db)
                 .get(t.mapping_index)
                 .map_or(0, |loc| crate::spans::mapping_start_offset(db, *loc));
-            Span::new(
-                t.span.start.saturating_add(base),
-                t.span.end.saturating_add(base),
-            )
+            t.span.shifted(base)
         };
 
         fossil_base::Diagnostic::new(
-            fossil_base::Severity::Error,
-            fossil_base::Problem::ConflictingIdentity {
+            fossil_graph_schema::Severity::Error,
+            fossil_graph_schema::Problem::ConflictingIdentity {
                 first: first.mapping_name.to_string(),
                 second: later.mapping_name.to_string(),
                 shape: type_name.to_string(),
@@ -526,13 +524,13 @@ Imported : Person from Legacy
         let d = diags.first().expect("the disagreement is reported");
         assert_eq!(
             d.severity,
-            fossil_base::Severity::Error,
+            fossil_graph_schema::Severity::Error,
             "a disagreement about identity is an error, not a warning: a warning \
              is ignored and the result is two entities where there was one"
         );
         assert_eq!(
             d.problem,
-            fossil_base::Problem::ConflictingIdentity {
+            fossil_graph_schema::Problem::ConflictingIdentity {
                 first: "Users".into(),
                 second: "Imported".into(),
                 shape: "Person".into(),

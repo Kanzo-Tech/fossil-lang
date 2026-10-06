@@ -36,7 +36,7 @@
 //! `suggestion_source` precedent exactly — structured, not string-parsed.
 //! Defaults to `None`; plain data (wasm-clean).
 
-pub use fossil_graph_schema::{Problem, Severity, Span};
+use fossil_graph_schema::{Problem, Severity, Span};
 
 /// What a [`Diagnostic`]'s span was measured against.
 ///
@@ -294,17 +294,6 @@ impl Diagnostic {
         self
     }
 }
-
-// `Span` was defined here and is `fossil_graph_schema::Span` now — re-exported
-// from this crate's root, so no consumer's `use fossil_base::Span` changed.
-// `Severity` followed it for the same reason: a run `Failure` carries compile
-// diagnostics as `fossil_graph_schema::Related`, which has to say how bad each is.
-//
-// It moved DOWN because `fossil-shex` needed it and cannot have it: this crate
-// carries salsa and that one is deliberately WASM-clean, so a shape document
-// that wants to say where it declares a predicate had no span type to say it
-// in. The leaf crate is where the shared vocabulary goes — the same move F1
-// made for `Primitive`. See `fossil_graph_schema::span` for the rest.
 
 #[cfg(test)]
 // `literal_string_with_formatting_args` flags the Fossil identity template

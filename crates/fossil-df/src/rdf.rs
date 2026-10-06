@@ -91,7 +91,11 @@ pub fn rdf_to_batch(
     let subjects: Vec<&String> = typed.iter().collect();
 
     let subject_col: StringArray = subjects.iter().map(|s| Some(s.as_str())).collect();
-    let mut fields = vec![Field::new("subject", DataType::Utf8, false)];
+    let mut fields = vec![Field::new(
+        fossil_graph_schema::SUBJECT_COLUMN,
+        DataType::Utf8,
+        false,
+    )];
     let mut arrays: Vec<ArrayRef> = vec![Arc::new(subject_col)];
 
     for column in columns {

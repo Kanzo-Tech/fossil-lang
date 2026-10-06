@@ -1,7 +1,7 @@
 /**
  * Hover — the type of what you wrote, and the type the shape demands of it.
  *
- * `fossil_ide::hover_bidirectional` is the answer and it is *bidirectional*,
+ * `fossil_ide::hover` is the answer and it is *bidirectional*,
  * which is the whole point of hovering in a mapping language: the first block is
  * the type of the expression under the cursor and where that type came from, and
  * the second is what the target shape requires of the predicate it is being
@@ -20,7 +20,7 @@
  *
  * ## The Markdown
  *
- * `hover_bidirectional`'s output uses exactly three constructs — a fenced
+ * `fossil_ide::hover`'s output uses exactly three constructs — a fenced
  * ```` ```fossil ```` block, an `*italic*` line, and `` `inline code` `` — and
  * {@link renderMarkdown} handles those three. It is not a Markdown renderer and
  * does not want to be one; a host that needs one passes `render`. Anything else
@@ -53,7 +53,7 @@ export interface HoverOptions {
 }
 
 /**
- * Render the three constructs `hover_bidirectional` emits.
+ * Render the three constructs `fossil_ide::hover` emits.
  *
  * Fenced blocks become `<pre class="cm-fossil-hover-code">`, `*text*` becomes
  * `<em>`, `` `text` `` becomes `<code>`, and everything else is text. No

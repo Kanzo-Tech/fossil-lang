@@ -49,7 +49,6 @@
 use fossil_base::SourceFile;
 use fossil_graph_schema::Primitive;
 use fossil_hir::def_map::{MappingLoc, def_map};
-use fossil_hir::item_tree::{ItemHeader, item_tree};
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
 use fossil_hir::stdlib::{FunctionRegistry, Receiver, ScalarTy};
@@ -407,7 +406,8 @@ fn qualifier(head: &SyntaxToken) -> Option<String> {
 /// The row the cursor's enclosing mapping reads, under the name its body
 /// addresses it by — `("users", {name: String, age: Integer})`.
 ///
-/// The name comes from [`item_tree`], the SIGNATURE-only query, so it survives
+/// The name comes from [`fossil_hir::lower::lower_to_hir`], the SIGNATURE-only
+/// query, so it survives
 /// every keystroke inside the body the user is typing in; the row comes from
 /// [`fossil_hir::infer::source_row_inferred`], the side-effect-free sibling of
 /// the checker's `resolve_source_scope`. That choice is load-bearing and not a
@@ -436,19 +436,10 @@ fn enclosing_row<'db>(
     character: u32,
 ) -> Option<(SmolStr, Record<'db>)> {
     let mapping = enclosing_mapping_loc(db, file, line, character)?;
-    // Filter-then-nth, the contract `MappingLoc::index` is numbered under: the
-    // item tree carries source definitions too, and counting them in would name
-    // a different mapping's binding.
-    let binding = item_tree(db, file)
-        .items(db)
-        .iter()
-        .filter_map(|item| match item {
-            ItemHeader::Mapping(header) => Some(header),
-            ItemHeader::SourceDef(_) => None,
-        })
-        .nth(mapping.index(db))?
+    let binding = fossil_hir::lower::lower_to_hir(db, file)
+        .mapping(db, mapping.index(db))?
         .source_binding
-        .clone()?;
+        .clone();
     let row = fossil_hir::infer::source_row_inferred(db, mapping)?;
     match row.kind(db) {
         TyKind::Record(record) => Some((binding, *record)),
@@ -631,19 +622,7 @@ fn enclosing_mapping_loc<'db>(
         }
         current = n.parent();
     }
-    let mapping_node = mapping_node?;
-    let cst = fossil_syntax::parse(db, file);
-    let mapping_index = cst
-        .root(db)
-        .syntax()
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::MAPPING)
-        .position(|c| c == mapping_node)?;
-    def_map(db, file)
-        .mappings(db)
-        .iter()
-        .find(|m| m.index(db) == mapping_index)
-        .copied()
+    fossil_hir::def_map::mapping_of(db, file, &mapping_node?)
 }
 
 /// Render a stdlib entry's signature as a `detail` string from its `'db`-free
@@ -669,7 +648,7 @@ fn render_sig(namespace: &str, entry: &fossil_hir::stdlib::RegistryEntry) -> Str
 fn sig_name(t: fossil_hir::stdlib::SigTy) -> String {
     use fossil_hir::stdlib::SigTy;
     match t {
-        SigTy::Scalar(s) => scalar_name(s),
+        SigTy::Scalar(s) => s.to_string(),
         SigTy::Rows => "Rows".to_string(),
         SigTy::Predicate => "Predicate".to_string(),
         // A position that NAMES rather than evaluates, and completion says so:
@@ -680,21 +659,6 @@ fn sig_name(t: fossil_hir::stdlib::SigTy) -> String {
         SigTy::Binding => "Binding".to_string(),
         SigTy::Aggregate => "Aggregate".to_string(),
     }
-}
-
-/// Human-readable name for a `'db`-free [`fossil_hir::stdlib::ScalarTy`].
-fn scalar_name(s: fossil_hir::stdlib::ScalarTy) -> String {
-    use fossil_hir::stdlib::ScalarTy as S;
-    match s {
-        S::String => "String",
-        S::Integer => "Integer",
-        S::Float => "Float",
-        S::Bool => "Bool",
-        S::Date => "Date",
-        S::DateTime => "DateTime",
-        S::SeqString => "Seq<String>",
-    }
-    .to_string()
 }
 
 #[cfg(test)]

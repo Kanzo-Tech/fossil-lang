@@ -7,15 +7,14 @@
 //! The hover bridge:
 //!
 //! - [`position`]: LSP `(line, character)` → byte offset → `SyntaxToken` /
-//!   `SyntaxNode`. Memoised line-offset table via Salsa-tracked
-//!   [`position::line_offsets`].
+//!   `SyntaxNode`, over rust-analyzer's `line-index`, memoised per file by
+//!   [`position::line_index`].
 //! - [`hover()`]: walks position → enclosing PROPERTY → enclosing MAPPING →
 //!   `MappingLoc` (filter-then-nth) → `ExprId` →
 //!   [`fossil_hir::provenance::ty_origin`] → Markdown. Destructures
 //!   `ExprTypeEntry`, which is a named struct and not a tuple.
 //!
 //! The rest of the surface:
-//!   - bidirectional hover (source-side + target-side types)
 //!   - goto-def (shape names and property keys into the shape document;
 //!     mappings and `:=` bindings across the open files)
 //!   - completion (stdlib + shape properties + source fields)
@@ -42,7 +41,6 @@ pub mod completion;
 pub mod diagnostics;
 pub mod goto_def;
 pub mod hover;
-pub mod line_index;
 pub mod outline;
 pub mod position;
 pub mod related;
@@ -54,21 +52,18 @@ pub mod workspace;
 pub use code_action::code_actions;
 pub use completion::completions;
 pub use diagnostics::{
-    DiagnosticData, Replacement, byte_range_to_range, diagnostics, file_uri, lsp_diagnostic,
-    lsp_diagnostics, span_to_range,
+    DiagnosticData, Replacement, diagnostics, file_uri, lsp_diagnostic, lsp_diagnostics,
 };
 pub use goto_def::{NavigationTarget, goto_definition};
-pub use hover::{HoverInfo, hover, hover_bidirectional};
-pub use line_index::{LineIndex, Utf16Position};
+pub use hover::{HoverInfo, hover};
 pub use outline::document_symbols;
 pub use position::{
-    LineOffsets, line_index, line_offsets, node_at_position, offset_to_lsp_position,
-    position_to_offset, token_at_position,
+    LineIndex, line_index, node_at_position, offset, position, range, span, token_at_position,
 };
 pub use related::{Related, related_locations};
 pub use semantic::{
-    SemanticSpan, decode_tokens, legend_modifier_name, legend_type_name, modifier_names,
-    semantic_legend, semantic_spans, semantic_tokens,
+    SemanticSpan, TokenType, decode_tokens, modifier_names, semantic_legend, semantic_spans,
+    semantic_tokens,
 };
 pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};
 pub use workspace::WorkspaceIndex;

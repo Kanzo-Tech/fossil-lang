@@ -176,7 +176,7 @@ pub(crate) fn render_diagnostics(
         .with_context_lines(1);
     let named = NamedSource::new(file_name, source.to_string());
     let mut out = String::new();
-    let at = |span: fossil_base::Span, text: &str| {
+    let at = |span: fossil_graph_schema::Span, text: &str| {
         LabeledSpan::new_with_span(
             Some(text.to_string()),
             SourceSpan::new(

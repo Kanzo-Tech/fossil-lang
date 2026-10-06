@@ -147,9 +147,10 @@ and nothing noticed for as long as it did not.
 
 So a token crosses as its name: `tokenize()` returns `{ kind: "Comment", start, end }`, `kind` typed by
 the `Token` union generated from the lexer's enum, and a host keys on `"Comment"` rather than on `2`; semantic tokens
-cross the boundary as legend names (`"type"`, `"declaration"`), and completion kinds followed — LSP spells
-`CompletionItemKind` as an integer, and `kind_name` puts the table in Rust where
-`every_lsp_kind_has_a_name` can check it is total. Each of those tables is an **exhaustive** match,
+cross the boundary as legend names (`"type"`, `"declaration"`), read off the same `TokenType` enum
+that numbers them, and completion kinds followed — LSP spells `CompletionItemKind` as an integer, and
+the two completion emits cross as the generated `CompletionKind` union, which the editor's icon
+table is a `Record` over. Each of those tables is an **exhaustive** match,
 so adding or renaming a variant fails this build rather than someone else's product, which is the
 whole difference between a guard and a comment. A kind past the end of a legend is a newer compiler
 than the host and reads as plain text, so appending stays backwards-compatible and reordering stops

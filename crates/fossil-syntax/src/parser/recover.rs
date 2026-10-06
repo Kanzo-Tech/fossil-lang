@@ -100,7 +100,7 @@ pub(crate) fn recover_to(p: &mut Parser, anchors: &[SyntaxKind]) {
     let span_end = p.current_token_span_start();
     p.finish();
     p.push_diagnostic(ParseDiagnostic::UnexpectedToken {
-        span: fossil_base::Span::new(
+        span: fossil_graph_schema::Span::new(
             u32::try_from(span_start).unwrap_or(u32::MAX),
             u32::try_from(span_end).unwrap_or(u32::MAX),
         ),
@@ -128,7 +128,7 @@ pub(crate) fn expect_or_recover(p: &mut Parser, want: SyntaxKind, anchors: &[Syn
     p.push_diagnostic(ParseDiagnostic::ExpectedToken {
         want,
         got,
-        span: fossil_base::Span::new(
+        span: fossil_graph_schema::Span::new(
             u32::try_from(span_start).unwrap_or(u32::MAX),
             u32::try_from(span_start).unwrap_or(u32::MAX),
         ),

@@ -41,7 +41,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Diagnostic, FossilDb, Problem, SourceFile, System};
+use fossil_base::{Diagnostic, FossilDb, SourceFile, System};
+use fossil_graph_schema::Problem;
 use fossil_syntax::parse;
 
 /// Parse `input` on a worker thread; panic with "parser hung — regression"

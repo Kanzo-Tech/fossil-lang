@@ -300,7 +300,7 @@ User : Person from users
     // Mapping-relative, so rebase before slicing: `HELLO`'s mapping starts at
     // the `User :` line.
     let base = crate::spans::mapping_start_offset(&db, first_mapping(&db, file));
-    let slice = |s: fossil_base::Span| {
+    let slice = |s: fossil_graph_schema::Span| {
         let start = (base + s.start) as usize;
         let end = (base + s.end) as usize;
         &TYPO[start..end]
@@ -349,7 +349,7 @@ User : Person from users
     let m = first_mapping(&db, file);
     let table = spans(&db, m);
     let base = crate::spans::mapping_start_offset(&db, m);
-    let slice = |s: fossil_base::Span| {
+    let slice = |s: fossil_graph_schema::Span| {
         let start = (base + s.start) as usize;
         &JOINED[start..(base + s.end) as usize]
     };
@@ -605,6 +605,7 @@ Contact : Person from users
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                span: None,
             }),
         );
         cx.check_property(
@@ -678,6 +679,7 @@ Orders : Order from Purchase
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                span: None,
             }),
         );
         cx.check_property(
@@ -761,10 +763,11 @@ Orders : Order from Purchase
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
                     occurs: Occurs::ONE,
                     // What the decoder found — see `fossil_shex::spans`.
-                    span: Some(fossil_base::Span::new(60, 70)),
+                    span: Some(fossil_graph_schema::Span::new(60, 70)),
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("shape.shex"),
+                span: None,
             }),
         );
         cx.check_property(
@@ -805,7 +808,7 @@ Orders : Order from Purchase
     );
     let label = in_document[0];
     assert_eq!(label.document.as_deref(), Some("shape.shex"));
-    assert_eq!(label.span, fossil_base::Span::new(60, 70));
+    assert_eq!(label.span, fossil_graph_schema::Span::new(60, 70));
     assert_eq!(label.text, "`Order` declares `total` as Float");
     // A document has no mappings, so there is no other frame its offsets could
     // be in — and a label rebased by a mapping's start would land nowhere.
@@ -871,6 +874,7 @@ Orders : Order from Purchase
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("shape.shex"),
+                span: None,
             }),
         );
         cx.check_property(
@@ -928,6 +932,7 @@ fn a_wrong_type_with_no_repair_says_nothing() {
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                span: None,
             }),
         );
         cx.check_property(
@@ -1092,6 +1097,7 @@ fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
             constraints: Vec::new(),
             rejections: vec![disjunction_rejection()],
             document: smol_str::SmolStr::from("personas.shex"),
+            span: None,
         };
         let mut cx = build_checker(db, m, None, Some(shape));
         cx.surface_shape_lowering_errors();

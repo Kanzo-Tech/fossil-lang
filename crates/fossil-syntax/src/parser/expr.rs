@@ -228,7 +228,7 @@ fn parse_postfix(p: &mut Parser) {
                         p.finish();
                         let end = p.prev_end();
                         p.push_diagnostic(ParseDiagnostic::Malformed {
-                            problem: fossil_base::Problem::HoleInMemberName {},
+                            problem: fossil_graph_schema::Problem::HoleInMemberName {},
                             help: Some(HOLE_IN_MEMBER_NAME_HELP.to_string()),
                             span: span_of(start, end),
                         });
@@ -272,7 +272,7 @@ fn refuse_needless_quotes(p: &mut Parser) {
         return;
     }
     p.push_diagnostic(ParseDiagnostic::Malformed {
-        problem: fossil_base::Problem::NeedlessQuotes { name },
+        problem: fossil_graph_schema::Problem::NeedlessQuotes { name },
         help: Some(
             "quotes are for a name an identifier cannot hold, like `Row.\"Person.id\"`, and each \
              name has one spelling"
@@ -282,8 +282,8 @@ fn refuse_needless_quotes(p: &mut Parser) {
     });
 }
 
-fn span_of(start: usize, end: usize) -> fossil_base::Span {
-    fossil_base::Span::new(
+fn span_of(start: usize, end: usize) -> fossil_graph_schema::Span {
+    fossil_graph_schema::Span::new(
         u32::try_from(start).unwrap_or(u32::MAX),
         u32::try_from(end).unwrap_or(u32::MAX),
     )

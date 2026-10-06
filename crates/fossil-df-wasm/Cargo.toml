@@ -36,7 +36,7 @@ fossil-graph-schema = { path = "../fossil-graph-schema", features = ["js"] }
 fossil-storage = { path = "../fossil-storage", features = ["js"] }
 object_store = { workspace = true }
 futures = { workspace = true }
-url = "2"
+url = { workspace = true }
 # chrono is transitive (datafusion / object_store) and pulled with wasmbind OFF,
 # so `Utc::now()` falls through to std `SystemTime::now()` — which PANICS on
 # wasm32 ("time not implemented"). object_store stamps `InMemory::put` and signs

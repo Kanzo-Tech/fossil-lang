@@ -109,11 +109,14 @@ duckdb = { version = "1.10502", features = ["bundled"] }
 # NEVER referenced by a WASM-gated crate.
 unicode-normalization = "0.1"           # the NFC/NFD/NFKC/NFKD reference
 slug = "0.1"                            # the URL-slugification reference
+url = "2"                               # the WHATWG URL Standard — every URI fossil parses or builds
 
 # === LSP — NATIVE ONLY ===
 lsp-server = "0.7"
 lsp-types = "0.97"
 crossbeam-channel = "0.5"
+# rust-analyzer's UTF-8 ↔ UTF-16 line table — the reference the LSP hosts convert by.
+line-index = "0.1"
 
 # === WASM ===
 wasm-bindgen = "=0.2.120"

@@ -40,24 +40,22 @@
 //!
 //!   * STRUCTURAL PASS (unavoidable — parse output changed by 1 byte):
 //!     1. parse(file)                       — text changed; re-parse required
-//!     2. item_tree(file)                   — re-runs, returns structurally-equal Vec<ItemHeader> (no signature changed); downstream validates
-//!     3. ast_id_map(file)                  — re-runs, returns structurally-equal AstIdMap; downstream validates
-//!     4. def_map(file)                     — re-runs, returns structurally-equal DefMap; downstream validates
-//!     5-14. mapping_cst_node(M_0..M_9)     — re-runs for ALL 10 mappings; output is structurally-equal for 9 siblings (rowan Arc-shared subtrees); only M_3's output differs
+//!     2. def_map(file)                     — re-runs, returns structurally-equal DefMap; downstream validates
+//!     3-12. mapping_cst_node(M_0..M_9)     — re-runs for ALL 10 mappings; output is structurally-equal for 9 siblings (rowan Arc-shared subtrees); only M_3's output differs
 //!
 //!   * STRUCTURAL PASS (what the checker reads file-keyed):
 //!     - lower_to_hir(file)                 — re-runs, returns structurally-equal HirFile (header-only signatures unchanged by a body edit); downstream validates. typecheck_mapping reads it (via resolve_source_scope + mapping/source name lookups) so it joins the file-keyed structural pass. File-keyed, NOT a per-mapping fan-out.
 //!
 //!   * PER-MAPPING FAN-OUT (the load-bearing invariant — only M_3 fans out):
-//!     15. body(M_3)                        — output of mapping_cst_node(M_3) changed
-//!     16. typecheck_mapping(M_3)           — reads body(M_3) + spans(M_3) + resolve_source_scope + resolve_target_shape; re-runs for the edited mapping ONLY
-//!     17. spans(M_3)                       — per-mapping side table; depends on mapping_cst_node(M_3); re-runs for the edited mapping ONLY (siblings stay cached via the same Arc-shared subtree barrier)
+//!     13. body(M_3)                        — output of mapping_cst_node(M_3) changed
+//!     14. typecheck_mapping(M_3)           — reads body(M_3) + spans(M_3) + resolve_source_scope + resolve_target_shape; re-runs for the edited mapping ONLY
+//!     15. spans(M_3)                       — per-mapping side table; depends on mapping_cst_node(M_3); re-runs for the edited mapping ONLY (siblings stay cached via the same Arc-shared subtree barrier)
 //!     (expr_types(M_3) is a thin accessor over typecheck_mapping(M_3);
 //!      after the edit its input output is structurally-equal — the
 //!      ten-mappings fixture's FieldRef bodies have no descriptor so the type
 //!      table is unchanged — so it VALIDATES instead of re-executing. Hence
 //!      expr_types_count == 0, and typecheck_count == 1
-//!      takes its place in the fan-out, for a total of 18.)
+//!      takes its place in the fan-out, for a total of 16.)
 //!
 //!   * SIBLING MAPPINGS (the FORBIDDEN re-executions — must stay cached):
 //!     - body(M_i)              for i ∈ {0,1,3,4,5,6,7,8,9} — sibling bodies
@@ -68,7 +66,7 @@
 //! (Note: indices are 0-based; "mapping #3" in prose = MappingLoc.index == 2.)
 //!
 //! ─────────────────────────────────────────────────────────────────────────
-//! WHY THE THRESHOLD IS 18, NOT 4
+//! WHY THE THRESHOLD IS 16, NOT 4
 //! ─────────────────────────────────────────────────────────────────────────
 //!
 //! The threshold this replaced — "≤ 4 (parse + body_3 + typecheck_3 +
@@ -88,11 +86,11 @@
 //! which counts body / typecheck / expr_types re-executions separately.
 //!
 //! The TOTAL count is bounded by the structural-pass costs:
-//!   1 (parse) + 4 (item_tree, def_map, ast_id_map, lower_to_hir)
+//!   1 (parse) + 2 (def_map, lower_to_hir)
 //!   + 10 (mapping_cst_node) + 1 (body of M_3) + 1 (typecheck_mapping of M_3)
-//!   + 1 (spans of M_3) = 18.
+//!   + 1 (spans of M_3) = 16.
 //!
-//! Two of those eighteen are worth naming, because each is a place the
+//! Two of those sixteen are worth naming, because each is a place the
 //! accounting could quietly move:
 //!   (a) `spans(db, mapping)` is a query of its own rather than a field on
 //!       `body`, so it re-executes on its own line; it is per-mapping, so it
@@ -133,7 +131,7 @@
 //!
 //!     The ten-mapping fixture names no document, so `resolve_target_shape`
 //!     returns `Ok(None)` before touching either, and `MAX_REEXECUTIONS` is
-//!     unmoved at 18. A future fixture that DOES name one must budget the
+//!     unmoved by it. A future fixture that DOES name one must budget the
 //!     `shape_document` re-execution here, once, and not per mapping.
 //!   * The CLI and `fossil_ide::WorkspaceIndex` touch
 //!     only native CLI / WASM-clean IDE-index code; neither introduces a
@@ -146,13 +144,13 @@
 //! `expr_types`, `spans`. Each is asserted to re-execute ≤
 //! `MAX_PER_MAPPING_FAN_OUT` (= 1) after the single-char body edit by
 //! `keyset_of_reexecuted_queries_matches_expected_four`. No new per-mapping
-//! query needed registration; `MAX_REEXECUTIONS` stays at 18 (breakdown
+//! query needed registration; `MAX_REEXECUTIONS` stays at 16 (breakdown
 //! above). Any future IDE feature that adds a per-mapping tracked
 //! query MUST register it in the keyset assertion and cap it at 1 — a NEW
 //! whole-file (FILE-keyed) query re-runs exactly once and is allowed to bump
 //! `MAX_REEXECUTIONS` ONLY with an updated breakdown here.
 //!
-//! If the test fails with count > 18, something else is leaking. If the
+//! If the test fails with count > 16, something else is leaking. If the
 //! per-mapping fan-out test (body / typecheck / expr_types / spans > 1)
 //! fails, the per-mapping invalidation barrier is broken — DO NOT relax that
 //! assertion; fix the data layout so that signatures stay file-keyed and every
@@ -164,25 +162,23 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{FossilDb, SourceFile, System};
-use fossil_hir::ast_id::ast_id_map;
 use fossil_hir::body::body;
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::def_map;
-use fossil_hir::item_tree::item_tree;
 use fossil_hir::provenance::expr_types;
 use fossil_hir::spans::spans;
 use salsa::Setter;
 
 /// Loose upper bound on the total count of re-executed queries after a
 /// single-char body edit in mapping #3 of a 10-mapping file. See the
-/// top-of-file "WHY THE THRESHOLD IS 18, NOT 4" comment for the breakdown.
+/// top-of-file "WHY THE THRESHOLD IS 16, NOT 4" comment for the breakdown.
 ///
 /// The LOAD-BEARING invariant is enforced by
 /// `keyset_of_reexecuted_queries_matches_expected_four` (per-mapping
 /// fan-out for body / typecheck_mapping / expr_types / spans is exactly
 /// 1 each, NOT 10). The threshold here is a secondary "no surprise extra
 /// work" guard.
-const MAX_REEXECUTIONS: usize = 18;
+const MAX_REEXECUTIONS: usize = 16;
 
 /// The LOAD-BEARING per-mapping fan-out bound. Editing
 /// one mapping's body MUST NOT re-execute body / typecheck / expr_types
@@ -192,7 +188,7 @@ const MAX_REEXECUTIONS: usize = 18;
 const MAX_PER_MAPPING_FAN_OUT: usize = 1;
 
 #[test]
-fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
+fn editing_body_of_mapping_3_stays_inside_mapping_3() {
     let baseline = include_str!("fixtures/ten_mappings_baseline.fossil");
     let edited = include_str!("fixtures/ten_mappings_mapping_3_body_one_char_edit.fossil");
 
@@ -221,8 +217,6 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
 
     // Step 1: warm caches. Touch every query under test for every
     // mapping. After this loop, the cache is hot.
-    let _ = item_tree(&db, file);
-    let _ = ast_id_map(&db, file);
     let mappings: Vec<_> = def_map(&db, file).mappings(&db).clone();
     for m in &mappings {
         let _ = body(&db, *m);
@@ -242,8 +236,6 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
 
     file.set_text(&mut db).to(edited.to_string());
 
-    let _ = item_tree(&db, file);
-    let _ = ast_id_map(&db, file);
     let mappings_after: Vec<_> = def_map(&db, file).mappings(&db).clone();
     for m in &mappings_after {
         let _ = body(&db, *m);
@@ -258,9 +250,9 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
         after <= MAX_REEXECUTIONS,
         "Salsa invalidation cascade detected: {after} queries re-executed after \
          one-char body edit in mapping #3 of 10. Expected ≤ {MAX_REEXECUTIONS} \
-         (structural pass: 1 parse + 3 file-keyed structural queries + 10 \
-         mapping_cst_node + per-mapping fan-out: 1 body + 1 expr_types + 1 \
-         spans = 17). If you exceed this bound, a NEW query has been added \
+         (structural pass: 1 parse + 2 file-keyed structural queries + 10 \
+         mapping_cst_node + per-mapping fan-out: 1 body + 1 typecheck + 1 \
+         spans = 16). If you exceed this bound, a NEW query has been added \
          that depends on parse(file) without an intermediate per-item \
          invalidation barrier — fix the data layout, do NOT relax the \
          threshold."
@@ -306,7 +298,7 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
 /// (e.g., the format changes in a future point release), this sub-test falls
 /// back to threshold-only mode: it asserts the count and prints a warning to
 /// stderr explaining the fallback. The main
-/// `editing_body_of_mapping_3_does_not_invalidate_item_tree` test remains
+/// `editing_body_of_mapping_3_stays_inside_mapping_3` test remains
 /// a secondary gate.
 #[test]
 // The keyset assertions are intentionally inline + heavily commented for
@@ -338,8 +330,6 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
     let file = SourceFile::new(&db, baseline.to_string(), "ten_mappings.fossil".to_string());
 
     // Warm.
-    let _ = item_tree(&db, file);
-    let _ = ast_id_map(&db, file);
     let mappings: Vec<_> = def_map(&db, file).mappings(&db).clone();
     for m in &mappings {
         let _ = body(&db, *m);
@@ -352,8 +342,6 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
 
     file.set_text(&mut db).to(edited.to_string());
 
-    let _ = item_tree(&db, file);
-    let _ = ast_id_map(&db, file);
     let mappings_after: Vec<_> = def_map(&db, file).mappings(&db).clone();
     for m in &mappings_after {
         let _ = body(&db, *m);
@@ -368,7 +356,7 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
     //    query name (any non-`DatabaseKeyIndex(...)` string), degrade gracefully.
     let any_named_query = keys
         .iter()
-        .any(|k| k.contains("parse") || k.contains("body") || k.contains("item_tree"));
+        .any(|k| k.contains("parse") || k.contains("body") || k.contains("def_map"));
 
     if !any_named_query {
         eprintln!(
