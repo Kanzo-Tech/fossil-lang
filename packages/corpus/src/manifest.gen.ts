@@ -48,11 +48,11 @@ export interface EdgeTable {
 }
 
 /**
- * One end of a relation.
+ * One end of a relation, or of a property's values.
  */
 export interface Endpoint {
   /**
-   * The edge table's column.
+   * The table's column.
    */
   key: string;
   /**
@@ -73,6 +73,11 @@ export interface Manifest {
    * The format the corpus is written in.
    */
   format: 'fossil/1';
+  /**
+   * One per multi-valued property, in the order the compiled schema lists their types and, inside a
+   * type, them. Absent when there is none.
+   */
+  property_tables?: PropertyTable[];
   /**
    * One per vertex type, in the order the compiled schema lists them.
    */
@@ -116,6 +121,34 @@ export interface Property {
    * Its type, in the spelling `data_type_name` writes.
    */
   type: string;
+}
+
+/**
+ * One multi-valued property's table, a row per value: first normal form, because a cell is one RDF
+ * term (R2RML §10.2) and an array is no Core SQL.
+ */
+export interface PropertyTable {
+  /**
+   * `<Type>_<property>`.
+   */
+  name: string;
+  /**
+   * The table's Parquet file, relative to the corpus root.
+   */
+  path: string;
+  /**
+   * Every column of the file, in file order: the source's key, then the value, which carries the
+   * property's IRI and term.
+   */
+  properties: Property[];
+  /**
+   * Rows in the file.
+   */
+  record_count: number;
+  /**
+   * The column holding the `dense_id` of the vertex the value belongs to, and its table.
+   */
+  source: Endpoint;
 }
 
 /**

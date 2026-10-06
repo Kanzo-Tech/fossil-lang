@@ -20,6 +20,13 @@
       "description": "The format the corpus is written in.",
       "const": "fossil/1"
     },
+    "property_tables": {
+      "description": "One per multi-valued property, in the order the compiled schema lists their types and, inside a type, them. Absent when there is none.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PropertyTable"
+      }
+    },
     "vertex_tables": {
       "description": "One per vertex type, in the order the compiled schema lists them.",
       "type": "array",
@@ -116,7 +123,7 @@
       }
     },
     "Endpoint": {
-      "description": "One end of a relation.",
+      "description": "One end of a relation, or of a property's values.",
       "type": "object",
       "required": [
         "key",
@@ -124,7 +131,7 @@
       ],
       "properties": {
         "key": {
-          "description": "The edge table's column.",
+          "description": "The table's column.",
           "type": "string"
         },
         "references": {
@@ -172,6 +179,48 @@
         "type": {
           "description": "Its type, in the spelling [`data_type_name`] writes.",
           "type": "string"
+        }
+      }
+    },
+    "PropertyTable": {
+      "description": "One multi-valued property's table, a row per value: first normal form, because a cell is one RDF term (R2RML §10.2) and an array is no Core SQL.",
+      "type": "object",
+      "required": [
+        "name",
+        "path",
+        "properties",
+        "record_count",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "description": "`<Type>_<property>`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The table's Parquet file, relative to the corpus root.",
+          "type": "string"
+        },
+        "properties": {
+          "description": "Every column of the file, in file order: the source's key, then the value, which carries the property's IRI and term.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Property"
+          }
+        },
+        "record_count": {
+          "description": "Rows in the file.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "source": {
+          "description": "The column holding the `dense_id` of the vertex the value belongs to, and its table.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Endpoint"
+            }
+          ]
         }
       }
     },

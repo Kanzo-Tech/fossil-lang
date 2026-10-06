@@ -510,7 +510,7 @@ async fn finalize_vertex(
     let (values, columns): (Vec<_>, Vec<_>) = columns.into_iter().partition(|(n, _)| multi(n));
     let row = df
         .clone()
-        .select(columns.iter().map(|(name, _)| column(name)).collect::<Vec<_>>())?;
+        .select(columns.iter().map(|(name, _)| column(name)))?;
 
     let by_subject = vec![col(PAYLOAD_IDENTITY).sort(true, false)];
     let sorted = if dedup {
@@ -597,7 +597,7 @@ async fn finalize_vertex(
 /// the difference is a whole class of source: a shape says how many values a
 /// predicate MAY carry, not how the source spells them. Reading the cardinality
 /// instead cost every `*` and `+` edge over a CSV — `unnest_columns` on a
-/// `Utf8` is a DataFusion internal error at run time with no diagnostic in
+/// `Utf8` is a `DataFusion` internal error at run time with no diagnostic in
 /// front of it — and that was 8 of LDBC-SNB's 21 relationships.
 fn row_per_value(df: DataFrame, column: &str) -> datafusion::error::Result<DataFrame> {
     let list = matches!(
@@ -743,15 +743,7 @@ async fn execute_edges<'db>(
         } = op
         {
             let rows = plan_relation(ctx, ops, *input, anchor).await?;
-            let prepared = execute_edge(
-                ctx,
-                rows,
-                src_type,
-                dst_type,
-                src_id,
-                dst_id,
-            )
-            .await?;
+            let prepared = execute_edge(ctx, rows, src_type, dst_type, src_id, dst_id).await?;
             let edge_type = GraphEdge {
                 label: edge_type.to_string(),
                 iri: rdf_uri.as_ref().map(ToString::to_string),

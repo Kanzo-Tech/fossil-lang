@@ -66,12 +66,19 @@ fn every_value_of_a_relational_source_is_kept() {
     let person = &m.vertex_tables[0];
     assert_eq!(person.record_count, 3);
     let columns: Vec<_> = person.properties.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(columns, ["dense_id", "subject", "name"], "the vertex row carries no nickname");
+    assert_eq!(
+        columns,
+        ["dense_id", "subject", "name"],
+        "the vertex row carries no nickname"
+    );
 
     let nickname = property(&m, "Person_nickname");
     assert_eq!(nickname.path, "property/Person_nickname.parquet");
     assert_eq!(nickname.source.references, "Person");
-    assert_eq!(nickname.record_count, 3, "three distinct nicknames, the repeat once");
+    assert_eq!(
+        nickname.record_count, 3,
+        "three distinct nicknames, the repeat once"
+    );
     let value = &nickname.properties[1];
     assert_eq!(value.iri.as_deref(), Some("https://example.org/nickname"));
     assert_eq!(
@@ -86,7 +93,10 @@ fn every_value_of_a_relational_source_is_kept() {
     );
     // Ada is `dense_id` 0 and Linus 1: subjects in order, and every value is
     // the vertex it belongs to.
-    assert_eq!(native::column(root.path(), &nickname.path, "src"), ["0", "0", "1"]);
+    assert_eq!(
+        native::column(root.path(), &nickname.path, "src"),
+        ["0", "0", "1"]
+    );
 }
 
 const RDF_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "type": "Schema", "shapes": [
@@ -128,7 +138,10 @@ fn an_rdf_list_is_a_row_per_value() {
         .collect();
     assert_eq!(columns, ["dense_id", "subject", "name"]);
     let nickname = property(&m, "Person_nickname");
-    assert_eq!(nickname.properties[1].data_type, "string", "a value, not a list");
+    assert_eq!(
+        nickname.properties[1].data_type, "string",
+        "a value, not a list"
+    );
     let root = corpus.materialise();
     assert_eq!(
         native::column(root.path(), &nickname.path, "nickname"),
