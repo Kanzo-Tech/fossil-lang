@@ -94,6 +94,7 @@ try {
   console.log("\nEvery guard fires on the break it exists for");
   const person = (dir) => join(dir, "vertex", "Person.parquet");
   const knows = (dir) => join(dir, "edge", "Person_knows_Person.parquet");
+  const nickname = (dir) => join(dir, "property", "Person_nickname.parquet");
   const MUTATIONS = [
     ["not-empty", "a table emptied, and declared empty", (dir) => {
       rewrite(join(dir, "edge", "Person_tagged_Tag.parquet"), "SELECT * FROM m LIMIT 0");
@@ -124,6 +125,10 @@ try {
       rewrite(person(dir), "SELECT * FROM m ORDER BY dense_id DESC")],
     ["sorted-by-key", "an edge table out of (src, dst) order", (dir) =>
       rewrite(knows(dir), "SELECT * FROM m ORDER BY dst, src")],
+    ["sorted-by-key", "a property table holding one value twice", (dir) =>
+      rewrite(nickname(dir), "SELECT * FROM m UNION ALL (SELECT * FROM m LIMIT 1) ORDER BY src, nickname")],
+    ["no-dangling-endpoint", "a value given to a vertex of another type", (dir) =>
+      rewrite(nickname(dir), `SELECT * REPLACE (CASE WHEN src = (SELECT min(src) FROM m) THEN (SELECT max(dense_id) FROM '${lit(join(dir, "vertex", "Tag.parquet"))}') ELSE src END::UINTEGER AS src) FROM m ORDER BY src, nickname`)],
     ["no-dangling-endpoint", "an endpoint moved onto a vertex of another type", (dir) =>
       rewrite(knows(dir), `SELECT * REPLACE ((SELECT max(dense_id) FROM '${lit(join(dir, "vertex", "Tag.parquet"))}')::UINTEGER AS dst) FROM m WHERE src = (SELECT min(src) FROM m)
                             UNION ALL SELECT * FROM m WHERE src <> (SELECT min(src) FROM m) ORDER BY src, dst`)],

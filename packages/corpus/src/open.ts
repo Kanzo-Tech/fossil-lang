@@ -6,7 +6,7 @@ import { mount } from '@fossil-lang/storage';
 import { FossilError, attachCause, type Engine, type Host } from '@fossil-lang/types';
 
 import type { Manifest } from './manifest.gen.js';
-import { parseManifest } from './manifest.js';
+import { parseManifest, tablesIn } from './manifest.js';
 import { ident, lit, query } from './sql.js';
 
 /** The file every open reads first. */
@@ -60,10 +60,11 @@ const holders = new WeakMap<object, Map<string, number>>();
  * ```
  *
  * `fossil_tables(table_name, kind, iri, path, rows, first_id, source, destination)` — one row per
- * table, in manifest order; `kind` is `vertex` or `edge`; `path` is its file under the corpus root;
- * a vertex table's `dense_id`s are
- * `first_id … first_id + rows − 1`; an edge table's `source`/`destination` name the vertex tables
- * its `src`/`dst` point into. `fossil_columns(table_name, column_name, ordinal, type, role, iri,
+ * table, in manifest order; `kind` is `vertex`, `edge` or `property`; `path` is its file under the
+ * corpus root; a vertex table's `dense_id`s are `first_id … first_id + rows − 1`; an edge table's
+ * `source`/`destination` name the vertex tables its `src`/`dst` point into, and a property table's
+ * `source` the one its `src` does — a row per value of a multi-valued property, whose IRI is its
+ * value column's. `fossil_columns(table_name, column_name, ordinal, type, role, iri,
  * nullable)` — one row per column, `role` the writer's (`address`, `identity`, `endpoint`) and null
  * on a program's column.
  *
@@ -120,7 +121,7 @@ export async function open(name: string, options: OpenOptions): Promise<Close> {
   try {
     const [where] = await names([ENTRY_POINT]);
     const manifest = await read(engine, where!, signal);
-    const tables = [...manifest.vertex_tables, ...manifest.edge_tables];
+    const tables = tablesIn(manifest);
     const seen = new Set(Object.keys(CATALOG_VIEWS));
     for (const table of tables) {
       if (seen.has(table.name)) throw FossilError.of('corpus/duplicate-table', { table: table.name });
@@ -229,6 +230,9 @@ function tablesOf(manifest: Manifest): string {
     ...manifest.edge_tables.map((t) => [
       lit(t.name), `'edge'`, opt(t.iri), lit(t.path), String(t.record_count), 'NULL', lit(t.source.references), lit(t.destination.references),
     ]),
+    ...(manifest.property_tables ?? []).map((t) => [
+      lit(t.name), `'property'`, 'NULL', lit(t.path), String(t.record_count), 'NULL', lit(t.source.references), 'NULL',
+    ]),
   ];
   return relationOf(
     [
@@ -241,7 +245,7 @@ function tablesOf(manifest: Manifest): string {
 
 /** `fossil_columns`: one row per column of every table, in file order. */
 function columnsOf(manifest: Manifest): string {
-  const rows = [...manifest.vertex_tables, ...manifest.edge_tables].flatMap((t) =>
+  const rows = tablesIn(manifest).flatMap((t) =>
     t.properties.map((p, at) => [
       lit(t.name), lit(p.name), String(at + 1), lit(p.type), opt(p.role), opt(p.iri), p.nullable === true ? 'true' : 'false',
     ]),

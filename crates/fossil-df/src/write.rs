@@ -1,5 +1,5 @@
 //! The corpus, written: [`write`](crate::write::write) writes one Parquet per
-//! vertex type and per relation, then `fossil.json`.
+//! vertex type, per relation and per multi-valued property, then `fossil.json`.
 //!
 //! **The corpus carries the graph, not a picture.** Where a vertex is drawn is
 //! the view's choice — two columns it binds, or its own simulation — so the
@@ -27,15 +27,15 @@ use datafusion::parquet::basic::{Compression, Encoding, ZstdLevel};
 use datafusion::parquet::errors::ParquetError;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::schema::types::ColumnPath;
-use fossil_graph_schema::{Failure, NodeType, Problem, Term};
+use fossil_graph_schema::{Cardinality, Failure, NodeType, Problem, Term};
 use fossil_sinks::generated::{
     ColumnRole, EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_COLUMNS,
-    PAYLOAD_IDENTITY, WriterColumn,
+    PAYLOAD_IDENTITY, PROPERTY_COLUMNS, WriterColumn,
 };
 use fossil_sinks::manifest::{
-    EdgeTable as EdgeEntry, Endpoint, Format, MANIFEST_FILE, Manifest, Property, ROW_GROUP_ROWS,
-    RR_IRI, RR_LITERAL, VertexTable as VertexEntry, data_type_name, edge_path, edge_table_name,
-    vertex_path,
+    EdgeTable as EdgeEntry, Endpoint, Format, MANIFEST_FILE, Manifest, Property,
+    PropertyTable as PropertyEntry, ROW_GROUP_ROWS, RR_IRI, RR_LITERAL, VertexTable as VertexEntry,
+    data_type_name, edge_path, edge_table_name, property_path, property_table_name, vertex_path,
 };
 use fossil_storage::{Storage, StorageError};
 
@@ -74,6 +74,11 @@ pub enum WriteError {
         relation: String,
         vertex_type: String,
     },
+    /// Two tables under one name — `Person_knows_Person` is both a relation
+    /// and `Person`'s multi-valued `knows_Person`. A reader attaches a view per
+    /// table name, so the corpus would hold one of them and lose the other.
+    #[error("the corpus would declare `{table}` twice")]
+    DuplicateTable { table: String },
     /// Putting a file into the store; the store's refusal, kept whole.
     #[error("write `{path}`: {source}")]
     Store {
@@ -98,6 +103,7 @@ impl From<WriteError> for Failure {
             WriteError::Store { path, source } => {
                 Self::new(Problem::WriteFailed { path }).caused_by(Self::from(source))
             }
+            WriteError::DuplicateTable { table } => Self::new(Problem::DuplicateTable { table }),
             e @ WriteError::UnknownType { .. } => {
                 bug("a relation names a vertex type with no table").caused_by(e)
             }
@@ -110,26 +116,52 @@ impl From<WriteError> for Failure {
 
 /// Write `graph` under `dest`, a prefix ending in `/` that `storage` covers.
 ///
-/// Vertex types and relations are written in the order the compiled schema
-/// lists them, which is the order `fossil.json` lists them in. The rows are the
-/// executor's, as they are: a vertex type sorted by `dense_id`, a relation by
-/// `(src, dst)`.
+/// Vertex types, relations and multi-valued properties are written in the
+/// order the compiled schema lists them, which is the order `fossil.json` lists
+/// them in. The rows are the executor's, as they are: a vertex type sorted by
+/// `dense_id`, a relation by `(src, dst)`, a property by `(src, value)`.
 ///
 /// # Errors
 ///
 /// [`WriteError`] on the first failure. Nothing is written after it, and
-/// `fossil.json` never is.
+/// `fossil.json` never is; two tables under one name are refused before
+/// anything is.
 #[tracing::instrument(skip_all, fields(dest = %dest))]
 pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Written, WriteError> {
     let empty: Vec<RecordBatch> = Vec::new();
+    let multi = |node: &'_ NodeType| {
+        node.properties
+            .iter()
+            .filter(|p| p.cardinality == Cardinality::Multi)
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let mut names = std::collections::HashSet::new();
+    let tables = graph.schema.nodes.iter().map(|n| n.label.clone());
+    let tables = tables.chain(
+        graph
+            .schema
+            .edges
+            .iter()
+            .map(|e| edge_table_name(&e.source, &e.label, &e.destination)),
+    );
+    let tables = tables.chain(graph.schema.nodes.iter().flat_map(|n| {
+        multi(n)
+            .into_iter()
+            .map(|p| property_table_name(&n.label, &p))
+    }));
+    for table in tables {
+        if !names.insert(table.clone()) {
+            return Err(WriteError::DuplicateTable { table });
+        }
+    }
 
     let mut vertex_tables = Vec::with_capacity(graph.schema.nodes.len());
+    let mut property_tables = Vec::new();
     for node in &graph.schema.nodes {
-        let batches = graph
-            .vertices
-            .iter()
-            .find(|v| v.label == node.label)
-            .map_or(empty.as_slice(), |v| v.batches.as_slice());
+        let vertex = graph.vertices.iter().find(|v| v.label == node.label);
+        let batches = vertex.map_or(empty.as_slice(), |v| v.batches.as_slice());
         let path = vertex_path(&node.label);
         let (bytes, properties) = vertex_parquet(node, batches)?;
         put(storage, dest, &path, bytes).await?;
@@ -142,6 +174,30 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
             record_count: rows(batches),
             properties,
         });
+
+        for property in multi(node) {
+            let batches = vertex
+                .and_then(|v| v.properties.iter().find(|p| p.name == property))
+                .map_or(empty.as_slice(), |p| p.batches.as_slice());
+            let name = property_table_name(&node.label, &property);
+            let path = property_path(&name);
+            let (bytes, value) = property_parquet(node, &property, batches)?;
+            put(storage, dest, &path, bytes).await?;
+            property_tables.push(PropertyEntry {
+                name,
+                path,
+                source: Endpoint {
+                    key: ENDPOINT_SRC.to_string(),
+                    references: node.label.clone(),
+                },
+                record_count: rows(batches),
+                properties: PROPERTY_COLUMNS
+                    .iter()
+                    .map(fixed)
+                    .chain(std::iter::once(value))
+                    .collect(),
+            });
+        }
     }
 
     let mut edge_tables = Vec::with_capacity(graph.schema.edges.len());
@@ -188,6 +244,7 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
         format: Format,
         vertex_tables,
         edge_tables,
+        property_tables,
     };
     put(
         storage,
@@ -282,29 +339,6 @@ fn vertex_parquet(
     batches: &[RecordBatch],
 ) -> Result<(Bytes, Vec<Property>), WriteError> {
     let mut properties: Vec<Property> = PAYLOAD_COLUMNS.iter().map(fixed).collect();
-    // The type is the column's, as written: `properties` describes the file a
-    // reader opens, and the checker's belief about a column the executor never
-    // introspected is not what the bytes hold. The IRI and the term are the
-    // shape's, copied as it declared them.
-    let program = |name: &str, arrow: &DataType| {
-        let declared = node.properties.iter().find(|p| p.name == name);
-        let term = declared.and_then(|p| p.term.as_ref());
-        Property {
-            name: name.to_string(),
-            data_type: data_type_name(arrow),
-            iri: declared.and_then(|p| p.iri.clone()),
-            term_type: term.map(|t| match t {
-                Term::Iri => RR_IRI.to_string(),
-                Term::Literal(_) => RR_LITERAL.to_string(),
-            }),
-            datatype: term.and_then(|t| match t {
-                Term::Iri => None,
-                Term::Literal(datatype) => datatype.clone(),
-            }),
-            nullable: true,
-            role: None,
-        }
-    };
 
     let Some(first) = batches.first() else {
         // A type with no rows: the writer's columns and the declared ones, and
@@ -320,9 +354,13 @@ fn vertex_parquet(
                 Field::new(c.name, data_type, false)
             })
             .collect();
-        for p in &node.properties {
+        for p in node
+            .properties
+            .iter()
+            .filter(|p| p.cardinality == Cardinality::Single)
+        {
             fields.push(Field::new(&p.name, DataType::Utf8, true));
-            properties.push(program(&p.name, &DataType::Utf8));
+            properties.push(program(node, &p.name, &DataType::Utf8, true));
         }
         let bytes = encode(&Arc::new(Schema::new(fields)), &[], &[PAYLOAD_ADDRESS])?;
         return Ok((bytes, properties));
@@ -337,13 +375,58 @@ fn vertex_parquet(
             if i < PAYLOAD_COLUMNS.len() {
                 field.as_ref().clone().with_nullable(false)
             } else {
-                properties.push(program(field.name(), field.data_type()));
+                properties.push(program(node, field.name(), field.data_type(), true));
                 field.as_ref().clone().with_nullable(true)
             }
         })
         .collect();
     let bytes = encode(&Arc::new(Schema::new(fields)), batches, &[PAYLOAD_ADDRESS])?;
     Ok((bytes, properties))
+}
+
+/// A program's column of `node`, as the manifest lists it. The type is the
+/// column's, as written: `properties` describes the file a reader opens, and
+/// the checker's belief about a column the executor never introspected is not
+/// what the bytes hold. The IRI and the term are the shape's, copied as it
+/// declared them.
+fn program(node: &NodeType, name: &str, arrow: &DataType, nullable: bool) -> Property {
+    let declared = node.properties.iter().find(|p| p.name == name);
+    let term = declared.and_then(|p| p.term.as_ref());
+    Property {
+        name: name.to_string(),
+        data_type: data_type_name(arrow),
+        iri: declared.and_then(|p| p.iri.clone()),
+        term_type: term.map(|t| match t {
+            Term::Iri => RR_IRI.to_string(),
+            Term::Literal(_) => RR_LITERAL.to_string(),
+        }),
+        datatype: term.and_then(|t| match t {
+            Term::Iri => None,
+            Term::Literal(datatype) => datatype.clone(),
+        }),
+        nullable,
+        role: None,
+    }
+}
+
+/// One multi-valued property's table: `src`, then the value under the
+/// property's name, a row per value and none for an absent one — the
+/// executor's rows, sorted by both.
+fn property_parquet(
+    node: &NodeType,
+    property: &str,
+    batches: &[RecordBatch],
+) -> Result<(Bytes, Property), WriteError> {
+    let value = batches.first().map_or(DataType::Utf8, |b| {
+        b.schema().field(PROPERTY_COLUMNS.len()).data_type().clone()
+    });
+    let fields: Vec<Field> = PROPERTY_COLUMNS
+        .iter()
+        .map(|c| Field::new(c.name, DataType::UInt32, false))
+        .chain(std::iter::once(Field::new(property, value.clone(), false)))
+        .collect();
+    let bytes = encode(&Arc::new(Schema::new(fields)), batches, &[ENDPOINT_SRC])?;
+    Ok((bytes, program(node, property, &value, false)))
 }
 
 /// One relation's table: `src`, `dst`, sorted by both — the executor's

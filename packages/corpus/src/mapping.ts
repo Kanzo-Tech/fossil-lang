@@ -11,7 +11,7 @@
  * consumer-side adapter, and why none of them.
  */
 
-import type { EdgeTable, Manifest, Property, VertexTable } from './manifest.gen.js';
+import type { EdgeTable, Manifest, Property, PropertyTable, VertexTable } from './manifest.gen.js';
 import { parseManifest } from './manifest.js';
 import { ident } from './sql.js';
 
@@ -27,8 +27,11 @@ import { ident } from './sql.js';
  *   table inner-joined at each end to the vertex table its key references, answering the two
  *   identities as `source` and `destination` — the source's subject, the relation's predicate, the
  *   destination's subject as an IRI.
- * - A type, column or relation without an IRI is not mapped; a type that would map to nothing has no
- *   triples map. A `list<…>` column is not mapped.
+ * - A multi-valued property is the same query over its own table, a row per value (first normal
+ *   form): joined at `src` to its vertex table, answering the source's identity and the `value`,
+ *   whose object map is the value column's, as a vertex column's is.
+ * - A type, column, relation or property without an IRI is not mapped; a type that would map to
+ *   nothing has no triples map.
  * - Every table and column is a delimited identifier, unqualified: the consumer resolves the names
  *   against the database it attached the corpus to.
  *
@@ -43,12 +46,9 @@ export function mapping(manifest: string): string {
 
 const has = (iri: string | undefined): iri is string => iri !== undefined && iri !== '';
 
-/**
- * The predicate-mapped columns of a vertex table: those with an IRI, less a `list<…>`, whose one cell
- * would be several terms, which no term map produces.
- */
-const mapped = (table: VertexTable): Property[] =>
-  table.properties.filter((p) => has(p.iri) && !p.type.startsWith('list<'));
+/** The predicate-mapped columns of a table: the program's, with an IRI. */
+const mapped = (table: VertexTable | PropertyTable): Property[] =>
+  table.properties.filter((p) => p.role === undefined && has(p.iri));
 
 function render(manifest: Manifest): string {
   const vertices = new Map(manifest.vertex_tables.map((t) => [t.name, t]));
@@ -58,6 +58,9 @@ function render(manifest: Manifest): string {
     ...manifest.edge_tables
       .filter((e) => has(e.iri) && vertices.has(e.source.references) && vertices.has(e.destination.references))
       .map((e) => edgeMap(e, vertices.get(e.source.references)!, vertices.get(e.destination.references)!)),
+    ...(manifest.property_tables ?? [])
+      .filter((t) => mapped(t).length > 0 && vertices.has(t.source.references))
+      .map((t) => valuesMap(t, vertices.get(t.source.references)!)),
   ];
   return `${[HEADER, ...maps].join('\n\n')}\n`;
 }
@@ -95,18 +98,42 @@ function vertexMap(table: VertexTable): string {
  * no name in it can collide with another.
  */
 function edgeMap(edge: EdgeTable, from: VertexTable, to: VertexTable): string {
-  const query = [
-    `SELECT s.${ident(from.identity)} AS "source", d.${ident(to.identity)} AS "destination"`,
-    `FROM ${ident(edge.name)} AS e`,
-    `JOIN ${ident(from.name)} AS s ON e.${ident(edge.source.key)} = s.${ident(from.key)}`,
-    `JOIN ${ident(to.name)} AS d ON e.${ident(edge.destination.key)} = d.${ident(to.key)}`,
-  ].join('\n');
+  return joinedMap(
+    edge.name,
+    [`s.${ident(from.identity)} AS "source"`, `d.${ident(to.identity)} AS "destination"`],
+    [
+      `JOIN ${ident(from.name)} AS s ON e.${ident(edge.source.key)} = s.${ident(from.key)}`,
+      `JOIN ${ident(to.name)} AS d ON e.${ident(edge.destination.key)} = d.${ident(to.key)}`,
+    ],
+    edge.iri!,
+    `rr:column ${column('destination')} ; rr:termType rr:IRI`,
+  );
+}
+
+/**
+ * A multi-valued property: its table joined at `src` to the vertex table it references, answering the
+ * vertex's subject and the value, and a triples map over it whose object is the value, as the column
+ * declares it.
+ */
+function valuesMap(table: PropertyTable, from: VertexTable): string {
+  const value = mapped(table)[0]!;
+  return joinedMap(
+    table.name,
+    [`s.${ident(from.identity)} AS "source"`, `e.${ident(value.name)} AS "value"`],
+    [`JOIN ${ident(from.name)} AS s ON e.${ident(table.source.key)} = s.${ident(from.key)}`],
+    value.iri!,
+    objectMap({ ...value, name: 'value' }),
+  );
+}
+
+/** A triples map over a query on `table`, `e`: its columns, its joins, and one predicate-object map. */
+function joinedMap(table: string, select: string[], joins: string[], predicate: string, object: string): string {
+  const query = [`SELECT ${select.join(', ')}`, `FROM ${ident(table)} AS e`, ...joins].join('\n');
   return [
-    `${node(edge.name)} a rr:TriplesMap ;`,
+    `${node(table)} a rr:TriplesMap ;`,
     `  rr:logicalTable [ rr:sqlQuery ${str(query)} ; rr:sqlVersion rr:SQL2008 ] ;`,
     `  rr:subjectMap [ rr:column ${column('source')} ; rr:termType rr:IRI ] ;`,
-    `  rr:predicateObjectMap [ rr:predicate ${iri(edge.iri!)} ; rr:objectMap [ ` +
-      `rr:column ${column('destination')} ; rr:termType rr:IRI ] ] .`,
+    `  rr:predicateObjectMap [ rr:predicate ${iri(predicate)} ; rr:objectMap [ ${object} ] ] .`,
   ].join('\n');
 }
 

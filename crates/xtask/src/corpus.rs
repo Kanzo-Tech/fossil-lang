@@ -40,6 +40,8 @@ pub enum Where {
     Payload,
     /// An edge row — one relation's table.
     Edge,
+    /// A property row — one multi-valued property's table, a row per value.
+    Property,
 }
 
 impl Where {
@@ -49,12 +51,13 @@ impl Where {
     /// of variants and both carried their own `match` for the prose, so adding
     /// an artefact meant editing four places and a compiler that noticed two of
     /// them. This is the array; [`Self::what`] is the prose.
-    pub const ALL: [Self; 2] = [Self::Payload, Self::Edge];
+    pub const ALL: [Self; 3] = [Self::Payload, Self::Edge, Self::Property];
 
     fn parse(word: &str) -> Option<Self> {
         match word {
             "payload" => Some(Self::Payload),
             "edge" => Some(Self::Edge),
+            "property" => Some(Self::Property),
             _ => None,
         }
     }
@@ -64,6 +67,7 @@ impl Where {
         match self {
             Self::Payload => "PAYLOAD",
             Self::Edge => "EDGE",
+            Self::Property => "PROPERTY",
         }
     }
 
@@ -72,6 +76,7 @@ impl Where {
         match self {
             Self::Payload => "a vertex payload row",
             Self::Edge => "an edge row",
+            Self::Property => "a property row",
         }
     }
 }
@@ -303,10 +308,10 @@ pub fn emit_rust(columns: &[Column]) -> String {
         }
         out.push_str("];\n");
 
-        // A role one column carries is named by that column; a role several
-        // carry (the two endpoints) is named per column, by `aligns`, below.
+        // A role one column carries is named by that column; an endpoint is
+        // named by the end it `aligns` with, below, whichever table it is in.
         for c in &cols {
-            if cols.iter().filter(|o| o.role == c.role).count() == 1 {
+            if c.aligns.is_none() && cols.iter().filter(|o| o.role == c.role).count() == 1 {
                 let _ = writeln!(
                     out,
                     "\n/// The {} column of {what} — {}.\npub const {}_{}: &str = {:?};",
@@ -320,10 +325,23 @@ pub fn emit_rust(columns: &[Column]) -> String {
         }
     }
 
+    // One const per end: a property table's `src` is the same column of the
+    // same end as an edge's, so the two must be one name, and are asserted so.
+    let mut ends: Vec<&Column> = Vec::new();
     for c in columns.iter().filter(|c| c.aligns.is_some()) {
+        match ends.iter().find(|e| e.aligns == c.aligns) {
+            Some(e) => assert_eq!(
+                e.name, c.name,
+                "corpus.bnf: two columns align with `{}` under two names",
+                c.name
+            ),
+            None => ends.push(c),
+        }
+    }
+    for c in ends {
         let _ = writeln!(
             out,
-            "\n/// The edge column the manifest's `{}` endpoint names as its `key`.\n\
+            "\n/// The column the manifest's `{}` endpoint names as its `key`.\n\
              pub const ENDPOINT_{}: &str = {:?};",
             if c.aligns.as_deref() == Some("src") {
                 "source"
@@ -434,9 +452,11 @@ mod tests {
         assert_eq!(count(Where::Payload, Role::Address), 1);
         assert_eq!(cols.iter().filter(|c| c.role == Role::Identity).count(), 1);
         assert_eq!(count(Where::Payload, Role::Identity), 1);
-        // An edge is its two endpoints, one per end.
+        // An edge is its two endpoints, one per end; a property table, the
+        // source end and the program's value.
         assert_eq!(count(Where::Edge, Role::Endpoint), 2);
+        assert_eq!(count(Where::Property, Role::Endpoint), 1);
         let ends: Vec<_> = cols.iter().filter_map(|c| c.aligns.as_deref()).collect();
-        assert_eq!(ends, ["src", "dst"]);
+        assert_eq!(ends, ["src", "dst", "src"]);
     }
 }

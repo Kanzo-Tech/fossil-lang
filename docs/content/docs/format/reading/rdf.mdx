@@ -54,9 +54,23 @@ JOIN "Person" AS d ON e."dst" = d."dense_id\"""" ; rr:sqlVersion rr:SQL2008 ] ;
     rr:objectMap [ rr:column "\"destination\"" ; rr:termType rr:IRI ] ] .
 ```
 
-The query is declared `rr:SQL2008`, R2RML's identifier for Core SQL 2008 (ISO/IEC 9075): it is
-standard SQL and no engine's dialect, and it is always this one form — two inner joins of delimited
-identifiers. R2RML §5.2 makes it a derived table, so a processor runs it as it stands.
+**A multi-valued property is the same query over its own table**, a row per value: joined at `src`
+to the vertex table it references, answering the vertex's `subject` as `source` and the value as
+`value`. The object is the value, with the term the column declares, as a vertex column's is.
+
+```turtle
+<#map/Person_nickname> a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """SELECT s."subject" AS "source", e."nickname" AS "value"
+FROM "Person_nickname" AS e
+JOIN "Person" AS s ON e."src" = s."dense_id\"""" ; rr:sqlVersion rr:SQL2008 ] ;
+  rr:subjectMap [ rr:column "\"source\"" ; rr:termType rr:IRI ] ;
+  rr:predicateObjectMap [ rr:predicate <https://example.org/nickname> ;
+    rr:objectMap [ rr:column "\"value\"" ] ] .
+```
+
+Each query is declared `rr:SQL2008`, R2RML's identifier for Core SQL 2008 (ISO/IEC 9075): it is
+standard SQL and no engine's dialect, and it is always one of these two forms — inner joins of
+delimited identifiers. R2RML §5.2 makes it a derived table, so a processor runs it as it stands.
 
 ## The rules
 
@@ -64,8 +78,6 @@ identifiers. R2RML §5.2 makes it a derived table, so a processor runs it as it 
   without one has no triples map; a vertex type without one has subjects with no `rr:class`, and a
   type with neither an IRI nor a column that has one has no triples map at all. Nothing is invented:
   there is no default namespace a missing IRI falls back to.
-- **A `list<…>` column is not mapped.** One cell would be several literals, which no term map
-  produces.
 - **The term is the shape's, verbatim.** `fossil.json` carries the term each column's shape declared
   — `term_type`, R2RML's `rr:IRI` or `rr:Literal`, and `datatype`, the IRI the document wrote — and
   the mapping copies both. Nothing is derived from the column's `type`: a shape that says `xsd:gYear`
@@ -85,8 +97,8 @@ identifiers. R2RML §5.2 makes it a derived table, so a processor runs it as it 
 
 `packages/corpus/tests/mapping.test.ts` parses the Turtle as a graph and holds it against the
 manifest — every type, column and relation with an IRI mapped, nothing without one, each column's
-declared term copied and none invented, each relation's query joining the right keys of the right
-tables. Then it runs the mapping:
+declared term copied and none invented, each relation's and property's query joining the right keys
+of the right tables. Then it runs the mapping:
 `packages/corpus/tests/r2rml.ts, materialise` is an R2RML processor for the constructs the mapping
 uses, natural datatypes included, over DuckDB, and the triples it makes of the checked-in corpus are
 compared with the triples a second query, written against the manifest, says the corpus holds. `integration/round-trip.test.ts`

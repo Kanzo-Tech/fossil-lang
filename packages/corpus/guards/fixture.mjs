@@ -9,7 +9,8 @@
  *
  * The graph is one graph, as the format is: `Person`, `Order` and `Tag` share one `dense_id` space,
  * each type one contiguous range of it in manifest order, subject order inside it. Three
- * relations, one inside a type and two between types.
+ * relations, one inside a type and two between types, and one multi-valued property: a person's
+ * nicknames, a row each.
  *
  * **What it is not.** It is not a benchmark and not a realistic graph. Nothing here is normative.
  * The conventions are.
@@ -58,6 +59,7 @@ export function write(dir, { count = 70_000, orders, tags = 16 } = {}) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "vertex"), { recursive: true });
   mkdirSync(join(dir, "edge"), { recursive: true });
+  mkdirSync(join(dir, "property"), { recursive: true });
 
   const placedBy = (j) => (j * 7919) % count;
   const personSubjects = Array.from({ length: count }, (_, i) => `${BASE}person/${i}`);
@@ -93,6 +95,14 @@ export function write(dir, { count = 70_000, orders, tags = 16 } = {}) {
   const tagged = [];
   for (let i = 0; i < count; i += 3) if (tags > 0) tagged.push([personId[i], tagId[i % tags]]);
   csv(at("tagged"), "src,dst", tagged);
+  // None for one person in five, one for the rest, and a second for every other one.
+  const nicknames = [];
+  for (let i = 0; i < count; i += 1) {
+    if (i % 5 === 0) continue;
+    nicknames.push([personId[i], `nick-${i % 7}`]);
+    if (i % 2 === 0) nicknames.push([personId[i], `alias-${i % 11}`]);
+  }
+  csv(at("nickname"), "src,nickname", nicknames);
 
   const P = (name, type, extra = {}) => ({ name, type, ...extra });
   // The term a shape would declare: a datatype the column's type does not imply, as a shape says it.
@@ -119,6 +129,12 @@ export function write(dir, { count = 70_000, orders, tags = 16 } = {}) {
     { src: "Order", label: "placedBy", dst: "Person", csv: "placedBy", rows: orders, sql: "src::UINTEGER AS src, dst::UINTEGER AS dst", properties: ends },
     { src: "Person", label: "tagged", dst: "Tag", csv: "tagged", rows: tagged.length, sql: "src::UINTEGER AS src, dst::UINTEGER AS dst", properties: ends },
   ].filter((e) => e.rows > 0);
+  const propertyTables = [
+    {
+      type: "Person", name: "nickname", rows: nicknames.length, sql: "src::UINTEGER AS src, nickname::VARCHAR AS nickname",
+      properties: [P("src", "uint32", { role: "endpoint" }), P("nickname", "string", { iri: `${BASE}nickname`, ...literal("string") })],
+    },
+  ].filter((t) => t.rows > 0);
 
   const copy = (from, sql, order, to) =>
     `COPY (SELECT ${sql} FROM read_csv('${lit(from)}', header = true, all_varchar = true) ORDER BY ${order})
@@ -130,6 +146,9 @@ export function write(dir, { count = 70_000, orders, tags = 16 } = {}) {
       ...vertexTables.map((t) => copy(at(t.name), t.sql, "dense_id", join(dir, "vertex", `${t.name}.parquet`))),
       ...edgeTables.map((e) =>
         copy(at(e.csv), e.sql, "src, dst", join(dir, "edge", `${e.src}_${e.label}_${e.dst}.parquet`)),
+      ),
+      ...propertyTables.map((t) =>
+        copy(at(t.name), t.sql, `src, ${t.name}`, join(dir, "property", `${t.type}_${t.name}.parquet`)),
       ),
     ].join("\n"),
   );
@@ -157,6 +176,13 @@ export function write(dir, { count = 70_000, orders, tags = 16 } = {}) {
       record_count: e.rows,
       properties: e.properties,
     })),
+    property_tables: propertyTables.map((t) => ({
+      name: `${t.type}_${t.name}`,
+      path: `property/${t.type}_${t.name}.parquet`,
+      source: { key: "src", references: t.type },
+      record_count: t.rows,
+      properties: t.properties,
+    })),
   };
   writeFileSync(join(dir, ENTRY_POINT), `${JSON.stringify(manifest, null, 2)}\n`);
 
@@ -164,7 +190,7 @@ export function write(dir, { count = 70_000, orders, tags = 16 } = {}) {
     dir,
     vertices: vertexTables.reduce((n, t) => n + t.rows, 0),
     edges: edgeTables.reduce((n, e) => n + e.rows, 0),
-    tables: vertexTables.length + edgeTables.length,
+    tables: vertexTables.length + edgeTables.length + propertyTables.length,
   };
 }
 

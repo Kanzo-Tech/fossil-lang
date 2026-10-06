@@ -97,7 +97,7 @@ use fossil_hir::shapes::inner_primitive;
 use fossil_hir::{MappingLoc, def_map::def_map};
 use fossil_locator::SourceAnchor;
 use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir_pg};
-use fossil_sinks::generated::{PAYLOAD_ADDRESS, PAYLOAD_IDENTITY};
+use fossil_sinks::generated::{ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_IDENTITY};
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
 /// single source of all type/predicate/cardinality metadata) plus the relation
@@ -243,9 +243,22 @@ pub async fn execute_graph<'db>(
 /// batches are also registered in the executor's [`SessionContext`] under
 /// `label` so the edge phase joins them without re-reading Parquet. The node's
 /// type/property metadata lives in the [`GraphSchema`], keyed by this `label`.
+///
+/// A [`Cardinality::Multi`] property is not a column of it: its values are in
+/// [`Self::properties`], a table each.
 #[derive(Debug)]
 pub struct VertexTable {
     pub label: String,
+    pub batches: Vec<RecordBatch>,
+    pub properties: Vec<PropertyValues>,
+}
+
+/// A multi-valued property's values, in first normal form: `src`, the
+/// `dense_id` of the vertex a value belongs to, and the value under the
+/// property's name — a set, `ORDER BY src, value`.
+#[derive(Debug)]
+pub struct PropertyValues {
+    pub name: String,
     pub batches: Vec<RecordBatch>,
 }
 
@@ -417,6 +430,15 @@ async fn prepare_vertex_ops<'db>(
 /// column, grouped by `subject`. Picking one whole ROW per subject, as
 /// `DISTINCT ON` did, would keep the `knows` mapping's row and its null `email`
 /// as often as the `People` row that has it.
+///
+/// # A multi-valued property is a table of its own
+///
+/// Merging a subject's rows is right for a single-valued column and wrong for a
+/// multi-valued one: `first_value` kept the first of a person's three
+/// nicknames from a CSV and dropped the other two without a word. So a
+/// [`Cardinality::Multi`] property leaves the vertex row and keeps every
+/// value, a row each ([`PropertyValues`]) — the shape a relational source
+/// already spells it in, and the RDF pivot's list unnested into it.
 #[tracing::instrument(skip_all)]
 async fn finalize_vertex(
     ctx: &SessionContext,
@@ -479,6 +501,16 @@ async fn finalize_vertex(
         });
     }
     let df = df.expect("a type group is never empty");
+    let multi = |name: &str| {
+        node.properties
+            .iter()
+            .any(|p| p.name == name && p.cardinality == Cardinality::Multi)
+    };
+    let column = |name: &str| DfExpr::Column(Column::new_unqualified(name));
+    let (values, columns): (Vec<_>, Vec<_>) = columns.into_iter().partition(|(n, _)| multi(n));
+    let row = df
+        .clone()
+        .select(columns.iter().map(|(name, _)| column(name)).collect::<Vec<_>>())?;
 
     let by_subject = vec![col(PAYLOAD_IDENTITY).sort(true, false)];
     let sorted = if dedup {
@@ -506,22 +538,77 @@ async fn finalize_vertex(
                     .alias(name.as_str())
             }))
             .collect();
-        df.aggregate(vec![col(PAYLOAD_IDENTITY)], merged)?
+        row.aggregate(vec![col(PAYLOAD_IDENTITY)], merged)?
             .select(renamed)?
             .sort(by_subject)?
     } else {
-        df.sort(by_subject)?
+        row.sort(by_subject)?
     };
 
     let batches = prepend_dense_id(sorted.collect().await?, first_id)?;
     register_batches(ctx, &node.label, &batches)?;
+
+    let mut properties = Vec::with_capacity(values.len());
+    for (name, _) in values {
+        let vertex = ctx.table(node.label.as_str()).await?.select(vec![
+            col(PAYLOAD_IDENTITY).alias("__subject"),
+            col(PAYLOAD_ADDRESS).alias(ENDPOINT_SRC),
+        ])?;
+        let batches = row_per_value(
+            df.clone()
+                .select(vec![col(PAYLOAD_IDENTITY), column(&name)])?,
+            &name,
+        )?
+        .filter(column(&name).is_not_null())?
+        .join(
+            vertex,
+            JoinType::Inner,
+            &[PAYLOAD_IDENTITY],
+            &["__subject"],
+            None,
+        )?
+        .select(vec![col(ENDPOINT_SRC), column(&name)])?
+        .distinct()?
+        .sort(vec![
+            col(ENDPOINT_SRC).sort(true, false),
+            column(&name).sort(true, false),
+        ])?
+        .collect()
+        .await?;
+        properties.push(PropertyValues { name, batches });
+    }
+
     Ok((
         VertexTable {
             label: node.label.clone(),
             batches,
+            properties,
         },
         node,
     ))
+}
+
+/// One row per value of `column`. The RDF pivot spells a multi-valued
+/// predicate as a `List` and is unnested; a relational source spells it as
+/// repeated rows, which is already the shape `UNNEST` produces and must not be
+/// unnested a second time.
+///
+/// **The condition is the column's TYPE, not the declared cardinality**, and
+/// the difference is a whole class of source: a shape says how many values a
+/// predicate MAY carry, not how the source spells them. Reading the cardinality
+/// instead cost every `*` and `+` edge over a CSV — `unnest_columns` on a
+/// `Utf8` is a DataFusion internal error at run time with no diagnostic in
+/// front of it — and that was 8 of LDBC-SNB's 21 relationships.
+fn row_per_value(df: DataFrame, column: &str) -> datafusion::error::Result<DataFrame> {
+    let list = matches!(
+        df.schema().field_with_unqualified_name(column)?.data_type(),
+        DataType::List(_) | DataType::LargeList(_) | DataType::FixedSizeList(_, _)
+    );
+    if list {
+        df.unnest_columns(&[column])
+    } else {
+        Ok(df)
+    }
 }
 
 /// Build a schema [`Property`](NodeProp) for a vertex prop: peel its canonical
@@ -663,7 +750,6 @@ async fn execute_edges<'db>(
                 dst_type,
                 src_id,
                 dst_id,
-                *single_valued,
             )
             .await?;
             let edge_type = GraphEdge {
@@ -715,47 +801,13 @@ async fn execute_edge(
     dst_type: &str,
     src_id: &Expr<'_>,
     dst_id: &Expr<'_>,
-    single_valued: bool,
 ) -> datafusion::error::Result<PreparedEdge> {
     let edge_src = rows.select(vec![
         render(src_id)?.alias("src_iri"),
         render(dst_id)?.alias("dst_iri"),
     ])?;
-    // A multi-valued edge's `dst_iri` is a `List` (the RDF pivot kept every
-    // object); UNNEST expands it to one (src, dst) row per element — the
-    // DataFusion-native counterpart of the writer's `UNNEST(list(...))`. A
-    // single-valued edge's `dst_iri` is already scalar.
-    //
-    // **The condition is the column's TYPE, not the declared cardinality**, and
-    // the difference is a whole class of source. `single_valued` comes from the
-    // shape (`Occurs::collapse`), and a shape says how many values a predicate
-    // MAY carry — not how the source spells them. The RDF pivot spells `*` as a
-    // `List`; a relational source spells it as REPEATED ROWS, which is already
-    // the shape UNNEST produces and must not be unnested a second time.
-    //
-    // Reading the cardinality instead cost every `*` and `+` edge over a CSV:
-    // `unnest_columns` on a `Utf8` is `"trying to unnest on invalid data type"`,
-    // a DataFusion internal error at run time with no diagnostic in front of it.
-    // That is 8 of LDBC-SNB's 21 relationships — `knows`, `likes`, `hasMember`,
-    // `hasTag`, `hasInterest`, `studyAt`, `workAt` — and a shape that wrote
-    // `;` where it meant `*` to dodge it was recording a defect, not a
-    // modelling choice.
-    let dst_is_list = matches!(
-        edge_src
-            .schema()
-            .field_with_unqualified_name("dst_iri")?
-            .data_type(),
-        DataType::List(_) | DataType::LargeList(_) | DataType::FixedSizeList(_, _)
-    );
-    debug_assert!(
-        !(single_valued && dst_is_list),
-        "a Single edge produced a list-typed `dst_iri`, which no source should do"
-    );
-    let edge_src = if dst_is_list {
-        edge_src.unnest_columns(&["dst_iri"])?
-    } else {
-        edge_src
-    };
+    // A multi-valued edge is an edge per object, however the source spells it.
+    let edge_src = row_per_value(edge_src, "dst_iri")?;
     // Pre-project each vertex table to (subject, dense) with disjoint names so
     // the two joins never collide on `subject`/`dense_id`.
     let src_v = ctx.table(src_type).await?.select(vec![

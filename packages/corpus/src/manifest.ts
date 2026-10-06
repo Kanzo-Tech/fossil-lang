@@ -8,7 +8,14 @@
 
 import { FossilError } from '@fossil-lang/types';
 
-import type { Manifest } from './manifest.gen.js';
+import type { EdgeTable, Manifest, PropertyTable, VertexTable } from './manifest.gen.js';
+
+/** Every table the manifest declares — vertices, relations, multi-valued properties — in its order. */
+export const tablesIn = (manifest: Manifest): (VertexTable | EdgeTable | PropertyTable)[] => [
+  ...manifest.vertex_tables,
+  ...manifest.edge_tables,
+  ...(manifest.property_tables ?? []),
+];
 
 /** The format this reader reads. Anything else is refused at `open`. */
 export const FOSSIL_FORMAT: Manifest['format'] = 'fossil/1';

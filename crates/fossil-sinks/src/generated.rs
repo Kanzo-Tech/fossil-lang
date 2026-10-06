@@ -79,8 +79,15 @@ pub const EDGE_COLUMNS: &[WriterColumn] = &[
     },
 ];
 
-/// The edge column the manifest's `source` endpoint names as its `key`.
+/// Every column of a property row, in writer order.
+pub const PROPERTY_COLUMNS: &[WriterColumn] = &[WriterColumn {
+    name: "src",
+    data_type: "uint32",
+    role: ColumnRole::Endpoint,
+}];
+
+/// The column the manifest's `source` endpoint names as its `key`.
 pub const ENDPOINT_SRC: &str = "src";
 
-/// The edge column the manifest's `destination` endpoint names as its `key`.
+/// The column the manifest's `destination` endpoint names as its `key`.
 pub const ENDPOINT_DST: &str = "dst";

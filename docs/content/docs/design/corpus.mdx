@@ -177,6 +177,27 @@ there can only be satisfied by agreeing with the bytes**, never by agreeing with
 implementation of the same arithmetic — the gap through which GraphAr's fourth implementation landed
 green and wrong.
 
+## A multi-valued property is a table of its own
+
+A property a shape declares `*` or `+` is **a table of its own, a row per value** — `src`, the
+vertex's address, and the value — and the vertex row carries none of it. It is first normal form,
+and it is chosen because it is the only form the mapping standard reads: R2RML §10.2 makes one cell
+one term, and an array column is SQL feature S091, outside the Core SQL 2008 that `rr:SQL2008`
+declares. A property table becomes RDF through the same joined query a relation does, so the corpus
+has one shape of mapping for both.
+
+It is also the form both sources already arrive in. A relational source spells "many" as repeated
+rows, which a vertex row can only hold by keeping one of them; RDF arrives as a list, which no term
+map reads. Both now unnest into the same table, by one rule shared with edges: a column whose *type* is
+a list is a row per value, whatever cardinality was declared. GraphAr, Kùzu and Neo4j keep a list
+in the vertex row instead; why not is on [what was discarded](/docs/design/discarded#the-corpus-as-rdf).
+
+A property table's name is `<Type>_<property>`, which can be the name of a relation —
+`Person`'s `knows_Person` and `Person_knows_Person` are one name — and a reader attaches one view
+per name. The writer refuses that run as `corpus/duplicate-table` before a byte is written. What
+would reverse that is a naming scheme with no collision at all, which needs a separator no property
+name can hold; there is none in a format whose names are a shape's.
+
 ## What a corpus can carry, and where the format lives
 
 Vertex and edge tables of values, and one graph: there are no quads and nowhere to put a graph
