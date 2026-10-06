@@ -192,3 +192,53 @@ describe('the mapping, executed', () => {
     expect([...got].filter((t) => t.includes(` <${knows.iri}> `))).toHaveLength(pairs!.n as number);
   }, 120_000);
 });
+
+describe('the mapping, executed over names a processor could fold', () => {
+  // A camelCase column, a table name that holds a `"`, and an edge between them: undelimited, an
+  // R2RML processor would fold `birthYear` to `BIRTHYEAR` and find no column (#22).
+  const ODD = 'A "quoted" type';
+  const manifest = {
+    format: 'fossil/1',
+    vertex_tables: [
+      {
+        name: 'Person', iri: 'https://example.org/Person', path: 'p', key: 'dense_id', identity: 'subject', record_count: 2,
+        properties: [{ name: 'birthYear', type: 'int32', iri: 'https://example.org/birthYear' }],
+      },
+      { name: ODD, iri: 'https://example.org/Odd', path: 'o', key: 'dense_id', identity: 'subject', record_count: 1, properties: [] },
+    ],
+    edge_tables: [
+      {
+        name: 'Person_likes_Odd', iri: 'https://example.org/likes', path: 'e', record_count: 1, properties: [],
+        source: { key: 'src', references: 'Person' }, destination: { key: 'dst', references: ODD },
+      },
+    ],
+  };
+  let query: (sql: string) => Promise<Record<string, unknown>[]>;
+
+  beforeAll(async () => {
+    ({ query } = await duckdb());
+    for (const statement of [
+      `ATTACH ':memory:' AS odd`,
+      `CREATE TABLE odd."Person" (dense_id UINTEGER, subject VARCHAR, "birthYear" INTEGER)`,
+      `INSERT INTO odd."Person" VALUES (0, 'https://example.org/ada', 1815), (1, 'https://example.org/alan', NULL)`,
+      `CREATE TABLE odd."A ""quoted"" type" (dense_id UINTEGER, subject VARCHAR)`,
+      `INSERT INTO odd."A ""quoted"" type" VALUES (2, 'https://example.org/engine')`,
+      `CREATE TABLE odd."Person_likes_Odd" (src UINTEGER, dst UINTEGER)`,
+      `INSERT INTO odd."Person_likes_Odd" VALUES (0, 2)`,
+    ]) await query(statement);
+  }, 60_000);
+
+  it('reads every name as written, case and quotes kept', async () => {
+    const got = await materialise(mapping(JSON.stringify(manifest)), 'odd', query);
+    const type = (s: string, c: string) => `<https://example.org/${s}> <${RDF_TYPE}> <https://example.org/${c}>`;
+    expect([...got].sort()).toEqual(
+      [
+        type('ada', 'Person'),
+        type('alan', 'Person'),
+        type('engine', 'Odd'),
+        `<https://example.org/ada> <https://example.org/birthYear> "1815"^^<${XSD}integer>`,
+        '<https://example.org/ada> <https://example.org/likes> <https://example.org/engine>',
+      ].sort(),
+    );
+  }, 60_000);
+});
