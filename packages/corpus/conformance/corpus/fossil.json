@@ -23,6 +23,8 @@
           "name": "birth_year",
           "type": "int32",
           "iri": "https://example.org/birthYear",
+          "term_type": "http://www.w3.org/ns/r2rml#Literal",
+          "datatype": "http://www.w3.org/2001/XMLSchema#gYear",
           "nullable": true
         },
         {
@@ -53,7 +55,9 @@
         {
           "name": "amount",
           "type": "double",
-          "iri": "https://example.org/amount"
+          "iri": "https://example.org/amount",
+          "term_type": "http://www.w3.org/ns/r2rml#Literal",
+          "datatype": "http://www.w3.org/2001/XMLSchema#decimal"
         }
       ]
     },

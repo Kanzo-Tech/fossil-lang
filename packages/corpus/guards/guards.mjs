@@ -70,6 +70,48 @@ function spells(declared, actual) {
   return known === undefined ? null : known.includes(actual);
 }
 
+const RR = "http://www.w3.org/ns/r2rml#";
+const XSD = "http://www.w3.org/2001/XMLSchema#";
+
+/**
+ * The lexical space of each XSD datatype this checker knows, as the regular expression XSD 1.1
+ * Part 2 gives it (§3.3). A datatype missing from this table is reported and not failed, as a type
+ * word missing from `SPELLINGS` is: the shape's vocabulary is the shape's.
+ */
+const TZ = "(Z|[+-]((0[0-9]|1[0-3]):[0-5][0-9]|14:00))?";
+const YEAR = "-?([1-9][0-9]{3,}|0[0-9]{3})";
+const DATE = `${YEAR}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])`;
+const TIME = "(([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?|24:00:00(\\.0+)?)";
+const INTEGER = "[+-]?[0-9]+";
+const DOUBLE = "[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([Ee][+-]?[0-9]+)?|[+-]?INF|NaN";
+const LEXICAL = {
+  boolean: "true|false|1|0",
+  decimal: "[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)",
+  double: DOUBLE,
+  float: DOUBLE,
+  date: `${DATE}${TZ}`,
+  time: `${TIME}${TZ}`,
+  dateTime: `${DATE}T${TIME}${TZ}`,
+  gYear: `${YEAR}${TZ}`,
+  hexBinary: "([0-9a-fA-F]{2})*",
+  string: ".*",
+  anyURI: ".*",
+};
+for (const local of ["integer", "long", "int", "short", "byte", "nonNegativeInteger", "positiveInteger",
+  "nonPositiveInteger", "negativeInteger", "unsignedLong", "unsignedInt", "unsignedShort", "unsignedByte"]) {
+  LEXICAL[local] = INTEGER;
+}
+
+/**
+ * A column's natural RDF lexical form, as SQL (R2RML §10.2): its text, with the two corrections a
+ * DuckDB cast needs — a timestamp's `T`, and a binary's hex.
+ */
+function natural(column, sql) {
+  if (sql.startsWith("TIMESTAMP")) return `replace(${column}::VARCHAR, ' ', 'T')`;
+  if (sql === "BLOB") return `hex(${column})`;
+  return `${column}::VARCHAR`;
+}
+
 /** The fixed columns of a table, by the fields of its manifest entry that name them. */
 function fixedColumns(table) {
   const e = table.entry;
@@ -350,6 +392,46 @@ export const GUARDS = [
         failures.push(...violations(row.repeats, `${table.name}: two vertices share a ${column}`));
       }
       return result(failures);
+    },
+  },
+
+  {
+    id: "declared-term",
+    title: "Every value is a term of the kind its column declares",
+    proves:
+      "A column whose entry declares an RDF term holds only values that are one. Under `datatype`, " +
+      "each value's natural lexical form (R2RML §10.2) is in the lexical space XSD gives that " +
+      "datatype, so R2RML's datatype override (§10.3) makes a well-typed literal and never the " +
+      "data error of §11. Under `term_type` `rr:IRI`, each value is an absolute IRI — it opens with " +
+      "a scheme. A shape that declares `xsd:gYear` over an integer column is answered here.",
+    cannotProve:
+      "That a value is in the datatype's *value* space beyond its lexical form: `2023-02-30` is a " +
+      "valid `xsd:date` lexically and no date, and an `xsd:byte` past 127 passes. A datatype " +
+      "outside the XSD table here is reported and not failed, and an IRI is held to its scheme " +
+      "only — RFC 3987's grammar is not.",
+    run(corpus) {
+      const failures = [];
+      const notes = [];
+      for (const table of readable([...corpus.vertices, ...corpus.edges])) {
+        const properties = Array.isArray(table.entry.properties) ? table.entry.properties : [];
+        for (const p of properties) {
+          const sql = table.columns.get(p.name);
+          if (sql === undefined || (p.datatype === undefined && p.term_type === undefined)) continue;
+          const local = typeof p.datatype === "string" && p.datatype.startsWith(XSD) ? p.datatype.slice(XSD.length) : null;
+          const pattern = p.term_type === `${RR}IRI` ? "[A-Za-z][A-Za-z0-9+.-]*:.*" : LEXICAL[local];
+          if (pattern === undefined) {
+            notes.push(`${table.name}.${p.name}: no lexical space known for ${p.datatype}`);
+            continue;
+          }
+          const bad = scalar(
+            `SELECT count(*) FROM ${parquet(table.file)}
+              WHERE "${p.name}" IS NOT NULL AND NOT regexp_full_match(${natural(`"${p.name}"`, sql)}, '${lit(pattern)}')`,
+          );
+          const term = p.term_type === `${RR}IRI` ? "an IRI" : `a ${p.datatype}`;
+          failures.push(...violations(bad, `${table.name}.${p.name}: a value that is not ${term}`));
+        }
+      }
+      return result(failures, notes);
     },
   },
 

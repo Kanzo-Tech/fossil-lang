@@ -71,7 +71,8 @@ identifiers. R2RML §5.2 makes it a derived table, so a processor runs it as it 
   the mapping copies both. Nothing is derived from the column's `type`: a shape that says `xsd:gYear`
   over an `int32` column is mapped `xsd:gYear`. Where the shape declared no term the mapping states
   none, and R2RML's default holds: a literal of the column's natural datatype (§10.2), which the
-  processor derives from the SQL type.
+  processor derives from the SQL type. The `declared-term` guard holds every stored value to the term its column
+  declares, so the override of §10.3 makes a well-typed literal and never the data error of §11.
 - **Every name is a delimited identifier, unqualified.** `rr:tableName`, `rr:column` and every name
   in a query is written `"Person"`, case kept, a `"` doubled — so every processor reads it the same
   way and none folds `birthYear` to upper case. No catalog or schema is in front of a table: R2RML
