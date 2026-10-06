@@ -150,7 +150,7 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
                     || {
                         let datatype = format!("http://www.w3.org/2001/XMLSchema#{value}");
                         (
-                            (value != "-").then(|| Term::Literal(Some(datatype))),
+                            (value != "-").then_some(Term::Literal(Some(datatype))),
                             Vec::new(),
                         )
                     },
