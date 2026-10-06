@@ -13,14 +13,14 @@
 //!   corpus       The same, one data file along: the writer's column table from
 //!                `corpus.bnf`, projected into Rust and TypeScript. Two data
 //!                files, two commands, one generator loop.
-//!   problem      The same again, from a derived file rather than a written one:
-//!                `@fossil-lang/types`' `problem.gen.ts` from
-//!                `crates/fossil-graph-schema/problem.schema.json`, the error
-//!                catalogue's schema. Three sources, one generator loop.
+//!
+//! What is generated from a Rust type rather than a data file — the JSON
+//! Schemas and the TypeScript declarations — is `tests/wire.rs`, because the
+//! types live in crates this binary must not link.
 
 use std::process::{Command, exit};
 
-use xtask::{catalogue, corpus, depgraph, problem};
+use xtask::{catalogue, corpus, depgraph};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -38,19 +38,11 @@ fn main() {
             corpus::generated(),
             args.next().as_deref() == Some("--check"),
         ),
-        Some("problem") => generate(
-            "crates/fossil-graph-schema/problem.schema.json",
-            "problem",
-            problem::generated(),
-            args.next().as_deref() == Some("--check"),
-        ),
         other => {
             if let Some(c) = other {
                 eprintln!("xtask: unknown command {c:?}");
             }
-            eprintln!(
-                "usage: cargo xtask <wasm-check | catalogue [--check] | corpus [--check] | problem [--check]>"
-            );
+            eprintln!("usage: cargo xtask <wasm-check | catalogue [--check] | corpus [--check]>");
             exit(2);
         }
     }

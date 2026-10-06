@@ -278,7 +278,7 @@ macro_rules! catalogue {
 
         /// Each code's `#[error]` as written — the format string and its
         /// arguments, as source text. `problem.schema.json` carries it as
-        /// `x-detail`, and `cargo xtask problem` turns the ones it can read
+        /// `x-detail`, and `xtask/tests/wire.rs` turns the ones it can read
         /// into the TypeScript that renders the same detail from the same data.
         pub const TEMPLATES: &[(&str, &str)] = &[$(($code, stringify!($($message)*))),*];
     };
@@ -922,7 +922,7 @@ const INDEX: &str = "docs/errors";
 impl Problem {
     /// `problem.schema.json`: the JSON Schema of this enum, each arm carrying
     /// its `#[error]` as written (`x-detail`), and the help link's two halves
-    /// (`x-help`). `cargo xtask problem` writes it and generates the
+    /// (`x-help`). `xtask/tests/wire.rs` writes it and generates the
     /// TypeScript catalogue from it.
     ///
     /// # Panics

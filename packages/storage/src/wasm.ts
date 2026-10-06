@@ -1,12 +1,22 @@
 // The glue is imported from this leaf module only, never from the entry — see
 // `@fossil-lang/executor`'s `client.ts` for why a `sideEffects: false` bundler must not see it twice.
 import init, {
+  storageCovering,
   storageGrant,
   storageName,
   storageRead as rawRead,
   type InitInput,
 } from '../pkg/fossil_storage_wasm.js';
-import { FossilError, isFossilError, loader, type Access, type Host, type StorageCredential } from '@fossil-lang/types';
+import {
+  FossilError,
+  isFossilError,
+  loader,
+  type Access,
+  type GrantPlan,
+  type Host,
+  type LocatorName,
+  type StorageCredential,
+} from '@fossil-lang/types';
 
 export type { InitInput };
 
@@ -46,30 +56,17 @@ export async function storageRead(host: Host, targets: readonly unknown[]): Prom
   }
 }
 
-export interface GrantPlan {
-  prefix: string;
-  install: string | null;
-  uninstall: string | null;
-  expiresAtMs: number | null;
-}
-
 export const plan = (credential: StorageCredential, access: Access): GrantPlan =>
-  guarded('fossil-storage failed planning a grant', () => storageGrant(credential, access) as GrantPlan);
+  guarded('fossil-storage failed planning a grant', () => storageGrant(credential, access));
 
-export const nameOf = (
-  credential: StorageCredential,
-  locator: string,
-): { name: string; lend: string | null } =>
+export const nameOf = (credential: StorageCredential, locator: string): LocatorName =>
   guarded('fossil-storage failed naming a locator', () => storageName(credential, locator));
 
-/** The credential whose prefix is the longest one covering `locator`. */
+/** The credential whose prefix covers `locator`, by `fossil_storage::covering`. */
 export function covering(
   credentials: readonly StorageCredential[],
   locator: string,
 ): StorageCredential | undefined {
-  let best: StorageCredential | undefined;
-  for (const c of credentials) {
-    if (locator.startsWith(c.prefix) && c.prefix.length > (best?.prefix.length ?? -1)) best = c;
-  }
-  return best;
+  const prefix = storageCovering(credentials.map((c) => c.prefix), locator);
+  return credentials.find((c) => c.prefix === prefix);
 }

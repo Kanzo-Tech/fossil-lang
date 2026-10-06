@@ -19,7 +19,7 @@ export interface BootOptions {
 
 /**
  * Boot the fossil-wasm module. MUST be awaited before calling any of
- * {@link tokenize}, {@link tokenKinds}, or instantiating
+ * {@link tokenize} or instantiating
  * {@link FossilWorkspace}. A boot that succeeded is kept; one that failed is
  * not, so the next call tries again — `module/unreachable` for a module that could not be
  * fetched within 60 s, `internal/bug` for one that would not instantiate.

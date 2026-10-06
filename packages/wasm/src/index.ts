@@ -6,7 +6,6 @@
  * - {@link initFossilWasm} — boots the module; its `.wasm` is a bundler asset. A failed boot is
  *   forgotten, so the next call tries again.
  * - {@link tokenize} — calls the Rust lexer, returns TokenRow[].
- * - {@link tokenKinds} — the legend for TokenRow.kind: variant names by index.
  * - {@link openProgram} — one program open for an editor: the workspace, the push-before-ask
  *   discipline and the document resolution a host would otherwise write, shaped to spread into
  *   `@fossil-lang/codemirror-fossil`'s `fossil()`. What a host with one editor calls.
@@ -34,14 +33,11 @@
 // package entry lets a `sideEffects:false` bundler duplicate it, splitting
 // `init()`'s wasm instance from the one the functions use (the crash the
 // codemirror tokenizer hit on the main thread). This entry only re-exports.
-import type { Problem } from '@fossil-lang/types';
-
 export { initFossilWasm } from './load.js';
 export type { BootOptions, InitInput } from './load.js';
 
 export {
   tokenize,
-  tokenKinds,
   FossilWorkspace,
   refs,
   providers,
@@ -52,170 +48,3 @@ export { providerFor } from './provider.js';
 
 export { openProgram } from './program.js';
 export type { FossilProgram, Introspection, OpenProgramOptions } from './program.js';
-
-/** One external reference a program makes — the typed lineage returned by
- *  {@link refs}. Mirrors `fossil_lineage::SourceRefInfo`. `connection` is the `@conn` alias the reference
- *  targets, or `null` for a direct URL/path; `role` is where it appears in the
- *  source constructor. The host resolves `@conn` → `{base}/path` itself. */
-export interface SourceRefInfo {
-  connection: string | null;
-  path: string;
-  role: 'data' | 'schema';
-}
-
-/** One data-source provider returned by {@link providers}. Mirrors
- *  `fossil_lineage::ProviderInfo`: the short name (`csv`, `rdf`, …), the file
- *  extensions it reads (no leading dot), and how it can be used. */
-export interface ProviderInfo {
-  name: string;
-  extensions: string[];
-  kind: 'schema' | 'data' | 'both';
-}
-
-/** The rows {@link FossilWorkspace.check} and {@link FossilWorkspace.diagnosticsFor} return —
- *  defined in `@fossil-lang/types`, beside the `Code` and `ProblemData` that type them. */
-export type { CheckRow, CheckRelated } from '@fossil-lang/types';
-
-/** An LSP range: zero-based lines, `character` in UTF-16 code units — the units
- *  a JavaScript string is indexed in, so no byte arithmetic converts it. (The
- *  lexer's {@link TokenRow} offsets are the other thing: those ARE bytes.) */
-export interface LspRange {
-  start: { line: number; character: number };
-  end: { line: number; character: number };
-}
-
-/** What {@link FossilWorkspace.hover} found: the rendered Markdown — a
- *  ` ```fossil ` fence, the type of what you wrote and where it came from, and
- *  a second block with the type the target shape demands of that predicate when
- *  the shape resolves — and the range it applies to. */
-export interface HoverRow {
-  markdown: string;
-  range: LspRange;
-}
-
-/** One candidate from {@link FossilWorkspace.completions}.
- *
- *  `kind` is the LSP `CompletionItemKind` **by name**, lowercased —
- *  `"function"`, `"field"`, `"enum_member"` — and `""` when the item carries
- *  none. Rust owns that table (`fossil_wasm::ide::kind_name`, total over the
- *  twenty-five the spec defines) because a table in TypeScript is one nothing
- *  can check: the deleted predecessor of `@fossil-lang/codemirror-fossil`
- *  hard-copied the lexer's discriminants and was wrong in nine places by the
- *  time it went.
- *
- *  `detail` is the signature, the shape property's IRI, or the source field's
- *  inferred type — whatever the compiler wrote beside the label; `""` when it
- *  wrote none. Neither field is optional, on purpose: an absent optional is the
- *  one shape `serde_json` and `serde_wasm_bindgen` are measured to disagree
- *  about. */
-export interface CompletionRow {
-  label: string;
-  kind: string;
-  detail: string;
-  /** What picking the row writes: the label's one spelling — the label itself,
-   *  or `"Person.id"` for a column whose name is not an identifier. Never
-   *  empty. */
-  insert: string;
-}
-
-/** One place {@link FossilWorkspace.gotoDefinition} found a definition.
- *
- *  `uri` is the key the buffer was opened under, VERBATIM — matching
- *  {@link CheckRow.uri}, and not a `file://` URI. Two of the four positions
- *  goto-def recognises resolve into the shape document, so a target in another
- *  file is the ordinary case and a host with one editor pane has to read this
- *  before it moves a cursor. */
-export interface DefinitionRow {
-  uri: string;
-  range: LspRange;
-}
-
-/** One classified span from {@link FossilWorkspace.semanticTokens} — what the
- *  compiler knows about a stretch of the program that the lexer cannot: that
- *  `Person` is a shape, `users` a binding being declared, `@warehouse` a
- *  connection inside a string.
- *
- *  `kind` is the semantic-token type by legend NAME (`"type"`, `"namespace"`,
- *  `"function"`, `"property"`, `"parameter"`, `"variable"`, `"keyword"`,
- *  `"string"`, `"number"`, `"operator"`, `"comment"`); `modifiers` likewise
- *  (`"declaration"`), empty when there are none. Names and not indices, for the
- *  reason {@link CompletionRow.kind} is one. Rows are in source order and never
- *  overlap; a range may cross a line. */
-export interface SemanticTokenRow {
-  range: LspRange;
-  kind: string;
-  modifiers: string[];
-}
-
-/**
- * The primitive lattice, as `fossil-graph-schema` serialises it — the same enum
- * the checker types against, not a set of names it looks up.
- *
- * A value outside this union is REJECTED when the descriptor is registered:
- * `registerInferredDescriptor` returns the serde error naming the offending
- * value. It is no longer coerced to `string` with a diagnostic three crates
- * later, so a host that sends a type fossil does not carry finds out at the
- * call, not in a compile.
- */
-export type InferredPrimitive =
-  | 'string'
-  | 'integer'
-  | 'float'
-  | 'bool'
-  | 'date'
-  | 'date_time'
-  | 'time'
-  | 'g_year'
-  | 'any_uri';
-
-/** One column from a host-introspected source. */
-export interface InferredColumnJson {
-  name: string;
-  primitive: InferredPrimitive;
-}
-
-/**
- * Host-introspected input schema. Produced by a `DESCRIBE SELECT * FROM
- * <reader>('<url>')` the host runs — `DuckDB-WASM` in a browser — where the
- * reader is the one the binding's `io.` constructor names: `read_csv_auto`,
- * `read_json_auto` or `read_parquet`. `@fossil-lang/introspect` is the one home
- * for that, and picking the reader off the constructor is not a nicety: a
- * Parquet file read as CSV fails DuckDB's sniffer outright, and a JSON array
- * read as CSV introspects to a single column named `[`.
- *
- * Consumed by the Rust compiler via
- * {@link FossilWorkspace.registerInferredDescriptor}. There is no metadata
- * sidecar for the user to write and keep in sync: the host introspects the
- * real file and feeds the compiler ahead of `compile()`.
- */
-export interface InferredDescriptorJson {
-  /**
-   * The source URI exactly as the program writes it — the string inside
-   * `io.csv("examples/users.csv")`. NOT the binding name, and NOT the URL the
-   * host resolved in order to read the file: the checker only ever sees what
-   * the program says.
-   */
-  uri: string;
-  /** Ordered columns — order is significant for column-position fallback. */
-  columns: InferredColumnJson[];
-  /**
-   * Opaque token identifying the state of the source this was read from. The
-   * cache compares it and nothing interprets it: an ETag, a digest, a
-   * `Last-Modified`, whatever the host can get cheaply. Empty means "I cannot
-   * tell", which the cache reads as never-fresh, so that source is
-   * re-introspected on every compile.
-   */
-  freshness_token: string;
-}
-
-// Re-export the token and source-host types for ergonomics — consumers
-// can import the full surface from `@fossil-lang/wasm` without also reaching
-// for `@fossil-lang/types` (still works; this is convenience).
-export type {
-  TokenRow,
-  Host,
-  MissingDocument,
-  UnreadDocument,
-  DocumentWorkspace,
-  ProgramSource,
-} from '@fossil-lang/types';

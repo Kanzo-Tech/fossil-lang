@@ -18,7 +18,7 @@
  *    missing.
  *
  * The result is shaped for `@fossil-lang/codemirror-fossil`'s `fossil()`: `tokenize`,
- * `tokenKinds`, `semanticTokens`, `uri`, `check`, `hover`, `complete` and `definition` are exactly
+ * `semanticTokens`, `uri`, `check`, `hover`, `complete` and `definition` are exactly
  * its option names, so a host spreads it and adds what is its own to decide:
  *
  * ```ts
@@ -35,21 +35,19 @@ import { resolveDocuments } from '@fossil-lang/storage';
 import {
   rowOf,
   until,
+  type CheckRow,
+  type CompletionRow,
+  type DefinitionRow,
   type Host,
+  type HoverRow,
+  type InferredDescriptor,
   type Problem,
   type ProgramSource,
+  type SemanticTokenRow,
   type UnreadDocument,
 } from '@fossil-lang/types';
 
-import { FossilWorkspace, tokenize, tokenKinds } from './client.js';
-import type {
-  CheckRow,
-  CompletionRow,
-  DefinitionRow,
-  HoverRow,
-  InferredDescriptorJson,
-  SemanticTokenRow,
-} from './index.js';
+import { FossilWorkspace, tokenize } from './client.js';
 import { initFossilWasm, type InitInput } from './load.js';
 
 /**
@@ -57,7 +55,7 @@ import { initFossilWasm, type InitInput } from './load.js';
  * as it came back: the sources it described, and the ones it could not, each with its problem.
  */
 export interface Introspection {
-  descriptors: readonly InferredDescriptorJson[];
+  descriptors: readonly InferredDescriptor[];
   undescribed: readonly { source: Pick<ProgramSource, 'key'>; problem: Problem }[];
 }
 
@@ -82,8 +80,6 @@ export interface FossilProgram {
   readonly uri: string;
   /** The compiler's lexer, for highlighting. Needs no workspace, and is here so the spread works. */
   readonly tokenize: typeof tokenize;
-  /** The legend for a token's `kind`. */
-  readonly tokenKinds: typeof tokenKinds;
   /** What the compiler knows about each name and reference — shapes, declarations, connections —
    *  laid over {@link tokenize}'s lexical highlighting. */
   semanticTokens(text: string): SemanticTokenRow[];
@@ -160,7 +156,6 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
   return {
     uri,
     tokenize,
-    tokenKinds,
     async check(next) {
       await settle(next);
       const rows = workspace.check();

@@ -6,7 +6,7 @@
  * Pure, and needs no module: it reads the list `providers()` answered, so a host filtering a
  * listing of a thousand files asks the module once.
  */
-import type { ProviderInfo, SourceRefInfo } from './index.js';
+import type { ProviderInfo, SourceRefInfo } from '@fossil-lang/types';
 
 /**
  * The provider that reads `path` in `role`, by its extension, case-insensitively — or `undefined`

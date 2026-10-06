@@ -14,10 +14,10 @@
 //!
 //! Moving it does not change what the compiler infers, and that is the point of
 //! this shape rather than a `DataFusion` rewrite: **`DuckDB` is still the engine
-//! that DESCRIBES, on both sides.** `packages/introspect/tests/rust-parity.test.ts`
-//! compares this crate against the TypeScript for exactly that reason — «the
-//! browser and the language server answer the same program differently» is the bug it
-//! exists to catch, and CSV type sniffing is where two engines would disagree.
+//! that DESCRIBES, on both sides.** What the two sides must agree on — the reader,
+//! its option keyword and what a column type means — is `catalogue.bnf`'s, generated
+//! into both: «the browser and the language server answer the same program
+//! differently» cannot be written down.
 //!
 //! # Credentials came too, and they had to
 //!
@@ -42,11 +42,11 @@ use std::sync::Arc;
 
 use fossil_base::{Db as _, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
-use fossil_graph_schema::Primitive;
 use fossil_lineage::ProgramSource;
 use smol_str::SmolStr;
 
 pub mod creds;
+pub mod generated;
 
 pub use creds::{ConnectionCreds, SecretSpec};
 
@@ -79,33 +79,6 @@ pub enum Reach {
     Local,
 }
 
-/// Map a `DuckDB` column-type string onto the lattice — the native sibling of
-/// `@fossil-lang/introspect`'s `duckdbTypeToFossilPrimitive`. A vocabulary the
-/// engine reads and nobody else does, which is why it lives here and not on
-/// [`Primitive`]; the xsd direction is the one the lattice owns.
-fn duckdb_type_to_fossil_primitive(t: &str) -> Primitive {
-    let upper = t.trim().to_ascii_uppercase();
-    match upper.as_str() {
-        "INTEGER" | "BIGINT" | "INT" | "SMALLINT" | "TINYINT" | "HUGEINT" => Primitive::Integer,
-        "DOUBLE" | "FLOAT" | "REAL" => Primitive::Float,
-        t if t.starts_with("DECIMAL") => Primitive::Float,
-        "BOOLEAN" | "BOOL" => Primitive::Bool,
-        "DATE" => Primitive::Date,
-        // Every spelling DuckDB has for an instant, because the arm was a list
-        // of two and DuckDB has seven. `TIMESTAMP WITH TIME ZONE` is what
-        // `read_csv_auto` infers for an ISO-8601 string carrying an offset —
-        // which is how LDBC-SNB dates every row it ships — and it fell to the
-        // `_` arm and came back `String`. The consequence is not a slow path:
-        // the checker compares this against the shape's declared `Primitive`,
-        // so `xsd:dateTime` over such a column is a hard type error and the
-        // column is unwritable as anything but `xsd:string`.
-        t if t.starts_with("TIMESTAMP") => Primitive::DateTime,
-        "DATETIME" => Primitive::DateTime,
-        t if t.starts_with("TIME") => Primitive::Time,
-        _ => Primitive::String,
-    }
-}
-
 /// The rows this host can `DESCRIBE`: the ones `catalogue.bnf` gives a
 /// `reads native <fn>`.
 ///
@@ -120,24 +93,6 @@ fn native_reader(format: &str) -> Option<fossil_base::NativeReader> {
             Some(fossil_base::RowReader::Native(r)) => Some(r),
             _ => None,
         })
-}
-
-/// The `DuckDB` named parameter a native reader's option is spelled with.
-///
-/// **This is the ENGINE's vocabulary and belongs here**, beside the SQL it goes
-/// into — exactly as `read_csv_auto` is the catalogue's word and
-/// `CsvReadOptions::delimiter` is `DataFusion`'s. `catalogue.bnf` names the
-/// position the PROGRAM writes (`delimiter`), and the two engines spell it
-/// differently enough that no one token could serve both: `delim=` is a SQL
-/// named argument and the other is a Rust method taking a byte.
-///
-/// Exhaustive, so a new native reader is a compile error here until somebody
-/// decides whether it has options and what `DuckDB` calls them.
-const fn duckdb_option_keyword(r: fossil_base::NativeReader) -> Option<&'static str> {
-    match r {
-        fossil_base::NativeReader::CsvAuto => Some("delim"),
-        fossil_base::NativeReader::JsonAuto | fossil_base::NativeReader::Parquet => None,
-    }
 }
 
 /// The token that decides whether a cached descriptor still describes its
@@ -302,7 +257,7 @@ pub fn pre_introspect_and_register(
         // to close. `fossil_hir::lower::check_reader_option` has already refused
         // a value that is not one character and one written on a row that takes
         // none, so what arrives here is either absent or usable.
-        let args = match (option.as_deref(), duckdb_option_keyword(native)) {
+        let args = match (option.as_deref(), native.option_keyword()) {
             (Some(value), Some(keyword)) => {
                 format!(", {keyword}='{}'", value.replace('\'', "''"))
             }
@@ -322,7 +277,7 @@ pub fn pre_introspect_and_register(
             let typ: String = row.get(1)?;
             Ok(InferredColumn {
                 name: SmolStr::from(name),
-                primitive: duckdb_type_to_fossil_primitive(&typ),
+                primitive: generated::duckdb_primitive(&typ),
             })
         }) {
             Ok(iter) => iter.filter_map(Result::ok).collect(),
@@ -387,6 +342,7 @@ pub fn apply_source_creds(
 mod tests {
     use super::*;
     use fossil_base::test_support::NativeSystem;
+    use fossil_graph_schema::Primitive;
     use fossil_locator::SourceAnchor;
 
     /// What `fossil_lineage::program_sources` reports for `program` written at
@@ -459,7 +415,7 @@ mod tests {
                 .expect("one column")
                 .expect("one row");
             assert_eq!(
-                duckdb_type_to_fossil_primitive(&declared),
+                generated::duckdb_primitive(&declared),
                 expected,
                 "DuckDB types `{sql}` as `{declared}`, which must not widen to String"
             );

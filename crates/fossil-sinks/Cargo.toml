@@ -20,14 +20,11 @@ workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The JSON Schema of `fossil.json`, derived from the structs rather than
-# written beside them — `fossil.schema.json`, which `tests/schema.rs` holds
-# against them. Pure Rust, wasm-clean; `fossil-lineage` derives with it too.
+# written beside them — `fossil.schema.json`, which `xtask/tests/wire.rs`
+# writes. Pure Rust, wasm-clean.
 schemars = { workspace = true }
 # `arrow-schema` sub-crate ONLY — NOT the `arrow` umbrella crate, whose default features
 # pull `arrow-ipc`/`arrow-csv`, and with them `mio`, which wasm32 cannot build.
 # `arrow_schema::DataType` is what `data_type_name` spells, and it is depended on ALONE
 # rather than fossil-hir's `Primitive` so the format stays decoupled from the type system.
 arrow-schema = { workspace = true }
-
-[dev-dependencies]
-expect-test = { workspace = true }

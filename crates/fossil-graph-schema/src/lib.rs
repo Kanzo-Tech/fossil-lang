@@ -126,7 +126,7 @@ pub struct EdgeType {
 /// Materializers map it to their own vocabulary (`fossil.json` `string/int64/double/…`,
 /// `DataFusion` scalars, `DuckDB` column types) next to the materializer; only the
 /// xsd direction lives here, because xsd is the RDF border every side reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Primitive {
     String,

@@ -19,10 +19,12 @@ use crate::resolved::{CloudSecret, ResolvedPath};
 /// `s3.session-token-expires-at-ms`; or `adls.sas-token.<host>` and
 /// `adls.sas-token-expires-at-ms.<host>`, `<host>` being the prefix's
 /// `<account>.dfs.core.windows.net`.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, schemars::JsonSchema)]
 pub struct StorageCredential {
     /// `s3://bucket/path/` or `abfss://container@account.dfs.core.windows.net/path/`.
     pub prefix: String,
+    /// Iceberg's keys, as above.
+    #[schemars(with = "HashMap<String, String>")]
     pub config: HashMap<String, SecretString>,
 }
 
@@ -37,8 +39,28 @@ impl std::fmt::Debug for StorageCredential {
     }
 }
 
+/// The item whose prefix is the longest one covering `key` — Iceberg's rule for
+/// several credentials over one table. A directory is covered by its own prefix,
+/// which is how a listing of `output/job` reaches `output/job/`.
+///
+/// The one copy of the rule: the routed store picks a store by it, and
+/// `@fossil-lang/storage` a credential, through `storageCovering`.
+pub fn covering<T>(
+    items: impl IntoIterator<Item = T>,
+    prefix: impl Fn(&T) -> &str,
+    key: &str,
+) -> Option<T> {
+    items
+        .into_iter()
+        .filter(|item| {
+            let p = prefix(item);
+            key.starts_with(p) || p.strip_suffix('/') == Some(key)
+        })
+        .max_by_key(|item| prefix(item).len())
+}
+
 /// What a credential was vended for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Access {
     Read,
@@ -333,7 +355,60 @@ impl std::fmt::Debug for Grant {
     }
 }
 
+/// What a host does with a credential: the statements that put it in the engine
+/// and take it out, and when it stops working.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantPlan {
+    /// The prefix the credential covers.
+    pub prefix: String,
+    /// The statement that installs it; absent for a store the engine is lent file
+    /// by file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install: Option<String>,
+    /// The statement that takes `install` back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uninstall: Option<String>,
+    /// When it stops working, in milliseconds since 1970; absent when the host
+    /// did not say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at_ms: Option<u64>,
+}
+
+/// What SQL calls a locator under a credential.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct LocatorName {
+    /// The name a statement reads.
+    pub name: String,
+    /// The URL the engine lends `name` to; absent when the name is readable as
+    /// it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lend: Option<String>,
+}
+
 impl Grant {
+    /// [`GrantPlan`] for `access`.
+    #[must_use]
+    pub fn plan(&self, access: Access) -> GrantPlan {
+        GrantPlan {
+            prefix: self.prefix.clone(),
+            install: self.install_sql(access),
+            uninstall: self.uninstall_sql(access),
+            expires_at_ms: self.expires_at_ms,
+        }
+    }
+
+    /// [`Self::name`] and [`Self::lend`] together.
+    ///
+    /// # Errors
+    /// As [`Self::name`].
+    pub fn locator_name(&self, locator: &str) -> Result<LocatorName, StorageError> {
+        Ok(LocatorName {
+            name: self.name(locator)?,
+            lend: self.lend(locator)?,
+        })
+    }
+
     /// The prefix the credential was vended for, as the host wrote it.
     #[must_use]
     pub fn prefix(&self) -> &str {

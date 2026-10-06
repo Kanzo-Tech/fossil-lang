@@ -134,7 +134,6 @@ describe('openProgram', () => {
       for (const key of [
         'uri',
         'tokenize',
-        'tokenKinds',
         'semanticTokens',
         'check',
         'hover',

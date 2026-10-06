@@ -34,19 +34,9 @@ import {
 } from '@codemirror/autocomplete';
 import { EditorState, type Extension } from '@codemirror/state';
 
-import { positionOf } from './positions.js';
+import type { CompletionRow } from '@fossil-lang/types';
 
-/** The `CompletionRow` shape, restated structurally so this module imports no
- *  runtime. `@fossil-lang/wasm` is the definition. */
-export interface CompletionRowLike {
-  label: string;
-  /** The LSP `CompletionItemKind`, by name — `"function"`, `"field"`. `""`
-   *  when the compiler set none. */
-  kind: string;
-  detail: string;
-  /** What a pick writes — the label, or its quoted spelling (`"Person.id"`). */
-  insert: string;
-}
+import { positionOf } from './positions.js';
 
 /** What {@link fossilCompletion} calls. Takes the text for the same reason
  *  {@link CheckSource} does — see the note in `hover.ts`. */
@@ -54,7 +44,7 @@ export type CompletionRowSource = (
   text: string,
   line: number,
   character: number,
-) => readonly CompletionRowLike[] | Promise<readonly CompletionRowLike[]>;
+) => readonly CompletionRow[] | Promise<readonly CompletionRow[]>;
 
 /**
  * LSP kind name → the vocabulary CodeMirror draws an icon for.
@@ -102,7 +92,7 @@ const CM_TYPE: Readonly<Record<string, string>> = {
  *  CodeMirror filters on `label` and inserts it, so `label` is what the author
  *  types — the spelling, `"Person.id"` — and the column's own name is what the
  *  list shows. */
-export function toCompletion(row: CompletionRowLike): Completion {
+export function toCompletion(row: CompletionRow): Completion {
   const type = CM_TYPE[row.kind];
   return {
     label: row.insert,
@@ -131,7 +121,7 @@ export function fossilCompletionSource(source: CompletionRowSource) {
     // catalogue, which is what an explicit request is for.
     if (!context.explicit && (word === null || word.from === word.to)) return null;
     const { line, character } = positionOf(context.state, context.pos);
-    let rows: readonly CompletionRowLike[];
+    let rows: readonly CompletionRow[];
     try {
       rows = await source(context.state.doc.toString(), line, character);
     } catch {

@@ -30,14 +30,9 @@
 import { EditorView, hoverTooltip, type Tooltip } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 
-import { positionOf, rangeOf, type Range } from './positions.js';
+import type { HoverRow } from '@fossil-lang/types';
 
-/** The `HoverRow` shape, restated structurally so this module imports no
- *  runtime. `@fossil-lang/wasm` is the definition. */
-export interface HoverRowLike {
-  markdown: string;
-  range: Range;
-}
+import { positionOf, rangeOf } from './positions.js';
 
 /** What {@link fossilHover} calls. Synchronous or not — the wasm surface is
  *  synchronous, a host driving a Worker is not, and both belong here. */
@@ -45,7 +40,7 @@ export type HoverSource = (
   text: string,
   line: number,
   character: number,
-) => HoverRowLike | null | Promise<HoverRowLike | null>;
+) => HoverRow | null | Promise<HoverRow | null>;
 
 /** Options for {@link fossilHover}. */
 export interface HoverOptions {
@@ -137,7 +132,7 @@ export function fossilHover(source: HoverSource, options: HoverOptions = {}): Ex
   return [hoverBaseTheme, hoverTooltip(
     async (view, pos): Promise<Tooltip | null> => {
       const { line, character } = positionOf(view.state, pos);
-      let row: HoverRowLike | null;
+      let row: HoverRow | null;
       try {
         row = await source(view.state.doc.toString(), line, character);
       } catch {

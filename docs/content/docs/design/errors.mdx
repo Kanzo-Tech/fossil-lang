@@ -275,16 +275,13 @@ show, which is why it stays the real message rather than the code. It is not an 
 in the contract reads it.
 
 **`ProblemData` is generated from Rust.** `Problem`'s derived JSON Schema is written to
-`crates/fossil-graph-schema/problem.schema.json` and held by a bless test beside it, exactly as
-`crates/fossil-sinks/tests/schema.rs, the_schema_file_is_the_structs` holds `fossil.schema.json`. From
-that file `xtask` writes `problem.gen.ts` into `@fossil-lang/types` — `Code`, `CODES`, `ProblemData`, each
+`crates/fossil-graph-schema/problem.schema.json`, and from it `crates/xtask/tests/wire.rs` writes
+`problem.gen.ts` into `@fossil-lang/types` — `Code`, `CODES`, `ProblemData`, each
 code's title, and `DETAILS`: each variant's `#[error]`, carried in the schema as `x-detail` and translated
 wherever it is a format string over fields, so `FossilError.of(code, data)` renders the detail Rust would
-and takes none of its own — and a test fails when the checked-in file is stale. Five details raised in
-TypeScript had already drifted from Rust's when this was added. This departs from the manifest's
-precedent, where the TypeScript is written by hand and `packages/corpus/tests/manifest.test.ts` holds it
-to the schema: that is right for a dozen interfaces and wrong for a hundred arms, where the hand is
-the drift. **What would reverse it:** the generator costing more to keep than the union does to write —
+and takes none of its own — and the test fails when the checked-in file is stale. Five details raised in
+TypeScript had already drifted from Rust's when this was added. Every other shape that crosses to
+TypeScript is generated the same way, the manifest's included. **What would reverse it:** the generator costing more to keep than the union does to write —
 a schema dialect it cannot read, say.
 
 `FossilError` lives in `@fossil-lang/types`, which gains its first runtime export; every package that

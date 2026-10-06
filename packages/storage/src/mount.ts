@@ -1,6 +1,7 @@
 import {
   FossilError,
   HOST_MS,
+  RENEW_BEFORE_MS,
   attachCause,
   isFossilError,
   until,
@@ -36,8 +37,6 @@ export interface Mount {
   close(): Promise<void>;
 }
 
-/** Renew this long before a credential expires — Iceberg's `VendedCredentialsProvider` margin. */
-export const RENEW_BEFORE_MS = 5 * 60_000;
 /** A renewal that failed is tried again after this, while the credential still works. */
 export const RETRY_MS = 30_000;
 
@@ -139,7 +138,7 @@ export async function mount(
       const names = locators.map((locator) => {
         const entry = entryFor(locator);
         const { name, lend } = nameOf(entry.credential, locator);
-        if (lend !== null) {
+        if (lend !== undefined) {
           entry.lent.set(locator, name);
           leases[name] = lend;
         }
@@ -174,7 +173,7 @@ async function release(engine: Engine, table: Map<string, Held>, keys: readonly 
     );
     const { uninstall } = plan(entry.credential, entry.access);
     try {
-      if (uninstall !== null) await engine.query(uninstall, { signal: unstoppable() });
+      if (uninstall !== undefined) await engine.query(uninstall, { signal: unstoppable() });
     } catch (cause) {
       failures.push(cause);
     }
@@ -193,7 +192,7 @@ async function release(engine: Engine, table: Map<string, Held>, keys: readonly 
 
 async function install(engine: Engine, entry: Held): Promise<void> {
   const { install: sql } = plan(entry.credential, entry.access);
-  if (sql !== null) {
+  if (sql !== undefined) {
     await requireHttpfs(engine);
     try {
       await engine.query(sql, { signal: unstoppable() });
@@ -210,7 +209,7 @@ async function install(engine: Engine, entry: Held): Promise<void> {
 
 function schedule(engine: Engine, host: Host, entry: Held, delay?: number): void {
   const { expiresAtMs } = plan(entry.credential, entry.access);
-  if (expiresAtMs === null) return;
+  if (expiresAtMs === undefined) return;
   const wait = delay ?? Math.max(0, expiresAtMs - RENEW_BEFORE_MS - Date.now());
   entry.timer = setTimeout(() => void renew(engine, host, entry), wait);
 }
@@ -227,7 +226,7 @@ async function renew(engine: Engine, host: Host, entry: Held): Promise<void> {
     schedule(engine, host, entry);
   } catch (cause) {
     const { expiresAtMs } = plan(entry.credential, entry.access);
-    if (expiresAtMs !== null && expiresAtMs > Date.now()) {
+    if (expiresAtMs !== undefined && expiresAtMs > Date.now()) {
       schedule(engine, host, entry, RETRY_MS);
       return;
     }

@@ -39,10 +39,9 @@ use serde::{Deserialize, Serialize};
 
 use fossil_graph_schema::Foreign;
 
+use crate::RENEW_BEFORE_MS;
 use crate::credential::{Access, Endpoint, Grant, S3, StorageCredential, StorageError, Store};
 
-/// Renew this long before a credential expires.
-const RENEW_BEFORE_MS: u64 = 5 * 60_000;
 /// A body larger than this is uploaded in parts of this size; S3's floor is 5 MiB.
 const PART_BYTES: usize = 8 * 1024 * 1024;
 /// Parts in flight at once.
@@ -103,7 +102,7 @@ impl HostError {
 }
 
 /// What a credential is asked for: a connection's prefix, or a job's dataset.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     Connection(String),
@@ -424,15 +423,9 @@ impl Routed {
         self.routes.push(Route { key, store });
     }
 
-    /// The store of the longest prefix covering `key`. A directory is covered
-    /// by its own prefix, which is how a listing of `output/job` reaches
-    /// `output/job/`.
+    /// The store of the longest prefix covering `key`, by [`crate::credential::covering`].
     fn covering(&self, key: &str) -> Option<&Arc<dyn ObjectStore>> {
-        self.routes
-            .iter()
-            .filter(|r| key.starts_with(&r.key) || format!("{key}/") == r.key)
-            .max_by_key(|r| r.key.len())
-            .map(|r| &r.store)
+        crate::credential::covering(&self.routes, |r| &r.key, key).map(|r| &r.store)
     }
 
     fn store(&self, location: &Path) -> object_store::Result<&Arc<dyn ObjectStore>> {

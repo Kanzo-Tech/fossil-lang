@@ -4,7 +4,7 @@
  * Five halves by now, and every one of them is an answer the compiler already
  * had:
  *
- * - **Highlighting**, from `tokenize()` + `tokenKinds()` — the compiler's own
+ * - **Highlighting**, from `tokenize()` — the compiler's own
  *   lexer, so no editor reimplements the grammar in TypeScript and drifts — with
  *   `semanticTokens()` laid over it: shapes, declarations and connections, which
  *   the lexer cannot tell apart.
@@ -81,37 +81,29 @@
  * of block openers, not the lexer's. Nothing here guesses at it.
  */
 export { fossilHighlighting } from './highlight.js';
-export type {
-  TokenSource,
-  HighlightOptions,
-  SemanticTokenRowLike,
-  SemanticTokenSource,
-} from './highlight.js';
+export type { TokenSource, HighlightOptions, SemanticTokenSource } from './highlight.js';
 
 export { fossilLinter, uncheckedRow } from './lint.js';
-export type { CheckRowLike, CheckSource, LinterOptions } from './lint.js';
+export type { CheckSource, LinterOptions } from './lint.js';
 
 export { fossilHover } from './hover.js';
-export type { HoverRowLike, HoverSource, HoverOptions } from './hover.js';
+export type { HoverSource, HoverOptions } from './hover.js';
 
 export { fossilCompletion, fossilCompletionSource } from './complete.js';
-export type { CompletionRowLike, CompletionRowSource } from './complete.js';
+export type { CompletionRowSource } from './complete.js';
 
 export { fossilGotoDefinition } from './navigate.js';
-export type { DefinitionRowLike, DefinitionSource, NavigateOptions } from './navigate.js';
+export type { DefinitionSource, NavigateOptions } from './navigate.js';
 
 
 import { type Extension } from '@codemirror/state';
+import type { DefinitionRow } from '@fossil-lang/types';
 
 import { fossilHighlighting, type HighlightOptions, type TokenSource } from './highlight.js';
 import { fossilLinter, type CheckSource, type LinterOptions } from './lint.js';
 import { fossilHover, type HoverOptions, type HoverSource } from './hover.js';
 import { fossilCompletion, type CompletionRowSource } from './complete.js';
-import {
-  fossilGotoDefinition,
-  type DefinitionRowLike,
-  type DefinitionSource,
-} from './navigate.js';
+import { fossilGotoDefinition, type DefinitionSource } from './navigate.js';
 
 /** Everything {@link fossil} needs, in one object. */
 export interface FossilOptions
@@ -141,13 +133,13 @@ export interface FossilOptions
    *  Required alongside {@link definition} — a target in the shape document is
    *  the common case, not the exception, so an extension that silently dropped
    *  it would look broken most of the time. */
-  onNavigate?: (target: DefinitionRowLike | null) => void;
+  onNavigate?: (target: DefinitionRow | null) => void;
 }
 
 /**
  * Every half the host asked for, as one extension.
  *
- * `tokenize`, `tokenKinds`, `uri` and `check` are required, because
+ * `tokenize`, `uri` and `check` are required, because
  * highlighting without diagnostics is the thing this package exists to stop
  * being the only option. `semanticTokens` and the three position sources are
  * optional: a host that has not wired the wasm workspace's queries — or a
@@ -159,7 +151,6 @@ export function fossil(options: FossilOptions): Extension {
     fossilHighlighting(
       {
         tokenize: options.tokenize,
-        tokenKinds: options.tokenKinds,
         semanticTokens: options.semanticTokens,
       },
       { maxLength: options.maxLength },

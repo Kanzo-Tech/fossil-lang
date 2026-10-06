@@ -62,9 +62,10 @@ use crate::FossilWorkspace;
 /// names an output document that resolves — a second block with the type the
 /// shape demands of that predicate. `range` is UTF-16, because a JS host counts
 /// in UTF-16 and LSP does too.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct HoverRow {
     pub markdown: String,
+    #[schemars(with = "fossil_ide::wire::RangeSchema")]
     pub range: Range,
 }
 
@@ -84,7 +85,7 @@ pub struct HoverRow {
 /// The name is the LSP constant, lowercased (`FUNCTION` → `"function"`,
 /// `ENUM_MEMBER` → `"enum_member"`). Mapping it onto whatever vocabulary an
 /// editor draws icons from is that editor's layer's job.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct CompletionRow {
     pub label: String,
     /// The LSP kind, by name; `""` when the item carries none.
@@ -111,9 +112,10 @@ pub struct CompletionRow {
 /// two of the three positions goto-def recognises resolve into the shape
 /// document — so a host with one editor pane still has to read `uri` before it
 /// moves a cursor.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct DefinitionRow {
     pub uri: String,
+    #[schemars(with = "fossil_ide::wire::RangeSchema")]
     pub range: Range,
 }
 
@@ -128,8 +130,9 @@ pub struct DefinitionRow {
 ///
 /// The rows are in source order and never overlap; a connection reference is
 /// carved out of its string literal, so `"@warehouse/x.csv"` is three rows.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct SemanticTokenRow {
+    #[schemars(with = "fossil_ide::wire::RangeSchema")]
     pub range: Range,
     pub kind: String,
     /// Empty when the span carries none — never absent.

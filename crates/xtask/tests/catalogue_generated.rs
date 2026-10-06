@@ -89,12 +89,20 @@ fn every_row_lands_in_exactly_one_generated_file() {
 /// spell.
 #[test]
 fn a_new_native_reader_is_a_row_and_nothing_else() {
-    let invented =
-        catalogue::parse("row avro = extensions \"avro\" ; reads native read_avro_scan .\n").rows;
+    // The one `duckdb` line is the file's frame, which `parse` requires: the
+    // type table has to end in its catch-all.
+    let invented = catalogue::parse(
+        "row avro = extensions \"avro\" ; reads native read_avro_scan option sep .\n\
+         duckdb string = \"*\" .\n",
+    )
+    .rows;
     assert_eq!(invented.len(), 1);
     assert_eq!(
         invented[0].reads,
-        Some(Reads::Native("read_avro_scan".into()))
+        Some(Reads::Native {
+            function: "read_avro_scan".into(),
+            option: Some("sep".into())
+        })
     );
 
     let emitted = catalogue::emit_base(&invented);
@@ -105,6 +113,10 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
     assert!(
         emitted.contains("Self::AvroScan => \"read_avro_scan\""),
         "and `table_function` gives the token back: {emitted}"
+    );
+    assert!(
+        emitted.contains("Self::AvroScan => Some(\"sep\")"),
+        "and `option_keyword` its option: {emitted}"
     );
     assert!(
         emitted.contains("reads_rows: Some(RowReader::Native(NativeReader::AvroScan))"),

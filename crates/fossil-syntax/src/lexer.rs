@@ -29,7 +29,10 @@
 
 use logos::Logos;
 
-#[derive(Logos, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// One token, serialised as its variant name — the name a highlighter keys on.
+#[derive(
+    Logos, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, schemars::JsonSchema,
+)]
 pub enum Token {
     // ───────────────────────────────────────────────────────────────────
     // Trivia — kept (NOT skipped) so the indent pass can see them.
@@ -247,8 +250,7 @@ pub fn raw_lex_lossless(input: &str) -> Vec<(Option<Token>, std::ops::Range<usiz
 /// Raw lex pass with the unlexable bytes DROPPED.
 ///
 /// The lossy one, and it is lossy on purpose: `fossil-wasm`'s `tokenize` feeds
-/// a `CodeMirror` `StreamParser` that has no row shape for a byte with no token
-/// kind. Everything inside this crate wants [`raw_lex_lossless`], because a
+/// a highlighter that has no row shape for a byte with no token kind. Everything inside this crate wants [`raw_lex_lossless`], because a
 /// dropped byte is a diagnostic nobody can emit.
 #[must_use]
 pub fn raw_lex(input: &str) -> Vec<(Token, std::ops::Range<usize>)> {

@@ -11,10 +11,16 @@
  * keasy's runner is where it lives.
  */
 import { resolveDocuments } from '@fossil-lang/storage';
-import { FossilError, isFossilError, type Host, type Related, type UnreadDocument } from '@fossil-lang/types';
+import {
+  FossilError,
+  isFossilError,
+  type Host,
+  type Related,
+  type RunReport,
+  type UnreadDocument,
+} from '@fossil-lang/types';
 
 import { FossilExecutor } from './client.js';
-import type { RunReport } from './index.js';
 
 /** Where a run reads and writes: the host that vends its credentials, and the job it writes for. */
 export interface RunOptions {

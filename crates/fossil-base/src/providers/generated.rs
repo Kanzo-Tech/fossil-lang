@@ -34,6 +34,16 @@ impl NativeReader {
             Self::Parquet => "read_parquet",
         }
     }
+
+    /// The `DuckDB` named parameter this reader's option is spelled with —
+    /// the token `catalogue.bnf` writes after `option`.
+    #[must_use]
+    pub const fn option_keyword(self) -> Option<&'static str> {
+        match self {
+            Self::CsvAuto => Some("delim"),
+            Self::JsonAuto | Self::Parquet => None,
+        }
+    }
 }
 
 /// `io.csv` — reads rows via `read_csv_auto`.

@@ -1798,6 +1798,7 @@ version = "0.1.0"
 dependencies = [
  "fossil-graph-schema",
  "indexmap",
+ "schemars",
  "serde",
  "serde_json",
  "smol_str",
@@ -1844,6 +1845,7 @@ dependencies = [
  "oxrdf",
  "oxttl",
  "salsa",
+ "schemars",
  "serde",
  "serde_json",
  "sha2",
@@ -1924,6 +1926,7 @@ dependencies = [
  "lsp-types",
  "rowan",
  "salsa",
+ "schemars",
  "serde",
  "serde_json",
  "smol_str",
@@ -2019,7 +2022,6 @@ name = "fossil-sinks"
 version = "0.1.0"
 dependencies = [
  "arrow-schema",
- "expect-test",
  "schemars",
  "serde",
  "serde_json",
@@ -2036,6 +2038,7 @@ dependencies = [
  "js-sys",
  "object_store",
  "percent-encoding",
+ "schemars",
  "secrecy",
  "serde",
  "serde-wasm-bindgen",
@@ -2073,6 +2076,8 @@ dependencies = [
  "logos",
  "rowan",
  "salsa",
+ "schemars",
+ "serde",
  "smol_str",
  "text-size",
 ]
@@ -2095,6 +2100,7 @@ dependencies = [
  "js-sys",
  "lsp-types",
  "salsa",
+ "schemars",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -5953,8 +5959,16 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "expect-test",
+ "fossil-descriptors-input",
+ "fossil-df",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-lineage",
+ "fossil-sinks",
+ "fossil-storage",
+ "fossil-wasm",
+ "schemars",
  "serde_json",
  "toml",
 ]

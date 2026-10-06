@@ -78,10 +78,7 @@
         },
         "iri": {
           "description": "The relation's IRI, when the program's shape document gives one.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "label": {
           "description": "The relation's label, e.g. `placedBy`.",
@@ -146,10 +143,7 @@
       "properties": {
         "iri": {
           "description": "The predicate IRI the program mapped it from, when there is one.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "name": {
           "description": "The column name, as in the Parquet schema.",
@@ -161,12 +155,9 @@
         },
         "role": {
           "description": "What the column IS, for a column the writer emits — `corpus.bnf`'s role, so a reader names the roles it means rather than the names it remembers. Absent on a column of the program's.",
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/ColumnRole"
-            },
-            {
-              "type": "null"
             }
           ]
         },
@@ -194,10 +185,7 @@
         },
         "iri": {
           "description": "The type's IRI, when the program's shape document gives one.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "key": {
           "description": "The key column: `dense_id`, global and gapless across every vertex table, and one contiguous range of it per table, in manifest order.",

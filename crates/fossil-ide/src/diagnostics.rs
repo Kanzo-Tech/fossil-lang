@@ -165,7 +165,7 @@ pub fn lsp_diagnostic(
 /// the same fields on `fossil-wasm`'s `CheckRow`.
 ///
 /// Serialized camelCase, every optional absent rather than `null`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticData {
     /// Fixed per code — [`fossil_base::Problem::title`].
@@ -186,8 +186,9 @@ pub struct DiagnosticData {
 }
 
 /// Replace the text at `range` with `replacement`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct Replacement {
+    #[schemars(with = "crate::wire::RangeSchema")]
     pub range: Range,
     pub replacement: String,
 }

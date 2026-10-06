@@ -48,6 +48,7 @@ pub mod position;
 pub mod related;
 pub mod semantic;
 pub mod symbol_index;
+pub mod wire;
 pub mod workspace;
 
 pub use code_action::code_actions;

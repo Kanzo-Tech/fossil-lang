@@ -8,11 +8,12 @@
  */
 import { EditorState } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
+import type { CompletionRow } from '@fossil-lang/types';
 import { describe, expect, it } from 'vitest';
 
-import { fossilCompletionSource, toCompletion, type CompletionRowLike } from '../src/complete.js';
+import { fossilCompletionSource, toCompletion } from '../src/complete.js';
 
-const rows: CompletionRowLike[] = [
+const rows: CompletionRow[] = [
   { label: 'trim', kind: 'function', detail: 'str.trim(String) -> String', insert: 'trim' },
   { label: 'upper', kind: 'function', detail: '', insert: 'upper' },
 ];
@@ -44,7 +45,7 @@ describe('toCompletion', () => {
 });
 
 describe('a quoted member', () => {
-  const quoted: CompletionRowLike = {
+  const quoted: CompletionRow = {
     label: 'Person.id',
     kind: 'field',
     detail: 'source field : String',

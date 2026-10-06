@@ -15,29 +15,25 @@ import {
   FossilWorkspace as RawFossilWorkspace,
   FileHandle as RawFileHandle,
   tokenize as rawTokenize,
-  tokenKinds as rawTokenKinds,
   refs as rawRefs,
   providers as rawProviders,
 } from '../pkg/fossil_wasm.js';
 import {
   until,
+  type CheckRow,
+  type CompletionRow,
+  type DefinitionRow,
   type DocumentWorkspace,
+  type HoverRow,
+  type InferredDescriptor,
   type MissingDocument,
   type Problem,
   type ProgramSource,
-  type TokenKindLegend,
+  type ProviderInfo,
+  type SemanticTokenRow,
+  type SourceRefInfo,
   type TokenRow,
 } from '@fossil-lang/types';
-import type {
-  CheckRow,
-  CompletionRow,
-  DefinitionRow,
-  HoverRow,
-  InferredDescriptorJson,
-  SemanticTokenRow,
-  SourceRefInfo,
-  ProviderInfo,
-} from './index.js';
 import { initFossilWasm, type BootOptions } from './load.js';
 
 /**
@@ -50,41 +46,15 @@ import { initFossilWasm, type BootOptions } from './load.js';
 export type FileHandle = RawFileHandle;
 
 /**
- * Tokenize a Fossil source string. Returns the byte-range tokens from the
- * canonical Rust lexer (`fossil_syntax::lexer::raw_lex`) — the single grammar
- * source of truth, so no editor ever reimplements the lexer in TS and drifts.
+ * Tokenize a Fossil source string with the compiler's own lexer: each token by name, its offsets in
+ * UTF-16 code units.
  *
  * MUST be called after {@link initFossilWasm} has resolved; otherwise the
  * underlying wasm-bindgen function throws (the wasm module is not yet
  * instantiated).
  */
 export function tokenize(text: string): TokenRow[] {
-  // The wasm-bindgen wrapper returns a `JsValue` typed as `any`; the Rust side
-  // (crates/fossil-wasm/src/tokenize.rs) serializes `Vec<TokenRow>` via
-  // `serde_wasm_bindgen::to_value`, so the shape matches `{ kind, start, end }`
-  // exactly. Cast is safe because the Rust ↔ JS contract is enforced upstream.
-  return rawTokenize(text) as TokenRow[];
-}
-
-/**
- * The legend for {@link TokenRow.kind}: every lexer variant NAME, indexed by the
- * discriminant a row carries. `tokenKinds()[row.kind]` is `"Comment"`,
- * `"KwFrom"`, `"String"`, …
- *
- * **This is the contract, and the numbers are not.** `kind` is a variant
- * discriminant of `fossil_syntax::lexer::Token`, so any reorder of that enum
- * remaps every value with nothing going red. The predecessor of this package
- * hard-coded the table (`enum FossilKind { Whitespace = 0, … }`) under a comment
- * saying it had to be updated in lockstep; it was wrong in nine places by the
- * time it was deleted. Keying on the name is what makes a reorder a non-event.
- *
- * An index past the end of the legend is a variant appended by a compiler newer
- * than this host: `undefined`, and a host styles it as plain text.
- *
- * MUST be called after {@link initFossilWasm} has resolved.
- */
-export function tokenKinds(): TokenKindLegend {
-  return rawTokenKinds() as string[];
+  return rawTokenize(text);
 }
 
 /**
@@ -102,7 +72,7 @@ export function tokenKinds(): TokenKindLegend {
  */
 export async function refs(program: string, options: BootOptions = {}): Promise<SourceRefInfo[]> {
   await until(initFossilWasm(options.wasm), options.signal);
-  return rawRefs(program) as SourceRefInfo[];
+  return rawRefs(program);
 }
 
 /**
@@ -115,7 +85,7 @@ export async function refs(program: string, options: BootOptions = {}): Promise<
  */
 export async function providers(options: BootOptions = {}): Promise<ProviderInfo[]> {
   await until(initFossilWasm(options.wasm), options.signal);
-  return rawProviders() as ProviderInfo[];
+  return rawProviders();
 }
 
 /**
@@ -184,7 +154,7 @@ export class FossilWorkspace {
    * with the key to register it under and the locator to read it from.
    */
   missingDocuments(handle: FileHandle): MissingDocument[] {
-    return this._inner.missingDocuments(handle) as MissingDocument[];
+    return this._inner.missingDocuments(handle);
   }
 
   /** Register a fetched document's text under the key {@link missingDocuments} reported. */
@@ -198,7 +168,7 @@ export class FossilWorkspace {
    * catalogue row and the reader option.
    */
   sources(handle: FileHandle): ProgramSource[] {
-    return this._inner.sources(handle) as ProgramSource[];
+    return this._inner.sources(handle);
   }
 
   /**
@@ -218,14 +188,14 @@ export class FossilWorkspace {
    * across every open file and returns a flat array of {@link CheckRow}.
    */
   check(): CheckRow[] {
-    return this._inner.check() as CheckRow[];
+    return this._inner.check();
   }
 
   /**
    * Per-file diagnostic drain: one file's rows of {@link check}.
    */
   diagnosticsFor(handle: FileHandle): CheckRow[] {
-    return this._inner.diagnostics_for(handle) as CheckRow[];
+    return this._inner.diagnostics_for(handle);
   }
 
   /**
@@ -234,8 +204,7 @@ export class FossilWorkspace {
    *
    * `line` / `character` are LSP: zero-based, `character` in UTF-16 code units.
    * A CodeMirror or Monaco host already counts in those units, so a document
-   * offset converts with `doc.lineAt(pos)` and no byte arithmetic — unlike
-   * {@link tokenize}, whose offsets ARE bytes.
+   * offset converts with `doc.lineAt(pos)` and no byte arithmetic.
    *
    * ## Push the buffer before you ask
    *
@@ -250,7 +219,7 @@ export class FossilWorkspace {
   hover(handle: FileHandle, line: number, character: number): HoverRow | null {
     // `serde_wasm_bindgen` writes `None` as `undefined`; a host reading this
     // should have one falsy answer to check, not two.
-    return (this._inner.hover(handle, line, character) as HoverRow | null | undefined) ?? null;
+    return this._inner.hover(handle, line, character) ?? null;
   }
 
   /**
@@ -267,7 +236,7 @@ export class FossilWorkspace {
    * fires on nearly every keystroke.
    */
   completions(handle: FileHandle, line: number, character: number): CompletionRow[] {
-    return this._inner.completions(handle, line, character) as CompletionRow[];
+    return this._inner.completions(handle, line, character);
   }
 
   /**
@@ -279,7 +248,7 @@ export class FossilWorkspace {
    * host with a single editor pane has to read `uri` before it moves a cursor.
    */
   gotoDefinition(handle: FileHandle, line: number, character: number): DefinitionRow[] {
-    return this._inner.gotoDefinition(handle, line, character) as DefinitionRow[];
+    return this._inner.gotoDefinition(handle, line, character);
   }
 
   /**
@@ -289,11 +258,11 @@ export class FossilWorkspace {
    * applies: push the buffer before you ask.
    */
   semanticTokens(handle: FileHandle): SemanticTokenRow[] {
-    return this._inner.semanticTokens(handle) as SemanticTokenRow[];
+    return this._inner.semanticTokens(handle);
   }
 
   /**
-   * Register an {@link InferredDescriptorJson} under the source URI the program
+   * Register an {@link InferredDescriptor} under the source URI the program
    * wrote, BEFORE invoking {@link check}. The Rust compiler reads from this
    * during forward type propagation.
    *
@@ -305,7 +274,7 @@ export class FossilWorkspace {
    * @throws {FossilError} `api/invalid-argument` if the descriptor fails to deserialise on the Rust
    *   side, the `serde_json` error as its cause.
    */
-  registerInferredDescriptor(descriptor: InferredDescriptorJson): void {
+  registerInferredDescriptor(descriptor: InferredDescriptor): void {
     // The wasm-bindgen wrapper accepts a JSON string; serialise here so callers
     // pass a typed object.
     this._inner.registerInferredDescriptor(JSON.stringify(descriptor));

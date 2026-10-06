@@ -1,7 +1,7 @@
 {
   "name": "@fossil-lang/codemirror-fossil",
   "version": "0.0.0-development",
-  "description": "The fossil language layer for CodeMirror 6: highlighting from the compiler's own lexer (tokenize + tokenKinds), diagnostics from its checker (check → @codemirror/lint), and hover, completion and go-to-definition from the same fossil-ide answers the language server gives. Extensions only — it composes into any editor rather than being one.",
+  "description": "The fossil language layer for CodeMirror 6: highlighting from the compiler's own lexer (tokenize), diagnostics from its checker (check → @codemirror/lint), and hover, completion and go-to-definition from the same fossil-ide answers the language server gives. Extensions only — it composes into any editor rather than being one.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

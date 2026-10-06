@@ -12,3 +12,4 @@ pub mod corpus;
 pub mod depgraph;
 pub mod problem;
 pub mod reference;
+pub mod ts;

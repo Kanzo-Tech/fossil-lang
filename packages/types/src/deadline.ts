@@ -8,8 +8,6 @@
 
 import { FossilError } from './error.js';
 
-/** How long a {@link Host} promise may take — credentials, connections, a job's completion. */
-export const HOST_MS = 30_000;
 /** How long a `.wasm` module may take to fetch and instantiate. */
 export const MODULE_MS = 60_000;
 

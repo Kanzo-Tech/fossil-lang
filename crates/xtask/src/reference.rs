@@ -217,7 +217,9 @@ fn io_rows(rows: &[Row]) -> Vec<[String; 3]> {
                 .map(|e| format!("`.{}`", cell(e)))
                 .collect();
             let reads = match (&row.reads, &row.decodes) {
-                (Some(Reads::Native(f)), _) => format!("rows, through `{}`", cell(f)),
+                (Some(Reads::Native { function: f, .. }), _) => {
+                    format!("rows, through `{}`", cell(f))
+                }
                 (Some(Reads::Materialised), _) => {
                     "rows, materialised outside the reader".to_owned()
                 }

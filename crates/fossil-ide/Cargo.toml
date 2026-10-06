@@ -48,6 +48,7 @@ lsp-types = { workspace = true }
 # `DiagnosticData` — what an LSP diagnostic's `data` and a wasm `CheckRow`
 # carry beside the code: a problem's `data` is a `serde_json::Value`.
 serde = { workspace = true }
+schemars = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]

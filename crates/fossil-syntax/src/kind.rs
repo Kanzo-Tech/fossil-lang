@@ -9,22 +9,32 @@
 //!
 //! The `repr(u16)` values are an implementation detail of the rowan green
 //! tree and are NOT a compatibility surface: nothing persists a raw value
-//! across a build, so adding or removing a variant renumbers the rest, and
-//! the only thing that has to move in lockstep is [`SyntaxKind::from_raw_value`]
-//! (guarded by `syntax_kind_round_trip_for_all_variants`).
-//!
-//! The one cross-language pin is on the LEXER's `Token` discriminants, not on
-//! these — see `packages/codemirror-fossil/src/tags.ts`.
+//! across a build, so adding or removing a variant renumbers the rest.
 
-// SCREAMING_SNAKE_CASE is the rust-analyzer / rowan-ecosystem convention for
-// SyntaxKind variants, and it is the naming `grammar.bnf` uses for its
-// terminals. Suppress the rustc style warning crate-wide for this enum only.
-#[allow(non_camel_case_types)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(u16)]
-pub enum SyntaxKind {
+/// Declare [`SyntaxKind`] and the slice of every variant in declaration
+/// order, from one list — so a raw value maps back by indexing, and no second
+/// list of the variants exists to fall out of step.
+macro_rules! syntax_kinds {
+    ($($(#[$attr:meta])* $kind:ident,)*) => {
+        // SCREAMING_SNAKE_CASE is the rust-analyzer / rowan-ecosystem convention
+        // for SyntaxKind variants, and it is the naming `grammar.bnf` uses for
+        // its terminals.
+        #[allow(non_camel_case_types)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[repr(u16)]
+        pub enum SyntaxKind {
+            $($(#[$attr])* $kind,)*
+        }
+
+        impl SyntaxKind {
+            const ALL: &[Self] = &[$(Self::$kind,)*];
+        }
+    };
+}
+
+syntax_kinds! {
     // ─── Trivia ───────────────────────────────────────────────────────
-    WHITESPACE = 0,
+    WHITESPACE,
     NEWLINE,
     COMMENT,
 
@@ -37,6 +47,8 @@ pub enum SyntaxKind {
     /// ONE kind for both spellings: which one it is, is the token's text, and a
     /// pair of kinds would make every consumer match twice to learn one bit.
     BOOL,
+    /// `null` — the absence of a value, `NULL := 'null'` (grammar.bnf).
+    NULL,
     STRING,
     /// The opening `"` of an interpolated string.
     ///
@@ -202,12 +214,6 @@ pub enum SyntaxKind {
     ERROR,
     EOF,
 
-    /// `null` — the absence of a value, `NULL := 'null'` (grammar.bnf).
-    ///
-    /// Declared here, after `EOF`, because the raw values below are positional
-    /// and a kind inserted in the middle renumbers every one after it.
-    NULL,
-
     /// Sentinel — must be the last variant. Used for round-trip bounds checks.
     #[doc(hidden)]
     __LAST,
@@ -221,86 +227,8 @@ impl From<SyntaxKind> for rowan::SyntaxKind {
 
 impl SyntaxKind {
     /// Reverse map from a raw `u16` (as stored by `rowan`) back to the typed enum.
-    ///
-    /// Implemented as an explicit `match` rather than `unsafe { transmute }` so
-    /// the workspace `unsafe_code = "deny"` lint stays clean here. An
-    /// `#[allow(unsafe_code)]` belongs only at a third-party-trait integration
-    /// boundary; a value-to-enum decode is not one.
-    ///
-    /// The match arms MUST stay in lock-step with the enum declaration order;
-    /// the `syntax_kind_round_trip_for_all_variants` unit test guards this.
     fn from_raw_value(v: u16) -> Self {
-        match v {
-            0 => Self::WHITESPACE,
-            1 => Self::NEWLINE,
-            2 => Self::COMMENT,
-            3 => Self::IDENT,
-            4 => Self::INTEGER,
-            5 => Self::FLOAT,
-            6 => Self::BOOL,
-            7 => Self::STRING,
-            8 => Self::STRING_OPEN,
-            9 => Self::STRING_TEXT,
-            10 => Self::INTERP_OPEN,
-            11 => Self::STRING_CLOSE,
-            12 => Self::AT_ATTR,
-            13 => Self::DEFINE,
-            14 => Self::ASSIGN,
-            15 => Self::SHAPE_SEP,
-            16 => Self::DOT,
-            17 => Self::COMMA,
-            18 => Self::LPAREN,
-            19 => Self::RPAREN,
-            20 => Self::LBRACE,
-            21 => Self::RBRACE,
-            22 => Self::EQ,
-            23 => Self::NEQ,
-            24 => Self::LT,
-            25 => Self::LE,
-            26 => Self::GT,
-            27 => Self::GE,
-            28 => Self::PLUS,
-            29 => Self::MINUS,
-            30 => Self::STAR,
-            31 => Self::SLASH,
-            32 => Self::PERCENT,
-            33 => Self::T_QUESTION,
-            34 => Self::KW_FROM,
-            35 => Self::KW_AND,
-            36 => Self::KW_OR,
-            37 => Self::KW_NOT,
-            38 => Self::INDENT,
-            39 => Self::DEDENT,
-            40 => Self::PROGRAM,
-            41 => Self::SOURCE_DEF,
-            42 => Self::MULTI_SOURCE_DEF,
-            43 => Self::TYPE_DEF,
-            44 => Self::RENAME_ATTR,
-            45 => Self::RENAME,
-            46 => Self::MAPPING,
-            47 => Self::MAPPING_HEADER,
-            48 => Self::MAPPING_BODY,
-            49 => Self::PROPERTY,
-            50 => Self::PROPERTY_LHS,
-            51 => Self::SHAPE_EXPR,
-            52 => Self::EXPR,
-            53 => Self::INTERP_STRING_EXPR,
-            54 => Self::INTERPOLATION,
-            55 => Self::LITERAL_EXPR,
-            56 => Self::TERNARY_EXPR,
-            57 => Self::BINARY_EXPR,
-            58 => Self::UNARY_EXPR,
-            59 => Self::POSTFIX_EXPR,
-            60 => Self::PAREN_EXPR,
-            61 => Self::ARG_LIST,
-            62 => Self::ARG,
-            63 => Self::NAMED_ARG,
-            64 => Self::ALIAS_ARG,
-            65 => Self::ERROR,
-            66 => Self::EOF,
-            67 => Self::NULL,
-            _ => panic!("invalid SyntaxKind raw value: {v}"),
-        }
+        Self::ALL[usize::from(v)]
     }
 }
 
@@ -335,14 +263,6 @@ pub type SyntaxElement = rowan::SyntaxElement<FossilLang>;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn syntax_kind_round_trip_for_all_variants() {
-        for raw in 0..(SyntaxKind::__LAST as u16) {
-            let kind = SyntaxKind::from_raw_value(raw);
-            assert_eq!(kind as u16, raw, "round-trip failed at raw={raw}");
-        }
-    }
 
     #[test]
     fn rowan_language_round_trips_every_kind() {

@@ -5,7 +5,7 @@ answer `@fossil-lang/wasm` already had:
 
 | half | what drives it | what you see |
 |---|---|---|
-| highlighting | `tokenize()` + `tokenKinds()`, then `semanticTokens()` over it | the compiler's own lexer, coloured by the host's own theme; shapes, declarations and `@connections` told apart where the program is open |
+| highlighting | `tokenize()`, then `semanticTokens()` over it | the compiler's own lexer, coloured by the host's own theme; shapes, declarations and `@connections` told apart where the program is open |
 | diagnostics | `check()` → `@codemirror/lint` | squiggles, with the checker's messages and help verbatim, and its two quick fixes — did-you-mean and split-mapping — as actions |
 | hover | `hover()` → `hoverTooltip` | the type of what you wrote AND the type the target shape demands of it |
 | completion | `completions()` → `@codemirror/autocomplete` | the receiver's members, spelled bare — `trim`, not `str.trim` |
@@ -32,7 +32,7 @@ const program = await openProgram('hello.fossil', { host, text });
 const extensions = fossil({ ...program, onNavigate: (target) => console.log(target) });
 ```
 
-`openProgram` answers with exactly this package's option names — `tokenize`, `tokenKinds`,
+`openProgram` answers with exactly this package's option names — `tokenize`,
 `semanticTokens`, `uri`, `check`, `hover`, `complete`, `definition` — over one workspace, so the host writes
 the one thing that is its own to decide: where a definition in another file goes.
 
@@ -53,29 +53,12 @@ linter, `openProgram` rejecting, is reported with the same `uncheckedRow`.
 `@kanzo-tech/ui`'s `CodeEditor` takes exactly that as its `extensions` prop and
 holds it in a live-reconfigured `Compartment`. So does a bare `EditorView`.
 
-## `kind` is a number and the legend is the contract
+## `kind` is a name
 
-`TokenRow.kind` is `fossil_syntax::lexer::Token as u32` — a variant discriminant,
-which any reorder of the enum remaps with nothing going red.
-
-The version of this package deleted in `873cbc0` hard-copied that table:
-
-```ts
-export enum FossilKind { Whitespace = 0, Newline = 1, Comment = 2, KwPrefix = 3, … }
-```
-
-under a comment saying it «MUST stay in sync with
-`crates/fossil-syntax/src/lexer.rs` — reorders are a breaking change». Nothing
-enforced it, and by the time the package went it named nine variants the lexer no
-longer had (`KwPrefix`, `KwIn`, `KwUse`, `KwAs`, `KwIri`, `Template`, `AbsIri`,
-`EnvVar`, `Pipe`), was missing three it had gained (`True`, `False`, `Null`), and
-every discriminant from 3 upwards pointed at the wrong token.
-
-So `fossil-wasm` now ships `tokenKinds()`, a legend of variant names indexed by
-the discriminant, and `src/tags.ts` maps **names**. A reorder moves both sides at
-once. The guard is `token_kinds_legend_indexes_by_kind` in
-`crates/fossil-wasm/tests/tokenize.rs`, which compares the legend against the
-lexer itself — on the side that knows.
+`TokenRow.kind` is the lexer's variant name — `"Comment"`, `"KwFrom"` — typed by the
+`Token` union `@fossil-lang/types` generates from the Rust enum, so `src/tags.ts` maps
+names and a key the lexer does not have fails the type-check. Offsets are UTF-16 code
+units, the units CodeMirror indexes in.
 
 ## Two layers of colour
 

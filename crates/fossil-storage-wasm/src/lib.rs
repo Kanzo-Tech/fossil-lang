@@ -50,48 +50,44 @@ fn object(fields: &[(&str, JsValue)]) -> Result<JsValue, Failure> {
     Ok(obj.into())
 }
 
-fn opt(value: Option<String>) -> JsValue {
-    value.map_or(JsValue::NULL, |v| JsValue::from_str(&v))
+// The types the signatures below name, from the one place they are declared.
+#[wasm_bindgen(typescript_custom_section)]
+const WIRE_TYPES: &str = "import type { GrantPlan, LocatorName } from '@fossil-lang/types';";
+
+fn to_js(value: &impl serde::Serialize) -> Result<JsValue, Failure> {
+    serde_wasm_bindgen::to_value(value).map_err(|e| bug("serialising an answer", e))
 }
 
-/// `{ prefix, install, uninstall, expiresAtMs }` — the statements that put the
-/// credential in the engine and take it out (`null` for a store the engine is
-/// lent file by file), and when it stops working (`null` when unsaid).
+/// The credential's [`fossil_storage::GrantPlan`] for `access`.
 ///
 /// # Errors
 /// A `FossilError`: `api/invalid-argument` for an unknown `access` or a
 /// credential that is not one, the credential's own code for one fossil does not read.
-#[wasm_bindgen(js_name = storageGrant)]
+#[wasm_bindgen(js_name = storageGrant, unchecked_return_type = "GrantPlan")]
 pub fn storage_grant(credential: JsValue, access: &str) -> Result<JsValue, JsValue> {
     let (grant, access) = (grant(credential)?, parse_access(access)?);
-    #[allow(clippy::cast_precision_loss)]
-    // milliseconds since 1970 fit in 2^53 until the year 287396
-    let expires = grant
-        .expires_at_ms()
-        .map_or(JsValue::NULL, |ms| JsValue::from_f64(ms as f64));
-    Ok(object(&[
-        ("prefix", JsValue::from_str(grant.prefix())),
-        ("install", opt(grant.install_sql(access))),
-        ("uninstall", opt(grant.uninstall_sql(access))),
-        ("expiresAtMs", expires),
-    ])?)
+    Ok(to_js(&grant.plan(access))?)
 }
 
-/// `{ name, lend }` — what SQL calls `locator`, and the URL the engine lends
-/// that name to (`null` when the name is readable as it is).
+/// The [`fossil_storage::LocatorName`] of `locator` under the credential.
 ///
 /// # Errors
 /// A `FossilError` — `storage/outside-prefix` when `locator` lies outside the
 /// credential's prefix.
-#[wasm_bindgen(js_name = storageName)]
+#[wasm_bindgen(js_name = storageName, unchecked_return_type = "LocatorName")]
 pub fn storage_name(credential: JsValue, locator: &str) -> Result<JsValue, JsValue> {
-    let grant = grant(credential)?;
-    let name = grant.name(locator).map_err(Failure::from)?;
-    let lend = grant.lend(locator).map_err(Failure::from)?;
-    Ok(object(&[
-        ("name", JsValue::from_str(&name)),
-        ("lend", opt(lend)),
-    ])?)
+    let named = grant(credential)?
+        .locator_name(locator)
+        .map_err(Failure::from)?;
+    Ok(to_js(&named)?)
+}
+
+/// The prefix, of `prefixes`, whose credential covers `locator` — the longest one
+/// covering it, by [`fossil_storage::covering`]; `undefined` when none does.
+#[wasm_bindgen(js_name = storageCovering)]
+#[must_use]
+pub fn storage_covering(prefixes: Vec<String>, locator: &str) -> Option<String> {
+    fossil_storage::covering(prefixes, String::as_str, locator)
 }
 
 /// `[{ ok: true, bytes } | { ok: false, problem }]` — each target's bytes, in

@@ -14,14 +14,12 @@ constructor names, gives the credential back, and builds the descriptor keyed by
 the key the program wrote. It owns the DESCRIBE SQL, the DuckDB→Fossil primitive
 table and the descriptor shape.
 
-`crates/fossil-introspect` does the same job natively, and the two are separate
-implementations, not a shared one. Three things must agree or a program means
-something different in the browser and in the language server: the DuckDB reader each `io.`
-constructor picks (`read_csv_auto`, `read_json_auto`, `read_parquet`), what
-DuckDB calls a reader option (`delim`), and the DuckDB→primitive table.
-`tests/rust-parity.test.ts` reads that crate's source, derives all three from
-it, and goes red when they diverge. The DESCRIBE statement itself is still
-composed on both sides; making it one is a separate step.
+`crates/fossil-introspect` does the same job natively. Three things must agree
+or a program means something different in the browser and in the language
+server: the DuckDB reader each `io.` constructor picks (`read_csv_auto`,
+`read_json_auto`, `read_parquet`), what DuckDB calls a reader option (`delim`),
+and the DuckDB→primitive table. All three are `catalogue.bnf`'s, generated into
+both sides by `cargo xtask catalogue`.
 
 ```ts
 import { introspect } from "@fossil-lang/introspect";

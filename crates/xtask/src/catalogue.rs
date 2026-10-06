@@ -194,8 +194,15 @@ pub(crate) fn lex(text: &str) -> Vec<Tok> {
 /// How a row's bytes become rows a plan can scan.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Reads {
-    /// `reads native <fn>` — a `DuckDB` table function, named by the token.
-    Native(String),
+    /// `reads native <fn> [option <keyword>]` — a `DuckDB` table function,
+    /// named by the token, and the named parameter its reader option is
+    /// spelled with, if it takes one.
+    Native {
+        /// The table function.
+        function: String,
+        /// The `DuckDB` keyword of the row's one reader option.
+        option: Option<String>,
+    },
     /// `reads materialised` — something outside the reader produces the
     /// relation and the core only scans it.
     Materialised,
@@ -405,6 +412,27 @@ impl Row {
     }
 }
 
+/// One spelling of a `duckdb` line: whole, `"X*"`, or `"*"`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Spelling {
+    /// Matches this spelling and no other.
+    Exact(String),
+    /// `"X*"` — matches every spelling starting with `X`.
+    Prefix(String),
+    /// `"*"` — matches anything.
+    Any,
+}
+
+/// One `duckdb <primitive> = "…"+ .` line: the `Primitive` by its wire name and
+/// the `DuckDB` column types that mean it.
+#[derive(Debug)]
+pub struct DuckdbType {
+    /// The `Primitive`'s wire name — `date_time`, not `DateTime`.
+    pub primitive: String,
+    /// The spellings, in file order.
+    pub spellings: Vec<Spelling>,
+}
+
 /// Everything `catalogue.bnf` declares.
 #[derive(Debug, Default)]
 pub struct Catalogue {
@@ -412,6 +440,8 @@ pub struct Catalogue {
     pub rows: Vec<Row>,
     /// The stdlib rows, in file order.
     pub fns: Vec<FnRow>,
+    /// The `DuckDB` type table, in file order — which is precedence.
+    pub duckdb: Vec<DuckdbType>,
 }
 
 impl Catalogue {
@@ -460,9 +490,12 @@ pub fn is_namespace_head(head: &str) -> bool {
 /// here rather than in a table so that a new reader is a row in the file and
 /// nothing else — which is the whole point of generating this.
 fn variant_of(table_fn: &str) -> String {
-    table_fn
-        .strip_prefix("read_")
-        .unwrap_or(table_fn)
+    upper_camel(table_fn.strip_prefix("read_").unwrap_or(table_fn))
+}
+
+/// `date_time` → `DateTime`: a `snake_case` wire name as its Rust variant.
+fn upper_camel(snake: &str) -> String {
+    snake
         .split('_')
         .filter(|part| !part.is_empty())
         .map(|part| {
@@ -499,6 +532,12 @@ impl Parser {
         } else {
             false
         }
+    }
+
+    fn eat_word(&mut self, w: &str) -> bool {
+        let found = matches!(self.peek(), Some(Tok::Word(x)) if x == w);
+        self.pos += usize::from(found);
+        found
     }
 
     fn expect_punct(&mut self, p: &str) {
@@ -596,7 +635,8 @@ impl Parser {
 ///
 /// # Panics
 ///
-/// On any statement that is not a well-formed `row` or `fn`, and on a file that
+/// On any statement that is not a well-formed `row`, `fn` or `duckdb`, on a
+/// `duckdb` table that does not end in its one `"*"`, and on a file that
 /// declares no rows at all.
 #[must_use]
 pub fn parse(text: &str) -> Catalogue {
@@ -610,9 +650,18 @@ pub fn parse(text: &str) -> Catalogue {
         match kw.as_str() {
             "row" => cat.rows.push(parse_row(&mut p)),
             "fn" => cat.fns.push(parse_fn(&mut p)),
-            other => panic!("catalogue.bnf: `{other}` begins no statement; write `row` or `fn`"),
+            "duckdb" => cat.duckdb.push(parse_duckdb(&mut p)),
+            other => panic!(
+                "catalogue.bnf: `{other}` begins no statement; write `row`, `fn` or `duckdb`"
+            ),
         }
     }
+    let catch_all = |t: &DuckdbType| t.spellings.contains(&Spelling::Any);
+    assert!(
+        cat.duckdb.last().is_some_and(catch_all)
+            && cat.duckdb.iter().filter(|t| catch_all(t)).count() == 1,
+        "catalogue.bnf: the `duckdb` table must end with the one line holding `\"*\"`"
+    );
     assert!(
         !cat.rows.is_empty(),
         "catalogue.bnf declares no `io.` rows at all"
@@ -639,6 +688,27 @@ fn parse_fn(p: &mut Parser) -> FnRow {
     }
 }
 
+/// `duckdb <primitive> = "<SPELLING>"+ .`
+fn parse_duckdb(p: &mut Parser) -> DuckdbType {
+    let primitive = p.word();
+    p.expect_punct("=");
+    let mut spellings = Vec::new();
+    while matches!(p.peek(), Some(Tok::Str(_))) {
+        let s = p.string();
+        spellings.push(match s.strip_suffix('*') {
+            Some("") => Spelling::Any,
+            Some(prefix) => Spelling::Prefix(prefix.to_owned()),
+            None => Spelling::Exact(s),
+        });
+    }
+    assert!(!spellings.is_empty(), "`duckdb {primitive}` names no type");
+    p.expect_punct(".");
+    DuckdbType {
+        primitive,
+        spellings,
+    }
+}
+
 /// `row <name> = extensions "…"+ ; <clause> [; signature <sig> ; <lowering>] .`
 fn parse_row(p: &mut Parser) -> Row {
     let name = p.word();
@@ -661,7 +731,11 @@ fn parse_row(p: &mut Parser) -> Row {
             "reads" => {
                 let what = p.word();
                 match what.as_str() {
-                    "native" => reads = Some(Reads::Native(p.word())),
+                    "native" => {
+                        let function = p.word();
+                        let option = p.eat_word("option").then(|| p.word());
+                        reads = Some(Reads::Native { function, option });
+                    }
                     "materialised" => reads = Some(Reads::Materialised),
                     other => panic!("row `{name}`: unknown `reads` form `{other}`"),
                 }
@@ -721,7 +795,7 @@ fn extensions_literal(extensions: &[String]) -> String {
 #[allow(clippy::option_if_let_else)]
 fn emit_row(out: &mut String, row: &Row) {
     let reads_rows = match &row.reads {
-        Some(Reads::Native(f)) => {
+        Some(Reads::Native { function: f, .. }) => {
             format!("Some(RowReader::Native(NativeReader::{}))", variant_of(f))
         }
         Some(Reads::Materialised) => "Some(RowReader::Materialised)".to_owned(),
@@ -732,7 +806,7 @@ fn emit_row(out: &mut String, row: &Row) {
         None => "None".to_owned(),
     };
     let what = match (&row.reads, &row.decodes) {
-        (Some(Reads::Native(f)), _) => format!("reads rows via `{f}`"),
+        (Some(Reads::Native { function: f, .. }), _) => format!("reads rows via `{f}`"),
         (Some(Reads::Materialised), _) => "reads rows, materialised outside the reader".to_owned(),
         (None, Some(f)) => format!("reads types via `{f}`"),
         (None, None) => unreachable!("parse rejects a row with no capability"),
@@ -769,12 +843,12 @@ pub fn emit_base(rows: &[Row]) -> String {
     out.push_str("use super::{Provider, RowReader};\n\n");
 
     // The reader enum, one variant per DISTINCT table function, in file order.
-    let mut readers: Vec<&String> = Vec::new();
+    let mut readers: Vec<(&String, &Option<String>)> = Vec::new();
     for row in &data {
-        if let Some(Reads::Native(f)) = &row.reads
-            && !readers.contains(&f)
+        if let Some(Reads::Native { function, option }) = &row.reads
+            && !readers.iter().any(|(f, _)| *f == function)
         {
-            readers.push(f);
+            readers.push((function, option));
         }
     }
 
@@ -787,7 +861,7 @@ pub fn emit_base(rows: &[Row]) -> String {
          #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n\
          pub enum NativeReader {\n",
     );
-    for f in &readers {
+    for (f, _) in &readers {
         let _ = writeln!(out, "    /// `{f}`.");
         let _ = writeln!(out, "    {},", variant_of(f));
     }
@@ -801,8 +875,28 @@ pub fn emit_base(rows: &[Row]) -> String {
          \x20   pub const fn table_function(self) -> &'static str {\n\
          \x20       match self {\n",
     );
-    for f in &readers {
+    for (f, _) in &readers {
         let _ = writeln!(out, "            Self::{} => {f:?},", variant_of(f));
+    }
+    out.push_str(
+        "        }\n    }\n\n\
+         \x20   /// The `DuckDB` named parameter this reader's option is spelled with —\n\
+         \x20   /// the token `catalogue.bnf` writes after `option`.\n\
+         \x20   #[must_use]\n\
+         \x20   pub const fn option_keyword(self) -> Option<&'static str> {\n\
+         \x20       match self {\n",
+    );
+    // One arm per distinct answer, in first-seen order: `clippy::match_same_arms`.
+    let mut answers: Vec<(&Option<String>, Vec<String>)> = Vec::new();
+    for (f, option) in &readers {
+        let variant = format!("Self::{}", variant_of(f));
+        match answers.iter_mut().find(|(o, _)| o == option) {
+            Some((_, variants)) => variants.push(variant),
+            None => answers.push((option, vec![variant])),
+        }
+    }
+    for (option, variants) in &answers {
+        let _ = writeln!(out, "            {} => {option:?},", variants.join(" | "));
     }
     out.push_str("        }\n    }\n}\n\n");
 
@@ -828,6 +922,49 @@ pub fn emit_base(rows: &[Row]) -> String {
         "pub static DATA: &[&Provider] = &[{}];",
         refs.join(", ")
     );
+    out
+}
+
+/// `fossil-introspect`: the `duckdb` table as `duckdb_primitive`.
+#[must_use]
+pub fn emit_introspect(cat: &Catalogue) -> String {
+    let mut out = header(
+        "//! What a `DuckDB` `DESCRIBE` column type means on the lattice — the\n\
+         //! `duckdb` table of `catalogue.bnf`.",
+    );
+    out.push_str(
+        "use fossil_graph_schema::Primitive;\n\n\
+         /// The [`Primitive`] a `DuckDB` column type means: case-blind, the first\n\
+         /// `duckdb` line of `catalogue.bnf` that matches.\n\
+         pub fn duckdb_primitive(t: &str) -> Primitive {\n\
+         \x20   match t.trim().to_ascii_uppercase().as_str() {\n",
+    );
+    for t in &cat.duckdb {
+        let variant = format!("Primitive::{}", upper_camel(&t.primitive));
+        let exact: Vec<String> = t
+            .spellings
+            .iter()
+            .filter_map(|s| match s {
+                Spelling::Exact(x) => Some(format!("{x:?}")),
+                _ => None,
+            })
+            .collect();
+        if !exact.is_empty() {
+            let _ = writeln!(out, "        {} => {variant},", exact.join(" | "));
+        }
+        for s in &t.spellings {
+            match s {
+                Spelling::Prefix(x) => {
+                    let _ = writeln!(out, "        t if t.starts_with({x:?}) => {variant},");
+                }
+                Spelling::Any => {
+                    let _ = writeln!(out, "        _ => {variant},");
+                }
+                Spelling::Exact(_) => {}
+            }
+        }
+    }
+    out.push_str("    }\n}\n");
     out
 }
 
@@ -896,7 +1033,7 @@ pub fn emit_hir_stdlib(cat: &Catalogue) -> String {
 fn native_rows(rows: &[Row]) -> Vec<(&str, &str)> {
     rows.iter()
         .filter_map(|r| match &r.reads {
-            Some(Reads::Native(f)) => Some((r.name.as_str(), f.as_str())),
+            Some(Reads::Native { function, .. }) => Some((r.name.as_str(), function.as_str())),
             _ => None,
         })
         .collect()
@@ -920,13 +1057,15 @@ fn ts_header(body: &str) -> String {
 /// there is no table function to `DESCRIBE` it with, which is what
 /// `reads materialised` means.
 #[must_use]
-pub fn emit_ts_introspect(rows: &[Row]) -> String {
-    let native = native_rows(rows);
+pub fn emit_ts_introspect(cat: &Catalogue) -> String {
+    let native = native_rows(&cat.rows);
     let mut out = ts_header(
-        "// The `io.` constructors that read through a native DuckDB table function.\n\
-         // A materialised row (`io.rdf`) has no reader to DESCRIBE through and is\n\
-         // deliberately absent — `packages/executor` gets the list that includes it.",
+        "// The `io.` constructors that read through a native DuckDB table function,\n\
+         // and what the DESCRIBE answers means. A materialised row (`io.rdf`) has no\n\
+         // reader to DESCRIBE through and is deliberately absent — `packages/executor`\n\
+         // gets the list that includes it.",
     );
+    out.push_str("import type { Primitive } from \"@fossil-lang/types\";\n\n");
 
     out.push_str("/** The DuckDB table function each constructor reads through. */\n");
     out.push_str("export const NATIVE_READERS = {\n");
@@ -944,8 +1083,50 @@ pub fn emit_ts_introspect(rows: &[Row]) -> String {
     );
 
     out.push_str("/** One `io.` constructor that reads through a native reader. */\n");
-    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n");
+    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n\n");
 
+    out.push_str(
+        "/** The DuckDB named parameter each constructor's reader option is spelled with. */\n\
+         export const NATIVE_OPTIONS: Partial<Record<NativeRow, string>> = {\n",
+    );
+    for row in &cat.rows {
+        if let Some(Reads::Native {
+            option: Some(o), ..
+        }) = &row.reads
+        {
+            let _ = writeln!(out, "  {}: {o:?},", row.name);
+        }
+    }
+    out.push_str("};\n\n");
+
+    out.push_str(
+        "/** The `Primitive` a DuckDB column type means: case-blind, the first `duckdb` line\n\
+         \x20*  of `catalogue.bnf` that matches. */\n\
+         export function duckdbPrimitive(t: string): Primitive {\n\
+         \x20 const upper = t.trim().toUpperCase();\n",
+    );
+    for t in &cat.duckdb {
+        let tests: Vec<String> = t
+            .spellings
+            .iter()
+            .map(|s| match s {
+                Spelling::Exact(x) => format!("upper === {x:?}"),
+                Spelling::Prefix(x) => format!("upper.startsWith({x:?})"),
+                Spelling::Any => String::new(),
+            })
+            .collect();
+        if t.spellings.contains(&Spelling::Any) {
+            let _ = writeln!(out, "  return {:?};", t.primitive);
+        } else {
+            let _ = writeln!(
+                out,
+                "  if ({}) return {:?};",
+                tests.join(" || "),
+                t.primitive
+            );
+        }
+    }
+    out.push_str("}\n");
     out
 }
 
@@ -1092,12 +1273,11 @@ pub fn read() -> Catalogue {
 
 /// Every generated file: its path, and what it should contain.
 ///
-/// All seven are projections of `catalogue.bnf` and of nothing else. The seventh
-/// is `@fossil-lang/prompt`'s library section, so the names a model is offered
-/// are the names the checker accepts. The fifth —
-/// `fossil-hir`'s stdlib table — is why the sixth, the reference page, no longer
-/// needs a second source: both halves of the catalogue are in the file now, so
-/// `crate::reference` reads the same parse everything else does.
+/// Each is a projection of `catalogue.bnf` and of nothing else. One is
+/// `@fossil-lang/prompt`'s library section, so the names a model is offered
+/// are the names the checker accepts. `fossil-hir`'s stdlib table is why the
+/// reference page needs no second source: both halves of the catalogue are in
+/// the file now, so `crate::reference` reads the same parse everything else does.
 ///
 /// # Panics
 ///
@@ -1117,12 +1297,16 @@ pub fn generated() -> Vec<(PathBuf, String)> {
             rustfmt(&emit_descriptors(rows)),
         ),
         (
+            root.join("crates/fossil-introspect/src/generated.rs"),
+            rustfmt(&emit_introspect(&cat)),
+        ),
+        (
             root.join("crates/fossil-hir/src/stdlib/generated.rs"),
             rustfmt(&emit_hir_stdlib(&cat)),
         ),
         (
             root.join("packages/introspect/src/catalogue.generated.ts"),
-            emit_ts_introspect(rows),
+            emit_ts_introspect(&cat),
         ),
         (
             root.join("packages/executor/src/catalogue.generated.ts"),

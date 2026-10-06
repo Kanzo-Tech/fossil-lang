@@ -5,8 +5,8 @@
 //! written **last** — its presence is the commit. The structs below are the
 //! format. `fossil-df` builds a [`Manifest`] and serialises it; nothing in the
 //! workspace parses one back, and a reader in another language checks itself
-//! against `fossil.schema.json` beside this crate, which `tests/schema.rs`
-//! holds against these structs.
+//! against `fossil.schema.json` beside this crate, which
+//! `crates/xtask/tests/wire.rs` derives from these structs.
 //!
 //! The vocabulary is SQL/PGQ's rather than `GraphAr`'s: a vertex table and an
 //! edge table, a `key`, a `source` and a `destination` that each name the key
@@ -187,7 +187,11 @@ impl Manifest {
     /// Never: a derived schema always serialises.
     #[must_use]
     pub fn json_schema() -> String {
-        let schema = schemars::schema_for!(Self);
+        // An absent optional is absent, never `null`: the writer skips it.
+        let schema = schemars::r#gen::SchemaSettings::draft07()
+            .with(|s| s.option_add_null_type = false)
+            .into_generator()
+            .into_root_schema_for::<Self>();
         let mut text = serde_json::to_string_pretty(&schema).expect("a derived schema serialises");
         text.push('\n');
         text

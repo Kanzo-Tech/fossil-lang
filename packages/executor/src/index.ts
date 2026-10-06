@@ -27,6 +27,8 @@ export type { InitInput } from './load.js';
 export { run } from './run.js';
 export type { RunOptions } from './run.js';
 
+import type { RunReport } from '@fossil-lang/types';
+
 import type { DataRow } from './catalogue.generated.js';
 
 /**
@@ -56,31 +58,6 @@ export interface CorpusFile {
   /** `fossil.json`, `vertex/<Type>.parquet` or `edge/<Src>_<label>_<Dst>.parquet`. */
   path: string;
   bytes: Uint8Array;
-}
-
-/** How many rows of one relation's input resolved no endpoint pair. */
-export interface EdgeDrops {
-  /** The edge table's `name` in `fossil.json`, `<Src>_<label>_<Dst>`. */
-  table: string;
-  /** Always present, `0` included: «nothing dropped» is not «this writer does not count». */
-  dropped: number;
-}
-
-/**
- * What a run tells its caller — the wire shape of `fossil_df::RunReport`: the
- * two facts the corpus cannot hold about itself.
- *
- * **The manifest is not here.** It is `<dest>fossil.json`, written last; open
- * the corpus (`@fossil-lang/corpus`) or read that file to learn what was
- * written. The report used to carry the whole manifest again, typed here by
- * hand, and a second description of one dataset is one that can disagree with
- * it.
- */
-export interface RunReport {
-  /** The prefix the corpus was written under, `fossil.json` at its root. */
-  dest: string;
-  /** One entry per edge table, in the order `fossil.json` lists them. */
-  dropped: EdgeDrops[];
 }
 
 /** The result of {@link FossilExecutor.runInMemory}. */

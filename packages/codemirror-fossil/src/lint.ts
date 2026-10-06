@@ -37,28 +37,16 @@ import {
   type Problem,
 } from '@fossil-lang/types';
 
-import { rangeOf, type Position } from './positions.js';
+import { rangeOf } from './positions.js';
 
 /** LSP `DiagnosticSeverity`, as `fossil-wasm` emits it on `CheckRow.severity`. */
-const SEVERITY: Readonly<Record<number, Diagnostic['severity']>> = {
+const SEVERITY: Readonly<Record<CheckRow['severity'], Diagnostic['severity']>> = {
   1: 'error',
   2: 'warning',
   3: 'info',
   4: 'hint',
 };
 
-/** The `CheckRow` fields this module reads, restated structurally. `@fossil-lang/types` is
- *  the definition; anything with these fields works. */
-export interface CheckRowLike {
-  uri: string;
-  range: { start: Position; end: Position };
-  severity: number;
-  message: string;
-  help?: string;
-  didYouMean?: { range: { start: Position; end: Position }; replacement: string };
-  suggestion?: string;
-  related?: { uri: string; range: { start: Position; end: Position }; message: string }[];
-}
 
 /**
  * A problem as a diagnostic's text: its title, its code and the page that explains it, its detail,
@@ -70,7 +58,7 @@ export function problemMessage(problem: Problem): string {
 }
 
 /** Replace `range` — measured against the text the row was computed from — with `insert`. */
-function replace(name: string, range: CheckRowLike['range'], insert: string): Action {
+function replace(name: string, range: CheckRow['range'], insert: string): Action {
   return {
     name,
     apply(view) {
@@ -80,7 +68,7 @@ function replace(name: string, range: CheckRowLike['range'], insert: string): Ac
   };
 }
 
-function actionsOf(row: CheckRowLike): Action[] {
+function actionsOf(row: CheckRow): Action[] {
   const actions: Action[] = [];
   if (row.didYouMean !== undefined) {
     const { range, replacement } = row.didYouMean;
@@ -111,7 +99,7 @@ function actionsOf(row: CheckRowLike): Action[] {
  */
 export function toDiagnostics(
   state: EditorState,
-  rows: readonly CheckRowLike[],
+  rows: readonly CheckRow[],
   uri: string,
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
@@ -160,7 +148,7 @@ export function uncheckedRow(uri: string, cause: unknown): CheckRow {
  *  is not, and both should be able to use this. */
 export type CheckSource = (
   text: string,
-) => readonly CheckRowLike[] | Promise<readonly CheckRowLike[]>;
+) => readonly CheckRow[] | Promise<readonly CheckRow[]>;
 
 /** Options for {@link fossilLinter}. */
 export interface LinterOptions {
@@ -186,7 +174,7 @@ export interface LinterOptions {
    *  diagnostics panel reads it here rather than running
    *  a second check. A check that threw is a batch too — its one
    *  {@link uncheckedRow} — so the host never wraps `check` to learn of it. */
-  onDiagnostics?: (rows: readonly CheckRowLike[]) => void;
+  onDiagnostics?: (rows: readonly CheckRow[]) => void;
 }
 
 /**
@@ -200,7 +188,7 @@ export function fossilLinter(source: CheckSource, options: LinterOptions): Exten
   return linter(
     async (view) => {
       const text = view.state.doc.toString();
-      let rows: readonly CheckRowLike[];
+      let rows: readonly CheckRow[];
       try {
         rows = await source(text);
       } catch (cause) {

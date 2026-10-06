@@ -6,14 +6,13 @@
 import { forEachDiagnostic, forceLinting } from '@codemirror/lint';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { FossilError, TITLES, type Problem } from '@fossil-lang/types';
+import { FossilError, TITLES, type CheckRow, type CheckRowBase, type Problem } from '@fossil-lang/types';
 import { describe, expect, it } from 'vitest';
 
 import {
   fossilLinter,
   toDiagnostics,
   uncheckedRow,
-  type CheckRowLike,
   type CheckSource,
 } from '../src/lint.js';
 
@@ -27,14 +26,17 @@ function state(doc = DOC): EditorState {
   return EditorState.create({ doc });
 }
 
-function row(over: Partial<CheckRowLike> = {}): CheckRowLike {
+function row(over: Partial<CheckRowBase> = {}): CheckRow {
   return {
     uri: URI,
     range: { start: { line: 3, character: 14 }, end: { line: 3, character: 18 } },
     severity: 1,
+    code: 'internal/bug',
+    data: { what: 'a fixture' },
+    title: 'Internal error',
     message: 'unknown column `nmae`',
     ...over,
-  };
+  } as CheckRow;
 }
 
 describe('toDiagnostics', () => {
@@ -165,7 +167,7 @@ describe('a failure, as a diagnostic', () => {
   });
 
   it('hands a refused check to onDiagnostics as its one row, so the host need not wrap check', async () => {
-    const batches: (readonly CheckRowLike[])[] = [];
+    const batches: (readonly CheckRow[])[] = [];
     const view = new EditorView({
       state: EditorState.create({
         doc: DOC,

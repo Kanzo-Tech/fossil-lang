@@ -22,6 +22,7 @@ workspace = true
 # sends the introspected column list over a wire.
 indexmap = { workspace = true }
 serde = { workspace = true }
+schemars = { workspace = true }
 serde_json = { workspace = true }
 # The `serde` feature on smol_str, for the same round-trip. Other consumers of
 # smol_str are unaffected — Cargo feature unification merges additively.

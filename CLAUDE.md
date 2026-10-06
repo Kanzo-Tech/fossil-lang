@@ -14,9 +14,10 @@ Keep it under 200 lines, rules-not-context.
   meant different questions by them. `cargo xtask corpus` generates the Rust projection;
   `crates/xtask/tests/corpus_generated.rs` is the `--check` as a test.
 - `catalogue.bnf` — WHICH NAMES EXIST, both halves: the `io.` constructors and every stdlib
-  function with its signature and lowering. Generated from, not compared against — seven files
-  come out of `cargo xtask catalogue` and no Rust states a row a second time. Adding a
-  function is a line here. `CONTRIBUTING.md` has the seven and the round-trip guard.
+  function with its signature and lowering, plus the DuckDB type table both introspecting
+  hosts read. Generated from, not compared against — `cargo xtask catalogue` writes every
+  projection and no Rust or TS states a row a second time. Adding a function is a line here.
+  `CONTRIBUTING.md` has the list and the round-trip guard.
 - `docs/` — the whole of the documentation, and there is no second site.
   `/docs/book/getting-started` teaches the language and `/docs/format` specifies the corpus;
   behind a maintainers' divider,
@@ -172,13 +173,13 @@ crates/
                            corpus, in the browser and in Node. There is no native CLI: it
                            was deleted on 2026-09-30 (`/docs/design/discarded` says what
                            brings it back)
-  xtask/                   repo automation. Four commands: `wasm-check` derives the wasm32
-                           subset from the cdylib closure, and `catalogue [--check]`,
-                           `corpus [--check]` and `problem [--check]` regenerate every
-                           projection of their source — `catalogue.bnf`, `corpus.bnf`, and
-                           `fossil-graph-schema/problem.schema.json` into `problem.gen.ts`.
-                           One generator loop behind all three, so the `--check` semantics
-                           cannot drift between them
+  xtask/                   repo automation. Three commands: `wasm-check` derives the wasm32
+                           subset from the cdylib closure, and `catalogue [--check]` and
+                           `corpus [--check]` regenerate every projection of their `.bnf`.
+                           What is generated from a Rust TYPE — the error catalogue, the
+                           manifest schema and every wire type in `@fossil-lang/types` — is
+                           the expect test `tests/wire.rs` (`UPDATE_EXPECT=1`), because the
+                           binary must not link the crates `catalogue` generates into
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
@@ -215,7 +216,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            No host ever signs a URL for fossil
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
                            and not an editor. FIVE of them, not two: highlighting from
-                           `tokenize()` + `tokenKinds()`, squiggles from `check()` through
+                           `tokenize()`, squiggles from `check()` through
                            `@codemirror/lint`, and hover / completion / goto-definition
                            over the three position queries `FossilWorkspace` grew. The
                            two that stay OUT are semantic tokens (only the native
@@ -227,12 +228,9 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            places by the time it went. This one keys on the NAMES the wasm
                            legend ships, and the guard is on the Rust side
   introspect/              source-binding schema introspection (the one home; `fossil-introspect`
-                           is the Rust sibling). Their agreement is ENFORCED, not asserted:
-                           `packages/introspect/tests/rust-parity.test.ts` derives the reader
-                           arms, the option keyword and the type table out of
-                           `crates/fossil-introspect/src/lib.rs` and fails on drift. It is a
-                           **pnpm** test — editing that Rust turns it red and `cargo test` will
-                           not tell you.
+                           is the Rust sibling). What they must agree on — the reader, its
+                           option keyword, the DuckDB type table — is `catalogue.bnf`'s and is
+                           generated into both
 
 docs/                      Next.js + fumadocs, and ALL of the prose: the book, the corpus
                            format, and the design argument behind a maintainers' divider.
@@ -242,8 +240,9 @@ docs/                      Next.js + fumadocs, and ALL of the prose: the book, t
                            `docs/CLAUDE.md` has the editorial rules
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
-catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
-                           source of seven generated files; no Rust states a row twice
+catalogue.bnf              which names exist — the `io.` rows, the stdlib rows and the
+                           DuckDB type table. Every projection is generated; no Rust or TS
+                           states a row twice
 corpus.bnf                 what a corpus is made of — the vertex and edge columns the writer
                            emits and the ROLE of each. The source of one generated file,
                            `fossil-sinks/src/generated.rs`. File names are NOT here: they are

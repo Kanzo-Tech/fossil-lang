@@ -11,10 +11,11 @@
  * undefined (reading '__wbindgen_malloc…')`). Mirrors `@fossil-lang/corpus`'s
  * `client.ts` split, which is the known-good shape.
  */
-import type { DocumentWorkspace, Host, MissingDocument } from '@fossil-lang/types';
+import type { DocumentWorkspace, Host, MissingDocument, RunReport } from '@fossil-lang/types';
 
 import { FossilExecutor as RawFossilExecutor } from '../pkg/fossil_df_wasm.js';
-import type { ExecutorResult, RunReport, SourceDescriptor } from './index.js';
+
+import type { ExecutorResult, SourceDescriptor } from './index.js';
 
 /**
  * One compiled fossil program, run on DataFusion in the browser. Call

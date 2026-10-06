@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HOST_MS, isFossilError, type DocumentWorkspace, type Engine, type Host } from '@fossil-lang/types';
 
 import { mount, read, resolveDocuments } from '../src/index.js';
-import { RENEW_BEFORE_MS } from '../src/mount.js';
+import { RENEW_BEFORE_MS } from '@fossil-lang/types';
 import { countingHost, recordingEngine, s3, table } from './fixtures.js';
 
 const JOB = 's3://keasy-dev/output/job-1/';

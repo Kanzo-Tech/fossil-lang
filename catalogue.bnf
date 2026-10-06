@@ -95,14 +95,14 @@
    the delimiter is what makes them agree, which is the whole point of the row
    having one; it is not a claim that the absent case was ever sound.
 
-   The DuckDB keyword (`delim=`) and the `DataFusion` one (`.delimiter(b'|')`)
-   are NOT here, for the reason `read_csv_auto` is here and `ctx.read_csv` is
-   not: an engine's spelling belongs to the adapter that speaks to it, and these
-   two are not even the same KIND of thing — one is a SQL named parameter, the
-   other a Rust method taking a byte. `catalogue.bnf` names the position the
-   PROGRAM writes. *)
+   `option delim` is what DuckDB calls that position, and it is here for the
+   reason `read_csv_auto` is: it is the named parameter OF that table function,
+   and two adapters speak it — `fossil-introspect` and `@fossil-lang/introspect`,
+   one DuckDB each. Written in either adapter it was written twice. `DataFusion`'s
+   `.delimiter(b'|')` is not here: a Rust method taking a byte belongs to the
+   one adapter that calls it. *)
 
-row csv     = extensions "csv"                    ; reads native read_csv_auto
+row csv     = extensions "csv"                    ; reads native read_csv_auto option delim
             ; signature (uri: String, delimiter = String?) -> Rows ; op Source .
 row json    = extensions "json"                   ; reads native read_json_auto
             ; signature (uri: String) -> Rows ; op Source .
@@ -128,6 +128,33 @@ row rdf     = extensions "ttl" "nt" "n3" "rdf"    ; reads materialised
 
 row shex    = extensions "shex" "shexj" "shexc"   ; decodes decode_shex         .
 row shacl   = extensions "ttl" "shacl"            ; decodes decode_shacl        .
+
+(* ------------------------------------------------------------ duckdb types *)
+(* What a DuckDB `DESCRIBE` column type means on the lattice — the `Primitive`
+   by its wire name, then the spellings that map to it. Both introspecting
+   hosts DESCRIBE through a native reader above, so the vocabulary is the
+   readers' and is generated into both, `fossil-introspect`'s
+   `duckdb_primitive` and `@fossil-lang/introspect`'s.
+
+   A spelling is matched case-blind and whole; `"X*"` matches every spelling
+   that starts with `X`, and `"*"` matches anything and must come last. The
+   FIRST line that matches wins, and the order below is load-bearing in one
+   place: `"TIMESTAMP*"` before `"TIME*"`, which would swallow every one of
+   DuckDB's seven spellings of an instant. `TIMESTAMP WITH TIME ZONE` is what
+   `read_csv_auto` infers for an ISO-8601 string carrying an offset — how
+   LDBC-SNB dates every row it ships — and read as `string` it makes
+   `xsd:dateTime` over that column a type error.
+
+   `DECIMAL` is a float because the lattice has no decimal; that is Design E's
+   question and not this table's. *)
+
+duckdb integer   = "INTEGER" "BIGINT" "INT" "SMALLINT" "TINYINT" "HUGEINT" .
+duckdb float     = "DOUBLE" "FLOAT" "REAL" "DECIMAL*" .
+duckdb bool      = "BOOLEAN" "BOOL" .
+duckdb date      = "DATE" .
+duckdb date_time = "TIMESTAMP*" "DATETIME" .
+duckdb time      = "TIME*" .
+duckdb string    = "*" .
 
 (* ------------------------------------------------------------- NOT IN HERE *)
 (* The WRITE half of the table is deliberately absent, not stubbed:
