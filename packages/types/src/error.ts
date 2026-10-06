@@ -252,5 +252,7 @@ export function attachCause<E>(error: E, failure: unknown): E {
  * deployment's to choose.
  */
 export function helpUrl(code: Code, base: string = HELP_SITE): string {
-  return `${base.replace(/\/+$/, '')}/${HELP_INDEX}/${code}`;
+  let end = base.length;
+  while (end > 0 && base[end - 1] === '/') end--;
+  return `${base.slice(0, end)}/${HELP_INDEX}/${code}`;
 }
