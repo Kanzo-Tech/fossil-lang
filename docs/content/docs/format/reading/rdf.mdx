@@ -1,105 +1,93 @@
 ---
-title: Its RDF meaning, in R2RML
-description: What a corpus means as RDF, stated once in the W3C Recommendation for relational data as RDF — an R2RML mapping that mapping() answers from fossil.json, so a SHACL engine, a triplestore or any R2RML processor reads the corpus with no fossil code.
+title: Its RDF meaning, as triples
+description: What a corpus means as RDF, stated once as one relation of triples that open() attaches beside the tables, so a SHACL engine, a triplestore loader or any reader of triples reads the corpus with plain SQL and no fossil code.
 ---
 
 A corpus is a property graph in Parquet, and its meaning as RDF is in the manifest already: a vertex
 table's `iri` is a class and its `identity` column the subject, a column's `iri` is a predicate, and
-an edge table's `iri` is a predicate between the subjects its two ends reference. **`mapping` states
-that meaning once, as an [R2RML](https://www.w3.org/TR/r2rml/) mapping** — the W3C Recommendation
-for relational data as RDF — so that a reader who wants triples runs an R2RML processor over the
-tables instead of re-deriving the interpretation.
+an edge table's `iri` is a predicate between the subjects its two ends reference. **`open` states
+that meaning once, as the relation `"<name>".triples`** — one row per RDF triple, a view over the
+tables beside them — so that a reader who wants triples selects them instead of re-deriving the
+interpretation.
 
 ```ts
-import { mapping } from '@fossil-lang/corpus';
-const turtle = mapping(manifest);   // manifest: the text of the corpus's fossil.json
+const close = await open(job, { engine, host });
+await engine.query(`SELECT * FROM "${job}".triples`);   // what a SHACL engine validates
 ```
 
-`packages/corpus/src/mapping.ts, mapping` is a pure function of `fossil.json`'s text: it reads no
-Parquet and the same manifest answers the same Turtle. It refuses what `open` refuses —
-`corpus/not-json`, and `corpus/unsupported-format` for a format other than `fossil/1`. The mapping is
-not a file of the corpus and `fossil.json` does not name one: the corpus carries the IRIs, and
-the mapping is what they mean.
+| column | what it holds |
+| --- | --- |
+| `s_k`, `s_v` | the subject's kind, always `I`, and its IRI |
+| `p` | the predicate IRI |
+| `o_k` | the object's kind: `I` for an IRI, `L` for a literal |
+| `o_v` | the object's IRI, or its lexical form |
+| `o_d` | a literal's datatype IRI, and `''` for an IRI |
+| `o_l` | a literal's language tag, and `''`: a corpus states none |
+
+Every column is `VARCHAR` and none is null, so a reader compares terms with `=` and never with
+`IS NOT DISTINCT FROM`. `packages/corpus/src/triples.ts, triplesOf` is a pure function of
+`fossil.json`: the same manifest answers the same view, and it reads no Parquet until the view is
+read. The relation is not a file of the corpus and `fossil.json` does not name one: the corpus carries
+the IRIs, and the triples are what they mean. `triples` is therefore a name no table may have, as
+`fossil_tables` and `fossil_columns` are, and `open` refuses a manifest that uses it with
+`corpus/duplicate-table`.
 
 ## What each part means
 
-**A vertex type is a `rr:TriplesMap` over its table.** The subject is the `identity` column, as an
-IRI, of class `iri`. Each column with an `iri` is a predicate-object map whose object is the column,
-with the term its shape declared — `term_type` and `datatype`, copied as `rr:termType` and
-`rr:datatype`.
+**A vertex type is its subjects' class, and its columns' values.** Each row's `identity` is the
+subject, as an IRI, and has `rdf:type` the table's `iri`. Each column with an `iri` is a predicate,
+and each non-null value of it an object, with the term its shape declared.
 
-```turtle
-<#map/Person> a rr:TriplesMap ;
-  rr:logicalTable [ rr:tableName "\"Person\"" ] ;
-  rr:subjectMap [ rr:column "\"subject\"" ; rr:termType rr:IRI ; rr:class <https://example.org/Person> ] ;
-  rr:predicateObjectMap [ rr:predicate <https://example.org/birthYear> ; rr:objectMap [
-    rr:column "\"birth_year\"" ; rr:termType rr:Literal ; rr:datatype xsd:gYear ] ] .
-```
+**A relation is the edge table, joined at each end.** `src` is joined to the source's `dense_id` and
+`dst` to the destination's, and the triple is the source's subject, the relation's `iri`, and the
+destination's subject as an IRI. `dense_id` is an
+[address and never an identity](/docs/format/conventions/identity), so it is joined through and never
+emitted.
 
-**A relation is a `rr:TriplesMap` over an `rr:sqlQuery`.** The query is the edge table, inner-joined
-at each end to the vertex table its key `references`: `src` to the source's `dense_id`, `dst` to the
-destination's, answering each one's `subject` as `source` and `destination`. The subject of a triple
-is the source's subject, the predicate is the relation's `iri`, and the object is the destination's
-subject as an IRI. `dense_id` is an [address and never an identity](/docs/format/conventions/identity),
-so it is joined through and never emitted.
-
-```turtle
-<#map/Order_placedBy_Person> a rr:TriplesMap ;
-  rr:logicalTable [ rr:sqlQuery """SELECT s."subject" AS "source", d."subject" AS "destination"
-FROM "Order_placedBy_Person" AS e
-JOIN "Order" AS s ON e."src" = s."dense_id"
-JOIN "Person" AS d ON e."dst" = d."dense_id\"""" ; rr:sqlVersion rr:SQL2008 ] ;
-  rr:subjectMap [ rr:column "\"source\"" ; rr:termType rr:IRI ] ;
-  rr:predicateObjectMap [ rr:predicate <https://example.org/placedBy> ;
-    rr:objectMap [ rr:column "\"destination\"" ; rr:termType rr:IRI ] ] .
-```
-
-**A multi-valued property is the same query over its own table**, a row per value: joined at `src`
-to the vertex table it references, answering the vertex's `subject` as `source` and the value as
-`value`. The object is the value, with the term the column declares, as a vertex column's is.
-
-```turtle
-<#map/Person_nickname> a rr:TriplesMap ;
-  rr:logicalTable [ rr:sqlQuery """SELECT s."subject" AS "source", e."nickname" AS "value"
-FROM "Person_nickname" AS e
-JOIN "Person" AS s ON e."src" = s."dense_id\"""" ; rr:sqlVersion rr:SQL2008 ] ;
-  rr:subjectMap [ rr:column "\"source\"" ; rr:termType rr:IRI ] ;
-  rr:predicateObjectMap [ rr:predicate <https://example.org/nickname> ;
-    rr:objectMap [ rr:column "\"value\"" ] ] .
-```
-
-Each query is declared `rr:SQL2008`, R2RML's identifier for Core SQL 2008 (ISO/IEC 9075): it is
-standard SQL and no engine's dialect, and it is always one of these two forms — inner joins of
-delimited identifiers. R2RML §5.2 makes it a derived table, so a processor runs it as it stands.
+**A multi-valued property is the same join over its own table**, a row per value: `src` joined to the
+vertex it belongs to, and the value an object with the term the column declares, as a vertex
+column's is.
 
 ## The rules
 
-- **What has no IRI is not mapped.** A column without an `iri` has no predicate map; a relation
-  without one has no triples map; a vertex type without one has subjects with no `rr:class`, and a
-  type with neither an IRI nor a column that has one has no triples map at all. Nothing is invented:
-  there is no default namespace a missing IRI falls back to.
+- **What has no IRI is not mapped.** A column without an `iri` makes no triple; a relation without
+  one makes none; a vertex type without one has subjects with no `rdf:type`. A relation or property
+  whose end names a type with no table has no subject there, and makes none either. Nothing is
+  invented: there is no default namespace a missing IRI falls back to.
 - **The term is the shape's, verbatim.** `fossil.json` carries the term each column's shape declared
   — `term_type`, R2RML's `rr:IRI` or `rr:Literal`, and `datatype`, the IRI the document wrote — and
-  the mapping copies both. Nothing is derived from the column's `type`: a shape that says `xsd:gYear`
-  over an `int32` column is mapped `xsd:gYear`. Where the shape declared no term the mapping states
-  none, and R2RML's default holds: a literal of the column's natural datatype (§10.2), which the
-  processor derives from the SQL type. The `declared-term` guard holds every stored value to the term its column
-  declares, so the override of §10.3 makes a well-typed literal and never the data error of §11.
-- **Every name is a delimited identifier, unqualified.** `rr:tableName`, `rr:column` and every name
-  in a query is written `"Person"`, case kept, a `"` doubled — so every processor reads it the same
-  way and none folds `birthYear` to upper case. No catalog or schema is in front of a table: R2RML
-  leaves the connection to the processor, and each consumer resolves the names against wherever it
-  attached the corpus.
-- **The mapping's own nodes are relative IRIs** — `<#map/…>` — resolved against wherever the document
-  is kept. They are never subjects of the triples it produces.
+  the view writes both. Nothing is derived from the column's `type` then: a shape that says
+  `xsd:gYear` over an `int32` column makes `xsd:gYear` literals. The `declared-term` guard holds every
+  stored value to the term its column declares, so the literal is always well-typed.
+- **Where the shape declared no term, the literal is the column's natural one** — the natural
+  mapping of SQL types to XSD of [R2RML §10.2](https://www.w3.org/TR/r2rml/#natural-mapping), the W3C
+  Recommendation for relational data as RDF:
+
+  | `type` | datatype | lexical form |
+  | --- | --- | --- |
+  | `int8` … `int64`, `uint8` … `uint64` | `xsd:integer` | the digits |
+  | `float`, `double` | `xsd:double` | the digits, and `INF`, `-INF`, `NaN` |
+  | `decimal` | `xsd:decimal` | the digits |
+  | `bool` | `xsd:boolean` | `true`, `false` |
+  | `date`, `time` | `xsd:date`, `xsd:time` | ISO 8601 |
+  | `timestamp` | `xsd:dateTime` | ISO 8601, with its `T` |
+  | `binary` | `xsd:hexBinary` | the bytes in hex |
+  | `string`, and anything else | `xsd:string` | the text |
+
+  The lexical form is the one the `declared-term` guard checks, so a column declared `xsd:double`
+  and one that falls back to it spell an infinity the same way.
+
+## Why a relation
+
+The reader once answered this meaning as an R2RML mapping in Turtle, for a processor to run over the
+tables. Every consumer then needed an R2RML processor, and the one consumer there was — a SHACL
+engine over SQL — needed only the triples. [`design/discarded`](/docs/design/discarded) keeps the
+mapping and what would bring it back.
 
 ## How it is held
 
-`packages/corpus/tests/mapping.test.ts` parses the Turtle as a graph and holds it against the
-manifest — every type, column and relation with an IRI mapped, nothing without one, each column's
-declared term copied and none invented, each relation's and property's query joining the right keys
-of the right tables. Then it runs the mapping:
-`packages/corpus/tests/r2rml.ts, materialise` is an R2RML processor for the constructs the mapping
-uses, natural datatypes included, over DuckDB, and the triples it makes of the checked-in corpus are
-compared with the triples a second query, written against the manifest, says the corpus holds. `integration/round-trip.test.ts`
+`packages/corpus/tests/triples.test.ts` reads the view of the checked-in corpus and compares it with
+`packages/corpus/tests/rdf.ts, held`: the triples a second query, written by the test against the
+manifest and the tables, says the corpus holds. Over tables of every type word it holds each natural
+literal to the spelling XSD gives it, and a declared IRI to an IRI. `integration/round-trip.test.ts`
 does the same over a corpus the executor writes, with an edge between two types.

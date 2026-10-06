@@ -90,9 +90,10 @@ expression in an attribute argument. These are the languages, and the control ex
 
 | source | what it settles |
 | --- | --- |
-| **R2RML**, W3C Recommendation 2012 | The vocabulary [`mapping`](/docs/format/reading/rdf) writes, and three things it settles: the **natural mapping** of SQL types to XSD datatypes (§10.2) — every integer `xsd:integer`, every float `xsd:double`; **delimited identifiers**, as the W3C RDB2RDF test cases spell `"\"Student\""`; and the `rr:sqlQuery` logical table declared `rr:SQL2008`, Core SQL 2008, which §5.2 makes a derived table — how a relation reaches the subjects of the two tables its ends reference. |
+| **R2RML**, W3C Recommendation 2012 | The **natural mapping** of SQL types to XSD datatypes and lexical forms (§10.2) that [`triples`](/docs/format/reading/rdf) writes a literal in where the shape declares no term — every integer `xsd:integer`, every float `xsd:double` — and `rr:IRI` / `rr:Literal`, the IRIs `term_type` is spelled in. Its mapping language was taken and then dropped for the relation ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
 | **RML — RML-Core, RML-IO and RML-LV**, the W3C KG-Construct Community Group's drafts | The generalisation of R2RML that was not taken: its logical views state the join in RDF, but they are a draft with few implementations ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
-| **Ontop** | The virtual-graph reading of the same idea: a mapping over tables that stay where they are, the triples produced at query time. It reads R2RML natively, and its split is the one taken here: the producer publishes the mapping, the consumer unfolds it into queries over its own engine. |
+| **AlgeMapLoom**, an algebra for knowledge-graph construction mappings | The intermediate layer between the language and its consumers that was not taken: a research artefact and no standard ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
+| **Ontop** | The virtual-graph reading of the same idea: the triples produced at query time over tables that stay where they are. `triples` is that, as a view: the consumer runs it on its own engine and nothing is materialised. |
 
 ## The backend
 

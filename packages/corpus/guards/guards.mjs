@@ -101,12 +101,16 @@ for (const local of ["integer", "long", "int", "short", "byte", "nonNegativeInte
 }
 
 /**
- * A column's natural RDF lexical form, as SQL (R2RML §10.2): its text, with the two corrections a
- * DuckDB cast needs — a timestamp's `T`, and a binary's hex.
+ * A column's natural RDF lexical form, as SQL (R2RML §10.2) — the form a corpus's `triples` writes:
+ * its text, with the corrections a DuckDB cast needs — a timestamp's `T`, a binary's hex, and XSD's
+ * spelling of the infinities and NaN.
  */
 function natural(column, sql) {
   if (sql.startsWith("TIMESTAMP")) return `replace(${column}::VARCHAR, ' ', 'T')`;
   if (sql === "BLOB") return `hex(${column})`;
+  if (sql === "FLOAT" || sql === "DOUBLE") {
+    return `CASE WHEN isnan(${column}) THEN 'NaN' WHEN isinf(${column}) THEN (CASE WHEN ${column} > 0 THEN 'INF' ELSE '-INF' END) ELSE ${column}::VARCHAR END`;
+  }
   return `${column}::VARCHAR`;
 }
 
